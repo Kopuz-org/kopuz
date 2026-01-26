@@ -43,8 +43,8 @@ fn main() {
     let config = dioxus::desktop::Config::new()
         .with_window(window)
         .with_custom_protocol("artwork", |_headers, request| {
-            let decoded =
-                percent_encoding::percent_decode_str(request.uri().path()).decode_utf8_lossy();
+            let path = request.uri().path();
+            let decoded = percent_encoding::percent_decode_str(path).decode_utf8_lossy();
 
             let mime = if decoded.ends_with(".png") {
                 "image/png"
@@ -52,10 +52,11 @@ fn main() {
                 "image/jpeg"
             };
 
-            let content = std::fs::read(std::path::Path::new(decoded.as_ref()))
+            let decoded_path = decoded.as_ref();
+            let content = std::fs::read(std::path::Path::new(decoded_path))
                 .or_else(|_| {
-                    if decoded.starts_with('/') {
-                        std::fs::read(std::path::Path::new(&decoded[1..]))
+                    if decoded_path.starts_with('/') {
+                        std::fs::read(std::path::Path::new(&decoded_path[1..]))
                     } else {
                         Err(std::io::Error::from(std::io::ErrorKind::NotFound))
                     }
@@ -65,6 +66,7 @@ fn main() {
 
             http::Response::builder()
                 .header("Content-Type", mime)
+                .header("Access-Control-Allow-Origin", "*")
                 .body(content)
                 .unwrap()
         });

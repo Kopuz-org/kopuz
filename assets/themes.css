@@ -1,40 +1,40 @@
 /* Default Theme (matches tailwind.css/main.css) */
 .theme-default {
-    /* Uses defaults from tailwind.css */
+    /* Uses base variables from tailwind/main.css */
 }
 
 /* Gruvbox Material Dark */
 .theme-gruvbox {
-    --color-black: #1d2021; /* bg-hard */
-    --color-white: #d4be98; /* fg */
-    --color-slate-400: #a89984; /* grey1 */
-    --color-slate-500: #928374; /* grey0 */
-    --color-green-500: #a9b665; /* green */
-    --color-indigo-600: #d3869b; /* purple-ish */
-    --color-purple-700: #b16286; /* purple */
-    --color-red-400: #ea6962;   /* red */
-    
-    body {
-        background-color: var(--color-black);
-        color: var(--color-white);
-    }
+    --color-black: #1d2021;
+    --color-white: #d4be98;
+    --color-slate-400: #a89984;
+    --color-slate-500: #928374;
+    --color-green-500: #a9b665;
+    --color-indigo-600: #d3869b;
+    --color-purple-700: #b16286;
+    --color-red-400: #ea6962;
+}
+
+.theme-gruvbox body {
+    background-color: var(--color-black);
+    color: var(--color-white);
 }
 
 /* Dracula */
 .theme-dracula {
     --color-black: #282a36;
     --color-white: #f8f8f2;
-    --color-slate-400: #6272a4; /* comment */
-    --color-slate-500: #44475a; /* selection */
+    --color-slate-400: #6272a4;
+    --color-slate-500: #44475a;
     --color-green-500: #50fa7b;
     --color-indigo-600: #bd93f9;
     --color-purple-700: #ff79c6;
     --color-red-400: #ff5555;
+}
 
-    body {
-        background-color: var(--color-black);
-        color: var(--color-white);
-    }
+.theme-dracula body {
+    background-color: var(--color-black);
+    color: var(--color-white);
 }
 
 /* Nord */
@@ -47,26 +47,26 @@
     --color-indigo-600: #88c0d0;
     --color-purple-700: #b48ead;
     --color-red-400: #bf616a;
+}
 
-    body {
-        background-color: var(--color-black);
-        color: var(--color-white);
-    }
+.theme-nord body {
+    background-color: var(--color-black);
+    color: var(--color-white);
 }
 
 /* Catppuccin Mocha */
 .theme-catppuccin {
-    --color-black: #1e1e2e; /* base */
-    --color-white: #cdd6f4; /* text */
-    --color-slate-400: #bac2de; /* subtext1 */
-    --color-slate-500: #585b70; /* surface2 */
-    --color-green-500: #a6e3a1; /* green */
-    --color-indigo-600: #89b4fa; /* blue */
-    --color-purple-700: #cba6f7; /* mauve */
-    --color-red-400: #f38ba8;   /* red */
+    --color-black: #1e1e2e;
+    --color-white: #cdd6f4;
+    --color-slate-400: #bac2de;
+    --color-slate-500: #585b70;
+    --color-green-500: #a6e3a1;
+    --color-indigo-600: #89b4fa;
+    --color-purple-700: #cba6f7;
+    --color-red-400: #f38ba8;
+}
 
-    body {
-        background-color: var(--color-black);
-        color: var(--color-white);
-    }
+.theme-catppuccin body {
+    background-color: var(--color-black);
+    color: var(--color-white);
 }
