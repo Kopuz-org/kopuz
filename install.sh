@@ -77,7 +77,7 @@ fi
 INSTALL_DIR="$HOME/.local/share/rusic"
 BIN_DIR="$HOME/.local/bin"
 DESKTOP_DIR="$HOME/.local/share/applications"
-ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
+ICON_DIR="$HOME/.local/share/icons/hicolor/512x512/apps"
 
 mkdir -p "$INSTALL_DIR" "$BIN_DIR" "$DESKTOP_DIR" "$ICON_DIR"
 
@@ -104,9 +104,11 @@ EOF
 chmod +x "$BIN_DIR/rusic"
 
 [ -f "rusic/assets/logo.png" ] && cp "rusic/assets/logo.png" "$ICON_DIR/com.temidaradev.rusic.png"
+[ -f "rusic/assets/logo.png" ] && cp "rusic/assets/logo.png" "$INSTALL_DIR/logo.png"
 
 cp "data/com.temidaradev.rusic.desktop" "$DESKTOP_DIR/"
 sed -i "/^Path=/d" "$DESKTOP_DIR/com.temidaradev.rusic.desktop"
+sed -i "s|Icon=com.temidaradev.rusic|Icon=$INSTALL_DIR/logo.png|g" "$DESKTOP_DIR/com.temidaradev.rusic.desktop"
 
 cat > "$BIN_DIR/rusic-desktop" << EOF
 #!/bin/bash

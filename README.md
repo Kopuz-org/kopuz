@@ -38,7 +38,7 @@ For mac you can just install the dmg file from releases
 
 - **Blazing fast**: Built with Rust, so it doesn't eat your RAM like Electron players do.
 - **Library Management**: Scans your folders and organizes music by artist and album automatically.
-- **Integrated**: Works with your system media controls and "Now Playing" widgets.
+- **Integrated**: Works with your system media controls and "Now Playing" widgets. (only mac for now)
 - **Clean UI**: Modern interface with Tailwind CSS and Dioxus.
 
 ## Development
