@@ -12,3 +12,7 @@ objc2-foundation = { version = "0.3.2", features = ["NSString", "NSDictionary", 
 objc2-media-player = { version = "0.3.2", features = ["MPNowPlayingInfoCenter", "MPMediaItem", "MPRemoteCommandCenter", "MPRemoteCommand"] }
 objc2-app-kit = { version = "0.3.2", features = ["NSImage"] }
 block2 = "0.6"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+mpris-server = "0.9.0"
+tokio = { workspace = true, features = ["full"] }
