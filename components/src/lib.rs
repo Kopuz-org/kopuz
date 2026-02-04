@@ -7,6 +7,8 @@ pub mod search_bar;
 pub mod search_genre_detail;
 pub mod search_genres;
 pub mod search_results;
+pub mod settings_items;
+pub mod settings_popups;
 pub mod showcase;
 pub mod sidebar;
 pub mod stat_card;

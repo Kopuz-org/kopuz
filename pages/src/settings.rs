@@ -1,166 +1,168 @@
+use components::settings_items::{DirectoryPicker, ServerSettings, SettingItem, ThemeSelector};
+use components::settings_popups::{AddServerPopup, LoginPopup};
 use config::AppConfig;
 use dioxus::prelude::*;
-use rfd::AsyncFileDialog;
+use server::jellyfin::JellyfinRemote;
 
 #[component]
 pub fn Settings(config: Signal<AppConfig>) -> Element {
-    let mut show_popup = use_signal(|| false);
+    let mut show_add_server = use_signal(|| false);
+    let mut show_login = use_signal(|| false);
 
     let mut server_name = use_signal(|| String::new());
     let mut server_url = use_signal(|| String::new());
-    let mut api_key = use_signal(|| String::new());
+
+    let mut username = use_signal(|| String::new());
+    let mut password = use_signal(|| String::new());
 
     let mut error = use_signal(|| Option::<String>::None);
+    let mut login_error = use_signal(|| Option::<String>::None);
+    let mut is_loading = use_signal(|| false);
+
+    let handle_add_server = move |_| {
+        if !server_url().starts_with("http") {
+            error.set(Some("Invalid server URL".into()));
+            return;
+        }
+
+        let new_server = config::JellyfinServer {
+            name: if server_name().is_empty() {
+                "Local Jellyfin".into()
+            } else {
+                server_name()
+            },
+            url: server_url(),
+            access_token: None,
+        };
+
+        config.write().server = Some(new_server);
+
+        server_name.set(String::new());
+        server_url.set(String::new());
+        error.set(None);
+        show_add_server.set(false);
+
+        show_login.set(true);
+    };
+
+    let handle_login = move |_| {
+        if username().is_empty() || password().is_empty() {
+            login_error.set(Some("Username and password are required".into()));
+            return;
+        }
+
+        if let Some(server) = &config.read().server {
+            let server_url = server.url.clone();
+            let device_id = config.read().device_id.clone();
+            let user = username();
+            let pass = password();
+
+            is_loading.set(true);
+            login_error.set(None);
+
+            spawn(async move {
+                let mut remote = JellyfinRemote::new(&server_url, None, &device_id);
+                let result = remote.login(&user, &pass).await;
+
+                is_loading.set(false);
+
+                match result {
+                    Ok(token) => {
+                        if let Some(server) = config.write().server.as_mut() {
+                            server.access_token = Some(token);
+                        }
+                        username.set(String::new());
+                        password.set(String::new());
+                        login_error.set(None);
+                        show_login.set(false);
+                    }
+                    Err(e) => {
+                        login_error.set(Some(format!("Login failed: {}", e)));
+                    }
+                }
+            });
+        }
+    };
 
     rsx! {
-        div {
-            class: "p-8 max-w-4xl",
+        div { class: "p-8 max-w-4xl",
             h1 { class: "text-3xl font-bold text-white mb-6", "Settings" }
 
-            div {
-                class: "space-y-8",
-
+            div { class: "space-y-8",
                 section {
-                    h2 { class: "text-lg font-semibold text-white/80 mb-4 border-b border-white/5 pb-2", "General" }
+                    h2 {
+                        class: "text-lg font-semibold text-white/80 mb-4 border-b border-white/5 pb-2",
+                        "General"
+                    }
+
                     div { class: "space-y-4",
                         SettingItem {
                             title: "Appearance",
                             description: "Select your preferred color theme.".to_string(),
                             control: rsx! {
-                                select {
-                                    class: "bg-white/5 border border-white/10 rounded px-3 py-1 text-sm text-white focus:outline-none focus:border-white/20",
-                                    value: "{config.read().theme}",
-                                    onchange: move |evt| {
-                                        config.write().theme = evt.value();
-                                    },
-                                    option { value: "default", "Default" }
-                                    option { value: "gruvbox", "Gruvbox Material" }
-                                    option { value: "dracula", "Dracula" }
-                                    option { value: "nord", "Nord" }
-                                    option { value: "catppuccin", "Catppuccin Mocha" }
+                                ThemeSelector {
+                                    current_theme: config.read().theme.clone(),
+                                    on_change: move |theme| {
+                                        config.write().theme = theme;
+                                    }
                                 }
                             }
                         }
+
                         SettingItem {
                             title: "Music Directory",
                             description: format!("Current path: {}", config.read().music_directory.display()),
                             control: rsx! {
-                                button {
-                                    onclick: move |_| {
-                                        spawn(async move {
-                                            if let Some(handle) = AsyncFileDialog::new().pick_folder().await {
-                                                let path = handle.path().to_path_buf();
-                                                config.write().music_directory = path;
-                                            }
-                                        });
-                                    },
-                                    class: "bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors",
-                                    "Change"
-                                }
-                            }
-                        }
-                        SettingItem {
-                            title: "Jellyfin Server",
-                            description: format!("Current server: {}", config.read().server),
-                            control: rsx! {
-                                button {
-                                    onclick: move |_| {
-                                        show_popup.set(true);
-
-                                    },
-                                    class: "bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors",
-                                    "Add Server"
-                                }
-                                if show_popup() {
-                                    AddServerPopup {
-                                        server_name,
-                                        server_url,
-                                        api_key,
-                                        error,
-                                        on_close: move |_| show_popup.set(false),
-                                        on_save: move |_| {
-                                            if !server_url().starts_with("http") {
-                                                error.set(Some("Invalid server URL".into()));
-                                                return;
-                                            }
-
-                                            show_popup.set(false);
-                                        }
+                                DirectoryPicker {
+                                    on_change: move |path| {
+                                        config.write().music_directory = path;
                                     }
                                 }
+                            }
+                        }
 
+                        SettingItem {
+                            title: "Jellyfin Server",
+                            description: if config.read().server.is_some() {
+                                "Server configured".to_string()
+                            } else {
+                                "No server configured".to_string()
+                            },
+                            control: rsx! {
+                                ServerSettings {
+                                    server: config.read().server.clone(),
+                                    on_add: move |_| show_add_server.set(true),
+                                    on_delete: move |_| config.write().server = None,
+                                    on_login: move |_| show_login.set(true),
+                                }
                             }
                         }
                     }
                 }
-            }
-        }
-    }
-}
 
-#[component]
-fn SettingItem(title: &'static str, description: String, control: Element) -> Element {
-    rsx! {
-        div { class: "flex items-center justify-between py-2",
-            div {
-                p { class: "text-white font-medium", "{title}" }
-                p { class: "text-sm text-slate-500", "{description}" }
-            }
-            {control}
-        }
-    }
-}
-
-#[component]
-fn AddServerPopup(
-    server_name: Signal<String>,
-    server_url: Signal<String>,
-    api_key: Signal<String>,
-    error: Signal<Option<String>>,
-    on_close: EventHandler<()>,
-    on_save: EventHandler<()>,
-) -> Element {
-    rsx! {
-        div {
-            class: "overlay",
-            onclick: move |_| on_close.call(()),
-
-            div {
-                class: "popup",
-                onclick: |e| e.stop_propagation(),
-
-                h2 { "Add Jellyfin Server" }
-
-                if let Some(err) = error() {
-                    p { class: "error", "{err}" }
-                }
-
-                input {
-                    placeholder: "Server name (optional)",
-                    value: "{server_name()}",
-                    oninput: move |e| server_name.set(e.value())
-                }
-
-                input {
-                    placeholder: "http://localhost:8096",
-                    value: "{server_url()}",
-                    oninput: move |e| server_url.set(e.value())
-                }
-
-                input {
-                    placeholder: "API Key (optional)",
-                    value: "{api_key()}",
-                    oninput: move |e| api_key.set(e.value())
-                }
-
-                div { class: "actions",
-                    button {
-                        onclick: move |_| on_close.call(()),
-                        "Cancel"
+                if show_add_server() {
+                    AddServerPopup {
+                        server_name,
+                        server_url,
+                        error,
+                        on_close: move |_| show_add_server.set(false),
+                        on_save: handle_add_server
                     }
-                    button {
-                        onclick: move |_| on_save.call(()),
-                        "Save"
+                }
+
+                if show_login() {
+                    LoginPopup {
+                        username,
+                        password,
+                        error: login_error,
+                        loading: is_loading,
+                        on_close: move |_| {
+                            show_login.set(false);
+                            username.set(String::new());
+                            password.set(String::new());
+                            login_error.set(None);
+                        },
+                        on_save: handle_login
                     }
                 }
             }
