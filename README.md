@@ -45,6 +45,14 @@ npm install
 dx serve --package rusic
 ```
 
+### MacOS Quarantine
+
+Since Apple hates open-source software, they make it harder for users to install them since they don't explicitly "trust" them. The source code can be verified by yours truly though. But in the meantime, after downloading the .dmg and dragging the app to your ~/Applications, use:
+
+```bash
+xattr -d com.apple.quarantine /Applications/Rusic.app
+```
+
 ## Tech Stack
 
 - **Dioxus**: UI Framework
