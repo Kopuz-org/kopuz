@@ -15,7 +15,7 @@
       Rusic is a fast, modern music player built with Rust and the Dioxus framework.
       It scans your local music folders and organizes them into a browsable library
       by artist and album. Features include full playback controls, an immersive
-      fullscreen player, dynamic theming, and system media integration. And also 
+      fullscreen player, dynamic theming, and system media integration. And also
       We have Jellyfin server integration. To listen to your music from your Jellyfin server.
     </p>
     <p>
@@ -38,8 +38,12 @@
   <content_rating type="oars-1.1" />
 
   <releases>
-
-    <release version="0.2.0" date="2026-02-10">
+    <release version="0.3.2" date="2026-03-05">
+        <description>
+            <p>Updated whole app, now it works better.</p>
+        </description>
+    </release>
+    <release version="0.2" date="2026-02-10">
       <description>
         <p>Added Jellyfin server integration, portable Linux installer, and Flatpak support.</p>
       </description>
