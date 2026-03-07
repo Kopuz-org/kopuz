@@ -162,6 +162,7 @@ pub fn Album(
                                             bitrate: bitrate_u8,
                                             track_number: item.index_number,
                                             disc_number: item.parent_index_number,
+                                            musicbrainz_release_id: None,
                                         };
                                         new_tracks.push(track);
                                     }

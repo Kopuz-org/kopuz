@@ -1,6 +1,7 @@
 use super::models::{Album, Library, Track};
 use super::utils::{find_folder_cover, save_cover};
 use lofty::prelude::*;
+use lofty::tag::ItemKey;
 use lofty::{probe::Probe, properties::FileProperties, tag::Tag};
 use std::path::Path;
 
@@ -40,6 +41,10 @@ pub fn extract_metadata(
         })
         .unwrap_or_else(|| "Unknown Title".to_string());
 
+    let musicbrainz_release_id = tag
+        .and_then(|t| t.get_string(&ItemKey::MusicBrainzReleaseId))
+        .map(|s| s.to_string());
+
     Track {
         path: track_path.to_path_buf(),
         album_id: make_album_id(&artist, &album_title),
@@ -51,6 +56,7 @@ pub fn extract_metadata(
         duration: properties.duration().as_secs(),
         track_number: tag.and_then(|t| t.track()),
         disc_number: tag.and_then(|t| t.disk()),
+        musicbrainz_release_id,
     }
 }
 

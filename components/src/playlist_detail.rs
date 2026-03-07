@@ -105,6 +105,7 @@ pub fn PlaylistDetail(
                                         bitrate: bitrate_u8,
                                         track_number: item.index_number,
                                         disc_number: item.parent_index_number,
+                                        musicbrainz_release_id: None,
                                     });
                                 }
                                 tracks.set(new_tracks);

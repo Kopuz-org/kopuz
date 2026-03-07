@@ -84,6 +84,7 @@ impl PlayerController {
                     let mut skip_in_progress = self.skip_in_progress;
                     let play_generation = self.play_generation;
                     let volume = self.volume;
+                    let cfg_signal = self.config;
 
                     self.current_song_title.set(track.title.clone());
                     self.current_song_artist.set(track.artist.clone());
@@ -115,6 +116,84 @@ impl PlayerController {
                                 is_loading.set(false);
                                 is_playing.set(true);
                                 skip_in_progress.set(false);
+
+                                let scrobble_track = track.clone();
+                                let scrobble_gen = current_gen;
+                                let scrobble_play_gen = play_generation;
+                                let scrobble_cfg = cfg_signal;
+                                let duration_secs = scrobble_track.duration;
+                                let threshold_secs = std::cmp::min(240, (duration_secs / 2) as u64);
+
+                                spawn(async move {
+                                    let token_raw = scrobble_cfg.read().musicbrainz_token.clone();
+                                    if !token_raw.is_empty() {
+                                        let auth = if token_raw.contains(' ') {
+                                            token_raw.clone()
+                                        } else {
+                                            format!("Token {}", token_raw)
+                                        };
+
+                                        let playing_now = scrobble::musicbrainz::make_playing_now(
+                                            &scrobble_track.artist,
+                                            &scrobble_track.title,
+                                            Some(&scrobble_track.album),
+                                        );
+
+                                        if let Err(e) = scrobble::musicbrainz::submit_listens(
+                                            &auth,
+                                            vec![playing_now],
+                                            "playing_now",
+                                        )
+                                        .await
+                                        {
+                                            tracing::warn!(
+                                                "Jellyfin: failed to submit playing_now: {}",
+                                                e
+                                            );
+                                        }
+                                    }
+
+                                    tokio::time::sleep(std::time::Duration::from_secs(
+                                        threshold_secs,
+                                    ))
+                                    .await;
+
+                                    if *scrobble_play_gen.read() != scrobble_gen {
+                                        return;
+                                    }
+
+                                    let token_raw = scrobble_cfg.read().musicbrainz_token.clone();
+                                    if token_raw.is_empty() {
+                                        return;
+                                    }
+
+                                    let auth = if token_raw.contains(' ') {
+                                        token_raw
+                                    } else {
+                                        format!("Token {}", token_raw)
+                                    };
+
+                                    let listen = scrobble::musicbrainz::make_listen(
+                                        &scrobble_track.artist,
+                                        &scrobble_track.title,
+                                        Some(&scrobble_track.album),
+                                    );
+
+                                    match scrobble::musicbrainz::submit_listens(
+                                        &auth,
+                                        vec![listen],
+                                        "single",
+                                    )
+                                    .await
+                                    {
+                                        Ok(_) => tracing::info!(
+                                            "Jellyfin scrobbled: {} - {}",
+                                            scrobble_track.artist,
+                                            scrobble_track.title
+                                        ),
+                                        Err(e) => tracing::warn!("Jellyfin scrobble failed: {}", e),
+                                    }
+                                });
 
                                 let cover_url = cover_url.clone();
                                 let track = track.clone();

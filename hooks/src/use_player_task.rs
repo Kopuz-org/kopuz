@@ -2,6 +2,7 @@ use crate::use_player_controller::PlayerController;
 use config::AppConfig;
 use dioxus::prelude::*;
 use discord_presence::Presence;
+use discord_presence::cover_art;
 use server::jellyfin::JellyfinRemote;
 use std::sync::Arc;
 
@@ -18,6 +19,9 @@ pub fn use_player_task(ctrl: PlayerController) {
     let mut config: Signal<AppConfig> = use_context();
     let mut last_title = use_signal(String::new);
     let mut was_playing = use_signal(|| false);
+    let mut discord_cover_url: Signal<Option<String>> = use_signal(|| None);
+    let mut discord_cover_resolving_for = use_signal(String::new);
+    let mut discord_cover_sent = use_signal(|| false);
 
     use_future(move || {
         let mut ctrl = ctrl;
@@ -167,21 +171,74 @@ pub fn use_player_task(ctrl: PlayerController) {
                         let progress = pos.as_secs();
                         let cover = ctrl.current_song_cover_url.read().clone();
 
+                        // Build a key that uniquely identifies the current song so we know
+                        // when to kick off a new Cover Art Archive lookup.
+                        let song_key = format!("{}|{}|{}", title, artist, album);
+
+                        if discord_enabled && song_key != *discord_cover_resolving_for.peek() {
+                            discord_cover_resolving_for.set(song_key);
+                            discord_cover_url.set(None);
+                            discord_cover_sent.set(false);
+
+                            if cover.starts_with("http") {
+                                // Jellyfin / remote URL – use it verbatim.
+                                discord_cover_url.set(Some(cover.clone()));
+                            } else {
+                                // Local file – resolve via MusicBrainz + Cover Art Archive.
+                                let mbid = {
+                                    let q = ctrl.queue.read();
+                                    let idx = *ctrl.current_queue_index.read();
+                                    q.get(idx).and_then(|t| t.musicbrainz_release_id.clone())
+                                };
+                                let artist_c = artist.clone();
+                                let album_c = album.clone();
+                                println!(
+                                    "[cover_art] Resolving cover for \"{}\" by {} (mbid={:?})",
+                                    album_c, artist_c, mbid
+                                );
+                                spawn(async move {
+                                    let resolved = cover_art::resolve_cover_art_url(
+                                        mbid.as_deref(),
+                                        &artist_c,
+                                        &album_c,
+                                    )
+                                    .await;
+                                    discord_cover_url.set(resolved);
+                                });
+                            }
+                        }
+
                         if discord_enabled {
-                            if title != *last_title.peek()
-                                || !*was_playing.peek()
-                                || !last_discord_enabled
-                            {
+                            let song_changed = title != *last_title.peek();
+                            let resumed = !*was_playing.peek();
+                            let toggled_on = !last_discord_enabled;
+
+                            // Check if the async cover art lookup finished since we last
+                            // sent the activity (so we can update the image).
+                            let cover_just_resolved =
+                                discord_cover_url.peek().is_some() && !*discord_cover_sent.peek();
+
+                            if song_changed || resumed || toggled_on || cover_just_resolved {
                                 last_title.set(title.clone());
-                                println!("Cover URL: {}", cover);
-                                let cover_ref = if cover.starts_with("http") {
+
+                                let resolved = discord_cover_url.read().clone();
+                                let cover_ref = if let Some(ref url) = resolved {
+                                    Some(url.as_str())
+                                } else if cover.starts_with("http") {
                                     Some(cover.as_str())
                                 } else {
                                     None
                                 };
+
                                 let _ = p.set_now_playing(
                                     &title, &artist, &album, progress, duration, cover_ref,
                                 );
+
+                                // If we had a resolved URL, mark it as sent so we don't
+                                // keep re-sending on every tick.
+                                if resolved.is_some() {
+                                    discord_cover_sent.set(true);
+                                }
                             }
                         } else if last_discord_enabled {
                             let _ = p.clear_activity();
@@ -221,8 +278,11 @@ pub fn use_player_task(ctrl: PlayerController) {
                     if let Some(ref p) = presence {
                         let title = ctrl.current_song_title.read().clone();
                         let artist = ctrl.current_song_artist.read().clone();
+                        let album = ctrl.current_song_album.read().clone();
                         if discord_enabled {
-                            let _ = p.set_paused(&title, &artist);
+                            let resolved = discord_cover_url.read().clone();
+                            let cover_ref = resolved.as_deref();
+                            let _ = p.set_paused(&title, &artist, &album, cover_ref);
                         } else if last_discord_enabled {
                             let _ = p.clear_activity();
                         }
@@ -234,7 +294,10 @@ pub fn use_player_task(ctrl: PlayerController) {
                         let title = ctrl.current_song_title.read().clone();
                         if !title.is_empty() {
                             let artist = ctrl.current_song_artist.read().clone();
-                            let _ = p.set_paused(&title, &artist);
+                            let album = ctrl.current_song_album.read().clone();
+                            let resolved = discord_cover_url.read().clone();
+                            let cover_ref = resolved.as_deref();
+                            let _ = p.set_paused(&title, &artist, &album, cover_ref);
                         }
                     }
                 }

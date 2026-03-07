@@ -24,6 +24,8 @@ pub struct Track {
     pub bitrate: u8,
     pub track_number: Option<u32>,
     pub disc_number: Option<u32>,
+    #[serde(default)]
+    pub musicbrainz_release_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
@@ -39,7 +41,6 @@ pub struct Library {
     #[serde(default)]
     pub jellyfin_genres: Vec<(String, String)>, // (Name, ID)
 }
-
 
 impl Library {
     pub fn new(root_path: PathBuf) -> Self {

@@ -7,3 +7,6 @@ edition = "2024"
 discord-rich-presence.workspace = true
 tokio.workspace = true
 reader.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true

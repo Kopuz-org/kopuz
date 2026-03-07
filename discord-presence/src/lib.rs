@@ -1,3 +1,5 @@
+pub mod cover_art;
+
 use discord_rich_presence::{
     DiscordIpc, DiscordIpcClient,
     activity::{self, Assets, Timestamps},
@@ -57,12 +59,23 @@ impl Presence {
         Ok(())
     }
 
-    pub fn set_paused(&self, title: &str, artist: &str) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn set_paused(
+        &self,
+        title: &str,
+        artist: &str,
+        album: &str,
+        cover_url: Option<&str>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let state = format!("by {artist} • Paused");
-        let activity = activity::Activity::new()
+        let mut activity = activity::Activity::new()
             .details(title)
             .state(&state)
             .activity_type(activity::ActivityType::Listening);
+
+        if let Some(url) = cover_url {
+            let assets = Assets::new().large_image(url).large_text(album);
+            activity = activity.assets(assets);
+        }
 
         self.client.lock().unwrap().set_activity(activity)?;
         Ok(())
