@@ -73,6 +73,22 @@ Because Apple hates open-source software, they have made it harder for users to 
 xattr -d com.apple.quarantine /Applications/Rusic.app
 ```
 
+### Where does Rusic keep its files?
+
+On **macOS** everything lives under your Library folders:
+- `~/Library/Application Support/com.temidaradev.rusic/config.json` — your settings
+- `~/Library/Caches/com.temidaradev.rusic/library.json` — the scanned library
+- `~/Library/Caches/com.temidaradev.rusic/playlists.json` — your playlists
+- `~/Library/Caches/com.temidaradev.rusic/covers/` — cached album art
+
+On **Linux** it follows the XDG spec like you'd expect:
+- `~/.config/rusic/config.json` — your settings
+- `~/.cache/rusic/library.json` — the scanned library
+- `~/.cache/rusic/playlists.json` — your playlists
+- `~/.cache/rusic/covers/` — cached album art
+
+If covers aren't showing or the library looks off, just delete the cache folder and hit rescan.
+
 ### Scrobbling functionality
 
 Scrobbling functionality is only available through MusicBrainz (for now). To enable it, you need to provide a valid MusicBrainz token in the configuration file. The scrobbling also is only available for your local musics. It's highly recommended to use [jellyfin-plugin-listenbrainz](https://github.com/lyarenei/jellyfin-plugin-listenbrainz), because if you also use other music apps for your jellyfin server, you can scrobble your music from anywhere.

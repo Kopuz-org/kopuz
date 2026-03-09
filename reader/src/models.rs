@@ -64,7 +64,7 @@ impl Library {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let data = serde_json::to_string_pretty(self)
+        let data = serde_json::to_string(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
         fs::write(path, data)
     }
@@ -130,7 +130,7 @@ impl PlaylistStore {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let data = serde_json::to_string_pretty(self)
+        let data = serde_json::to_string(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
         fs::write(path, data)
     }

@@ -6,12 +6,55 @@ use discord_presence::cover_art;
 use server::jellyfin::JellyfinRemote;
 use std::sync::Arc;
 
+#[cfg(target_os = "macos")]
+use player::systemint::set_background_handler;
+
+#[derive(Debug, Clone, Copy)]
+enum BgCmd {
+    Play,
+    Pause,
+    Toggle,
+    Next,
+    Prev,
+}
+
+static BG_CMD_TX: std::sync::OnceLock<std::sync::Mutex<std::sync::mpsc::Sender<BgCmd>>> =
+    std::sync::OnceLock::new();
+static BG_CMD_RX: std::sync::OnceLock<std::sync::Mutex<std::sync::mpsc::Receiver<BgCmd>>> =
+    std::sync::OnceLock::new();
+
+fn init_bg_channel() {
+    BG_CMD_TX.get_or_init(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<BgCmd>();
+        let _ = BG_CMD_RX.set(std::sync::Mutex::new(rx));
+        std::sync::Mutex::new(tx)
+    });
+}
+
+fn send_bg_cmd(cmd: BgCmd) {
+    if let Some(lock) = BG_CMD_TX.get() {
+        if let Ok(tx) = lock.lock() {
+            let _ = tx.send(cmd);
+        }
+    }
+}
+
+fn drain_bg_cmds() -> Vec<BgCmd> {
+    let mut cmds = Vec::new();
+    if let Some(lock) = BG_CMD_RX.get() {
+        if let Ok(rx) = lock.try_lock() {
+            while let Ok(cmd) = rx.try_recv() {
+                cmds.push(cmd);
+            }
+        }
+    }
+    cmds
+}
+
 #[inline]
 fn nudge_event_loop() {
     #[cfg(target_os = "macos")]
-    {
-        player::systemint::wake_run_loop();
-    }
+    player::systemint::wake_run_loop();
 }
 
 pub fn use_player_task(ctrl: PlayerController) {
@@ -23,55 +66,43 @@ pub fn use_player_task(ctrl: PlayerController) {
     let mut discord_cover_resolving_for = use_signal(String::new);
     let mut discord_cover_sent = use_signal(|| false);
 
+    #[cfg(target_os = "macos")]
+    use_hook(move || {
+        init_bg_channel();
+        set_background_handler(move |event| {
+            use player::systemint::SystemEvent;
+            let cmd = match event {
+                SystemEvent::Play => BgCmd::Play,
+                SystemEvent::Pause => BgCmd::Pause,
+                SystemEvent::Toggle => BgCmd::Toggle,
+                SystemEvent::Next => BgCmd::Next,
+                SystemEvent::Prev => BgCmd::Prev,
+            };
+            send_bg_cmd(cmd);
+            nudge_event_loop();
+        });
+    });
+
+    #[cfg(target_os = "linux")]
     use_future(move || {
         let mut ctrl = ctrl;
         async move {
-            #[cfg(target_os = "macos")]
-            {
-                use player::systemint::{SystemEvent, wait_event};
-                println!("[player_task] Starting macOS event loop");
-                loop {
-                    let event = wait_event().await;
-                    if let Some(event) = event {
-                        println!("[player_task] Received MacOS system event: {:?}", event);
-                        match event {
-                            SystemEvent::Play => ctrl.resume(),
-                            SystemEvent::Pause => ctrl.pause(),
-                            SystemEvent::Toggle => ctrl.toggle(),
-                            SystemEvent::Next => ctrl.play_next(),
-                            SystemEvent::Prev => ctrl.play_prev(),
-                        }
-                    } else {
-                        println!("[player_task] wait_event returned None - channel closed?");
-                        break;
+            use player::systemint::{SystemEvent, poll_event};
+            loop {
+                let mut processed = false;
+                while let Some(event) = poll_event() {
+                    processed = true;
+                    match event {
+                        SystemEvent::Play => ctrl.resume(),
+                        SystemEvent::Pause => ctrl.pause(),
+                        SystemEvent::Toggle => ctrl.toggle(),
+                        SystemEvent::Next => ctrl.play_next(),
+                        SystemEvent::Prev => ctrl.play_prev(),
                     }
                 }
-            }
-
-            #[cfg(target_os = "linux")]
-            {
-                use player::systemint::{SystemEvent, poll_event};
-                loop {
-                    let mut processed = false;
-                    while let Some(event) = poll_event() {
-                        processed = true;
-                        match event {
-                            SystemEvent::Play => ctrl.resume(),
-                            SystemEvent::Pause => ctrl.pause(),
-                            SystemEvent::Toggle => ctrl.toggle(),
-                            SystemEvent::Next => ctrl.play_next(),
-                            SystemEvent::Prev => ctrl.play_prev(),
-                        }
-                    }
-                    if !processed {
-                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-                    }
+                if !processed {
+                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
                 }
-            }
-
-            #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-            {
-                std::future::pending::<()>().await;
             }
         }
     });
@@ -85,10 +116,21 @@ pub fn use_player_task(ctrl: PlayerController) {
         let mut last_progress_report = std::time::Instant::now();
 
         async move {
+            let mut last_progress_secs: u64 = u64::MAX;
             loop {
                 tokio::time::sleep(std::time::Duration::from_millis(250)).await;
 
                 nudge_event_loop();
+
+                for cmd in drain_bg_cmds() {
+                    match cmd {
+                        BgCmd::Play => ctrl.resume(),
+                        BgCmd::Pause => ctrl.pause(),
+                        BgCmd::Toggle => ctrl.toggle(),
+                        BgCmd::Next => ctrl.play_next(),
+                        BgCmd::Prev => ctrl.play_prev(),
+                    }
+                }
 
                 let is_playing = *ctrl.is_playing.read();
                 let discord_enabled = config.read().discord_presence.unwrap_or(true);
@@ -161,7 +203,11 @@ pub fn use_player_task(ctrl: PlayerController) {
                 }
 
                 if is_playing {
-                    ctrl.current_song_progress.set(pos.as_secs());
+                    let pos_secs = pos.as_secs();
+                    if pos_secs != last_progress_secs {
+                        last_progress_secs = pos_secs;
+                        ctrl.current_song_progress.set(pos_secs);
+                    }
 
                     if let Some(ref p) = presence {
                         let title = ctrl.current_song_title.read().clone();
@@ -188,10 +234,6 @@ pub fn use_player_task(ctrl: PlayerController) {
                                 };
                                 let artist_c = artist.clone();
                                 let album_c = album.clone();
-                                println!(
-                                    "[cover_art] Resolving cover for \"{}\" by {} (mbid={:?})",
-                                    album_c, artist_c, mbid
-                                );
                                 spawn(async move {
                                     let resolved = cover_art::resolve_cover_art_url(
                                         mbid.as_deref(),
@@ -208,7 +250,6 @@ pub fn use_player_task(ctrl: PlayerController) {
                             let song_changed = title != *last_title.peek();
                             let resumed = !*was_playing.peek();
                             let toggled_on = !last_discord_enabled;
-
                             let cover_just_resolved =
                                 discord_cover_url.peek().is_some() && !*discord_cover_sent.peek();
 
@@ -273,8 +314,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                         let album = ctrl.current_song_album.read().clone();
                         if discord_enabled {
                             let resolved = discord_cover_url.read().clone();
-                            let cover_ref = resolved.as_deref();
-                            let _ = p.set_paused(&title, &artist, &album, cover_ref);
+                            let _ = p.set_paused(&title, &artist, &album, resolved.as_deref());
                         } else if last_discord_enabled {
                             let _ = p.clear_activity();
                         }
@@ -288,8 +328,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                             let artist = ctrl.current_song_artist.read().clone();
                             let album = ctrl.current_song_album.read().clone();
                             let resolved = discord_cover_url.read().clone();
-                            let cover_ref = resolved.as_deref();
-                            let _ = p.set_paused(&title, &artist, &album, cover_ref);
+                            let _ = p.set_paused(&title, &artist, &album, resolved.as_deref());
                         }
                     }
                 }

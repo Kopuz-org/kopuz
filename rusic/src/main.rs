@@ -149,21 +149,36 @@ fn App() -> Element {
     let search_query = use_signal(String::new);
 
     use_effect(move || {
-        if let Err(e) = config.read().save(&config_path()) {
-            eprintln!("Failed to save config: {}", e);
-        }
+        let config_snapshot = config.read().clone();
+        let path = config_path();
+        spawn(async move {
+            let result = tokio::task::spawn_blocking(move || config_snapshot.save(&path)).await;
+            if let Ok(Err(e)) = result {
+                eprintln!("Failed to save config: {}", e);
+            }
+        });
     });
 
     use_effect(move || {
-        if let Err(e) = playlist_store.read().save(&playlist_path()) {
-            eprintln!("Failed to save playlists: {}", e);
-        }
+        let store_snapshot = playlist_store.read().clone();
+        let path = playlist_path();
+        spawn(async move {
+            let result = tokio::task::spawn_blocking(move || store_snapshot.save(&path)).await;
+            if let Ok(Err(e)) = result {
+                eprintln!("Failed to save playlists: {}", e);
+            }
+        });
     });
 
     use_effect(move || {
-        if let Err(e) = library.read().save(&lib_path()) {
-            eprintln!("Failed to save library: {}", e);
-        }
+        let lib_snapshot = library.read().clone();
+        let path = lib_path();
+        spawn(async move {
+            let result = tokio::task::spawn_blocking(move || lib_snapshot.save(&path)).await;
+            if let Ok(Err(e)) = result {
+                eprintln!("Failed to save library: {}", e);
+            }
+        });
     });
 
     use_hook(move || {

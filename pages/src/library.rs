@@ -28,8 +28,6 @@ pub fn LibraryPage(
     mut queue: Signal<Vec<reader::models::Track>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
-    let lib = library.read();
-
     let items = use_library_items(library);
     let mut sort_order = items.sort_order;
 
@@ -247,115 +245,119 @@ pub fn LibraryPage(
         }
     });
 
-    let displayed_tracks = if !is_jellyfin {
-        items
-            .all_tracks
-            .iter()
-            .map(|(t, c)| (t.clone(), c.clone()))
-            .collect::<Vec<_>>()
-    } else {
-        let mut tracks = library.read().jellyfin_tracks.clone();
-        match *sort_order.read() {
-            config::SortOrder::Title => {
-                tracks.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
-            }
-            config::SortOrder::Artist => {
-                tracks.sort_by(|a, b| a.artist.to_lowercase().cmp(&b.artist.to_lowercase()))
-            }
-            config::SortOrder::Album => {
-                tracks.sort_by(|a, b| a.album.to_lowercase().cmp(&b.album.to_lowercase()))
-            }
-        }
-
-        tracks
-            .iter()
-            .map(|t| {
-                let cover_url = if let Some(server) = &config.read().server {
-                    let path_str = t.path.to_string_lossy();
-                    let parts: Vec<&str> = path_str.split(':').collect();
-                    if parts.len() >= 2 {
-                        let id = parts[1];
-                        let mut url = format!("{}/Items/{}/Images/Primary", server.url, id);
-                        let mut params = Vec::new();
-
-                        if parts.len() >= 3 {
-                            params.push(format!("tag={}", parts[2]));
-                        }
-                        if let Some(token) = &server.access_token {
-                            params.push(format!("api_key={}", token));
-                        }
-                        if !params.is_empty() {
-                            url.push('?');
-                            url.push_str(&params.join("&"));
-                        }
-                        Some(url)
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-                (t.clone(), cover_url)
-            })
-            .collect()
-    };
-
-    let mut ctrl = use_context::<PlayerController>();
-    let queue_tracks: Vec<reader::models::Track> =
-        displayed_tracks.iter().map(|(t, _)| t.clone()).collect();
-
-    let is_empty = displayed_tracks.is_empty();
-    let tracks_nodes = displayed_tracks
-        .into_iter()
-        .enumerate()
-        .map(|(idx, (track, cover_url))| {
-            let track_menu = track.clone();
-            let track_add = track.clone();
-            let track_delete = track.clone();
-            let is_jellyfin_track = track.path.to_string_lossy().starts_with("jellyfin:");
-
-            let queue_source = queue_tracks.clone();
-
-            let track_key = format!("{}-{}", track.path.display(), idx);
-            let is_menu_open = active_menu_track.read().as_ref() == Some(&track.path);
-
-            rsx! {
-                TrackRow {
-                    key: "{track_key}",
-                    track: track.clone(),
-                    cover_url: cover_url.clone(),
-                    is_menu_open: is_menu_open,
-                    on_click_menu: move |_| {
-                        if active_menu_track.read().as_ref() == Some(&track_menu.path) {
-                            active_menu_track.set(None);
-                        } else {
-                            active_menu_track.set(Some(track_menu.path.clone()));
-                        }
-                    },
-                    on_add_to_playlist: move |_| {
-                        selected_track_for_playlist.set(Some(track_add.path.clone()));
-                        show_playlist_modal.set(true);
-                        active_menu_track.set(None);
-                    },
-                    on_close_menu: move |_| active_menu_track.set(None),
-                    on_delete: move |_| {
-                        active_menu_track.set(None);
-                        if !is_jellyfin_track {
-                            if std::fs::remove_file(&track_delete.path).is_ok() {
-                                library.write().remove_track(&track_delete.path);
-                                let cache_dir = std::path::Path::new("./cache").to_path_buf();
-                                let lib_path = cache_dir.join("library.json");
-                                let _ = library.read().save(&lib_path);
-                            }
-                        }
-                    },
-                    on_play: move |_| {
-                        queue.set(queue_source.clone());
-                        ctrl.play_track(idx);
-                    }
+    let displayed_tracks = use_memo(move || {
+        if !is_jellyfin {
+            (items.all_tracks)()
+        } else {
+            let mut tracks = library.read().jellyfin_tracks.clone();
+            match *sort_order.read() {
+                config::SortOrder::Title => {
+                    tracks.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+                }
+                config::SortOrder::Artist => {
+                    tracks.sort_by(|a, b| a.artist.to_lowercase().cmp(&b.artist.to_lowercase()))
+                }
+                config::SortOrder::Album => {
+                    tracks.sort_by(|a, b| a.album.to_lowercase().cmp(&b.album.to_lowercase()))
                 }
             }
-        });
+
+            let conf = config.read();
+            tracks
+                .iter()
+                .map(|t| {
+                    let cover_url = if let Some(server) = &conf.server {
+                        let path_str = t.path.to_string_lossy();
+                        let parts: Vec<&str> = path_str.split(':').collect();
+                        if parts.len() >= 2 {
+                            let id = parts[1];
+                            let mut url = format!("{}/Items/{}/Images/Primary", server.url, id);
+                            let mut params = Vec::new();
+
+                            if parts.len() >= 3 {
+                                params.push(format!("tag={}", parts[2]));
+                            }
+                            if let Some(token) = &server.access_token {
+                                params.push(format!("api_key={}", token));
+                            }
+                            if !params.is_empty() {
+                                url.push('?');
+                                url.push_str(&params.join("&"));
+                            }
+                            Some(url)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    (t.clone(), cover_url)
+                })
+                .collect()
+        }
+    });
+
+    let mut ctrl = use_context::<PlayerController>();
+    let queue_tracks = use_memo(move || {
+        displayed_tracks()
+            .iter()
+            .map(|(t, _)| t.clone())
+            .collect::<Vec<_>>()
+    });
+
+    let is_empty = displayed_tracks().is_empty();
+    let tracks_nodes =
+        displayed_tracks()
+            .into_iter()
+            .enumerate()
+            .map(|(idx, (track, cover_url))| {
+                let track_menu = track.clone();
+                let track_add = track.clone();
+                let track_delete = track.clone();
+                let is_jellyfin_track = track.path.to_string_lossy().starts_with("jellyfin:");
+
+                let queue_source = queue_tracks();
+
+                let track_key = format!("{}-{}", track.path.display(), idx);
+                let is_menu_open = active_menu_track.read().as_ref() == Some(&track.path);
+
+                rsx! {
+                    TrackRow {
+                        key: "{track_key}",
+                        track: track.clone(),
+                        cover_url: cover_url.clone(),
+                        is_menu_open: is_menu_open,
+                        on_click_menu: move |_| {
+                            if active_menu_track.read().as_ref() == Some(&track_menu.path) {
+                                active_menu_track.set(None);
+                            } else {
+                                active_menu_track.set(Some(track_menu.path.clone()));
+                            }
+                        },
+                        on_add_to_playlist: move |_| {
+                            selected_track_for_playlist.set(Some(track_add.path.clone()));
+                            show_playlist_modal.set(true);
+                            active_menu_track.set(None);
+                        },
+                        on_close_menu: move |_| active_menu_track.set(None),
+                        on_delete: move |_| {
+                            active_menu_track.set(None);
+                            if !is_jellyfin_track {
+                                if std::fs::remove_file(&track_delete.path).is_ok() {
+                                    library.write().remove_track(&track_delete.path);
+                                    let cache_dir = std::path::Path::new("./cache").to_path_buf();
+                                    let lib_path = cache_dir.join("library.json");
+                                    let _ = library.read().save(&lib_path);
+                                }
+                            }
+                        },
+                        on_play: move |_| {
+                            queue.set(queue_source.clone());
+                            ctrl.play_track(idx);
+                        }
+                    }
+                }
+            });
 
     rsx! {
         div {
@@ -458,11 +460,17 @@ pub fn LibraryPage(
             div {
                 class: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-12",
                 if !is_jellyfin {
-                    StatCard { label: "Tracks", value: "{lib.tracks.len()}", icon: "fa-music" }
-                    StatCard { label: "Albums", value: "{lib.albums.len()}", icon: "fa-compact-disc" }
-                    StatCard { label: "Artists", value: "{items.artist_count}", icon: "fa-user" }
+                    {
+                        let lib = library.read();
+                        rsx! {
+                            StatCard { label: "Tracks", value: "{lib.tracks.len()}", icon: "fa-music" }
+                            StatCard { label: "Albums", value: "{lib.albums.len()}", icon: "fa-compact-disc" }
+                            StatCard { label: "Artists", value: "{(items.artist_count)()}", icon: "fa-user" }
+                        }
+                    }
                 } else {
                     {
+                        let lib = library.read();
                         let artist_count = {
                             let mut artists = HashSet::new();
                             for album in &lib.jellyfin_albums { artists.insert(&album.artist); }

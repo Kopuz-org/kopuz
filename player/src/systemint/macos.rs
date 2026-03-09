@@ -1,7 +1,6 @@
 use std::ptr::NonNull;
-use std::sync::OnceLock;
-use tokio::sync::Mutex;
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use std::sync::Mutex as StdMutex;
+use std::sync::{Arc, OnceLock};
 
 use block2::RcBlock;
 use objc2::AllocAnyThread;
@@ -17,36 +16,17 @@ use objc2_media_player::{
     MPRemoteCommandHandlerStatus,
 };
 
-// CoreFoundation FFI — CFRunLoopWakeUp is the only reliable way to wake
-// the Tao/Dioxus event loop from a background thread on macOS.
 unsafe extern "C" {
     fn CFRunLoopGetMain() -> *mut std::ffi::c_void;
     fn CFRunLoopWakeUp(rl: *mut std::ffi::c_void);
 }
 
-/// Wake the main CFRunLoop so the Dioxus event loop polls pending tokio tasks.
-/// Thread-safe per Apple docs. Call this after sending events to the channel.
 pub fn wake_run_loop() {
     unsafe { CFRunLoopWakeUp(CFRunLoopGetMain()) }
 }
 
-// NSActivityIdleSystemSleepDisabled = 1 << 20
-// NSActivitySuddenTerminationDisabled = 1 << 14
-// NSActivityAutomaticTerminationDisabled = 1 << 15
-// NSActivityUserInitiated = 0x00FFFFFF | NSActivityIdleSystemSleepDisabled
-// NSActivityBackground = 0x000000FF
-// NSActivityLatencyCritical = 0xFF00000000
-//
-// We construct the flags manually to be explicit.
-// We used to use UserInitiated, but Background + LatencyCritical is more appropriate for
-// a long-running audio player that shouldn't be throttled.
-//
-// Switching to NSActivityUserInitiated to prevent aggressive throttling.
-const NS_ACTIVITY_PREVENT_SUSPENSION: u64 = (0x00FFFFFF) | // NSActivityUserInitiated
-    (1 << 20) |    // NSActivityIdleSystemSleepDisabled
-    (1 << 14) |    // NSActivitySuddenTerminationDisabled
-    (1 << 15) |    // NSActivityAutomaticTerminationDisabled
-    0xFF00000000; // NSActivityLatencyCritical
+const NS_ACTIVITY_PREVENT_SUSPENSION: u64 =
+    0x00FFFFFF | (1 << 20) | (1 << 14) | (1 << 15) | 0xFF00000000;
 
 #[derive(Debug)]
 pub enum SystemEvent {
@@ -58,7 +38,6 @@ pub enum SystemEvent {
 }
 
 struct ThreadSafeArtwork(objc2::rc::Retained<MPMediaItemArtwork>);
-
 unsafe impl Send for ThreadSafeArtwork {}
 unsafe impl Sync for ThreadSafeArtwork {}
 
@@ -66,30 +45,28 @@ struct ThreadSafeActivity(objc2::rc::Retained<AnyObject>);
 unsafe impl Send for ThreadSafeActivity {}
 unsafe impl Sync for ThreadSafeActivity {}
 
-static EVENT_SENDER: OnceLock<UnboundedSender<SystemEvent>> = OnceLock::new();
-static EVENT_RECEIVER: OnceLock<Mutex<UnboundedReceiver<SystemEvent>>> = OnceLock::new();
+static BACKGROUND_HANDLER: OnceLock<Arc<StdMutex<Option<Box<dyn Fn(SystemEvent) + Send + Sync>>>>> =
+    OnceLock::new();
 
-fn get_tx() -> UnboundedSender<SystemEvent> {
-    EVENT_SENDER
-        .get_or_init(|| {
-            let (tx, rx) = mpsc::unbounded_channel();
-            let _ = EVENT_RECEIVER.set(Mutex::new(rx));
-            tx
-        })
+fn get_bg_handler() -> Arc<StdMutex<Option<Box<dyn Fn(SystemEvent) + Send + Sync>>>> {
+    BACKGROUND_HANDLER
+        .get_or_init(|| Arc::new(StdMutex::new(None)))
         .clone()
 }
 
-pub fn poll_event() -> Option<SystemEvent> {
-    EVENT_RECEIVER.get()?.try_lock().ok()?.try_recv().ok()
+pub fn set_background_handler(handler: impl Fn(SystemEvent) + Send + Sync + 'static) {
+    let arc = get_bg_handler();
+    let mut guard = arc.lock().unwrap();
+    *guard = Some(Box::new(handler));
 }
 
-pub async fn wait_event() -> Option<SystemEvent> {
-    if let Some(rx) = EVENT_RECEIVER.get() {
-        let mut guard = rx.lock().await;
-        guard.recv().await
-    } else {
-        None
+fn dispatch_event(event: SystemEvent) {
+    if let Ok(guard) = get_bg_handler().lock() {
+        if let Some(ref handler) = *guard {
+            handler(event);
+        }
     }
+    wake_run_loop();
 }
 
 pub fn init() {
@@ -97,96 +74,75 @@ pub fn init() {
     ONCE.get_or_init(|| unsafe {
         let process_info = objc2_foundation::NSProcessInfo::processInfo();
         let reason = NSString::from_str("Music Playback Quality of Service");
-        let activity: *mut AnyObject = objc2::msg_send![&process_info, beginActivityWithOptions: NS_ACTIVITY_PREVENT_SUSPENSION, reason: &*reason];
+        let activity: *mut AnyObject = objc2::msg_send![
+            &process_info,
+            beginActivityWithOptions: NS_ACTIVITY_PREVENT_SUSPENSION,
+            reason: &*reason
+        ];
 
-        // Configure AVAudioSession for background playback
         let session = AVAudioSession::sharedInstance();
         if let Err(e) = session.setCategory_error(AVAudioSessionCategoryPlayback.unwrap()) {
             eprintln!("[macos] Failed to set AVAudioSession category: {:?}", e);
         }
         if let Err(e) = session.setActive_error(true) {
-             eprintln!("[macos] Failed to activate AVAudioSession: {:?}", e);
+            eprintln!("[macos] Failed to activate AVAudioSession: {:?}", e);
         } else {
-             println!("[macos] AVAudioSession configured for background playback");
+            println!("[macos] AVAudioSession configured for background playback");
         }
 
         static ACTIVITY_TOKEN: OnceLock<ThreadSafeActivity> = OnceLock::new();
         if !activity.is_null() {
-             let retained_activity = objc2::rc::Retained::from_raw(activity).expect("retained activity token");
-             let _ = ACTIVITY_TOKEN.set(ThreadSafeActivity(retained_activity));
-             println!("[macos] Acquired background activity token (Prevent Suspension)");
+            let retained =
+                objc2::rc::Retained::from_raw(activity).expect("retained activity token");
+            let _ = ACTIVITY_TOKEN.set(ThreadSafeActivity(retained));
+            println!("[macos] Acquired background activity token");
         } else {
-             eprintln!("[macos] Failed to acquire background activity token");
+            eprintln!("[macos] Failed to acquire background activity token");
         }
 
         std::thread::spawn(|| {
-            let mut counter: u64 = 0;
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(1));
-                counter += 1;
-                // Wake the main run loop so Dioxus polls its tokio tasks.
-                // Without this, the event loop sleeps and use_future stops running.
-                // 1s keeps auto-skip responsive even when the window is backgrounded.
                 wake_run_loop();
-                if counter % 30 == 0 {
-                    println!("[macos] Background heartbeat tick: {}", counter);
-                }
             }
         });
 
         let center = MPRemoteCommandCenter::sharedCommandCenter();
-        let tx = get_tx();
 
-        let play_tx = tx.clone();
         center.playCommand().addTargetWithHandler(&RcBlock::new(
-            move |_event: NonNull<MPRemoteCommandEvent>| {
-                let _ = play_tx.send(SystemEvent::Play);
-                wake_run_loop();
+            move |_: NonNull<MPRemoteCommandEvent>| {
+                dispatch_event(SystemEvent::Play);
                 MPRemoteCommandHandlerStatus::Success
             },
         ));
 
-        let pause_tx = tx.clone();
         center.pauseCommand().addTargetWithHandler(&RcBlock::new(
-            move |_event: NonNull<MPRemoteCommandEvent>| {
-                let _ = pause_tx.send(SystemEvent::Pause);
-                wake_run_loop();
+            move |_: NonNull<MPRemoteCommandEvent>| {
+                dispatch_event(SystemEvent::Pause);
                 MPRemoteCommandHandlerStatus::Success
             },
         ));
 
-        let toggle_tx = tx.clone();
         center
             .togglePlayPauseCommand()
-            .addTargetWithHandler(&RcBlock::new(
-                move |_event: NonNull<MPRemoteCommandEvent>| {
-                    let _ = toggle_tx.send(SystemEvent::Toggle);
-                    wake_run_loop();
-                    MPRemoteCommandHandlerStatus::Success
-                },
-            ));
+            .addTargetWithHandler(&RcBlock::new(move |_: NonNull<MPRemoteCommandEvent>| {
+                dispatch_event(SystemEvent::Toggle);
+                MPRemoteCommandHandlerStatus::Success
+            }));
 
-        let next_tx = tx.clone();
         center
             .nextTrackCommand()
-            .addTargetWithHandler(&RcBlock::new(
-                move |_event: NonNull<MPRemoteCommandEvent>| {
-                    let _ = next_tx.send(SystemEvent::Next);
-                    wake_run_loop();
-                    MPRemoteCommandHandlerStatus::Success
-                },
-            ));
+            .addTargetWithHandler(&RcBlock::new(move |_: NonNull<MPRemoteCommandEvent>| {
+                dispatch_event(SystemEvent::Next);
+                MPRemoteCommandHandlerStatus::Success
+            }));
 
-        let prev_tx = tx.clone();
         center
             .previousTrackCommand()
-            .addTargetWithHandler(&RcBlock::new(
-                move |_event: NonNull<MPRemoteCommandEvent>| {
-                    let _ = prev_tx.send(SystemEvent::Prev);
-                    wake_run_loop();
-                    MPRemoteCommandHandlerStatus::Success
-                },
-            ));
+            .addTargetWithHandler(&RcBlock::new(move |_: NonNull<MPRemoteCommandEvent>| {
+                dispatch_event(SystemEvent::Prev);
+                MPRemoteCommandHandlerStatus::Success
+            }));
     });
 }
 
@@ -201,7 +157,6 @@ pub fn update_now_playing(
 ) {
     init();
 
-    // Cache to store the last artwork path and the created MPMediaItemArtwork
     static ARTWORK_CACHE: OnceLock<std::sync::Mutex<Option<(String, ThreadSafeArtwork)>>> =
         OnceLock::new();
 
@@ -246,7 +201,6 @@ pub fn update_now_playing(
             let cache_lock = ARTWORK_CACHE.get_or_init(|| std::sync::Mutex::new(None));
             let mut cache = cache_lock.lock().unwrap();
 
-            // Check if we have a cached artwork for this path
             let cached_artwork = if let Some((cached_path, artwork_wrapper)) = &*cache {
                 if cached_path == path {
                     Some(artwork_wrapper.0.clone())
@@ -265,29 +219,26 @@ pub fn update_now_playing(
                     ProtocolObject::from_ref(MPMediaItemPropertyArtwork),
                 );
             } else {
-                // Not cached or path changed, load new artwork
                 let ns_path = NSString::from_str(path);
                 if let Some(image) = NSImage::initWithContentsOfFile(NSImage::alloc(), &ns_path) {
                     use objc2::msg_send;
-
                     let artwork_alloc = MPMediaItemArtwork::alloc();
                     let artwork_ptr: *mut MPMediaItemArtwork = std::mem::transmute(artwork_alloc);
                     let artwork_raw: *mut MPMediaItemArtwork =
                         msg_send![artwork_ptr, initWithImage: &*image];
 
                     if !artwork_raw.is_null() {
-                        let artwork_retained: objc2::rc::Retained<MPMediaItemArtwork> =
+                        let retained: objc2::rc::Retained<MPMediaItemArtwork> =
                             objc2::rc::Retained::from_raw(artwork_raw).expect("retained artwork");
 
                         let artwork_ref: &AnyObject =
-                            &*(std::mem::transmute::<_, *const AnyObject>(&*artwork_retained));
+                            &*(std::mem::transmute::<_, *const AnyObject>(&*retained));
                         info.setObject_forKey(
                             artwork_ref,
                             ProtocolObject::from_ref(MPMediaItemPropertyArtwork),
                         );
 
-                        // Update cache
-                        *cache = Some((path.to_string(), ThreadSafeArtwork(artwork_retained)));
+                        *cache = Some((path.to_string(), ThreadSafeArtwork(retained)));
                     }
                 }
             }

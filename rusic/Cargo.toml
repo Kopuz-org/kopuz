@@ -42,6 +42,13 @@ default = []
 [profile.dev.package."*"]
 opt-level = 3
 
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
 [profile.wasm-dev]
 inherits = "dev"
 opt-level = 1

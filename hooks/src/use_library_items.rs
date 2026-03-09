@@ -4,14 +4,13 @@ use reader::Library;
 use reader::models::Track;
 
 pub struct LibraryItems {
-    pub all_tracks: Vec<(Track, Option<String>)>,
-    pub artist_count: usize,
+    pub all_tracks: Memo<Vec<(Track, Option<String>)>>,
+    pub artist_count: Memo<usize>,
     pub sort_order: Signal<SortOrder>,
 }
 
 pub fn use_library_items(library: Signal<Library>) -> LibraryItems {
     let config = use_context::<Signal<AppConfig>>();
-    let lib = library.read();
 
     let initial_sort_order = config.read().sort_order.clone();
     let sort_order = use_signal(move || initial_sort_order);
@@ -27,39 +26,46 @@ pub fn use_library_items(library: Signal<Library>) -> LibraryItems {
         }
     });
 
-    let artist_count = {
+    let artist_count = use_memo(move || {
+        let lib = library.read();
         let mut artists = std::collections::HashSet::new();
         for album in &lib.albums {
-            artists.insert(&album.artist);
+            artists.insert(album.artist.clone());
         }
         for track in &lib.tracks {
-            artists.insert(&track.artist);
+            artists.insert(track.artist.clone());
         }
         artists.len()
-    };
+    });
 
-    let mut all_tracks: Vec<_> = lib
-        .tracks
-        .iter()
-        .map(|track| {
-            let album = lib.albums.iter().find(|a| a.id == track.album_id);
-            let cover_url = album
-                .and_then(|a| a.cover_path.as_ref())
-                .and_then(|p| utils::format_artwork_url(Some(&p)));
-            (track.clone(), cover_url)
-        })
-        .collect();
+    let all_tracks = use_memo(move || {
+        let lib = library.read();
 
-    match *sort_order.read() {
-        SortOrder::Title => {
-            all_tracks.sort_by(|(a, _), (b, _)| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+        let mut tracks: Vec<(Track, Option<String>)> = lib
+            .tracks
+            .iter()
+            .map(|track| {
+                let album = lib.albums.iter().find(|a| a.id == track.album_id);
+                let cover_url = album
+                    .and_then(|a| a.cover_path.as_ref())
+                    .and_then(|p| utils::format_artwork_url(Some(p)));
+                (track.clone(), cover_url)
+            })
+            .collect();
+
+        match *sort_order.read() {
+            SortOrder::Title => {
+                tracks.sort_by(|(a, _), (b, _)| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+            }
+            SortOrder::Artist => tracks
+                .sort_by(|(a, _), (b, _)| a.artist.to_lowercase().cmp(&b.artist.to_lowercase())),
+            SortOrder::Album => {
+                tracks.sort_by(|(a, _), (b, _)| a.album.to_lowercase().cmp(&b.album.to_lowercase()))
+            }
         }
-        SortOrder::Artist => all_tracks
-            .sort_by(|(a, _), (b, _)| a.artist.to_lowercase().cmp(&b.artist.to_lowercase())),
-        SortOrder::Album => {
-            all_tracks.sort_by(|(a, _), (b, _)| a.album.to_lowercase().cmp(&b.album.to_lowercase()))
-        }
-    }
+
+        tracks
+    });
 
     LibraryItems {
         all_tracks,
