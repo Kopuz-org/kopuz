@@ -142,15 +142,18 @@ pub fn use_player_task(ctrl: PlayerController) {
                 };
 
                 if let Some((server, device_id)) = jellyfin_info {
-                    let remote = JellyfinRemote::new(
+                    let remote = Arc::new(JellyfinRemote::new(
                         &server.url,
                         server.access_token.as_deref(),
                         &device_id,
                         server.user_id.as_deref(),
-                    );
+                    ));
 
                     if last_ping.elapsed().as_secs() >= 30 {
-                        let _ = remote.ping().await;
+                        let remote = remote.clone();
+                        spawn(async move {
+                            let _ = remote.ping().await;
+                        });
                         last_ping = std::time::Instant::now();
                     }
 
@@ -169,14 +172,22 @@ pub fn use_player_task(ctrl: PlayerController) {
 
                                 if last_jellyfin_id.as_ref() != Some(&current_id) {
                                     if let Some(old_id) = last_jellyfin_id {
-                                        let _ = remote
-                                            .report_playback_stopped(
-                                                &old_id,
-                                                pos.as_micros() as u64 * 10,
-                                            )
-                                            .await;
+                                        let remote = remote.clone();
+                                        spawn(async move {
+                                            let _ = remote
+                                                .report_playback_stopped(
+                                                    &old_id,
+                                                    pos.as_micros() as u64 * 10,
+                                                )
+                                                .await;
+                                        });
                                     }
-                                    let _ = remote.report_playback_start(&current_id).await;
+                                    let remote = remote.clone();
+                                    let current_id_clone = current_id.clone();
+                                    spawn(async move {
+                                        let _ =
+                                            remote.report_playback_start(&current_id_clone).await;
+                                    });
                                     last_jellyfin_id = Some(current_id.clone());
                                 }
 
@@ -184,21 +195,35 @@ pub fn use_player_task(ctrl: PlayerController) {
                                     || is_playing != *was_playing.peek()
                                 {
                                     let ticks = pos.as_micros() as u64 * 10;
-                                    let _ = remote
-                                        .report_playback_progress(&current_id, ticks, !is_playing)
-                                        .await;
+                                    let remote = remote.clone();
+                                    let current_id_clone = current_id.clone();
+                                    spawn(async move {
+                                        let _ = remote
+                                            .report_playback_progress(
+                                                &current_id_clone,
+                                                ticks,
+                                                !is_playing,
+                                            )
+                                            .await;
+                                    });
                                     last_progress_report = std::time::Instant::now();
                                 }
                             }
                         } else if let Some(old_id) = last_jellyfin_id.take() {
+                            let remote = remote.clone();
+                            spawn(async move {
+                                let _ = remote
+                                    .report_playback_stopped(&old_id, pos.as_micros() as u64 * 10)
+                                    .await;
+                            });
+                        }
+                    } else if let Some(old_id) = last_jellyfin_id.take() {
+                        let remote = remote.clone();
+                        spawn(async move {
                             let _ = remote
                                 .report_playback_stopped(&old_id, pos.as_micros() as u64 * 10)
                                 .await;
-                        }
-                    } else if let Some(old_id) = last_jellyfin_id.take() {
-                        let _ = remote
-                            .report_playback_stopped(&old_id, pos.as_micros() as u64 * 10)
-                            .await;
+                        });
                     }
                 }
 

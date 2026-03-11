@@ -166,9 +166,14 @@ impl JellyfinRemote {
         let clean_base_url = base_url.trim_end_matches('/');
         client.create_api(clean_base_url, api_key);
 
+        let http_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
+
         Self {
             client,
-            http_client: reqwest::Client::new(),
+            http_client,
             base_url: clean_base_url.to_string(),
             device_id: device_id.to_string(),
             user_id: user_id.map(|s| s.to_string()),
