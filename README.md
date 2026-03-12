@@ -35,7 +35,7 @@ nix run github:temidaradev/rusic
 Install to your profile:
 
 ```bash
-nix profile install github:temidaradev/rusic
+nix profile add github:temidaradev/rusic
 ```
 
 Or add to your NixOS flake inputs:
