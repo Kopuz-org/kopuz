@@ -1,6 +1,8 @@
 use jellyfin_sdk_rust::JellyfinSDK;
 use serde::{Deserialize, Serialize};
 
+const APP_VERSION: &str = "0.3.3";
+
 #[derive(Serialize)]
 struct PlaybackProgressRequest<'a> {
     #[serde(rename = "ItemId")]
@@ -191,8 +193,8 @@ impl JellyfinRemote {
         let body = LoginRequest { username, password };
 
         let auth_header = format!(
-            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"0.3.1\"",
-            self.device_id
+            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"{}\"",
+            self.device_id, APP_VERSION
         );
 
         let resp = self
@@ -233,8 +235,8 @@ impl JellyfinRemote {
         );
 
         let auth_header = format!(
-            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"0.3.1\", Token=\"{}\"",
-            self.device_id, token
+            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"{}\", Token=\"{}\"",
+            self.device_id, APP_VERSION, token
         );
 
         let resp = self
@@ -263,8 +265,8 @@ impl JellyfinRemote {
         let url = format!("{}/Users/{}/Views", self.base_url, user_id);
 
         let auth_header = format!(
-            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"0.3.1\", Token=\"{}\"",
-            self.device_id, token
+            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"{}\", Token=\"{}\"",
+            self.device_id, APP_VERSION, token
         );
 
         let resp = self
@@ -307,8 +309,8 @@ impl JellyfinRemote {
         let url = format!("{}/Users/{}/Items", self.base_url, user_id);
 
         let auth_header = format!(
-            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"0.3.1\", Token=\"{}\"",
-            self.device_id, token
+            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"{}\", Token=\"{}\"",
+            self.device_id, APP_VERSION, token
         );
 
         let start = start_index.to_string();
@@ -350,8 +352,8 @@ impl JellyfinRemote {
         let url = format!("{}/Users/{}/Items", self.base_url, user_id);
 
         let auth_header = format!(
-            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"0.3.1\", Token=\"{}\"",
-            self.device_id, token
+            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"{}\", Token=\"{}\"",
+            self.device_id, APP_VERSION, token
         );
 
         let fields = "DateCreated,DateLastMediaAdded".to_string();
@@ -387,8 +389,8 @@ impl JellyfinRemote {
         let url = format!("{}/Playlists", self.base_url);
 
         let auth_header = format!(
-            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"0.3.1\", Token=\"{}\"",
-            self.device_id, token
+            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"{}\", Token=\"{}\"",
+            self.device_id, APP_VERSION, token
         );
 
         let body = CreatePlaylistRequest {
@@ -428,8 +430,8 @@ impl JellyfinRemote {
         let url = format!("{}/Playlists/{}/Items", self.base_url, playlist_id);
 
         let auth_header = format!(
-            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"0.3.1\", Token=\"{}\"",
-            self.device_id, token
+            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"{}\", Token=\"{}\"",
+            self.device_id, APP_VERSION, token
         );
 
         let resp = self
@@ -458,8 +460,8 @@ impl JellyfinRemote {
         let url = format!("{}/Playlists/{}/Items", self.base_url, playlist_id);
 
         let auth_header = format!(
-            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"0.3.1\", Token=\"{}\"",
-            self.device_id, token
+            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"{}\", Token=\"{}\"",
+            self.device_id, APP_VERSION, token
         );
 
         let fields = "DateCreated,DateLastMediaAdded,MediaSources,ImageTags,Genres,ParentIndexNumber,IndexNumber,AlbumId,AlbumArtist,ProductionYear,Container".to_string();
@@ -490,8 +492,8 @@ impl JellyfinRemote {
         let url = format!("{}/Genres", self.base_url);
 
         let auth_header = format!(
-            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"0.3.1\", Token=\"{}\"",
-            self.device_id, token
+            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"{}\", Token=\"{}\"",
+            self.device_id, APP_VERSION, token
         );
 
         let resp = self
@@ -530,8 +532,8 @@ impl JellyfinRemote {
         let url = format!("{}/Users/{}/Items", self.base_url, user_id);
 
         let auth_header = format!(
-            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"0.3.1\", Token=\"{}\"",
-            self.device_id, token
+            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"{}\", Token=\"{}\"",
+            self.device_id, APP_VERSION, token
         );
 
         let start = start_index.to_string();
@@ -574,8 +576,8 @@ impl JellyfinRemote {
         let url = format!("{}/Sessions/Playing", self.base_url);
 
         let auth_header = format!(
-            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"0.3.1\", Token=\"{}\"",
-            self.device_id, token
+            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"{}\", Token=\"{}\"",
+            self.device_id, APP_VERSION, token
         );
 
         let body = PlaybackProgressRequest {
@@ -617,8 +619,8 @@ impl JellyfinRemote {
         let url = format!("{}/Sessions/Playing/Progress", self.base_url);
 
         let auth_header = format!(
-            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"0.3.1\", Token=\"{}\"",
-            self.device_id, token
+            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"{}\", Token=\"{}\"",
+            self.device_id, APP_VERSION, token
         );
 
         let body = PlaybackProgressRequest {
@@ -659,8 +661,8 @@ impl JellyfinRemote {
         let url = format!("{}/Sessions/Playing/Stopped", self.base_url);
 
         let auth_header = format!(
-            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"0.3.1\", Token=\"{}\"",
-            self.device_id, token
+            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"{}\", Token=\"{}\"",
+            self.device_id, APP_VERSION, token
         );
 
         let body = PlaybackStopRequest {
@@ -695,8 +697,8 @@ impl JellyfinRemote {
         let url = format!("{}/Sessions/Ping", self.base_url);
 
         let auth_header = format!(
-            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"0.3.1\", Token=\"{}\"",
-            self.device_id, token
+            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"{}\", Token=\"{}\"",
+            self.device_id, APP_VERSION, token
         );
 
         let resp = self
@@ -727,8 +729,8 @@ impl JellyfinRemote {
         );
 
         let auth_header = format!(
-            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"0.3.1\", Token=\"{}\"",
-            self.device_id, token
+            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"{}\", Token=\"{}\"",
+            self.device_id, APP_VERSION, token
         );
 
         let resp = self
@@ -759,8 +761,8 @@ impl JellyfinRemote {
         );
 
         let auth_header = format!(
-            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"0.3.1\", Token=\"{}\"",
-            self.device_id, token
+            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"{}\", Token=\"{}\"",
+            self.device_id, APP_VERSION, token
         );
 
         let resp = self
@@ -788,8 +790,8 @@ impl JellyfinRemote {
         let url = format!("{}/Users/{}/Items", self.base_url, user_id);
 
         let auth_header = format!(
-            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"0.3.1\", Token=\"{}\"",
-            self.device_id, token
+            "MediaBrowser Client=\"Rusic\", Device=\"Rusic\", DeviceId=\"{}\", Version=\"{}\", Token=\"{}\"",
+            self.device_id, APP_VERSION, token
         );
 
         let fields = "DateCreated,MediaSources,ImageTags,Genres,ParentIndexNumber,IndexNumber,AlbumId,AlbumArtist,ProductionYear,Container".to_string();
