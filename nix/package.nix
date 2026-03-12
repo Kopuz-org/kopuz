@@ -16,9 +16,7 @@
 , xdotool ? null
 , wayland ? null
 , dbus ? null
-# macOS only
-, darwin ? null
-, libiconv ? null
+, extraBuildInputs ? []
 }:
 
 rustPlatform.buildRustPackage {
@@ -49,16 +47,7 @@ rustPlatform.buildRustPackage {
     xdotool
     wayland
     dbus
-  ] ++ lib.optionals stdenv.isDarwin (with darwin.apple_sdk.frameworks; [
-    WebKit
-    AppKit
-    CoreAudio
-    AVFoundation
-    CoreFoundation
-    Security
-    SystemConfiguration
-    libiconv
-  ]);
+  ] ++ extraBuildInputs;
 
   doCheck = false;
 
