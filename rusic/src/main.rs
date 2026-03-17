@@ -9,11 +9,11 @@ use reader::FavoritesStore;
 use rusic_route::Route;
 use std::{borrow::Cow, sync::Arc};
 
-const FAVICON: Asset = asset!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/favicon.ico"));
-const MAIN_CSS: Asset = asset!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/main.css"));
-const THEME_CSS: Asset = asset!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/themes.css"));
-const TAILWIND_CSS: Asset = asset!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/tailwind.css"));
-const REDUCED_ANIMATIONS_CSS: Asset = asset!(concat!(env!("CARGO_MANIFEST_DIR"), "/assets/reduced-animations.css"));
+const FAVICON: Asset = asset!("../assets/favicon.ico");
+const MAIN_CSS: Asset = asset!("../assets/main.css");
+const THEME_CSS: Asset = asset!("../assets/themes.css");
+const TAILWIND_CSS: Asset = asset!("../assets/tailwind.css");
+const REDUCED_ANIMATIONS_CSS: Asset = asset!("../assets/reduced-animations.css");
 
 static PRESENCE: std::sync::OnceLock<Option<Arc<Presence>>> = std::sync::OnceLock::new();
 
@@ -50,10 +50,10 @@ fn main() {
     }
 
     let config = dioxus::desktop::Config::new()
-        .with_window(window)        
+        .with_window(window)
         .with_custom_protocol("artwork", |_headers, request| {
             let uri = request.uri();
-        
+
             // Decode the file path from the ?p= parameter
             let file_path: String = uri
                 .query()
@@ -67,18 +67,18 @@ fn main() {
                         })
                 })
                 .unwrap_or_default();
-            
+
             if file_path.is_empty() {
                 return http::Response::builder()
                     .status(400)
                     .body(std::borrow::Cow::from(Vec::new()))
                     .unwrap();
             }
-        
+
             // convert forward slashes back to backslashes for proper path handling
             #[cfg(target_os = "windows")]
             let file_path = file_path.replace('/', "\\");
-        
+
             #[cfg(not(target_os = "windows"))]
             let file_path = if file_path.starts_with('~') {
                 if let Ok(home) = std::env::var("HOME") {
@@ -89,7 +89,7 @@ fn main() {
             } else {
                 file_path
             };
-        
+
             let path = std::path::Path::new(&file_path);
 
             // Check
@@ -100,23 +100,21 @@ fn main() {
                     .body(std::borrow::Cow::from(Vec::new()))
                     .unwrap();
             }
-        
+
             let mime = if file_path.ends_with(".png") {
                 "image/png"
             } else {
                 "image/jpeg"
             };
-        
+
             // Read the file with error handling
             match std::fs::read(path) {
-                Ok(content) => {
-                    http::Response::builder()
-                        .header("Content-Type", mime)
-                        .header("Access-Control-Allow-Origin", "*")
-                        .header("Cache-Control", "public, max-age=31536000")
-                        .body(std::borrow::Cow::from(content))
-                        .unwrap()
-                }
+                Ok(content) => http::Response::builder()
+                    .header("Content-Type", mime)
+                    .header("Access-Control-Allow-Origin", "*")
+                    .header("Cache-Control", "public, max-age=31536000")
+                    .body(std::borrow::Cow::from(content))
+                    .unwrap(),
                 Err(e) => {
                     eprintln!("[artwork] Failed to read file {}: {}", file_path, e);
                     http::Response::builder()
@@ -126,7 +124,7 @@ fn main() {
                 }
             }
         });
-        
+
     dioxus::LaunchBuilder::desktop()
         .with_cfg(config)
         .launch(App);
