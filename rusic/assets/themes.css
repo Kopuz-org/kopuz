@@ -275,20 +275,213 @@
     --color-black: #090909;
     --color-white: #fef638;
     --cursor-color: rgba(254, 246, 232, 0.5);
-    --color-slate-400: #dddddd;
-    --color-slate-500: #bbbbbb;
-    --color-green-400: #009988;
-    --color-green-500: #228833;
-    --color-indigo-400: #66ccee;
-    --color-indigo-500: #33bbee;
-    --color-indigo-600: #0077bb;
-    --color-indigo-900: #1d1f21;
-    --color-purple-600: #ee3377;
-    --color-purple-700: #aa3377;
-    --color-red-400: #ee6677;
-    --color-red-500: #cc3311;
-    --color-orange-500: #ee7733;
-    --color-neutral-900: #1d1f21;
+    --color0: #1d1f21;
+    --color1: #cc3311;
+    --color2: #009988;
+    --color3: #ee7733;
+    --color4: #0077bb;
+    --color5: #ee3377;
+    --color6: #33bbee;
+    --color7: #dddddd;
+    --color8: #bbbbbb;
+    --color9: #ee6677;
+    --color10: #228833;
+    --color11: #ccbb44;
+    --color12: #4477aa;
+    --color13: #aa3377;
+    --color14: #66ccee;
+    --color15: #ffffff;
+
+    --color-slate-400: var(--color7);
+    --color-slate-500: var(--color8);
+    --color-green-400: var(--color10);
+    --color-green-500: var(--color2);
+    --color-indigo-400: var(--color14);
+    --color-indigo-500: var(--color6);
+    --color-indigo-600: var(--color4);
+    --color-indigo-900: var(--color0);
+    --color-purple-400: var(--color12);
+    --color-purple-500: var(--color13);
+    --color-purple-600: var(--color5);
+    --color-purple-700: var(--color13);
+    --color-red-400: var(--color9);
+    --color-red-500: var(--color1);
+    --color-orange-500: var(--color3);
+    --color-neutral-900: var(--color0);
+}
+
+/* Kettek16 Component Overrides - Using the full 16-color palette */
+.theme-kettek16 h1,
+.theme-kettek16 .text-3xl,
+.theme-kettek16 .text-4xl {
+    color: var(--color11) !important; /* Bright Yellow */
+}
+
+.theme-kettek16 h2,
+.theme-kettek16 .text-2xl {
+    color: var(--color14) !important; /* Cyan */
+}
+
+.theme-kettek16 h3,
+.theme-kettek16 .text-xl {
+    color: var(--color15) !important; /* Pure White */
+}
+
+.theme-kettek16 .fa-house {
+    color: var(--color1) !important;
+}
+.theme-kettek16 .fa-magnifying-glass {
+    color: var(--color3) !important;
+}
+.theme-kettek16 .fa-book {
+    color: var(--color10) !important;
+}
+.theme-kettek16 .fa-music {
+    color: var(--color12) !important;
+}
+.theme-kettek16 .fa-user {
+    color: var(--color5) !important;
+}
+.theme-kettek16 .fa-list {
+    color: var(--color6) !important;
+}
+.theme-kettek16 .fa-heart {
+    color: var(--color9) !important;
+}
+.theme-kettek16 .fa-clipboard-list {
+    color: var(--color14) !important;
+}
+.theme-kettek16 .fa-gear {
+    color: var(--color11) !important;
+}
+.theme-kettek16 .fa-compact-disc {
+    color: var(--color4) !important;
+}
+.theme-kettek16 .fa-shuffle {
+    color: var(--color13) !important;
+}
+.theme-kettek16 .fa-repeat {
+    color: var(--color13) !important;
+}
+.theme-kettek16 .fa-backward-step,
+.theme-kettek16 .fa-forward-step {
+    color: var(--color12) !important;
+}
+.theme-kettek16 .fa-volume-high {
+    color: var(--color14) !important;
+}
+.theme-kettek16 .fa-server {
+    color: var(--color10) !important;
+}
+.theme-kettek16 .fa-trash {
+    color: var(--color1) !important;
+}
+
+/* Interactive elements */
+.theme-kettek16 .group-hover\:bg-green-500 {
+    background-color: var(--color10) !important;
+}
+.theme-kettek16 .group-hover\/vol\:bg-green-500 {
+    background-color: var(--color10) !important;
+}
+.theme-kettek16 .text-green-400 {
+    color: var(--color10) !important;
+}
+.theme-kettek16 .text-red-400 {
+    color: var(--color9) !important;
+}
+.theme-kettek16 .text-red-500 {
+    color: var(--color1) !important;
+}
+
+/* Sidebar Specifics */
+.theme-kettek16 .bg-white\/5 {
+    background-color: rgba(
+        29,
+        31,
+        33,
+        0.4
+    ) !important; /* var(--color0) with opacity */
+}
+
+/* Scrubber and Progress */
+.theme-kettek16 .group-hover\:bg-green-500,
+.theme-kettek16 .group-hover\/vol\:bg-green-500 {
+    background-color: var(--color10) !important;
+}
+
+/* Album Art Dynamic Fallback */
+.theme-kettek16 .bg-indigo-600\/20 {
+    background-color: rgba(0, 119, 187, 0.2) !important; /* var(--color4) */
+}
+
+.theme-kettek16 .to-purple-600\/20 {
+    --tw-gradient-to: rgba(170, 51, 119, 0.2) !important; /* var(--color13) */
+}
+
+/* Statistics and Labels */
+.theme-kettek16 .text-slate-500 {
+    color: var(--color11) !important; /* Use yellow/gold for labels */
+}
+
+.theme-kettek16 .text-slate-400 {
+    color: var(--color7) !important;
+}
+
+/* Selection and Focus */
+.theme-kettek16 .bg-indigo-500 {
+    background-color: var(--color6) !important;
+}
+
+.theme-kettek16 .hover\:bg-indigo-400:hover {
+    background-color: var(--color14) !important;
+}
+
+/* Global Dropdown and Select Overrides - Force black background */
+select,
+select option,
+select optgroup {
+    background-color: #000000 !important;
+    background: #000000 !important;
+    color: #ffffff !important;
+}
+
+select {
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    background-color: #000000 !important;
+    background: #000000 !important;
+    color: #ffffff !important;
+    border: 1px solid rgba(255, 255, 255, 0.2) !important;
+    padding: 6px 10px !important;
+    border-radius: 4px !important;
+}
+
+select:focus {
+    outline: none !important;
+    border-color: #ffffff !important;
+    background-color: #000000 !important;
+    background: #000000 !important;
+}
+
+/* Kettek16 specific select styling */
+.theme-kettek16 select {
+    background-color: #090909 !important;
+    background: #090909 !important;
+    color: #fef638 !important;
+    border-color: #228833 !important;
+}
+
+.theme-kettek16 select:focus {
+    border-color: #66ccee !important;
+}
+
+.theme-kettek16 select option,
+.theme-kettek16 select optgroup {
+    background-color: #090909 !important;
+    background: #090909 !important;
+    color: #fef638 !important;
 }
 
 /* ═══════════════════════════════════════════ */

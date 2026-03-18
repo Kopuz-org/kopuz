@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=linuxdeploy-plugin-appimage
+Exec=linuxdeploy-plugin-appimage %f
+Icon=linuxdeploy-plugin-appimage
+Terminal=true
+Type=Application
+Categories=Development;

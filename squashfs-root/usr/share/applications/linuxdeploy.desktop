@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=linuxdeploy
+Type=Application
+Terminal=true
+NoDisplay=true
+Exec=linuxdeploy
+Icon=linuxdeploy
+Categories=Development;
+X-AppImage-Integrate=false
