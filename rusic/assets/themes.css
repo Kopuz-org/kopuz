@@ -270,6 +270,27 @@
     --color-neutral-900: #1f1d2e;
 }
 
+/* kettek16 */
+.theme-kettek16 {
+    --color-black: #090909;
+    --color-white: #fef638;
+    --cursor-color: rgba(254, 246, 232, 0.5);
+    --color-slate-400: #dddddd;
+    --color-slate-500: #bbbbbb;
+    --color-green-400: #009988;
+    --color-green-500: #228833;
+    --color-indigo-400: #66ccee;
+    --color-indigo-500: #33bbee;
+    --color-indigo-600: #0077bb;
+    --color-indigo-900: #1d1f21;
+    --color-purple-600: #ee3377;
+    --color-purple-700: #aa3377;
+    --color-red-400: #ee6677;
+    --color-red-500: #cc3311;
+    --color-orange-500: #ee7733;
+    --color-neutral-900: #1d1f21;
+}
+
 /* ═══════════════════════════════════════════ */
 /*                LIGHT THEMES                */
 /* ═══════════════════════════════════════════ */

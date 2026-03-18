@@ -42,6 +42,7 @@ pub fn ThemeSelector(current_theme: String, on_change: EventHandler<String>) -> 
                 option { value: "kanagawa-dragon", "Kanagawa Dragon" }
                 option { value: "everforest", "Everforest" }
                 option { value: "rosepine", "Rosé Pine" }
+                option { value: "kettek16", "kettek16" }
             }
             optgroup { label: "── Light ──",
                 option { value: "default-light", "Default Light" }
