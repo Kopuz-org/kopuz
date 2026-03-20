@@ -145,11 +145,18 @@ impl Player {
     }
 
     pub fn get_position(&self) -> Duration {
-        if let Some(start) = self.start_time {
+        let raw = if let Some(start) = self.start_time {
             self.elapsed + start.elapsed()
         } else {
             self.elapsed
+        };
+
+        if let Some(meta) = &self.now_playing {
+            if meta.duration > Duration::ZERO && raw > meta.duration {
+                return meta.duration;
+            }
         }
+        raw
     }
 }
 

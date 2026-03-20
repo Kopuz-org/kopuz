@@ -21,6 +21,33 @@ use objc2_media_player::{
 unsafe extern "C" {
     fn CFRunLoopGetMain() -> *mut std::ffi::c_void;
     fn CFRunLoopWakeUp(rl: *mut std::ffi::c_void);
+    fn CFRunLoopAddTimer(
+        rl: *mut std::ffi::c_void,
+        timer: *mut std::ffi::c_void,
+        mode: *const std::ffi::c_void,
+    );
+    fn CFRunLoopTimerCreate(
+        allocator: *const std::ffi::c_void,
+        fire_date: f64,
+        interval: f64,
+        flags: u64,
+        order: i64,
+        callout: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void),
+        context: *const std::ffi::c_void,
+    ) -> *mut std::ffi::c_void;
+    fn CFAbsoluteTimeGetCurrent() -> f64;
+    static kCFRunLoopCommonModes: *const std::ffi::c_void;
+}
+
+type IOPMAssertionID = u32;
+#[link(name = "IOKit", kind = "framework")]
+unsafe extern "C" {
+    fn IOPMAssertionCreateWithName(
+        assertion_type: *const std::ffi::c_void,
+        assertion_level: u32,
+        reason: *const std::ffi::c_void,
+        assertion_id: *mut IOPMAssertionID,
+    ) -> i32;
 }
 
 pub fn wake_run_loop() {
@@ -43,10 +70,32 @@ unsafe impl Sync for ThreadSafeArtwork {}
 static BACKGROUND_HANDLER: OnceLock<Arc<StdMutex<Option<Box<dyn Fn(SystemEvent) + Send + Sync>>>>> =
     OnceLock::new();
 
+static TOKIO_WAKER: OnceLock<Arc<StdMutex<Option<Box<dyn Fn() + Send + Sync>>>>> = OnceLock::new();
+
 fn get_bg_handler() -> Arc<StdMutex<Option<Box<dyn Fn(SystemEvent) + Send + Sync>>>> {
     BACKGROUND_HANDLER
         .get_or_init(|| Arc::new(StdMutex::new(None)))
         .clone()
+}
+
+fn get_tokio_waker() -> Arc<StdMutex<Option<Box<dyn Fn() + Send + Sync>>>> {
+    TOKIO_WAKER
+        .get_or_init(|| Arc::new(StdMutex::new(None)))
+        .clone()
+}
+
+pub fn set_tokio_waker(waker: impl Fn() + Send + Sync + 'static) {
+    let arc = get_tokio_waker();
+    let mut guard = arc.lock().unwrap();
+    *guard = Some(Box::new(waker));
+}
+
+fn wake_tokio() {
+    if let Ok(guard) = get_tokio_waker().lock() {
+        if let Some(ref waker) = *guard {
+            waker();
+        }
+    }
 }
 
 pub fn set_background_handler(handler: impl Fn(SystemEvent) + Send + Sync + 'static) {
@@ -64,18 +113,58 @@ fn dispatch_event(event: SystemEvent) {
     wake_run_loop();
 }
 
+unsafe extern "C" fn main_loop_heartbeat(
+    _timer: *mut std::ffi::c_void,
+    _info: *mut std::ffi::c_void,
+) {
+    static LAST_REFRESH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    unsafe {
+        let now = CFAbsoluteTimeGetCurrent() as u64;
+        let last = LAST_REFRESH.load(std::sync::atomic::Ordering::Relaxed);
+        if now.wrapping_sub(last) >= 10 {
+            LAST_REFRESH.store(now, std::sync::atomic::Ordering::Relaxed);
+            let center = MPNowPlayingInfoCenter::defaultCenter();
+            let existing = center.nowPlayingInfo();
+            center.setNowPlayingInfo(existing.as_deref());
+        }
+    }
+    wake_tokio();
+}
+
 pub fn init() {
     static ONCE: OnceLock<()> = OnceLock::new();
     ONCE.get_or_init(|| unsafe {
         use objc2::ClassType;
         let process_info: *mut AnyObject = objc2::msg_send![NSProcessInfo::class(), processInfo];
         let reason = NSString::from_str("Rusic Background Audio Playback");
-        let options: u64 = 0x00FFFFFF;
+        let options: u64 = 0x00FFFFFF | 0xFF00000000;
         let activity: *mut AnyObject =
             objc2::msg_send![process_info, beginActivityWithOptions: options, reason: &*reason];
         if !activity.is_null() {
             let _: *mut AnyObject = objc2::msg_send![activity, retain];
-            println!("[macos] App Nap bypassed with NSProcessInfo activity");
+            println!("[macos] App Nap bypassed with NSProcessInfo activity (latency-critical)");
+        }
+
+        let assertion_type = NSString::from_str("PreventUserIdleSystemSleep");
+        let assertion_reason = NSString::from_str("Rusic is playing audio");
+        let mut assertion_id: IOPMAssertionID = 0;
+        let kr = IOPMAssertionCreateWithName(
+            std::mem::transmute::<&objc2_foundation::NSString, *const std::ffi::c_void>(
+                &*assertion_type,
+            ),
+            255,
+            std::mem::transmute::<&objc2_foundation::NSString, *const std::ffi::c_void>(
+                &*assertion_reason,
+            ),
+            &mut assertion_id,
+        );
+        if kr == 0 {
+            println!(
+                "[macos] IOKit power assertion created (id={})",
+                assertion_id
+            );
+        } else {
+            eprintln!("[macos] Failed to create IOKit power assertion: {}", kr);
         }
 
         let session = AVAudioSession::sharedInstance();
@@ -125,12 +214,28 @@ pub fn init() {
                 MPRemoteCommandHandlerStatus::Success
             }));
 
-        std::thread::spawn(|| {
-            loop {
-                std::thread::sleep(std::time::Duration::from_millis(500));
-                wake_run_loop();
-            }
-        });
+        let fire_date = CFAbsoluteTimeGetCurrent();
+        let timer = CFRunLoopTimerCreate(
+            std::ptr::null(),
+            fire_date,
+            0.25,
+            0,
+            0,
+            main_loop_heartbeat,
+            std::ptr::null(),
+        );
+        if !timer.is_null() {
+            CFRunLoopAddTimer(CFRunLoopGetMain(), timer, kCFRunLoopCommonModes);
+            println!("[macos] CFRunLoopTimer heartbeat started on main run loop (250ms)");
+        } else {
+            eprintln!("[macos] Failed to create CFRunLoopTimer, falling back to thread");
+            std::thread::spawn(|| {
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                    wake_run_loop();
+                }
+            });
+        }
     });
 }
 
@@ -236,5 +341,13 @@ pub fn update_now_playing(
             &NSMutableDictionary<_, _>,
             &NSDictionary<NSString, AnyObject>,
         >(&*info)));
+    }
+}
+
+pub fn refresh_now_playing() {
+    unsafe {
+        let center = MPNowPlayingInfoCenter::defaultCenter();
+        let existing = center.nowPlayingInfo();
+        center.setNowPlayingInfo(existing.as_deref());
     }
 }

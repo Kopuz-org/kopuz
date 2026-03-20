@@ -9,6 +9,9 @@ use std::sync::Arc;
 #[cfg(target_os = "macos")]
 use player::systemint::set_background_handler;
 
+#[cfg(target_os = "macos")]
+use player::systemint::set_tokio_waker;
+
 #[derive(Debug, Clone, Copy)]
 enum BgCmd {
     Play,
@@ -22,6 +25,7 @@ static BG_CMD_TX: std::sync::OnceLock<std::sync::Mutex<std::sync::mpsc::Sender<B
     std::sync::OnceLock::new();
 static BG_CMD_RX: std::sync::OnceLock<std::sync::Mutex<std::sync::mpsc::Receiver<BgCmd>>> =
     std::sync::OnceLock::new();
+static BG_NOTIFY: std::sync::OnceLock<tokio::sync::Notify> = std::sync::OnceLock::new();
 
 fn init_bg_channel() {
     BG_CMD_TX.get_or_init(|| {
@@ -29,6 +33,7 @@ fn init_bg_channel() {
         let _ = BG_CMD_RX.set(std::sync::Mutex::new(rx));
         std::sync::Mutex::new(tx)
     });
+    BG_NOTIFY.get_or_init(tokio::sync::Notify::new);
 }
 
 fn send_bg_cmd(cmd: BgCmd) {
@@ -36,6 +41,11 @@ fn send_bg_cmd(cmd: BgCmd) {
         if let Ok(tx) = lock.lock() {
             let _ = tx.send(cmd);
         }
+    }
+    // Instantly wake the tokio task so it processes the command
+    // without waiting for the next 250ms poll tick.
+    if let Some(notify) = BG_NOTIFY.get() {
+        notify.notify_one();
     }
 }
 
@@ -69,6 +79,15 @@ pub fn use_player_task(ctrl: PlayerController) {
     #[cfg(target_os = "macos")]
     use_hook(move || {
         init_bg_channel();
+
+        // let the CFRunLoopTimer heartbeat poke our tokio task so it
+        // doesn't stall when macOS coalesces tokio::time::sleep
+        set_tokio_waker(|| {
+            if let Some(notify) = BG_NOTIFY.get() {
+                notify.notify_one();
+            }
+        });
+
         set_background_handler(move |event| {
             use player::systemint::SystemEvent;
             let cmd = match event {
@@ -144,8 +163,15 @@ pub fn use_player_task(ctrl: PlayerController) {
 
         async move {
             let mut last_progress_secs: u64 = u64::MAX;
+            let bg_notify = BG_NOTIFY.get_or_init(tokio::sync::Notify::new);
             loop {
-                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                // Wait for EITHER a media command notification OR 250ms,
+                // whichever comes first. This ensures instant response to
+                // media keys even when macOS is coalescing tokio timers.
+                tokio::select! {
+                    _ = bg_notify.notified() => {},
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(250)) => {},
+                }
 
                 nudge_event_loop();
 
@@ -255,7 +281,8 @@ pub fn use_player_task(ctrl: PlayerController) {
                 }
 
                 if is_playing {
-                    let pos_secs = pos.as_secs();
+                    let duration = *ctrl.current_song_duration.read();
+                    let pos_secs = pos.as_secs().min(duration);
                     if pos_secs != last_progress_secs {
                         last_progress_secs = pos_secs;
                         ctrl.current_song_progress.set(pos_secs);
@@ -330,7 +357,6 @@ pub fn use_player_task(ctrl: PlayerController) {
                         }
                     }
 
-                    let duration = *ctrl.current_song_duration.read();
                     let is_jellyfin = {
                         let q = ctrl.queue.read();
                         let idx = *ctrl.current_queue_index.read();
