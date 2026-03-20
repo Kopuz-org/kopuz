@@ -120,6 +120,26 @@ If covers aren't showing or the library looks off, just delete the cache folder 
 
 Scrobbling functionality is only available through MusicBrainz (for now). To enable it, you need to provide a valid MusicBrainz token in the configuration file. The scrobbling also is only available for your local musics. It's highly recommended to use [jellyfin-plugin-listenbrainz](https://github.com/lyarenei/jellyfin-plugin-listenbrainz), because if you also use other music apps for your jellyfin server, you can scrobble your music from anywhere.
 
+## Optimization
+
+rusic is built to feel snappy even with large libraries. here's what we do under the hood:
+
+**skip what's already indexed** — the scanner keeps a `HashSet` of every path it's already seen, so rescans only process new files. if you have 10k tracks and add 5 new ones, it won't re-read the other 9995. makes a huge difference on HDDs especially.
+
+**parallel startup loading** — on launch, library, config, playlists, and favorites all load in parallel with `tokio::join!`. before this, everything loaded sequentially and you'd stare at a blank window for a bit. now it's near-instant.
+
+**album art caching** — cover images get extracted once and saved to disk (`~/.cache/rusic/covers/` on linux, `~/Library/Caches/` on mac). we also cache the macOS now-playing artwork object in memory so it doesn't re-decode the image every time the progress bar updates.
+
+**lazy loading images** — album covers in search results, track rows, and genre views all use `loading="lazy"` so we're not loading hundreds of images at once when you scroll through a big library.
+
+**non-blocking I/O** — all the heavy stuff (metadata parsing, file scanning, saving library state) runs on `spawn_blocking` threads so the UI never freezes. the main thread stays responsive even during a full library scan.
+
+**smarter sorting** — we use `sort_by_cached_key` instead of regular `sort_by_key` for library views, which avoids recalculating the sort key (like `.to_lowercase()`) on every comparison. small thing but it adds up with thousands of tracks.
+
+**http caching for artwork** — the custom `artwork://` protocol serves images with `Cache-Control: public, max-age=31536000` so the webview doesn't re-request covers it already has.
+
+overall these changes brought the rescan time down significantly and the app feels much more responsive, especially with libraries over 5000 tracks. memory usage stays reasonable too since we're not holding decoded images in memory longer than needed.
+
 ## Tech Stack
 
 - **Dioxus**: UI Framework
