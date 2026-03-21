@@ -152,11 +152,11 @@ fn App() -> Element {
     });
     let lib_path = use_memo(move || cache_dir().join("library.json"));
     let config_path = use_memo(move || config_dir().join("config.json"));
-    let mut config = use_signal(|| config::AppConfig::default());
+    let mut config = use_signal(config::AppConfig::default);
     let playlist_path = use_memo(move || cache_dir().join("playlists.json"));
-    let mut playlist_store = use_signal(|| reader::PlaylistStore::default());
+    let mut playlist_store = use_signal(reader::PlaylistStore::default);
     let favorites_path = use_memo(move || cache_dir().join("favorites.json"));
-    let mut favorites_store = use_signal(|| FavoritesStore::default());
+    let mut favorites_store = use_signal(FavoritesStore::default);
     let mut initial_load_done = use_signal(|| false);
     let cover_cache = use_memo(move || cache_dir().join("covers"));
     let _ = std::fs::create_dir_all(cover_cache());
@@ -552,7 +552,7 @@ fn App() -> Element {
                                 current_song_progress: current_song_progress,
                                 queue: queue,
                                 current_queue_index: current_queue_index,
-                                selected_playlist_id: selected_playlist_id.clone(),
+                                selected_playlist_id: selected_playlist_id,
                             }
                         },
                         Route::Logs => rsx! {
