@@ -23,7 +23,9 @@ percent-encoding = "2.3.2"
 dotenvy = "0.15"
 http = "1.4.0"
 uuid = { version = "1.20.0", features = ["v4", "fast-rng", "macro-diagnostics"] }
-rodio = "0.21.1"
+cpal = "0.17"
+symphonia = { version = "0.5", features = ["all"] }
+rb = "0.4"
 jellyfin-sdk-rust = "0.1.2"
 reqwest = "0.12"
 rand = "0.8"

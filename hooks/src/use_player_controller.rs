@@ -110,9 +110,12 @@ impl PlayerController {
                     spawn(async move {
                         let stream = utils::stream_buffer::StreamBuffer::new(stream_url);
                         let source_res =
-                            tokio::task::spawn_blocking(move || rodio::Decoder::new(stream)).await;
+                            tokio::task::spawn_blocking(move || {
+                                let (source, hint) = player::decoder::from_stream(stream);
+                                Ok::<_, std::io::Error>((source, hint))
+                            }).await;
 
-                        if let Ok(Ok(source)) = source_res {
+                        if let Ok(Ok((source, hint))) = source_res {
                             if *play_generation.read() == current_gen {
                                 let meta = NowPlayingMeta {
                                     title: track.title.clone(),
@@ -122,7 +125,7 @@ impl PlayerController {
                                     artwork: Some(cover_url.clone()),
                                 };
 
-                                player.write().play(source, meta);
+                                player.write().play(source, meta, hint);
                                 player.write().set_volume(*volume.peek());
                                 is_loading.set(false);
                                 is_playing.set(true);
@@ -247,8 +250,8 @@ impl PlayerController {
                 }
             } else {
                 self.current_queue_index.set(idx);
-                if let Ok(file) = std::fs::File::open(&track.path) {
-                    if let Ok(source) = rodio::Decoder::new(std::io::BufReader::new(file)) {
+                if let Ok((source, hint)) = player::decoder::open_file(&track.path) {
+                    {
                         let lib = self.library.peek();
                         let album = lib.albums.iter().find(|a| a.id == track.album_id);
                         let artwork = album.and_then(|a| {
@@ -265,7 +268,7 @@ impl PlayerController {
                             artwork,
                         };
 
-                        self.player.write().play(source, meta);
+                        self.player.write().play(source, meta, hint);
                         self.player.write().set_volume(*self.volume.peek());
 
                         self.skip_in_progress.set(false);

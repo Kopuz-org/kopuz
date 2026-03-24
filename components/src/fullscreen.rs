@@ -24,6 +24,14 @@ pub fn Fullscreen(
     mut volume: Signal<f32>,
     palette: Signal<Option<Vec<utils::color::Color>>>,
 ) -> Element {
+    let mut is_dragging = use_signal(|| false);
+    let mut drag_progress = use_signal(|| 0u64);
+
+    let display_progress = if *is_dragging.read() {
+        *drag_progress.read()
+    } else {
+        *current_song_progress.read()
+    };
     if !*is_fullscreen.read() {
         return rsx! { div {} };
     }
@@ -46,7 +54,7 @@ pub fn Fullscreen(
     };
 
     let progress_percent = if *current_song_duration.read() > 0 {
-        (*current_song_progress.read() as f64 / *current_song_duration.read() as f64) * 100.0
+        (display_progress as f64 / *current_song_duration.read() as f64) * 100.0
     } else {
         0.0
     };
@@ -200,7 +208,7 @@ pub fn Fullscreen(
                     style: "max-width: 420px;",
                     div {
                         class: "flex items-center gap-3",
-                        span { class: "text-xs text-white/70 font-mono", style: "width: 50px; text-align: left;", "{format_time(*current_song_progress.read())}" }
+                        span { class: "text-xs text-white/70 font-mono", style: "width: 50px; text-align: left;", "{format_time(display_progress)}" }
                         div {
                             class: "flex-1 cursor-pointer relative",
                             style: "height: 20px;",
@@ -220,12 +228,20 @@ pub fn Fullscreen(
                                 r#type: "range",
                                 min: "0",
                                 max: "{*current_song_duration.read()}",
-                                value: "{*current_song_progress.read()}",
+                                value: "{display_progress}",
                                 class: "absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer",
-                                oninput: move |evt| {
+                                onchange: move |evt| {
                                     if let Ok(val) = evt.value().parse::<u64>() {
                                         player.write().seek(std::time::Duration::from_secs(val));
                                         current_song_progress.set(val);
+                                        drag_progress.set(val);
+                                        is_dragging.set(false);
+                                    }
+                                },
+                                oninput: move |evt| {
+                                    if let Ok(val) = evt.value().parse::<u64>() {
+                                        is_dragging.set(true);
+                                        drag_progress.set(val);
                                     }
                                 }
                             }
@@ -319,11 +335,15 @@ pub fn Fullscreen(
                             step: "0.01",
                             value: "{*volume.read()}",
                             class: "absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer",
+                            onchange: move |evt| {
+                                if let Ok(val) = evt.value().parse::<f32>() {
+                                    config.write().volume = val;
+                                }
+                            },
                             oninput: move |evt| {
                                 if let Ok(val) = evt.value().parse::<f32>() {
                                     player.write().set_volume(val);
                                     volume.set(val);
-                                    config.write().volume = val;
                                 }
                             }
                         }

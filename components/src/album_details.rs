@@ -1,5 +1,8 @@
 use dioxus::prelude::*;
-use player::player;
+use player::{
+    decoder,
+    player::{NowPlayingMeta, Player},
+};
 use reader::Library;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -9,7 +12,7 @@ pub fn AlbumDetails(
     album_id: String,
     library: Signal<Library>,
     playlist_store: Signal<reader::PlaylistStore>,
-    player: Signal<player::Player>,
+    player: Signal<Player>,
     mut is_playing: Signal<bool>,
     mut current_song_cover_url: Signal<String>,
     mut current_song_title: Signal<String>,
@@ -108,11 +111,7 @@ pub fn AlbumDetails(
                         current_queue_index.set(idx);
 
                         if let Some(t) = q.get(idx) {
-                            let file = match std::fs::File::open(&t.path) {
-                                Ok(f) => f,
-                                Err(_) => return,
-                            };
-                            let source = match rodio::Decoder::new(std::io::BufReader::new(file)) {
+                            let (source, hint) = match decoder::open_file(&t.path) {
                                 Ok(s) => s,
                                 Err(_) => return,
                             };
@@ -125,14 +124,14 @@ pub fn AlbumDetails(
                                     .map(|p| p.to_string_lossy().into_owned())
                             });
 
-                            let meta = player::NowPlayingMeta {
+                            let meta = NowPlayingMeta {
                                 title: t.title.clone(),
                                 artist: t.artist.clone(),
                                 album: t.album.clone(),
                                 duration: std::time::Duration::from_secs(t.duration),
                                 artwork,
                             };
-                            player.write().play(source, meta);
+                            player.write().play(source, meta, hint);
                             current_song_title.set(t.title.clone());
                             current_song_artist.set(t.artist.clone());
                             current_song_duration.set(t.duration);

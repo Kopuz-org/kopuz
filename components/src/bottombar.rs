@@ -21,6 +21,15 @@ pub fn Bottombar(
     mut volume: Signal<f32>,
     mut is_rightbar_open: Signal<bool>,
 ) -> Element {
+    let mut is_dragging = use_signal(|| false);
+    let mut drag_progress = use_signal(|| 0u64);
+
+    let display_progress = if *is_dragging.read() {
+        *drag_progress.read()
+    } else {
+        *current_song_progress.read()
+    };
+
     let format_time = |seconds: u64| {
         let minutes = seconds / 60;
         let seconds = seconds % 60;
@@ -28,7 +37,7 @@ pub fn Bottombar(
     };
 
     let progress_percent = if *current_song_duration.read() > 0 {
-        (*current_song_progress.read() as f64 / *current_song_duration.read() as f64) * 100.0
+        (display_progress as f64 / *current_song_duration.read() as f64) * 100.0
     } else {
         0.0
     };
@@ -225,7 +234,7 @@ pub fn Bottombar(
 
                 div {
                     class: "flex items-center gap-2 w-full",
-                    span { class: "text-[10px] text-slate-500 w-8 text-right font-mono", "{format_time(*current_song_progress.read())}" }
+                    span { class: "text-[10px] text-slate-500 w-8 text-right font-mono", "{format_time(display_progress)}" }
                     div {
                         class: "flex-1 h-1 bg-white/10 rounded-full group cursor-pointer relative",
                         div {
@@ -237,12 +246,20 @@ pub fn Bottombar(
                             r#type: "range",
                             min: "0",
                             max: "{*current_song_duration.read()}",
-                            value: "{*current_song_progress.read()}",
+                            value: "{display_progress}",
                             class: "absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer z-10",
-                            oninput: move |evt| {
+                            onchange: move |evt| {
                                 if let Ok(val) = evt.value().parse::<u64>() {
                                     player.write().seek(std::time::Duration::from_secs(val));
                                     current_song_progress.set(val);
+                                    drag_progress.set(val);
+                                    is_dragging.set(false);
+                                }
+                            },
+                            oninput: move |evt| {
+                                if let Ok(val) = evt.value().parse::<u64>() {
+                                    is_dragging.set(true);
+                                    drag_progress.set(val);
                                 }
                             }
                         }
@@ -270,11 +287,15 @@ pub fn Bottombar(
                             step: "0.01",
                             value: "{*volume.read()}",
                             class: "absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer z-10",
+                            onchange: move |evt| {
+                                if let Ok(val) = evt.value().parse::<f32>() {
+                                    config.write().volume = val;
+                                }
+                            },
                             oninput: move |evt| {
                                 if let Ok(val) = evt.value().parse::<f32>() {
                                     player.write().set_volume(val);
                                     volume.set(val);
-                                    config.write().volume = val;
                                 }
                             }
                         }
