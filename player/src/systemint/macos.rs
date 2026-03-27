@@ -21,7 +21,22 @@ use objc2_media_player::{
 unsafe extern "C" {
     fn CFRunLoopGetMain() -> *mut std::ffi::c_void;
     fn CFRunLoopWakeUp(rl: *mut std::ffi::c_void);
+    fn CFRunLoopAddTimer(
+        rl: *mut std::ffi::c_void,
+        timer: *mut std::ffi::c_void,
+        mode: *const std::ffi::c_void,
+    );
+    fn CFRunLoopTimerCreate(
+        allocator: *const std::ffi::c_void,
+        fire_date: f64,
+        interval: f64,
+        flags: u64,
+        order: i64,
+        callout: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void),
+        context: *const std::ffi::c_void,
+    ) -> *mut std::ffi::c_void;
     fn CFAbsoluteTimeGetCurrent() -> f64;
+    static kCFRunLoopCommonModes: *const std::ffi::c_void;
 }
 
 type IOPMAssertionID = u32;
@@ -98,23 +113,28 @@ fn dispatch_event(event: SystemEvent) {
     wake_run_loop();
 }
 
+unsafe extern "C" fn main_loop_heartbeat(
+    _timer: *mut std::ffi::c_void,
+    _info: *mut std::ffi::c_void,
+) {
+    wake_tokio();
+}
+
 pub fn init() {
     static ONCE: OnceLock<()> = OnceLock::new();
     ONCE.get_or_init(|| unsafe {
         use objc2::ClassType;
         let process_info: *mut AnyObject = objc2::msg_send![NSProcessInfo::class(), processInfo];
         let reason = NSString::from_str("Rusic Background Audio Playback");
-        // Use NSActivityUserInitiated (0x00FFFFFF) to prevent App Nap without LatencyCritical
-        // LatencyCritical (0xFF00000000) causes macOS to ignore the assertion if held too long!
-        let options: u64 = 0x00FFFFFF;
+        let options: u64 = 0x00FFFFFF | 0xFF00000000;
         let activity: *mut AnyObject =
             objc2::msg_send![process_info, beginActivityWithOptions: options, reason: &*reason];
         if !activity.is_null() {
             let _: *mut AnyObject = objc2::msg_send![activity, retain];
-            println!("[macos] App Nap bypassed with NSProcessInfo activity (UserInitiated)");
+            println!("[macos] App Nap bypassed with NSProcessInfo activity (latency-critical)");
         }
 
-        let assertion_type = NSString::from_str("PreventUserIdleSystemSleep");
+        let assertion_type = NSString::from_str("NoIdleSleepAssertion");
         let assertion_reason = NSString::from_str("Rusic is playing audio");
         let mut assertion_id: IOPMAssertionID = 0;
         let kr = IOPMAssertionCreateWithName(
@@ -183,25 +203,29 @@ pub fn init() {
                 MPRemoteCommandHandlerStatus::Success
             }));
 
-        std::thread::spawn(|| {
-            let mut last_refresh = unsafe { CFAbsoluteTimeGetCurrent() as u64 };
-            loop {
-                std::thread::sleep(std::time::Duration::from_millis(250));
-                wake_tokio();
-                wake_run_loop();
-
-                unsafe {
-                    let now = CFAbsoluteTimeGetCurrent() as u64;
-                    if now.wrapping_sub(last_refresh) >= 10 {
-                        last_refresh = now;
-                        let center = MPNowPlayingInfoCenter::defaultCenter();
-                        let existing = center.nowPlayingInfo();
-                        center.setNowPlayingInfo(existing.as_deref());
-                    }
+        let fire_date = CFAbsoluteTimeGetCurrent();
+        let timer = CFRunLoopTimerCreate(
+            std::ptr::null(),
+            fire_date,
+            0.25,
+            0,
+            0,
+            main_loop_heartbeat,
+            std::ptr::null(),
+        );
+        if !timer.is_null() {
+            CFRunLoopAddTimer(CFRunLoopGetMain(), timer, kCFRunLoopCommonModes);
+            println!("[macos] CFRunLoopTimer heartbeat started on main run loop (250ms)");
+        } else {
+            eprintln!("[macos] Failed to create CFRunLoopTimer, falling back to thread");
+            std::thread::spawn(|| {
+                loop {
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                    wake_tokio();
+                    wake_run_loop();
                 }
-            }
-        });
-        println!("[macos] Background heartbeat thread started (250ms)");
+            });
+        }
     });
 }
 

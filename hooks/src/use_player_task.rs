@@ -160,6 +160,8 @@ pub fn use_player_task(ctrl: PlayerController) {
         let mut last_jellyfin_id: Option<String> = None;
         let mut last_ping = std::time::Instant::now();
         let mut last_progress_report = std::time::Instant::now();
+        #[cfg(target_os = "macos")]
+        let mut last_now_playing_refresh = std::time::Instant::now();
 
         async move {
             let mut last_progress_secs: u64 = u64::MAX;
@@ -278,6 +280,12 @@ pub fn use_player_task(ctrl: PlayerController) {
                                 .await;
                         });
                     }
+                }
+
+                #[cfg(target_os = "macos")]
+                if last_now_playing_refresh.elapsed().as_secs() >= 10 {
+                    player::systemint::refresh_now_playing();
+                    last_now_playing_refresh = std::time::Instant::now();
                 }
 
                 if is_playing {
