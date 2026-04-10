@@ -1,3 +1,4 @@
+use config::MusicService;
 use dioxus::prelude::*;
 use player::player;
 use reader::{Library, PlaylistStore};
@@ -67,56 +68,131 @@ pub fn PlaylistDetail(
                         if let (Some(token), Some(user_id)) =
                             (&server.access_token, &server.user_id)
                         {
-                            let remote = server::jellyfin::JellyfinClient::new(
-                                &server.url,
-                                Some(token),
-                                &conf.device_id,
-                                Some(user_id),
-                            );
+                            match server.service {
+                                MusicService::Jellyfin => {
+                                    let remote = server::jellyfin::JellyfinClient::new(
+                                        &server.url,
+                                        Some(token),
+                                        &conf.device_id,
+                                        Some(user_id),
+                                    );
 
-                            if let Ok(items) = remote.get_playlist_items(&pid_clone).await {
-                                let mut new_tracks = Vec::new();
-                                for (_, item) in items.into_iter().enumerate() {
-                                    let duration_secs =
-                                        item.run_time_ticks.unwrap_or(0) / 10_000_000;
-                                    let mut path_str = format!("jellyfin:{}", item.id);
-                                    if let Some(tags) = &item.image_tags {
-                                        if let Some(tag) = tags.get("Primary") {
-                                            path_str.push_str(&format!(":{}", tag));
+                                    if let Ok(items) = remote.get_playlist_items(&pid_clone).await {
+                                        let mut new_tracks = Vec::new();
+                                        for (_, item) in items.into_iter().enumerate() {
+                                            let duration_secs =
+                                                item.run_time_ticks.unwrap_or(0) / 10_000_000;
+                                            let mut path_str = format!("jellyfin:{}", item.id);
+                                            if let Some(tags) = &item.image_tags {
+                                                if let Some(tag) = tags.get("Primary") {
+                                                    path_str.push_str(&format!(":{}", tag));
+                                                }
+                                            }
+                                            let bitrate_kbps = item.bitrate.unwrap_or(0) / 1000;
+                                            let bitrate_u8 = if bitrate_kbps > 255 {
+                                                255
+                                            } else {
+                                                bitrate_kbps as u8
+                                            };
+
+                                            let artist_str = item
+                                                .album_artist
+                                                .clone()
+                                                .or_else(|| {
+                                                    item.artists.as_ref().map(|a| a.join(", "))
+                                                })
+                                                .unwrap_or_default();
+                                            new_tracks.push(reader::models::Track {
+                                                path: PathBuf::from(path_str),
+                                                album_id: item
+                                                    .album_id
+                                                    .map(|id| format!("jellyfin:{}", id))
+                                                    .unwrap_or_default(),
+                                                title: item.name,
+                                                artist: artist_str,
+                                                album: item.album.unwrap_or_default(),
+                                                duration: duration_secs,
+                                                khz: item.sample_rate.unwrap_or(0),
+                                                bitrate: bitrate_u8,
+                                                track_number: item.index_number,
+                                                disc_number: item.parent_index_number,
+                                                musicbrainz_release_id: None,
+                                                playlist_item_id: item.playlist_item_id,
+                                            });
                                         }
+                                        tracks.set(new_tracks);
+                                        has_loaded_jellyfin_tracks.set(true);
                                     }
-                                    let bitrate_kbps = item.bitrate.unwrap_or(0) / 1000;
-                                    let bitrate_u8 = if bitrate_kbps > 255 {
-                                        255
-                                    } else {
-                                        bitrate_kbps as u8
-                                    };
-
-                                    let artist_str = item
-                                        .album_artist
-                                        .clone()
-                                        .or_else(|| item.artists.as_ref().map(|a| a.join(", ")))
-                                        .unwrap_or_default();
-                                    new_tracks.push(reader::models::Track {
-                                        path: PathBuf::from(path_str),
-                                        album_id: item
-                                            .album_id
-                                            .map(|id| format!("jellyfin:{}", id))
-                                            .unwrap_or_default(),
-                                        title: item.name,
-                                        artist: artist_str,
-                                        album: item.album.unwrap_or_default(),
-                                        duration: duration_secs,
-                                        khz: item.sample_rate.unwrap_or(0),
-                                        bitrate: bitrate_u8,
-                                        track_number: item.index_number,
-                                        disc_number: item.parent_index_number,
-                                        musicbrainz_release_id: None,
-                                        playlist_item_id: item.playlist_item_id,
-                                    });
                                 }
-                                tracks.set(new_tracks);
-                                has_loaded_jellyfin_tracks.set(true);
+                                MusicService::Subsonic | MusicService::Custom => {
+                                    let remote = server::subsonic::SubsonicClient::new(
+                                        &server.url,
+                                        user_id,
+                                        token,
+                                    );
+                                    if let Ok(items) = remote.get_playlist_entries(&pid_clone).await
+                                    {
+                                        let mut new_tracks = Vec::new();
+                                        for item in items.into_iter() {
+                                            let cover_tag = item
+                                                .cover_art
+                                                .as_ref()
+                                                .and_then(|cover_art_id| {
+                                                    remote
+                                                        .cover_art_url(cover_art_id, Some(512))
+                                                        .ok()
+                                                })
+                                                .map(|url| {
+                                                    let mut hex =
+                                                        String::with_capacity(url.len() * 2);
+                                                    for b in url.as_bytes() {
+                                                        hex.push_str(&format!("{:02x}", b));
+                                                    }
+                                                    format!("urlhex_{}", hex)
+                                                });
+
+                                            let path = if let Some(tag) = &cover_tag {
+                                                PathBuf::from(format!(
+                                                    "jellyfin:{}:{}",
+                                                    item.id, tag
+                                                ))
+                                            } else {
+                                                PathBuf::from(format!("jellyfin:{}", item.id))
+                                            };
+
+                                            let album_id = item
+                                                .album_id
+                                                .as_ref()
+                                                .map(|id| {
+                                                    if let Some(tag) = &cover_tag {
+                                                        format!("jellyfin:{}:{}", id, tag)
+                                                    } else {
+                                                        format!("jellyfin:{}:none", id)
+                                                    }
+                                                })
+                                                .unwrap_or_else(|| {
+                                                    format!("jellyfin:{}:none", item.id)
+                                                });
+
+                                            new_tracks.push(reader::models::Track {
+                                                path,
+                                                album_id,
+                                                title: item.title,
+                                                artist: item.artist.unwrap_or_default(),
+                                                album: item.album.unwrap_or_default(),
+                                                duration: item.duration.unwrap_or(0),
+                                                khz: item.sampling_rate.unwrap_or(0),
+                                                bitrate: item.bit_rate.unwrap_or(0).min(255) as u8,
+                                                track_number: item.track,
+                                                disc_number: item.disc_number,
+                                                musicbrainz_release_id: None,
+                                                playlist_item_id: None,
+                                            });
+                                        }
+                                        tracks.set(new_tracks);
+                                        has_loaded_jellyfin_tracks.set(true);
+                                    }
+                                }
                             }
                         }
                     }
@@ -176,7 +252,7 @@ pub fn PlaylistDetail(
 
             crate::showcase::Showcase {
                 name: playlist_name.clone(),
-                description: if is_jellyfin { "Jellyfin Playlist".to_string() } else { String::new() },
+                description: if is_jellyfin { "Server Playlist".to_string() } else { String::new() },
                 cover_url: playlist_cover,
                 tracks: tracks_val.clone(),
                 library: library,
@@ -269,18 +345,36 @@ pub fn PlaylistDetail(
                             } else {
                                 let pid_clone = pid.clone();
                                 let entry_id_opt = t.playlist_item_id.clone();
+                                let remove_idx = idx;
                                 spawn(async move {
-                                    if let Some(entry_id) = entry_id_opt {
-                                        let conf = config.peek();
-                                        if let Some(server) = &conf.server {
-                                            if let (Some(token), Some(user_id)) = (&server.access_token, &server.user_id) {
-                                                let remote = server::jellyfin::JellyfinClient::new(
-                                                    &server.url,
-                                                    Some(token),
-                                                    &conf.device_id,
-                                                    Some(user_id),
-                                                );
-                                                let _ = remote.remove_from_playlist(&pid_clone, &entry_id).await;
+                                    let conf = config.peek();
+                                    if let Some(server) = &conf.server {
+                                        if let (Some(token), Some(user_id)) = (&server.access_token, &server.user_id) {
+                                            let removed = match server.service {
+                                                MusicService::Jellyfin => {
+                                                    if let Some(entry_id) = entry_id_opt {
+                                                        let remote = server::jellyfin::JellyfinClient::new(
+                                                            &server.url,
+                                                            Some(token),
+                                                            &conf.device_id,
+                                                            Some(user_id),
+                                                        );
+                                                        remote.remove_from_playlist(&pid_clone, &entry_id).await.is_ok()
+                                                    } else {
+                                                        false
+                                                    }
+                                                }
+                                                MusicService::Subsonic | MusicService::Custom => {
+                                                    let remote = server::subsonic::SubsonicClient::new(&server.url, user_id, token);
+                                                    remote.remove_from_playlist(&pid_clone, remove_idx).await.is_ok()
+                                                }
+                                            };
+
+                                            if removed {
+                                                let mut tracks_write = tracks.write();
+                                                if remove_idx < tracks_write.len() {
+                                                    tracks_write.remove(remove_idx);
+                                                }
                                             }
                                         }
                                     }
@@ -352,17 +446,25 @@ pub fn PlaylistDetail(
                                     let conf = config.peek();
                                     if let Some(server) = &conf.server {
                                         if let (Some(token), Some(user_id)) = (&server.access_token, &server.user_id) {
-                                            let remote = server::jellyfin::JellyfinClient::new(
-                                                &server.url,
-                                                Some(token),
-                                                &conf.device_id,
-                                                Some(user_id),
-                                            );
                                             for path in selected_paths {
                                                 let parts: Vec<&str> = path.to_str().unwrap_or_default().split(':').collect();
                                                 if parts.len() >= 2 {
                                                     let item_id = parts[1];
-                                                    let _ = remote.add_to_playlist(&pid, item_id).await;
+                                                    match server.service {
+                                                        MusicService::Jellyfin => {
+                                                            let remote = server::jellyfin::JellyfinClient::new(
+                                                                &server.url,
+                                                                Some(token),
+                                                                &conf.device_id,
+                                                                Some(user_id),
+                                                            );
+                                                            let _ = remote.add_to_playlist(&pid, item_id).await;
+                                                        }
+                                                        MusicService::Subsonic | MusicService::Custom => {
+                                                            let remote = server::subsonic::SubsonicClient::new(&server.url, user_id, token);
+                                                            let _ = remote.add_to_playlist(&pid, item_id).await;
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -396,19 +498,27 @@ pub fn PlaylistDetail(
                                     let conf = config.peek();
                                     if let Some(server) = &conf.server {
                                         if let (Some(token), Some(user_id)) = (&server.access_token, &server.user_id) {
-                                            let remote = server::jellyfin::JellyfinClient::new(
-                                                &server.url,
-                                                Some(token),
-                                                &conf.device_id,
-                                                Some(user_id),
-                                            );
                                             let item_ids: Vec<String> = selected_paths.iter().filter_map(|p| {
                                                 let parts: Vec<&str> = p.to_str()?.split(':').collect();
                                                 if parts.len() >= 2 { Some(parts[1].to_string()) } else { None }
                                             }).collect();
                                             if !item_ids.is_empty() {
                                                 let item_id_refs: Vec<&str> = item_ids.iter().map(|s| s.as_str()).collect();
-                                                let _ = remote.create_playlist(&playlist_name, &item_id_refs).await;
+                                                match server.service {
+                                                    MusicService::Jellyfin => {
+                                                        let remote = server::jellyfin::JellyfinClient::new(
+                                                            &server.url,
+                                                            Some(token),
+                                                            &conf.device_id,
+                                                            Some(user_id),
+                                                        );
+                                                        let _ = remote.create_playlist(&playlist_name, &item_id_refs).await;
+                                                    }
+                                                    MusicService::Subsonic | MusicService::Custom => {
+                                                        let remote = server::subsonic::SubsonicClient::new(&server.url, user_id, token);
+                                                        let _ = remote.create_playlist(&playlist_name, &item_id_refs).await;
+                                                    }
+                                                }
                                             }
                                         }
                                     }

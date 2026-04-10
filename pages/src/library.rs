@@ -3,8 +3,8 @@ use dioxus::prelude::*;
 use player::player;
 use reader::Library;
 
-use crate::jellyfin::library::JellyfinLibrary;
 use crate::local::library::LocalLibrary;
+use crate::server::library::ServerLibrary;
 
 #[component]
 pub fn LibraryPage(
@@ -23,11 +23,11 @@ pub fn LibraryPage(
     mut queue: Signal<Vec<reader::models::Track>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
-    let is_jellyfin = config.read().active_source == MusicSource::Jellyfin;
+    let is_server = config.read().active_source == MusicSource::Server;
 
     rsx! {
-        if is_jellyfin {
-            JellyfinLibrary {
+        if is_server {
+            ServerLibrary {
                 library,
                 config,
                 playlist_store,

@@ -1,11 +1,11 @@
+use ::server::provider::ProviderClient;
 use components::settings_items::{
     DirectoryPicker, DiscordPresenceSettings, MusicBrainzSettings, ServerSettings, SettingItem,
     ThemeSelector, ToggleSetting,
 };
 use components::settings_popups::{AddServerPopup, LoginPopup};
-use config::AppConfig;
+use config::{AppConfig, MusicService};
 use dioxus::prelude::*;
-use server::jellyfin::JellyfinClient;
 
 #[component]
 pub fn Settings(config: Signal<AppConfig>) -> Element {
@@ -14,6 +14,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
 
     let mut server_name = use_signal(|| String::new());
     let mut server_url = use_signal(|| String::new());
+    let mut server_service = use_signal(|| MusicService::Jellyfin);
 
     let mut username = use_signal(|| String::new());
     let mut password = use_signal(|| String::new());
@@ -28,19 +29,23 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             return;
         }
 
-        let new_server = config::JellyfinServer::new(
+        let selected_service = server_service();
+
+        let new_server = config::MusicServer::new_with_service(
             if server_name().is_empty() {
-                "Local Jellyfin".into()
+                format!("Local {}", selected_service.display_name())
             } else {
                 server_name()
             },
             server_url(),
+            selected_service,
         );
 
         config.write().server = Some(new_server);
 
         server_name.set(String::new());
         server_url.set(String::new());
+        server_service.set(MusicService::Jellyfin);
         error.set(None);
         show_add_server.set(false);
 
@@ -54,6 +59,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         }
 
         if let Some(server) = &config.read().server {
+            let service = server.service;
             let server_url = server.url.clone();
             let device_id = config.read().device_id.clone();
             let user = username();
@@ -63,16 +69,16 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             login_error.set(None);
 
             spawn(async move {
-                let mut remote = JellyfinClient::new(&server_url, None, &device_id, None);
+                let remote = ProviderClient::new(service, server_url, device_id);
                 let result = remote.login(&user, &pass).await;
 
                 is_loading.set(false);
 
                 match result {
-                    Ok((token, user_id)) => {
+                    Ok(session) => {
                         if let Some(server) = config.write().server.as_mut() {
-                            server.access_token = Some(token);
-                            server.user_id = Some(user_id);
+                            server.access_token = Some(session.access_token);
+                            server.user_id = Some(session.user_id);
                         }
                         username.set(String::new());
                         password.set(String::new());
@@ -125,9 +131,13 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         }
 
                         SettingItem {
-                            title: "Jellyfin Server",
+                            title: "Media Server",
                             description: if config.read().server.is_some() {
-                                "Server configured".to_string()
+                                if let Some(server) = &config.read().server {
+                                    format!("{} configured", server.service.display_name())
+                                } else {
+                                    "Server configured".to_string()
+                                }
                             } else {
                                 "No server configured".to_string()
                             },
@@ -199,6 +209,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     AddServerPopup {
                         server_name,
                         server_url,
+                        server_service,
                         error,
                         on_close: move |_| show_add_server.set(false),
                         on_save: handle_add_server
@@ -209,6 +220,12 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     LoginPopup {
                         username,
                         password,
+                        service_name: config
+                            .read()
+                            .server
+                            .as_ref()
+                            .map(|server| server.service.display_name().to_string())
+                            .unwrap_or_else(|| "Server".to_string()),
                         error: login_error,
                         loading: is_loading,
                         on_close: move |_| {

@@ -7,7 +7,33 @@ use std::path::{Path, PathBuf};
 pub enum MusicSource {
     #[default]
     Local,
+    #[serde(alias = "Jellyfin")]
+    Server,
+}
+
+impl MusicSource {
+    pub fn is_server(&self) -> bool {
+        matches!(self, Self::Server)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum MusicService {
+    #[default]
     Jellyfin,
+    #[serde(alias = "Navidrome")]
+    Subsonic,
+    Custom,
+}
+
+impl MusicService {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Jellyfin => "Jellyfin",
+            Self::Subsonic => "Subsonic",
+            Self::Custom => "Custom",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -20,7 +46,7 @@ pub enum SortOrder {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
-    pub server: Option<JellyfinServer>,
+    pub server: Option<MusicServer>,
     #[serde(default)]
     pub active_source: MusicSource,
     pub music_directory: PathBuf,
@@ -45,19 +71,28 @@ pub struct AppConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct JellyfinServer {
+pub struct MusicServer {
     pub name: String,
     pub url: String,
+    #[serde(default)]
+    pub service: MusicService,
     pub access_token: Option<String>,
     pub user_id: Option<String>,
 }
 
-impl JellyfinServer {
+pub type JellyfinServer = MusicServer;
+
+impl MusicServer {
     pub fn new(name: String, url: String) -> Self {
+        Self::new_with_service(name, url, MusicService::Jellyfin)
+    }
+
+    pub fn new_with_service(name: String, url: String, service: MusicService) -> Self {
         Self {
             name,
             // trim once here so every consumer gets a clean url to prevent broken links
             url: url.trim_end_matches('/').to_string(),
+            service,
             access_token: None,
             user_id: None,
         }
@@ -106,11 +141,12 @@ impl Default for AppConfig {
     }
 }
 
-impl Default for JellyfinServer {
+impl Default for MusicServer {
     fn default() -> Self {
         Self {
             name: String::new(),
             url: String::new(),
+            service: MusicService::Jellyfin,
             access_token: None,
             user_id: None,
         }
@@ -118,6 +154,18 @@ impl Default for JellyfinServer {
 }
 
 impl AppConfig {
+    pub fn active_service(&self) -> Option<MusicService> {
+        if self.active_source.is_server() {
+            self.server.as_ref().map(|server| server.service)
+        } else {
+            None
+        }
+    }
+
+    pub fn uses_jellyfin_server(&self) -> bool {
+        self.active_service() == Some(MusicService::Jellyfin)
+    }
+
     pub fn load(path: &Path) -> Self {
         if !path.exists() {
             return Self::default();

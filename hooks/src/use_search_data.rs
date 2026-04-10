@@ -1,4 +1,4 @@
-use config::{AppConfig, MusicSource};
+use config::{AppConfig, MusicService, MusicSource};
 use dioxus::prelude::*;
 use reader::Library;
 use reader::models::{Album, Track};
@@ -21,25 +21,42 @@ pub fn use_search_data(
     config: Signal<AppConfig>,
 ) -> SearchData {
     let genres = use_memo(move || {
-        let active_source = config.read().active_source.clone();
+        let conf = config.read();
+        let active_source = conf.active_source.clone();
+        let active_service = conf.active_service();
+        let server = conf.server.clone();
         let lib = library.read();
 
-        if active_source == MusicSource::Jellyfin {
+        if active_source == MusicSource::Server {
             let mut genre_items = std::collections::HashMap::new();
             for album in &lib.jellyfin_albums {
                 for g in album.genre.split(|c| c == '/' || c == ';' || c == ',') {
                     let g = g.trim();
                     if !g.is_empty() && !genre_items.contains_key(g) {
-                        let cover_url = if let Some(server) = &config.read().server {
+                        let cover_url = if let Some(server) = &server {
                             album.cover_path.as_ref().and_then(|cover_path| {
                                 let path_str = cover_path.to_string_lossy();
-                                utils::jellyfin_image::jellyfin_image_url_from_path(
-                                    &path_str,
-                                    &server.url,
-                                    server.access_token.as_deref(),
-                                    320,
-                                    80,
-                                )
+                                match active_service {
+                                    Some(MusicService::Jellyfin) => {
+                                        utils::jellyfin_image::jellyfin_image_url_from_path(
+                                            &path_str,
+                                            &server.url,
+                                            server.access_token.as_deref(),
+                                            320,
+                                            80,
+                                        )
+                                    }
+                                    Some(MusicService::Subsonic) | Some(MusicService::Custom) => {
+                                        utils::subsonic_image::subsonic_image_url_from_path(
+                                            &path_str,
+                                            &server.url,
+                                            server.access_token.as_deref(),
+                                            320,
+                                            80,
+                                        )
+                                    }
+                                    None => None,
+                                }
                             })
                         } else {
                             None
@@ -95,7 +112,10 @@ pub fn use_search_data(
         }
 
         let lib = library.read();
-        let active_source = config.read().active_source.clone();
+        let conf = config.read();
+        let active_source = conf.active_source.clone();
+        let active_service = conf.active_service();
+        let server = conf.server.clone();
 
         let album_map: std::collections::HashMap<&String, &Album> =
             lib.albums.iter().map(|a| (&a.id, a)).collect();
@@ -145,7 +165,7 @@ pub fn use_search_data(
                     })
                     .collect();
             }
-            MusicSource::Jellyfin => {
+            MusicSource::Server => {
                 tracks = lib
                     .jellyfin_tracks
                     .iter()
@@ -155,15 +175,29 @@ pub fn use_search_data(
                             || t.album.to_lowercase().contains(&query)
                     })
                     .map(|t| {
-                        let cover_url = if let Some(server) = &config.read().server {
+                        let cover_url = if let Some(server) = &server {
                             let path_str = t.path.to_string_lossy();
-                            utils::jellyfin_image::jellyfin_image_url_from_path(
-                                &path_str,
-                                &server.url,
-                                server.access_token.as_deref(),
-                                80,
-                                80,
-                            )
+                            match active_service {
+                                Some(MusicService::Jellyfin) => {
+                                    utils::jellyfin_image::jellyfin_image_url_from_path(
+                                        &path_str,
+                                        &server.url,
+                                        server.access_token.as_deref(),
+                                        80,
+                                        80,
+                                    )
+                                }
+                                Some(MusicService::Subsonic) | Some(MusicService::Custom) => {
+                                    utils::subsonic_image::subsonic_image_url_from_path(
+                                        &path_str,
+                                        &server.url,
+                                        server.access_token.as_deref(),
+                                        80,
+                                        80,
+                                    )
+                                }
+                                None => None,
+                            }
                         } else {
                             None
                         };
@@ -183,16 +217,30 @@ pub fn use_search_data(
                     })
                     .take(50)
                     .map(|a| {
-                        let cover_url = if let Some(server) = &config.read().server {
+                        let cover_url = if let Some(server) = &server {
                             a.cover_path.as_ref().and_then(|cover_path| {
                                 let path_str = cover_path.to_string_lossy();
-                                utils::jellyfin_image::jellyfin_image_url_from_path(
-                                    &path_str,
-                                    &server.url,
-                                    server.access_token.as_deref(),
-                                    360,
-                                    80,
-                                )
+                                match active_service {
+                                    Some(MusicService::Jellyfin) => {
+                                        utils::jellyfin_image::jellyfin_image_url_from_path(
+                                            &path_str,
+                                            &server.url,
+                                            server.access_token.as_deref(),
+                                            360,
+                                            80,
+                                        )
+                                    }
+                                    Some(MusicService::Subsonic) | Some(MusicService::Custom) => {
+                                        utils::subsonic_image::subsonic_image_url_from_path(
+                                            &path_str,
+                                            &server.url,
+                                            server.access_token.as_deref(),
+                                            360,
+                                            80,
+                                        )
+                                    }
+                                    None => None,
+                                }
                             })
                         } else {
                             None

@@ -5,8 +5,8 @@ use dioxus::prelude::*;
 use player::player;
 use reader::{Library, PlaylistStore};
 
-use crate::jellyfin::playlists::JellyfinPlaylists;
 use crate::local::playlists::LocalPlaylists;
+use crate::server::playlists::ServerPlaylists;
 
 #[component]
 pub fn PlaylistsPage(
@@ -25,7 +25,7 @@ pub fn PlaylistsPage(
     mut current_queue_index: Signal<usize>,
     mut selected_playlist_id: Signal<Option<String>>,
 ) -> Element {
-    let is_jellyfin = config.read().active_source == MusicSource::Jellyfin;
+    let is_server = config.read().active_source == MusicSource::Server;
 
     let mut show_add_playlist = use_signal(|| false);
     let mut playlist_name = use_signal(|| String::new());
@@ -90,8 +90,8 @@ pub fn PlaylistsPage(
                     }
                 }
 
-                if is_jellyfin {
-                    JellyfinPlaylists {
+                if is_server {
+                    ServerPlaylists {
                         playlist_store,
                         library,
                         config,

@@ -36,7 +36,7 @@ pub fn PlaylistModal(props: PlaylistModalProps) -> Element {
                 class: "bg-neutral-900 rounded-xl border border-white/10 w-full max-w-md p-6",
                 onclick: move |e| e.stop_propagation(),
                 h2 { class: "text-xl font-bold text-white mb-4",
-                    if props.is_jellyfin { "Add to Jellyfin Playlist" } else { "Add to Playlist" }
+                    "Add to Playlist"
                 }
 
                 div { class: "max-h-60 overflow-y-auto mb-4 space-y-2",

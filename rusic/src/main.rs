@@ -200,6 +200,39 @@ fn App() -> Element {
     let mut selected_playlist_id = use_signal(|| None::<String>);
     let mut selected_artist_name = use_signal(String::new);
     let search_query = use_signal(String::new);
+    let mut last_server_playlist_key = use_signal(|| None::<String>);
+    let mut server_playlist_key_initialized = use_signal(|| false);
+
+    use_effect(move || {
+        if !*initial_load_done.read() {
+            return;
+        }
+
+        let current_server_key = {
+            let conf = config.read();
+            conf.server.as_ref().map(|server| {
+                format!(
+                    "{:?}|{}|{}|{}",
+                    server.service,
+                    server.url,
+                    server.user_id.as_deref().unwrap_or_default(),
+                    server.access_token.as_deref().unwrap_or_default()
+                )
+            })
+        };
+
+        if !*server_playlist_key_initialized.read() {
+            last_server_playlist_key.set(current_server_key);
+            server_playlist_key_initialized.set(true);
+            return;
+        }
+
+        if *last_server_playlist_key.read() != current_server_key {
+            last_server_playlist_key.set(current_server_key);
+            selected_playlist_id.set(None);
+            playlist_store.write().jellyfin_playlists.clear();
+        }
+    });
 
     use_effect(move || {
         if !*initial_load_done.read() {

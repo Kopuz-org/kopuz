@@ -1,11 +1,12 @@
+use ::server::jellyfin::JellyfinClient;
+use ::server::subsonic::SubsonicClient;
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
 use components::track_row::TrackRow;
-use config::AppConfig;
+use config::{AppConfig, MusicService};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 use reader::{FavoritesStore, Library, PlaylistStore};
-use server::jellyfin::JellyfinClient;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -40,7 +41,12 @@ pub fn JellyfinFavorites(
                             (&server.access_token, &server.user_id)
                         {
                             (
-                                Some((server.url.clone(), token.clone(), user_id.clone())),
+                                Some((
+                                    server.service,
+                                    server.url.clone(),
+                                    token.clone(),
+                                    user_id.clone(),
+                                )),
                                 conf.device_id.clone(),
                             )
                         } else {
@@ -51,15 +57,28 @@ pub fn JellyfinFavorites(
                     }
                 };
 
-                if let Some((url, token, user_id)) = server_config {
-                    let remote =
-                        JellyfinClient::new(&url, Some(&token), &device_id, Some(&user_id));
-                    if let Ok(items) = remote.get_favorite_items().await {
-                        let ids: Vec<String> = items.iter().map(|i| i.id.clone()).collect();
-                        let mut store = favorites_store.write();
-                        store.jellyfin_favorites = ids;
+                let ids = if let Some((service, url, token, user_id)) = server_config {
+                    match service {
+                        MusicService::Jellyfin => {
+                            let remote =
+                                JellyfinClient::new(&url, Some(&token), &device_id, Some(&user_id));
+                            remote
+                                .get_favorite_items()
+                                .await
+                                .map(|items| items.into_iter().map(|i| i.id).collect())
+                                .unwrap_or_default()
+                        }
+                        MusicService::Subsonic | MusicService::Custom => {
+                            let remote = SubsonicClient::new(&url, &user_id, &token);
+                            remote.get_starred_song_ids().await.unwrap_or_default()
+                        }
                     }
-                }
+                } else {
+                    Vec::new()
+                };
+
+                let mut store = favorites_store.write();
+                store.jellyfin_favorites = ids;
                 is_syncing.set(false);
             });
         }
@@ -185,22 +204,30 @@ pub fn JellyfinFavorites(
                         }
 
                         if !selected_paths.is_empty() {
-                            let pid = playlist_id.clone();
+                                let pid = playlist_id.clone();
                             spawn(async move {
                                 let conf = config.peek();
                                 if let Some(server) = &conf.server {
                                     if let (Some(token), Some(user_id)) = (&server.access_token, &server.user_id) {
-                                        let remote = JellyfinClient::new(
-                                            &server.url,
-                                            Some(token),
-                                            &conf.device_id,
-                                            Some(user_id),
-                                        );
                                         for path in selected_paths {
                                             let parts: Vec<&str> = path.to_str().unwrap_or_default().split(':').collect();
                                             if parts.len() >= 2 {
                                                 let item_id = parts[1];
-                                                let _ = remote.add_to_playlist(&pid, item_id).await;
+                                                    match server.service {
+                                                        MusicService::Jellyfin => {
+                                                            let remote = JellyfinClient::new(
+                                                                &server.url,
+                                                                Some(token),
+                                                                &conf.device_id,
+                                                                Some(user_id),
+                                                            );
+                                                            let _ = remote.add_to_playlist(&pid, item_id).await;
+                                                        }
+                                                        MusicService::Subsonic | MusicService::Custom => {
+                                                            let remote = SubsonicClient::new(&server.url, user_id, token);
+                                                            let _ = remote.add_to_playlist(&pid, item_id).await;
+                                                        }
+                                                    }
                                             }
                                         }
                                     }
@@ -226,12 +253,6 @@ pub fn JellyfinFavorites(
                                 let conf = config.peek();
                                 if let Some(server) = &conf.server {
                                     if let (Some(token), Some(user_id)) = (&server.access_token, &server.user_id) {
-                                        let remote = JellyfinClient::new(
-                                            &server.url,
-                                            Some(token),
-                                            &conf.device_id,
-                                            Some(user_id),
-                                        );
                                         let item_ids: Vec<String> = selected_paths
                                             .iter()
                                             .filter_map(|p| {
@@ -246,9 +267,23 @@ pub fn JellyfinFavorites(
 
                                         if !item_ids.is_empty() {
                                             let item_id_refs: Vec<&str> = item_ids.iter().map(|s| s.as_str()).collect();
-                                            let _ = remote
-                                                .create_playlist(&playlist_name, &item_id_refs)
-                                                .await;
+                                            match server.service {
+                                                MusicService::Jellyfin => {
+                                                    let remote = JellyfinClient::new(
+                                                        &server.url,
+                                                        Some(token),
+                                                        &conf.device_id,
+                                                        Some(user_id),
+                                                    );
+                                                    let _ = remote
+                                                        .create_playlist(&playlist_name, &item_id_refs)
+                                                        .await;
+                                                }
+                                                MusicService::Subsonic | MusicService::Custom => {
+                                                    let remote = SubsonicClient::new(&server.url, user_id, token);
+                                                    let _ = remote.create_playlist(&playlist_name, &item_id_refs).await;
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -283,7 +318,7 @@ pub fn JellyfinFavorites(
                 div {
                     class: "flex items-center gap-2 text-slate-400 text-sm mb-4",
                     i { class: "fa-solid fa-circle-notch fa-spin" }
-                    span { "Syncing with Jellyfin..." }
+                    span { "Syncing with server..." }
                 }
             }
 
@@ -293,7 +328,7 @@ pub fn JellyfinFavorites(
                     i { class: "fa-regular fa-heart text-4xl mb-4 opacity-30" }
                     p { class: "text-base", "No favorites yet." }
                     p { class: "text-sm mt-1 opacity-70",
-                        "Heart a track while it's playing to add it here, and it'll sync to Jellyfin."
+                        "Heart a track while it's playing to add it here and sync it to your server."
                     }
                 }
             } else if !is_empty {
@@ -305,3 +340,5 @@ pub fn JellyfinFavorites(
         }
     }
 }
+
+pub use JellyfinFavorites as ServerFavorites;

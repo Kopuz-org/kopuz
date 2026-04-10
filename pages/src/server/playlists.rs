@@ -1,7 +1,8 @@
-use config::AppConfig;
+use ::server::jellyfin::JellyfinClient;
+use ::server::subsonic::SubsonicClient;
+use config::{AppConfig, MusicService};
 use dioxus::prelude::*;
 use reader::{Library, PlaylistStore};
-use server::jellyfin::JellyfinClient;
 
 #[component]
 pub fn JellyfinPlaylists(
@@ -10,58 +11,106 @@ pub fn JellyfinPlaylists(
     config: Signal<AppConfig>,
     mut selected_playlist_id: Signal<Option<String>>,
 ) -> Element {
-    let mut has_fetched = use_signal(|| false);
+    let mut last_fetch_key = use_signal(|| None::<String>);
+    let mut fetch_request_id = use_signal(|| 0u64);
 
     use_effect(move || {
-        if !*has_fetched.read() {
-            has_fetched.set(true);
-            spawn(async move {
-                let (server_config, device_id) = {
-                    let conf = config.peek();
-                    if let Some(server) = &conf.server {
-                        if let (Some(token), Some(user_id)) =
-                            (&server.access_token, &server.user_id)
-                        {
-                            (
-                                Some((server.url.clone(), token.clone(), user_id.clone())),
-                                conf.device_id.clone(),
-                            )
-                        } else {
-                            (None, conf.device_id.clone())
-                        }
-                    } else {
-                        (None, conf.device_id.clone())
-                    }
-                };
+        let fetch_context = {
+            let conf = config.read();
+            conf.server.as_ref().and_then(|server| {
+                if let (Some(token), Some(user_id)) = (&server.access_token, &server.user_id) {
+                    Some((
+                        server.service,
+                        server.url.clone(),
+                        token.clone(),
+                        user_id.clone(),
+                        conf.device_id.clone(),
+                    ))
+                } else {
+                    None
+                }
+            })
+        };
 
-                if let Some((url, token, user_id)) = server_config {
+        let fetch_key = fetch_context
+            .as_ref()
+            .map(|(service, url, token, user_id, _)| {
+                format!("{service:?}|{url}|{user_id}|{token}")
+            });
+
+        if *last_fetch_key.read() == fetch_key {
+            return;
+        }
+
+        last_fetch_key.set(fetch_key.clone());
+
+        {
+            let mut store_write = playlist_store.write();
+            store_write.jellyfin_playlists.clear();
+        }
+
+        let request_id = *fetch_request_id.read() + 1;
+        fetch_request_id.set(request_id);
+
+        let Some((service, url, token, user_id, device_id)) = fetch_context else {
+            return;
+        };
+
+        spawn(async move {
+            let mut server_playlists = Vec::new();
+
+            match service {
+                MusicService::Jellyfin => {
                     let remote =
                         JellyfinClient::new(&url, Some(&token), &device_id, Some(&user_id));
                     if let Ok(playlists) = remote.get_playlists().await {
-                        let mut jelly_playlists = Vec::new();
                         for p in playlists {
                             if let Ok(items) = remote.get_playlist_items(&p.id).await {
                                 let tracks: Vec<String> =
                                     items.into_iter().map(|item| item.id).collect();
-                                jelly_playlists.push(reader::models::JellyfinPlaylist {
+                                server_playlists.push(reader::models::JellyfinPlaylist {
                                     id: p.id.clone(),
                                     name: p.name.clone(),
                                     tracks,
                                 });
                             } else {
-                                jelly_playlists.push(reader::models::JellyfinPlaylist {
+                                server_playlists.push(reader::models::JellyfinPlaylist {
                                     id: p.id.clone(),
                                     name: p.name.clone(),
                                     tracks: vec![],
                                 });
                             }
                         }
-                        let mut store_write = playlist_store.write();
-                        store_write.jellyfin_playlists = jelly_playlists;
                     }
                 }
-            });
-        }
+                MusicService::Subsonic | MusicService::Custom => {
+                    let remote = SubsonicClient::new(&url, &user_id, &token);
+                    if let Ok(playlists) = remote.get_playlists().await {
+                        for p in playlists {
+                            let tracks = remote
+                                .get_playlist_entries(&p.id)
+                                .await
+                                .unwrap_or_default()
+                                .into_iter()
+                                .map(|song| song.id)
+                                .collect();
+                            server_playlists.push(reader::models::JellyfinPlaylist {
+                                id: p.id,
+                                name: p.name,
+                                tracks,
+                            });
+                        }
+                    }
+                }
+            }
+
+            if *fetch_request_id.read() != request_id {
+                return;
+            }
+
+            let mut store_write = playlist_store.write();
+            store_write.jellyfin_playlists = server_playlists;
+        });
     });
 
     let store = playlist_store.read();
@@ -71,7 +120,7 @@ pub fn JellyfinPlaylists(
             if store.jellyfin_playlists.is_empty() {
                 div { class: "flex flex-col items-center justify-center h-64 text-slate-500",
                     i { class: "fa-regular fa-folder-open text-4xl mb-4 opacity-50" }
-                    p { "No Jellyfin playlists found." }
+                    p { "No playlists found." }
                 }
             } else {
                 div { class: "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6",
@@ -126,7 +175,7 @@ pub fn JellyfinPlaylists(
                                     }
                                 }
                                 h3 { class: "text-xl font-bold text-white mb-1 truncate", "{playlist.name}" }
-                                p { class: "text-sm text-slate-400", "Jellyfin • {playlist.tracks.len()} tracks" }
+                                p { class: "text-sm text-slate-400", "Server • {playlist.tracks.len()} tracks" }
                             }
                         }
                     })}
@@ -135,3 +184,5 @@ pub fn JellyfinPlaylists(
         }
     }
 }
+
+pub use JellyfinPlaylists as ServerPlaylists;

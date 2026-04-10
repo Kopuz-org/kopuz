@@ -1,4 +1,5 @@
 use config::AppConfig;
+use config::MusicService;
 use dioxus::{logger::tracing, prelude::*};
 use player::player::{NowPlayingMeta, Player};
 use reader::{Library, Track};
@@ -65,31 +66,76 @@ impl PlayerController {
         let q = self.queue.peek();
         if idx < q.len() {
             let track = q[idx].clone();
-            let is_jellyfin = track.path.to_string_lossy().starts_with("jellyfin:");
+            let path_str = track.path.to_string_lossy().to_string();
+            let scheme = path_str
+                .split(':')
+                .next()
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            let is_server_item = matches!(scheme.as_str(), "jellyfin" | "subsonic" | "custom");
 
-            if is_jellyfin {
-                let path_str = track.path.to_string_lossy();
+            if is_server_item {
                 let parts: Vec<&str> = path_str.split(':').collect();
                 let id = parts.get(1).unwrap_or(&"").to_string();
 
                 let conf = self.config.read();
                 if let Some(server) = &conf.server {
-                    let mut stream_url = format!("{}/Audio/{}/stream?static=true", server.url, id);
-                    if let Some(token) = &server.access_token {
-                        stream_url.push_str(&format!("&api_key={}", token));
-                    }
+                    let (stream_url, cover_url) = match server.service {
+                        MusicService::Jellyfin => {
+                            let mut stream_url =
+                                format!("{}/Audio/{}/stream?static=true", server.url, id);
+                            if let Some(token) = &server.access_token {
+                                stream_url.push_str(&format!("&api_key={}", token));
+                            }
 
-                    let cover_url = {
-                        let path_str = track.path.to_string_lossy();
-                        utils::jellyfin_image::jellyfin_image_url_from_path(
-                            &path_str,
-                            &server.url,
-                            server.access_token.as_deref(),
-                            800,
-                            90,
-                        )
-                        .unwrap_or_default()
+                            let cover_url = {
+                                let path_str = track.path.to_string_lossy();
+                                utils::jellyfin_image::jellyfin_image_url_from_path(
+                                    &path_str,
+                                    &server.url,
+                                    server.access_token.as_deref(),
+                                    800,
+                                    90,
+                                )
+                                .unwrap_or_default()
+                            };
+
+                            (stream_url, cover_url)
+                        }
+                        MusicService::Subsonic | MusicService::Custom => {
+                            let (stream_url, cover_url) = if let (Some(password), Some(username)) =
+                                (&server.access_token, &server.user_id)
+                            {
+                                let remote = ::server::subsonic::SubsonicClient::new(
+                                    &server.url,
+                                    username,
+                                    password,
+                                );
+                                let stream_url = remote.stream_url(&id).unwrap_or_default();
+                                let cover_url =
+                                    utils::subsonic_image::subsonic_image_url_from_path(
+                                        &path_str,
+                                        &server.url,
+                                        server.access_token.as_deref(),
+                                        800,
+                                        90,
+                                    )
+                                    .or_else(|| remote.cover_art_url(&id, Some(800)).ok())
+                                    .unwrap_or_default();
+                                (stream_url, cover_url)
+                            } else {
+                                (String::new(), String::new())
+                            };
+
+                            (stream_url, cover_url)
+                        }
                     };
+
+                    if stream_url.is_empty() {
+                        self.is_loading.set(false);
+                        self.skip_in_progress.set(false);
+                        return;
+                    }
 
                     self.player.write().stop();
                     self.is_playing.set(false);
@@ -114,11 +160,11 @@ impl PlayerController {
 
                     spawn(async move {
                         let stream = utils::stream_buffer::StreamBuffer::new(stream_url);
-                        let source_res =
-                            tokio::task::spawn_blocking(move || {
-                                let (source, hint) = player::decoder::from_stream(stream);
-                                Ok::<_, std::io::Error>((source, hint))
-                            }).await;
+                        let source_res = tokio::task::spawn_blocking(move || {
+                            let (source, hint) = player::decoder::from_stream(stream);
+                            Ok::<_, std::io::Error>((source, hint))
+                        })
+                        .await;
 
                         if let Ok(Ok((source, hint))) = source_res {
                             if *play_generation.read() == current_gen {

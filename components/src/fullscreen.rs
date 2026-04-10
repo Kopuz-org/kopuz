@@ -121,18 +121,39 @@ pub fn Fullscreen(
         let lib = library.read();
         let conf = config.read();
 
-        let is_jellyfin_track = track.path.to_string_lossy().starts_with("jellyfin:");
+        let path_str = track.path.to_string_lossy();
+        let provider = if path_str.starts_with("jellyfin:") {
+            Some(config::MusicService::Jellyfin)
+        } else if path_str.starts_with("subsonic:") {
+            Some(config::MusicService::Subsonic)
+        } else if path_str.starts_with("custom:") {
+            Some(config::MusicService::Custom)
+        } else {
+            None
+        };
 
-        if is_jellyfin_track {
+        if let Some(provider) = provider {
             if let Some(server) = &conf.server {
-                let path_str = track.path.to_string_lossy();
-                return utils::jellyfin_image::jellyfin_image_url_from_path(
-                    &path_str,
-                    &server.url,
-                    server.access_token.as_deref(),
-                    96,
-                    80,
-                );
+                return match provider {
+                    config::MusicService::Jellyfin => {
+                        utils::jellyfin_image::jellyfin_image_url_from_path(
+                            &path_str,
+                            &server.url,
+                            server.access_token.as_deref(),
+                            96,
+                            80,
+                        )
+                    }
+                    config::MusicService::Subsonic | config::MusicService::Custom => {
+                        utils::subsonic_image::subsonic_image_url_from_path(
+                            &path_str,
+                            &server.url,
+                            server.access_token.as_deref(),
+                            96,
+                            80,
+                        )
+                    }
+                };
             }
             None
         } else {

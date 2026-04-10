@@ -2,8 +2,8 @@ use config::{AppConfig, MusicSource};
 use dioxus::prelude::*;
 use reader::{FavoritesStore, Library, PlaylistStore};
 
-use crate::jellyfin::home::JellyfinHome;
 use crate::local::home::LocalHome;
+use crate::server::home::ServerHome;
 
 #[component]
 pub fn Home(
@@ -16,7 +16,7 @@ pub fn Home(
     on_search_artist: EventHandler<String>,
 ) -> Element {
     let config = use_context::<Signal<AppConfig>>();
-    let is_jellyfin = config.read().active_source == MusicSource::Jellyfin;
+    let is_server = config.read().active_source == MusicSource::Server;
 
     rsx! {
         div {
@@ -26,8 +26,8 @@ pub fn Home(
                 h1 { class: "text-4xl font-black text-white tracking-tight", "Home" }
             }
 
-            if is_jellyfin {
-                JellyfinHome {
+            if is_server {
+                ServerHome {
                     library,
                     playlist_store,
                     favorites_store,

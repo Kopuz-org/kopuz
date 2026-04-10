@@ -1,13 +1,21 @@
+use config::MusicService;
 use dioxus::prelude::*;
 
 #[component]
 pub fn AddServerPopup(
     server_name: Signal<String>,
     server_url: Signal<String>,
+    server_service: Signal<MusicService>,
     error: Signal<Option<String>>,
     on_close: EventHandler<()>,
     on_save: EventHandler<()>,
 ) -> Element {
+    let service_value = match server_service() {
+        MusicService::Jellyfin => "jellyfin",
+        MusicService::Subsonic => "subsonic",
+        MusicService::Custom => "custom",
+    };
+
     rsx! {
         div {
             class: "overlay",
@@ -17,7 +25,7 @@ pub fn AddServerPopup(
                 class: "popup",
                 onclick: |e| e.stop_propagation(),
 
-                h2 { "Add Jellyfin Server" }
+                h2 { "Add Media Server" }
 
                 if let Some(err) = error() {
                     p { class: "error", "{err}" }
@@ -35,6 +43,22 @@ pub fn AddServerPopup(
                     value: "{server_url()}",
                     oninput: move |e| server_url.set(e.value()),
                     onkeydown: move |e| e.stop_propagation()
+                }
+
+                select {
+                    value: "{service_value}",
+                    onchange: move |e| {
+                        let service = match e.value().as_str() {
+                            "subsonic" => MusicService::Subsonic,
+                            "custom" => MusicService::Custom,
+                            _ => MusicService::Jellyfin,
+                        };
+                        server_service.set(service);
+                    },
+                    onkeydown: move |e| e.stop_propagation(),
+                    option { value: "jellyfin", "Jellyfin" }
+                    option { value: "subsonic", "Subsonic" }
+                    option { value: "custom", "Custom (manual API)" }
                 }
 
                 div { class: "actions",
@@ -56,6 +80,7 @@ pub fn AddServerPopup(
 pub fn LoginPopup(
     username: Signal<String>,
     password: Signal<String>,
+    service_name: String,
     error: Signal<Option<String>>,
     loading: Signal<bool>,
     on_close: EventHandler<()>,
@@ -70,7 +95,7 @@ pub fn LoginPopup(
                 class: "popup",
                 onclick: |e| e.stop_propagation(),
 
-                h2 { "Login to Jellyfin" }
+                h2 { "Login to {service_name}" }
 
                 if let Some(err) = error() {
                     p { class: "error", "{err}" }

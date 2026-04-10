@@ -3,8 +3,8 @@ use dioxus::prelude::*;
 use player::player;
 use reader::{Library, PlaylistStore};
 
-use crate::jellyfin::artist::JellyfinArtist;
 use crate::local::artist::LocalArtist;
+use crate::server::artist::ServerArtist;
 
 #[component]
 pub fn Artist(
@@ -24,7 +24,7 @@ pub fn Artist(
     mut current_queue_index: Signal<usize>,
     on_close: EventHandler<()>,
 ) -> Element {
-    let is_jellyfin = config.read().active_source == MusicSource::Jellyfin;
+    let is_server = config.read().active_source == MusicSource::Server;
 
     rsx! {
         div {
@@ -40,8 +40,8 @@ pub fn Artist(
                     }
                 }
 
-                if is_jellyfin {
-                    JellyfinArtist {
+                if is_server {
+                    ServerArtist {
                         library,
                         config,
                         artist_name,

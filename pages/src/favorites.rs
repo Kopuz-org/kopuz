@@ -2,8 +2,8 @@ use config::{AppConfig, MusicSource};
 use dioxus::prelude::*;
 use reader::{FavoritesStore, Library, PlaylistStore};
 
-use crate::jellyfin::favorites::JellyfinFavorites;
 use crate::local::favorites::LocalFavorites;
+use crate::server::favorites::ServerFavorites;
 
 #[component]
 pub fn FavoritesPage(
@@ -22,7 +22,7 @@ pub fn FavoritesPage(
     mut queue: Signal<Vec<reader::models::Track>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
-    let is_jellyfin = config.read().active_source == MusicSource::Jellyfin;
+    let is_server = config.read().active_source == MusicSource::Server;
 
     rsx! {
         div {
@@ -34,8 +34,8 @@ pub fn FavoritesPage(
                 h1 { class: "text-3xl font-bold text-white", "Favorites" }
             }
 
-            if is_jellyfin {
-                JellyfinFavorites {
+            if is_server {
+                ServerFavorites {
                     favorites_store,
                     library,
                     config,

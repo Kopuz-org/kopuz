@@ -4,6 +4,7 @@ use components::search_genre_detail::SearchGenreDetail;
 use components::search_genres::SearchGenres;
 use components::search_results::SearchResults;
 use config::AppConfig;
+use config::MusicService;
 use dioxus::prelude::*;
 use hooks::use_search_data::use_search_data;
 use player::player;
@@ -94,12 +95,6 @@ pub fn JellyfinSearch(
                                     if let (Some(token), Some(user_id)) =
                                         (&server.access_token, &server.user_id)
                                     {
-                                        let remote = server::jellyfin::JellyfinClient::new(
-                                            &server.url,
-                                            Some(token),
-                                            &conf.device_id,
-                                            Some(user_id),
-                                        );
                                         let parts: Vec<&str> = path_clone
                                             .to_str()
                                             .unwrap_or_default()
@@ -107,7 +102,25 @@ pub fn JellyfinSearch(
                                             .collect();
                                         if parts.len() >= 2 {
                                             let item_id = parts[1];
-                                            let _ = remote.add_to_playlist(&pid, item_id).await;
+                                            match server.service {
+                                                MusicService::Jellyfin => {
+                                                    let remote = server::jellyfin::JellyfinClient::new(
+                                                        &server.url,
+                                                        Some(token),
+                                                        &conf.device_id,
+                                                        Some(user_id),
+                                                    );
+                                                    let _ = remote.add_to_playlist(&pid, item_id).await;
+                                                }
+                                                MusicService::Subsonic | MusicService::Custom => {
+                                                    let remote = server::subsonic::SubsonicClient::new(
+                                                        &server.url,
+                                                        user_id,
+                                                        token,
+                                                    );
+                                                    let _ = remote.add_to_playlist(&pid, item_id).await;
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -126,12 +139,6 @@ pub fn JellyfinSearch(
                                     if let (Some(token), Some(user_id)) =
                                         (&server.access_token, &server.user_id)
                                     {
-                                        let remote = server::jellyfin::JellyfinClient::new(
-                                            &server.url,
-                                            Some(token),
-                                            &conf.device_id,
-                                            Some(user_id),
-                                        );
                                         let parts: Vec<&str> = path_clone
                                             .to_str()
                                             .unwrap_or_default()
@@ -139,9 +146,27 @@ pub fn JellyfinSearch(
                                             .collect();
                                         if parts.len() >= 2 {
                                             let item_id = parts[1];
-                                            let _ = remote
-                                                .create_playlist(&playlist_name, &[item_id])
-                                                .await;
+                                            match server.service {
+                                                MusicService::Jellyfin => {
+                                                    let remote = server::jellyfin::JellyfinClient::new(
+                                                        &server.url,
+                                                        Some(token),
+                                                        &conf.device_id,
+                                                        Some(user_id),
+                                                    );
+                                                    let _ = remote
+                                                        .create_playlist(&playlist_name, &[item_id])
+                                                        .await;
+                                                }
+                                                MusicService::Subsonic | MusicService::Custom => {
+                                                    let remote = server::subsonic::SubsonicClient::new(
+                                                        &server.url,
+                                                        user_id,
+                                                        token,
+                                                    );
+                                                    let _ = remote.create_playlist(&playlist_name, &[item_id]).await;
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -207,3 +232,5 @@ pub fn JellyfinSearch(
         }
     }
 }
+
+pub use JellyfinSearch as ServerSearch;

@@ -1,4 +1,4 @@
-use config::AppConfig;
+use config::{AppConfig, MusicService};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 use reader::Library;
@@ -48,7 +48,7 @@ pub fn JellyfinLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Elem
                 div { class: "mb-8 flex items-end justify-between",
                     div {
                         h1 { class: "text-3xl font-bold text-white mb-2", "Listening Logs" }
-                        p { class: "text-slate-400 text-sm", "Your most played Jellyfin tracks." }
+                        p { class: "text-slate-400 text-sm", "Your most played tracks." }
                     }
                     div {
                         div { class: "w-12 h-12 rounded-full flex items-center justify-center bg-white/5 border border-white/10 text-slate-400",
@@ -119,7 +119,7 @@ pub fn JellyfinLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Elem
                                                 "{track.title}"
                                                 i {
                                                     class: "fa-solid fa-database text-[10px] text-slate-500",
-                                                    title: "Jellyfin"
+                                                    title: "Server"
                                                 }
                                             }
                                             div { class: "text-slate-400 text-sm truncate group-hover:text-slate-300 transition-colors", "{track.artist}" }
@@ -155,11 +155,25 @@ pub fn JellyfinLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Elem
                     if sorted_tracks.read().is_empty() {
                         div { class: "flex flex-col items-center justify-center py-24 text-slate-500",
                             i { class: "fa-solid fa-headphones text-4xl mb-4 opacity-50" }
-                            p { "No tracks found in your Jellyfin library." }
+                            p { "No tracks found in your music library." }
                         }
                     }
                 }
             }
         }
+    }
+}
+
+#[component]
+pub fn ServerLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Element {
+    let service = config
+        .read()
+        .active_service()
+        .unwrap_or(MusicService::Jellyfin);
+
+    match service {
+        MusicService::Jellyfin | MusicService::Subsonic | MusicService::Custom => rsx! {
+            JellyfinLogs { library, config }
+        },
     }
 }

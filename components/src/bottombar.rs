@@ -1,3 +1,4 @@
+use config::MusicService;
 use dioxus::prelude::*;
 use hooks::use_player_controller::{LoopMode, PlayerController};
 use player::player::Player;
@@ -51,9 +52,12 @@ pub fn Bottombar(
         let idx = *current_queue_index.read();
         if let Some(track) = q.get(idx) {
             let path_str = track.path.to_string_lossy();
-            if path_str.starts_with("jellyfin:") {
+            if path_str.starts_with("jellyfin:")
+                || path_str.starts_with("subsonic:")
+                || path_str.starts_with("custom:")
+            {
                 let parts: Vec<&str> = path_str.split(':').collect();
-                if parts.len() >= 2 {
+                if parts.len() >= 2 && !parts[1].trim().is_empty() {
                     favorites_store.read().is_jellyfin_favorite(parts[1])
                 } else {
                     false
@@ -113,11 +117,13 @@ pub fn Bottombar(
                         if let Some(track) = q.get(idx).cloned() {
                             drop(q);
                             let path_str = track.path.to_string_lossy().to_string();
-                            let is_jellyfin = path_str.starts_with("jellyfin:");
+                            let is_server_item = path_str.starts_with("jellyfin:")
+                                || path_str.starts_with("subsonic:")
+                                || path_str.starts_with("custom:");
 
-                            if is_jellyfin {
+                            if is_server_item {
                                 let parts: Vec<String> = path_str.split(':').map(|s| s.to_string()).collect();
-                                if parts.len() >= 2 {
+                                if parts.len() >= 2 && !parts[1].trim().is_empty() {
                                     let item_id = parts[1].clone();
                                     let currently_fav = favorites_store.read().is_jellyfin_favorite(&item_id);
                                     let new_fav = !currently_fav;
@@ -125,42 +131,55 @@ pub fn Bottombar(
                                     favorites_store.write().set_jellyfin(item_id.clone(), new_fav);
 
                                     spawn(async move {
-                                        let (server_config, device_id) = {
+                                        let server_config = {
                                             let conf = config.peek();
-                                            if let Some(server) = &conf.server {
+                                            conf.server.as_ref().and_then(|server| {
                                                 if let (Some(token), Some(user_id)) =
                                                     (&server.access_token, &server.user_id)
                                                 {
-                                                    (
-                                                        Some((
-                                                            server.url.clone(),
-                                                            token.clone(),
-                                                            user_id.clone(),
-                                                        )),
+                                                    Some((
+                                                        server.service,
+                                                        server.url.clone(),
+                                                        token.clone(),
+                                                        user_id.clone(),
                                                         conf.device_id.clone(),
-                                                    )
+                                                    ))
                                                 } else {
-                                                    (None, conf.device_id.clone())
+                                                    None
                                                 }
-                                            } else {
-                                                (None, conf.device_id.clone())
-                                            }
+                                            })
                                         };
 
-                                        if let Some((url, token, user_id)) = server_config {
-                                            let remote = server::jellyfin::JellyfinClient::new(
-                                                &url,
-                                                Some(&token),
-                                                &device_id,
-                                                Some(&user_id),
-                                            );
-                                            let result = if new_fav {
-                                                remote.mark_favorite(&item_id).await
-                                            } else {
-                                                remote.unmark_favorite(&item_id).await
+                                        if let Some((service, url, token, user_id, device_id)) = server_config {
+                                            let result = match service {
+                                                MusicService::Jellyfin => {
+                                                    let remote = server::jellyfin::JellyfinClient::new(
+                                                        &url,
+                                                        Some(&token),
+                                                        &device_id,
+                                                        Some(&user_id),
+                                                    );
+                                                    if new_fav {
+                                                        remote.mark_favorite(&item_id).await
+                                                    } else {
+                                                        remote.unmark_favorite(&item_id).await
+                                                    }
+                                                }
+                                                MusicService::Subsonic | MusicService::Custom => {
+                                                    let remote = server::subsonic::SubsonicClient::new(
+                                                        &url,
+                                                        &user_id,
+                                                        &token,
+                                                    );
+                                                    if new_fav {
+                                                        remote.star(&item_id).await
+                                                    } else {
+                                                        remote.unstar(&item_id).await
+                                                    }
+                                                }
                                             };
                                             if let Err(e) = result {
-                                                eprintln!("Failed to sync favorite to Jellyfin: {e}");
+                                                eprintln!("Failed to sync favorite to server: {e}");
                                                 favorites_store.write().set_jellyfin(item_id, !new_fav);
                                             }
                                         }

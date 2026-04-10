@@ -1,9 +1,10 @@
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
-use config::AppConfig;
+use config::{AppConfig, MusicService};
 use dioxus::prelude::*;
 use reader::{Library, PlaylistStore};
-use server::jellyfin::JellyfinClient;
+use ::server::jellyfin::JellyfinClient;
+use ::server::subsonic::SubsonicClient;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
@@ -159,22 +160,40 @@ pub fn JellyfinArtist(
                                             if let (Some(token), Some(user_id)) =
                                                 (&server.access_token, &server.user_id)
                                             {
-                                                let remote = JellyfinClient::new(
-                                                    &server.url,
-                                                    Some(token),
-                                                    &conf.device_id,
-                                                    Some(user_id),
-                                                );
-                                                for path in selected_paths {
-                                                    let parts: Vec<&str> = path
-                                                        .to_str()
-                                                        .unwrap_or_default()
-                                                        .split(':')
-                                                        .collect();
-                                                    if parts.len() >= 2 {
-                                                        let item_id = parts[1];
-                                                        let _ =
-                                                            remote.add_to_playlist(&pid, item_id).await;
+                                                match server.service {
+                                                    MusicService::Jellyfin => {
+                                                        let remote = JellyfinClient::new(
+                                                            &server.url,
+                                                            Some(token),
+                                                            &conf.device_id,
+                                                            Some(user_id),
+                                                        );
+                                                        for path in selected_paths {
+                                                            let parts: Vec<&str> = path
+                                                                .to_str()
+                                                                .unwrap_or_default()
+                                                                .split(':')
+                                                                .collect();
+                                                            if parts.len() >= 2 {
+                                                                let item_id = parts[1];
+                                                                let _ =
+                                                                    remote.add_to_playlist(&pid, item_id).await;
+                                                            }
+                                                        }
+                                                    }
+                                                    MusicService::Subsonic | MusicService::Custom => {
+                                                        let remote = SubsonicClient::new(&server.url, user_id, token);
+                                                        for path in selected_paths {
+                                                            let parts: Vec<&str> = path
+                                                                .to_str()
+                                                                .unwrap_or_default()
+                                                                .split(':')
+                                                                .collect();
+                                                            if parts.len() >= 2 {
+                                                                let item_id = parts[1];
+                                                                let _ = remote.add_to_playlist(&pid, item_id).await;
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
@@ -202,21 +221,31 @@ pub fn JellyfinArtist(
                                             if let (Some(token), Some(user_id)) =
                                                 (&server.access_token, &server.user_id)
                                             {
-                                                let remote = JellyfinClient::new(
-                                                    &server.url,
-                                                    Some(token),
-                                                    &conf.device_id,
-                                                    Some(user_id),
-                                                );
                                                 let item_ids: Vec<String> = selected_paths.iter().filter_map(|p| {
                                                     let parts: Vec<&str> = p.to_str()?.split(':').collect();
                                                     if parts.len() >= 2 { Some(parts[1].to_string()) } else { None }
                                                 }).collect();
                                                 if !item_ids.is_empty() {
                                                     let item_id_refs: Vec<&str> = item_ids.iter().map(|s| s.as_str()).collect();
-                                                    let _ = remote
-                                                        .create_playlist(&playlist_name, &item_id_refs)
-                                                        .await;
+                                                    match server.service {
+                                                        MusicService::Jellyfin => {
+                                                            let remote = JellyfinClient::new(
+                                                                &server.url,
+                                                                Some(token),
+                                                                &conf.device_id,
+                                                                Some(user_id),
+                                                            );
+                                                            let _ = remote
+                                                                .create_playlist(&playlist_name, &item_id_refs)
+                                                                .await;
+                                                        }
+                                                        MusicService::Subsonic | MusicService::Custom => {
+                                                            let remote = SubsonicClient::new(&server.url, user_id, token);
+                                                            let _ = remote
+                                                                .create_playlist(&playlist_name, &item_id_refs)
+                                                                .await;
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -311,6 +340,96 @@ pub fn JellyfinArtist(
                     }
                 }
             }
+        }
+    }
+}
+
+#[component]
+pub fn ServerArtist(
+    library: Signal<Library>,
+    config: Signal<AppConfig>,
+    artist_name: Signal<String>,
+    playlist_store: Signal<PlaylistStore>,
+    queue: Signal<Vec<reader::models::Track>>,
+    current_queue_index: Signal<usize>,
+) -> Element {
+    let service = config
+        .read()
+        .active_service()
+        .unwrap_or(MusicService::Jellyfin);
+
+    match service {
+        MusicService::Jellyfin => rsx! {
+            JellyfinArtist {
+                library,
+                config,
+                artist_name,
+                playlist_store,
+                queue,
+                current_queue_index,
+            }
+        },
+        MusicService::Subsonic => rsx! {
+            SubsonicArtist {
+                library,
+                config,
+                artist_name,
+                playlist_store,
+                queue,
+                current_queue_index,
+            }
+        },
+        MusicService::Custom => rsx! {
+            CustomArtist {
+                library,
+                config,
+                artist_name,
+                playlist_store,
+                queue,
+                current_queue_index,
+            }
+        },
+    }
+}
+
+#[component]
+pub fn SubsonicArtist(
+    library: Signal<Library>,
+    config: Signal<AppConfig>,
+    artist_name: Signal<String>,
+    playlist_store: Signal<PlaylistStore>,
+    queue: Signal<Vec<reader::models::Track>>,
+    current_queue_index: Signal<usize>,
+) -> Element {
+    rsx! {
+        JellyfinArtist {
+            library,
+            config,
+            artist_name,
+            playlist_store,
+            queue,
+            current_queue_index,
+        }
+    }
+}
+
+#[component]
+pub fn CustomArtist(
+    library: Signal<Library>,
+    config: Signal<AppConfig>,
+    artist_name: Signal<String>,
+    playlist_store: Signal<PlaylistStore>,
+    queue: Signal<Vec<reader::models::Track>>,
+    current_queue_index: Signal<usize>,
+) -> Element {
+    rsx! {
+        JellyfinArtist {
+            library,
+            config,
+            artist_name,
+            playlist_store,
+            queue,
+            current_queue_index,
         }
     }
 }

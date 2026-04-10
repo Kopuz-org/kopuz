@@ -1,5 +1,5 @@
 use crate::track_row::TrackRow;
-use config::{AppConfig, MusicSource};
+use config::{AppConfig, MusicService, MusicSource};
 use dioxus::prelude::*;
 use reader::{Library, Track};
 use std::collections::HashSet;
@@ -35,7 +35,7 @@ pub fn Showcase(props: ShowcaseProps) -> Element {
     let duration_min = total_seconds / 60;
 
     let lib = props.library.read();
-    let is_jellyfin = config.read().active_source == MusicSource::Jellyfin;
+    let is_server_source = config.read().active_source == MusicSource::Server;
 
     rsx! {
          div {
@@ -92,16 +92,29 @@ pub fn Showcase(props: ShowcaseProps) -> Element {
 
                      for (idx, track) in props.tracks.iter().enumerate() {
                          {
-                             let cover_url = if is_jellyfin {
+                             let cover_url = if is_server_source {
                                  if let Some(server) = &config.read().server {
                                      let path_str = track.path.to_string_lossy();
-                                     utils::jellyfin_image::jellyfin_image_url_from_path(
-                                         &path_str,
-                                         &server.url,
-                                         server.access_token.as_deref(),
-                                         80,
-                                         80,
-                                     )
+                                     match server.service {
+                                         MusicService::Jellyfin => {
+                                             utils::jellyfin_image::jellyfin_image_url_from_path(
+                                                 &path_str,
+                                                 &server.url,
+                                                 server.access_token.as_deref(),
+                                                 80,
+                                                 80,
+                                             )
+                                         }
+                                         MusicService::Subsonic | MusicService::Custom => {
+                                             utils::subsonic_image::subsonic_image_url_from_path(
+                                                 &path_str,
+                                                 &server.url,
+                                                 server.access_token.as_deref(),
+                                                 80,
+                                                 80,
+                                             )
+                                         }
+                                     }
                                  } else { None }
                              } else {
                                  lib.albums.iter()

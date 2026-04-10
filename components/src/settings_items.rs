@@ -1,4 +1,4 @@
-use config::JellyfinServer;
+use config::MusicServer;
 use dioxus::prelude::*;
 use rfd::AsyncFileDialog;
 
@@ -77,7 +77,7 @@ pub fn DirectoryPicker(on_change: EventHandler<std::path::PathBuf>) -> Element {
 
 #[component]
 pub fn ServerSettings(
-    server: Option<JellyfinServer>,
+    server: Option<MusicServer>,
     on_add: EventHandler<()>,
     on_delete: EventHandler<()>,
     on_login: EventHandler<()>,
@@ -88,6 +88,7 @@ pub fn ServerSettings(
                 div { class: "flex items-center justify-between gap-4 bg-white/5 p-2 rounded w-full",
                     div {
                         p { class: "text-sm font-medium text-white", "{server.name}" }
+                        p { class: "text-xs text-white/60", "Service: {server.service.display_name()}" }
                         p { class: "text-xs text-white/60", "{server.url}" }
                         if server.access_token.is_some() {
                             p { class: "text-xs text-green-400 mt-1", "● Connected" }

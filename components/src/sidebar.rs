@@ -103,18 +103,18 @@ pub fn Sidebar(props: SidebarProps) -> Element {
         ""
     };
 
-    let is_jellyfin = config.read().active_source == MusicSource::Jellyfin;
-    let local_class = if !is_jellyfin {
+    let is_server = config.read().active_source == MusicSource::Server;
+    let local_class = if !is_server {
         "text-white"
     } else {
         "text-slate-500 hover:text-slate-300"
     };
-    let jellyfin_class = if is_jellyfin {
+    let server_class = if is_server {
         "text-white"
     } else {
         "text-slate-500 hover:text-slate-300"
     };
-    let slider_style = if is_jellyfin {
+    let slider_style = if is_server {
         "left: calc(50% + 2px); width: calc(50% - 4px);"
     } else {
         "left: 4px; width: calc(50% - 4px);"
@@ -186,9 +186,9 @@ pub fn Sidebar(props: SidebarProps) -> Element {
                                 "LOCAL"
                             }
                             button {
-                                class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 {jellyfin_class}",
-                                onclick: move |_| config.write().active_source = MusicSource::Jellyfin,
-                                "JELLYFIN"
+                                class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 {server_class}",
+                                onclick: move |_| config.write().active_source = MusicSource::Server,
+                                "SERVER"
                             }
                         }
                     }

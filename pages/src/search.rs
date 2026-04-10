@@ -3,8 +3,8 @@ use dioxus::prelude::*;
 use player::player;
 use reader::Library;
 
-use crate::jellyfin::search::JellyfinSearch;
 use crate::local::search::LocalSearch;
+use crate::server::search::ServerSearch;
 
 #[component]
 pub fn Search(
@@ -23,11 +23,11 @@ pub fn Search(
     queue: Signal<Vec<reader::models::Track>>,
     current_queue_index: Signal<usize>,
 ) -> Element {
-    let is_jellyfin = config.read().active_source == MusicSource::Jellyfin;
+    let is_server = config.read().active_source == MusicSource::Server;
 
     rsx! {
-        if is_jellyfin {
-            JellyfinSearch {
+        if is_server {
+            ServerSearch {
                 library,
                 config,
                 playlist_store,

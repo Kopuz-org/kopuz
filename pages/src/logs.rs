@@ -2,16 +2,16 @@ use config::{AppConfig, MusicSource};
 use dioxus::prelude::*;
 use reader::Library;
 
-use crate::jellyfin::logs::JellyfinLogs;
 use crate::local::logs::LocalLogs;
+use crate::server::logs::ServerLogs;
 
 #[component]
 pub fn Logs(library: Signal<Library>, config: Signal<AppConfig>) -> Element {
-    let is_jellyfin = config.read().active_source == MusicSource::Jellyfin;
+    let is_server = config.read().active_source == MusicSource::Server;
 
     rsx! {
-        if is_jellyfin {
-            JellyfinLogs { library, config }
+        if is_server {
+            ServerLogs { library, config }
         } else {
             LocalLogs { library, config }
         }
