@@ -11,88 +11,106 @@ pub fn JellyfinPlaylists(
     config: Signal<AppConfig>,
     mut selected_playlist_id: Signal<Option<String>>,
 ) -> Element {
-    let mut has_fetched = use_signal(|| false);
+    let mut last_fetch_key = use_signal(|| None::<String>);
+    let mut fetch_request_id = use_signal(|| 0u64);
 
     use_effect(move || {
-        if !*has_fetched.read() {
-            has_fetched.set(true);
-            spawn(async move {
-                let (server_config, device_id) = {
-                    let conf = config.peek();
-                    if let Some(server) = &conf.server {
-                        if let (Some(token), Some(user_id)) =
-                            (&server.access_token, &server.user_id)
-                        {
-                            (
-                                Some((
-                                    server.service,
-                                    server.url.clone(),
-                                    token.clone(),
-                                    user_id.clone(),
-                                )),
-                                conf.device_id.clone(),
-                            )
-                        } else {
-                            (None, conf.device_id.clone())
-                        }
-                    } else {
-                        (None, conf.device_id.clone())
-                    }
-                };
-
-                if let Some((service, url, token, user_id)) = server_config {
-                    let mut jelly_playlists = Vec::new();
-
-                    match service {
-                        MusicService::Jellyfin => {
-                            let remote =
-                                JellyfinClient::new(&url, Some(&token), &device_id, Some(&user_id));
-                            if let Ok(playlists) = remote.get_playlists().await {
-                                for p in playlists {
-                                    if let Ok(items) = remote.get_playlist_items(&p.id).await {
-                                        let tracks: Vec<String> =
-                                            items.into_iter().map(|item| item.id).collect();
-                                        jelly_playlists.push(reader::models::JellyfinPlaylist {
-                                            id: p.id.clone(),
-                                            name: p.name.clone(),
-                                            tracks,
-                                        });
-                                    } else {
-                                        jelly_playlists.push(reader::models::JellyfinPlaylist {
-                                            id: p.id.clone(),
-                                            name: p.name.clone(),
-                                            tracks: vec![],
-                                        });
-                                    }
-                                }
-                            }
-                        }
-                        MusicService::Subsonic | MusicService::Custom => {
-                            let remote = SubsonicClient::new(&url, &user_id, &token);
-                            if let Ok(playlists) = remote.get_playlists().await {
-                                for p in playlists {
-                                    let tracks = remote
-                                        .get_playlist_entries(&p.id)
-                                        .await
-                                        .unwrap_or_default()
-                                        .into_iter()
-                                        .map(|song| song.id)
-                                        .collect();
-                                    jelly_playlists.push(reader::models::JellyfinPlaylist {
-                                        id: p.id,
-                                        name: p.name,
-                                        tracks,
-                                    });
-                                }
-                            }
-                        }
-                    }
-
-                    let mut store_write = playlist_store.write();
-                    store_write.jellyfin_playlists = jelly_playlists;
+        let fetch_context = {
+            let conf = config.read();
+            conf.server.as_ref().and_then(|server| {
+                if let (Some(token), Some(user_id)) = (&server.access_token, &server.user_id) {
+                    Some((
+                        server.service,
+                        server.url.clone(),
+                        token.clone(),
+                        user_id.clone(),
+                        conf.device_id.clone(),
+                    ))
+                } else {
+                    None
                 }
+            })
+        };
+
+        let fetch_key = fetch_context
+            .as_ref()
+            .map(|(service, url, token, user_id, _)| {
+                format!("{service:?}|{url}|{user_id}|{token}")
             });
+
+        if *last_fetch_key.read() == fetch_key {
+            return;
         }
+
+        last_fetch_key.set(fetch_key.clone());
+
+        {
+            let mut store_write = playlist_store.write();
+            store_write.jellyfin_playlists.clear();
+        }
+
+        let Some((service, url, token, user_id, device_id)) = fetch_context else {
+            return;
+        };
+
+        let request_id = *fetch_request_id.read() + 1;
+        fetch_request_id.set(request_id);
+
+        spawn(async move {
+            let mut server_playlists = Vec::new();
+
+            match service {
+                MusicService::Jellyfin => {
+                    let remote =
+                        JellyfinClient::new(&url, Some(&token), &device_id, Some(&user_id));
+                    if let Ok(playlists) = remote.get_playlists().await {
+                        for p in playlists {
+                            if let Ok(items) = remote.get_playlist_items(&p.id).await {
+                                let tracks: Vec<String> =
+                                    items.into_iter().map(|item| item.id).collect();
+                                server_playlists.push(reader::models::JellyfinPlaylist {
+                                    id: p.id.clone(),
+                                    name: p.name.clone(),
+                                    tracks,
+                                });
+                            } else {
+                                server_playlists.push(reader::models::JellyfinPlaylist {
+                                    id: p.id.clone(),
+                                    name: p.name.clone(),
+                                    tracks: vec![],
+                                });
+                            }
+                        }
+                    }
+                }
+                MusicService::Subsonic | MusicService::Custom => {
+                    let remote = SubsonicClient::new(&url, &user_id, &token);
+                    if let Ok(playlists) = remote.get_playlists().await {
+                        for p in playlists {
+                            let tracks = remote
+                                .get_playlist_entries(&p.id)
+                                .await
+                                .unwrap_or_default()
+                                .into_iter()
+                                .map(|song| song.id)
+                                .collect();
+                            server_playlists.push(reader::models::JellyfinPlaylist {
+                                id: p.id,
+                                name: p.name,
+                                tracks,
+                            });
+                        }
+                    }
+                }
+            }
+
+            if *fetch_request_id.read() != request_id {
+                return;
+            }
+
+            let mut store_write = playlist_store.write();
+            store_write.jellyfin_playlists = server_playlists;
+        });
     });
 
     let store = playlist_store.read();

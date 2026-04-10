@@ -1,9 +1,10 @@
 use ::server::jellyfin::JellyfinClient;
+use ::server::subsonic::SubsonicClient;
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
 use components::stat_card::StatCard;
 use components::track_row::TrackRow;
-use config::AppConfig;
+use config::{AppConfig, MusicService};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 use reader::Library;
@@ -217,21 +218,40 @@ pub fn JellyfinLibrary(
                                     if let (Some(token), Some(user_id)) =
                                         (&server.access_token, &server.user_id)
                                     {
-                                        let remote = JellyfinClient::new(
-                                            &server.url,
-                                            Some(token),
-                                            &conf.device_id,
-                                            Some(user_id),
-                                        );
-                                        for path in selected_paths {
-                                            let parts: Vec<&str> = path
-                                                .to_str()
-                                                .unwrap_or_default()
-                                                .split(':')
-                                                .collect();
-                                            if parts.len() >= 2 {
-                                                let item_id = parts[1];
-                                                let _ = remote.add_to_playlist(&pid, item_id).await;
+                                        match server.service {
+                                            MusicService::Jellyfin => {
+                                                let remote = JellyfinClient::new(
+                                                    &server.url,
+                                                    Some(token),
+                                                    &conf.device_id,
+                                                    Some(user_id),
+                                                );
+                                                for path in selected_paths {
+                                                    let parts: Vec<&str> = path
+                                                        .to_str()
+                                                        .unwrap_or_default()
+                                                        .split(':')
+                                                        .collect();
+                                                    if parts.len() >= 2 {
+                                                        let item_id = parts[1];
+                                                        let _ = remote.add_to_playlist(&pid, item_id).await;
+                                                    }
+                                                }
+                                            }
+                                            MusicService::Subsonic | MusicService::Custom => {
+                                                let remote =
+                                                    SubsonicClient::new(&server.url, user_id, token);
+                                                for path in selected_paths {
+                                                    let parts: Vec<&str> = path
+                                                        .to_str()
+                                                        .unwrap_or_default()
+                                                        .split(':')
+                                                        .collect();
+                                                    if parts.len() >= 2 {
+                                                        let item_id = parts[1];
+                                                        let _ = remote.add_to_playlist(&pid, item_id).await;
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -259,12 +279,6 @@ pub fn JellyfinLibrary(
                                     if let (Some(token), Some(user_id)) =
                                         (&server.access_token, &server.user_id)
                                     {
-                                        let remote = JellyfinClient::new(
-                                            &server.url,
-                                            Some(token),
-                                            &conf.device_id,
-                                            Some(user_id),
-                                        );
                                         let item_ids: Vec<String> = selected_paths
                                             .iter()
                                             .filter_map(|p| {
@@ -279,9 +293,26 @@ pub fn JellyfinLibrary(
 
                                         if !item_ids.is_empty() {
                                             let item_id_refs: Vec<&str> = item_ids.iter().map(|s| s.as_str()).collect();
-                                            let _ = remote
-                                                .create_playlist(&playlist_name, &item_id_refs)
-                                                .await;
+                                            match server.service {
+                                                MusicService::Jellyfin => {
+                                                    let remote = JellyfinClient::new(
+                                                        &server.url,
+                                                        Some(token),
+                                                        &conf.device_id,
+                                                        Some(user_id),
+                                                    );
+                                                    let _ = remote
+                                                        .create_playlist(&playlist_name, &item_id_refs)
+                                                        .await;
+                                                }
+                                                MusicService::Subsonic | MusicService::Custom => {
+                                                    let remote =
+                                                        SubsonicClient::new(&server.url, user_id, token);
+                                                    let _ = remote
+                                                        .create_playlist(&playlist_name, &item_id_refs)
+                                                        .await;
+                                                }
+                                            }
                                         }
                                     }
                                 }
