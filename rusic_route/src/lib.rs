@@ -9,4 +9,5 @@ pub enum Route {
     Favorites,
     Logs,
     Settings,
+    ThemeEditor,
 }

@@ -1,6 +1,12 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CustomTheme {
+    pub name: String,
+    pub vars: HashMap<String, String>,
+}
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -68,6 +74,8 @@ pub struct AppConfig {
     pub reduce_animations: bool,
     #[serde(default = "default_volume")]
     pub volume: f32,
+    #[serde(default)]
+    pub custom_themes: HashMap<String, CustomTheme>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -137,6 +145,7 @@ impl Default for AppConfig {
             lastfm_token: String::new(),
             reduce_animations: false,
             volume: default_volume(),
+            custom_themes: HashMap::new(),
         }
     }
 }

@@ -53,11 +53,18 @@ const TOP_MENU: &[SidebarItem] = &[
     },
 ];
 
-const BOTTOM_MENU: &[SidebarItem] = &[SidebarItem {
-    name: "Settings",
-    route: Route::Settings,
-    icon: "fa-solid fa-gear",
-}];
+const BOTTOM_MENU: &[SidebarItem] = &[
+    SidebarItem {
+        name: "Theme Editor",
+        route: Route::ThemeEditor,
+        icon: "fa-solid fa-palette",
+    },
+    SidebarItem {
+        name: "Settings",
+        route: Route::Settings,
+        icon: "fa-solid fa-gear",
+    },
+];
 
 #[derive(Props, Clone, PartialEq)]
 pub struct SidebarProps {

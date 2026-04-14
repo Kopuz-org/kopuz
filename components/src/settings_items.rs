@@ -1,4 +1,4 @@
-use config::MusicServer;
+use config::{AppConfig, MusicServer};
 use dioxus::prelude::*;
 use rfd::AsyncFileDialog;
 
@@ -17,6 +17,15 @@ pub fn SettingItem(title: &'static str, description: String, control: Element) -
 
 #[component]
 pub fn ThemeSelector(current_theme: String, on_change: EventHandler<String>) -> Element {
+    let config = use_context::<Signal<AppConfig>>();
+    let mut custom: Vec<(String, String)> = config
+        .read()
+        .custom_themes
+        .iter()
+        .map(|(id, ct)| (id.clone(), ct.name.clone()))
+        .collect();
+    custom.sort_by(|a, b| a.1.cmp(&b.1));
+
     rsx! {
         select {
             class: "bg-white/5 border border-white/10 rounded px-3 py-1 text-sm text-white focus:outline-none focus:border-white/20",
@@ -52,6 +61,13 @@ pub fn ThemeSelector(current_theme: String, on_change: EventHandler<String>) -> 
                 option { value: "ayu-light", "Ayu Light" }
                 option { value: "one-light", "One Light" }
                 option { value: "gruvbox-light", "Gruvbox Light Soft" }
+            }
+            if !custom.is_empty() {
+                optgroup { label: "── Custom ──",
+                    for (id, name) in &custom {
+                        option { value: "{id}", "{name}" }
+                    }
+                }
             }
         }
     }
