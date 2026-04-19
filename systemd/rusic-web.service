@@ -1,0 +1,16 @@
+[Unit]
+Description=Rusic web bundle static server
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/mnt/musics/rusic/target/dx/rusic/release/web/public
+ExecStart=/usr/bin/python3 -m http.server 8080 --bind 0.0.0.0
+Restart=on-failure
+RestartSec=3
+User=temidaradev
+Group=temidaradev
+
+[Install]
+WantedBy=multi-user.target

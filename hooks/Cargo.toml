@@ -8,7 +8,6 @@ dioxus = { workspace = true }
 reader = { workspace = true }
 utils = { workspace = true }
 player = { workspace = true }
-tokio = { workspace = true }
 config = { workspace = true }
 rand = { workspace = true }
 reqwest = { workspace = true }
@@ -16,5 +15,9 @@ server = { workspace = true }
 scrobble = { workspace = true }
 web-time = { workspace = true }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio = { workspace = true }
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 discord-presence = { workspace = true }
+tokio = { workspace = true, features = ["fs"] }

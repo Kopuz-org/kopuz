@@ -14,6 +14,14 @@ use reader::FavoritesStore;
 use rusic_route::Route;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
+#[cfg(target_arch = "wasm32")]
+use crate::web_storage::{
+    load_web_config, load_web_favorites, load_web_library, load_web_playlists, load_web_ui_state,
+    save_web_config, save_web_favorites, save_web_library, save_web_playlists,
+    save_web_ui_state,
+};
+
+mod web_storage;
 
 const FAVICON: Asset = asset!("../assets/favicon.ico");
 const MAIN_CSS: Asset = asset!("../assets/main.css");
@@ -229,7 +237,7 @@ fn App() -> Element {
     let mut selected_album_id = use_signal(String::new);
     let mut selected_playlist_id = use_signal(|| None::<String>);
     let mut selected_artist_name = use_signal(String::new);
-    let search_query = use_signal(String::new);
+    let mut search_query = use_signal(String::new);
     let mut last_server_playlist_key = use_signal(|| None::<String>);
     let mut server_playlist_key_initialized = use_signal(|| false);
 
@@ -279,6 +287,11 @@ fn App() -> Element {
                 }
             });
         }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let cfg_snapshot = config.read().clone();
+            save_web_config(&cfg_snapshot);
+        }
     });
 
     use_effect(move || {
@@ -296,6 +309,11 @@ fn App() -> Element {
                 }
             });
         }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let store_snapshot = playlist_store.read().clone();
+            save_web_playlists(&store_snapshot);
+        }
     });
 
     use_effect(move || {
@@ -312,6 +330,33 @@ fn App() -> Element {
                     eprintln!("Failed to save library: {}", e);
                 }
             });
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let lib_snapshot = library.read().clone();
+            save_web_library(&lib_snapshot);
+        }
+    });
+
+    use_effect(move || {
+        if !*initial_load_done.read() {
+            return;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let store_snapshot = favorites_store.read().clone();
+            let path = favorites_path();
+            spawn(async move {
+                let result = tokio::task::spawn_blocking(move || store_snapshot.save(&path)).await;
+                if let Ok(Err(e)) = result {
+                    eprintln!("Failed to save favorites: {}", e);
+                }
+            });
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            let store_snapshot = favorites_store.read().clone();
+            save_web_favorites(&store_snapshot);
         }
     });
 
@@ -358,8 +403,64 @@ fn App() -> Element {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            config.write().active_source = config::MusicSource::Server;
+            let mut loaded = load_web_config().unwrap_or_default();
+            if loaded.server.is_none() {
+                loaded.active_source = config::MusicSource::Server;
+            }
+            let loaded_volume = loaded.volume;
+            config.set(loaded);
+            volume.set(loaded_volume);
+            player.write().set_volume(loaded_volume);
+
+            if let Some((
+                route,
+                saved_album_id,
+                saved_playlist_id,
+                saved_artist_name,
+                saved_search_query,
+            )) = load_web_ui_state()
+            {
+                current_route.set(route);
+                selected_album_id.set(saved_album_id);
+                selected_playlist_id.set(saved_playlist_id);
+                selected_artist_name.set(saved_artist_name);
+                search_query.set(saved_search_query);
+            }
+
+            if let Some(loaded_library) = load_web_library() {
+                library.set(loaded_library);
+            }
+            if let Some(loaded_playlists) = load_web_playlists() {
+                playlist_store.set(loaded_playlists);
+            }
+            if let Some(loaded_favorites) = load_web_favorites() {
+                favorites_store.set(loaded_favorites);
+            }
+
             initial_load_done.set(true);
+        }
+    });
+
+    use_effect(move || {
+        if !*initial_load_done.read() {
+            return;
+        }
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            let route = *current_route.read();
+            let album_id = selected_album_id.read().clone();
+            let playlist_id = selected_playlist_id.read().clone();
+            let artist_name = selected_artist_name.read().clone();
+            let query = search_query.read().clone();
+
+            save_web_ui_state(
+                route,
+                &album_id,
+                playlist_id.as_deref(),
+                &artist_name,
+                &query,
+            );
         }
     });
 
