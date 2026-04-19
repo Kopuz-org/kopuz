@@ -10,6 +10,7 @@ pub fn JellyfinPlaylists(
     library: Signal<Library>,
     config: Signal<AppConfig>,
     mut selected_playlist_id: Signal<Option<String>>,
+    #[props(default)] refresh_trigger: Signal<u64>,
 ) -> Element {
     let mut last_fetch_key = use_signal(|| None::<String>);
     let mut fetch_request_id = use_signal(|| 0u64);
@@ -32,10 +33,11 @@ pub fn JellyfinPlaylists(
             })
         };
 
+        let trigger = *refresh_trigger.read();
         let fetch_key = fetch_context
             .as_ref()
             .map(|(service, url, token, user_id, _)| {
-                format!("{service:?}|{url}|{user_id}|{token}")
+                format!("{service:?}|{url}|{user_id}|{token}|{trigger}")
             });
 
         if *last_fetch_key.read() == fetch_key {

@@ -6,6 +6,7 @@ pub fn SelectionBar(
     on_add_to_playlist: EventHandler<()>,
     on_delete: EventHandler<()>,
     on_cancel: EventHandler<()>,
+    #[props(default = true)] show_delete: bool,
 ) -> Element {
     if count == 0 {
         return rsx! { "" };
@@ -27,11 +28,13 @@ pub fn SelectionBar(
                     span { class: "hidden sm:inline", "Add to Playlist" }
                 }
 
-                button {
-                    class: "hover:opacity-80 transition-opacity flex items-center gap-2 font-medium whitespace-nowrap",
-                    onclick: move |_| on_delete.call(()),
-                    i { class: "fa-solid fa-trash text-sm" }
-                    span { class: "hidden sm:inline", "Delete" }
+                if show_delete {
+                    button {
+                        class: "hover:opacity-80 transition-opacity flex items-center gap-2 font-medium whitespace-nowrap",
+                        onclick: move |_| on_delete.call(()),
+                        i { class: "fa-solid fa-trash text-sm" }
+                        span { class: "hidden sm:inline", "Delete" }
+                    }
                 }
             }
 

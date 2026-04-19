@@ -262,6 +262,7 @@ pub fn JellyfinArtist(
                     if is_selection_mode() {
                         SelectionBar {
                             count: selected_tracks.read().len(),
+                            show_delete: false,
                             on_add_to_playlist: move |_| {
                                 show_playlist_modal.set(true);
                             },

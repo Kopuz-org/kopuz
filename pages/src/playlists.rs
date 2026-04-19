@@ -1,9 +1,11 @@
 use components::playlist_detail::PlaylistDetail;
 use components::playlist_popups::AddPlaylistPopup;
-use config::{AppConfig, MusicSource};
+use config::{AppConfig, MusicService, MusicSource};
 use dioxus::prelude::*;
 use player::player;
 use reader::{Library, PlaylistStore};
+use ::server::jellyfin::JellyfinClient;
+use ::server::subsonic::SubsonicClient;
 
 use crate::local::playlists::LocalPlaylists;
 use crate::server::playlists::ServerPlaylists;
@@ -30,14 +32,39 @@ pub fn PlaylistsPage(
     let mut show_add_playlist = use_signal(|| false);
     let mut playlist_name = use_signal(|| String::new());
     let error = use_signal(|| Option::<String>::None);
+    let mut playlist_refresh_trigger = use_signal(|| 0u64);
 
     let handle_add_playlist = move |_| {
-        let mut store = playlist_store.write();
-        store.playlists.push(reader::models::Playlist {
-            id: uuid::Uuid::new_v4().to_string(),
-            name: playlist_name(),
-            tracks: Vec::new(),
-        });
+        let name = playlist_name();
+        if is_server {
+            spawn(async move {
+                let conf = config.peek();
+                if let Some(server) = &conf.server {
+                    if let (Some(token), Some(user_id)) = (&server.access_token, &server.user_id) {
+                        let ok = match server.service {
+                            MusicService::Jellyfin => {
+                                let remote = JellyfinClient::new(&server.url, Some(token), &conf.device_id, Some(user_id));
+                                remote.create_playlist(&name, &[]).await.is_ok()
+                            }
+                            MusicService::Subsonic | MusicService::Custom => {
+                                let remote = SubsonicClient::new(&server.url, user_id, token);
+                                remote.create_playlist(&name, &[]).await.is_ok()
+                            }
+                        };
+                        if ok {
+                            playlist_refresh_trigger.with_mut(|v| *v += 1);
+                        }
+                    }
+                }
+            });
+        } else {
+            let mut store = playlist_store.write();
+            store.playlists.push(reader::models::Playlist {
+                id: uuid::Uuid::new_v4().to_string(),
+                name,
+                tracks: Vec::new(),
+            });
+        }
 
         show_add_playlist.set(false);
         playlist_name.set(String::new());
@@ -96,6 +123,7 @@ pub fn PlaylistsPage(
                         library,
                         config,
                         selected_playlist_id,
+                        refresh_trigger: playlist_refresh_trigger,
                     }
                 } else {
                     LocalPlaylists {

@@ -174,6 +174,7 @@ pub fn JellyfinFavorites(
                     },
                     on_close_menu: move |_| active_menu_track.set(None),
                     on_delete: move |_| active_menu_track.set(None),
+                    hide_delete: true,
                     on_play: move |_| {
                         queue.set(queue_source.clone());
                         ctrl.play_track(idx);
@@ -300,6 +301,7 @@ pub fn JellyfinFavorites(
             if is_selection_mode() {
                 SelectionBar {
                     count: selected_tracks.read().len(),
+                    show_delete: false,
                     on_add_to_playlist: move |_| {
                         show_playlist_modal.set(true);
                     },

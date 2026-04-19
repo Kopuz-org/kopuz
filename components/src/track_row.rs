@@ -15,6 +15,7 @@ pub fn TrackRow(
     on_remove_from_playlist: Option<EventHandler<()>>,
     #[props(default = false)] is_selection_mode: bool,
     #[props(default = false)] is_selected: bool,
+    #[props(default = false)] hide_delete: bool,
     on_select: Option<EventHandler<bool>>,
     on_long_press: Option<EventHandler<()>>,
 ) -> Element {
@@ -25,7 +26,9 @@ pub fn TrackRow(
         actions.push(MenuAction::new("Remove from Playlist", "fa-solid fa-minus"));
     }
 
-    actions.push(MenuAction::new("Delete Song", "fa-solid fa-trash").destructive());
+    if !hide_delete {
+        actions.push(MenuAction::new("Delete Song", "fa-solid fa-trash").destructive());
+    }
 
     let mut long_press_task = use_signal(|| None);
     let mut long_press_occurred = use_signal(|| false);
