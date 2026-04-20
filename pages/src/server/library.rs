@@ -226,7 +226,7 @@ pub fn JellyfinLibrary(
 
     rsx! {
         div {
-            class: "p-8 relative min-h-full",
+            class: "p-8 relative h-full flex flex-col overflow-hidden",
 
             if *show_playlist_modal.read() {
                 PlaylistModal {
@@ -451,7 +451,7 @@ pub fn JellyfinLibrary(
             }
 
             div {
-                class: "pb-20 h-[calc(100vh-300px)] overflow-y-auto",
+                class: "flex-1 overflow-y-auto pb-20",
                 onmounted: move |event| {
                     spawn(async move {
                         if let Ok(window) = event.get_client_rect().await {
