@@ -13,6 +13,7 @@ pub fn SelectionBar(
     }
 
     let delete_text = rust_i18n::t!("delete").to_string();
+    let add_to_playlist_text = rust_i18n::t!("add_to_playlist").to_string();
 
     rsx! {
         div {
@@ -27,7 +28,7 @@ pub fn SelectionBar(
                     class: "hover:opacity-80 transition-opacity flex items-center gap-2 font-medium whitespace-nowrap",
                     onclick: move |_| on_add_to_playlist.call(()),
                     i { class: "fa-solid fa-plus text-sm" }
-                    span { class: "hidden sm:inline", "{rust_i18n::t!(\"add_to_playlist\")}" }
+                    span { class: "hidden sm:inline", "{add_to_playlist_text}" }
                 }
 
                 if show_delete {

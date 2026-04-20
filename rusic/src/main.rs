@@ -55,7 +55,7 @@ fn main() {
             player::systemint::init();
         }
 
-        let window = dioxus::desktop::WindowBuilder::new()
+        let mut window = dioxus::desktop::WindowBuilder::new()
             .with_title("Rusic")
             .with_resizable(true)
             .with_inner_size(LogicalSize::new(1350.0, 800.0));
