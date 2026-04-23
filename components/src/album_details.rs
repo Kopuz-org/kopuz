@@ -35,12 +35,17 @@ pub fn AlbumDetails(
         None => return rsx! { div { "{rust_i18n::t!(\"album_not_found\")}" } },
     };
 
-    let tracks: Vec<_> = lib
+    let mut tracks: Vec<_> = lib
         .tracks
         .iter()
         .filter(|t| t.album == album.title)
         .cloned()
         .collect();
+    tracks.sort_by(|a, b| {
+        a.track_number
+            .cmp(&b.track_number)
+            .then_with(|| a.title.cmp(&b.title))
+    });
 
     let album_cover = utils::format_artwork_url(album.cover_path.as_ref());
 
