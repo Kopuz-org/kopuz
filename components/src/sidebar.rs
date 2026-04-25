@@ -46,7 +46,14 @@ pub fn Sidebar(props: SidebarProps) -> Element {
     let onmousemove = move |evt: MouseEvent| {
         if *is_resizing.read() {
             let new_width = evt.client_coordinates().x as i32;
-            if new_width > 180 && new_width < 450 {
+            if *is_collapsed.read() {
+                if new_width > 180 {
+                    is_collapsed.set(false);
+                    width.set(new_width);
+                }
+            } else if new_width < 150 {
+                is_collapsed.set(true);
+            } else if new_width < 450 {
                 width.set(new_width);
             }
         }
@@ -54,7 +61,7 @@ pub fn Sidebar(props: SidebarProps) -> Element {
 
     let onmouseup = move |_| is_resizing.set(false);
 
-    let header_class = if *is_collapsed.read() { "justify-center px-0" } else { "justify-between px-6" };
+
     let extra_padding = if cfg!(target_os = "macos") { "pt-10" } else { "" };
 
     let is_server = config.read().active_source == MusicSource::Server;
@@ -93,43 +100,21 @@ pub fn Sidebar(props: SidebarProps) -> Element {
         }
 
         div {
-            class: "h-full bg-black/40 text-slate-400 flex flex-col flex-shrink-0 select-none relative transition-all duration-300 ease-out border-r border-white/5 {extra_padding}",
+            class: "h-full bg-black/40 text-slate-400 flex flex-col flex-shrink-0 select-none relative border-r border-white/5 {extra_padding}",
             style: "width: {current_width}px",
 
-            div {
-                class: "absolute top-0 left-0 w-full h-10 z-50",
-                onmousedown: move |_| {
-                    #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
-                    use_window().drag();
-                }
-            }
-
-            div {
-                class: "h-20 flex items-center mb-4 transition-all {header_class}",
-                onmousedown: move |_| {
-                    #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
-                    use_window().drag();
-                },
-                if !*is_collapsed.read() {
-                    h2 {
-                        class: "text-lg font-bold tracking-widest text-white/90 uppercase",
-                        style: "font-family: 'JetBrains Mono', monospace;",
-                        "KOPUZ"
-                    }
-                }
-                button {
-                    class: "p-2 rounded-lg hover:bg-white/5 text-slate-500 hover:text-white transition-all active:scale-95 flex items-center justify-center shrink-0",
-                    onclick: move |_| is_collapsed.toggle(),
-                    if *is_collapsed.read() {
-                        i { class: "fa-solid fa-angles-right w-6 h-6 flex items-center justify-center text-xl" }
-                    } else {
-                        i { class: "fa-solid fa-angles-left w-5 h-5 flex items-center justify-center text-lg" }
+            if cfg!(all(not(target_arch = "wasm32"), target_os = "macos")) {
+                div {
+                    class: "absolute top-0 left-0 w-full h-10 z-50",
+                    onmousedown: move |_| {
+                        #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
+                        use_window().drag();
                     }
                 }
             }
 
             div {
-                class: "flex-1 flex flex-col overflow-y-auto overflow-x-hidden",
+                class: "flex-1 flex flex-col overflow-y-auto overflow-x-hidden pt-2",
 
                 if !*is_collapsed.read() && !cfg!(target_arch = "wasm32") && config.read().show_source_toggle {
                     div {
@@ -205,12 +190,10 @@ pub fn Sidebar(props: SidebarProps) -> Element {
                 }
             }
 
-            if !*is_collapsed.read() {
-                div {
-                    class: "absolute top-0 right-0 w-1 h-full cursor-col-resize group/handle z-50",
-                    onmousedown: move |_| is_resizing.set(true),
-                    div { class: "absolute inset-y-0 right-0 w-px bg-white/0 group-hover/handle:bg-white/10 transition-colors" }
-                }
+            div {
+                class: "absolute top-0 right-0 w-2 h-full cursor-col-resize group/handle z-50",
+                onmousedown: move |_| is_resizing.set(true),
+                div { class: "absolute inset-y-0 right-0 w-px bg-white/0 group-hover/handle:bg-white/10 transition-colors" }
             }
         }
     }

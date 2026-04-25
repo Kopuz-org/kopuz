@@ -46,11 +46,6 @@ pub fn JellyfinPlaylists(
 
         last_fetch_key.set(fetch_key.clone());
 
-        {
-            let mut store_write = playlist_store.write();
-            store_write.jellyfin_playlists.clear();
-        }
-
         let request_id = *fetch_request_id.read() + 1;
         fetch_request_id.set(request_id);
 
