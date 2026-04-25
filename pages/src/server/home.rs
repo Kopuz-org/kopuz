@@ -146,6 +146,30 @@ pub fn JellyfinHome(
             .collect::<Vec<_>>()
     });
 
+    let jellyfin_hero_cover = use_memo(move || {
+        let conf = config.read();
+        let lib = library.read();
+        let shuffled = jellyfin_shuffled.read();
+        let Some((album_id, ..)) = shuffled.first() else {
+            return None;
+        };
+        let Some(album) = lib.jellyfin_albums.iter().find(|a| a.id == *album_id) else {
+            return None;
+        };
+        let Some(server) = &conf.server else {
+            return None;
+        };
+        album.cover_path.as_ref().and_then(|cover_path| {
+            utils::jellyfin_image::jellyfin_image_url_from_path(
+                &cover_path.to_string_lossy(),
+                &server.url,
+                server.access_token.as_deref(),
+                1400,
+                96,
+            )
+        })
+    });
+
     let scroll_container = move |id: &str, direction: i32| {
         let script = format!(
             "document.getElementById('{}').scrollBy({{ left: {}, behavior: 'smooth' }})",
@@ -160,11 +184,12 @@ pub fn JellyfinHome(
             section { class: "relative h-[350px] rounded-3xl overflow-hidden mb-12",
                 {
                     let jelly_list = jellyfin_shuffled.read();
-                    if let Some((album_id, title, artist, cover_url)) = jelly_list.first() {
+                    if let Some((album_id, title, artist, _)) = jelly_list.first() {
+                        let hero_url: Option<String> = jellyfin_hero_cover.read().clone();
                         rsx! {
                             div { class: "absolute inset-0",
-                                if let Some(url) = cover_url {
-                                    img { src: "{url}", class: "w-full h-full object-cover", decoding: "async", loading: "lazy" }
+                                if let Some(url) = hero_url {
+                                    img { src: "{url}", class: "w-full h-full object-cover", decoding: "async" }
                                 }
                                 div { class: "absolute inset-0 bg-gradient-to-r from-black/90 via-black/40 to-transparent" }
                             }

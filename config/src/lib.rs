@@ -78,6 +78,8 @@ pub struct AppConfig {
     pub reduce_animations: bool,
     #[serde(default = "default_show_source_toggle")]
     pub show_source_toggle: bool,
+    #[serde(default = "default_sidebar_order")]
+    pub sidebar_order: Vec<String>,
     #[serde(default = "default_volume")]
     pub volume: f32,
     #[serde(default)]
@@ -133,6 +135,19 @@ fn default_show_source_toggle() -> bool {
     true
 }
 
+pub fn default_sidebar_order() -> Vec<String> {
+    vec![
+        "home".to_string(),
+        "search".to_string(),
+        "library".to_string(),
+        "albums".to_string(),
+        "artists".to_string(),
+        "playlists".to_string(),
+        "favorites".to_string(),
+        "Activity".to_string(),
+    ]
+}
+
 fn default_volume() -> f32 {
     1.0
 }
@@ -161,6 +176,7 @@ impl Default for AppConfig {
             language: default_language(),
             reduce_animations: false,
             show_source_toggle: default_show_source_toggle(),
+            sidebar_order: default_sidebar_order(),
             volume: default_volume(),
             custom_themes: HashMap::new(),
         }
