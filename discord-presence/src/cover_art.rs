@@ -2,7 +2,7 @@ use serde::Deserialize;
 
 const MUSICBRAINZ_API: &str = "https://musicbrainz.org/ws/2";
 const COVER_ART_ARCHIVE: &str = "https://coverartarchive.org";
-const USER_AGENT: &str = "Kopuz/0.3.2 (https://github.com/temidaradev/kopuz)";
+const USER_AGENT: &str = "Kopuz/0.4.2 (https://github.com/temidaradev/kopuz)";
 
 #[derive(Debug, Deserialize)]
 struct ReleaseSearchResponse {

@@ -1,6 +1,6 @@
 pkgbase = kopuz
 	pkgdesc = A modern music player
-	pkgver = 0.4.0
+	pkgver = 0.4.2
 	pkgrel = 1
 	url = https://github.com/temidaradev/kopuz
 	arch = x86_64

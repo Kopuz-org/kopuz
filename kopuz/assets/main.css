@@ -1,4 +1,8 @@
 /* App-wide styling */
+.flex-row-reverse {
+    flex-direction: row-reverse;
+}
+
 html,
 body {
     height: 100%;
