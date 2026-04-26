@@ -8,7 +8,7 @@ body {
     background-color: #000000;
     color: #ffffff;
     font-family:
-        "JetBrains Mono", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        "JetBrains Mono", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif, Helvetica;
     margin: 0;
     overflow: hidden;
 }
