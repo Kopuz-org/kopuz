@@ -113,14 +113,14 @@ no_playlists_yet = Du hast noch keine Playlists. Füge Songs aus deiner Biblioth
 add_music_to_get_started = Füge Musik hinzu, um loszulegen
 
 # Data Labels
-title = Title
-time = Time
+title = Titel
+time = Zeit
 genre = Genre
-plays = Plays
-track_count = { $count } tracks
-track_count_singular = 1 track
-songs = songs
-min = min
+plays = Wiedergaben
+track_count = { $count } Titel
+track_count_singular = 1 Titel
+songs = Songs
+min = Min.
 
 # Error Messages
 invalid_server_url = Die Server-URL ist ungültig
