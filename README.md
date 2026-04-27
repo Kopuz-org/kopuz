@@ -2,6 +2,14 @@
 
 Kopuz is a modern, lightweight, music player application built with Rust and the Dioxus framework. It provides a clean and responsive interface for managing and enjoying your local music collection.
 
+## About the Name
+
+The kopuz is an ancient Turkic string instrument and is often considered the ancestor of many Central Asian lutes. It was traditionally used by bards and shamans.
+
+The Kyrgyz komuz is not the same instrument, but likely a descendant of the kopuz. The Kazakh kobyz is also related, though it is bowed rather than plucked. In contrast, the Tuvan/Yakut xomus (jaw harp) is unrelated, despite the similar name.
+
+In Turkic legend, the kopuz is linked to Dede Korkut, a legendary bard, though this is mythological rather than historical.
+
 [![Discord](https://img.shields.io/badge/Discord-5865F2?style=flat&logo=discord&logoColor=white)](https://discord.gg/K6Bmzw2E4M)
 ![Rust](https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white)
 

@@ -1,6 +1,6 @@
 pkgbase = kopuz
 	pkgdesc = A modern music player
-	pkgver = 0.4.0
+	pkgver = 0.4.2
 	pkgrel = 1
 	url = https://github.com/temidaradev/kopuz
 	arch = x86_64
@@ -16,7 +16,7 @@ pkgbase = kopuz
 	depends = openssl
 	depends = xdotool
 	depends = dbus
-	source = kopuz-0.4.0.tar.gz::https://github.com/temidaradev/kopuz/archive/refs/tags/v0.4.0.tar.gz
-	sha256sums = 5f71a49f5e43a499af7d09c44653e687eef5bc41879b91e83d8fa4b2760cc87e
+	source = kopuz-0.4.2.tar.gz::https://github.com/temidaradev/kopuz/archive/refs/tags/v0.4.2.tar.gz
+	sha256sums = 0935d1e7ea1e5377ea669ed460f530ca48f45d0448da88518951a1cf45705aeb
 
 pkgname = kopuz

@@ -6,6 +6,10 @@
     font-style: normal;
 }
 
+.flex-row-reverse {
+    flex-direction: row-reverse;
+}
+
 html,
 body {
     height: 100%;

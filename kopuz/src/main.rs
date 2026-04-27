@@ -583,11 +583,7 @@ fn App() -> Element {
 
     let is_rtl = i18n::is_rtl();
     let dir = if is_rtl { "rtl" } else { "ltr" };
-    let content_row_class = if is_rtl {
-        "flex flex-1 overflow-hidden flex-row-reverse"
-    } else {
-        "flex flex-1 overflow-hidden"
-    };
+    let content_row_class = "flex flex-1 overflow-hidden";
 
     let background_style = if config.read().theme == "album-art" {
         utils::color::get_background_style(palette.read().as_deref())
@@ -617,7 +613,7 @@ fn App() -> Element {
                 }
             },
             if cfg!(target_os = "linux") {
-                Titlebar {}
+                div { dir: "ltr", Titlebar {} }
             }
             div {
                 class: "{content_row_class}",
