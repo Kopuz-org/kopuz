@@ -173,7 +173,8 @@ overall these changes brought the rescan time down significantly and the app fee
 ## Tech Stack
 
 - **Dioxus**: UI Framework
-- **Rodio**: Audio playback library
+- **Symphonia**: Audio decoding library
+- **Cpal**: Audio I/O library
 - **Lofty**: Metadata parsing
 - **TailwindCSS**: Styling framework based on CSS
 
