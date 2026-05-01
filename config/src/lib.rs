@@ -2,6 +2,97 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::fs;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct YtdlpOptions {
+    #[serde(default = "default_true")]
+    pub embed_metadata: bool,
+    #[serde(default = "default_true")]
+    pub embed_thumbnail: bool,
+    #[serde(default)]
+    pub embed_chapters: bool,
+    #[serde(default)]
+    pub embed_subs: bool,
+    #[serde(default)]
+    pub embed_info_json: bool,
+    #[serde(default)]
+    pub write_thumbnail: bool,
+    #[serde(default)]
+    pub write_description: bool,
+    #[serde(default)]
+    pub write_info_json: bool,
+    #[serde(default)]
+    pub write_subs: bool,
+    #[serde(default)]
+    pub write_auto_subs: bool,
+    #[serde(default)]
+    pub write_comments: bool,
+    #[serde(default)]
+    pub sponsorblock: bool,
+    #[serde(default)]
+    pub sponsorblock_mark: bool,
+    #[serde(default)]
+    pub split_chapters: bool,
+    #[serde(default)]
+    pub convert_thumbnail: String,
+    #[serde(default)]
+    pub no_playlist: bool,
+    #[serde(default)]
+    pub xattrs: bool,
+    #[serde(default)]
+    pub no_mtime: bool,
+    #[serde(default)]
+    pub rate_limit: String,
+    #[serde(default)]
+    pub cookies_from_browser: String,
+    #[serde(default = "default_audio_quality")]
+    pub audio_quality: u8,
+}
+
+impl Default for YtdlpOptions {
+    fn default() -> Self {
+        Self {
+            embed_metadata: true,
+            embed_thumbnail: true,
+            embed_chapters: false,
+            embed_subs: false,
+            embed_info_json: false,
+            write_thumbnail: false,
+            write_description: false,
+            write_info_json: false,
+            write_subs: false,
+            write_auto_subs: false,
+            write_comments: false,
+            sponsorblock: false,
+            sponsorblock_mark: false,
+            split_chapters: false,
+            convert_thumbnail: String::new(),
+            no_playlist: false,
+            xattrs: false,
+            no_mtime: false,
+            rate_limit: String::new(),
+            cookies_from_browser: String::new(),
+            audio_quality: 0,
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+fn default_audio_quality() -> u8 {
+    0
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct YtdlpHistoryEntry {
+    pub url: String,
+    pub title: String,
+    pub format: String,
+    pub status: String,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CustomTheme {
     pub name: String,
@@ -102,6 +193,12 @@ pub struct AppConfig {
     pub custom_themes: HashMap<String, CustomTheme>,
     #[serde(default)]
     pub back_behavior: BackBehavior,
+    #[serde(default)]
+    pub ytdlp_output_dir: String,
+    #[serde(default)]
+    pub ytdlp_options: YtdlpOptions,
+    #[serde(default)]
+    pub ytdlp_history: Vec<YtdlpHistoryEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -166,7 +263,8 @@ pub fn default_sidebar_order() -> Vec<String> {
         "artists".to_string(),
         "playlists".to_string(),
         "favorites".to_string(),
-        "Activity".to_string(),
+        "activity".to_string(),
+        "ytdlp".to_string(),
     ]
 }
 
@@ -178,8 +276,6 @@ fn default_language() -> String {
     "en".to_string()
 }
 
-/// Custom deserializer for music_directory that accepts either a single PathBuf
-/// (old config format) or a Vec<PathBuf> (new multi-folder format).
 fn deserialize_music_directories<'de, D>(deserializer: D) -> Result<Vec<PathBuf>, D::Error>
 where
     D: Deserializer<'de>,
@@ -221,6 +317,9 @@ impl Default for AppConfig {
             volume: default_volume(),
             custom_themes: HashMap::new(),
             back_behavior: BackBehavior::RewindThenPrev,
+            ytdlp_output_dir: String::new(),
+            ytdlp_options: YtdlpOptions::default(),
+            ytdlp_history: Vec::new(),
         }
     }
 }

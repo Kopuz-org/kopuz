@@ -51,6 +51,7 @@
               rustToolchain
               dioxus-cli
               nodejs_22
+              yt-dlp
             ];
 
             shellHook = ''

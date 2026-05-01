@@ -42,6 +42,7 @@ show_source_toggle = Show Source Toggle
 volume = Volume
 local = Local
 server = Server
+ytdlp = Downloads
 
 # UI Actions & Buttons
 add_to_favorites = Add to Favorites

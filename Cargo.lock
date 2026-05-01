@@ -4353,6 +4353,8 @@ dependencies = [
  "reader",
  "reqwest 0.12.28",
  "rfd",
+ "serde",
+ "serde_json",
  "server",
  "tokio",
  "utils",

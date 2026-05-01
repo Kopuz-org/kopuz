@@ -820,6 +820,7 @@ fn App() -> Element {
                               config: config,
                           }
                         },
+                        Route::Ytdlp => rsx! { pages::ytdlp::YtdlpPage { config } },
                         Route::Settings => rsx! { pages::settings::Settings { config } },
                         Route::ThemeEditor => rsx! { pages::theme_editor::ThemeEditorPage { config } },
                     }

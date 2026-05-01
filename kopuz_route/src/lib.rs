@@ -8,6 +8,7 @@ pub enum Route {
     Playlists,
     Favorites,
     Activity,
+    Ytdlp,
     Settings,
     ThemeEditor,
 }
