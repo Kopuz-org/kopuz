@@ -42,7 +42,6 @@ impl Biquad {
 
     fn set_coefficients(&mut self, coeffs: Coefficients) {
         self.coeffs = coeffs;
-        self.reset();
     }
 
     fn process(&mut self, sample: f32) -> f32 {
@@ -94,6 +93,12 @@ impl Band {
         }
     }
 
+    fn reset_filters(&mut self) {
+        for filter in &mut self.filters {
+            filter.reset();
+        }
+    }
+
     fn process(&mut self, channel: usize, sample: f32) -> f32 {
         let index = if channel < self.filters.len() {
             channel
@@ -131,19 +136,19 @@ impl Equalizer {
             }),
             output_gain: 1.0,
         };
-        equalizer.rebuild();
+        equalizer.rebuild(false);
         equalizer
     }
 
     pub fn set_settings(&mut self, settings: EqualizerSettings) {
         self.settings = settings;
-        self.rebuild();
+        self.rebuild(false);
     }
 
     pub fn update_output_format(&mut self, sample_rate: u32, channels: usize) {
         self.sample_rate = sample_rate.max(1);
         self.channels = channels.max(1);
-        self.rebuild();
+        self.rebuild(true);
     }
 
     pub fn process_in_place(&mut self, samples: &mut [f32]) {
@@ -162,7 +167,7 @@ impl Equalizer {
         }
     }
 
-    fn rebuild(&mut self) {
+    fn rebuild(&mut self, reset_filter_state: bool) {
         let resolved_bands = self.settings.resolved_bands();
         let max_boost = resolved_bands
             .iter()
@@ -175,6 +180,9 @@ impl Equalizer {
         for (band, gain) in self.bands.iter_mut().zip(resolved_bands) {
             band.ensure_channels(self.channels, self.sample_rate);
             band.update_gain(gain, self.sample_rate);
+            if reset_filter_state {
+                band.reset_filters();
+            }
         }
     }
 }

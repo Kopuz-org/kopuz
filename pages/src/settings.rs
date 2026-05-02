@@ -237,20 +237,25 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     }
                 }
 
-                section {
-                    h2 {
-                        class: "text-lg font-semibold text-white/80 mb-4 border-b border-white/5 pb-2",
-                        "{i18n::t(\"player_settings\")}"
-                    }
+                if !cfg!(target_arch = "wasm32") {
+                    section {
+                        h2 {
+                            class: "text-lg font-semibold text-white/80 mb-4 border-b border-white/5 pb-2",
+                            "{i18n::t(\"player_settings\")}"
+                        }
 
-                    div { class: "space-y-4",
-                        div { class: "py-2",
-                            p { class: "text-white font-medium mb-3", "{i18n::t(\"equalizer\")}" }
-                            EqualizerPanel {
-                                current: config.read().equalizer.clone(),
-                                on_change: move |equalizer: config::EqualizerSettings| {
-                                    config.write().equalizer = equalizer.clone();
-                                    ctrl.player.write().set_equalizer(equalizer);
+                        div { class: "space-y-4",
+                            div { class: "py-2",
+                                p { class: "text-white font-medium mb-3", "{i18n::t(\"equalizer\")}" }
+                                EqualizerPanel {
+                                    current: config.read().equalizer.clone(),
+                                    on_preview: move |equalizer: config::EqualizerSettings| {
+                                        ctrl.player.write().set_equalizer(equalizer);
+                                    },
+                                    on_commit: move |equalizer: config::EqualizerSettings| {
+                                        config.write().equalizer = equalizer.clone();
+                                        ctrl.player.write().set_equalizer(equalizer);
+                                    }
                                 }
                             }
                         }

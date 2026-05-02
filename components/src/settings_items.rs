@@ -347,17 +347,17 @@ fn eq_nearest_band(x: f64, total: usize) -> usize {
     nearest
 }
 
-fn eq_apply_drag(
-    base: &EqualizerConfig,
-    index: usize,
-    y: f64,
-) -> EqualizerConfig {
+fn eq_apply_band_gain(base: &EqualizerConfig, index: usize, gain: f32) -> EqualizerConfig {
     let mut next = base.clone();
     let mut bands = base.resolved_bands();
-    bands[index] = eq_y_to_gain(y);
+    bands[index] = gain.clamp(EQ_MIN_DB as f32, EQ_MAX_DB as f32);
     next.bands = bands;
     next.preset = EqPreset::Custom;
     next
+}
+
+fn eq_apply_drag(base: &EqualizerConfig, index: usize, y: f64) -> EqualizerConfig {
+    eq_apply_band_gain(base, index, eq_y_to_gain(y))
 }
 
 fn eq_preset_label(preset: EqPreset) -> String {
@@ -374,13 +374,15 @@ fn eq_preset_label(preset: EqPreset) -> String {
 #[component]
 pub fn EqualizerPanel(
     current: EqualizerConfig,
-    on_change: EventHandler<EqualizerConfig>,
+    on_preview: EventHandler<EqualizerConfig>,
+    on_commit: EventHandler<EqualizerConfig>,
 ) -> Element {
     const BAND_LABELS: [&str; 5] = ["60 Hz", "250 Hz", "1 kHz", "4 kHz", "12 kHz"];
 
-    let enabled = current.enabled;
-    let resolved_bands = current.resolved_bands();
+    let mut draft = use_signal(|| current.clone());
     let mut dragging_band = use_signal(|| None::<usize>);
+    let enabled = draft.read().enabled;
+    let resolved_bands = draft.read().resolved_bands();
     let slider_style = if enabled {
         "inset-inline-start: 4px; width: calc(50% - 4px);"
     } else {
@@ -398,20 +400,6 @@ pub fn EqualizerPanel(
     } else {
         "text-slate-500 hover:text-slate-300"
     };
-
-    let current_for_enable = current.clone();
-    let current_for_disable = current.clone();
-    let current_for_preset = current.clone();
-    let current_for_preamp = current.clone();
-
-    let on_change_enable = on_change.clone();
-    let on_change_disable = on_change.clone();
-    let on_change_preset = on_change.clone();
-    let on_change_preamp = on_change.clone();
-    let current_for_graph_down = current.clone();
-    let current_for_graph_move = current.clone();
-    let on_change_graph_down = on_change.clone();
-    let on_change_graph_move = on_change.clone();
 
     let graph_path = resolved_bands
         .iter()
@@ -439,18 +427,22 @@ pub fn EqualizerPanel(
                     button {
                         class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 cursor-pointer {enable_class}",
                         onclick: move |_| {
-                            let mut next = current_for_enable.clone();
+                            let mut next = draft.peek().clone();
                             next.enabled = true;
-                            on_change_enable.call(next);
+                            draft.set(next.clone());
+                            on_preview.call(next.clone());
+                            on_commit.call(next);
                         },
                         "{i18n::t(\"enabled\")}"
                     }
                     button {
                         class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 cursor-pointer {disable_class}",
                         onclick: move |_| {
-                            let mut next = current_for_disable.clone();
+                            let mut next = draft.peek().clone();
                             next.enabled = false;
-                            on_change_disable.call(next);
+                            draft.set(next.clone());
+                            on_preview.call(next.clone());
+                            on_commit.call(next);
                         },
                         "{i18n::t(\"disabled\")}"
                     }
@@ -460,16 +452,18 @@ pub fn EqualizerPanel(
                     span { class: "text-xs uppercase tracking-[0.18em] text-slate-400", "{i18n::t(\"eq_preset\")}" }
                     select {
                         class: "bg-transparent text-sm text-white focus:outline-none",
-                        value: "{current.preset.as_storage()}",
+                        value: "{draft.read().preset.as_storage()}",
                         onchange: move |evt| {
-                            let mut next = current_for_preset.clone();
+                            let mut next = draft.peek().clone();
                             next.preset = EqPreset::from_storage(&evt.value());
-                            on_change_preset.call(next);
+                            draft.set(next.clone());
+                            on_preview.call(next.clone());
+                            on_commit.call(next);
                         },
                         for preset in EqPreset::all() {
                             option {
                                 value: "{preset.as_storage()}",
-                                selected: preset == current.preset,
+                                selected: preset == draft.read().preset,
                                 "{eq_preset_label(preset)}"
                             }
                         }
@@ -486,18 +480,27 @@ pub fn EqualizerPanel(
                         min: "-12",
                         max: "6",
                         step: "0.5",
-                        value: format!("{:.1}", current.preamp_db),
+                        value: format!("{:.1}", draft.read().preamp_db),
                         class: "flex-1",
                         style: "accent-color: var(--color-indigo-500);",
                         oninput: move |evt| {
                             if let Ok(value) = evt.value().parse::<f32>() {
-                                let mut next = current_for_preamp.clone();
+                                let mut next = draft.peek().clone();
                                 next.preamp_db = value;
-                                on_change_preamp.call(next);
+                                draft.set(next.clone());
+                                on_preview.call(next);
+                            }
+                        },
+                        onchange: move |evt| {
+                            if let Ok(value) = evt.value().parse::<f32>() {
+                                let mut next = draft.peek().clone();
+                                next.preamp_db = value;
+                                draft.set(next.clone());
+                                on_commit.call(next);
                             }
                         }
                     }
-                    span { class: "text-xs font-mono text-white/80 w-14 text-right", {format!("{:+.1} dB", current.preamp_db)} }
+                    span { class: "text-xs font-mono text-white/80 w-14 text-right", {format!("{:+.1} dB", draft.read().preamp_db)} }
                 }
             }
 
@@ -514,16 +517,30 @@ pub fn EqualizerPanel(
                         let point = evt.element_coordinates();
                         let index = eq_nearest_band(point.x, BAND_LABELS.len());
                         dragging_band.set(Some(index));
-                        on_change_graph_down.call(eq_apply_drag(&current_for_graph_down, index, point.y));
+                        let next = eq_apply_drag(&draft.peek().clone(), index, point.y);
+                        draft.set(next.clone());
+                        on_preview.call(next);
                     },
                     onmousemove: move |evt: MouseEvent| {
                         if let Some(index) = *dragging_band.read() {
                             let point = evt.element_coordinates();
-                            on_change_graph_move.call(eq_apply_drag(&current_for_graph_move, index, point.y));
+                            let next = eq_apply_drag(&draft.peek().clone(), index, point.y);
+                            draft.set(next.clone());
+                            on_preview.call(next);
                         }
                     },
-                    onmouseup: move |_| dragging_band.set(None),
-                    onmouseleave: move |_| dragging_band.set(None),
+                    onmouseup: move |_| {
+                        if dragging_band.peek().is_some() {
+                            on_commit.call(draft.peek().clone());
+                        }
+                        dragging_band.set(None);
+                    },
+                    onmouseleave: move |_| {
+                        if dragging_band.peek().is_some() {
+                            on_commit.call(draft.peek().clone());
+                        }
+                        dragging_band.set(None);
+                    },
                     for db in [-12.0_f64, -6.0, 0.0, 6.0, 12.0] {
                         line {
                             x1: "{EQ_GRAPH_PAD_X}",
@@ -599,6 +616,7 @@ pub fn EqualizerPanel(
                         }
                     }
                 }
+
             }
 
         }
