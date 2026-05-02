@@ -37,6 +37,7 @@ Kopuz allows you to scan your local directories for audio files, or stream from 
 - **Auto-Cleanup**: Automatically removes missing or deleted tracks from your library when rescanning.
 - **Smooth Navigation**: Enjoy a polished interface where scroll positions reset properly as you browse different views and pages.
 - **Reduce Animations**: Accessibility setting to tone down motion effects if you prefer a calmer UI.
+- **Equalizer**: Built-in 5-band equalizer with presets and custom settings to fine-tune your sound.
 
 ## Installation
 
