@@ -407,8 +407,10 @@ pub fn EqualizerPanel(
     let config = use_context::<Signal<AppConfig>>();
     let mut draft = use_signal(|| current.clone());
     let mut dragging_band = use_signal(|| None::<usize>);
+    let mut hovered_band = use_signal(|| None::<usize>);
     let mut displayed_bands = use_signal(|| current.resolved_bands());
     let mut animation_token = use_signal(|| 0_u64);
+    let reduce_animations = config.read().reduce_animations;
     let enabled = draft.read().enabled;
     let resolved_bands = *displayed_bands.read();
     let slider_style = if enabled {
@@ -429,6 +431,13 @@ pub fn EqualizerPanel(
         "text-slate-500 hover:text-slate-300"
     };
     let active_drag_band = *dragging_band.read();
+    let active_hover_band = *hovered_band.read();
+    let highlighted_band = active_drag_band.or(active_hover_band);
+    let graph_class = if active_drag_band.is_some() {
+        "block mx-auto cursor-grabbing"
+    } else {
+        "block mx-auto cursor-row-resize"
+    };
 
     let graph_path = resolved_bands
         .iter()
@@ -443,6 +452,49 @@ pub fn EqualizerPanel(
         })
         .collect::<Vec<_>>()
         .join(" ");
+    let graph_fill_path = format!(
+        "{} L {:.2} {:.2} L {:.2} {:.2} Z",
+        graph_path,
+        eq_band_x(BAND_LABELS.len().saturating_sub(1), BAND_LABELS.len()),
+        EQ_GRAPH_HEIGHT - EQ_GRAPH_PAD_BOTTOM,
+        eq_band_x(0, BAND_LABELS.len()),
+        EQ_GRAPH_HEIGHT - EQ_GRAPH_PAD_BOTTOM
+    );
+    let curve_fill_style = {
+        let opacity = if enabled {
+            if highlighted_band.is_some() { 0.94 } else { 0.82 }
+        } else {
+            0.22
+        };
+
+        if reduce_animations {
+            format!("fill: url(#eq-curve-fill); opacity: {opacity:.2};")
+        } else {
+            format!(
+                "fill: url(#eq-curve-fill); opacity: {opacity:.2}; transition: opacity 160ms ease-out;"
+            )
+        }
+    };
+    let curve_stroke_style = if enabled {
+        if highlighted_band.is_some() {
+            if reduce_animations {
+                "stroke: var(--color-indigo-400);".to_string()
+            } else {
+                "stroke: var(--color-indigo-400); transition: stroke 140ms ease-out;"
+                    .to_string()
+            }
+        } else if reduce_animations {
+            "stroke: var(--color-indigo-500);".to_string()
+        } else {
+            "stroke: var(--color-indigo-500); transition: stroke 140ms ease-out;".to_string()
+        }
+    } else if reduce_animations {
+        "stroke: color-mix(in oklab, var(--color-indigo-500) 52%, var(--color-slate-400));"
+            .to_string()
+    } else {
+        "stroke: color-mix(in oklab, var(--color-indigo-500) 52%, var(--color-slate-400)); transition: stroke 180ms ease-out;"
+            .to_string()
+    };
 
     rsx! {
         div { class: "flex flex-col gap-4 w-full",
@@ -494,7 +546,7 @@ pub fn EqualizerPanel(
                             draft.set(next.clone());
                             let token = *animation_token.read() + 1;
                             animation_token.set(token);
-                            if config.read().reduce_animations {
+                            if reduce_animations {
                                 displayed_bands.set(next_bands);
                             } else {
                                 spawn(async move {
@@ -569,13 +621,14 @@ pub fn EqualizerPanel(
                 class: "rounded-2xl border border-white/8 bg-white/5 p-4 select-none overflow-x-auto",
                 style: "background: color-mix(in oklab, var(--color-neutral-900) 78%, transparent); border-color: color-mix(in oklab, var(--color-white) 8%, transparent);",
                 svg {
-                    class: "block mx-auto cursor-row-resize",
+                    class: "{graph_class}",
                     style: "width: 760px; height: 280px; min-width: 760px;",
                     view_box: "0 0 760 280",
                     onmousedown: move |evt: MouseEvent| {
                         let point = evt.element_coordinates();
                         let index = eq_nearest_band(point.x, BAND_LABELS.len());
                         dragging_band.set(Some(index));
+                        hovered_band.set(Some(index));
                         let next = eq_apply_drag(&draft.peek().clone(), index, point.y);
                         draft.set(next.clone());
                         let token = *animation_token.read() + 1;
@@ -584,8 +637,10 @@ pub fn EqualizerPanel(
                         on_preview.call(next);
                     },
                     onmousemove: move |evt: MouseEvent| {
+                        let point = evt.element_coordinates();
+                        let index = eq_nearest_band(point.x, BAND_LABELS.len());
+                        hovered_band.set(Some(index));
                         if let Some(index) = *dragging_band.read() {
-                            let point = evt.element_coordinates();
                             let next = eq_apply_drag(&draft.peek().clone(), index, point.y);
                             draft.set(next.clone());
                             displayed_bands.set(next.resolved_bands());
@@ -597,13 +652,32 @@ pub fn EqualizerPanel(
                             on_commit.call(draft.peek().clone());
                         }
                         dragging_band.set(None);
+                        hovered_band.set(None);
                     },
                     onmouseleave: move |_| {
                         if dragging_band.peek().is_some() {
                             on_commit.call(draft.peek().clone());
                         }
                         dragging_band.set(None);
+                        hovered_band.set(None);
                     },
+                    defs {
+                        linearGradient {
+                            id: "eq-curve-fill",
+                            x1: "0",
+                            y1: "0",
+                            x2: "0",
+                            y2: "1",
+                            stop {
+                                offset: "0%",
+                                style: "stop-color: color-mix(in oklab, var(--color-indigo-400) 34%, transparent); stop-opacity: 1;",
+                            }
+                            stop {
+                                offset: "100%",
+                                style: "stop-color: color-mix(in oklab, var(--color-indigo-500) 3%, transparent); stop-opacity: 1;",
+                            }
+                        }
+                    }
                     for db in [-12.0_f64, -6.0, 0.0, 6.0, 12.0] {
                         line {
                             x1: "{EQ_GRAPH_PAD_X}",
@@ -647,35 +721,88 @@ pub fn EqualizerPanel(
                         }
                     }
                     path {
+                        d: "{graph_fill_path}",
+                        style: "{curve_fill_style}",
+                    }
+                    if let Some(index) = highlighted_band {
+                        line {
+                            x1: "{eq_band_x(index, BAND_LABELS.len())}",
+                            x2: "{eq_band_x(index, BAND_LABELS.len())}",
+                            y1: "{EQ_GRAPH_PAD_TOP}",
+                            y2: "{EQ_GRAPH_HEIGHT - EQ_GRAPH_PAD_BOTTOM}",
+                            stroke_width: "1.5",
+                            style: if reduce_animations {
+                                "stroke: color-mix(in oklab, var(--color-indigo-400) 34%, transparent);"
+                            } else {
+                                "stroke: color-mix(in oklab, var(--color-indigo-400) 34%, transparent); transition: stroke 140ms ease-out;"
+                            },
+                        }
+                    }
+                    path {
                         d: "{graph_path}",
                         fill: "none",
                         stroke_width: "2.5",
                         stroke_linecap: "round",
                         stroke_linejoin: "round",
-                        style: "stroke: var(--color-indigo-500);",
+                        style: "{curve_stroke_style}",
                     }
                     for (index, gain) in resolved_bands.iter().enumerate() {
-                        circle {
-                            cx: "{eq_band_x(index, BAND_LABELS.len())}",
-                            cy: "{eq_gain_to_y(*gain)}",
-                            r: if active_drag_band == Some(index) { "8" } else { "6" },
-                            style: if active_drag_band == Some(index) {
-                                "fill: var(--color-indigo-400);"
-                            } else {
-                                "fill: var(--color-white);"
-                            },
-                        }
-                        circle {
-                            cx: "{eq_band_x(index, BAND_LABELS.len())}",
-                            cy: "{eq_gain_to_y(*gain)}",
-                            r: "14",
-                            fill: "transparent",
-                            stroke_width: "1",
-                            style: if active_drag_band == Some(index) {
-                                "stroke: color-mix(in oklab, var(--color-indigo-400) 40%, transparent);"
-                            } else {
-                                "stroke: color-mix(in oklab, var(--color-white) 10%, transparent);"
-                            },
+                        {
+                            let is_highlighted = highlighted_band == Some(index);
+                            rsx! {
+                                circle {
+                                    cx: "{eq_band_x(index, BAND_LABELS.len())}",
+                                    cy: "{eq_gain_to_y(*gain)}",
+                                    r: if active_drag_band == Some(index) {
+                                        "8"
+                                    } else if is_highlighted {
+                                        "7"
+                                    } else {
+                                        "6"
+                                    },
+                                    style: if active_drag_band == Some(index) {
+                                        if reduce_animations {
+                                            "fill: var(--color-indigo-400);"
+                                        } else {
+                                            "fill: var(--color-indigo-400); transition: r 140ms ease-out, fill 140ms ease-out;"
+                                        }
+                                    } else if is_highlighted {
+                                        if reduce_animations {
+                                            "fill: var(--color-indigo-400);"
+                                        } else {
+                                            "fill: var(--color-indigo-400); transition: r 140ms ease-out, fill 140ms ease-out;"
+                                        }
+                                    } else if reduce_animations {
+                                        "fill: var(--color-white);"
+                                    } else {
+                                        "fill: var(--color-white); transition: r 140ms ease-out, fill 140ms ease-out;"
+                                    },
+                                }
+                                circle {
+                                    cx: "{eq_band_x(index, BAND_LABELS.len())}",
+                                    cy: "{eq_gain_to_y(*gain)}",
+                                    r: if is_highlighted { "16" } else { "14" },
+                                    fill: "transparent",
+                                    stroke_width: "1",
+                                    style: if active_drag_band == Some(index) {
+                                        if reduce_animations {
+                                            "stroke: color-mix(in oklab, var(--color-indigo-400) 40%, transparent);"
+                                        } else {
+                                            "stroke: color-mix(in oklab, var(--color-indigo-400) 40%, transparent); transition: r 140ms ease-out, stroke 140ms ease-out;"
+                                        }
+                                    } else if is_highlighted {
+                                        if reduce_animations {
+                                            "stroke: color-mix(in oklab, var(--color-indigo-400) 28%, transparent);"
+                                        } else {
+                                            "stroke: color-mix(in oklab, var(--color-indigo-400) 28%, transparent); transition: r 140ms ease-out, stroke 140ms ease-out;"
+                                        }
+                                    } else if reduce_animations {
+                                        "stroke: color-mix(in oklab, var(--color-white) 10%, transparent);"
+                                    } else {
+                                        "stroke: color-mix(in oklab, var(--color-white) 10%, transparent); transition: r 140ms ease-out, stroke 140ms ease-out;"
+                                    },
+                                }
+                            }
                         }
                     }
                     if let Some(index) = active_drag_band {
