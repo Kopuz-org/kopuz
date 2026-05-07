@@ -145,11 +145,6 @@ sudo dnf groupinstall "Development Tools" "Development Libraries"
 sudo dnf install rust cargo cmake pkgconf-pkg-config opus-devel alsa-lib-devel libxdo-devel webkit2gtk4.1-devel gtk3-devel libsoup3-devel openssl-devel
 cargo install --locked dioxus-cli
 ```
-**openSUSE Based Systems**
-```bash
-sudo zypper install rust cargo cmake pkg-config libopus-devel alsa-devel xdotool webkit2gtk3-soup2-devel gtk3-devel libsoup3-devel libopenssl-devel
-cargo install --locked dioxus-cli
-```
 
 **openSUSE Based Systems**
 
