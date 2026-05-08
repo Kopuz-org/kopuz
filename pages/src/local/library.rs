@@ -317,7 +317,12 @@ div {
                     });
                 },
                 onscroll: move |event| {
-                    scroll_stat.set(event.scroll_top());
+                    let new_scroll = event.scroll_top();
+                    let old_row = (*scroll_stat.peek() / ITEM_HEIGHT).floor() as i64;
+                    let new_row = (new_scroll / ITEM_HEIGHT).floor() as i64;
+                    if new_row != old_row {
+                        scroll_stat.set(new_scroll);
+                    }
                     let height = event.client_height() as f64;
                     if (height - *container_height.peek()).abs() > 1.0 {
                         container_height.set(height);

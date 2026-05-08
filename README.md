@@ -1,6 +1,15 @@
-# Kopuz (formerly known as Rusic)
+<div align="center">
+  <img src="kopuz/assets/banner.png" alt="Kopuz Logo" height="300"/>
+
+# Kopuz (Formerly Rusic)
 
 Kopuz is a modern, lightweight, music player application built with Rust and the Dioxus framework. It provides a clean and responsive interface for managing and enjoying your local music collection.
+
+[![Discord](https://img.shields.io/badge/Discord-5865F2?style=flat&logo=discord&logoColor=white)](https://discord.gg/K6Bmzw2E4M)
+![Rust](https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white)
+![Kopuz](https://github.com/user-attachments/assets/c0cdbcfa-f468-4a51-8910-2e27f3d55127)
+
+</div>
 
 ## About the Name
 
@@ -9,11 +18,6 @@ The kopuz is an ancient Turkic string instrument and is often considered the anc
 The Kyrgyz komuz is not the same instrument, but likely a descendant of the kopuz. The Kazakh kobyz is also related, though it is bowed rather than plucked. In contrast, the Tuvan/Yakut xomus (jaw harp) is unrelated, despite the similar name.
 
 In Turkic legend, the kopuz is linked to Dede Korkut, a legendary bard, though this is mythological rather than historical.
-
-[![Discord](https://img.shields.io/badge/Discord-5865F2?style=flat&logo=discord&logoColor=white)](https://discord.gg/K6Bmzw2E4M)
-![Rust](https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white)
-
-![Kopuz](https://github.com/user-attachments/assets/c0cdbcfa-f468-4a51-8910-2e27f3d55127)
 
 ## Overview
 
@@ -85,7 +89,6 @@ environment.systemPackages = [
 ];
 ```
 
-
 ### Flatpak (Recommended)
 
 Kopuz is soon available on Flathub. To install from source manifest:
@@ -106,7 +109,7 @@ You can also click on the file and open it with an app provider, for example KDE
 On Arch-based distros, if the AppImage crashes with a `WebKitNetworkProcess` error, either run it with:
 
 ```bash
-LD_LIBRARY_PATH=/usr/lib ./rusic_*.AppImage
+LD_LIBRARY_PATH=/usr/lib ./kopuz_*.AppImage
 ```
 
 Or create symlinks once (requires sudo):
@@ -121,27 +124,34 @@ sudo ln -s /usr/lib/webkit2gtk-4.1/WebKitGPUProcess /usr/libexec/webkit2gtk-4.1/
 ### Build from Source
 
 #### Dependencies
+
 **Arch Linux Based Systems**
+
 ```bash
 sudo pacman -S rust cargo dioxus-cli base-devel cmake pkgconf opus alsa-lib xdotool webkit2gtk-4.1 gtk3 libsoup3 openssl
 ```
+
 **Debian Based Systems**
+
 ```bash
 sudo apt install rustc cargo build-essential cmake pkg-config libopus-dev libasound2-dev libxdo-dev libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libssl-dev
 cargo install dioxus-cli
 ```
+
 **Fedora Based Systems**
+
 ```bash
 sudo dnf groupinstall "Development Tools" "Development Libraries"
 sudo dnf install rust cargo cmake pkgconf-pkg-config opus-devel alsa-lib-devel libxdo-devel webkit2gtk4.1-devel gtk3-devel libsoup3-devel openssl-devel
-cargo install dioxus-cli
-```
-**openSUSE Based Systems**
-```bash
-sudo zypper install rust cargo cmake pkg-config libopus-devel alsa-devel xdotool webkit2gtk3-soup2-devel gtk3-devel libsoup3-devel libopenssl-devel
-cargo install dioxus-cli
+cargo install --locked dioxus-cli
 ```
 
+**openSUSE Based Systems**
+
+```bash
+sudo zypper install rust cargo cmake pkg-config libopus-devel alsa-devel xdotool webkit2gtk3-soup2-devel gtk3-devel libsoup3-devel libopenssl-devel
+cargo install --locked dioxus-cli
+```
 
 ```bash
 git clone https://github.com/temidaradev/kopuz
@@ -158,16 +168,17 @@ dx serve --package kopuz
 xattr -d com.apple.quarantine /Applications/Kopuz.app
 ```
 
-
 ### Where does Kopuz keep its files?
 
 On **macOS** everything lives under your Library folders:
+
 - `~/Library/Application Support/com.temidaradev.kopuz/config.json` — your settings
 - `~/Library/Caches/com.temidaradev.kopuz/library.json` — the scanned library
 - `~/Library/Caches/com.temidaradev.kopuz/playlists.json` — your playlists
 - `~/Library/Caches/com.temidaradev.kopuz/covers/` — cached album art
 
 On **Linux** it follows the XDG spec like you'd expect:
+
 - `~/.config/kopuz/config.json` — your settings
 - `~/.cache/kopuz/library.json` — the scanned library
 - `~/.cache/kopuz/playlists.json` — your playlists

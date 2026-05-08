@@ -202,7 +202,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
-                        if cfg!(target_os = "linux") {
+                        if cfg!(any(target_os = "linux", target_os = "windows")) {
                             SettingItem {
                                 title: i18n::t("titlebar_mode").to_string(),
                                 control: rsx! {

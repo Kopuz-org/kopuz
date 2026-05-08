@@ -8,9 +8,9 @@ base_path = "kopuz/assets"
 [bundle]
 identifier = "com.temidaradev.kopuz"
 publisher = "temidaradev"
-icon = ["assets/logo.png"]
+icon = ["kopuz/assets/favicon.ico", "kopuz/assets/logo.png"]
 category = "public.app-category.music"
-targets = ["macos", "dmg"]
+targets = ["macos", "dmg", "nsis", "msi"]
 
 [bundle.macos]
 info_plist_path = "Info.plist"
