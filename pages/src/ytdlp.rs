@@ -129,7 +129,7 @@ fn find_in_augmented_path(binary: &str) -> Option<String> {
         return Some(binary.to_string());
     }
 
-    let candidates = vec![binary.to_string()];
+    let mut candidates = vec![binary.to_string()];
     #[cfg(target_os = "windows")]
     if !binary.ends_with(".exe") {
         candidates.push(format!("{binary}.exe"));
