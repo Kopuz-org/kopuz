@@ -26,11 +26,17 @@ pub fn TrackRow(
     let remove_from_playlist_text = i18n::t("remove_from_playlist").to_string();
     let delete_song_text = i18n::t("delete").to_string();
 
-    let mut actions = vec![MenuAction::new(add_to_playlist_text.as_str(), "fa-solid fa-plus")];
+    let mut actions = vec![MenuAction::new(
+        add_to_playlist_text.as_str(),
+        "fa-solid fa-plus",
+    )];
 
     let has_remove = on_remove_from_playlist.is_some();
     if has_remove {
-        actions.push(MenuAction::new(remove_from_playlist_text.as_str(), "fa-solid fa-minus"));
+        actions.push(MenuAction::new(
+            remove_from_playlist_text.as_str(),
+            "fa-solid fa-minus",
+        ));
     }
 
     let has_download = on_download.is_some();
@@ -54,7 +60,11 @@ pub fn TrackRow(
     }
 
     let download_action_idx = if has_remove { 2 } else { 1 };
-    let delete_action_idx = if has_download { download_action_idx + 1 } else { download_action_idx };
+    let delete_action_idx = if has_download {
+        download_action_idx + 1
+    } else {
+        download_action_idx
+    };
 
     let mut long_press_task = use_signal(|| None);
     let mut long_press_occurred = use_signal(|| false);
@@ -93,10 +103,14 @@ pub fn TrackRow(
                     long_press_occurred.set(false);
                     return;
                 }
-                if is_selection_mode {
-                    if let Some(handler) = on_select {
-                        handler.call(!is_selected);
+                if !is_selected && !is_selection_mode {
+                    if let Some(handler) = on_long_press {
+                        handler.call(());
+                    } else if let Some(handler) = on_select {
+                        handler.call(true);
                     }
+                } else if let Some(handler) = on_select {
+                    handler.call(!is_selected);
                 }
             },
             ondoubleclick: move |evt| {
@@ -117,13 +131,30 @@ pub fn TrackRow(
                 }
             },
 
-            if is_selection_mode {
-                div { class: "mr-4 flex items-center justify-center w-6 h-6",
-                    input {
-                        r#type: "checkbox",
-                        class: "w-4 h-4 rounded border-white/20 bg-transparent text-indigo-500 focus:ring-indigo-400",
-                        checked: is_selected,
-                        onchange: |_| {}, // Controlled component
+            if on_select.is_some() {
+                div { class: "mr-4 flex items-center justify-center w-6 h-6 shrink-0",
+                    button {
+                        class: if is_selected {
+                            "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
+                        } else {
+                            "w-4 h-4 rounded border border-white/20 bg-white/5 hover:border-white/50 transition-colors"
+                        },
+                        aria_label: if is_selected { "Deselect track" } else { "Select track" },
+                        onclick: move |evt| {
+                            evt.stop_propagation();
+                            if !is_selected && !is_selection_mode {
+                                if let Some(handler) = on_long_press {
+                                    handler.call(());
+                                } else if let Some(handler) = on_select {
+                                    handler.call(true);
+                                }
+                            } else if let Some(handler) = on_select {
+                                handler.call(!is_selected);
+                            }
+                        },
+                        if is_selected {
+                            i { class: "fa-solid fa-check", style: "font-size: 9px;" }
+                        }
                     }
                 }
             }

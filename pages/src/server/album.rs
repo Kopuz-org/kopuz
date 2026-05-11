@@ -1,5 +1,3 @@
-use ::server::jellyfin::JellyfinClient;
-use ::server::subsonic::SubsonicClient;
 use crate::server::download_manager::{DownloadQueue, DownloadStatus, queue_downloads};
 use components::dots_menu::{DotsMenu, MenuAction};
 use components::playlist_modal::PlaylistModal;
@@ -8,6 +6,8 @@ use components::track_row::TrackRow;
 use config::{AppConfig, MusicService};
 use dioxus::prelude::*;
 use reader::{Library, PlaylistStore};
+use server::jellyfin::JellyfinClient;
+use server::subsonic::SubsonicClient;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -40,15 +40,19 @@ pub fn JellyfinAlbum(
 
         let offline = *is_offline.read();
         let downloaded_album_ids: std::collections::HashSet<String> = if offline {
-            lib.jellyfin_tracks.iter().filter(|t| {
-                let id = t.path.to_string_lossy();
-                let id_str = id.split(':').nth(1).unwrap_or(&id);
-                if let Some(path_str) = conf.offline_tracks.get(id_str) {
-                    std::path::Path::new(path_str).exists()
-                } else {
-                    false
-                }
-            }).map(|t| t.album_id.clone()).collect()
+            lib.jellyfin_tracks
+                .iter()
+                .filter(|t| {
+                    let id = t.path.to_string_lossy();
+                    let id_str = id.split(':').nth(1).unwrap_or(&id);
+                    if let Some(path_str) = conf.offline_tracks.get(id_str) {
+                        std::path::Path::new(path_str).exists()
+                    } else {
+                        false
+                    }
+                })
+                .map(|t| t.album_id.clone())
+                .collect()
         } else {
             std::collections::HashSet::new()
         };
@@ -230,7 +234,9 @@ pub fn JellyfinAlbumDetails(
             .iter()
             .filter(|t| !album_name.is_empty() && t.album == album_name)
             .filter(|t| {
-                if !offline { return true; }
+                if !offline {
+                    return true;
+                }
                 let s = t.path.to_string_lossy();
                 let id = s.split(':').nth(1).unwrap_or(&s);
                 conf.offline_tracks.contains_key(id)
@@ -238,14 +244,16 @@ pub fn JellyfinAlbumDetails(
             .map(|t| {
                 let cover_url = if let Some(server) = &conf.server {
                     let path_str = t.path.to_string_lossy();
-                    utils::map_cover_url(utils::jellyfin_image::track_cover_url_with_album_fallback(
-                        &path_str,
-                        &t.album_id,
-                        &server.url,
-                        server.access_token.as_deref(),
-                        80,
-                        80,
-                    ))
+                    utils::map_cover_url(
+                        utils::jellyfin_image::track_cover_url_with_album_fallback(
+                            &path_str,
+                            &t.album_id,
+                            &server.url,
+                            server.access_token.as_deref(),
+                            80,
+                            80,
+                        ),
+                    )
                 } else {
                     None
                 };
@@ -557,8 +565,33 @@ pub fn JellyfinAlbumDetails(
                         p { class: "text-lg", "{i18n::t(\"no_songs_here\")}" }
                     }
                 } else {
-                    div { class: "grid grid-cols-[auto_1fr_1fr_auto_auto] gap-4 px-4 py-2 border-b border-white/5 text-sm font-medium text-slate-500 mb-2 uppercase tracking-wider",
-                        div { class: "w-8 text-center", "#" }
+                    div { class: "grid grid-cols-[auto_1fr_1fr_auto_auto] gap-4 px-2 py-2 border-b border-white/5 text-sm font-medium text-slate-500 mb-2 uppercase tracking-wider",
+                        div { class: "flex items-center w-24 shrink-0",
+                            div { class: "mr-4 flex items-center justify-center w-6 h-6 shrink-0",
+                                button {
+                                    class: if !album_tracks().is_empty() && album_tracks().iter().all(|(track, _)| selected_tracks.read().contains(&track.path)) {
+                                        "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
+                                    } else {
+                                        "w-4 h-4 rounded border border-white/20 bg-white/5 hover:border-white/50 transition-colors"
+                                    },
+                                    aria_label: "Select all tracks",
+                                    onclick: move |_| {
+                                        let tracks = album_tracks();
+                                        let all_selected = !tracks.is_empty() && tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.path));
+                                        if all_selected {
+                                            selected_tracks.write().clear();
+                                            is_selection_mode.set(false);
+                                        } else {
+                                            selected_tracks.set(tracks.into_iter().map(|(track, _)| track.path).collect());
+                                            is_selection_mode.set(true);
+                                        }
+                                    },
+                                    if !album_tracks().is_empty() && album_tracks().iter().all(|(track, _)| selected_tracks.read().contains(&track.path)) {
+                                        i { class: "fa-solid fa-check", style: "font-size: 9px;" }
+                                    }
+                                }
+                            }
+                        }
                         div { "{i18n::t(\"title\")}" }
                         div { "{i18n::t(\"album\")}" }
                     }
@@ -601,6 +634,7 @@ pub fn JellyfinAlbumDetails(
                                     },
                                     on_select: move |selected| {
                                         if selected {
+                                            is_selection_mode.set(true);
                                             selected_tracks.write().insert(track_select.clone());
                                         } else {
                                             selected_tracks.write().remove(&track_select);

@@ -31,6 +31,9 @@ pub struct ShowcaseProps {
     #[props(default = HashSet::new())]
     pub selected_tracks: HashSet<PathBuf>,
     pub on_select: Option<EventHandler<(usize, bool)>>,
+    pub on_select_all: Option<EventHandler<bool>>,
+    #[props(default = false)]
+    pub all_selected: bool,
     pub on_long_press: Option<EventHandler<usize>>,
     pub on_cover_click: Option<EventHandler<()>>,
     #[props(default = false)]
@@ -53,15 +56,16 @@ pub fn Showcase(props: ShowcaseProps) -> Element {
     // Read offline_tracks once for the whole render pass so we can cheaply check per-track
     let offline_tracks = config.read().offline_tracks.clone();
 
-    let all_downloaded = !props.tracks.is_empty() && props.tracks.iter().all(|t| {
-        let p = t.path.to_string_lossy();
-        let id = p.split(':').nth(1).unwrap_or(&p);
-        if let Some(path_str) = offline_tracks.get(id) {
-            std::path::Path::new(path_str).exists()
-        } else {
-            false
-        }
-    });
+    let all_downloaded = !props.tracks.is_empty()
+        && props.tracks.iter().all(|t| {
+            let p = t.path.to_string_lossy();
+            let id = p.split(':').nth(1).unwrap_or(&p);
+            if let Some(path_str) = offline_tracks.get(id) {
+                std::path::Path::new(path_str).exists()
+            } else {
+                false
+            }
+        });
 
     rsx! {
          div {
@@ -148,11 +152,30 @@ pub fn Showcase(props: ShowcaseProps) -> Element {
                          p { class: "text-lg", "{i18n::t(\"no_songs_here\")}" }
                      }
                  } else {
-                     div { class: "grid grid-cols-[auto_1fr_1fr_auto_auto] gap-4 px-4 py-2 border-b border-white/5 text-sm font-medium text-slate-500 mb-2 uppercase tracking-wider",
-                          div { class: "w-8 text-center", "#" }
-                          div { "{i18n::t(\"title\")}" }
-                          div { "{i18n::t(\"album\")}" }
-                     }
+                      div { class: "grid grid-cols-[auto_1fr_1fr_auto_auto] gap-4 px-2 py-2 border-b border-white/5 text-sm font-medium text-slate-500 mb-2 uppercase tracking-wider",
+                           div { class: "flex items-center w-24 shrink-0",
+                               if let Some(handler) = props.on_select_all {
+                                   div { class: "mr-4 flex items-center justify-center w-6 h-6 shrink-0",
+                                       button {
+                                           class: if props.all_selected {
+                                               "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
+                                           } else {
+                                               "w-4 h-4 rounded border border-white/20 bg-white/5 hover:border-white/50 transition-colors"
+                                           },
+                                           aria_label: if props.all_selected { "Deselect all tracks" } else { "Select all tracks" },
+                                           onclick: move |_| handler.call(!props.all_selected),
+                                           if props.all_selected {
+                                               i { class: "fa-solid fa-check", style: "font-size: 9px;" }
+                                           }
+                                       }
+                                   }
+                               } else {
+                                   "#"
+                               }
+                           }
+                           div { "{i18n::t(\"title\")}" }
+                           div { "{i18n::t(\"album\")}" }
+                      }
 
                      for (idx, track) in props.tracks.iter().enumerate() {
                          {

@@ -1,6 +1,6 @@
+use crate::server::download_manager::{DownloadQueue, DownloadStatus, queue_downloads};
 use ::server::jellyfin::JellyfinClient;
 use ::server::subsonic::SubsonicClient;
-use crate::server::download_manager::{DownloadQueue, DownloadStatus, queue_downloads};
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
 use components::track_row::TrackRow;
@@ -106,14 +106,16 @@ pub fn JellyfinFavorites(
             .map(|t| {
                 let cover_url = if let Some(ref srv) = server_ref {
                     let path_str = t.path.to_string_lossy();
-                    utils::map_cover_url(utils::jellyfin_image::track_cover_url_with_album_fallback(
-                        &path_str,
-                        &t.album_id,
-                        &srv.url,
-                        srv.access_token.as_deref(),
-                        80,
-                        80,
-                    ))
+                    utils::map_cover_url(
+                        utils::jellyfin_image::track_cover_url_with_album_fallback(
+                            &path_str,
+                            &t.album_id,
+                            &srv.url,
+                            srv.access_token.as_deref(),
+                            80,
+                            80,
+                        ),
+                    )
                 } else {
                     None
                 };
@@ -128,7 +130,8 @@ pub fn JellyfinFavorites(
     let is_empty = displayed_tracks.is_empty();
 
     let tracks_nodes = displayed_tracks
-        .into_iter()
+        .iter()
+        .cloned()
         .enumerate()
         .map(|(idx, (track, cover_url))| {
             let track_menu = track.clone();
@@ -168,6 +171,7 @@ pub fn JellyfinFavorites(
                     },
                     on_select: move |selected| {
                         if selected {
+                            is_selection_mode.set(true);
                             selected_tracks.write().insert(track_select.clone());
                         } else {
                             selected_tracks.write().remove(&track_select);
@@ -360,6 +364,31 @@ pub fn JellyfinFavorites(
                     }
                 }
             } else if !is_empty {
+                div {
+                    class: "flex items-center gap-3 mb-4 px-2 text-sm font-medium text-slate-500 uppercase tracking-wider",
+                    button {
+                        class: if displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.path)) {
+                            "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
+                        } else {
+                            "w-4 h-4 rounded border border-white/20 bg-white/5 hover:border-white/50 transition-colors"
+                        },
+                        aria_label: "Select all tracks",
+                        onclick: move |_| {
+                            let all_selected = !displayed_tracks.is_empty() && displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.path));
+                            if all_selected {
+                                selected_tracks.write().clear();
+                                is_selection_mode.set(false);
+                            } else {
+                                selected_tracks.set(displayed_tracks.iter().map(|(track, _)| track.path.clone()).collect());
+                                is_selection_mode.set(true);
+                            }
+                        },
+                        if displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.path)) {
+                            i { class: "fa-solid fa-check", style: "font-size: 9px;" }
+                        }
+                    }
+                    span { "Select all" }
+                }
                 div {
                     class: "space-y-1",
                     {tracks_nodes}

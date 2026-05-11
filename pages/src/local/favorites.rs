@@ -55,71 +55,74 @@ pub fn LocalFavorites(
 
     let is_empty = displayed_tracks.is_empty();
 
-    let tracks_nodes = displayed_tracks
-        .into_iter()
-        .enumerate()
-        .map(|(idx, (track, cover_url))| {
-            let track_menu = track.clone();
-            let track_path = track.path.clone();
-            let track_select = track.path.clone();
-            let track_add = track.clone();
-            let track_delete = track.clone();
-            let queue_source = queue_tracks.clone();
-            let track_key = format!("{}-{}", track.path.display(), idx);
-            let is_menu_open = active_menu_track.read().as_ref() == Some(&track.path);
-            let is_selected = selected_tracks.read().contains(&track_path);
+    let tracks_nodes =
+        displayed_tracks
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(idx, (track, cover_url))| {
+                let track_menu = track.clone();
+                let track_path = track.path.clone();
+                let track_select = track.path.clone();
+                let track_add = track.clone();
+                let track_delete = track.clone();
+                let queue_source = queue_tracks.clone();
+                let track_key = format!("{}-{}", track.path.display(), idx);
+                let is_menu_open = active_menu_track.read().as_ref() == Some(&track.path);
+                let is_selected = selected_tracks.read().contains(&track_path);
 
-            rsx! {
-                div {
-                    key: "{track_key}",
-                    style: "content-visibility: auto; contain-intrinsic-size: 0 60px;",
-                    TrackRow {
-                        track: track.clone(),
-                        cover_url: cover_url.clone(),
-                    is_menu_open,
-                    is_selection_mode: is_selection_mode(),
-                    is_selected,
-                    on_long_press: move |_| {
-                        is_selection_mode.set(true);
-                        selected_tracks.write().insert(track_path.clone());
-                    },
-                    on_select: move |selected| {
-                        if selected {
-                            selected_tracks.write().insert(track_select.clone());
-                        } else {
-                            selected_tracks.write().remove(&track_select);
-                            if selected_tracks.read().is_empty() {
-                                is_selection_mode.set(false);
+                rsx! {
+                    div {
+                        key: "{track_key}",
+                        style: "content-visibility: auto; contain-intrinsic-size: 0 60px;",
+                        TrackRow {
+                            track: track.clone(),
+                            cover_url: cover_url.clone(),
+                        is_menu_open,
+                        is_selection_mode: is_selection_mode(),
+                        is_selected,
+                        on_long_press: move |_| {
+                            is_selection_mode.set(true);
+                            selected_tracks.write().insert(track_path.clone());
+                        },
+                        on_select: move |selected| {
+                            if selected {
+                                is_selection_mode.set(true);
+                                selected_tracks.write().insert(track_select.clone());
+                            } else {
+                                selected_tracks.write().remove(&track_select);
+                                if selected_tracks.read().is_empty() {
+                                    is_selection_mode.set(false);
+                                }
                             }
-                        }
-                    },
-                    on_click_menu: move |_| {
-                        if active_menu_track.read().as_ref() == Some(&track_menu.path) {
+                        },
+                        on_click_menu: move |_| {
+                            if active_menu_track.read().as_ref() == Some(&track_menu.path) {
+                                active_menu_track.set(None);
+                            } else {
+                                active_menu_track.set(Some(track_menu.path.clone()));
+                            }
+                        },
+                        on_add_to_playlist: move |_| {
+                            selected_track_for_playlist.set(Some(track_add.path.clone()));
+                            show_playlist_modal.set(true);
                             active_menu_track.set(None);
-                        } else {
-                            active_menu_track.set(Some(track_menu.path.clone()));
-                        }
-                    },
-                    on_add_to_playlist: move |_| {
-                        selected_track_for_playlist.set(Some(track_add.path.clone()));
-                        show_playlist_modal.set(true);
-                        active_menu_track.set(None);
-                    },
-                    on_close_menu: move |_| active_menu_track.set(None),
-                    on_delete: move |_| {
-                        active_menu_track.set(None);
-                        if std::fs::remove_file(&track_delete.path).is_ok() {
-                            library.write().remove_track(&track_delete.path);
-                        }
-                    },
-                    on_play: move |_| {
-                        queue.set(queue_source.clone());
-                        ctrl.play_track(idx);
-                    },
+                        },
+                        on_close_menu: move |_| active_menu_track.set(None),
+                        on_delete: move |_| {
+                            active_menu_track.set(None);
+                            if std::fs::remove_file(&track_delete.path).is_ok() {
+                                library.write().remove_track(&track_delete.path);
+                            }
+                        },
+                        on_play: move |_| {
+                            queue.set(queue_source.clone());
+                            ctrl.play_track(idx);
+                        },
+                    }
+                    }
                 }
-                }
-            }
-        });
+            });
 
     rsx! {
         div {
@@ -210,6 +213,31 @@ pub fn LocalFavorites(
                     }
                 }
             } else {
+                div {
+                    class: "flex items-center gap-3 mb-4 px-2 text-sm font-medium text-slate-500 uppercase tracking-wider",
+                    button {
+                        class: if !is_empty && displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.path)) {
+                            "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
+                        } else {
+                            "w-4 h-4 rounded border border-white/20 bg-white/5 hover:border-white/50 transition-colors"
+                        },
+                        aria_label: "Select all tracks",
+                        onclick: move |_| {
+                            let all_selected = !displayed_tracks.is_empty() && displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.path));
+                            if all_selected {
+                                selected_tracks.write().clear();
+                                is_selection_mode.set(false);
+                            } else {
+                                selected_tracks.set(displayed_tracks.iter().map(|(track, _)| track.path.clone()).collect());
+                                is_selection_mode.set(true);
+                            }
+                        },
+                        if !is_empty && displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.path)) {
+                            i { class: "fa-solid fa-check", style: "font-size: 9px;" }
+                        }
+                    }
+                    span { "Select all" }
+                }
                 div {
                     class: "space-y-1",
                     {tracks_nodes}

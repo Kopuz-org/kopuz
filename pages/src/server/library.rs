@@ -219,6 +219,7 @@ pub fn JellyfinLibrary(
                     },
                     on_select: move |selected| {
                         if selected {
+                            is_selection_mode.set(true);
                             selected_tracks.write().insert(track_select.clone());
                         } else {
                             selected_tracks.write().remove(&track_select);
@@ -454,7 +455,32 @@ pub fn JellyfinLibrary(
 
             div {
                 class: "flex items-center justify-between mb-4",
-                h2 { class: "text-xl font-semibold text-white/80", "{i18n::t(\"tracks\")}" }
+                div { class: "flex items-center gap-3",
+                    button {
+                        class: if !is_empty && displayed_tracks().iter().all(|(track, _)| selected_tracks.read().contains(&track.path)) {
+                            "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
+                        } else {
+                            "w-4 h-4 rounded border border-white/20 bg-white/5 hover:border-white/50 transition-colors"
+                        },
+                        aria_label: "Select all tracks",
+                        disabled: is_empty,
+                        onclick: move |_| {
+                            let tracks = displayed_tracks();
+                            let all_selected = !tracks.is_empty() && tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.path));
+                            if all_selected {
+                                selected_tracks.write().clear();
+                                is_selection_mode.set(false);
+                            } else {
+                                selected_tracks.set(tracks.into_iter().map(|(track, _)| track.path).collect());
+                                is_selection_mode.set(true);
+                            }
+                        },
+                        if !is_empty && displayed_tracks().iter().all(|(track, _)| selected_tracks.read().contains(&track.path)) {
+                            i { class: "fa-solid fa-check", style: "font-size: 9px;" }
+                        }
+                    }
+                    h2 { class: "text-xl font-semibold text-white/80", "{i18n::t(\"tracks\")}" }
+                }
                 div {
                     class: "flex space-x-1 bg-white/5 border border-white/5 p-1 rounded-lg",
                     button {

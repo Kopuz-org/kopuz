@@ -54,7 +54,9 @@ pub fn LocalArtist(
                 .find(|a| a.id == track.album_id)
                 .and_then(|a| a.cover_path.clone());
             for artist in &track.artists {
-                artist_map.entry(artist.clone()).or_insert_with(|| cover.clone());
+                artist_map
+                    .entry(artist.clone())
+                    .or_insert_with(|| cover.clone());
             }
         }
         let mut artists: Vec<_> = artist_map.into_iter().collect();
@@ -392,6 +394,16 @@ pub fn LocalArtist(
                                 active_track: active_menu_track.read().clone(),
                                 is_selection_mode: is_selection_mode(),
                                 selected_tracks: selected_tracks.read().clone(),
+                                all_selected: !artist_tracks().is_empty() && artist_tracks().iter().all(|track| selected_tracks.read().contains(&track.path)),
+                                on_select_all: move |selected: bool| {
+                                    if selected {
+                                        selected_tracks.set(artist_tracks().into_iter().map(|track| track.path).collect());
+                                        is_selection_mode.set(true);
+                                    } else {
+                                        selected_tracks.write().clear();
+                                        is_selection_mode.set(false);
+                                    }
+                                },
                                 on_long_press: move |idx: usize| {
                                     if let Some(track) = artist_tracks().get(idx) {
                                         is_selection_mode.set(true);
@@ -401,6 +413,7 @@ pub fn LocalArtist(
                                 on_select: move |(idx, selected): (usize, bool)| {
                                     if let Some(track) = artist_tracks().get(idx) {
                                         if selected {
+                                            is_selection_mode.set(true);
                                             selected_tracks.write().insert(track.path.clone());
                                         } else {
                                             selected_tracks.write().remove(&track.path);

@@ -2,10 +2,10 @@ use config::MusicService;
 use dioxus::prelude::*;
 use player::player;
 use reader::{Library, PlaylistStore};
-use std::collections::HashSet;
-use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
 use rfd::AsyncFileDialog;
+use std::collections::HashSet;
+use std::path::PathBuf;
 
 #[component]
 pub fn PlaylistDetail(
@@ -39,13 +39,25 @@ pub fn PlaylistDetail(
 
     let (playlist_name, local_tracks_paths, is_jellyfin, playlist_custom_cover, playlist_image_tag) =
         if let Some(p) = store.playlists.iter().find(|p| p.id == playlist_id) {
-            (p.name.clone(), p.tracks.clone(), false, p.cover_path.clone(), None::<String>)
+            (
+                p.name.clone(),
+                p.tracks.clone(),
+                false,
+                p.cover_path.clone(),
+                None::<String>,
+            )
         } else if let Some(p) = store
             .jellyfin_playlists
             .iter()
             .find(|p| p.id == playlist_id)
         {
-            (p.name.clone(), vec![], true, p.cover_path.clone(), p.image_tag.clone())
+            (
+                p.name.clone(),
+                vec![],
+                true,
+                p.cover_path.clone(),
+                p.image_tag.clone(),
+            )
         } else {
             return rsx! { div { "{i18n::t(\"playlist_not_found\")}" } };
         };
@@ -226,14 +238,17 @@ pub fn PlaylistDetail(
         if let Some(path) = &playlist_custom_cover {
             utils::format_artwork_url(Some(path))
         } else if let Some(tag) = &playlist_image_tag {
-            Some(std::sync::Arc::from(utils::jellyfin_image::jellyfin_image_url(
-                &server.url,
-                &playlist_id,
-                Some(tag.as_str()),
-                server.access_token.as_deref(),
-                512,
-                90,
-            ).as_str()))
+            Some(std::sync::Arc::from(
+                utils::jellyfin_image::jellyfin_image_url(
+                    &server.url,
+                    &playlist_id,
+                    Some(tag.as_str()),
+                    server.access_token.as_deref(),
+                    512,
+                    90,
+                )
+                .as_str(),
+            ))
         } else {
             tracks_val.first().and_then(|t| {
                 let path_str = t.path.to_string_lossy();
@@ -343,6 +358,16 @@ pub fn PlaylistDetail(
                 library: library,
                 is_selection_mode: is_selection_mode(),
                 selected_tracks: selected_tracks.read().clone(),
+                all_selected: !tracks_val.is_empty() && tracks_val.iter().all(|track| selected_tracks.read().contains(&track.path)),
+                on_select_all: move |selected: bool| {
+                    if selected {
+                        selected_tracks.set(tracks.read().iter().map(|track| track.path.clone()).collect());
+                        is_selection_mode.set(true);
+                    } else {
+                        selected_tracks.write().clear();
+                        is_selection_mode.set(false);
+                    }
+                },
                 on_long_press: move |idx: usize| {
                     if let Some(t) = tracks.read().get(idx) {
                         is_selection_mode.set(true);
@@ -352,6 +377,7 @@ pub fn PlaylistDetail(
                 on_select: move |(idx, selected): (usize, bool)| {
                     if let Some(t) = tracks.read().get(idx) {
                         if selected {
+                            is_selection_mode.set(true);
                             selected_tracks.write().insert(t.path.clone());
                         } else {
                             selected_tracks.write().remove(&t.path);

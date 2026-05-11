@@ -1,5 +1,3 @@
-use ::server::jellyfin::JellyfinClient;
-use ::server::subsonic::SubsonicClient;
 use crate::server::download_manager::{DownloadQueue, queue_downloads};
 use components::dots_menu::{DotsMenu, MenuAction};
 use components::playlist_modal::PlaylistModal;
@@ -7,6 +5,8 @@ use components::selection_bar::SelectionBar;
 use config::{AppConfig, ArtistViewOrder, MusicService};
 use dioxus::prelude::*;
 use reader::{Library, PlaylistStore};
+use server::jellyfin::JellyfinClient;
+use server::subsonic::SubsonicClient;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
@@ -57,19 +57,26 @@ pub fn JellyfinArtist(
         }
         let offline = *is_offline.read();
         let conf = config.read();
-        let mut artists: Vec<_> = artist_map.into_iter().filter(|(artist, _)| {
-            if !offline { return true; }
-            lib.jellyfin_tracks.iter().any(|t| {
-                if t.artist.to_lowercase() != artist.to_lowercase() { return false; }
-                let s = t.path.to_string_lossy();
-                let id = s.split(':').nth(1).unwrap_or(&s);
-                if let Some(path_str) = conf.offline_tracks.get(id) {
-                    std::path::Path::new(path_str).exists()
-                } else {
-                    false
+        let mut artists: Vec<_> = artist_map
+            .into_iter()
+            .filter(|(artist, _)| {
+                if !offline {
+                    return true;
                 }
+                lib.jellyfin_tracks.iter().any(|t| {
+                    if t.artist.to_lowercase() != artist.to_lowercase() {
+                        return false;
+                    }
+                    let s = t.path.to_string_lossy();
+                    let id = s.split(':').nth(1).unwrap_or(&s);
+                    if let Some(path_str) = conf.offline_tracks.get(id) {
+                        std::path::Path::new(path_str).exists()
+                    } else {
+                        false
+                    }
+                })
             })
-        }).collect();
+            .collect();
         artists.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
         artists
     });
@@ -86,7 +93,9 @@ pub fn JellyfinArtist(
             .iter()
             .filter(|t| t.artist.to_lowercase() == artist.to_lowercase())
             .filter(|t| {
-                if !offline { return true; }
+                if !offline {
+                    return true;
+                }
                 let s = t.path.to_string_lossy();
                 let id = s.split(':').nth(1).unwrap_or(&s);
                 if let Some(path_str) = conf.offline_tracks.get(id) {
@@ -144,9 +153,13 @@ pub fn JellyfinArtist(
             .iter()
             .filter(|a| a.artist.to_lowercase() == artist_lc)
             .filter(|a| {
-                if !offline { return true; }
+                if !offline {
+                    return true;
+                }
                 lib.jellyfin_tracks.iter().any(|t| {
-                    if t.album_id != a.id { return false; }
+                    if t.album_id != a.id {
+                        return false;
+                    }
                     let s = t.path.to_string_lossy();
                     let id = s.split(':').nth(1).unwrap_or(&s);
                     if let Some(path_str) = conf.offline_tracks.get(id) {
@@ -647,6 +660,16 @@ pub fn JellyfinArtist(
                                 active_track: active_menu_track.read().clone(),
                                 is_selection_mode: is_selection_mode(),
                                 selected_tracks: selected_tracks.read().clone(),
+                                all_selected: !artist_tracks().is_empty() && artist_tracks().iter().all(|track| selected_tracks.read().contains(&track.path)),
+                                on_select_all: move |selected: bool| {
+                                    if selected {
+                                        selected_tracks.set(artist_tracks().into_iter().map(|track| track.path).collect());
+                                        is_selection_mode.set(true);
+                                    } else {
+                                        selected_tracks.write().clear();
+                                        is_selection_mode.set(false);
+                                    }
+                                },
                                 on_long_press: move |idx: usize| {
                                     if let Some(track) = artist_tracks().get(idx) {
                                         is_selection_mode.set(true);
@@ -656,6 +679,7 @@ pub fn JellyfinArtist(
                                 on_select: move |(idx, selected): (usize, bool)| {
                                     if let Some(track) = artist_tracks().get(idx) {
                                         if selected {
+                                            is_selection_mode.set(true);
                                             selected_tracks.write().insert(track.path.clone());
                                         } else {
                                             selected_tracks.write().remove(&track.path);
