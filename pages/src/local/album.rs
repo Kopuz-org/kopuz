@@ -75,7 +75,11 @@ pub fn LocalAlbum(
                                         },
                                         div { class: "aspect-square rounded-lg bg-stone-800 mb-3 overflow-hidden relative",
                                             if let Some(url) = &cover_url {
-                                                img { src: "{url.as_ref()}", class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" }
+                                                img {
+                                                    src: "{url.as_ref()}",
+                                                    loading: "lazy",
+                                                    class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                                }
                                             } else {
                                                 div { class: "w-full h-full flex items-center justify-center",
                                                     i { class: "fa-solid fa-compact-disc text-4xl text-white/20" }

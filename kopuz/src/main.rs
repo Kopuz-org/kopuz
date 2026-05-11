@@ -1329,7 +1329,7 @@ fn App() -> Element {
                           }
                         },
                         #[cfg(not(target_arch = "wasm32"))]
-                        Route::Ytdlp => rsx! { pages::ytdlp::YtdlpPage { config } },
+                        Route::Ytdlp => rsx! { pages::ytdlp::YtdlpPage { config, trigger_rescan } },
                         #[cfg(target_arch = "wasm32")]
                         Route::Ytdlp => rsx! { pages::settings::Settings { config } },
                         Route::Settings => rsx! { pages::settings::Settings { config } },

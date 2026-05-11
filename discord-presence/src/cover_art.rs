@@ -2,7 +2,12 @@ use serde::Deserialize;
 
 const MUSICBRAINZ_API: &str = "https://musicbrainz.org/ws/2";
 const COVER_ART_ARCHIVE: &str = "https://coverartarchive.org";
+const ITUNES: &str = "https://itunes.apple.com/search";
 const USER_AGENT: &str = "Kopuz/0.5.0 (https://github.com/temidaradev/kopuz)";
+
+fn build_client() -> Result<reqwest::Client, reqwest::Error> {
+    reqwest::Client::builder().user_agent(USER_AGENT).build()
+}
 
 #[derive(Debug, Deserialize)]
 struct ReleaseSearchResponse {
@@ -17,10 +22,6 @@ struct ReleaseSearchResult {
 
 pub fn cover_art_url(release_mbid: &str) -> String {
     format!("{}/release/{}/front", COVER_ART_ARCHIVE, release_mbid)
-}
-
-fn build_client() -> Result<reqwest::Client, reqwest::Error> {
-    reqwest::Client::builder().user_agent(USER_AGENT).build()
 }
 
 fn escape_lucene(input: &str) -> String {
@@ -47,14 +48,12 @@ async fn search_release_mbid(
     }
 
     let mut query_parts: Vec<String> = Vec::new();
-
     if !album.is_empty() {
         query_parts.push(format!("release:\"{}\"", escape_lucene(album)));
     }
     if !artist.is_empty() {
         query_parts.push(format!("artist:\"{}\"", escape_lucene(artist)));
     }
-
     let query = query_parts.join(" AND ");
 
     let client = build_client()?;
@@ -73,7 +72,6 @@ async fn search_release_mbid(
     }
 
     let body: ReleaseSearchResponse = resp.json().await?;
-
     if let Some(releases) = body.releases {
         if let Some(first) = releases.first() {
             let score = first.score.unwrap_or(0);
@@ -95,6 +93,56 @@ async fn search_release_mbid(
     Ok(None)
 }
 
+#[derive(Debug, Deserialize)]
+struct ItunesSearchResponse {
+    #[serde(rename = "resultCount")]
+    result_count: u32,
+    results: Vec<ItunesResult>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ItunesResult {
+    #[serde(rename = "artworkUrl100")]
+    artwork_url_100: Option<String>,
+}
+
+async fn resolve_via_itunes(
+    artist: &str,
+    album: &str,
+) -> Result<Option<String>, Box<dyn std::error::Error + Send + Sync>> {
+    if artist.is_empty() && album.is_empty() {
+        return Ok(None);
+    }
+
+    let term = format!("{} {}", artist, album);
+    let client = build_client()?;
+    let resp = client
+        .get(ITUNES)
+        .query(&[("term", term.as_str()), ("entity", "album"), ("limit", "1")])
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        println!("[cover_art] iTunes returned HTTP {}", resp.status());
+        return Ok(None);
+    }
+
+    let body: ItunesSearchResponse = resp.json().await?;
+    if body.result_count == 0 {
+        return Ok(None);
+    }
+
+    if let Some(result) = body.results.first() {
+        if let Some(url) = &result.artwork_url_100 {
+            let hires = url.replace("100x100bb", "600x600bb");
+            println!("[cover_art] iTunes match -> {}", hires);
+            return Ok(Some(hires));
+        }
+    }
+
+    Ok(None)
+}
+
 async fn verify_cover_exists(
     release_mbid: &str,
 ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
@@ -104,6 +152,7 @@ async fn verify_cover_exists(
     let status = resp.status();
     Ok(status.is_success() || status.is_redirection())
 }
+
 pub async fn resolve_cover_art_url(
     mbid: Option<&str>,
     artist: &str,
@@ -117,15 +166,11 @@ pub async fn resolve_cover_art_url(
                     println!("[cover_art] Resolved via embedded MBID -> {}", url);
                     return Some(url);
                 }
-                Ok(false) => {
-                    println!(
-                        "[cover_art] Embedded MBID {} has no front cover, falling back to search",
-                        id
-                    );
-                }
-                Err(e) => {
-                    println!("[cover_art] Error verifying MBID {}: {}", id, e);
-                }
+                Ok(false) => println!(
+                    "[cover_art] Embedded MBID {} has no front cover, falling back",
+                    id
+                ),
+                Err(e) => println!("[cover_art] Error verifying MBID {}: {}", id, e),
             }
         }
     }
@@ -134,31 +179,29 @@ pub async fn resolve_cover_art_url(
         Ok(Some(release_id)) => match verify_cover_exists(&release_id).await {
             Ok(true) => {
                 let url = cover_art_url(&release_id);
-                println!("[cover_art] Resolved via search -> {}", url);
-                Some(url)
+                println!("[cover_art] Resolved via MusicBrainz search -> {}", url);
+                return Some(url);
             }
-            Ok(false) => {
-                println!(
-                    "[cover_art] Release {} found but has no front cover",
-                    release_id
-                );
-                None
-            }
-            Err(e) => {
-                println!("[cover_art] Error verifying release {}: {}", release_id, e);
-                None
-            }
+            Ok(false) => println!("[cover_art] Release {} has no front cover", release_id),
+            Err(e) => println!("[cover_art] Error verifying release {}: {}", release_id, e),
         },
-        Ok(None) => {
-            println!(
-                "[cover_art] No match for artist=\"{}\" album=\"{}\"",
-                artist, album
-            );
-            None
-        }
-        Err(e) => {
-            println!("[cover_art] MusicBrainz search failed: {}", e);
-            None
-        }
+        Ok(None) => println!(
+            "[cover_art] No MusicBrainz match for artist=\"{}\" album=\"{}\"",
+            artist, album
+        ),
+        Err(e) => println!("[cover_art] MusicBrainz search failed: {}", e),
     }
+
+    // Fallback: iTunes
+    match resolve_via_itunes(artist, album).await {
+        Ok(Some(url)) => return Some(url),
+        Ok(None) => println!("[cover_art] No iTunes match"),
+        Err(e) => println!("[cover_art] iTunes error: {}", e),
+    }
+
+    println!(
+        "[cover_art] All sources exhausted for artist=\"{}\" album=\"{}\"",
+        artist, album
+    );
+    None
 }

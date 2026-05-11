@@ -1,23 +1,58 @@
 use super::models::{Album, Library, Track};
 use super::utils::{find_folder_cover, save_cover};
+use lofty::file::TaggedFileExt;
+use lofty::picture::{Picture, PictureType};
 use lofty::prelude::*;
 use lofty::tag::ItemKey;
-use lofty::{probe::Probe, properties::FileProperties, tag::Tag};
-use std::fs;
+use lofty::{file::TaggedFile, probe::Probe, properties::FileProperties, tag::Tag};
 use std::path::Path;
 
-pub fn make_album_id(album: &str) -> String {
-    format!(
-        "alb_{}",
-        album
-            .to_lowercase()
-            .replace(' ', "_")
-            .replace(|c: char| !c.is_alphanumeric() && c != '_', "")
-    )
+fn slugify_album_key(value: &str) -> String {
+    value
+        .to_lowercase()
+        .replace(' ', "_")
+        .replace(|c: char| !c.is_alphanumeric() && c != '_', "")
 }
 
-pub fn extract_embedded_cover(tag: Option<&Tag>) -> Option<Vec<u8>> {
-    tag?.pictures().first().map(|pic| pic.data().to_vec())
+pub fn make_album_id(album: &str, grouping_key: &str) -> String {
+    let normalized_album = album.trim();
+
+    if !normalized_album.is_empty() {
+        return format!("alb_{}", slugify_album_key(normalized_album));
+    }
+
+    let fallback = slugify_album_key(grouping_key);
+    if fallback.is_empty() {
+        "alb_unknown".to_string()
+    } else {
+        format!("alb_unknown_{fallback}")
+    }
+}
+
+fn select_best_picture<'a>(pictures: &'a [Picture]) -> Option<&'a Picture> {
+    pictures
+        .iter()
+        .find(|picture| picture.pic_type() == PictureType::CoverFront)
+        .or_else(|| pictures.first())
+}
+
+pub fn extract_embedded_cover<'a>(
+    tagged_file: &'a TaggedFile,
+    tag: Option<&'a Tag>,
+) -> Option<&'a Picture> {
+    let candidate_tags = tag
+        .into_iter()
+        .chain(tagged_file.tags().iter())
+        .collect::<Vec<_>>();
+
+    candidate_tags
+        .iter()
+        .find_map(|tag| tag.get_picture_type(PictureType::CoverFront))
+        .or_else(|| {
+            candidate_tags
+                .iter()
+                .find_map(|tag| select_best_picture(tag.pictures()))
+        })
 }
 
 pub fn extract_metadata(
@@ -50,16 +85,14 @@ pub fn extract_metadata(
         })
         .unwrap_or_else(|| vec![artist.clone()]);
 
-    let album_title = tag
-        .and_then(|t| t.album().map(|a| a.to_string()))
-        .unwrap_or_else(|| "Unknown Album".to_string());
+    let album_title = tag.and_then(|t| t.album().map(|a| a.to_string()));
 
     let album_artist = tag
         .and_then(|t| t.get_string(&ItemKey::AlbumArtist))
         .map(|s| s.to_string());
 
     let parent_path = track_path.parent().map(|p| p.to_string_lossy());
-    let _grouping_key = album_artist
+    let grouping_key = album_artist
         .as_deref()
         .or(parent_path.as_deref())
         .unwrap_or(&artist);
@@ -79,11 +112,11 @@ pub fn extract_metadata(
 
     Track {
         path: track_path.to_path_buf(),
-        album_id: make_album_id(&album_title),
+        album_id: make_album_id(album_title.as_deref().unwrap_or(""), grouping_key),
         title,
         artist,
         artists,
-        album: album_title,
+        album: album_title.unwrap_or_else(|| "Unknown Album".to_string()),
         khz: properties.sample_rate().unwrap_or(0),
         bitrate: properties.bit_depth().unwrap_or(0),
         duration: properties.duration().as_secs()
@@ -110,17 +143,21 @@ pub fn read(track_path: &Path, cover_cache: &Path, library: &mut Library) -> Opt
         .map(|s| s.to_string())
         .unwrap_or_else(|| track.artist.clone());
 
-    let album_exists = library.albums.iter().any(|a| a.id == album_id);
+    let album = library.albums.iter().find(|a| a.id == album_id);
+    let album_exists = album.is_some();
+    let needs_cover = album.and_then(|album| album.cover_path.as_ref()).is_none();
+    let mut cover = None;
 
-    if !album_exists {
-        let mut cover = None;
-
-        if let Some(bytes) = extract_embedded_cover(tag) {
-            cover = save_cover(&album_id, &bytes, cover_cache).ok();
-        } else if let Some(folder_cover) = find_folder_cover(track_path.parent()?) {
+    if needs_cover {
+        if let Some(picture) = extract_embedded_cover(&tagged_file, tag) {
+            let extension = picture.mime_type().and_then(|mime_type| mime_type.ext());
+            cover = save_cover(&album_id, picture.data(), extension, cover_cache).ok();
+        } else if let Some(folder_cover) = track_path.parent().and_then(find_folder_cover) {
             cover = Some(folder_cover);
         }
+    }
 
+    if !album_exists || cover.is_some() {
         let genre = tag
             .and_then(|t| t.genre().map(|g| g.to_string()))
             .unwrap_or_else(|| "Unknown".to_string());

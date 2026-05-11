@@ -317,7 +317,7 @@ fn parse_line(line: &str) -> Option<LineInfo> {
 }
 
 #[component]
-pub fn YtdlpPage(config: Signal<AppConfig>) -> Element {
+pub fn YtdlpPage(config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) -> Element {
     let mut url_input = use_signal(String::new);
     let mut format = use_signal(|| AudioFormat::BestAudio);
     let mut jobs = use_signal(|| Vec::<DownloadJob>::new());
@@ -472,6 +472,7 @@ pub fn YtdlpPage(config: Signal<AppConfig>) -> Element {
                             cfg.ytdlp_history.insert(0, e);
                             cfg.ytdlp_history.truncate(200);
                         }
+                        *trigger_rescan.write() += 1;
                         break;
                     }
                     LineInfo::Error(msg) => {
