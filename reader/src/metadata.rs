@@ -40,17 +40,16 @@ pub fn extract_embedded_cover<'a>(
     tagged_file: &'a TaggedFile,
     tag: Option<&'a Tag>,
 ) -> Option<&'a Picture> {
-    tag.and_then(|tag| tag.get_picture_type(PictureType::CoverFront))
+    let candidate_tags = tag
+        .into_iter()
+        .chain(tagged_file.tags().iter())
+        .collect::<Vec<_>>();
+
+    candidate_tags
+        .iter()
+        .find_map(|tag| tag.get_picture_type(PictureType::CoverFront))
         .or_else(|| {
-            tagged_file
-                .tags()
-                .iter()
-                .find_map(|tag| tag.get_picture_type(PictureType::CoverFront))
-        })
-        .or_else(|| tag.and_then(|tag| select_best_picture(tag.pictures())))
-        .or_else(|| {
-            tagged_file
-                .tags()
+            candidate_tags
                 .iter()
                 .find_map(|tag| select_best_picture(tag.pictures()))
         })
