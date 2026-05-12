@@ -461,6 +461,8 @@ pub struct AppConfig {
     pub offline_quality: OfflineQuality,
     #[serde(default)]
     pub offline_tracks: HashMap<String, String>,
+    #[serde(default)]
+    pub apple_music_ui: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -592,6 +594,7 @@ impl Default for AppConfig {
             titlebar_mode: TitlebarMode::Custom,
             offline_quality: OfflineQuality::default(),
             offline_tracks: HashMap::new(),
+            apple_music_ui: false,
         }
     }
 }

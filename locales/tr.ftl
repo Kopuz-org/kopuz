@@ -38,6 +38,7 @@ password = Şifre
 player_settings = Oynatıcı Ayarları
 discord_presence = Discord Durumu
 reduce_animations = Animasyonları Azalt
+apple_music_ui = Apple Music-style UI (Cider look)
 show_source_toggle = Sidebar'da Kaynağı Göster
 titlebar_mode = Başlık çubuğu
 titlebar_custom = Özel (uygulama tarafından çizilen)

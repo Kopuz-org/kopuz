@@ -2,25 +2,35 @@
 
 /* Themed scrollbars — uses CSS vars so all themes apply automatically */
 ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 4px;
+    height: 4px;
 }
 
 ::-webkit-scrollbar-track {
-    background: var(--color-black, #000000);
+    background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-    background: var(--color-slate-500, #64748b);
-    border-radius: 3px;
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: var(--color-slate-400, #94a3b8);
+    background: rgba(255, 255, 255, 0.22);
 }
 
 ::-webkit-scrollbar-corner {
-    background: var(--color-black, #000000);
+    background: transparent;
+}
+
+/* Glassmorphism fade-in */
+@keyframes cider-fade-up {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+    animation: cider-fade-up 0.25s ease-out both;
 }
 
 @keyframes scan-slide {

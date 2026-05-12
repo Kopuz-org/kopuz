@@ -38,6 +38,7 @@ password = Senha
 player_settings = Configurações do player
 discord_presence = Presença no Discord
 reduce_animations = Reduzir animações
+apple_music_ui = Apple Music-style UI (Cider look)
 show_source_toggle = Mostrar alternância de fonte
 titlebar_mode = Barra de título
 titlebar_custom = Personalizada (desenhada pelo app)

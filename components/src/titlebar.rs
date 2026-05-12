@@ -23,7 +23,11 @@ pub fn Titlebar() -> Element {
 
         rsx! {
         div {
-            class: "flex items-center h-9 bg-black/50 border-b border-white/5 flex-shrink-0 select-none relative",
+            class: if config.read().apple_music_ui {
+                "flex items-center h-9 bg-black/30 backdrop-blur-xl border-b border-white/[0.04] flex-shrink-0 select-none relative"
+            } else {
+                "flex items-center h-9 bg-black/50 border-b border-white/5 flex-shrink-0 select-none relative"
+            },
             onmousedown: move |_| {
                 use_window().drag();
             },
@@ -43,22 +47,22 @@ pub fn Titlebar() -> Element {
                 onmousedown: move |evt| evt.stop_propagation(),
 
                 button {
-                    class: "w-11 h-full flex items-center justify-center text-white/25 hover:text-white/70 hover:bg-white/6 transition-all duration-150",
+                    class: "w-10 h-full flex items-center justify-center text-white/20 hover:text-white/60 hover:bg-white/5 transition-all duration-150",
                     title: "{minimize_text}",
                     onclick: move |_| use_window().window.set_minimized(true),
-                    i { class: "fa-solid fa-minus text-[10px] leading-none" }
+                    i { class: "fa-solid fa-minus text-[9px] leading-none" }
                 }
                 button {
-                    class: "w-11 h-full flex items-center justify-center text-white/25 hover:text-white/70 hover:bg-white/6 transition-all duration-150",
+                    class: "w-10 h-full flex items-center justify-center text-white/20 hover:text-white/60 hover:bg-white/5 transition-all duration-150",
                     title: "{maximize_text}",
                     onclick: move |_| use_window().toggle_maximized(),
-                    i { class: "fa-regular fa-square text-[10px] leading-none" }
+                    i { class: "fa-regular fa-square text-[9px] leading-none" }
                 }
                 button {
-                    class: "w-11 h-full flex items-center justify-center text-white/25 hover:text-white hover:bg-red-500/70 transition-all duration-150",
+                    class: "w-10 h-full flex items-center justify-center text-white/20 hover:text-white hover:bg-red-500/60 transition-all duration-150",
                     title: "{close_text}",
                     onclick: move |_| use_window().close(),
-                    i { class: "fa-solid fa-xmark text-[10px] leading-none" }
+                    i { class: "fa-solid fa-xmark text-[9px] leading-none" }
                 }
             }
         }

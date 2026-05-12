@@ -80,6 +80,9 @@ pub fn Sidebar(props: SidebarProps) -> Element {
 
     let is_rtl = i18n::is_rtl();
     let border_side = if is_rtl { "border-l" } else { "border-r" };
+    let apple_ui = config.read().apple_music_ui;
+    let sidebar_bg = if apple_ui { "bg-black/20 backdrop-blur-xl" } else { "bg-black/40" };
+    let sidebar_border = if apple_ui { "border-white/[0.04]" } else { "border-white/5" };
 
     let is_server = config.read().active_source == MusicSource::Server;
     let local_class  = if !is_server { "text-white" } else { "text-slate-500 hover:text-slate-300" };
@@ -118,7 +121,7 @@ pub fn Sidebar(props: SidebarProps) -> Element {
         }
 
         div {
-            class: "h-full bg-black/40 text-slate-400 flex flex-col flex-shrink-0 select-none relative {border_side} border-white/5 {extra_padding}",
+            class: "h-full {sidebar_bg} text-slate-400 flex flex-col flex-shrink-0 select-none relative {border_side} {sidebar_border} {extra_padding}",
             style: "width: {current_width}px",
 
             if cfg!(all(not(target_arch = "wasm32"), target_os = "macos")) {
@@ -136,15 +139,23 @@ pub fn Sidebar(props: SidebarProps) -> Element {
 
                 if !*is_collapsed.read() && !cfg!(target_arch = "wasm32") && config.read().show_source_toggle {
                     div {
-                        class: "px-4 mb-6",
+                        class: "px-4 mb-4",
                         div {
-                            class: "bg-white/5 p-1 rounded-xl flex relative h-10 items-center border border-white/5",
+                            class: if apple_ui {
+                                "bg-white/[0.06] backdrop-blur-sm p-1 rounded-2xl flex relative h-9 items-center border border-white/[0.06]"
+                            } else {
+                                "bg-white/5 p-1 rounded-xl flex relative h-10 items-center border border-white/5"
+                            },
                             div {
-                                class: "absolute h-8 bg-white/10 rounded-lg transition-all duration-300 ease-out",
+                                class: if apple_ui {
+                                    "absolute h-7 bg-white/15 rounded-xl transition-all duration-300 ease-out"
+                                } else {
+                                    "absolute h-8 bg-white/10 rounded-lg transition-all duration-300 ease-out"
+                                },
                                 style: "{slider_style}"
                             }
                             button {
-                                class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 {local_class}",
+                                class: "flex-1 text-[10px] font-semibold z-10 transition-colors duration-300 {local_class}",
                                 onclick: move |_| {
                                     let mut cfg = config.write();
                                     cfg.active_source = MusicSource::Local;
@@ -153,7 +164,7 @@ pub fn Sidebar(props: SidebarProps) -> Element {
                                 "{i18n::t(\"local\").to_uppercase()}"
                             }
                             button {
-                                class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 {server_class}",
+                                class: "flex-1 text-[10px] font-semibold z-10 transition-colors duration-300 {server_class}",
                                 onclick: move |_| {
                                     let mut cfg = config.write();
                                     cfg.active_source = MusicSource::Server;
@@ -166,7 +177,7 @@ pub fn Sidebar(props: SidebarProps) -> Element {
                 }
 
                 nav {
-                    class: "flex-1 px-3 space-y-1",
+                    class: "flex-1 px-3 space-y-0.5",
                     for (idx, item) in ordered_items.into_iter().enumerate() {
                         SidebarLink {
                             key: "{item.key}",
@@ -174,6 +185,7 @@ pub fn Sidebar(props: SidebarProps) -> Element {
                             collapsed: is_collapsed,
                             active: *props.current_route.read() == item.route,
                             is_rtl,
+                            apple_ui,
                             can_move_up: idx > 0,
                             can_move_down: idx < item_count - 1,
                             onclick: move |_| props.on_navigate.call(item.route),
@@ -193,13 +205,14 @@ pub fn Sidebar(props: SidebarProps) -> Element {
                             },
                         }
                     }
-                    div { class: "h-px bg-white/5 my-4 mx-3" }
+                    div { class: if apple_ui { "h-px bg-white/[0.06] my-3 mx-2" } else { "h-px bg-white/5 my-4 mx-3" } }
                     for item in BOTTOM_MENU {
                         SidebarLink {
                             item: item.clone(),
                             collapsed: is_collapsed,
                             active: *props.current_route.read() == item.route,
                             is_rtl,
+                            apple_ui,
                             can_move_up: false,
                             can_move_down: false,
                             onclick: move |_| props.on_navigate.call(item.route),
@@ -233,6 +246,7 @@ fn SidebarLink(
     collapsed: Signal<bool>,
     active: bool,
     is_rtl: bool,
+    apple_ui: bool,
     can_move_up: bool,
     can_move_down: bool,
     onclick: EventHandler<MouseEvent>,
@@ -241,16 +255,17 @@ fn SidebarLink(
 ) -> Element {
     let is_collapsed = *collapsed.read();
     let alignment_class = if is_collapsed { "justify-center" } else { "justify-start px-3" };
+
+    let active_class = if apple_ui {
+        if active { "bg-white/[0.12] text-white" } else { "text-slate-400 hover:text-white/90 hover:bg-white/[0.06]" }
+    } else {
+        if active { "bg-white/10 text-white" } else { "text-slate-400 hover:text-white/90 hover:bg-white/5" }
+    };
+
     let indicator_base = if is_rtl {
         "absolute right-0 w-0.5 rounded-l-full transition-all duration-300"
     } else {
         "absolute left-0 w-0.5 rounded-r-full transition-all duration-300"
-    };
-
-    let active_class = if active {
-        "bg-white/10 text-white"
-    } else {
-        "text-slate-400 hover:text-white/90 hover:bg-white/5"
     };
 
     let opacity_class = if active { "opacity-100" } else { "opacity-70 group-hover:opacity-100" };
@@ -258,27 +273,41 @@ fn SidebarLink(
     rsx! {
         div { class: "flex items-center group",
             a {
-                class: "flex flex-1 items-center {alignment_class} relative p-3 rounded-lg transition-all duration-200 cursor-pointer {active_class}",
+                class: if apple_ui {
+                    "flex flex-1 items-center {alignment_class} relative py-2.5 rounded-xl transition-all duration-200 cursor-pointer {active_class}"
+                } else {
+                    "flex flex-1 items-center {alignment_class} relative p-3 rounded-lg transition-all duration-200 cursor-pointer {active_class}"
+                },
                 title: if is_collapsed { i18n::t(item.key) } else { String::new() },
                 onclick: move |evt| onclick.call(evt),
 
                 div {
-                    class: "flex items-center justify-center w-6 h-6 shrink-0 transition-transform group-active:scale-95",
-                    i { class: "{item.icon} text-lg" }
+                    class: if apple_ui {
+                        "flex items-center justify-center w-5 h-5 shrink-0 transition-transform group-active:scale-90"
+                    } else {
+                        "flex items-center justify-center w-6 h-6 shrink-0 transition-transform group-active:scale-95"
+                    },
+                    i { class: if apple_ui { "{item.icon} text-base transition-colors" } else { "{item.icon} text-lg" } }
                 }
 
                 if !is_collapsed {
                     span {
-                        class: "ml-4 text-sm font-medium tracking-tight {opacity_class} transition-opacity",
+                        class: if apple_ui {
+                            "ml-3 text-[13px] tracking-tight transition-colors"
+                        } else {
+                            "ml-4 text-sm font-medium tracking-tight {opacity_class} transition-opacity"
+                        },
                         "{i18n::t(item.key)}"
                     }
                 }
 
-                div {
-                    class: if active {
-                        "{indicator_base} h-6 bg-white"
-                    } else {
-                        "{indicator_base} h-0 bg-white/40 group-hover:h-4"
+                if !apple_ui {
+                    div {
+                        class: if active {
+                            "{indicator_base} h-6 bg-white"
+                        } else {
+                            "{indicator_base} h-0 bg-white/40 group-hover:h-4"
+                        }
                     }
                 }
             }

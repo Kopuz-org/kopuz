@@ -1,3 +1,25 @@
+/* Cider — Apple Music-inspired deep purple glassmorphism */
+.theme-cider {
+    --color-black: #0c0c10;
+    --color-white: #f0eeff;
+    --color-slate-400: #9b9ab8;
+    --color-slate-500: #3e3d52;
+    --color-green-400: #34d058;
+    --color-green-500: #26c147;
+    --color-indigo-400: #b09eff;
+    --color-indigo-500: #7b61ff;
+    --color-indigo-600: #5e45d6;
+    --color-indigo-900: #1a1730;
+    --color-purple-400: #d4bcff;
+    --color-purple-500: #c0a0ff;
+    --color-purple-600: #a78bfa;
+    --color-purple-700: #8b6fde;
+    --color-red-400: #ff6b8a;
+    --color-red-500: #ff3d6a;
+    --color-orange-500: #ff9f5a;
+    --color-neutral-900: #18172a;
+}
+
 /* Default Theme (matches tailwind.css/main.css) */
 .theme-default {
     --color-black: #000000;

@@ -38,6 +38,7 @@ password = Sandi
 player_settings = Pengaturan Player
 discord_presence = Discord Presence
 reduce_animations = Kurangi Animasi
+apple_music_ui = Apple Music-style UI (Cider look)
 show_source_toggle = Tampilkan Pengubah Sumber
 titlebar_mode = Bar judul
 titlebar_custom = Kustom (dari app)

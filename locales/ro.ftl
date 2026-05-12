@@ -38,6 +38,7 @@ password = Parolă
 player_settings = Setări Player
 discord_presence = Prezență Discord
 reduce_animations = Reducere Animații
+apple_music_ui = Apple Music-style UI (Cider look)
 show_source_toggle = Comutator Sursă
 titlebar_mode = Bară de titlu
 titlebar_custom = Personalizat (desenat de aplicație)

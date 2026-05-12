@@ -38,6 +38,7 @@ password = Jelszó
 player_settings = Lejátszó beállításai
 discord_presence = Discord jelenlét
 reduce_animations = Animációk csökkentése
+apple_music_ui = Apple Music-style UI (Cider look)
 show_source_toggle = Forrás kapcsoló megjelenítése
 titlebar_mode = Címsor
 titlebar_custom = Egyéni (alkalmazás által rajzolt)
