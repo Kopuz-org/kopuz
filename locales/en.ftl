@@ -117,6 +117,7 @@ delete = Delete
 delete_song = Delete Song
 delete_album = Delete Album
 delete_playlist = Delete Playlist
+add_all_to_queue = Add All to Queue
 add_all_to_playlist = Add All to Playlist
 select_all = Select all
 select_all_tracks = Select all tracks
