@@ -26,6 +26,7 @@ pub fn TrackRow(
     on_click_menu: EventHandler<()>,
     is_menu_open: bool,
     on_add_to_playlist: EventHandler<()>,
+    on_queue: Option<EventHandler<()>>,
     on_close_menu: EventHandler<()>,
     on_play: EventHandler<()>,
     on_delete: EventHandler<()>,
@@ -39,14 +40,25 @@ pub fn TrackRow(
     #[props(default = false)] is_downloaded: bool,
     #[props(default = false)] is_downloading: bool,
 ) -> Element {
+    let add_to_queue_text = i18n::t("add_to_queue").to_string();
     let add_to_playlist_text = i18n::t("add_to_playlist").to_string();
     let remove_from_playlist_text = i18n::t("remove_from_playlist").to_string();
     let delete_song_text = i18n::t("delete").to_string();
 
-    let mut actions = vec![MenuAction::new(
+    let mut actions = Vec::new();
+
+    let has_queue = on_queue.is_some();
+    if has_queue {
+        actions.push(MenuAction::new(
+            add_to_queue_text.as_str(),
+            "fa-solid fa-list-ul",
+        ));
+    }
+
+    actions.push(MenuAction::new(
         add_to_playlist_text.as_str(),
         "fa-solid fa-plus",
-    )];
+    ));
 
     let has_remove = on_remove_from_playlist.is_some();
     if has_remove {
@@ -76,11 +88,22 @@ pub fn TrackRow(
         actions.push(MenuAction::new(delete_song_text.as_str(), "fa-solid fa-trash").destructive());
     }
 
-    let download_action_idx = if has_remove { 2 } else { 1 };
+    let add_to_queue_idx = if has_queue { Some(0) } else { None };
+    let add_to_playlist_idx = if has_queue { 1 } else { 0 };
+    let remove_action_idx = if has_remove {
+        Some(add_to_playlist_idx + 1)
+    } else {
+        None
+    };
+    let download_action_idx = if has_download {
+        add_to_playlist_idx + 1 + usize::from(has_remove)
+    } else {
+        0
+    };
     let delete_action_idx = if has_download {
         download_action_idx + 1
     } else {
-        download_action_idx
+        add_to_playlist_idx + 1 + usize::from(has_remove)
     };
 
     let mut long_press_task = use_signal(|| None);
@@ -192,11 +215,22 @@ pub fn TrackRow(
                     button_class: "opacity-0 group-hover:opacity-100 focus:opacity-100".to_string(),
                     anchor: "right".to_string(),
                     on_action: move |idx: usize| {
-                        if idx == 0 {
+                        if let Some(queue_idx) = add_to_queue_idx {
+                            if idx == queue_idx {
+                                if let Some(handler) = on_queue {
+                                    handler.call(());
+                                }
+                                return;
+                            }
+                        }
+
+                        if idx == add_to_playlist_idx {
                             on_add_to_playlist.call(());
-                        } else if has_remove && idx == 1 {
-                            if let Some(handler) = on_remove_from_playlist {
-                                handler.call(());
+                        } else if let Some(remove_idx) = remove_action_idx {
+                            if idx == remove_idx {
+                                if let Some(handler) = on_remove_from_playlist {
+                                    handler.call(());
+                                }
                             }
                         } else if has_download && idx == download_action_idx {
                             if let Some(handler) = on_download {

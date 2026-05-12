@@ -14,6 +14,7 @@ pub struct ShowcaseProps {
     pub tracks: Vec<Track>,
     pub library: Signal<Library>,
     pub on_play: EventHandler<usize>,
+    pub on_queue: Option<EventHandler<usize>>,
     pub on_add_to_playlist: Option<EventHandler<usize>>,
     pub on_delete_track: Option<EventHandler<usize>>,
     pub on_remove_from_playlist: Option<EventHandler<usize>>,
@@ -265,9 +266,14 @@ pub fn Showcase(props: ShowcaseProps) -> Element {
                                                 }
                                              },
                                              on_add_to_playlist: move |_| {
-                                                if let Some(handler) = &props.on_add_to_playlist {
-                                                    handler.call(idx);
-                                                }
+                                                 if let Some(handler) = &props.on_add_to_playlist {
+                                                     handler.call(idx);
+                                                 }
+                                             },
+                                             on_queue: move |_| {
+                                                 if let Some(handler) = &props.on_queue {
+                                                     handler.call(idx);
+                                                 }
                                              },
                                              on_close_menu: move |_| {
                                                 if let Some(handler) = &props.on_close_menu {
