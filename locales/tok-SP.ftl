@@ -266,8 +266,13 @@ ytdlp_status_processing = 󱤏 󱥔 󱤦...
 ytdlp_status_completed = 󱥛
 ytdlp_status_waiting = 󱥎 󱤈...
 ytdlp_error_not_found = 󱤏 yt-dlp 󱤮 󱤳 󱤂. 󱥎 󱥸 󱤱: https://github.com/yt-dlp/yt-dlp
+ytdlp_error_ffmpeg_not_found = ilo ffmpeg li lon ala lon PATH. o pana e ona tawa ni: ilo yt-dlp li ken pali e ante pini.
 ytdlp_error_start = yt-dlp 󱤮 󱤎 󱥒: { $error }
 ytdlp_error_exit = yt-dlp 󱤮 󱦃: { $status }
+ytdlp_error_duplicate_active = URL ni li lon pali jo.
+ytdlp_error_output_not_directory = nasin pi weka lipu li tomo ala: { $path }
+ytdlp_error_output_prepare = ken ala pona e tomo pi weka lipu: { $error }
+ytdlp_error_output_not_writable = ken ala sitelen tawa tomo pi weka lipu: { $path }
 
 featured_album = 󱥯 󱤶 󱥬
 minimize = 󱥬 󱤴

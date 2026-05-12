@@ -91,8 +91,13 @@ ytdlp_status_processing = Sedang memproses…
 ytdlp_status_completed = Selesai
 ytdlp_status_waiting = Menunggu…
 ytdlp_error_not_found = yt-dlp tidak ditemukan di PATH. Install: https://github.com/yt-dlp/yt-dlp
+ytdlp_error_ffmpeg_not_found = ffmpeg tidak ditemukan di PATH. Instal agar post-processing yt-dlp dapat bekerja.
 ytdlp_error_start = Gagal untuk memulai yt-dlp: { $error }
 ytdlp_error_exit = yt-dlp gagal: { $status }
+ytdlp_error_duplicate_active = URL ini sudah sedang diunduh.
+ytdlp_error_output_not_directory = Path output bukan direktori: { $path }
+ytdlp_error_output_prepare = Gagal menyiapkan direktori output: { $error }
+ytdlp_error_output_not_writable = Direktori output tidak dapat ditulisi: { $path }
 
 # UI Actions & Buttons
 add_to_favorites = Tambah ke Favorit

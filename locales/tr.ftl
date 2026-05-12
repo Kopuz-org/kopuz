@@ -291,8 +291,13 @@ ytdlp_status_processing = İşleniyor…
 ytdlp_status_completed = Tamamlandı
 ytdlp_status_waiting = Bekleniyor…
 ytdlp_error_not_found = yt-dlp PATH içinde bulunamadı. Buradan indirin: https://github.com/yt-dlp/yt-dlp
+ytdlp_error_ffmpeg_not_found = ffmpeg PATH içinde bulunamadı. yt-dlp son işlemenin çalışması için yükleyin.
 ytdlp_error_start = yt-dlp başlatılamadı: { $error }
 ytdlp_error_exit = yt-dlp sonlandı: { $status }
+ytdlp_error_duplicate_active = Bu URL zaten indiriliyor.
+ytdlp_error_output_not_directory = Çıkış yolu bir klasör değil: { $path }
+ytdlp_error_output_prepare = Çıkış klasörü hazırlanamadı: { $error }
+ytdlp_error_output_not_writable = Çıkış klasörüne yazılamıyor: { $path }
 
 channel_mode = Kanal Modu
 channel_mode_stereo = Stereo

@@ -297,8 +297,13 @@ ytdlp_status_processing = 処理中…
 ytdlp_status_completed = 完了
 ytdlp_status_waiting = 待機中…
 ytdlp_error_not_found = PATH に yt-dlp が見つかりませんでした。インストールしてください: https://github.com/yt-dlp/yt-dlp
+ytdlp_error_ffmpeg_not_found = PATH に ffmpeg が見つかりませんでした。yt-dlp の後処理を動作させるためにインストールしてください。
 ytdlp_error_start = yt-dlp の起動に失敗しました: { $error }
 ytdlp_error_exit = yt-dlp が終了しました: { $status }
+ytdlp_error_duplicate_active = この URL はすでにダウンロード中です。
+ytdlp_error_output_not_directory = 出力先のパスはディレクトリではありません: { $path }
+ytdlp_error_output_prepare = 出力先ディレクトリを準備できませんでした: { $error }
+ytdlp_error_output_not_writable = 出力先ディレクトリに書き込めません: { $path }
 
 channel_mode = チャンネルモード
 channel_mode_stereo = ステレオ

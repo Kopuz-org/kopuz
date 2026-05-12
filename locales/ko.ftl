@@ -291,8 +291,13 @@ ytdlp_status_processing = 처리 중…
 ytdlp_status_completed = 완료됨
 ytdlp_status_waiting = 대기 중…
 ytdlp_error_not_found = PATH에서 yt-dlp를 찾을 수 없습니다. 설치: https://github.com/yt-dlp/yt-dlp
+ytdlp_error_ffmpeg_not_found = PATH에서 ffmpeg를 찾을 수 없습니다. yt-dlp 후처리가 동작하도록 설치하세요.
 ytdlp_error_start = yt-dlp 시작 실패: { $error }
 ytdlp_error_exit = yt-dlp 종료됨: { $status }
+ytdlp_error_duplicate_active = 이 URL은 이미 다운로드 중입니다.
+ytdlp_error_output_not_directory = 출력 경로가 폴더가 아닙니다: { $path }
+ytdlp_error_output_prepare = 출력 폴더를 준비하지 못했습니다: { $error }
+ytdlp_error_output_not_writable = 출력 폴더에 쓸 수 없습니다: { $path }
 
 channel_mode = 채널 모드
 channel_mode_stereo = 스테레오

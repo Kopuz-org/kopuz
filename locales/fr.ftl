@@ -266,8 +266,13 @@ ytdlp_status_processing = Traitement en cours...
 ytdlp_status_completed = Terminé
 ytdlp_status_waiting = En attente...
 ytdlp_error_not_found = yt-dlp introuvable dans le PATH. Installez-le : https://github.com/yt-dlp/yt-dlp
+ytdlp_error_ffmpeg_not_found = ffmpeg introuvable dans le PATH. Installez-le pour que le post-traitement de yt-dlp fonctionne.
 ytdlp_error_start = Échec du démarrage de yt-dlp : { $error }
 ytdlp_error_exit = yt-dlp s'est arrêté : { $status }
+ytdlp_error_duplicate_active = Cette URL est déjà en cours de téléchargement.
+ytdlp_error_output_not_directory = Le chemin de sortie n'est pas un dossier : { $path }
+ytdlp_error_output_prepare = Impossible de préparer le dossier de sortie : { $error }
+ytdlp_error_output_not_writable = Le dossier de sortie n'est pas accessible en écriture : { $path }
 
 featured_album = Album en vedette
 minimize = Réduire

@@ -291,8 +291,13 @@ ytdlp_status_processing = מעבד…
 ytdlp_status_completed = הושלם
 ytdlp_status_waiting = ממתין…
 ytdlp_error_not_found = yt-dlp לא נמצא ב-PATH. ניתן להתקין דרך: https://github.com/yt-dlp/yt-dlp
+ytdlp_error_ffmpeg_not_found = ffmpeg לא נמצא ב-PATH. התקן אותו כדי שעיבוד ההמשך של yt-dlp יעבוד.
 ytdlp_error_start = נכשל בהפעלת yt-dlp: { $error }
 ytdlp_error_exit = yt-dlp סיים: { $status }
+ytdlp_error_duplicate_active = הכתובת הזו כבר בהורדה.
+ytdlp_error_output_not_directory = נתיב הפלט אינו תיקייה: { $path }
+ytdlp_error_output_prepare = לא ניתן להכין את תיקיית הפלט: { $error }
+ytdlp_error_output_not_writable = אין הרשאת כתיבה לתיקיית הפלט: { $path }
 
 channel_mode = מצב ערוץ
 channel_mode_stereo = סטריאו

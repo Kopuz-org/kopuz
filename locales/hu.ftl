@@ -291,8 +291,13 @@ ytdlp_status_processing = Feldolgozás…
 ytdlp_status_completed = Befejezve
 ytdlp_status_waiting = Várakozás…
 ytdlp_error_not_found = Az yt-dlp nem található a PATH-ban. Telepítés: https://github.com/yt-dlp/yt-dlp
+ytdlp_error_ffmpeg_not_found = Az ffmpeg nem található a PATH-ban. Telepítse, hogy az yt-dlp utófeldolgozása működjön.
 ytdlp_error_start = Nem sikerült elindítani az yt-dlp-t: { $error }
 ytdlp_error_exit = Az yt-dlp kilépett: { $status }
+ytdlp_error_duplicate_active = Ez az URL már letöltés alatt áll.
+ytdlp_error_output_not_directory = A kimeneti útvonal nem könyvtár: { $path }
+ytdlp_error_output_prepare = Nem sikerült előkészíteni a kimeneti könyvtárat: { $error }
+ytdlp_error_output_not_writable = A kimeneti könyvtár nem írható: { $path }
 
 channel_mode = Csatorna mód
 channel_mode_stereo = Sztereó

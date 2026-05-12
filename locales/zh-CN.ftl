@@ -291,8 +291,13 @@ ytdlp_status_processing = 正在处理…
 ytdlp_status_completed = 已完成
 ytdlp_status_waiting = 等待中…
 ytdlp_error_not_found = PATH 中未找到 yt-dlp。请安装：https://github.com/yt-dlp/yt-dlp
+ytdlp_error_ffmpeg_not_found = PATH 中未找到 ffmpeg。请安装它以便 yt-dlp 的后处理正常工作。
 ytdlp_error_start = 启动 yt-dlp 失败：{ $error }
 ytdlp_error_exit = yt-dlp 返回状态异常：{ $status }
+ytdlp_error_duplicate_active = 此 URL 已在下载中。
+ytdlp_error_output_not_directory = 输出路径不是目录：{ $path }
+ytdlp_error_output_prepare = 准备输出目录失败：{ $error }
+ytdlp_error_output_not_writable = 输出目录不可写：{ $path }
 
 channel_mode = 声道模式
 channel_mode_stereo = 立体声

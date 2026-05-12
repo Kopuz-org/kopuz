@@ -291,8 +291,13 @@ ytdlp_status_processing = Обробка...
 ytdlp_status_completed = Завершено
 ytdlp_status_waiting = Очікування...
 ytdlp_error_not_found = yt-dlp не знайдено у PATH. Встановіть його: https://github.com/yt-dlp/yt-dlp
+ytdlp_error_ffmpeg_not_found = ffmpeg не знайдено у PATH. Встановіть його, щоб післяобробка yt-dlp працювала.
 ytdlp_error_start = Помилка запуску yt-dlp: { $error }
 ytdlp_error_exit = yt-dlp завершив роботу: { $status }
+ytdlp_error_duplicate_active = Ця URL-адреса вже завантажується.
+ytdlp_error_output_not_directory = Шлях виводу не є каталогом: { $path }
+ytdlp_error_output_prepare = Не вдалося підготувати каталог виводу: { $error }
+ytdlp_error_output_not_writable = Каталог виводу недоступний для запису: { $path }
 
 channel_mode = Режим каналу
 channel_mode_stereo = Стерео

@@ -297,8 +297,13 @@ ytdlp_status_processing = جارٍ المعالجة...
 ytdlp_status_completed = اكتمل
 ytdlp_status_waiting = قيد الانتظار...
 ytdlp_error_not_found = لم يتم العثور على yt-dlp في PATH. قم بتثبيته: https://github.com/yt-dlp/yt-dlp
+ytdlp_error_ffmpeg_not_found = لم يتم العثور على ffmpeg في PATH. قم بتثبيته لكي تعمل المعالجة اللاحقة في yt-dlp.
 ytdlp_error_start = فشل بدء yt-dlp: { $error }
 ytdlp_error_exit = خرج yt-dlp: { $status }
+ytdlp_error_duplicate_active = يجري تنزيل هذا الرابط بالفعل.
+ytdlp_error_output_not_directory = مسار الإخراج ليس مجلدًا: { $path }
+ytdlp_error_output_prepare = تعذر تجهيز مجلد الإخراج: { $error }
+ytdlp_error_output_not_writable = لا يمكن الكتابة إلى مجلد الإخراج: { $path }
 
 channel_mode = وضع القناة
 channel_mode_stereo = ستيريو

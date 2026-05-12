@@ -91,8 +91,13 @@ ytdlp_status_processing = Processando…
 ytdlp_status_completed = Concluído
 ytdlp_status_waiting = Aguardando…
 ytdlp_error_not_found = yt-dlp não encontrado no PATH. Instale-o: https://github.com/yt-dlp/yt-dlp
+ytdlp_error_ffmpeg_not_found = ffmpeg não encontrado no PATH. Instale-o para que o pós-processamento do yt-dlp funcione.
 ytdlp_error_start = Falha ao iniciar o yt-dlp: { $error }
 ytdlp_error_exit = yt-dlp saiu: { $status }
+ytdlp_error_duplicate_active = Esta URL já está sendo baixada.
+ytdlp_error_output_not_directory = O caminho de saída não é uma pasta: { $path }
+ytdlp_error_output_prepare = Falha ao preparar a pasta de saída: { $error }
+ytdlp_error_output_not_writable = Sem permissão de escrita na pasta de saída: { $path }
 
 # UI Actions & Buttons
 add_to_favorites = Adicionar aos favoritos

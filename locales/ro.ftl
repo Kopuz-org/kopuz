@@ -291,8 +291,13 @@ ytdlp_status_processing = Procesare…
 ytdlp_status_completed = Finalizat
 ytdlp_status_waiting = Se Așteaptă…
 ytdlp_error_not_found = yt-dlp nu a fost găsit în sistemul PATH. Instalați yt-dlp: https://github.com/yt-dlp/yt-dlp
+ytdlp_error_ffmpeg_not_found = ffmpeg nu a fost găsit în PATH. Instalați-l pentru ca post-procesarea yt-dlp să funcționeze.
 ytdlp_error_start = yt-dlp nu s-a pornit: { $error }
 ytdlp_error_exit = yt-dlp a ieșit: { $status }
+ytdlp_error_duplicate_active = Acest URL se descarcă deja.
+ytdlp_error_output_not_directory = Calea de ieșire nu este un director: { $path }
+ytdlp_error_output_prepare = Nu s-a putut pregăti directorul de ieșire: { $error }
+ytdlp_error_output_not_writable = Directorul de ieșire nu este inscriptibil: { $path }
 
 channel_mode = Mod canal
 channel_mode_stereo = Stereo

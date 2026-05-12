@@ -1,6 +1,8 @@
 use config::{AppConfig, YtdlpOptions};
 use dioxus::prelude::*;
+use std::fs::{self, OpenOptions};
 use std::io::BufRead;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DownloadJob {
@@ -107,26 +109,101 @@ fn find_ytdlp() -> String {
         }
     }
 
-    let extra_path = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin";
-    if let Ok(out) = std::process::Command::new("sh")
-        .args(["-c", "which yt-dlp"])
-        .env(
-            "PATH",
-            format!(
-                "{}:{}",
-                extra_path,
-                std::env::var("PATH").unwrap_or_default()
-            ),
-        )
-        .output()
-    {
-        let found = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        if !found.is_empty() && std::path::Path::new(&found).exists() {
-            return found;
-        }
+    if let Some(found) = find_in_augmented_path("yt-dlp") {
+        return found;
     }
 
     "yt-dlp".to_string()
+}
+
+fn augmented_path() -> String {
+    format!(
+        "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:{}",
+        std::env::var("PATH").unwrap_or_default()
+    )
+}
+
+fn find_in_augmented_path(binary: &str) -> Option<String> {
+    let binary_path = Path::new(binary);
+    if binary_path.is_absolute() && binary_path.exists() {
+        return Some(binary.to_string());
+    }
+
+    let mut candidates = vec![binary.to_string()];
+    #[cfg(target_os = "windows")]
+    if !binary.ends_with(".exe") {
+        candidates.push(format!("{binary}.exe"));
+    }
+
+    for dir in std::env::split_paths(&augmented_path()) {
+        for candidate in &candidates {
+            let path = dir.join(candidate);
+            if path.exists() {
+                return Some(path.to_string_lossy().into_owned());
+            }
+        }
+    }
+
+    None
+}
+
+fn validate_output_directory(out_dir: &str) -> Result<(), String> {
+    let trimmed = out_dir.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+
+    let path = PathBuf::from(trimmed);
+    if path.exists() && !path.is_dir() {
+        return Err(i18n::t_with(
+            "ytdlp_error_output_not_directory",
+            &[("path", trimmed.to_string())],
+        ));
+    }
+
+    fs::create_dir_all(&path).map_err(|error| {
+        i18n::t_with(
+            "ytdlp_error_output_prepare",
+            &[("error", error.to_string())],
+        )
+    })?;
+
+    let probe_path = path.join(format!(".kopuz-write-test-{}", uuid::Uuid::new_v4()));
+    OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe_path)
+        .map_err(|_| {
+            i18n::t_with(
+                "ytdlp_error_output_not_writable",
+                &[("path", trimmed.to_string())],
+            )
+        })?;
+    let _ = fs::remove_file(probe_path);
+
+    Ok(())
+}
+
+fn run_preflight_checks(url: &str, out_dir: &str, jobs: &[DownloadJob]) -> Result<(), String> {
+    if jobs.iter().any(|job| {
+        job.url.trim() == url
+            && matches!(
+                job.status,
+                JobStatus::Pending | JobStatus::Downloading | JobStatus::Processing
+            )
+    }) {
+        return Err(i18n::t("ytdlp_error_duplicate_active"));
+    }
+
+    if find_in_augmented_path(&find_ytdlp()).is_none() {
+        return Err(i18n::t("ytdlp_error_not_found"));
+    }
+
+    if find_in_augmented_path("ffmpeg").is_none() {
+        return Err(i18n::t("ytdlp_error_ffmpeg_not_found"));
+    }
+
+    validate_output_directory(out_dir)
 }
 
 fn build_command(
@@ -137,12 +214,7 @@ fn build_command(
 ) -> std::process::Command {
     let binary = find_ytdlp();
     let mut cmd = std::process::Command::new(&binary);
-
-    let augmented_path = format!(
-        "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:{}",
-        std::env::var("PATH").unwrap_or_default()
-    );
-    cmd.env("PATH", augmented_path);
+    cmd.env("PATH", augmented_path());
 
     cmd.arg("--newline")
         .arg("--no-warnings")
@@ -323,6 +395,7 @@ pub fn YtdlpPage(config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) -
     let mut jobs = use_signal(|| Vec::<DownloadJob>::new());
     let mut out_dir = use_signal(|| config.peek().ytdlp_output_dir.clone());
     let mut show_opts = use_signal(|| false);
+    let mut preflight_error = use_signal(|| Option::<String>::None);
 
     use_hook(move || {
         let history = config.peek().ytdlp_history.clone();
@@ -350,6 +423,13 @@ pub fn YtdlpPage(config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) -
     let mut do_download = move || {
         let url = url_input().trim().to_string();
         if url.is_empty() {
+            return;
+        }
+
+        preflight_error.set(None);
+
+        if let Err(error) = run_preflight_checks(&url, &out_dir(), &jobs.read()) {
+            preflight_error.set(Some(error));
             return;
         }
 
@@ -528,7 +608,10 @@ pub fn YtdlpPage(config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) -
                     class: "flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-white/30 transition-colors text-sm",
                     placeholder: "{i18n::t(\"ytdlp_url_placeholder\")}",
                     value: "{url_input}",
-                    oninput: move |e| url_input.set(e.value()),
+                    oninput: move |e| {
+                        preflight_error.set(None);
+                        url_input.set(e.value());
+                    },
                     onkeydown: move |e| {
                         if e.key() == dioxus::prelude::Key::Enter { do_download(); }
                     }
@@ -555,6 +638,13 @@ pub fn YtdlpPage(config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) -
                 }
             }
 
+            if let Some(error) = preflight_error.read().clone() {
+                div { class: "mb-4 rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-200 whitespace-pre-wrap",
+                    i { class: "fa-solid fa-triangle-exclamation mr-2 text-red-300" }
+                    "{error}"
+                }
+            }
+
             div { class: "flex items-center gap-2 mb-5",
                 i { class: "fa-solid fa-folder text-slate-600 text-sm shrink-0" }
                 input {
@@ -562,6 +652,7 @@ pub fn YtdlpPage(config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) -
                     placeholder: "{i18n::t(\"ytdlp_output_dir_placeholder\")}",
                     value: "{out_dir}",
                     oninput: move |e| {
+                        preflight_error.set(None);
                         out_dir.set(e.value());
                         config.write().ytdlp_output_dir = e.value();
                     }

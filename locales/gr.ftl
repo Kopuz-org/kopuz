@@ -291,8 +291,13 @@ ytdlp_status_processing = Επεξεργασία…
 ytdlp_status_completed = Ολοκληρώθηκε
 ytdlp_status_waiting = Αναμονή…
 ytdlp_error_not_found = Το yt-dlp δεν βρέθηκε. Εγκαταστήστε το: https://github.com/yt-dlp/yt-dlp
+ytdlp_error_ffmpeg_not_found = Δεν βρέθηκε το ffmpeg στο PATH. Εγκαταστήστε το ώστε να λειτουργεί η μετεπεξεργασία του yt-dlp.
 ytdlp_error_start = Αποτυχία εκκίνησης yt-dlp: { $error }
 ytdlp_error_exit = Το yt-dlp τερματίστηκε: { $status }
+ytdlp_error_duplicate_active = Αυτό το URL κατεβαίνει ήδη.
+ytdlp_error_output_not_directory = Η διαδρομή εξόδου δεν είναι φάκελος: { $path }
+ytdlp_error_output_prepare = Αποτυχία προετοιμασίας του φακέλου εξόδου: { $error }
+ytdlp_error_output_not_writable = Δεν υπάρχει άδεια εγγραφής στον φάκελο εξόδου: { $path }
 
 channel_mode = Λειτουργία καναλιού
 channel_mode_stereo = Στέρεο
