@@ -38,6 +38,7 @@ password = len
 player_settings = nasin pi ilo lawa kalama
 discord_presence = lon pi ilo Siko
 reduce_animations = o lili e tawa
+apple_music_ui = Apple Music-style UI (Cider look)
 show_source_toggle = o lukin e ilo ante
 titlebar_mode = lawa ilo
 titlebar_custom = lawa pi ilo

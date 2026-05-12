@@ -72,7 +72,7 @@ pub fn Showcase(props: ShowcaseProps) -> Element {
              class: "select-none",
              div {
                  class: "flex flex-col md:flex-row items-end gap-8 mb-12",
-                 div { class: "w-64 h-64 rounded-xl bg-stone-800 overflow-hidden relative flex-shrink-0",
+                 div { class: "w-60 h-60 rounded-2xl bg-white/[0.06] overflow-hidden relative flex-shrink-0 shadow-2xl",
                      if let Some(url) = &props.cover_url {
                          img { src: "{url.as_ref()}", class: "w-full h-full object-cover" }
                      } else {
@@ -82,7 +82,7 @@ pub fn Showcase(props: ShowcaseProps) -> Element {
                      }
                      if props.on_cover_click.is_some() {
                          div {
-                             class: "absolute inset-0 bg-black/50 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer rounded-xl",
+                             class: "absolute inset-0 bg-black/50 opacity-0 hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer rounded-2xl",
                              onclick: move |_| {
                                  if let Some(ref h) = props.on_cover_click {
                                      h.call(());
@@ -96,7 +96,7 @@ pub fn Showcase(props: ShowcaseProps) -> Element {
                      if !props.description.is_empty() {
                          h5 { class: "text-sm font-bold tracking-widest text-white/60 uppercase mb-2", "{props.description}" }
                      }
-                     h1 { class: "text-5xl md:text-7xl font-bold text-white mb-6", "{props.name}" }
+                     h1 { class: "text-4xl md:text-6xl font-bold text-white mb-4 tracking-tight", "{props.name}" }
                      div { class: "flex items-center gap-6 text-slate-400",
                          {
                             let count = props.tracks.len();
@@ -113,13 +113,13 @@ pub fn Showcase(props: ShowcaseProps) -> Element {
                 div { class: "flex items-center gap-4",
                      if !props.tracks.is_empty() {
                          button {
-                             class: "w-14 h-14 rounded-full bg-indigo-500 hover:bg-indigo-400 text-black flex items-center justify-center transition-transform hover:scale-105",
+                             class: "w-12 h-12 rounded-full bg-white hover:bg-white/90 text-black flex items-center justify-center transition-all hover:scale-105 active:scale-95 shadow-lg",
                              onclick: move |_| props.on_play.call(0),
-                             i { class: "fa-solid fa-play text-xl ml-1" }
+                             i { class: "fa-solid fa-play text-base ml-0.5" }
                          }
                          if props.on_download_all.is_some() || props.on_delete_all.is_some() {
                              button {
-                                 class: "w-12 h-12 rounded-full border border-white/20 hover:border-white/40 text-white/70 hover:text-white flex items-center justify-center transition-colors",
+                                 class: "w-10 h-10 rounded-full bg-white/[0.06] hover:bg-white/10 border border-white/10 hover:border-white/20 text-white/60 hover:text-white flex items-center justify-center transition-colors",
                                  title: if all_downloaded { "Remove downloads" } else { "Download all for offline playback" },
                                  disabled: props.is_downloading_all,
                                  onclick: move |_| {

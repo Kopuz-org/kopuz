@@ -38,6 +38,7 @@ password = パスワード
 player_settings = プレイヤー設定
 discord_presence = Discordプレゼンス
 reduce_animations = アニメーションを減らす
+apple_music_ui = Apple Music-style UI (Cider look)
 show_source_toggle = ソース切替を表示
 titlebar_mode = タイトルバー
 titlebar_custom = カスタム（アプリ描画）

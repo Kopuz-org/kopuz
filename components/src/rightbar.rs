@@ -197,7 +197,11 @@ pub fn Rightbar(
 
     rsx! {
         div {
-            class: "bg-black/40 border-l border-white/5 flex flex-col h-full flex-shrink-0 z-10 relative",
+            class: if config.read().apple_music_ui {
+                "bg-black/30 backdrop-blur-xl border-l border-white/[0.05] flex flex-col h-full flex-shrink-0 z-10 relative"
+            } else {
+                "bg-black/40 border-l border-white/5 flex flex-col h-full flex-shrink-0 z-10 relative"
+            },
             style: "width: {width}px; min-width: {width}px;",
 
             div {
@@ -210,32 +214,32 @@ pub fn Rightbar(
             }
 
             div {
-                class: "flex items-center justify-between px-4 py-4 border-b border-white/10",
+                class: "flex items-center justify-between px-4 py-3.5 border-b border-white/[0.06]",
                 div {
                     class: "flex items-center gap-1",
                     button {
                         class: if *active_tab.read() == 0 {
-                            "px-2 py-1 text-[10px] font-medium tracking-wider text-white border-b-2 border-white"
+                            "px-2.5 py-1 text-[10px] font-semibold tracking-wide text-white bg-white/10 rounded-lg"
                         } else {
-                            "px-2 py-1 text-[10px] font-medium tracking-wider text-white/40 hover:text-white/70 transition-colors"
+                            "px-2.5 py-1 text-[10px] font-medium tracking-wide text-white/40 hover:text-white/70 transition-colors"
                         },
                         onclick: move |_| active_tab.set(0),
                         "{back_text}"
                     }
                     button {
                         class: if *active_tab.read() == 1 {
-                            "px-2 py-1 text-[10px] font-medium tracking-wider text-white border-b-2 border-white"
+                            "px-2.5 py-1 text-[10px] font-semibold tracking-wide text-white bg-white/10 rounded-lg"
                         } else {
-                            "px-2 py-1 text-[10px] font-medium tracking-wider text-white/40 hover:text-white/70 transition-colors"
+                            "px-2.5 py-1 text-[10px] font-medium tracking-wide text-white/40 hover:text-white/70 transition-colors"
                         },
                         onclick: move |_| active_tab.set(1),
                         "{up_next_text}"
                     }
                     button {
                         class: if *active_tab.read() == 2 {
-                            "px-2 py-1 text-[10px] font-medium tracking-wider text-white border-b-2 border-white"
+                            "px-2.5 py-1 text-[10px] font-semibold tracking-wide text-white bg-white/10 rounded-lg"
                         } else {
-                            "px-2 py-1 text-[10px] font-medium tracking-wider text-white/40 hover:text-white/70 transition-colors"
+                            "px-2.5 py-1 text-[10px] font-medium tracking-wide text-white/40 hover:text-white/70 transition-colors"
                         },
                         onclick: move |_| active_tab.set(2),
                         "{lyrics_text}"

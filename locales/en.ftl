@@ -46,6 +46,7 @@ channel_mode_right_only = Right only
 channel_mode_swap_left_right = Swap L/R
 discord_presence = Discord Presence
 reduce_animations = Reduce Animations
+apple_music_ui = Apple Music-style UI (Cider look)
 show_source_toggle = Show Source Toggle
 titlebar_mode = Titlebar
 titlebar_custom = Custom (app-drawn)

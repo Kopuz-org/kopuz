@@ -38,6 +38,7 @@ password = סיסמה
 player_settings = הגדרות נגן
 discord_presence = נוכחות דיסקורד
 reduce_animations = הפחתת אנימציות
+apple_music_ui = Apple Music-style UI (Cider look)
 show_source_toggle = הצגת מקור
 titlebar_mode = סרגל כותרת
 titlebar_custom = מותאם אישית (מצויר על ידי האפליקציה)

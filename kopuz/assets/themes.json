@@ -1,6 +1,23 @@
 {
   "dark": {
 
+    "cider": {
+      "name": "Cider",
+      "bg":             "#0c0c10",
+      "text":           "#f0eeff",
+      "text-muted":     "#9b9ab8",
+      "surface":        "#3e3d52",
+      "progress":       "#26c147",
+      "accent-soft":    "#b09eff",
+      "accent":         "#7b61ff",
+      "accent-alt":     "#5e45d6",
+      "accent-deep":    "#1a1730",
+      "highlight":      "#a78bfa",
+      "highlight-dark": "#8b6fde",
+      "danger":         "#ff6b8a",
+      "raised":         "#18172a"
+    },
+
     "default": {
       "name": "Default",
       "bg":             "#000000",

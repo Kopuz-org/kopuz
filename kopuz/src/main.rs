@@ -1287,6 +1287,26 @@ fn App() -> Element {
                 }
             }
 
+            if config.read().apple_music_ui {
+                Bottombar {
+                    library: library,
+                    favorites_store,
+                    config,
+                    current_song_cover_url: current_song_cover_url,
+                    current_song_title: current_song_title,
+                    current_song_artist: current_song_artist,
+                    player: player,
+                    is_playing: is_playing,
+                    is_fullscreen: is_fullscreen,
+                    current_song_duration: current_song_duration,
+                    current_song_progress: current_song_progress,
+                    queue: queue,
+                    current_queue_index: current_queue_index,
+                    volume: volume,
+                    persisted_volume: persisted_volume,
+                    is_rightbar_open: is_rightbar_open,
+                }
+            }
             div {
                 class: "{content_row_class}",
                 Sidebar {
@@ -1490,23 +1510,25 @@ fn App() -> Element {
                 palette: palette,
             }
             DownloadOverlay { queue: download_queue }
-            Bottombar {
-                library: library,
-                favorites_store,
-                config,
-                current_song_cover_url: current_song_cover_url,
-                current_song_title: current_song_title,
-                current_song_artist: current_song_artist,
-                player: player,
-                is_playing: is_playing,
-                is_fullscreen: is_fullscreen,
-                current_song_duration: current_song_duration,
-                current_song_progress: current_song_progress,
-                queue: queue,
-                current_queue_index: current_queue_index,
-                volume: volume,
-                persisted_volume: persisted_volume,
-                is_rightbar_open: is_rightbar_open,
+            if !config.read().apple_music_ui {
+                Bottombar {
+                    library: library,
+                    favorites_store,
+                    config,
+                    current_song_cover_url: current_song_cover_url,
+                    current_song_title: current_song_title,
+                    current_song_artist: current_song_artist,
+                    player: player,
+                    is_playing: is_playing,
+                    is_fullscreen: is_fullscreen,
+                    current_song_duration: current_song_duration,
+                    current_song_progress: current_song_progress,
+                    queue: queue,
+                    current_queue_index: current_queue_index,
+                    volume: volume,
+                    persisted_volume: persisted_volume,
+                    is_rightbar_open: is_rightbar_open,
+                }
             }
         }
     }

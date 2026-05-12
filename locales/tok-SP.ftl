@@ -38,6 +38,7 @@ password = 󱤥
 player_settings = 󱤿󱥍󱤎󱤤󱤕
 discord_presence = 󱤬󱥍󱤎󱦐󱥛󱦜󱤜󱦝󱦑
 reduce_animations = 󱥄󱤨󱤉󱥩
+apple_music_ui = Apple Music-style UI (Cider look)
 show_source_toggle = 󱥄󱤮󱤉󱤎󱤆
 titlebar_mode = 󱤤󱤎
 titlebar_custom = 󱤤󱥎󱤎

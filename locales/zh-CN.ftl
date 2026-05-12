@@ -38,6 +38,7 @@ password = 密码
 player_settings = 播放器设置
 discord_presence = Discord 状态
 reduce_animations = 减少动画
+apple_music_ui = Apple Music-style UI (Cider look)
 show_source_toggle = 显示来源切换
 titlebar_mode = 标题栏
 titlebar_custom = 自定义（应用绘制）

@@ -196,6 +196,15 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+                        SettingItem {
+                            title: i18n::t("apple_music_ui").to_string(),
+                            control: rsx! {
+                                ToggleSetting {
+                                    enabled: config.read().apple_music_ui,
+                                    on_change: move |val| config.write().apple_music_ui = val,
+                                }
+                            }
+                        }
                         if !cfg!(target_arch = "wasm32") {
                             SettingItem {
                                 title: i18n::t("show_source_toggle").to_string(),

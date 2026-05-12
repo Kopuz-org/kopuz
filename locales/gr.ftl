@@ -38,6 +38,7 @@ password = Κωδικός
 player_settings = Ρυθμίσεις Αναπαραγωγής
 discord_presence = Κατάσταση Discord
 reduce_animations = Μείωση κινήσεων
+apple_music_ui = Apple Music-style UI (Cider look)
 show_source_toggle = Εμφάνιση διακόπτη πηγής
 titlebar_mode = Γραμμή τίτλου
 titlebar_custom = Προσαρμοσμένο (σχεδιαζόμενο από την εφαρμογή)

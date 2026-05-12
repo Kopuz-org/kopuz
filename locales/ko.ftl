@@ -38,6 +38,7 @@ password = 비밀번호
 player_settings = 플레이어 설정
 discord_presence = Discord 상태 표시
 reduce_animations = 애니메이션 줄이기
+apple_music_ui = Apple Music-style UI (Cider look)
 show_source_toggle = 소스 전환 표시
 titlebar_mode = 제목 표시줄
 titlebar_custom = 사용자 정의 (앱이 그린)
