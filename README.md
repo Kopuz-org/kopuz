@@ -7,7 +7,7 @@ Kopuz is a modern, lightweight, music player application built with Rust and the
 
 [![Discord](https://img.shields.io/badge/Discord-5865F2?style=flat&logo=discord&logoColor=white)](https://discord.gg/K6Bmzw2E4M)
 ![Rust](https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white)
-![Kopuz](https://github.com/user-attachments/assets/c0cdbcfa-f468-4a51-8910-2e27f3d55127)
+![Kopuz](https://github.com/user-attachments/assets/8180cd15-70bb-4aa5-b1d2-62e76bd44009)
 
 </div>
 
