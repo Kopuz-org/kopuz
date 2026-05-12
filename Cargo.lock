@@ -3258,7 +3258,7 @@ dependencies = [
 
 [[package]]
 name = "kopuz"
-version = "0.5.0"
+version = "0.5.5"
 dependencies = [
  "block2",
  "components",
