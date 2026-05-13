@@ -110,7 +110,7 @@ pub fn LocalFavorites(
                             active_menu_track.set(None);
                         },
                         on_queue: move |_| {
-                            queue.write().push(track_queue.clone());
+                            ctrl.add_to_queue(vec![track_queue.clone()]);
                             active_menu_track.set(None);
                         },
                         on_close_menu: move |_| active_menu_track.set(None),

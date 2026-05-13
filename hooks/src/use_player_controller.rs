@@ -293,12 +293,14 @@ impl PlayerController {
     }
 
     pub fn play_track(&mut self, idx: usize) {
-        let current_idx = *self.current_queue_index.peek();
-        self.history.with_mut(|h| {
-            if h.last() != Some(&current_idx) {
-                h.push(current_idx);
-            }
-        });
+        if *self.is_playing.peek() || self.player.peek().can_resume() {
+            let current_idx = *self.current_queue_index.peek();
+            self.history.with_mut(|h| {
+                if h.last() != Some(&current_idx) {
+                    h.push(current_idx);
+                }
+            });
+        }
         self.play_track_no_history_without_crossfade(idx);
     }
 
@@ -1167,11 +1169,16 @@ impl PlayerController {
         }
 
         if let Some(prev_idx) = self.history.with_mut(|h| h.pop()) {
+            if *self.shuffle.peek() {
+                self.shuffle_order.with_mut(|so| so.insert(0, idx));
+            }
             self.play_track_no_history_without_crossfade(prev_idx);
             return;
         }
 
-        if idx > 0 {
+        if *self.shuffle.peek() {
+            self.play_track_no_history_without_crossfade(idx);
+        } else if idx > 0 {
             self.play_track_no_history_without_crossfade(idx - 1);
         } else if *self.loop_mode.peek() == LoopMode::Queue {
             self.play_track_no_history_without_crossfade(queue_len - 1);
@@ -1204,9 +1211,10 @@ impl PlayerController {
 
         self.queue.set(tracks);
         self.shuffle_order.set(Vec::new());
+        self.history.set(Vec::new());
         let start = rand::thread_rng().gen_range(0..queue_len);
 
-        self.play_track(start);
+        self.play_track_no_history(start);
         self.rebuild_shuffle_order();
     }
 
@@ -1216,7 +1224,24 @@ impl PlayerController {
         }
         self.queue.set(tracks);
         self.shuffle_order.set(Vec::new());
-        self.play_track(0);
+        self.history.set(Vec::new());
+        self.play_track_no_history(0);
+    }
+
+    pub fn add_to_queue(&mut self, tracks: impl IntoIterator<Item = Track>) {
+        let tracks: Vec<Track> = tracks.into_iter().collect();
+        let count = tracks.len();
+        if count == 0 { return; }
+
+        self.queue.with_mut(|q| q.extend(tracks));
+
+        if *self.shuffle.peek() {
+            let q_len = self.queue.peek().len();
+            let start_idx = q_len - count;
+            self.shuffle_order.with_mut(|so| {
+                (start_idx..q_len).for_each(|idx| so.push(idx));
+            });
+        }
     }
 
     pub fn toggle_shuffle(&mut self) {
@@ -1259,7 +1284,23 @@ impl PlayerController {
         }
     }
 
-    pub fn move_queue_item(&mut self, from: usize, to: usize) {
+    pub fn move_queue_item(&mut self, from_list_pos: usize, to_list_pos: usize) {
+        if *self.shuffle.peek() {
+            self.shuffle_order.with_mut(|so| {
+                if from_list_pos < so.len() && to_list_pos < so.len() {
+                    let item = so.remove(from_list_pos);
+                    so.insert(to_list_pos, item);
+                }
+            });
+        } else {
+            let current_idx = *self.current_queue_index.peek();
+            let from_queue_idx = current_idx + 1 + from_list_pos;
+            let to_queue_idx = current_idx + 1 + to_list_pos;
+            self.move_physical_queue_item(from_queue_idx, to_queue_idx);
+        }
+    }
+
+    fn move_physical_queue_item(&mut self, from: usize, to: usize) {
         let len = self.queue.peek().len();
         if from >= len || to >= len || from == to {
             return;
@@ -1276,6 +1317,12 @@ impl PlayerController {
 
         self.history.with_mut(|history| {
             for idx in history.iter_mut() {
+                *idx = Self::remap_queue_index(*idx, from, to);
+            }
+        });
+
+        self.shuffle_order.with_mut(|shuffle_order| {
+            for idx in shuffle_order.iter_mut() {
                 *idx = Self::remap_queue_index(*idx, from, to);
             }
         });

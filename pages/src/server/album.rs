@@ -5,7 +5,6 @@ use components::selection_bar::SelectionBar;
 use components::track_row::TrackRow;
 use config::{AppConfig, MusicService};
 use dioxus::prelude::*;
-use rand::seq::SliceRandom;
 use reader::{Library, PlaylistStore};
 use server::jellyfin::JellyfinClient;
 use server::subsonic::SubsonicClient;
@@ -35,6 +34,7 @@ pub fn JellyfinAlbum(
                 .to_lowercase()
                 .cmp(&b.title.trim().to_lowercase())
         });
+
 
         let mut unique_albums = Vec::new();
         let mut seen_titles = std::collections::HashSet::new();
@@ -93,6 +93,8 @@ pub fn JellyfinAlbum(
             })
             .collect::<Vec<_>>()
     });
+
+    let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
 
     let add_all_to_queue_text = i18n::t("add_all_to_queue").to_string();
     let add_all_to_playlist_text = i18n::t("add_all_to_playlist").to_string();
@@ -181,7 +183,7 @@ pub fn JellyfinAlbum(
                                                                     disc_cmp
                                                                 }
                                                             });
-                                                            queue.write().extend(tracks_for_queue);
+                                                            ctrl.add_to_queue(tracks_for_queue);
                                                         }
                                                         1 => {
                                                             pending_album_id_for_playlist.set(Some(id.clone()));
@@ -692,7 +694,7 @@ pub fn JellyfinAlbumDetails(
                                         active_menu_track.set(None);
                                     },
                                     on_queue: move |_| {
-                                        queue.write().push(track_queue.clone());
+                                        ctrl.add_to_queue(vec![track_queue.clone()]);
                                         active_menu_track.set(None);
                                     },
                                     on_close_menu: move |_| active_menu_track.set(None),

@@ -125,7 +125,7 @@ pub fn TrackListView(mut props: TrackListViewProps) -> Element {
                 },
                 on_queue: move |idx: usize| {
                     if let Some(t) = tracks_queue.get(idx) {
-                        ctrl.queue.write().push(t.clone());
+                        ctrl.add_to_queue(vec![t.clone()]);
                         active_menu_track.set(None);
                     }
                 },

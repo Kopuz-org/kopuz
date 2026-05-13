@@ -24,6 +24,7 @@ pub fn ReorderButtons(
                         on_move_up.call(evt);
                     }
                 },
+                ondoubleclick: move |evt| evt.stop_propagation(),
                 i { class: "fa-solid fa-chevron-up {icon_class}" }
             }
             button {
@@ -39,6 +40,7 @@ pub fn ReorderButtons(
                         on_move_down.call(evt);
                     }
                 },
+                ondoubleclick: move |evt| evt.stop_propagation(),
                 i { class: "fa-solid fa-chevron-down {icon_class}" }
             }
         }
