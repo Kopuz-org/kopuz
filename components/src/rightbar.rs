@@ -347,14 +347,14 @@ pub fn Rightbar(
                             if back_items.is_empty() {
                                 div { class: "text-white/30 text-center py-10 text-sm", "{i18n::t(\"no_previous_songs\")}" }
                             } else {
-                                for (qi, track) in back_items.iter() {
+                                for (list_pos, (qi, track)) in back_items.iter().enumerate() {
                                     {
                                         let qi = *qi;
                                         let track = track.clone();
                                         let cover_url = get_track_cover(&track);
                                         rsx! {
                                             div {
-                                                key: "{qi}",
+                                                key: "{list_pos}-{qi}",
                                                 class: "flex items-center gap-3 px-2 py-2 hover:bg-white/5 cursor-pointer rounded-lg transition-colors group",
                                             style: "content-visibility: auto; contain-intrinsic-size: 0 56px;",
                                             ondoubleclick: move |_| play_song_at_index(qi),
