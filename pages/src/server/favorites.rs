@@ -343,8 +343,13 @@ pub fn JellyfinFavorites(
                         if selected.is_empty() {
                             return;
                         }
-                        for (track, _) in displayed_tracks_for_selection.iter().filter(|(t, _)| selected.contains(&t.path)) {
-                            ctrl.add_to_queue(vec![track.clone()]);
+                        let tracks: Vec<_> = displayed_tracks_for_selection
+                            .iter()
+                            .filter(|(t, _)| selected.contains(&t.path))
+                            .map(|(track, _)| track.clone())
+                            .collect();
+                        if !tracks.is_empty() {
+                            ctrl.add_to_queue(tracks);
                         }
                         is_selection_mode.set(false);
                         selected_tracks.write().clear();

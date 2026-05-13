@@ -466,9 +466,13 @@ pub fn JellyfinAlbumDetails(
                         if selected.is_empty() {
                             return;
                         }
-                        let tracks = album_tracks();
-                        for (track, _) in tracks.iter().filter(|(t, _)| selected.contains(&t.path)) {
-                            ctrl.add_to_queue(vec![track.clone()]);
+                        let tracks: Vec<_> = album_tracks()
+                            .iter()
+                            .filter(|(t, _)| selected.contains(&t.path))
+                            .map(|(track, _)| track.clone())
+                            .collect();
+                        if !album_tracks.is_empty() {
+                            ctrl.add_to_queue(tracks);
                         }
                         is_selection_mode.set(false);
                         selected_tracks.write().clear();

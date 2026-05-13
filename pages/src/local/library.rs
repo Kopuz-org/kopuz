@@ -242,9 +242,13 @@ div {
                         if selected.is_empty() {
                             return;
                         }
-                        let tracks = displayed_tracks.read();
-                        for track in tracks.iter().filter(|t| selected.contains(&t.path)) {
-                            ctrl.add_to_queue(vec![track.clone()]);
+                        let tracks: Vec<_> = displayed_tracks.read()
+                            .iter()
+                            .filter(|t| selected.contains(&t.path))
+                            .cloned()
+                            .collect();
+                        if !tracks.is_empty() {
+                            ctrl.add_to_queue(tracks);
                         }
                         selected_tracks.write().clear();
                         is_selection_mode.set(false);

@@ -415,9 +415,13 @@ pub fn JellyfinLibrary(
                         if selected.is_empty() {
                             return;
                         }
-                        let tracks = displayed_tracks.read();
-                        for (track, _) in tracks.iter().filter(|(t, _)| selected.contains(&t.path)) {
-                            ctrl.add_to_queue(vec![track.clone()]);
+                        let tracks: Vec<_> = displayed_tracks.read()
+                            .iter()
+                            .filter(|(t, _)| selected.contains(&t.path))
+                            .map(|(track, _)| track.clone())
+                            .collect();
+                        if !tracks.is_empty() {
+                            ctrl.add_to_queue(tracks);
                         }
                         is_selection_mode.set(false);
                         selected_tracks.write().clear();

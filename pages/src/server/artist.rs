@@ -379,9 +379,13 @@ pub fn JellyfinArtist(
                                 if selected.is_empty() {
                                     return;
                                 }
-                                let tracks = artist_tracks();
-                                for track in tracks.iter().filter(|t| selected.contains(&t.path)) {
-                                    ctrl.add_to_queue(vec![track.clone()]);
+                                let tracks: Vec<_> = artist_tracks()
+                                    .iter()
+                                    .filter(|t| selected.contains(&t.path))
+                                    .cloned()
+                                    .collect();
+                                if !tracks.is_empty() {
+                                ctrl.add_to_queue(tracks);
                                 }
                                 is_selection_mode.set(false);
                                 selected_tracks.write().clear();

@@ -194,8 +194,13 @@ pub fn LocalFavorites(
                         if selected.is_empty() {
                             return;
                         }
-                        for track in queue_tracks_for_selection.iter().filter(|t| selected.contains(&t.path)) {
-                            ctrl.add_to_queue(vec![track.clone()]);
+                        let tracks: Vec<_> = queue_tracks_for_selection
+                            .iter()
+                            .filter(|t| selected.contains(&t.path))
+                            .cloned()
+                            .collect();
+                        if !tracks.is_empty() {
+                            ctrl.add_to_queue(tracks);
                         }
                         selected_tracks.write().clear();
                         is_selection_mode.set(false);

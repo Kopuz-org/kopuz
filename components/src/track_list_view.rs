@@ -161,8 +161,13 @@ pub fn TrackListView(mut props: TrackListViewProps) -> Element {
                         if selected.is_empty() {
                             return;
                         }
-                        for track in tracks_sel_queue.iter().filter(|t| selected.contains(&t.path)) {
-                            ctrl.add_to_queue(vec![track.clone()]);
+                        let tracks: Vec<_> = tracks_sel_queue
+                            .iter()
+                            .filter(|t| selected.contains(&t.path))
+                            .cloned()
+                            .collect();
+                        if !tracks.is_empty() {
+                            ctrl.add_to_queue(tracks);
                         }
                         selected_tracks.write().clear();
                         is_selection_mode.set(false);
