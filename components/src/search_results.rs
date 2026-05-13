@@ -25,6 +25,7 @@ pub fn SearchResults(
     mut active_menu_track: Signal<Option<std::path::PathBuf>>,
     mut show_playlist_modal: Signal<bool>,
     mut selected_track_for_playlist: Signal<Option<std::path::PathBuf>>,
+    on_select_album: EventHandler<String>,
 ) -> Element {
     let mut ctrl = use_context::<PlayerController>();
     let config = use_context::<Signal<AppConfig>>();
@@ -82,7 +83,7 @@ pub fn SearchResults(
                                             active_menu_track.set(None);
                                         },
                                         on_queue: move |_| {
-                                            queue.write().push(track_queue.clone());
+                                            ctrl.add_to_queue(vec![track_queue.clone()]);
                                             active_menu_track.set(None);
                                         },
                                         on_close_menu: move |_| active_menu_track.set(None),
@@ -112,25 +113,31 @@ pub fn SearchResults(
                     h2 { class: "text-xl font-semibold text-white/80 mb-4", "{i18n::t(\"albums\")}" }
                     div { class: "grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4",
                         for (album, cover_url) in &albums {
-                            div {
-                                key: "{album.id}",
-                                class: "p-4 bg-white/5 rounded-xl hover:bg-white/10 transition-colors cursor-pointer group",
-                                div {
-                                    class: "aspect-square rounded-lg bg-black/40 mb-3 overflow-hidden relative",
-                                    if let Some(url) = cover_url {
-                                        img {
-                                            src: "{url.as_ref()}",
-                                            class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-300",
-                                            decoding: "async", loading: "lazy",
+                            {
+                                let album_id = album.id.clone();
+                                rsx! {
+                                    div {
+                                        key: "{album_id}",
+                                        class: "p-4 bg-white/5 rounded-xl hover:bg-white/10 transition-colors cursor-pointer group",
+                                        onclick: move |_| on_select_album.call(album_id.clone()),
+                                        div {
+                                            class: "aspect-square rounded-lg bg-black/40 mb-3 overflow-hidden relative",
+                                            if let Some(url) = cover_url {
+                                                img {
+                                                    src: "{url.as_ref()}",
+                                                    class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-300",
+                                                    decoding: "async", loading: "lazy",
+                                                }
+                                            } else {
+                                                div { class: "w-full h-full flex items-center justify-center",
+                                                    i { class: "fa-solid fa-compact-disc text-4xl text-white/20" }
+                                                }
+                                            }
                                         }
-                                    } else {
-                                        div { class: "w-full h-full flex items-center justify-center",
-                                            i { class: "fa-solid fa-compact-disc text-4xl text-white/20" }
-                                        }
+                                        h3 { class: "text-white font-medium truncate", "{album.title}" }
+                                        p { class: "text-sm text-slate-400 truncate", "{album.artist}" }
                                     }
                                 }
-                                h3 { class: "text-white font-medium truncate", "{album.title}" }
-                                p { class: "text-sm text-slate-400 truncate", "{album.artist}" }
                             }
                         }
                     }

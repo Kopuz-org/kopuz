@@ -3,7 +3,6 @@ use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
 use config::{AppConfig, ArtistViewOrder};
 use dioxus::prelude::*;
-use rand::seq::SliceRandom;
 use reader::{Library, PlaylistStore};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -373,7 +372,7 @@ pub fn LocalArtist(
                                                                                         .then_with(|| a.title.cmp(&b.title))
                                                                                 });
 
-                                                                                queue.write().extend(tracks_for_queue);
+                                                                                ctrl.add_to_queue(tracks_for_queue);
                                                                             }
                                                                             1 => {
                                                                                 pending_album_id_for_playlist.set(Some(id.clone()));
@@ -488,7 +487,7 @@ pub fn LocalArtist(
                                 },
                                 on_queue: move |idx: usize| {
                                     if let Some(track) = artist_tracks().get(idx) {
-                                        queue.write().push(track.clone());
+                                        ctrl.add_to_queue(vec![track.clone()]);
                                         active_menu_track.set(None);
                                     }
                                 },

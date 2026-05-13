@@ -22,6 +22,7 @@ pub fn Search(
     current_song_progress: Signal<u64>,
     queue: Signal<Vec<reader::models::Track>>,
     current_queue_index: Signal<usize>,
+    on_select_album: EventHandler<String>,
 ) -> Element {
     let is_server = config.read().active_source == MusicSource::Server;
 
@@ -42,6 +43,7 @@ pub fn Search(
                 current_song_progress,
                 queue,
                 current_queue_index,
+                on_select_album,
             }
         } else {
             LocalSearch {
@@ -59,6 +61,7 @@ pub fn Search(
                 current_song_progress,
                 queue,
                 current_queue_index,
+                on_select_album,
             }
         }
     }

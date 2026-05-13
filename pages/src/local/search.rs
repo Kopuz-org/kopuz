@@ -25,6 +25,7 @@ pub fn LocalSearch(
     current_song_progress: Signal<u64>,
     queue: Signal<Vec<reader::models::Track>>,
     current_queue_index: Signal<usize>,
+    on_select_album: EventHandler<String>,
 ) -> Element {
     let data = use_search_data(library, search_query, config);
     let mut selected_genre = use_signal(|| None::<String>);
@@ -145,6 +146,7 @@ pub fn LocalSearch(
                         active_menu_track,
                         show_playlist_modal,
                         selected_track_for_playlist,
+                        on_select_album,
                     }
                 } else {
                     SearchGenres {

@@ -32,6 +32,8 @@ pub fn LocalAlbum(
         unique_albums
     });
 
+    let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
+
     let add_all_to_queue_text = i18n::t("add_all_to_queue").to_string();
     let add_all_to_playlist_text = i18n::t("add_all_to_playlist").to_string();
     let delete_album_text = i18n::t("delete_album").to_string();
@@ -124,7 +126,7 @@ pub fn LocalAlbum(
                                                                     .cmp(&b.track_number)
                                                                     .then_with(|| a.title.cmp(&b.title))
                                                             });
-                                                            queue.write().extend(tracks_for_queue);
+                                                            ctrl.add_to_queue(tracks_for_queue);
                                                         }
                                                         1 => {
                                                             pending_album_id_for_playlist.set(Some(id.clone()));

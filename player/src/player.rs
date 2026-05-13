@@ -349,11 +349,12 @@ impl Player {
                         }
                     }
 
-                    stream_position.fetch_add(
-                        (active_read as u64 * 1_000_000)
-                            / (channels as u64 * device_sample_rate as u64),
-                        Ordering::Relaxed,
-                    );
+                    if channels > 0 && device_sample_rate > 0 {
+                        stream_position.fetch_add(
+                            (read as u64 * 1_000_000) / (channels as u64 * device_sample_rate as u64),
+                            Ordering::Relaxed,
+                        );
+                    }
 
                     for sample in data[..read].iter_mut() {
                         *sample *= volume;
@@ -1004,8 +1005,14 @@ impl Player {
     }
 
     fn resample(samples: &[f32], channels: usize, src_rate: u32, dst_rate: u32) -> Vec<f32> {
+        if channels == 0 || src_rate == 0 || dst_rate == 0 {
+            return samples.to_vec();
+        }
         let src_frames = samples.len() / channels;
         let ratio = dst_rate as f64 / src_rate as f64;
+        if ratio.is_nan() || ratio.is_infinite() {
+            return samples.to_vec();
+        }
         let dst_frames = (src_frames as f64 * ratio).ceil() as usize;
         let mut out = Vec::with_capacity(dst_frames * channels);
 

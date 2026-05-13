@@ -162,6 +162,9 @@ impl Equalizer {
                 for band in &mut self.bands {
                     value = band.process(channel, value);
                 }
+                if value.is_nan() {
+                    value = 0.0;
+                }
                 *sample = value.clamp(-1.0, 1.0);
             }
         }
@@ -200,7 +203,10 @@ fn peaking_coefficients(sample_rate: u32, frequency: f32, q: f32, gain_db: f32) 
     let b0 = 1.0 + alpha * a;
     let b1 = -2.0 * cos_omega;
     let b2 = 1.0 - alpha * a;
-    let a0 = 1.0 + alpha / a;
+    let mut a0 = 1.0 + alpha / a;
+    if a0.abs() < 1e-6 {
+        a0 = 1e-6;
+    }
     let a1 = -2.0 * cos_omega;
     let a2 = 1.0 - alpha / a;
 

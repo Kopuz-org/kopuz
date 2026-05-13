@@ -1169,7 +1169,7 @@ impl PlayerController {
                 self.play_track_with_history(idx, allow_crossfade);
             }
             _ => {
-                if idx > queue_len - 1 && loop_mode == LoopMode::None {
+                if idx + 1 >= queue_len && loop_mode == LoopMode::None {
                     self.skip_in_progress.set(false);
                     self.player.write().pause();
                     self.is_playing.set(false);
@@ -1264,6 +1264,25 @@ impl PlayerController {
         }
         self.queue.set(tracks);
         self.play_track(0);
+        self.play_track_no_history(0);
+    }
+
+    pub fn add_to_queue(&mut self, tracks: impl IntoIterator<Item = Track>) {
+        let tracks: Vec<Track> = tracks.into_iter().collect();
+        let count = tracks.len();
+        if count == 0 {
+            return;
+        }
+
+        self.queue.with_mut(|q| q.extend(tracks));
+
+        if *self.shuffle.peek() {
+            let q_len = self.queue.peek().len();
+            let start_idx = q_len - count;
+            self.shuffle_order.with_mut(|so| {
+                (start_idx..q_len).for_each(|idx| so.push(idx));
+            });
+        }
     }
 
     pub fn toggle_shuffle(&mut self) {
@@ -1317,29 +1336,33 @@ impl PlayerController {
     }
 
     pub fn move_queue_item(&mut self, from: usize, to: usize) {
+        if *self.shuffle.peek() {
+            self.shuffle_order.with_mut(|so| so.swap(from, to));
+        } else {
+            self.move_physical_queue_item(from, to);
+        }
+    }
+
+    fn move_physical_queue_item(&mut self, from: usize, to: usize) {
         let len = self.queue.peek().len();
         if from >= len || to >= len || from == to {
             return;
         }
 
-        if *self.shuffle.peek() {
-            self.shuffle_order.with_mut(|o| o.swap(from, to));
-        } else {
-            self.queue.with_mut(|queue| {
-                let track = queue.remove(from);
-                queue.insert(to, track);
-            });
+        self.queue.with_mut(|queue| {
+            let track = queue.remove(from);
+            queue.insert(to, track);
+        });
 
-            let current_idx = *self.current_queue_index.peek();
-            self.current_queue_index
-                .set(Self::remap_queue_index(current_idx, from, to));
+        let current_idx = *self.current_queue_index.peek();
+        self.current_queue_index
+            .set(Self::remap_queue_index(current_idx, from, to));
 
-            self.history.with_mut(|history| {
-                for idx in history.iter_mut() {
-                    *idx = Self::remap_queue_index(*idx, from, to);
-                }
-            });
-        }
+        self.history.with_mut(|history| {
+            for idx in history.iter_mut() {
+                *idx = Self::remap_queue_index(*idx, from, to);
+            }
+        });
     }
 
     pub fn restore_queue_state(

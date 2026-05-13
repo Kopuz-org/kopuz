@@ -237,7 +237,7 @@ pub fn Rightbar(
             .filter_map(|&qi| q.get(qi).cloned().map(|t| (qi, t)))
             .collect();
         let next = order
-            .get(..current_idx)
+            .get(current_idx + 1..)
             .unwrap_or_default()
             .iter()
             .filter_map(|&qi| q.get(qi).cloned().map(|t| (qi, t)))
@@ -356,9 +356,9 @@ pub fn Rightbar(
                         }
                     }
                 } else if *active_tab.read() == 0 {
-                    if current_idx == 0 {
+                    if back_items.is_empty() {
                         div { class: "text-white/30 text-center py-10 text-sm", "{i18n::t(\"no_previous_songs\")}" }
-                    }
+                    } else {
                     for (list_pos, (queue_idx, track)) in back_items.iter().enumerate() {
                         {
                             let queue_idx = *queue_idx;
@@ -376,66 +376,68 @@ pub fn Rightbar(
                                         if let Some(ref url) = cover_url {
                                             img { src: "{url.as_ref()}", class: "w-full h-full object-cover" }
                                         } else {
+                                                    div {
+                                                        class: "w-full h-full flex items-center justify-center",
+                                                        i { class: "fa-solid fa-music text-white/20", style: "font-size: 12px;" }
+                                                    }
+                                                }
+                                            }
                                             div {
-                                                class: "w-full h-full flex items-center justify-center",
-                                                i { class: "fa-solid fa-music text-white/20", style: "font-size: 12px;" }
+                                                class: "flex-1 min-w-0 flex flex-col justify-center gap-0.5",
+                                                div { class: "text-sm text-white truncate font-medium", "{track.title}" }
+                                                div { class: "text-xs text-white/50 truncate group-hover:text-white/70", "{track.artist}" }
                                             }
                                         }
-                                    }
-                                    div {
-                                        class: "flex-1 min-w-0 flex flex-col justify-center gap-0.5",
-                                        div { class: "text-sm text-white truncate font-medium", "{track.title}" }
-                                        div { class: "text-xs text-white/50 truncate group-hover:text-white/70", "{track.artist}" }
                                     }
                                 }
                             }
                         }
-                    }
+
                 } else if *active_tab.read() == 1 {
-                    if q.is_empty() || current_idx == q.len() - 1 {
+                    if up_next_items.is_empty() {
                         div { class: "text-white/30 text-center py-10 text-sm", "{i18n::t(\"no_more_songs\")}" }
                     } else {
                         div {
                             class: "px-2 pt-1 pb-2 text-[11px] uppercase tracking-[0.18em] text-slate-500",
                             "{up_next_summary}"
                         }
-                    }
-                    for (list_pos, (queue_idx, track)) in up_next_items.iter().enumerate() {
-                        {
-                            let queue_idx = *queue_idx;
-                            let cover_url = get_track_cover(&track);
-                            let track_idx = current_idx + 1 + list_pos;
-                            let can_move_up = track_idx > current_idx + 1;
-                            let can_move_down = track_idx + 1 < q.len();
-                            rsx! {
-                                div {
-                                    key: "{queue_idx}",
-                                    class: "flex items-center gap-3 px-2 py-2 hover:bg-white/5 cursor-pointer rounded-lg transition-colors group",
-                                    style: "content-visibility: auto; contain-intrinsic-size: 0 56px;",
-                                    ondoubleclick: move |_| play_song_at_index(track_idx),
+                        for (list_pos, (queue_idx, track)) in up_next_items.iter().enumerate() {
+                            {
+                                let queue_idx = *queue_idx;
+                                let cover_url = get_track_cover(&track);
+                                let track_idx = current_idx + 1 + list_pos;
+                                let can_move_up = track_idx > current_idx + 1;
+                                let can_move_down = track_idx + 1 < q.len();
+                                rsx! {
                                     div {
-                                        class: "rounded-md overflow-hidden bg-black/30 flex-shrink-0 shadow-sm",
-                                        style: "width: 40px; height: 40px;",
-                                        if let Some(ref url) = cover_url {
-                                            img { src: "{url.as_ref()}", class: "w-full h-full object-cover" }
-                                        } else {
-                                            div {
-                                                class: "w-full h-full flex items-center justify-center",
-                                                i { class: "fa-solid fa-music text-white/20", style: "font-size: 12px;" }
-                                            }
+                                        key: "{queue_idx}",
+                                        class: "flex items-center gap-3 px-2 py-2 hover:bg-white/5 cursor-pointer rounded-lg transition-colors group",
+                                        style: "content-visibility: auto; contain-intrinsic-size: 0 56px;",
+                                        ondoubleclick: move |_| play_song_at_index(track_idx),
+                                        div {
+                                            class: "rounded-md overflow-hidden bg-black/30 flex-shrink-0 shadow-sm",
+                                            style: "width: 40px; height: 40px;",
+                                            if let Some(ref url) = cover_url {
+                                                img { src: "{url.as_ref()}", class: "w-full h-full object-cover" }
+                                    } else {
+                                        div {
+                                            class: "w-full h-full flex items-center justify-center",
+                                            i { class: "fa-solid fa-music text-white/20", style: "font-size: 12px;" }
                                         }
                                     }
-                                    div {
-                                        class: "flex-1 min-w-0 flex flex-col justify-center gap-0.5",
-                                        div { class: "text-sm text-white truncate font-medium", "{track.title}" }
-                                        div { class: "text-xs text-white/50 truncate group-hover:text-white/70", "{track.artist}" }
-                                    }
-                                    ReorderButtons {
-                                        can_move_up,
-                                        can_move_down,
-                                        class: "flex flex-col pr-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity".to_string(),
-                                        on_move_up: move |_| move_queue_item(track_idx, track_idx - 1),
-                                        on_move_down: move |_| move_queue_item(track_idx, track_idx + 1),
+                                        }
+                                        div {
+                                            class: "flex-1 min-w-0 flex flex-col justify-center gap-0.5",
+                                            div { class: "text-sm text-white truncate font-medium", "{track.title}" }
+                                            div { class: "text-xs text-white/50 truncate group-hover:text-white/70", "{track.artist}" }
+                                        }
+                                        ReorderButtons {
+                                            can_move_up,
+                                            can_move_down,
+                                            class: "flex flex-col pr-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity".to_string(),
+                                            on_move_up: move |_| move_queue_item(track_idx, track_idx - 1),
+                                            on_move_down: move |_| move_queue_item(track_idx, track_idx + 1),
+                                        }
                                     }
                                 }
                             }
