@@ -234,6 +234,15 @@ pub fn Rightbar(
                 .collect()
         }
     };
+    let back_items: Vec<(usize, reader::Track)> = if is_shuffle {
+        ctrl.history.read().iter().rev()
+            .filter_map(|&qi| queue.read().get(qi).map(|t| (qi, t.clone())))
+            .collect()
+    } else {
+        (0..*current_queue_index.read())
+            .filter_map(|i| queue.read().get(i).map(|t| (i, t.clone())))
+            .collect()
+    };
     let up_next_count = up_next_items.len();
     let up_next_duration: u64 = up_next_items.iter().map(|(_, t)| t.duration).sum();
     let up_next_summary = format!(
@@ -334,35 +343,39 @@ pub fn Rightbar(
                         }
                     }
                 } else if *active_tab.read() == 0 {
-                    if *current_queue_index.read() == 0 {
-                        div { class: "text-white/30 text-center py-10 text-sm", "{i18n::t(\"no_previous_songs\")}" }
-                    }
-                    for i in 0..*current_queue_index.read() {
-                        {
-                            let track = queue.read()[i].clone();
-                            let cover_url = get_track_cover(&track);
-                            rsx! {
-                                div {
-                                    key: "{i}",
-                                    class: "flex items-center gap-3 px-2 py-2 hover:bg-white/5 cursor-pointer rounded-lg transition-colors group",
-                                    style: "content-visibility: auto; contain-intrinsic-size: 0 56px;",
-                                    ondoubleclick: move |_| play_song_at_index(i),
-                                    div {
-                                        class: "rounded-md overflow-hidden bg-black/30 flex-shrink-0 shadow-sm",
-                                        style: "width: 40px; height: 40px;",
-                                        if let Some(ref url) = cover_url {
-                                            img { src: "{url.as_ref()}", class: "w-full h-full object-cover" }
-                                        } else {
+                        div {
+                            if back_items.is_empty() {
+                                div { class: "text-white/30 text-center py-10 text-sm", "{i18n::t(\"no_previous_songs\")}" }
+                            } else {
+                                for (qi, track) in back_items.iter() {
+                                    {
+                                        let qi = *qi;
+                                        let track = track.clone();
+                                        let cover_url = get_track_cover(&track);
+                                        rsx! {
                                             div {
-                                                class: "w-full h-full flex items-center justify-center",
-                                                i { class: "fa-solid fa-music text-white/20", style: "font-size: 12px;" }
+                                                key: "{qi}",
+                                                class: "flex items-center gap-3 px-2 py-2 hover:bg-white/5 cursor-pointer rounded-lg transition-colors group",
+                                            style: "content-visibility: auto; contain-intrinsic-size: 0 56px;",
+                                            ondoubleclick: move |_| play_song_at_index(qi),
+                                            div {
+                                                class: "rounded-md overflow-hidden bg-black/30 flex-shrink-0 shadow-sm",
+                                                style: "width: 40px; height: 40px;",
+                                                if let Some(ref url) = cover_url {
+                                                    img { src: "{url.as_ref()}", class: "w-full h-full object-cover" }
+                                                } else {
+                                                    div {
+                                                        class: "w-full h-full flex items-center justify-center",
+                                                        i { class: "fa-solid fa-music text-white/20", style: "font-size: 12px;" }
+                                                    }
+                                                }
+                                            }
+                                            div {
+                                                class: "flex-1 min-w-0 flex flex-col justify-center gap-0.5",
+                                                div { class: "text-sm text-white truncate font-medium", "{track.title}" }
+                                                div { class: "text-xs text-white/50 truncate group-hover:text-white/70", "{track.artist}" }
                                             }
                                         }
-                                    }
-                                    div {
-                                        class: "flex-1 min-w-0 flex flex-col justify-center gap-0.5",
-                                        div { class: "text-sm text-white truncate font-medium", "{track.title}" }
-                                        div { class: "text-xs text-white/50 truncate group-hover:text-white/70", "{track.artist}" }
                                     }
                                 }
                             }
@@ -382,7 +395,7 @@ pub fn Rightbar(
                             let queue_idx = *queue_idx;
                             let track = track.clone();
                             let cover_url = get_track_cover(&track);
-                            let _current_idx = *current_queue_index.read();
+                            let current_idx = *current_queue_index.read();
                             let can_move_up = list_pos > 0;
                             let can_move_down = list_pos + 1 < up_next_items.len();
                             rsx! {
