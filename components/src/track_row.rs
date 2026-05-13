@@ -131,10 +131,13 @@ pub fn TrackRow(
         div {
             class: format!(
                 "flex items-center p-2 rounded-lg hover:bg-white/5 group transition-colors relative select-none {}",
-                if is_currently_playing { "bg-[var(--color-primary,#6366f1)]/10" }
-                else if is_selected { "bg-white/10" }
-                else { "" }
+                if is_selected { "bg-white/10" } else { "" }
             ),
+            style: if is_currently_playing {
+                "background-color: color-mix(in oklab, var(--color-indigo-500) 12%, transparent);"
+            } else {
+                ""
+            },
             onclick: move |evt| {
                 evt.stop_propagation();
                 if *long_press_occurred.read() {
@@ -201,10 +204,11 @@ pub fn TrackRow(
 
             div { class: "flex-1 min-w-0 pr-4",
                 p {
-                    class: if is_currently_playing {
-                        "text-sm font-medium truncate text-[var(--color-primary,#6366f1)]"
+                    class: "text-sm font-medium truncate",
+                    style: if is_currently_playing {
+                        "color: var(--color-indigo-500);"
                     } else {
-                        "text-sm font-medium text-white/90 truncate"
+                        "opacity: 0.9;"
                     },
                     "{track.title}"
                 }
