@@ -29,11 +29,11 @@ rustPlatform.buildRustPackage rec {
     owner = "temidaradev";
     repo = "kopuz";
     rev = "v${version}";
-    hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+    hash = "sha256-ktioWgKu1JNMOfiJpHQBhY3IVn6OaYrUJuSUrYw/OW8=";
   };
 
   useFetchCargoVendor = true;
-  cargoHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  cargoHash = "sha256-fvcNXNz8sN75eTGNcK0NVnryN0zItaWRFzMi+9hehq8=";
 
   nativeBuildInputs = [
     pkg-config
