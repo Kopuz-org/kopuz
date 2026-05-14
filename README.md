@@ -36,7 +36,7 @@ Kopuz allows you to scan your local directories for audio files, or stream from 
 - **Search**: Search across artists, albums, and tracks with real-time results.
 - **Listening Logs**: Tracks play counts locally so you can see what you actually listen to most.
 - **Scrobbling**: Scrobble to ListenBrainz. for Jellyfin users, [jellyfin-plugin-listenbrainz](https://github.com/lyarenei/jellyfin-plugin-listenbrainz) is recommended if you use multiple clients.
-- **Language Support**: UI available in English and Russian, with more languages easy to add.
+- **Language Support**: UI available in English, Russian, German, French, Spanish, Turkish, Ukrainian, Polish, Arabic, Greek, Hebrew, Hungarian, Indonesian, Japanese, Korean, Romanian, Brazilian Portuguese, Toki Pona, and Simplified Chinese — with more languages easy to add.
 - **High Performance**: Heavy background processing and an optimized library scanner ensure the app opens instantly, runs smoothly, and skips previously indexed files quickly.
 - **Auto-Cleanup**: Automatically removes missing or deleted tracks from your library when rescanning.
 - **Smooth Navigation**: Enjoy a polished interface where scroll positions reset properly as you browse different views and pages.
@@ -44,6 +44,7 @@ Kopuz allows you to scan your local directories for audio files, or stream from 
 - **Equalizer**: Built-in 5-band equalizer with presets and custom settings to fine-tune your sound.
 - **Crossfade**: Blend track transitions for smoother automatic playback between songs on native desktop builds. Browser playback currently uses normal track switching.
 - **Channel Mode**: Switch between `Stereo`, `Mono`, `Left only`, `Right only`, and `Swap L/R` output modes.
+- **yt-dlp Integration**: Download audio directly from YouTube and other supported sites via yt-dlp. Choose your output format (Best Audio, MP3, FLAC, WAV, or MP4 video). FLAC is not recommended since yt-dlp remuxes lossy audio rather than decoding from a lossless source. Supports SponsorBlock, chapter splitting, cookies, rate limiting, and more. Requires `yt-dlp` installed on your system.
 
 ## Installation
 
@@ -90,6 +91,21 @@ environment.systemPackages = [
   kopuz.packages.${system}.default
 ];
 ```
+
+### AUR (Arch Linux)
+
+Install from the AUR using your preferred helper:
+
+```bash
+yay -S kopuz
+# or
+paru -S kopuz
+```
+
+> **Note:** `dioxus-cli` must be installed first at the version matching dioxus 0.7.x:
+> ```bash
+> cargo install dioxus-cli --version "^0.7"
+> ```
 
 ### Flatpak (Recommended)
 
