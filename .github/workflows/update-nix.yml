@@ -57,13 +57,16 @@ jobs:
           set +e
           BUILD_OUT=$(nix build --no-link --print-build-logs --impure --expr '
             with import <nixpkgs> {};
-            (callPackage ./nix/package.nix {}).cargoDeps
+            callPackage ./nix/package.nix {}
           ' -I nixpkgs=channel:nixos-unstable 2>&1)
           set -e
-          echo "$BUILD_OUT" | tail -40
-          GOT=$(echo "$BUILD_OUT" | grep -oE 'got:[[:space:]]+sha256-[A-Za-z0-9+/=]+' | head -1 | awk '{print $2}')
+          echo "$BUILD_OUT" | tail -60
+          GOT=$(echo "$BUILD_OUT" | grep -oE 'vendor-staging[^"]*"sha256-[A-Za-z0-9+/=]+"' | head -1 | grep -oE 'sha256-[A-Za-z0-9+/=]+')
           if [ -z "$GOT" ]; then
-            GOT=$(echo "$BUILD_OUT" | grep -oE 'use[[:space:]]+"sha256-[A-Za-z0-9+/=]+"' | head -1 | sed -E 's/.*"(sha256-[^"]+)".*/\1/')
+            GOT=$(echo "$BUILD_OUT" | grep -oE 'got:[[:space:]]+sha256-[A-Za-z0-9+/=]+' | tail -1 | awk '{print $2}')
+          fi
+          if [ -z "$GOT" ]; then
+            GOT=$(echo "$BUILD_OUT" | grep -oE 'use[[:space:]]+"sha256-[A-Za-z0-9+/=]+"' | tail -1 | sed -E 's/.*"(sha256-[^"]+)".*/\1/')
           fi
           if [ -z "$GOT" ]; then
             echo "Failed to extract cargoHash"
