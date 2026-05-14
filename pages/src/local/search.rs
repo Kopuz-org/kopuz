@@ -3,7 +3,7 @@ use components::search_bar::SearchBar;
 use components::search_genre_detail::SearchGenreDetail;
 use components::search_genres::SearchGenres;
 use components::search_results::SearchResults;
-use config::AppConfig;
+use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_search_data::use_search_data;
 use player::player;
@@ -66,9 +66,11 @@ pub fn LocalSearch(
         }
     });
 
+    let is_modern = config.read().ui_style == UiStyle::Modern;
+
     rsx! {
         div {
-            class: "p-8",
+            class: if is_modern { "px-6 pt-6 pb-24" } else { "p-8" },
 
             if *show_playlist_modal.read() {
                 PlaylistModal {

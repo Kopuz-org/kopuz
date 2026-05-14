@@ -1,5 +1,5 @@
 use crate::track_row::TrackRow;
-use config::AppConfig;
+use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 use player::player;
@@ -30,13 +30,25 @@ pub fn SearchResults(
     let mut ctrl = use_context::<PlayerController>();
     let config = use_context::<Signal<AppConfig>>();
     let offline_tracks = config.read().offline_tracks.clone();
+    let is_modern = config.read().ui_style == UiStyle::Modern;
 
     rsx! {
         div { class: "mt-8 space-y-8",
             if !tracks.is_empty() {
                 div {
                     h2 { class: "text-xl font-semibold text-white/80 mb-4", "{i18n::t(\"tracks\")}" }
-                    div { class: "space-y-2",
+                    if is_modern {
+                        div {
+                            class: "grid px-3 py-2 text-[10px] font-bold uppercase tracking-widest border-b mb-1",
+                            style: "grid-template-columns: 40px 1fr 180px 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);",
+                            div {}
+                            div { "{i18n::t(\"title\")}" }
+                            div { "{i18n::t(\"artist\")}" }
+                            div { class: "text-right pr-2", i { class: "fa-regular fa-clock" } }
+                            div {}
+                        }
+                    }
+                    div { class: if is_modern { "" } else { "space-y-2" },
                         for (idx, (track, cover_url)) in tracks.iter().enumerate() {
                             {
                                 let track = track.clone();
@@ -68,6 +80,7 @@ pub fn SearchResults(
                                         key: "{track_key}",
                                         track: track.clone(),
                                         cover_url: cover_url.clone(),
+                                        row_num: Some(idx + 1),
                                         is_menu_open: is_menu_open,
                                         is_downloaded: is_downloaded,
                                         on_click_menu: move |_| {

@@ -3,7 +3,7 @@ use components::dots_menu::{DotsMenu, MenuAction};
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
 use components::track_row::TrackRow;
-use config::{AppConfig, MusicService};
+use config::{AppConfig, MusicService, UiStyle};
 use dioxus::prelude::*;
 use reader::{Library, PlaylistStore};
 use server::jellyfin::JellyfinClient;
@@ -332,6 +332,21 @@ pub fn JellyfinAlbumDetails(
         }
     };
 
+    let currently_playing_idx: Option<usize> = {
+        let queue = ctrl.queue.read();
+        let q_idx = *ctrl.current_queue_index.read();
+        let tracks: Vec<_> = album_tracks().into_iter().map(|(t, _)| t).collect();
+        if queue.len() == tracks.len()
+            && queue.iter().zip(tracks.iter()).all(|(q, t)| q.path == t.path)
+        {
+            Some(q_idx)
+        } else {
+            None
+        }
+    };
+
+    let is_modern = config.read().ui_style == UiStyle::Modern;
+
     rsx! {
         div {
             class: "w-full max-w-[1600px] mx-auto",
@@ -500,109 +515,237 @@ pub fn JellyfinAlbumDetails(
                 }
             }
 
-            div {
-                class: "flex flex-col md:flex-row items-end gap-8 mb-12",
-                div { class: "w-64 h-64 rounded-xl bg-stone-800 overflow-hidden relative flex-shrink-0",
-                    if let Some(url) = &cover_url {
-                        img { src: "{url}", class: "w-full h-full object-cover" }
-                    } else {
-                        div { class: "w-full h-full flex flex-col items-center justify-center text-white/20",
-                            i { class: "fa-solid fa-music text-6xl mb-4" }
+            if is_modern {
+                div { class: "flex items-end gap-6 mb-8",
+                    div {
+                        class: "w-44 h-44 rounded-2xl overflow-hidden shrink-0 shadow-2xl bg-white/5",
+                        style: "box-shadow: 0 20px 60px rgba(0,0,0,0.6);",
+                        if let Some(url) = &cover_url {
+                            img { src: "{url}", class: "w-full h-full object-cover" }
+                        } else {
+                            div { class: "w-full h-full flex items-center justify-center",
+                                i { class: "fa-solid fa-music text-4xl", style: "color: rgba(255,255,255,0.15);" }
+                            }
                         }
                     }
-                }
-                div { class: "flex-1",
-                    if !artist.is_empty() {
-                        h5 { class: "text-sm font-bold tracking-widest text-white/60 uppercase mb-2", "{artist}" }
-                    }
-                    h1 { class: "text-5xl md:text-7xl font-bold text-white mb-6", "{album_title}" }
-                    div { class: "flex items-center gap-6 text-slate-400",
-                        p { "{album_tracks().len()} {songs_text}" }
-                        span { "•" }
-                        p { "{duration_min} {min_text}" }
-                    }
-                }
-                div { class: "flex items-center gap-4",
-                    if !album_tracks().is_empty() {
-                        button {
-                            class: format!("w-14 h-14 rounded-full flex items-center justify-center {}", if *ctrl.shuffle.read() { "text-white" } else { "text-slate-400 hover:text-white" }),
-                            title: if *ctrl.shuffle.read() {
-                                i18n::t("shuffle_on").to_string()
-                            } else {
-                                i18n::t("shuffle_off").to_string()
-                            },
-                            onclick: move |_| ctrl.toggle_shuffle(),
-                            i { class: "fa-solid fa-shuffle text-xl ml-1" }
+                    div { class: "flex flex-col gap-1 pb-1 min-w-0",
+                        if !artist.is_empty() {
+                            p {
+                                class: "text-xs font-bold tracking-widest uppercase mb-1",
+                                style: "color: rgba(255,255,255,0.35);",
+                                "{artist}"
+                            }
                         }
-                        button {
-                            class: "w-14 h-14 rounded-full bg-indigo-500 hover:bg-indigo-400 text-black flex items-center justify-center transition-transform hover:scale-105",
-                            onclick: {
-                                let tracks_for_play: Vec<reader::models::Track> = album_tracks().iter().map(|(t, _)| t.clone()).collect();
-                                move |_| {
-                                    let is_shuffle = *ctrl.shuffle.peek();
-                                    if is_shuffle {
-                                        ctrl.play_queue_shuffled(tracks_for_play.clone());
+                        h1 { class: "text-4xl font-bold text-white truncate mb-1", "{album_title}" }
+                        p {
+                            class: "text-sm mb-3",
+                            style: "color: rgba(255,255,255,0.45);",
+                            "{album_tracks().len()} {songs_text} · {duration_min} {min_text}"
+                        }
+                        div { class: "flex items-center gap-2 flex-wrap",
+                            if !album_tracks().is_empty() {
+                                button {
+                                    class: "inline-flex items-center justify-center gap-2 h-9 px-5 rounded-full text-sm font-semibold text-white transition-opacity hover:opacity-90 active:scale-95",
+                                    style: "background: var(--color-indigo-500);",
+                                    onclick: {
+                                        let tracks_for_play: Vec<reader::models::Track> = album_tracks().iter().map(|(t, _)| t.clone()).collect();
+                                        move |_| {
+                                            let is_shuffle = *ctrl.shuffle.peek();
+                                            if is_shuffle {
+                                                ctrl.play_queue_shuffled(tracks_for_play.clone());
+                                            } else {
+                                                ctrl.play_queue_linear(tracks_for_play.clone());
+                                            }
+                                        }
+                                    },
+                                    i { class: "fa-solid fa-play text-xs" }
+                                    "{i18n::t(\"play\")}"
+                                }
+                                button {
+                                    class: "inline-flex items-center justify-center gap-2 h-9 px-5 rounded-full text-sm font-semibold text-white transition-opacity hover:opacity-90 active:scale-95",
+                                    style: if *ctrl.shuffle.read() {
+                                        "background: var(--color-indigo-500);"
                                     } else {
-                                        ctrl.play_queue_linear(tracks_for_play.clone());
+                                        "background: color-mix(in oklab, var(--color-indigo-500) 25%, transparent); border: 1px solid color-mix(in oklab, var(--color-indigo-500) 40%, transparent);"
+                                    },
+                                    onclick: {
+                                        let tracks_for_shuffle: Vec<reader::models::Track> = album_tracks().iter().map(|(t, _)| t.clone()).collect();
+                                        move |_| {
+                                            ctrl.toggle_shuffle();
+                                            ctrl.play_queue_shuffled(tracks_for_shuffle.clone());
+                                        }
+                                    },
+                                    i { class: "fa-solid fa-shuffle text-xs" }
+                                    "{i18n::t(\"shuffle\")}"
+                                }
+                                {
+                                    let is_album_dl = {
+                                        let q = download_queue.read();
+                                        album_tracks().iter().any(|(t, _)| {
+                                            let s = t.path.to_string_lossy();
+                                            let id = s.split(':').nth(1).unwrap_or("");
+                                            q.items.iter().any(|i| i.id == id && matches!(i.status, DownloadStatus::Queued | DownloadStatus::Downloading))
+                                        })
+                                    };
+                                    let all_downloaded = !album_tracks().is_empty() && album_tracks().iter().all(|(t, _)| {
+                                        let s = t.path.to_string_lossy();
+                                        let id = s.split(':').nth(1).unwrap_or("");
+                                        if let Some(path_str) = config.read().offline_tracks.get(id) {
+                                            std::path::Path::new(path_str).exists()
+                                        } else {
+                                            false
+                                        }
+                                    });
+                                    rsx! {
+                                        button {
+                                            class: "inline-flex items-center justify-center h-9 w-9 rounded-full text-sm font-medium transition-colors hover:bg-white/10",
+                                            style: "color: rgba(255,255,255,0.6); border: 1px solid rgba(255,255,255,0.12);",
+                                            title: if all_downloaded { "Remove downloads" } else { "Download album for offline playback" },
+                                            disabled: is_album_dl,
+                                            onclick: move |_| {
+                                                let ids_only: Vec<String> = album_tracks()
+                                                    .iter()
+                                                    .filter_map(|(t, _)| {
+                                                        let s = t.path.to_string_lossy().to_string();
+                                                        s.split(':').nth(1).map(|id| id.to_string())
+                                                    })
+                                                    .collect();
+                                                if all_downloaded {
+                                                    crate::server::download_manager::delete_downloads(ids_only, config, download_queue);
+                                                } else {
+                                                    let requests: Vec<(String, String, String)> = album_tracks()
+                                                        .iter()
+                                                        .filter_map(|(t, _)| {
+                                                            let s = t.path.to_string_lossy().to_string();
+                                                            s.split(':').nth(1).map(|id| (
+                                                                id.to_string(),
+                                                                t.title.clone(),
+                                                                t.artist.clone(),
+                                                            ))
+                                                        })
+                                                        .collect();
+                                                    queue_downloads(requests, config, download_queue);
+                                                }
+                                            },
+                                            if is_album_dl {
+                                                i { class: "fa-solid fa-spinner fa-spin text-xs" }
+                                            } else if all_downloaded {
+                                                i { class: "fa-solid fa-trash text-xs" }
+                                            } else {
+                                                i { class: "fa-solid fa-download text-xs" }
+                                            }
+                                        }
                                     }
                                 }
-                              },
-                            i { class: "fa-solid fa-play text-xl ml-1" }
+                            }
                         }
-                        {
-                            let is_album_dl = {
-                                let q = download_queue.read();
-                                album_tracks().iter().any(|(t, _)| {
+                    }
+                }
+            } else {
+                div {
+                    class: "flex flex-col md:flex-row items-end gap-8 mb-12",
+                    div { class: "w-64 h-64 rounded-xl bg-stone-800 overflow-hidden relative flex-shrink-0",
+                        if let Some(url) = &cover_url {
+                            img { src: "{url}", class: "w-full h-full object-cover" }
+                        } else {
+                            div { class: "w-full h-full flex flex-col items-center justify-center text-white/20",
+                                i { class: "fa-solid fa-music text-6xl mb-4" }
+                            }
+                        }
+                    }
+                    div { class: "flex-1",
+                        if !artist.is_empty() {
+                            h5 { class: "text-sm font-bold tracking-widest text-white/60 uppercase mb-2", "{artist}" }
+                        }
+                        h1 { class: "text-5xl md:text-7xl font-bold text-white mb-6", "{album_title}" }
+                        div { class: "flex items-center gap-6 text-slate-400",
+                            p { "{album_tracks().len()} {songs_text}" }
+                            span { "•" }
+                            p { "{duration_min} {min_text}" }
+                        }
+                    }
+                    div { class: "flex items-center gap-4",
+                        if !album_tracks().is_empty() {
+                            button {
+                                class: format!("w-14 h-14 rounded-full flex items-center justify-center {}", if *ctrl.shuffle.read() { "text-white" } else { "text-slate-400 hover:text-white" }),
+                                title: if *ctrl.shuffle.read() {
+                                    i18n::t("shuffle_on").to_string()
+                                } else {
+                                    i18n::t("shuffle_off").to_string()
+                                },
+                                onclick: move |_| ctrl.toggle_shuffle(),
+                                i { class: "fa-solid fa-shuffle text-xl ml-1" }
+                            }
+                            button {
+                                class: "w-14 h-14 rounded-full bg-indigo-500 hover:bg-indigo-400 text-black flex items-center justify-center transition-transform hover:scale-105",
+                                onclick: {
+                                    let tracks_for_play: Vec<reader::models::Track> = album_tracks().iter().map(|(t, _)| t.clone()).collect();
+                                    move |_| {
+                                        let is_shuffle = *ctrl.shuffle.peek();
+                                        if is_shuffle {
+                                            ctrl.play_queue_shuffled(tracks_for_play.clone());
+                                        } else {
+                                            ctrl.play_queue_linear(tracks_for_play.clone());
+                                        }
+                                    }
+                                  },
+                                i { class: "fa-solid fa-play text-xl ml-1" }
+                            }
+                            {
+                                let is_album_dl = {
+                                    let q = download_queue.read();
+                                    album_tracks().iter().any(|(t, _)| {
+                                        let s = t.path.to_string_lossy();
+                                        let id = s.split(':').nth(1).unwrap_or("");
+                                        q.items.iter().any(|i| i.id == id && matches!(i.status, DownloadStatus::Queued | DownloadStatus::Downloading))
+                                    })
+                                };
+                                let all_downloaded = !album_tracks().is_empty() && album_tracks().iter().all(|(t, _)| {
                                     let s = t.path.to_string_lossy();
                                     let id = s.split(':').nth(1).unwrap_or("");
-                                    q.items.iter().any(|i| i.id == id && matches!(i.status, DownloadStatus::Queued | DownloadStatus::Downloading))
-                                })
-                            };
-                            let all_downloaded = !album_tracks().is_empty() && album_tracks().iter().all(|(t, _)| {
-                                let s = t.path.to_string_lossy();
-                                let id = s.split(':').nth(1).unwrap_or("");
-                                if let Some(path_str) = config.read().offline_tracks.get(id) {
-                                    std::path::Path::new(path_str).exists()
-                                } else {
-                                    false
-                                }
-                            });
-                            rsx! {
-                                button {
-                                    class: "w-12 h-12 rounded-full border border-white/20 hover:border-white/40 text-white/70 hover:text-white flex items-center justify-center transition-colors",
-                                    title: if all_downloaded { "Remove downloads" } else { "Download album for offline playback" },
-                                    disabled: is_album_dl,
-                                    onclick: move |_| {
-                                        let ids_only: Vec<String> = album_tracks()
-                                            .iter()
-                                            .filter_map(|(t, _)| {
-                                                let s = t.path.to_string_lossy().to_string();
-                                                s.split(':').nth(1).map(|id| id.to_string())
-                                            })
-                                            .collect();
-                                        if all_downloaded {
-                                            crate::server::download_manager::delete_downloads(ids_only, config, download_queue);
-                                        } else {
-                                            let requests: Vec<(String, String, String)> = album_tracks()
+                                    if let Some(path_str) = config.read().offline_tracks.get(id) {
+                                        std::path::Path::new(path_str).exists()
+                                    } else {
+                                        false
+                                    }
+                                });
+                                rsx! {
+                                    button {
+                                        class: "w-12 h-12 rounded-full border border-white/20 hover:border-white/40 text-white/70 hover:text-white flex items-center justify-center transition-colors",
+                                        title: if all_downloaded { "Remove downloads" } else { "Download album for offline playback" },
+                                        disabled: is_album_dl,
+                                        onclick: move |_| {
+                                            let ids_only: Vec<String> = album_tracks()
                                                 .iter()
                                                 .filter_map(|(t, _)| {
                                                     let s = t.path.to_string_lossy().to_string();
-                                                    s.split(':').nth(1).map(|id| (
-                                                        id.to_string(),
-                                                        t.title.clone(),
-                                                        t.artist.clone(),
-                                                    ))
+                                                    s.split(':').nth(1).map(|id| id.to_string())
                                                 })
                                                 .collect();
-                                            queue_downloads(requests, config, download_queue);
+                                            if all_downloaded {
+                                                crate::server::download_manager::delete_downloads(ids_only, config, download_queue);
+                                            } else {
+                                                let requests: Vec<(String, String, String)> = album_tracks()
+                                                    .iter()
+                                                    .filter_map(|(t, _)| {
+                                                        let s = t.path.to_string_lossy().to_string();
+                                                        s.split(':').nth(1).map(|id| (
+                                                            id.to_string(),
+                                                            t.title.clone(),
+                                                            t.artist.clone(),
+                                                        ))
+                                                    })
+                                                    .collect();
+                                                queue_downloads(requests, config, download_queue);
+                                            }
+                                        },
+                                        if is_album_dl {
+                                            i { class: "fa-solid fa-spinner fa-spin" }
+                                        } else if all_downloaded {
+                                            i { class: "fa-solid fa-trash" }
+                                        } else {
+                                            i { class: "fa-solid fa-download" }
                                         }
-                                    },
-                                    if is_album_dl {
-                                        i { class: "fa-solid fa-spinner fa-spin" }
-                                    } else if all_downloaded {
-                                        i { class: "fa-solid fa-trash" }
-                                    } else {
-                                        i { class: "fa-solid fa-download" }
                                     }
                                 }
                             }
@@ -611,42 +754,54 @@ pub fn JellyfinAlbumDetails(
                 }
             }
 
-            div { class: "space-y-1",
+            div {
                 if album_tracks().is_empty() {
                     div { class: "py-12 flex flex-col items-center justify-center text-slate-600",
                         i { class: "fa-regular fa-folder-open text-4xl mb-4" }
                         p { class: "text-lg", "{i18n::t(\"no_songs_here\")}" }
                     }
                 } else {
-                    div { class: "grid grid-cols-[auto_1fr_1fr_auto_auto] gap-4 px-2 py-2 border-b border-white/5 text-sm font-medium text-slate-500 mb-2 uppercase tracking-wider",
-                        div { class: "flex items-center w-24 shrink-0",
-                            div { class: "mr-4 flex items-center justify-center w-6 h-6 shrink-0",
-                                button {
-                                    class: if !album_tracks().is_empty() && album_tracks().iter().all(|(track, _)| selected_tracks.read().contains(&track.path)) {
-                                        "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
-                                    } else {
-                                        "w-4 h-4 rounded border border-white/20 bg-white/5 hover:border-white/50 transition-colors"
-                                    },
-                                    aria_label: "Select all tracks",
-                                    onclick: move |_| {
-                                        let tracks = album_tracks();
-                                        let all_selected = !tracks.is_empty() && tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.path));
-                                        if all_selected {
-                                            selected_tracks.write().clear();
-                                            is_selection_mode.set(false);
+                    if is_modern {
+                        div {
+                            class: "grid px-3 py-2 text-[10px] font-bold uppercase tracking-widest border-b mb-1",
+                            style: "grid-template-columns: 40px 1fr 180px 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);",
+                            div {}
+                            div { "{i18n::t(\"title\")}" }
+                            div { "{i18n::t(\"artist\")}" }
+                            div { class: "text-right pr-2", i { class: "fa-regular fa-clock" } }
+                            div {}
+                        }
+                    } else {
+                        div { class: "grid grid-cols-[auto_1fr_1fr_auto_auto] gap-4 px-2 py-2 border-b border-white/5 text-sm font-medium text-slate-500 mb-2 uppercase tracking-wider",
+                            div { class: "flex items-center w-24 shrink-0",
+                                div { class: "mr-4 flex items-center justify-center w-6 h-6 shrink-0",
+                                    button {
+                                        class: if !album_tracks().is_empty() && album_tracks().iter().all(|(track, _)| selected_tracks.read().contains(&track.path)) {
+                                            "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
                                         } else {
-                                            selected_tracks.set(tracks.into_iter().map(|(track, _)| track.path).collect());
-                                            is_selection_mode.set(true);
+                                            "w-4 h-4 rounded border border-white/20 bg-white/5 hover:border-white/50 transition-colors"
+                                        },
+                                        aria_label: "Select all tracks",
+                                        onclick: move |_| {
+                                            let tracks = album_tracks();
+                                            let all_selected = !tracks.is_empty() && tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.path));
+                                            if all_selected {
+                                                selected_tracks.write().clear();
+                                                is_selection_mode.set(false);
+                                            } else {
+                                                selected_tracks.set(tracks.into_iter().map(|(track, _)| track.path).collect());
+                                                is_selection_mode.set(true);
+                                            }
+                                        },
+                                        if !album_tracks().is_empty() && album_tracks().iter().all(|(track, _)| selected_tracks.read().contains(&track.path)) {
+                                            i { class: "fa-solid fa-check", style: "font-size: 9px;" }
                                         }
-                                    },
-                                    if !album_tracks().is_empty() && album_tracks().iter().all(|(track, _)| selected_tracks.read().contains(&track.path)) {
-                                        i { class: "fa-solid fa-check", style: "font-size: 9px;" }
                                     }
                                 }
                             }
+                            div { "{i18n::t(\"title\")}" }
+                            div { "{i18n::t(\"album\")}" }
                         }
-                        div { "{i18n::t(\"title\")}" }
-                        div { "{i18n::t(\"album\")}" }
                     }
                     for (idx, (track, track_cover_url)) in album_tracks().into_iter().enumerate() {
                         {
@@ -677,7 +832,9 @@ pub fn JellyfinAlbumDetails(
                                     key: "{track_key}",
                                     track: track.clone(),
                                     cover_url: track_cover_url,
+                                    row_num: Some(idx + 1),
                                     is_menu_open,
+                                    is_currently_playing: currently_playing_idx == Some(idx),
                                     is_selection_mode: is_selection_mode(),
                                     is_selected: selected_tracks.read().contains(&track_path),
                                     is_downloaded,

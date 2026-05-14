@@ -883,6 +883,7 @@ fn App() -> Element {
             utils::sleep(std::time::Duration::from_millis(500)).await;
         }
         let mut was_reachable = true;
+        let mut consecutive_failures: u8 = 0;
         loop {
             utils::sleep(std::time::Duration::from_secs(30)).await;
 
@@ -890,6 +891,7 @@ fn App() -> Element {
                 let conf = config.read();
                 if conf.active_source != config::MusicSource::Server {
                     was_reachable = true;
+                    consecutive_failures = 0;
                     continue;
                 }
                 conf.server.as_ref().map(|s| s.url.clone())
@@ -897,6 +899,7 @@ fn App() -> Element {
 
             let Some(base_url) = server_url else {
                 was_reachable = true;
+                consecutive_failures = 0;
                 continue;
             };
 
@@ -919,14 +922,21 @@ fn App() -> Element {
                 None => false,
             };
 
-            if !reachable && was_reachable {
+            if reachable {
+                consecutive_failures = 0;
+            } else {
+                consecutive_failures = consecutive_failures.saturating_add(1);
+            }
+
+            if !reachable && consecutive_failures >= 2 && was_reachable {
                 was_reachable = false;
                 is_offline.set(true);
                 auto_switched_to_offline.set(true);
                 config.write().active_source = config::MusicSource::Local;
-                network_banner.set(Some(true)); // offline banner
+                network_banner.set(Some(true));
             } else if reachable && !was_reachable {
                 was_reachable = true;
+                consecutive_failures = 0;
                 is_offline.set(false);
                 if *auto_switched_to_offline.read() {
                     auto_switched_to_offline.set(false);
@@ -1337,6 +1347,26 @@ fn App() -> Element {
                 }
             }
 
+            if config.read().player_bar_position == config::PlayerBarPosition::Top {
+                Bottombar {
+                    library: library,
+                    favorites_store,
+                    config,
+                    current_song_cover_url: current_song_cover_url,
+                    current_song_title: current_song_title,
+                    current_song_artist: current_song_artist,
+                    player: player,
+                    is_playing: is_playing,
+                    is_fullscreen: is_fullscreen,
+                    current_song_duration: current_song_duration,
+                    current_song_progress: current_song_progress,
+                    queue: queue,
+                    current_queue_index: current_queue_index,
+                    volume: volume,
+                    persisted_volume: persisted_volume,
+                    is_rightbar_open: is_rightbar_open,
+                }
+            }
             div {
                 class: "{content_row_class}",
                 Sidebar {
@@ -1544,23 +1574,25 @@ fn App() -> Element {
                 palette: palette,
             }
             DownloadOverlay { queue: download_queue }
-            Bottombar {
-                library: library,
-                favorites_store,
-                config,
-                current_song_cover_url: current_song_cover_url,
-                current_song_title: current_song_title,
-                current_song_artist: current_song_artist,
-                player: player,
-                is_playing: is_playing,
-                is_fullscreen: is_fullscreen,
-                current_song_duration: current_song_duration,
-                current_song_progress: current_song_progress,
-                queue: queue,
-                current_queue_index: current_queue_index,
-                volume: volume,
-                persisted_volume: persisted_volume,
-                is_rightbar_open: is_rightbar_open,
+            if config.read().player_bar_position == config::PlayerBarPosition::Bottom {
+                Bottombar {
+                    library: library,
+                    favorites_store,
+                    config,
+                    current_song_cover_url: current_song_cover_url,
+                    current_song_title: current_song_title,
+                    current_song_artist: current_song_artist,
+                    player: player,
+                    is_playing: is_playing,
+                    is_fullscreen: is_fullscreen,
+                    current_song_duration: current_song_duration,
+                    current_song_progress: current_song_progress,
+                    queue: queue,
+                    current_queue_index: current_queue_index,
+                    volume: volume,
+                    persisted_volume: persisted_volume,
+                    is_rightbar_open: is_rightbar_open,
+                }
             }
         }
     }

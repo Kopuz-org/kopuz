@@ -1,3 +1,6 @@
+pub mod shared;
+pub mod normal;
+pub mod modern;
 pub mod album_details;
 pub mod download_overlay;
 pub mod folder_detail;

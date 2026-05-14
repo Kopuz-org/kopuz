@@ -202,6 +202,7 @@ pub fn use_player_task(ctrl: PlayerController) {
             let mut last_progress_secs: u64 = u64::MAX;
             let mut prev_playing = false;
             let mut crossfade_triggered_for_gen: Option<usize> = None;
+            let mut last_recent_path: Option<String> = None;
             #[cfg(not(target_arch = "wasm32"))]
             let bg_notify = BG_NOTIFY.get_or_init(tokio::sync::Notify::new);
             loop {
@@ -226,6 +227,26 @@ pub fn use_player_task(ctrl: PlayerController) {
                 }
 
                 let is_playing = *ctrl.is_playing.read();
+
+                {
+                    let current_path: Option<String> = {
+                        let q = ctrl.queue.read();
+                        let idx = *ctrl.current_queue_index.read();
+                        q.get(idx).map(|t| t.path.to_string_lossy().to_string())
+                    };
+                    if let Some(path) = current_path {
+                        if is_playing && last_recent_path.as_ref() != Some(&path) {
+                            last_recent_path = Some(path.clone());
+                            let is_server = path.starts_with("jellyfin:") || path.starts_with("subsonic:");
+                            let id = if is_server {
+                                path.split(':').nth(1).unwrap_or(&path).to_string()
+                            } else {
+                                path.clone()
+                            };
+                            config.write().push_recent(id, is_server);
+                        }
+                    }
+                }
                 #[cfg(not(target_arch = "wasm32"))]
                 let discord_enabled = config.read().discord_presence.unwrap_or(true);
                 let pos = ctrl.player.read().get_position();

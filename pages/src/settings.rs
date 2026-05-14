@@ -211,23 +211,93 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             SettingItem {
                                 title: i18n::t("titlebar_mode").to_string(),
                                 control: rsx! {
-                                    select {
-                                        class: "bg-stone-800 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-indigo-500",
-                                        value: match config.read().titlebar_mode {
-                                            config::TitlebarMode::Custom => "custom",
-                                            config::TitlebarMode::System => "system",
-                                            config::TitlebarMode::Off => "off",
-                                        },
-                                        onchange: move |evt| {
-                                            config.write().titlebar_mode = match evt.value().as_str() {
-                                                "system" => config::TitlebarMode::System,
-                                                "off" => config::TitlebarMode::Off,
-                                                _ => config::TitlebarMode::Custom,
-                                            };
-                                        },
-                                        option { value: "custom", "{i18n::t(\"titlebar_custom\")}" }
-                                        option { value: "system", "{i18n::t(\"titlebar_system\")}" }
-                                        option { value: "off", "{i18n::t(\"titlebar_off\")}" }
+                                    {
+                                        let current_mode = config.read().titlebar_mode;
+                                        rsx! {
+                                            select {
+                                                class: "bg-stone-800 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-indigo-500",
+                                                onchange: move |evt| {
+                                                    config.write().titlebar_mode = match evt.value().as_str() {
+                                                        "system" => config::TitlebarMode::System,
+                                                        "off" => config::TitlebarMode::Off,
+                                                        _ => config::TitlebarMode::Custom,
+                                                    };
+                                                },
+                                                option {
+                                                    value: "custom",
+                                                    selected: current_mode == config::TitlebarMode::Custom,
+                                                    "{i18n::t(\"titlebar_custom\")}"
+                                                }
+                                                option {
+                                                    value: "system",
+                                                    selected: current_mode == config::TitlebarMode::System,
+                                                    "{i18n::t(\"titlebar_system\")}"
+                                                }
+                                                option {
+                                                    value: "off",
+                                                    selected: current_mode == config::TitlebarMode::Off,
+                                                    "{i18n::t(\"titlebar_off\")}"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        SettingItem {
+                            title: i18n::t("ui_style").to_string(),
+                            control: rsx! {
+                                {
+                                    let current_style = config.read().ui_style;
+                                    rsx! {
+                                        select {
+                                            class: "bg-stone-800 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-indigo-500",
+                                            onchange: move |evt| {
+                                                config.write().ui_style = match evt.value().as_str() {
+                                                    "modern" => config::UiStyle::Modern,
+                                                    _ => config::UiStyle::Normal,
+                                                };
+                                            },
+                                            option {
+                                                value: "normal",
+                                                selected: current_style == config::UiStyle::Normal,
+                                                "{i18n::t(\"ui_normal\")}"
+                                            }
+                                            option {
+                                                value: "modern",
+                                                selected: current_style == config::UiStyle::Modern,
+                                                "{i18n::t(\"ui_modern\")}"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        SettingItem {
+                            title: i18n::t("player_bar_position").to_string(),
+                            control: rsx! {
+                                {
+                                    let current_position = config.read().player_bar_position;
+                                    rsx! {
+                                        select {
+                                            class: "bg-stone-800 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-indigo-500",
+                                            onchange: move |evt| {
+                                                config.write().player_bar_position = match evt.value().as_str() {
+                                                    "top" => config::PlayerBarPosition::Top,
+                                                    _ => config::PlayerBarPosition::Bottom,
+                                                };
+                                            },
+                                            option {
+                                                value: "bottom",
+                                                selected: current_position == config::PlayerBarPosition::Bottom,
+                                                "{i18n::t(\"position_bottom\")}"
+                                            }
+                                            option {
+                                                value: "top",
+                                                selected: current_position == config::PlayerBarPosition::Top,
+                                                "{i18n::t(\"position_top\")}"
+                                            }
+                                        }
                                     }
                                 }
                             }

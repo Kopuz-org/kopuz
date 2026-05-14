@@ -1,7 +1,8 @@
-use config::{AppConfig, MusicService};
+use config::{AppConfig, MusicService, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
-use reader::Library;
+use reader::{Library, Track};
+use std::collections::HashMap;
 
 fn format_duration(seconds: u64) -> String {
     let minutes = seconds / 60;
@@ -13,9 +14,17 @@ fn format_duration(seconds: u64) -> String {
 pub fn JellyfinLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Element {
     let mut ctrl = use_context::<PlayerController>();
 
-    let sorted_tracks = use_memo(move || {
+    let track_data = use_memo(move || {
         let lib = library.read();
         let conf = config.read();
+
+        let album_genre_map: HashMap<String, String> = lib
+            .jellyfin_albums
+            .iter()
+            .map(|a| (a.id.clone(), a.genre.clone()))
+            .collect();
+
+        let cover_url_base = conf.server.as_ref().map(|s| (s.url.clone(), s.access_token.clone()));
 
         let mut all_tracks = lib.jellyfin_tracks.clone();
 
@@ -38,21 +47,54 @@ pub fn JellyfinLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Elem
         });
 
         all_tracks
+            .into_iter()
+            .map(|track| {
+                let track_id = track.path.to_string_lossy().to_string();
+                let plays = conf.listen_counts.get(&track_id).copied().unwrap_or(0);
+                let genre = album_genre_map
+                    .get(&track.album_id)
+                    .cloned()
+                    .unwrap_or_default();
+                let cover_url = cover_url_base.as_ref().map(|(url, token)| {
+                    utils::jellyfin_image::track_cover_url_with_album_fallback(
+                        &track_id,
+                        &track.album_id,
+                        url,
+                        token.as_deref(),
+                        80,
+                        80,
+                    )
+                }).flatten();
+                (track, plays, genre, cover_url)
+            })
+            .collect::<Vec<(Track, u64, String, Option<String>)>>()
     });
 
-    let conf = config.read();
+    let is_modern = config.read().ui_style == UiStyle::Modern;
 
     rsx! {
-        div { class: "p-8 h-full overflow-y-auto w-full",
+        div { class: if is_modern { "px-6 pt-6 pb-24 h-full overflow-y-auto w-full" } else { "p-8 h-full overflow-y-auto w-full" },
             div { class: "max-w-[1600px] mx-auto",
                 div { class: "mb-8 flex items-end justify-between",
                     div {
-                        h1 { class: "text-3xl font-bold text-white mb-2", "{i18n::t(\"listening_logs\")}" }
+                        if is_modern {
+                            p {
+                                class: "text-[10px] font-bold tracking-widest uppercase mb-0.5",
+                                style: "color: rgba(255,255,255,0.35);",
+                                "{i18n::t(\"library\")}"
+                            }
+                        }
+                        h1 {
+                            class: if is_modern { "text-2xl font-bold text-white mb-1" } else { "text-3xl font-bold text-white mb-2" },
+                            "{i18n::t(\"listening_logs\")}"
+                        }
                         p { class: "text-slate-400 text-sm", "{i18n::t(\"most_played_tracks\")}" }
                     }
-                    div {
-                        div { class: "w-12 h-12 rounded-full flex items-center justify-center bg-white/5 border border-white/10 text-slate-400",
-                            i { class: "fa-solid fa-chart-simple" }
+                    if !is_modern {
+                        div {
+                            div { class: "w-12 h-12 rounded-full flex items-center justify-center bg-white/5 border border-white/10 text-slate-400",
+                                i { class: "fa-solid fa-chart-simple" }
+                            }
                         }
                     }
                 }
@@ -67,38 +109,19 @@ pub fn JellyfinLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Elem
                 }
 
                 div { class: "flex flex-col pb-32 space-y-1",
-                    for (idx, track) in sorted_tracks.read().iter().enumerate() {
+                    for (idx, (track, plays, genre, cover_url)) in track_data.read().iter().enumerate() {
                         {
                             let track_id = track.path.to_string_lossy().to_string();
-                            let plays = conf.listen_counts.get(&track_id).copied().unwrap_or(0);
-
-                            let genre = library.read().jellyfin_albums.iter()
-                                .find(|a| a.id == track.album_id)
-                                .map(|a| a.genre.clone())
-                                .unwrap_or_default();
-
-                            let cover_url = {
-                                if let Some(server) = &conf.server {
-                                    let path_str = track.path.to_string_lossy();
-                                    utils::jellyfin_image::track_cover_url_with_album_fallback(
-                                        &path_str,
-                                        &track.album_id,
-                                        &server.url,
-                                        server.access_token.as_deref(),
-                                        80,
-                                        80,
-                                    )
-                                } else {
-                                    None
-                                }
-                            };
+                            let plays = *plays;
+                            let genre = genre.clone();
+                            let cover_url = cover_url.clone();
 
                             rsx! {
                                 div {
                                     key: "{track_id}",
                                     class: "flex items-center px-4 py-2 hover:bg-white/5 rounded-xl cursor-pointer transition-colors group",
                                     onclick: move |_| {
-                                        ctrl.queue.set(sorted_tracks.read().clone());
+                                        ctrl.queue.set(track_data.read().iter().map(|(t, _, _, _)| t.clone()).collect());
                                         ctrl.play_track(idx);
                                     },
                                     div { class: "w-12 shrink-0 flex items-center justify-center tabular-nums text-slate-500 font-medium group-hover:text-white transition-colors relative",
@@ -152,7 +175,7 @@ pub fn JellyfinLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Elem
                             }
                         }
                     }
-                    if sorted_tracks.read().is_empty() {
+                    if track_data.read().is_empty() {
                         div { class: "flex flex-col items-center justify-center py-24 text-slate-500",
                             i { class: "fa-solid fa-headphones text-4xl mb-4 opacity-50" }
                             p { "{i18n::t(\"no_tracks_in_library\")}" }

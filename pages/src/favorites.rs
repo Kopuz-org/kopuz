@@ -1,4 +1,4 @@
-use config::{AppConfig, MusicSource};
+use config::{AppConfig, MusicSource, UiStyle};
 use dioxus::prelude::*;
 use reader::{FavoritesStore, Library, PlaylistStore};
 
@@ -23,15 +23,30 @@ pub fn FavoritesPage(
     mut current_queue_index: Signal<usize>,
 ) -> Element {
     let is_server = config.read().active_source == MusicSource::Server;
+    let is_modern = config.read().ui_style == UiStyle::Modern;
 
     rsx! {
         div {
-            class: "p-8 min-h-full",
+            class: if is_modern { "px-6 pt-6 pb-24 min-h-full" } else { "p-8 min-h-full" },
 
-            div {
-                class: "flex items-center gap-3 mb-8",
-                i { class: "fa-solid fa-heart text-red-400 text-2xl" }
-                h1 { class: "text-3xl font-bold text-white", "{i18n::t(\"favorites\")}" }
+            if is_modern {
+                div { class: "mb-6",
+                    p {
+                        class: "text-[10px] font-bold tracking-widest uppercase mb-1",
+                        style: "color: rgba(255,255,255,0.35);",
+                        "{i18n::t(\"library\")}"
+                    }
+                    h1 {
+                        class: "text-3xl font-bold text-white",
+                        "{i18n::t(\"favorites\")}"
+                    }
+                }
+            } else {
+                div {
+                    class: "flex items-center gap-3 mb-8",
+                    i { class: "fa-solid fa-heart text-red-400 text-2xl" }
+                    h1 { class: "text-3xl font-bold text-white", "{i18n::t(\"favorites\")}" }
+                }
             }
 
             if is_server {

@@ -807,23 +807,21 @@ fn SortOrderToggle(mut sort_order: Signal<ArtistViewOrder>) -> Element {
     let is_tracks = *sort_order.read() == ArtistViewOrder::Tracks;
 
     let btn_active =
-        "px-3 py-1 text-xs rounded-md bg-white/10 text-white font-medium transition-all";
+        "inline-flex items-center justify-center h-7 px-3 text-xs rounded-md bg-white/10 text-white font-medium transition-all";
     let btn_inactive =
-        "px-3 py-1 text-xs rounded-md text-white/40 hover:text-white/80 transition-all";
+        "inline-flex items-center justify-center h-7 px-3 text-xs rounded-md text-white/40 hover:text-white/80 transition-all";
 
     rsx! {
-        div { class: "flex justify-end mb-4",
-            div { class: "flex space-x-1 bg-white/5 border border-white/5 p-1 rounded-lg",
-                button {
-                    class: if is_tracks { btn_active } else { btn_inactive },
-                    onclick: move |_| sort_order.set(ArtistViewOrder::Tracks),
-                    "{i18n::t(\"tracks\")}"
-                }
-                button {
-                    class: if !is_tracks { btn_active } else { btn_inactive },
-                    onclick: move |_| sort_order.set(ArtistViewOrder::Albums),
-                    "{i18n::t(\"albums\")}"
-                }
+        div { class: "inline-flex items-center h-9 p-1 space-x-1 bg-white/5 border border-white/5 rounded-full",
+            button {
+                class: if is_tracks { btn_active } else { btn_inactive },
+                onclick: move |_| sort_order.set(ArtistViewOrder::Tracks),
+                "{i18n::t(\"tracks\")}"
+            }
+            button {
+                class: if !is_tracks { btn_active } else { btn_inactive },
+                onclick: move |_| sort_order.set(ArtistViewOrder::Albums),
+                "{i18n::t(\"albums\")}"
             }
         }
     }

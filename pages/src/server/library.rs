@@ -5,14 +5,14 @@ use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
 use components::stat_card::StatCard;
 use components::track_row::TrackRow;
-use config::{AppConfig, MusicService};
+use config::{AppConfig, MusicService, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 use reader::Library;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-const ITEM_HEIGHT: f64 = 64.0; // 60px content + 4px margin (mb-1)
+const ITEM_HEIGHT: f64 = 60.0;
 #[component]
 pub fn JellyfinLibrary(
     mut library: Signal<Library>,
@@ -137,16 +137,22 @@ pub fn JellyfinLibrary(
     let all_tracks = displayed_tracks();
     let is_empty = all_tracks.is_empty();
     let queue_source = std::sync::Arc::new(queue_tracks());
-    let mut container_height = use_signal(|| 800.0);
+    let mut container_height = use_signal(|| f64::NAN);
     let scroll_top = *scroll_stat.read();
     let row_height = ITEM_HEIGHT;
-    let window_size = (*container_height.read() / row_height).ceil() as usize;
+    let container_h = *container_height.read();
+    let window_size = if container_h.is_nan() {
+        0
+    } else {
+        (container_h / row_height).ceil() as usize
+    };
     let buffer_size = 10;
     let total_tracks = all_tracks.len();
 
     let start_index = {
+        let max_start = total_tracks.saturating_sub(1);
         let calc = (scroll_top - (buffer_size as f64) * row_height) / row_height;
-        calc.floor().max(0.0) as usize
+        (calc.floor().max(0.0) as usize).min(max_start)
     };
 
     let end_index = {
@@ -173,6 +179,19 @@ pub fn JellyfinLibrary(
         (total_height - rendered_height - top_pad).max(0.0)
     };
 
+    let currently_playing_idx: Option<usize> = {
+        let queue = ctrl.queue.read();
+        let q_idx = *ctrl.current_queue_index.read();
+        let qt = queue_tracks();
+        if queue.len() == qt.len()
+            && queue.iter().zip(qt.iter()).all(|(q, t)| q.path == t.path)
+        {
+            Some(q_idx)
+        } else {
+            None
+        }
+    };
+
     let tracks_nodes = all_tracks
         .into_iter()
         .enumerate()
@@ -183,6 +202,7 @@ pub fn JellyfinLibrary(
             let track_add = track.clone();
             let track_queue = track.clone();
             let track_path = track.path.clone();
+            let is_currently_playing = currently_playing_idx == Some(idx);
             let track_select = track.path.clone();
             let queue_arc = std::sync::Arc::clone(&queue_source);
             let track_key = format!("{}-{}", track.path.display(), idx);
@@ -204,12 +224,13 @@ pub fn JellyfinLibrary(
             rsx! {
                 div {
                     key: "{track_key}",
-                    class: "mb-1",
                     style: "height: {ITEM_HEIGHT}px;",
                 TrackRow {
                     track: track.clone(),
                     cover_url: cover_url.clone(),
+                    row_num: Some(idx + 1),
                     is_menu_open,
+                    is_currently_playing,
                     is_selection_mode: is_selection_mode(),
                     is_selected,
                     is_downloaded,
@@ -267,9 +288,11 @@ pub fn JellyfinLibrary(
             }
         });
 
+    let is_modern = config.read().ui_style == UiStyle::Modern;
+
     rsx! {
         div {
-            class: "p-8 relative h-full flex flex-col overflow-hidden",
+            class: if is_modern { "px-6 pt-6 pb-24 relative min-h-full flex flex-col" } else { "p-8 relative min-h-full flex flex-col" },
 
             if *show_playlist_modal.read() {
                 PlaylistModal {
@@ -442,7 +465,18 @@ pub fn JellyfinLibrary(
 
             div {
                 class: "flex items-center justify-between mb-6",
-                h1 { class: "text-3xl font-bold text-white", "{i18n::t(\"your_library\")}" }
+                if is_modern {
+                    div {
+                        p {
+                            class: "text-[10px] font-bold tracking-widest uppercase mb-0.5",
+                            style: "color: rgba(255,255,255,0.35);",
+                            "{i18n::t(\"library\")}"
+                        }
+                        h1 { class: "text-2xl font-bold text-white", "{i18n::t(\"your_library\")}" }
+                    }
+                } else {
+                    h1 { class: "text-3xl font-bold text-white", "{i18n::t(\"your_library\")}" }
+                }
                 button {
                     class: "text-white/60 hover:text-white transition-colors p-2 rounded-full hover:bg-white/10",
                     title: i18n::t("refresh_music_library").to_string(),
@@ -531,6 +565,18 @@ pub fn JellyfinLibrary(
                         onclick: move |_| sort_order.set(config::SortOrder::Album),
                         "Album"
                     }
+                }
+            }
+
+            if is_modern {
+                div {
+                    class: "grid px-3 py-2 text-[10px] font-bold uppercase tracking-widest border-b mb-1",
+                    style: "grid-template-columns: 40px 1fr 180px 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);",
+                    div {}
+                    div { "{i18n::t(\"title\")}" }
+                    div { "{i18n::t(\"artist\")}" }
+                    div { class: "text-right pr-2", i { class: "fa-regular fa-clock" } }
+                    div {}
                 }
             }
 

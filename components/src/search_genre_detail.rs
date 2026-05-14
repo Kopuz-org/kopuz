@@ -1,5 +1,5 @@
 use crate::track_row::TrackRow;
-use config::AppConfig;
+use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 use player::player;
@@ -30,6 +30,7 @@ pub fn SearchGenreDetail(
     let mut ctrl = use_context::<PlayerController>();
     let config = use_context::<Signal<AppConfig>>();
     let offline_tracks = config.read().offline_tracks.clone();
+    let is_modern = config.read().ui_style == UiStyle::Modern;
 
     rsx! {
         div {
@@ -41,31 +42,115 @@ pub fn SearchGenreDetail(
                  "{i18n::t(\"back_to_browse\")}"
             }
 
-            div { class: "flex items-end gap-6 mb-8",
-                 if let Some((_, Some(url))) = genres.iter().find(|(g, _)| g == &genre) {
-                     img { src: "{url.as_ref()}", class: "w-48 h-48 rounded-lg object-cover" }
-                 } else {
-                     div { class: "w-48 h-48 rounded-lg bg-gradient-to-br flex items-center justify-center",
-                         i { class: "fa-solid fa-music text-6xl text-white/20" }
+            if is_modern {
+                div { class: "flex items-end gap-6 mb-8",
+                    div {
+                        class: "w-44 h-44 rounded-2xl overflow-hidden shrink-0 shadow-2xl bg-white/5",
+                        style: "box-shadow: 0 20px 60px rgba(0,0,0,0.6);",
+                        if let Some((_, Some(url))) = genres.iter().find(|(g, _)| g == &genre) {
+                            img { src: "{url.as_ref()}", class: "w-full h-full object-cover" }
+                        } else {
+                            div { class: "w-full h-full flex items-center justify-center",
+                                i { class: "fa-solid fa-music text-4xl", style: "color: rgba(255,255,255,0.15);" }
+                            }
+                        }
+                    }
+                    div { class: "flex flex-col gap-1 pb-1 min-w-0",
+                        p {
+                            class: "text-xs font-bold tracking-widest uppercase mb-1",
+                            style: "color: rgba(255,255,255,0.35);",
+                            "{i18n::t(\"genre\")}"
+                        }
+                        h1 { class: "text-4xl font-bold text-white truncate mb-1", "{genre}" }
+                        p {
+                            class: "text-sm mb-3",
+                            style: "color: rgba(255,255,255,0.45);",
+                            {
+                                if genre_tracks.len() == 1 {
+                                    i18n::t("track_count_singular").to_string()
+                                } else {
+                                    i18n::t_with("track_count", &[("count", genre_tracks.len().to_string())])
+                                }
+                            }
+                        }
+                        div { class: "flex items-center gap-2 flex-wrap",
+                            if !genre_tracks.is_empty() {
+                                button {
+                                    class: "inline-flex items-center justify-center gap-2 h-9 px-5 rounded-full text-sm font-semibold text-white transition-opacity hover:opacity-90 active:scale-95",
+                                    style: "background: var(--color-indigo-500);",
+                                    onclick: {
+                                        let tracks_play: Vec<Track> = genre_tracks.iter().map(|(t, _)| t.clone()).collect();
+                                        move |_| {
+                                            let is_shuffle = *ctrl.shuffle.peek();
+                                            if is_shuffle {
+                                                ctrl.play_queue_shuffled(tracks_play.clone());
+                                            } else {
+                                                ctrl.play_queue_linear(tracks_play.clone());
+                                            }
+                                        }
+                                    },
+                                    i { class: "fa-solid fa-play text-xs" }
+                                    "{i18n::t(\"play\")}"
+                                }
+                                button {
+                                    class: "inline-flex items-center justify-center gap-2 h-9 px-5 rounded-full text-sm font-semibold text-white transition-opacity hover:opacity-90 active:scale-95",
+                                    style: if *ctrl.shuffle.read() {
+                                        "background: var(--color-indigo-500);"
+                                    } else {
+                                        "background: color-mix(in oklab, var(--color-indigo-500) 25%, transparent); border: 1px solid color-mix(in oklab, var(--color-indigo-500) 40%, transparent);"
+                                    },
+                                    onclick: {
+                                        let tracks_shuffle: Vec<Track> = genre_tracks.iter().map(|(t, _)| t.clone()).collect();
+                                        move |_| {
+                                            ctrl.toggle_shuffle();
+                                            ctrl.play_queue_shuffled(tracks_shuffle.clone());
+                                        }
+                                    },
+                                    i { class: "fa-solid fa-shuffle text-xs" }
+                                    "{i18n::t(\"shuffle\")}"
+                                }
+                            }
+                        }
+                    }
+                }
+            } else {
+                div { class: "flex items-end gap-6 mb-8",
+                     if let Some((_, Some(url))) = genres.iter().find(|(g, _)| g == &genre) {
+                         img { src: "{url.as_ref()}", class: "w-48 h-48 rounded-lg object-cover" }
+                     } else {
+                         div { class: "w-48 h-48 rounded-lg bg-gradient-to-br flex items-center justify-center",
+                             i { class: "fa-solid fa-music text-6xl text-white/20" }
+                         }
                      }
-                 }
 
-                 div {
-                     h2 { class: "text-sm font-bold text-white/60 uppercase tracking-widest mb-2", "{i18n::t(\"genre\")}" }
-                     h1 { class: "text-5xl font-bold text-white mb-4", "{genre}" }
-                     p { class: "text-slate-400",
-                         {
-                             if genre_tracks.len() == 1 {
-                                 i18n::t("track_count_singular").to_string()
-                             } else {
-                                 i18n::t_with("track_count", &[("count", genre_tracks.len().to_string())])
+                     div {
+                         h2 { class: "text-sm font-bold text-white/60 uppercase tracking-widest mb-2", "{i18n::t(\"genre\")}" }
+                         h1 { class: "text-5xl font-bold text-white mb-4", "{genre}" }
+                         p { class: "text-slate-400",
+                             {
+                                 if genre_tracks.len() == 1 {
+                                     i18n::t("track_count_singular").to_string()
+                                 } else {
+                                     i18n::t_with("track_count", &[("count", genre_tracks.len().to_string())])
+                                 }
                              }
                          }
                      }
-                 }
+                }
             }
 
-            div { class: "space-y-1 pb-20",
+            if is_modern {
+                div {
+                    class: "grid px-3 py-2 text-[10px] font-bold uppercase tracking-widest border-b mb-1",
+                    style: "grid-template-columns: 40px 1fr 180px 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);",
+                    div {}
+                    div { "{i18n::t(\"title\")}" }
+                    div { "{i18n::t(\"artist\")}" }
+                    div { class: "text-right pr-2", i { class: "fa-regular fa-clock" } }
+                    div {}
+                }
+            }
+            div { class: if is_modern { "pb-20" } else { "space-y-1 pb-20" },
                  for (idx, (track, cover_url)) in genre_tracks.iter().enumerate() {
                      {
                          let track = track.clone();
@@ -97,6 +182,7 @@ pub fn SearchGenreDetail(
                                  key: "{track_key}",
                                  track: track.clone(),
                                  cover_url: cover_url.clone(),
+                                 row_num: Some(idx + 1),
                                  is_menu_open: is_menu_open,
                                  is_downloaded: is_downloaded,
                                  on_click_menu: move |_| {

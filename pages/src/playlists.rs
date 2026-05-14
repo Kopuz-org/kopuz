@@ -1,7 +1,7 @@
 use components::folder_detail::FolderDetail;
 use components::playlist_detail::PlaylistDetail;
 use components::playlist_popups::AddPlaylistPopup;
-use config::{AppConfig, MusicService, MusicSource};
+use config::{AppConfig, MusicService, MusicSource, UiStyle};
 use dioxus::prelude::*;
 use reader::{Library, PlaylistStore};
 use ::server::jellyfin::JellyfinClient;
@@ -89,9 +89,11 @@ pub fn PlaylistsPage(
         last_source.set(config.read().active_source.clone());
     }
 
+    let is_modern = config.read().ui_style == UiStyle::Modern;
+
     rsx! {
         div {
-            class: "p-8",
+            class: if is_modern { "px-6 pt-6 pb-24" } else { "p-8" },
 
             if let Some(folder_path) = selected_folder.read().clone() {
                 FolderDetail {
@@ -200,8 +202,19 @@ pub fn PlaylistsPage(
                     }
                 }
             } else {
-                div { class: "flex items-center justify-between mb-8",
-                    h1 { class: "text-3xl font-bold text-white", "{i18n::t(\"playlists\")}" }
+                div { class: if is_modern { "flex items-center justify-between mb-6" } else { "flex items-center justify-between mb-8" },
+                    if is_modern {
+                        div {
+                            p {
+                                class: "text-[10px] font-bold tracking-widest uppercase mb-0.5",
+                                style: "color: rgba(255,255,255,0.35);",
+                                "{i18n::t(\"library\")}"
+                            }
+                            h1 { class: "text-2xl font-bold text-white", "{i18n::t(\"playlists\")}" }
+                        }
+                    } else {
+                        h1 { class: "text-3xl font-bold text-white", "{i18n::t(\"playlists\")}" }
+                    }
                     div { class: "flex items-center gap-1",
                         if !is_server {
                             button {

@@ -1,7 +1,7 @@
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
 use components::track_row::TrackRow;
-use config::AppConfig;
+use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 use reader::{FavoritesStore, Library, PlaylistStore};
@@ -54,7 +54,20 @@ pub fn LocalFavorites(
         displayed_tracks.iter().map(|(t, _)| t.clone()).collect();
     let queue_tracks_for_selection = queue_tracks.clone();
 
+    let currently_playing_idx: Option<usize> = {
+        let queue = ctrl.queue.read();
+        let q_idx = *ctrl.current_queue_index.read();
+        if queue.len() == queue_tracks.len()
+            && queue.iter().zip(queue_tracks.iter()).all(|(q, t)| q.path == t.path)
+        {
+            Some(q_idx)
+        } else {
+            None
+        }
+    };
+
     let is_empty = displayed_tracks.is_empty();
+    let is_modern = config.read().ui_style == UiStyle::Modern;
 
     let tracks_nodes =
         displayed_tracks
@@ -72,6 +85,7 @@ pub fn LocalFavorites(
                 let track_key = format!("{}-{}", track.path.display(), idx);
                 let is_menu_open = active_menu_track.read().as_ref() == Some(&track.path);
                 let is_selected = selected_tracks.read().contains(&track_path);
+                let is_currently_playing = currently_playing_idx == Some(idx);
 
                 rsx! {
                     div {
@@ -80,7 +94,9 @@ pub fn LocalFavorites(
                         TrackRow {
                             track: track.clone(),
                             cover_url: cover_url.clone(),
+                            row_num: Some(idx + 1),
                         is_menu_open,
+                        is_currently_playing,
                         is_selection_mode: is_selection_mode(),
                         is_selected,
                         on_long_press: move |_| {
@@ -260,8 +276,19 @@ pub fn LocalFavorites(
                     }
                     span { "{i18n::t(\"select_all\")}" }
                 }
+                if is_modern {
+                    div {
+                        class: "grid px-3 py-2 text-[10px] font-bold uppercase tracking-widest border-b mb-1",
+                        style: "grid-template-columns: 40px 1fr 180px 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);",
+                        div {}
+                        div { "{i18n::t(\"title\")}" }
+                        div { "{i18n::t(\"artist\")}" }
+                        div { class: "text-right pr-2", i { class: "fa-regular fa-clock" } }
+                        div {}
+                    }
+                }
                 div {
-                    class: "space-y-1",
+                    class: if is_modern { "" } else { "space-y-1" },
                     {tracks_nodes}
                 }
             }
