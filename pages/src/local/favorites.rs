@@ -52,6 +52,7 @@ pub fn LocalFavorites(
 
     let queue_tracks: Vec<reader::models::Track> =
         displayed_tracks.iter().map(|(t, _)| t.clone()).collect();
+    let queue_tracks_for_selection = queue_tracks.clone();
 
     let currently_playing_idx: Option<usize> = {
         let queue = ctrl.queue.read();
@@ -204,6 +205,22 @@ pub fn LocalFavorites(
             if is_selection_mode() {
                 SelectionBar {
                     count: selected_tracks.read().len(),
+                    on_add_to_queue: move |_| {
+                        let selected = selected_tracks.read().clone();
+                        if selected.is_empty() {
+                            return;
+                        }
+                        let tracks: Vec<_> = queue_tracks_for_selection
+                            .iter()
+                            .filter(|t| selected.contains(&t.path))
+                            .cloned()
+                            .collect();
+                        if !tracks.is_empty() {
+                            ctrl.add_to_queue(tracks);
+                        }
+                        selected_tracks.write().clear();
+                        is_selection_mode.set(false);
+                    },
                     on_add_to_playlist: move |_| {
                         show_playlist_modal.set(true);
                     },

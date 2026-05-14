@@ -139,6 +139,7 @@ pub fn JellyfinFavorites(
         }
     };
 
+    let displayed_tracks_for_selection = displayed_tracks.clone();
     let is_empty = displayed_tracks.is_empty();
     let is_modern = config.read().ui_style == UiStyle::Modern;
 
@@ -353,6 +354,22 @@ pub fn JellyfinFavorites(
                 SelectionBar {
                     count: selected_tracks.read().len(),
                     show_delete: false,
+                    on_add_to_queue: move |_| {
+                        let selected = selected_tracks.read().clone();
+                        if selected.is_empty() {
+                            return;
+                        }
+                        let tracks: Vec<_> = displayed_tracks_for_selection
+                            .iter()
+                            .filter(|(t, _)| selected.contains(&t.path))
+                            .map(|(track, _)| track.clone())
+                            .collect();
+                        if !tracks.is_empty() {
+                            ctrl.add_to_queue(tracks);
+                        }
+                        is_selection_mode.set(false);
+                        selected_tracks.write().clear();
+                    },
                     on_add_to_playlist: move |_| {
                         show_playlist_modal.set(true);
                     },

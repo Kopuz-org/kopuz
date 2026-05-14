@@ -52,6 +52,7 @@ pub fn TrackListView(mut props: TrackListViewProps) -> Element {
     let tracks_queue = props.tracks.clone();
     let tracks_menu = props.tracks.clone();
     let tracks_sel_delete = props.tracks.clone();
+    let tracks_sel_queue = props.tracks.clone();
 
     rsx! {
         div { class: "w-full max-w-[1600px] mx-auto select-none",
@@ -155,6 +156,22 @@ pub fn TrackListView(mut props: TrackListViewProps) -> Element {
                 crate::selection_bar::SelectionBar {
                     count: selected_tracks.read().len(),
                     show_delete: props.show_delete_in_selection,
+                    on_add_to_queue: move |_| {
+                        let selected = selected_tracks.read().clone();
+                        if selected.is_empty() {
+                            return;
+                        }
+                        let tracks: Vec<_> = tracks_sel_queue
+                            .iter()
+                            .filter(|t| selected.contains(&t.path))
+                            .cloned()
+                            .collect();
+                        if !tracks.is_empty() {
+                            ctrl.add_to_queue(tracks);
+                        }
+                        selected_tracks.write().clear();
+                        is_selection_mode.set(false);
+                    },
                     on_add_to_playlist: move |_| show_playlist_modal.set(true),
                     on_delete: move |_| {
                         let paths: Vec<PathBuf> = tracks_sel_delete.iter()

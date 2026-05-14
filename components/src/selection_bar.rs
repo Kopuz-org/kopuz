@@ -3,6 +3,7 @@ use dioxus::prelude::*;
 #[component]
 pub fn SelectionBar(
     count: usize,
+    on_add_to_queue: EventHandler<()>,
     on_add_to_playlist: EventHandler<()>,
     on_delete: EventHandler<()>,
     on_cancel: EventHandler<()>,
@@ -13,6 +14,7 @@ pub fn SelectionBar(
     }
 
     let delete_text = i18n::t("delete").to_string();
+    let add_to_queue_text = i18n::t("add_to_queue").to_string();
     let add_to_playlist_text = i18n::t("add_to_playlist").to_string();
 
     rsx! {
@@ -24,6 +26,12 @@ pub fn SelectionBar(
             div { class: "w-px h-5 bg-white/20" }
 
             div { class: "flex items-center gap-4",
+                button {
+                    class: "hover:opacity-80 transition-opacity flex items-center gap-2 font-medium whitespace-nowrap",
+                    onclick: move |_| on_add_to_queue.call(()),
+                    i { class: "fa-solid fa-list-ul text-sm" }
+                    span { class: "hidden sm:inline", "{add_to_queue_text}" }
+                }
                 button {
                     class: "hover:opacity-80 transition-opacity flex items-center gap-2 font-medium whitespace-nowrap",
                     onclick: move |_| on_add_to_playlist.call(()),

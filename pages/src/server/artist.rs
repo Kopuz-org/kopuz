@@ -374,6 +374,22 @@ pub fn JellyfinArtist(
                         SelectionBar {
                             count: selected_tracks.read().len(),
                             show_delete: false,
+                            on_add_to_queue: move |_| {
+                                let selected = selected_tracks.read().clone();
+                                if selected.is_empty() {
+                                    return;
+                                }
+                                let tracks: Vec<_> = artist_tracks()
+                                    .iter()
+                                    .filter(|t| selected.contains(&t.path))
+                                    .cloned()
+                                    .collect();
+                                if !tracks.is_empty() {
+                                ctrl.add_to_queue(tracks);
+                                }
+                                is_selection_mode.set(false);
+                                selected_tracks.write().clear();
+                            },
                             on_add_to_playlist: move |_| {
                                 show_playlist_modal.set(true);
                             },

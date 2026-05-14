@@ -61,7 +61,11 @@ pub fn Rightbar(
         let (server_url, server_token, server_user_id) = {
             let conf = config.peek();
             if let Some(server) = &conf.server {
-                (Some(server.url.clone()), server.access_token.clone(), server.user_id.clone())
+                (
+                    Some(server.url.clone()),
+                    server.access_token.clone(),
+                    server.user_id.clone(),
+                )
             } else {
                 (None, None, None)
             }
@@ -89,7 +93,9 @@ pub fn Rightbar(
             .await;
             if *fetch_gen.peek() == fetch_id {
                 let display = result.or_else(|| {
-                    Some(utils::lyrics::Lyrics::Plain(i18n::t("lyrics_not_found").to_string()))
+                    Some(utils::lyrics::Lyrics::Plain(
+                        i18n::t("lyrics_not_found").to_string(),
+                    ))
                 });
                 lyrics.set(Some(display));
             }
@@ -218,36 +224,43 @@ pub fn Rightbar(
             format!("{minutes}:{secs:02}")
         }
     };
+    let q = queue.read();
+    let current_idx = *current_queue_index.read();
     let is_shuffle = *ctrl.shuffle.read();
-    let up_next_items: Vec<(usize, reader::Track)> = {
-        let q = queue.read();
-        let current_idx = *current_queue_index.read();
-        if is_shuffle {
-            ctrl.shuffle_order
-                .read()
-                .iter()
-                .filter_map(|&qi| q.get(qi).map(|t| (qi, t.clone())))
-                .collect()
-        } else {
-            (current_idx + 1..q.len())
-                .filter_map(|qi| q.get(qi).map(|t| (qi, t.clone())))
-                .collect()
-        }
-    };
-    let back_items: Vec<(usize, reader::Track)> = if is_shuffle {
-        ctrl.history.read().iter().rev()
-            .filter_map(|&qi| queue.read().get(qi).map(|t| (qi, t.clone())))
-            .collect()
+
+    let (back_items, up_next_items): (Vec<_>, Vec<_>) = if is_shuffle {
+        let order = ctrl.shuffle_order.read();
+        let back = order
+            .get(..current_idx)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|&qi| q.get(qi).cloned().map(|t| (qi, t)))
+            .collect();
+        let next = order
+            .get(current_idx + 1..)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|&qi| q.get(qi).cloned().map(|t| (qi, t)))
+            .collect();
+        (back, next)
     } else {
-        (0..*current_queue_index.read())
-            .filter_map(|i| queue.read().get(i).map(|t| (i, t.clone())))
-            .collect()
+        let back = (0..current_idx)
+            .filter_map(|qi| q.get(qi).cloned().map(|t| (qi, t)))
+            .collect();
+        let next = (current_idx + 1..q.len())
+            .filter_map(|qi| q.get(qi).cloned().map(|t| (qi, t)))
+            .collect();
+        (back, next)
     };
+
     let up_next_count = up_next_items.len();
     let up_next_duration: u64 = up_next_items.iter().map(|(_, t)| t.duration).sum();
     let up_next_summary = format!(
         "{} • {}",
-        i18n::t_with("showcase_song_count", &[("count", up_next_count.to_string())]),
+        i18n::t_with(
+            "showcase_song_count",
+            &[("count", up_next_count.to_string())]
+        ),
         format_queue_duration(up_next_duration)
     );
 
@@ -343,27 +356,26 @@ pub fn Rightbar(
                         }
                     }
                 } else if *active_tab.read() == 0 {
-                        div {
-                            if back_items.is_empty() {
-                                div { class: "text-white/30 text-center py-10 text-sm", "{i18n::t(\"no_previous_songs\")}" }
-                            } else {
-                                for (list_pos, (qi, track)) in back_items.iter().enumerate() {
-                                    {
-                                        let qi = *qi;
-                                        let track = track.clone();
-                                        let cover_url = get_track_cover(&track);
-                                        rsx! {
-                                            div {
-                                                key: "{list_pos}-{qi}",
-                                                class: "flex items-center gap-3 px-2 py-2 hover:bg-white/5 cursor-pointer rounded-lg transition-colors group",
-                                            style: "content-visibility: auto; contain-intrinsic-size: 0 56px;",
-                                            ondoubleclick: move |_| play_song_at_index(qi),
-                                            div {
-                                                class: "rounded-md overflow-hidden bg-black/30 flex-shrink-0 shadow-sm",
-                                                style: "width: 40px; height: 40px;",
-                                                if let Some(ref url) = cover_url {
-                                                    img { src: "{url.as_ref()}", class: "w-full h-full object-cover" }
-                                                } else {
+                    if back_items.is_empty() {
+                        div { class: "text-white/30 text-center py-10 text-sm", "{i18n::t(\"no_previous_songs\")}" }
+                    } else {
+                    for (list_pos, (queue_idx, track)) in back_items.iter().enumerate() {
+                        {
+                            let queue_idx = *queue_idx;
+                            let track_idx = list_pos;
+                            let cover_url = get_track_cover(&track);
+                            rsx! {
+                                div {
+                                    key: "{queue_idx}",
+                                    class: "flex items-center gap-3 px-2 py-2 hover:bg-white/5 cursor-pointer rounded-lg transition-colors group",
+                                    style: "content-visibility: auto; contain-intrinsic-size: 0 56px;",
+                                    ondoubleclick: move |_| play_song_at_index(track_idx),
+                                    div {
+                                        class: "rounded-md overflow-hidden bg-black/30 flex-shrink-0 shadow-sm",
+                                        style: "width: 40px; height: 40px;",
+                                        if let Some(ref url) = cover_url {
+                                            img { src: "{url.as_ref()}", class: "w-full h-full object-cover" }
+                                        } else {
                                                     div {
                                                         class: "w-full h-full flex items-center justify-center",
                                                         i { class: "fa-solid fa-music text-white/20", style: "font-size: 12px;" }
@@ -380,7 +392,7 @@ pub fn Rightbar(
                                 }
                             }
                         }
-                    }
+
                 } else if *active_tab.read() == 1 {
                     if up_next_items.is_empty() {
                         div { class: "text-white/30 text-center py-10 text-sm", "{i18n::t(\"no_more_songs\")}" }
@@ -389,44 +401,43 @@ pub fn Rightbar(
                             class: "px-2 pt-1 pb-2 text-[11px] uppercase tracking-[0.18em] text-slate-500",
                             "{up_next_summary}"
                         }
-                    }
-                    for (list_pos, (queue_idx, track)) in up_next_items.iter().enumerate() {
-                        {
-                            let queue_idx = *queue_idx;
-                            let track = track.clone();
-                            let cover_url = get_track_cover(&track);
-                            let current_idx = *current_queue_index.read();
-                            let can_move_up = list_pos > 0;
-                            let can_move_down = list_pos + 1 < up_next_items.len();
-                            rsx! {
-                                div {
-                                    key: "{list_pos}",
-                                    class: "flex items-center gap-3 px-2 py-2 hover:bg-white/5 cursor-pointer rounded-lg transition-colors group",
-                                    style: "content-visibility: auto; contain-intrinsic-size: 0 56px;",
-                                    ondoubleclick: move |_| play_song_at_index(queue_idx),
+                        for (list_pos, (queue_idx, track)) in up_next_items.iter().enumerate() {
+                            {
+                                let queue_idx = *queue_idx;
+                                let cover_url = get_track_cover(&track);
+                                let track_idx = current_idx + 1 + list_pos;
+                                let can_move_up = track_idx > current_idx + 1;
+                                let can_move_down = track_idx + 1 < q.len();
+                                rsx! {
                                     div {
-                                        class: "rounded-md overflow-hidden bg-black/30 flex-shrink-0 shadow-sm",
-                                        style: "width: 40px; height: 40px;",
-                                        if let Some(ref url) = cover_url {
-                                            img { src: "{url.as_ref()}", class: "w-full h-full object-cover" }
-                                        } else {
-                                            div {
-                                                class: "w-full h-full flex items-center justify-center",
-                                                i { class: "fa-solid fa-music text-white/20", style: "font-size: 12px;" }
-                                            }
+                                        key: "{queue_idx}",
+                                        class: "flex items-center gap-3 px-2 py-2 hover:bg-white/5 cursor-pointer rounded-lg transition-colors group",
+                                        style: "content-visibility: auto; contain-intrinsic-size: 0 56px;",
+                                        ondoubleclick: move |_| play_song_at_index(track_idx),
+                                        div {
+                                            class: "rounded-md overflow-hidden bg-black/30 flex-shrink-0 shadow-sm",
+                                            style: "width: 40px; height: 40px;",
+                                            if let Some(ref url) = cover_url {
+                                                img { src: "{url.as_ref()}", class: "w-full h-full object-cover" }
+                                    } else {
+                                        div {
+                                            class: "w-full h-full flex items-center justify-center",
+                                            i { class: "fa-solid fa-music text-white/20", style: "font-size: 12px;" }
                                         }
                                     }
-                                    div {
-                                        class: "flex-1 min-w-0 flex flex-col justify-center gap-0.5",
-                                        div { class: "text-sm text-white truncate font-medium", "{track.title}" }
-                                        div { class: "text-xs text-white/50 truncate group-hover:text-white/70", "{track.artist}" }
-                                    }
-                                    ReorderButtons {
-                                        can_move_up,
-                                        can_move_down,
-                                        class: "flex flex-col pr-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity".to_string(),
-                                        on_move_up: move |_| ctrl.move_queue_item(list_pos, list_pos - 1),
-                                        on_move_down: move |_| ctrl.move_queue_item(list_pos, list_pos + 1),
+                                        }
+                                        div {
+                                            class: "flex-1 min-w-0 flex flex-col justify-center gap-0.5",
+                                            div { class: "text-sm text-white truncate font-medium", "{track.title}" }
+                                            div { class: "text-xs text-white/50 truncate group-hover:text-white/70", "{track.artist}" }
+                                        }
+                                        ReorderButtons {
+                                            can_move_up,
+                                            can_move_down,
+                                            class: "flex flex-col pr-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity".to_string(),
+                                            on_move_up: move |_| move_queue_item(track_idx, track_idx - 1),
+                                            on_move_down: move |_| move_queue_item(track_idx, track_idx + 1),
+                                        }
                                     }
                                 }
                             }
