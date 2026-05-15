@@ -179,6 +179,20 @@ struct PlaylistCreationData {
     playlist: Option<SubsonicPlaylist>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Search3Container {
+    #[serde(default)]
+    song: Vec<SubsonicSong>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Search3Data {
+    #[serde(default)]
+    search_result3: Option<Search3Container>,
+}
+
 impl SubsonicClient {
     pub fn new(base_url: &str, username: &str, password: &str) -> Self {
         let builder = reqwest::Client::builder();
@@ -227,6 +241,26 @@ impl SubsonicClient {
             )
             .await?;
         Ok(data.album.map(|a| a.song).unwrap_or_default())
+    }
+
+    pub async fn search_songs(
+        &self,
+        offset: usize,
+        size: usize,
+    ) -> Result<Vec<SubsonicSong>, String> {
+        let data = self
+            .call::<Search3Data>(
+                "search3.view",
+                vec![
+                    ("query".to_string(), "".to_string()),
+                    ("songCount".to_string(), size.to_string()),
+                    ("songOffset".to_string(), offset.to_string()),
+                    ("albumCount".to_string(), "0".to_string()),
+                    ("artistCount".to_string(), "0".to_string()),
+                ],
+            )
+            .await?;
+        Ok(data.search_result3.map(|r| r.song).unwrap_or_default())
     }
 
     pub async fn get_playlists(&self) -> Result<Vec<SubsonicPlaylist>, String> {

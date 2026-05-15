@@ -51,15 +51,13 @@ pub fn JellyfinLibrary(
         is_loading.set(true);
         fetch_generation.with_mut(|g| *g += 1);
         let current_gen = *fetch_generation.peek();
-        {
-            let mut lib_write = library.write();
-            lib_write.jellyfin_tracks.clear();
-            lib_write.jellyfin_albums.clear();
-        }
         spawn(async move {
             if *fetch_generation.read() == current_gen {
-                let _ =
-                    crate::server::subsonic_sync::sync_server_library(library, config, true).await;
+                if let Err(e) =
+                    crate::server::subsonic_sync::sync_server_library(library, config, true).await
+                {
+                    eprintln!("Failed to sync server library: {e}");
+                }
                 if *fetch_generation.read() == current_gen {
                     is_loading.set(false);
                 }
@@ -107,36 +105,10 @@ pub fn JellyfinLibrary(
                 )
             }),
         }
-        let conf = config.read();
         tracks
-            .into_iter()
-            .map(|t| {
-                let cover_url = if let Some(server) = &conf.server {
-                    let path_str = t.path.to_string_lossy();
-                    utils::map_cover_url(
-                        utils::jellyfin_image::track_cover_url_with_album_fallback(
-                            &path_str,
-                            &t.album_id,
-                            &server.url,
-                            server.access_token.as_deref(),
-                            80,
-                            80,
-                        ),
-                    )
-                } else {
-                    None
-                };
-                (t, cover_url)
-            })
-            .collect::<Vec<_>>()
     });
 
-    let queue_tracks = use_memo(move || {
-        displayed_tracks()
-            .iter()
-            .map(|(t, _)| t.clone())
-            .collect::<Vec<_>>()
-    });
+    let queue_tracks = displayed_tracks;
 
     let all_tracks = displayed_tracks();
     let is_empty = all_tracks.is_empty();
@@ -196,12 +168,26 @@ pub fn JellyfinLibrary(
         }
     };
 
+    let server_cover_ctx = config.read().server.as_ref().map(|s| (s.url.clone(), s.access_token.clone()));
+
     let tracks_nodes = all_tracks
         .into_iter()
         .enumerate()
         .skip(start_index)
         .take(items_to_render)
-        .map(|(idx, (track, cover_url))| {
+        .map(|(idx, track)| {
+            let cover_url = server_cover_ctx.as_ref().and_then(|(url, token)| {
+                utils::map_cover_url(
+                    utils::jellyfin_image::track_cover_url_with_album_fallback(
+                        &track.path.to_string_lossy(),
+                        &track.album_id,
+                        url,
+                        token.as_deref(),
+                        80,
+                        80,
+                    ),
+                )
+            });
             let track_menu = track.clone();
             let track_add = track.clone();
             let track_queue = track.clone();
@@ -231,7 +217,7 @@ pub fn JellyfinLibrary(
                     style: "height: {ITEM_HEIGHT}px;",
                 TrackRow {
                     track: track.clone(),
-                    cover_url: cover_url.clone(),
+                    cover_url,
                     row_num: Some(idx + 1),
                     is_menu_open,
                     is_currently_playing,
@@ -444,8 +430,8 @@ pub fn JellyfinLibrary(
                         }
                         let tracks: Vec<_> = displayed_tracks.read()
                             .iter()
-                            .filter(|(t, _)| selected.contains(&t.path))
-                            .map(|(track, _)| track.clone())
+                            .filter(|t| selected.contains(&t.path))
+                            .cloned()
                             .collect();
                         if !tracks.is_empty() {
                             ctrl.add_to_queue(tracks);
@@ -516,7 +502,7 @@ pub fn JellyfinLibrary(
                 class: "flex items-center justify-between mb-4",
                 div { class: "flex items-center gap-3",
                     button {
-                        class: if !is_empty && displayed_tracks().iter().all(|(track, _)| selected_tracks.read().contains(&track.path)) {
+                        class: if !is_empty && displayed_tracks().iter().all(|track| selected_tracks.read().contains(&track.path)) {
                             "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
                         } else {
                             "w-4 h-4 rounded border border-white/20 bg-white/5 hover:border-white/50 transition-colors"
@@ -525,16 +511,16 @@ pub fn JellyfinLibrary(
                         disabled: is_empty,
                         onclick: move |_| {
                             let tracks = displayed_tracks();
-                            let all_selected = !tracks.is_empty() && tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.path));
+                            let all_selected = !tracks.is_empty() && tracks.iter().all(|track| selected_tracks.read().contains(&track.path));
                             if all_selected {
                                 selected_tracks.write().clear();
                                 is_selection_mode.set(false);
                             } else {
-                                selected_tracks.set(tracks.into_iter().map(|(track, _)| track.path).collect());
+                                selected_tracks.set(tracks.into_iter().map(|track| track.path).collect());
                                 is_selection_mode.set(true);
                             }
                         },
-                        if !is_empty && displayed_tracks().iter().all(|(track, _)| selected_tracks.read().contains(&track.path)) {
+                        if !is_empty && displayed_tracks().iter().all(|track| selected_tracks.read().contains(&track.path)) {
                             i { class: "fa-solid fa-check", style: "font-size: 9px;" }
                         }
                     }
@@ -587,10 +573,26 @@ pub fn JellyfinLibrary(
             div {
                 id: "library-scroll",
                 class: "flex-1 overflow-y-auto pb-20",
-                onmounted: move |event| {
+                onmounted: move |_event| {
                     spawn(async move {
-                        if let Ok(window) = event.get_client_rect().await {
-                            container_height.set(window.height());
+                        let mut eval = dioxus::document::eval(
+                            r#"
+                            const el = document.getElementById('library-scroll');
+                            if (el) {
+                                const send = () => dioxus.send(el.clientHeight);
+                                send();
+                                requestAnimationFrame(send);
+                                const ro = new ResizeObserver(send);
+                                ro.observe(el);
+                            }
+                            "#,
+                        );
+                        while let Ok(val) = eval.recv::<serde_json::Value>().await {
+                            if let Some(h) = val.as_f64() {
+                                if h > 0.0 {
+                                    container_height.set(h);
+                                }
+                            }
                         }
                     });
                     if saved_scroll > 0.0 {

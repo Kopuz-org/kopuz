@@ -202,10 +202,32 @@ pub async fn sync_server_library(
         }
         MusicService::Subsonic | MusicService::Custom => {
             let data = fetch_subsonic_library(service, &server_url, &user_id, &token).await?;
+            if data.tracks.is_empty() && data.albums.is_empty() {
+                return Err("Subsonic returned empty library".to_string());
+            }
             let mut lib_write = library.write();
-            lib_write.jellyfin_albums = data.albums;
-            lib_write.jellyfin_tracks = data.tracks;
-            lib_write.jellyfin_genres = data.genres;
+            if clear_first {
+                lib_write.jellyfin_albums.clear();
+                lib_write.jellyfin_tracks.clear();
+                lib_write.jellyfin_genres.clear();
+            }
+            for album in data.albums {
+                if !lib_write.jellyfin_albums.iter().any(|a| a.id == album.id) {
+                    lib_write.jellyfin_albums.push(album);
+                }
+            }
+            for track in data.tracks {
+                if !lib_write
+                    .jellyfin_tracks
+                    .iter()
+                    .any(|t| t.path == track.path)
+                {
+                    lib_write.jellyfin_tracks.push(track);
+                }
+            }
+            if !data.genres.is_empty() {
+                lib_write.jellyfin_genres = data.genres;
+            }
             lib_write.server_artist_images = data.artist_images;
         }
     }
@@ -230,6 +252,8 @@ pub async fn fetch_subsonic_library(
     let mut tracks_out = Vec::new();
     let mut seen_track_ids = HashSet::new();
     let mut genres = HashSet::new();
+    let mut album_meta: std::collections::HashMap<String, (String, String, String)> =
+        std::collections::HashMap::new();
 
     let mut artist_images = std::collections::HashMap::new();
     if let Ok(artists) = remote.get_artists().await {
@@ -242,11 +266,11 @@ pub async fn fetch_subsonic_library(
         }
     }
 
-    let mut offset = 0usize;
-    let batch = 250usize;
+    let mut album_offset = 0usize;
+    let album_batch = 500usize;
 
     loop {
-        let albums = remote.get_album_list(offset, batch).await?;
+        let albums = remote.get_album_list(album_offset, album_batch).await?;
         if albums.is_empty() {
             break;
         }
@@ -273,64 +297,101 @@ pub async fn fetch_subsonic_library(
                 genres.insert(album_genre.clone());
             }
 
+            album_meta.insert(
+                album.id.clone(),
+                (album_id_prefixed.clone(), album_name.clone(), album_artist.clone()),
+            );
+
             albums_out.push(Album {
                 id: album_id_prefixed.clone(),
-                title: album_name.clone(),
-                artist: album_artist.clone(),
+                title: album_name,
+                artist: album_artist,
                 genre: album_genre,
                 year: album.year.unwrap_or(0),
                 cover_path: Some(PathBuf::from(album_id_prefixed.clone())),
             });
-
-            let songs = remote.get_album_songs(&album.id).await.map_err(|e| {
-                i18n::t_with("error_fetch_songs", &[("album_id", album.id.clone()), ("error", e.to_string())])
-            })?;
-
-            for song in songs {
-                if !seen_track_ids.insert(song.id.clone()) {
-                    continue;
-                }
-
-                if let Some(genre) = &song.genre {
-                    if !genre.is_empty() {
-                        genres.insert(genre.clone());
-                    }
-                }
-
-                let bitrate_u8 = song.bit_rate.unwrap_or(0).min(255) as u8;
-
-                let song_cover_tag = song
-                    .cover_art
-                    .as_ref()
-                    .and_then(|cover_art_id| remote.cover_art_url(cover_art_id, Some(512)).ok())
-                    .map(|url| encode_cover_url_tag(&url));
-
-                let song_path = if let Some(tag) = &song_cover_tag {
-                    format!("{}:{}:{}", provider_prefix, song.id, tag)
-                } else {
-                    format!("{}:{}:none", provider_prefix, song.id)
-                };
-
-                tracks_out.push(Track {
-                    path: PathBuf::from(song_path),
-                    album_id: album_id_prefixed.clone(),
-                    title: song.title,
-                    artist: song.artist.clone().unwrap_or_else(|| album_artist.clone()),
-                    album: song.album.unwrap_or_else(|| album_name.clone()),
-                    duration: song.duration.unwrap_or(0),
-                    khz: song.sampling_rate.unwrap_or(0),
-                    bitrate: bitrate_u8,
-                    track_number: song.track,
-                    disc_number: song.disc_number,
-                    musicbrainz_release_id: None,
-                    playlist_item_id: None,
-                    artists: vec![song.artist.unwrap_or_else(|| album_artist.clone())],
-                });
-            }
         }
 
-        offset += count;
-        if count < batch {
+        album_offset += count;
+        if count < album_batch {
+            break;
+        }
+    }
+
+    let mut song_offset = 0usize;
+    let song_batch = 500usize;
+    let mut empty_streak = 0;
+
+    loop {
+        let songs = match remote.search_songs(song_offset, song_batch).await {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Subsonic search3 failed at offset {song_offset}: {e}. Stopping song sync.");
+                break;
+            }
+        };
+
+        if songs.is_empty() {
+            empty_streak += 1;
+            if empty_streak >= 2 {
+                break;
+            }
+            song_offset += song_batch;
+            continue;
+        }
+        empty_streak = 0;
+        let count = songs.len();
+
+        for song in songs {
+            if !seen_track_ids.insert(song.id.clone()) {
+                continue;
+            }
+
+            if let Some(genre) = &song.genre {
+                if !genre.is_empty() {
+                    genres.insert(genre.clone());
+                }
+            }
+
+            let bitrate_u8 = song.bit_rate.unwrap_or(0).min(255) as u8;
+
+            let (album_id_prefixed, album_name_fb, album_artist_fb) = song
+                .album_id
+                .as_ref()
+                .and_then(|id| album_meta.get(id).cloned())
+                .unwrap_or_else(|| (String::new(), String::new(), String::new()));
+
+            let song_cover_tag = song
+                .cover_art
+                .as_ref()
+                .and_then(|cover_art_id| remote.cover_art_url(cover_art_id, Some(512)).ok())
+                .map(|url| encode_cover_url_tag(&url));
+
+            let song_path = if let Some(tag) = &song_cover_tag {
+                format!("{}:{}:{}", provider_prefix, song.id, tag)
+            } else {
+                format!("{}:{}:none", provider_prefix, song.id)
+            };
+
+            tracks_out.push(Track {
+                path: PathBuf::from(song_path),
+                album_id: album_id_prefixed,
+                title: song.title,
+                artist: song.artist.clone().unwrap_or_else(|| album_artist_fb.clone()),
+                album: song.album.unwrap_or(album_name_fb),
+                duration: song.duration.unwrap_or(0),
+                khz: song.sampling_rate.unwrap_or(0),
+                bitrate: bitrate_u8,
+                track_number: song.track,
+                disc_number: song.disc_number,
+                musicbrainz_release_id: None,
+                playlist_item_id: None,
+                artists: vec![song.artist.unwrap_or(album_artist_fb)],
+            });
+        }
+
+        song_offset += count;
+        if count < song_batch {
             break;
         }
     }

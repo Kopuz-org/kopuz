@@ -408,10 +408,26 @@ div {
             div {
                 id: "library-scroll",
                 class: "flex-1 overflow-y-auto pb-20",
-                onmounted: move |event| {
+                onmounted: move |_event| {
                     spawn(async move {
-                        if let Ok(window) = event.get_client_rect().await {
-                            container_height.set(window.height());
+                        let mut eval = dioxus::document::eval(
+                            r#"
+                            const el = document.getElementById('library-scroll');
+                            if (el) {
+                                const send = () => dioxus.send(el.clientHeight);
+                                send();
+                                requestAnimationFrame(send);
+                                const ro = new ResizeObserver(send);
+                                ro.observe(el);
+                            }
+                            "#,
+                        );
+                        while let Ok(val) = eval.recv::<serde_json::Value>().await {
+                            if let Some(h) = val.as_f64() {
+                                if h > 0.0 {
+                                    container_height.set(h);
+                                }
+                            }
                         }
                     });
                     if saved_scroll > 0.0 {
