@@ -175,8 +175,10 @@ pub async fn submit_now_playing(
 ) -> Result<String, reqwest::Error> {
     let client = Client::new();
 
-    let artist = now_playing.track_metadata.artist_name;
-    let track = now_playing.track_metadata.track_name;
+    let artist = now_playing.track_metadata.artist_name.trim();
+    let track = now_playing.track_metadata.track_name.trim();
+    let api_key = api_key.trim();
+    let session_key = session_key.trim();
 
     let mut params: Vec<(&str, &str)> = vec![
         ("api_key", api_key),
@@ -197,13 +199,6 @@ pub async fn submit_now_playing(
 
     let mut form = params.clone();
     form.push(("api_sig", &api_sig));
-
-    if let Some(album) = now_playing.track_metadata.release_name {
-        let album_trimmed = album.trim();
-        if !album_trimmed.is_empty() {
-            params.push(("album", album_trimmed));
-        }
-    }
 
     let url = format!("{}?format=json", API_URL);
 
