@@ -11,6 +11,9 @@ directories = { workspace = true }
 dioxus = { workspace = true, features = ["web"] }
 
 [dependencies]
+webbrowser = "1.2.1"
+tracing = "0.1"
+scrobble = { path = "../scrobble" }
 uuid = { workspace = true }
 player = { workspace = true }
 reader = { workspace = true }
