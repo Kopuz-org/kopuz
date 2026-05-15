@@ -181,7 +181,12 @@ pub fn JellyfinHome(
             .into_iter()
             .map(|album| {
                 let cover = album_cover_url(&conf, &album);
-                (album.id.clone(), album.title.clone(), album.artist.clone(), cover)
+                (
+                    album.id.clone(),
+                    album.title.clone(),
+                    album.artist.clone(),
+                    cover,
+                )
             })
             .collect()
     });
@@ -203,7 +208,12 @@ pub fn JellyfinHome(
             .into_iter()
             .map(|album| {
                 let cover = album_cover_url(&conf, &album);
-                (album.id.clone(), album.title.clone(), album.artist.clone(), cover)
+                (
+                    album.id.clone(),
+                    album.title.clone(),
+                    album.artist.clone(),
+                    cover,
+                )
             })
             .collect()
     });
@@ -283,7 +293,12 @@ pub fn JellyfinHome(
             .into_iter()
             .map(|album| {
                 let cover = album_cover_url(&conf, &album);
-                (album.id.clone(), album.title.clone(), album.artist.clone(), cover)
+                (
+                    album.id.clone(),
+                    album.title.clone(),
+                    album.artist.clone(),
+                    cover,
+                )
             })
             .collect();
         (top_genre, cards)

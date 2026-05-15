@@ -10,4 +10,4 @@ serde_json = { workspace = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 lofty = { workspace = true }
 async-recursion = { workspace = true }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["fs"] }

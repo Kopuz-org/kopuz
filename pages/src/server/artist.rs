@@ -60,9 +60,15 @@ pub fn JellyfinArtist(
 
         let snapshot = {
             let conf = config.read();
-            let Some(server) = &conf.server else { return; };
-            let Some(token) = &server.access_token else { return; };
-            let Some(user_id) = &server.user_id else { return; };
+            let Some(server) = &conf.server else {
+                return;
+            };
+            let Some(token) = &server.access_token else {
+                return;
+            };
+            let Some(user_id) = &server.user_id else {
+                return;
+            };
             let service = server.service;
             let url = server.url.clone();
             let tok = token.clone();
@@ -79,7 +85,8 @@ pub fn JellyfinArtist(
 
             match service {
                 config::MusicService::Jellyfin => {
-                    let client = JellyfinClient::new(&url, Some(&token), &device_id, Some(&user_id));
+                    let client =
+                        JellyfinClient::new(&url, Some(&token), &device_id, Some(&user_id));
                     match client.get_artists().await {
                         Ok(artists) => {
                             for artist in artists {
@@ -109,7 +116,9 @@ pub fn JellyfinArtist(
                         Ok(artists) => {
                             for artist in artists {
                                 if let Some(cover_art_id) = &artist.cover_art {
-                                    if let Ok(img_url) = client.cover_art_url(cover_art_id, Some(512)) {
+                                    if let Ok(img_url) =
+                                        client.cover_art_url(cover_art_id, Some(512))
+                                    {
                                         images.insert(artist.name.clone(), img_url);
                                     }
                                 }
@@ -899,10 +908,8 @@ pub fn JellyfinArtist(
 fn SortOrderToggle(mut sort_order: Signal<ArtistViewOrder>) -> Element {
     let is_tracks = *sort_order.read() == ArtistViewOrder::Tracks;
 
-    let btn_active =
-        "inline-flex items-center justify-center h-7 px-3 text-xs rounded-md bg-white/10 text-white font-medium transition-all";
-    let btn_inactive =
-        "inline-flex items-center justify-center h-7 px-3 text-xs rounded-md text-white/40 hover:text-white/80 transition-all";
+    let btn_active = "inline-flex items-center justify-center h-7 px-3 text-xs rounded-md bg-white/10 text-white font-medium transition-all";
+    let btn_inactive = "inline-flex items-center justify-center h-7 px-3 text-xs rounded-md text-white/40 hover:text-white/80 transition-all";
 
     rsx! {
         div { class: "inline-flex items-center h-9 p-1 space-x-1 bg-white/5 border border-white/5 rounded-full",
