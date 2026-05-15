@@ -5,6 +5,7 @@ use config::{
 use dioxus::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
 use rfd::AsyncFileDialog;
+use scrobble::lastfm;
 
 #[component]
 pub fn SettingItem(title: String, control: Element) -> Element {
@@ -313,6 +314,96 @@ pub fn MusicBrainzSettings(current: String, on_save: EventHandler<String>) -> El
     }
 }
 
+#[component]
+pub fn LastFmSettings(
+    api_key: String,
+    api_secret: String,
+    session_key: String,
+    on_api_key_save: EventHandler<String>,
+    on_api_secret_save: EventHandler<String>,
+    on_session_key_save: EventHandler<String>,
+) -> Element {
+    let mut api_key_input = use_signal(move || api_key.clone());
+    let mut api_secret_input = use_signal(move || api_secret.clone());
+
+    rsx! {
+        div {
+            class: "flex flex-col gap-3 w-full max-w-xl",
+            div {
+                class: "bg-white/5 p-1 rounded-xl border border-white/5",
+                input {
+                    class: "bg-transparent w-full px-3 py-2 text-sm text-white placeholder:text-white/50 outline-none",
+                    placeholder: "{i18n::t(\"lastfm_api_key_placeholder\")}",
+                    value: "{api_key_input()}",
+                    oninput: move |evt| {
+                        api_key_input.set(evt.value());
+                        on_api_key_save.call(evt.value());
+                    },
+                    r#type: "password",
+                }
+            }
+
+            div {
+                class: "bg-white/5 p-1 rounded-xl border border-white/5",
+
+                input {
+                    class: "bg-transparent w-full px-3 py-2 text-sm text-white placeholder:text-white/50 outline-none",
+                    placeholder: "{i18n::t(\"lastfm_api_secret_placeholder\")}",
+                    value: "{api_secret_input()}",
+                    oninput: move |evt| {
+                        api_secret_input.set(evt.value());
+                        on_api_secret_save.call(evt.value());
+                    },
+                    r#type: "password",
+                }
+            }
+            button {
+                class: "bg-white/10 hover:bg-white/20 px-5 py-2 rounded text-sm text-white transition-colors self-start mx-auto w-fit",
+                onclick: move |_| {
+                    let api_key = api_key_input();
+                    let api_secret = api_secret_input();
+                    let on_session_key_save = on_session_key_save.clone();
+
+                    spawn(async move {
+                        match lastfm::get_auth_token(&api_key).await {
+                            Ok(token) => {
+                                let url = lastfm::auth_url(&api_key, &token);
+
+                                if let Err(e) = webbrowser::open(&url) {
+                                    tracing::warn!("Failed to open browser: {}", e);
+                                    return;
+                                }
+
+                                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+
+                                match lastfm::get_session_key(&api_key, &api_secret, &token).await {
+                                    Ok(session_key) => {
+                                        on_session_key_save.call(session_key);
+
+                                        tracing::info!("Last.fm connected successfully");
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!("Failed to get session key: {}", e);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!("Failed to get auth token: {}", e);
+                            }
+                        }
+                    });
+                },
+
+                if session_key.is_empty() || api_key_input.is_empty() || api_secret_input.is_empty() {
+                    "{i18n::t(\"connect_to_lastfm\")}"
+                } else {
+                    "{i18n::t(\"lastfm_connected\")}"
+                }
+            }
+        }
+    }
+}
+
 const EQ_MIN_DB: f64 = -12.0;
 const EQ_MAX_DB: f64 = 12.0;
 const EQ_GRAPH_WIDTH: f64 = 760.0;
@@ -463,7 +554,11 @@ pub fn EqualizerPanel(
     );
     let curve_fill_style = {
         let opacity = if enabled {
-            if highlighted_band.is_some() { 0.94 } else { 0.82 }
+            if highlighted_band.is_some() {
+                0.94
+            } else {
+                0.82
+            }
         } else {
             0.22
         };
@@ -481,8 +576,7 @@ pub fn EqualizerPanel(
             if reduce_animations {
                 "stroke: var(--color-indigo-400);".to_string()
             } else {
-                "stroke: var(--color-indigo-400); transition: stroke 140ms ease-out;"
-                    .to_string()
+                "stroke: var(--color-indigo-400); transition: stroke 140ms ease-out;".to_string()
             }
         } else if reduce_animations {
             "stroke: var(--color-indigo-500);".to_string()
@@ -843,28 +937,6 @@ pub fn EqualizerPanel(
     }
 }
 
-// #[component]
-// pub fn LastFmSettings(current: String, on_save: EventHandler<String>) -> Element {
-//     let mut input = use_signal(move || current.clone());
-
-//     rsx! {
-//         div { class: "flex items-center gap-2 w-full max-w-xl",
-//             div { class: "flex-1 bg-white/5 p-1 rounded-xl border border-white/5",
-//                 input {
-//                     class: "bg-transparent w-full px-3 py-2 text-sm text-white placeholder:text-white/50 outline-none",
-//                     placeholder: "Enter your last.fm token",
-//                     value: "{input()}",
-//                     oninput: move |evt| {
-//                         input.set(evt.value());
-//                         on_save.call(evt.value());
-//                     },
-//                     r#type: "text",
-//                 }
-//             }
-//         }
-//     }
-// }
-
 #[component]
 pub fn BackBehaviorSelector(
     current: BackBehavior,
@@ -924,10 +996,7 @@ fn channel_mode_label(mode: ChannelMode) -> String {
 }
 
 #[component]
-pub fn ChannelModeSelector(
-    current: ChannelMode,
-    on_change: EventHandler<ChannelMode>,
-) -> Element {
+pub fn ChannelModeSelector(current: ChannelMode, on_change: EventHandler<ChannelMode>) -> Element {
     rsx! {
         select {
             class: "bg-white/5 border border-white/10 rounded px-3 py-1 text-sm text-white focus:outline-none focus:border-white/20",
