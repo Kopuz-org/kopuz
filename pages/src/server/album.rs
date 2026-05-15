@@ -35,7 +35,6 @@ pub fn JellyfinAlbum(
                 .cmp(&b.title.trim().to_lowercase())
         });
 
-
         let mut unique_albums = Vec::new();
         let mut seen_titles = std::collections::HashSet::new();
 
@@ -337,7 +336,10 @@ pub fn JellyfinAlbumDetails(
         let q_idx = *ctrl.current_queue_index.read();
         let tracks: Vec<_> = album_tracks().into_iter().map(|(t, _)| t).collect();
         if queue.len() == tracks.len()
-            && queue.iter().zip(tracks.iter()).all(|(q, t)| q.path == t.path)
+            && queue
+                .iter()
+                .zip(tracks.iter())
+                .all(|(q, t)| q.path == t.path)
         {
             Some(q_idx)
         } else {

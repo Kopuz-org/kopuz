@@ -30,7 +30,7 @@ pub async fn sleep(duration: std::time::Duration) {
     }
 }
 
-pub fn format_artwork_url(path: Option<&impl AsRef<Path>>) -> Option<CoverUrl> {
+fn format_artwork_url_impl(path: Option<&impl AsRef<Path>>, size: Option<u32>) -> Option<CoverUrl> {
     path.and_then(|p| {
         let p = p.as_ref();
         let p_str = p.to_string_lossy();
@@ -68,15 +68,34 @@ pub fn format_artwork_url(path: Option<&impl AsRef<Path>>) -> Option<CoverUrl> {
             .add(b':');
 
         if cfg!(target_os = "windows") {
-            Some(cover_url_from_string(format!(
+            let mut url = format!(
                 "http://artwork.dioxus.localhost/local?p={}",
                 percent_encoding::utf8_percent_encode(&abs_str, QUERY_VAL)
-            )))
+            );
+            if let Some(size) = size {
+                url.push_str(&format!("&s={size}"));
+            }
+            Some(cover_url_from_string(url))
         } else {
-            Some(cover_url_from_string(format!(
+            let mut url = format!(
                 "artwork://local?p={}",
                 percent_encoding::utf8_percent_encode(&abs_str, QUERY_VAL)
-            )))
+            );
+            if let Some(size) = size {
+                url.push_str(&format!("&s={size}"));
+            }
+            Some(cover_url_from_string(url))
         }
     })
+}
+
+pub fn format_artwork_url(path: Option<&impl AsRef<Path>>) -> Option<CoverUrl> {
+    format_artwork_url_impl(path, None)
+}
+
+pub fn format_artwork_thumb_url(
+    path: Option<&impl AsRef<Path>>,
+    size: u32,
+) -> Option<CoverUrl> {
+    format_artwork_url_impl(path, Some(size))
 }

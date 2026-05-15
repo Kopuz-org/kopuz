@@ -38,6 +38,18 @@ pub fn find_folder_cover(dir: &Path) -> Option<PathBuf> {
     None
 }
 
+pub fn is_artist_image_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| {
+            matches!(
+                name.to_ascii_lowercase().as_str(),
+                "artist.jpg" | "artist.jpeg" | "artist.png" | "artist.webp"
+            )
+        })
+        .unwrap_or(false)
+}
+
 pub fn save_cover(
     album_id: &str,
     data: &[u8],

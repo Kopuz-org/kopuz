@@ -1,4 +1,4 @@
-use config::{AppConfig, ListenNowStyle, UiStyle};
+use config::{AppConfig, ArtistPhotoSource, ListenNowStyle, UiStyle};
 use dioxus::prelude::*;
 use rand::seq::SliceRandom;
 use rand::thread_rng;
@@ -92,15 +92,33 @@ pub fn LocalHome(
 
     let artists = use_memo(move || {
         let lib = library.read();
+        let use_artist_photo = config.read().artist_photo_source == ArtistPhotoSource::ArtistPhoto;
         let mut unique_artists = std::collections::HashSet::new();
         let mut artist_list = Vec::new();
         for album in &lib.albums {
             if unique_artists.insert(album.artist.clone()) {
-                let cover = album.cover_path.clone();
+                let cover = if use_artist_photo {
+                    lib.local_artist_images
+                        .get(&album.artist)
+                        .cloned()
+                        .or_else(|| album.cover_path.clone())
+                } else {
+                    album.cover_path.clone()
+                };
                 artist_list.push((album.artist.clone(), cover));
             }
             if artist_list.len() >= 10 {
-                break;
+                return artist_list;
+            }
+        }
+        if use_artist_photo {
+            for (artist, image_path) in &lib.local_artist_images {
+                if unique_artists.insert(artist.clone()) {
+                    artist_list.push((artist.clone(), Some(image_path.clone())));
+                }
+                if artist_list.len() >= 10 {
+                    break;
+                }
             }
         }
         artist_list
@@ -383,7 +401,13 @@ fn render_local_section(
             on_play_album,
             scroll_container,
         ),
-        "listen_now" => render_listen_now(is_modern, listen_now_style, local_shuffled, on_select_album, on_play_album),
+        "listen_now" => render_listen_now(
+            is_modern,
+            listen_now_style,
+            local_shuffled,
+            on_select_album,
+            on_play_album,
+        ),
         "top_artists" => render_top_artists(is_modern, artists, on_search_artist, scroll_container),
         "new_releases" => render_albums_row(
             "albums-scroll",
@@ -800,7 +824,7 @@ fn render_top_artists(
                         },
                         div { class: "aspect-square rounded-full bg-stone-800/80 mb-4 overflow-hidden transition-all duration-300 relative mx-auto gpu-hover",
                             if let Some(path) = cover_path {
-                                if let Some(url) = utils::format_artwork_url(Some(&path)) {
+                                if let Some(url) = utils::format_artwork_thumb_url(Some(&path), 320) {
                                     img { src: "{url.as_ref()}", class: "w-full h-full object-cover group-hover:scale-110 transition-transform duration-700", decoding: "async", loading: "lazy" }
                                 }
                             } else {

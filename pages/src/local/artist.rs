@@ -1,7 +1,7 @@
 use components::dots_menu::{DotsMenu, MenuAction};
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
-use config::{AppConfig, ArtistViewOrder};
+use config::{AppConfig, ArtistPhotoSource, ArtistViewOrder};
 use dioxus::prelude::*;
 use reader::{Library, PlaylistStore};
 use std::collections::{HashMap, HashSet};
@@ -41,6 +41,7 @@ pub fn LocalArtist(
 
     let local_artists = use_memo(move || {
         let lib = library.read();
+        let use_artist_photo = config.read().artist_photo_source == ArtistPhotoSource::ArtistPhoto;
         let mut artist_map: HashMap<String, Option<std::path::PathBuf>> = HashMap::new();
         for album in &lib.albums {
             artist_map
@@ -57,6 +58,11 @@ pub fn LocalArtist(
                 artist_map
                     .entry(artist.clone())
                     .or_insert_with(|| cover.clone());
+            }
+        }
+        if use_artist_photo {
+            for (artist, image_path) in &lib.local_artist_images {
+                artist_map.insert(artist.clone(), Some(image_path.clone()));
             }
         }
         let mut artists: Vec<_> = artist_map.into_iter().collect();
@@ -89,15 +95,30 @@ pub fn LocalArtist(
 
     let artist_cover = use_memo(move || {
         let lib = library.read();
+        let use_artist_photo = config.read().artist_photo_source == ArtistPhotoSource::ArtistPhoto;
         let artist = artist_name.read();
         if artist.is_empty() {
             return None;
         }
         let artist_lc = artist.to_lowercase();
-        lib.albums
-            .iter()
-            .find(|a| a.artist.to_lowercase() == artist_lc)
-            .and_then(|album| utils::format_artwork_url(album.cover_path.as_ref()))
+        if use_artist_photo {
+            lib.local_artist_images
+                .iter()
+                .find(|(name, _)| name.to_lowercase() == artist_lc)
+                .map(|(_, path)| path)
+                .and_then(|path| utils::format_artwork_url(Some(path)))
+                .or_else(|| {
+                    lib.albums
+                        .iter()
+                        .find(|a| a.artist.to_lowercase() == artist_lc)
+                        .and_then(|album| utils::format_artwork_url(album.cover_path.as_ref()))
+                })
+        } else {
+            lib.albums
+                .iter()
+                .find(|a| a.artist.to_lowercase() == artist_lc)
+                .and_then(|album| utils::format_artwork_url(album.cover_path.as_ref()))
+        }
     });
 
     let artist_albums = use_memo(move || {
@@ -170,7 +191,7 @@ pub fn LocalArtist(
                 div { class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-8",
                     for (artist , cover_path) in local_artists() {
                         {
-                            let cover_url = utils::format_artwork_url(cover_path.as_ref());
+                            let cover_url = utils::format_artwork_thumb_url(cover_path.as_ref(), 320);
                             let art = artist.clone();
                             rsx! {
                                 div {
@@ -247,7 +268,7 @@ pub fn LocalArtist(
                                     .filter(|t| selected.contains(&t.path))
                                     .cloned()
                                     .collect();
-                                
+
                                 if !tracks.is_empty() {
                                     ctrl.add_to_queue(tracks);
                                 }
@@ -531,10 +552,8 @@ pub fn LocalArtist(
 fn SortOrderToggle(mut sort_order: Signal<ArtistViewOrder>) -> Element {
     let is_tracks = *sort_order.read() == ArtistViewOrder::Tracks;
 
-    let btn_active =
-        "inline-flex items-center justify-center h-7 px-3 text-xs rounded-md bg-white/10 text-white font-medium transition-all";
-    let btn_inactive =
-        "inline-flex items-center justify-center h-7 px-3 text-xs rounded-md text-white/40 hover:text-white/80 transition-all";
+    let btn_active = "inline-flex items-center justify-center h-7 px-3 text-xs rounded-md bg-white/10 text-white font-medium transition-all";
+    let btn_inactive = "inline-flex items-center justify-center h-7 px-3 text-xs rounded-md text-white/40 hover:text-white/80 transition-all";
 
     rsx! {
         div { class: "inline-flex items-center h-9 p-1 space-x-1 bg-white/5 border border-white/5 rounded-full",
