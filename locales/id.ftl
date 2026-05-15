@@ -25,10 +25,10 @@ add = Tambah
 add_folder = Tambah Folder
 no_music_folders = Tidak ada folder musik yang diset
 add_server = Tambah Server
-<!-- NEEDS LOCALIZATION -->
+# TODO: NEED LOCALIZATION
 connect_to_lastfm = Connect to Last.fm
 lastfm_connected = Last.fm Connected
-<!-- NEEDS LOCALIZATION -->
+# TODO: NEED LOCALIZATION
 server_details = Detail Server
 server_name = Nama Server
 server_url = URL Server
@@ -175,10 +175,10 @@ heart_track_to_add_server = Sukai lagu yang sedang diputar untuk menambahkannya 
 search_placeholder = Cari artis, album atau lagu...
 no_results_found = Tidak ada hasil untuk "{ $query }"
 listenbrainz_token_placeholder = Masukkan token ListenBrainz kamu
-<!-- NEEDS LOCALIZATION -->
+# TODO: NEED LOCALIZATION
 lastfm_api_key_placeholder = Enter your Last.fm API Key
 lastfm_api_secret_placeholder = Enter your Last.fm API Secret
-<!-- NEEDS LOCALIZATION -->
+# TODO: NEED LOCALIZATION
 
 # Empty States
 album_not_found = Album tidak ditemukan

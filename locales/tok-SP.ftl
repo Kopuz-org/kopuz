@@ -25,10 +25,10 @@ add = 󱥄󱥌
 add_folder = 󱥄󱥌 󱤉 󱤕
 no_music_folders = 󱤕 󱤧 󱤬 󱤂
 add_server = 󱥄󱥸︀󱤉󱥌
-<!-- NEEDS LOCALIZATION -->
+# TODO: NEED LOCALIZATION
 connect_to_lastfm = Connect to Last.fm
 lastfm_connected = Last.fm Connected
-<!-- NEED LOCALIZATION -->
+# TODO: NEED LOCALIZATION
 server_details = 󱥡󱥌
 server_name = 󱥂󱥌
 server_url = 󱤿URL 󱥌
@@ -120,10 +120,10 @@ heart_track_to_add_server = 󱥄󱤭󱤉󱥀󱥅󱤬󱤠󱤕󱤡󱤕󱤧󱤖󱥩
 search_placeholder = 󱥄󱤃󱤉󱤑󱥉, 󱤉󱤟󱥍󱤕󱥖, 󱤉󱤕󱦜󱦜󱦜
 no_results_found = "{ $query }"󱤧󱤬󱤂
 listenbrainz_token_placeholder = 󱥄󱥌󱤉"token ListenBrainz"
-<!-- NEEDS LOCALIZATION -->
+# TODO: NEED LOCALIZATION
 lastfm_api_key_placeholder = Enter your Last.fm API Key
 lastfm_api_secret_placeholder = Enter your Last.fm API Secret
-<!-- NEEDS LOCALIZATION -->
+# TODO: NEED LOCALIZATION
 
 # Empty States
 album_not_found = 󱤟󱥍󱦗󱤕󱥖󱦘󱤧󱤬󱤂

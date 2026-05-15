@@ -25,10 +25,10 @@ add = Hinzufügen
 add_folder = Ordner hinzufügen
 no_music_folders = Keine Musikordner konfiguriert
 add_server = Server hinzufügen
-<!-- NEED LOCALIZATION -->
+# TODO: NEED LOCALIZATION
 connect_to_lastfm = Connect to Last.fm
 lastfm_connected = Last.fm Connected
-<!-- NEED LOCALIZATION -->
+# TODO: NEED LOCALIZATION
 server_details = Serverdetails
 server_name = Servername
 server_url = Serveradresse
@@ -121,10 +121,10 @@ heart_track_to_add_server = Markiere einen Titel mit „Gefällt mir“, um ihn 
 search_placeholder = Suche nach Künstlern, Alben oder Titeln...
 no_results_found = Keine Ergebnisse für „{ $query }“ gefunden
 listenbrainz_token_placeholder = Gib deinen ListenBrainz-Token ein
-<!-- NEED LOCALIZATION -->
+# TODO: NEED LOCALIZATION
 lastfm_api_key_placeholder = Enter your Last.fm API Key
 lastfm_api_secret_placeholder = Enter your Last.fm API Secret
-<!-- NEEDS LOCALIZATION -->
+# TODO: NEED LOCALIZATION
 
 # Empty States
 album_not_found = Album nicht gefunden
