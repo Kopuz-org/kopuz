@@ -1560,7 +1560,7 @@ fn App() -> Element {
                         div {
                             class: "flex items-center gap-2",
                             i { class: "fa-solid fa-download text-xs" }
-                            span { class: "font-medium", "{i18n::t(\"update_available\")}" }
+                            span { class: "font-medium", "{i18n::t(\"update_available\")} - " }
                             span { "{i18n::t_with(\"update_banner_message\", &[(\"version\", update.version.clone())])}" }
                             button {
                                 class: "ml-2 text-xs underline opacity-80 hover:opacity-100 transition-opacity",
