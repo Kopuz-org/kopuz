@@ -115,6 +115,7 @@ pub fn extract_metadata(
         .ok()
         .map(|m| m.len())
         .unwrap_or(0);
+    let _bitdepth = properties.bit_depth().unwrap_or(0);
     let duration_secs = properties.duration().as_secs().max(1);
     let bitrate_kbps = ((file_size * 8) / duration_secs / 1000).min(u16::MAX as u64) as u16;
 

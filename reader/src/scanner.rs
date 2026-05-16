@@ -103,7 +103,7 @@ async fn collect_audio_files(
 
         while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
-            let is_dir = entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false);
+            let is_dir = entry.metadata().await.map(|t| t.is_dir()).unwrap_or(false);
             if is_dir {
                 dirs.push(path);
             } else if is_artist_image_file(&path) {
