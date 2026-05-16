@@ -31,11 +31,11 @@ pub fn LyricsPanel(
                         let nextEl = document.getElementById(`rightbar-lyrics-${nextIndex}`)
                         if (currEl != nextEl) {
                             if (currEl) {
-                                currEl.classList = 'text-white/40 transition-all duration-300 hover:text-white/60 cursor-pointer';
+                                currEl.className = 'text-white/40 transition-all duration-300 hover:text-white/60 cursor-pointer';
                             }
 
                             if (nextEl) {
-                                nextEl.classList = 'text-white text-lg font-bold transition-all duration-300';
+                                nextEl.className = 'text-white text-lg font-bold transition-all duration-300';
                                 nextEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
                                 currEl = nextEl;
                             }
