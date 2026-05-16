@@ -70,6 +70,8 @@ pub fn LyricsPanel(
                                     .min(50.0) as u64
                             })
                             .unwrap_or(50);
+                    } else {
+                        let _ = eval("window.rightbar_updateLyrics(-1)");
                     }
 
                     utils::sleep(std::time::Duration::from_millis(sleep_duration_ms)).await;
@@ -203,7 +205,7 @@ pub fn QueuePanel(
             if back_items.is_empty() {
                 div { class: "text-white/30 text-center py-10 text-sm", "{i18n::t(\"no_previous_songs\")}" }
             } else {
-            for (list_pos, (queue_idx, track)) in back_items.iter().rev().take(30).enumerate() {
+            for (list_pos, (queue_idx, track)) in back_items.iter().enumerate().rev() {
                 {
                     let queue_idx = *queue_idx;
                     let track_idx = list_pos;
@@ -245,7 +247,7 @@ pub fn QueuePanel(
                 class: "px-2 pt-1 pb-2 text-[11px] uppercase tracking-[0.18em] text-slate-500",
                 "{up_next_summary}"
             }
-            for (list_pos, (queue_idx, track)) in up_next_items.iter().take(30).enumerate() {
+            for (list_pos, (queue_idx, track)) in up_next_items.iter().enumerate() {
                 {
                     let queue_idx = *queue_idx;
                     let cover_url = get_track_cover(&track);
