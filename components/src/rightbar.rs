@@ -7,6 +7,15 @@ use hooks::use_player_controller::PlayerController;
 use reader::Library;
 use serde_json::Value;
 
+fn js_scroll_to_top() {
+    let _scroll_to_top = eval(
+        r#"
+            const el = document.getElementById('rightbar-content');
+            if (el) { el.scrollTo({top: 0, left: 0, behavior: 'auto'}); }
+        "#,
+    );
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Tabs {
     Back,
@@ -165,6 +174,7 @@ pub fn QueuePanel(
 
     let mut play_song_at_index = move |index: usize| {
         ctrl.play_track_no_history(index);
+        js_scroll_to_top();
     };
 
     let mut move_queue_item = move |from: usize, to: usize| {
@@ -319,15 +329,6 @@ pub fn Rightbar(
     let mut fetch_gen: Signal<u32> = use_signal(|| 0);
     let mut last_key: Signal<String> = use_signal(String::new);
 
-    let js_scroll_to_top = || {
-        let _scroll_to_top = eval(
-            r#"
-                const el = document.getElementById('rightbar-content');
-                if (el) { el.scrollTo({top: 0, left: 0, behavior: 'auto'}); }
-            "#,
-        );
-    };
-
     use_effect(move || {
         let title = current_song_title.read().clone();
         let track_path = {
@@ -402,8 +403,6 @@ pub fn Rightbar(
                 lyrics.set(Some(display));
             }
         });
-
-        js_scroll_to_top();
     });
 
     // reset scroll position on tab change
