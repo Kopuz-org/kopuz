@@ -22,7 +22,7 @@ pub fn AlbumDetails(
     let mut tracks: Vec<_> = lib
         .tracks
         .iter()
-        .filter(|t| t.album == album_title)
+        .filter(|t| t.album_id == album_id)
         .cloned()
         .collect();
     tracks.sort_by(|a, b| {
