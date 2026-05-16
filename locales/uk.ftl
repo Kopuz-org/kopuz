@@ -371,3 +371,8 @@ radio_j1_desc = Сучасні хіти та класичні пісні з Яп
 radio_doujinstyle_desc = Додзін-музика, саундтреки до відеоігор та інше.
 radio_vocaloid_desc = Вокалоїдні хіти з Японії. Ми граємо все!
 radio_live_stream = Прямий ефір
+
+auto_check_updates = Автоматично перевіряти оновлення
+update_available = Доступне оновлення
+update_banner_message = Доступна версія Kopuz { $version }.
+view_release = Переглянути реліз

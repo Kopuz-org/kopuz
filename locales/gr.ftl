@@ -371,3 +371,8 @@ radio_j1_desc = Τρέχουσες επιτυχίες και κλασικά τρ
 radio_doujinstyle_desc = Μουσική doujin, soundtrack βιντεοπαιχνιδιών και πολλά άλλα.
 radio_vocaloid_desc = Επιτυχίες Vocaloid από την Ιαπωνία. Παίζουμε τα πάντα!
 radio_live_stream = Ζωντανή μετάδοση
+
+auto_check_updates = Αυτόματος έλεγχος ενημερώσεων
+update_available = Διαθέσιμη ενημέρωση
+update_banner_message = Το Kopuz { $version } είναι διαθέσιμο.
+view_release = Προβολή έκδοσης

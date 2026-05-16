@@ -78,6 +78,87 @@ const QUEUE_STATE_PROGRESS_STEP_SECS: u64 = 5;
 static PRESENCE: std::sync::OnceLock<Option<Arc<Presence>>> = std::sync::OnceLock::new();
 
 #[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct AvailableUpdate {
+    version: String,
+    release_url: String,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(serde::Deserialize)]
+struct GithubRelease {
+    tag_name: String,
+    html_url: String,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn parse_version_parts(version: &str) -> Option<Vec<u64>> {
+    let core = version
+        .trim()
+        .trim_start_matches(['v', 'V'])
+        .split(['-', '+'])
+        .next()
+        .unwrap_or_default();
+    let parts: Option<Vec<u64>> = core
+        .split('.')
+        .map(|part| part.parse::<u64>().ok())
+        .collect();
+    parts.filter(|parts| !parts.is_empty())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn is_newer_version(current: &str, candidate: &str) -> bool {
+    let Some(current_parts) = parse_version_parts(current) else {
+        return false;
+    };
+    let Some(candidate_parts) = parse_version_parts(candidate) else {
+        return false;
+    };
+
+    let max_len = current_parts.len().max(candidate_parts.len());
+    for idx in 0..max_len {
+        let current_part = *current_parts.get(idx).unwrap_or(&0);
+        let candidate_part = *candidate_parts.get(idx).unwrap_or(&0);
+        match candidate_part.cmp(&current_part) {
+            std::cmp::Ordering::Greater => return true,
+            std::cmp::Ordering::Less => return false,
+            std::cmp::Ordering::Equal => {}
+        }
+    }
+
+    false
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn fetch_available_update() -> Option<AvailableUpdate> {
+    let client = reqwest::Client::builder()
+        .user_agent(format!("kopuz/{}", env!("CARGO_PKG_VERSION")))
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .ok()?;
+    let release = client
+        .get("https://api.github.com/repos/Kopuz-org/kopuz/releases/latest")
+        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+        .send()
+        .await
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .json::<GithubRelease>()
+        .await
+        .ok()?;
+
+    if is_newer_version(env!("CARGO_PKG_VERSION"), &release.tag_name) {
+        Some(AvailableUpdate {
+            version: release.tag_name.trim_start_matches(['v', 'V']).to_string(),
+            release_url: release.html_url,
+        })
+    } else {
+        None
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn persist_config_snapshot(config_snapshot: config::AppConfig, path: std::path::PathBuf) {
     spawn(async move {
         let result = tokio::task::spawn_blocking(move || config_snapshot.save(&path)).await;
@@ -751,6 +832,10 @@ fn App() -> Element {
     let current_queue_index = use_signal(|| 0usize);
 
     let mut network_banner: Signal<Option<bool>> = use_signal(|| None);
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut update_banner: Signal<Option<AvailableUpdate>> = use_signal(|| None);
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut did_check_updates = use_signal(|| false);
     let mut auto_switched_to_offline = use_signal(|| false);
     let mut ctrl = hooks::use_player_controller(
         player,
@@ -799,6 +884,32 @@ fn App() -> Element {
             selected_playlist_id.set(None);
             playlist_store.write().jellyfin_playlists.clear();
         }
+    });
+
+    #[cfg(not(target_arch = "wasm32"))]
+    use_effect(move || {
+        if !*initial_load_done.read() {
+            return;
+        }
+
+        if !config.read().auto_check_updates {
+            update_banner.set(None);
+            if *did_check_updates.peek() {
+                did_check_updates.set(false);
+            }
+            return;
+        }
+
+        if *did_check_updates.read() {
+            return;
+        }
+
+        did_check_updates.set(true);
+        spawn(async move {
+            if let Some(update) = fetch_available_update().await {
+                update_banner.set(Some(update));
+            }
+        });
     });
 
     use_effect(move || {
@@ -1325,6 +1436,8 @@ fn App() -> Element {
     let is_rtl = i18n::is_rtl();
     let dir = if is_rtl { "rtl" } else { "ltr" };
     let content_row_class = "flex flex-1 overflow-hidden";
+    #[cfg(not(target_arch = "wasm32"))]
+    let update_banner_state = update_banner.read().clone();
 
     let background_style = if config.read().theme == "album-art" {
         utils::color::get_background_style(palette.read().as_deref())
@@ -1424,6 +1537,47 @@ fn App() -> Element {
                         button {
                             class: "opacity-50 hover:opacity-100 transition-opacity p-1",
                             onclick: move |_| network_banner.set(None),
+                            i { class: "fa-solid fa-xmark text-xs" }
+                        }
+                    }
+                }
+            }
+
+            if let Some(update) = {
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    update_banner_state.clone()
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    None
+                }
+            } {
+                div {
+                    class: "flex-shrink-0",
+                    div {
+                        class: "flex items-center justify-between gap-3 px-4 py-2 bg-sky-500/15 border-b border-sky-500/20 text-sky-200 text-sm",
+                        div {
+                            class: "flex items-center gap-2",
+                            i { class: "fa-solid fa-download text-xs" }
+                            span { class: "font-medium", "{i18n::t(\"update_available\")} - " }
+                            span { "{i18n::t_with(\"update_banner_message\", &[(\"version\", update.version.clone())])}" }
+                            button {
+                                class: "ml-2 text-xs underline opacity-80 hover:opacity-100 transition-opacity",
+                                onclick: {
+                                    let release_url = update.release_url.clone();
+                                    move |_| {
+                                        if let Err(e) = webbrowser::open(&release_url) {
+                                            tracing::error!("Failed to open release page: {}", e);
+                                        }
+                                    }
+                                },
+                                "{i18n::t(\"view_release\")}"
+                            }
+                        }
+                        button {
+                            class: "opacity-50 hover:opacity-100 transition-opacity p-1",
+                            onclick: move |_| update_banner.set(None),
                             i { class: "fa-solid fa-xmark text-xs" }
                         }
                     }

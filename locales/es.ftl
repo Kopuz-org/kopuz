@@ -372,3 +372,8 @@ radio_j1_desc = Éxitos actuales y canciones clásicas de Japón.
 radio_doujinstyle_desc = Música doujin, bandas sonoras de videojuegos y más.
 radio_vocaloid_desc = Éxitos de Vocaloid de Japón. ¡Tocamos de todo!
 radio_live_stream = Transmisión en vivo
+
+auto_check_updates = Buscar actualizaciones automáticamente
+update_available = Actualización disponible
+update_banner_message = Kopuz { $version } está disponible.
+view_release = Ver lanzamiento

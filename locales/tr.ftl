@@ -371,3 +371,8 @@ radio_j1_desc = Japonya'dan güncel liste başı şarkılar ve klasikler.
 radio_doujinstyle_desc = Doujin müziği, video oyunu müzikleri ve daha fazlası.
 radio_vocaloid_desc = Japonya'dan Vocaloid hitleri. Her şeyi çalıyoruz!
 radio_live_stream = Canlı Yayın
+
+auto_check_updates = Güncellemeleri otomatik denetle
+update_available = Güncelleme mevcut
+update_banner_message = Kopuz { $version } kullanılabilir.
+view_release = Sürümü görüntüle

@@ -372,3 +372,8 @@ radio_j1_desc = kalama musi suli pi ma Nijon.
 radio_doujinstyle_desc = kalama musi pi musi sitelen.
 radio_vocaloid_desc = kalama musi pi ilo kalama.
 radio_live_stream = linja kalama tenpo ni
+
+auto_check_updates = lukin pi sin namako lon tenpo ale
+update_available = sin namako li lon
+update_banner_message = Kopuz { $version } li lon.
+view_release = o lukin e lipu pi sin namako

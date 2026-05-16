@@ -371,3 +371,8 @@ radio_j1_desc = Hituri actuale și melodii clasice din Japonia.
 radio_doujinstyle_desc = Muzică doujin, coloane sonore de jocuri video și altele.
 radio_vocaloid_desc = Hituri Vocaloid din Japonia. Punem orice!
 radio_live_stream = Transmisie în direct
+
+auto_check_updates = Verifică automat actualizările
+update_available = Actualizare disponibilă
+update_banner_message = Kopuz { $version } este disponibil.
+view_release = Vezi lansarea

@@ -371,3 +371,8 @@ radio_j1_desc = 来自日本的当前热门歌曲和经典歌曲。
 radio_doujinstyle_desc = 同人音乐，视频游戏原声带等。
 radio_vocaloid_desc = 来自日本的Vocaloid热门歌曲。我们什么都播！
 radio_live_stream = 直播
+
+auto_check_updates = 自动检查更新
+update_available = 有可用更新
+update_banner_message = Kopuz { $version } 现已可用。
+view_release = 查看发行版

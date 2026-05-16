@@ -50,6 +50,7 @@ channel_mode_right_only = Right only
 channel_mode_swap_left_right = Swap L/R
 discord_presence = Discord Presence
 reduce_animations = Reduce Animations
+auto_check_updates = Auto Check Updates
 show_source_toggle = Show Source Toggle
 titlebar_mode = Titlebar
 titlebar_custom = Custom (app-drawn)
@@ -111,6 +112,9 @@ ytdlp_error_duplicate_active = This URL is already downloading.
 ytdlp_error_output_not_directory = Output path is not a directory: { $path }
 ytdlp_error_output_prepare = Failed to prepare output directory: { $error }
 ytdlp_error_output_not_writable = Output directory is not writable: { $path }
+update_available = Update available
+update_banner_message = Kopuz { $version } is available.
+view_release = View release
 
 # UI Actions & Buttons
 add_to_favorites = Add to Favorites
