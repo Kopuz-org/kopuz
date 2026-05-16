@@ -714,6 +714,19 @@ impl AppConfig {
         }
     }
 
+    pub fn migrate_sidebar_order(&mut self) {
+        let all_keys: &[&str] = &[
+            "home", "search", "library", "albums", "artists",
+            "playlists", "favorites", "radio", "activity", "ytdlp",
+        ];
+        for key in all_keys {
+            if !self.sidebar_order.iter().any(|k| k == key) {
+                self.sidebar_order.push(key.to_string());
+            }
+        }
+        self.sidebar_order.retain(|k| all_keys.contains(&k.as_str()));
+    }
+
     pub fn push_recent(&mut self, id: String, server: bool) {
         let list = if server {
             &mut self.recently_played_server
@@ -762,6 +775,7 @@ impl AppConfig {
             Ok(data) => match serde_json::from_str::<Self>(&data) {
                 Ok(mut config) => {
                     config.migrate_home_sections();
+                    config.migrate_sidebar_order();
                     config
                 }
                 Err(e) => {
