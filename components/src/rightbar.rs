@@ -203,7 +203,7 @@ pub fn QueuePanel(
             if back_items.is_empty() {
                 div { class: "text-white/30 text-center py-10 text-sm", "{i18n::t(\"no_previous_songs\")}" }
             } else {
-            for (list_pos, (queue_idx, track)) in back_items.iter().take(30).enumerate().rev() {
+            for (list_pos, (queue_idx, track)) in back_items.iter().rev().take(30).enumerate() {
                 {
                     let queue_idx = *queue_idx;
                     let track_idx = list_pos;
