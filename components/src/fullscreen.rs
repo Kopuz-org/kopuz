@@ -87,7 +87,12 @@ pub fn Fullscreen(
         let current_track = {
             let q = queue.read();
             let idx = *current_queue_index.read();
-            q.get(idx).cloned()
+            let queue_idx = if *ctrl.shuffle.read() {
+                ctrl.shuffle_order.read().get(idx).copied()
+            } else {
+                Some(idx)
+            };
+            queue_idx.and_then(|queue_idx| q.get(queue_idx).cloned())
         };
 
         let (title, artist, album, duration, track_path) = if let Some(track) = current_track {
