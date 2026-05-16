@@ -47,7 +47,7 @@ pub fn Fullscreen(
     use_future(move || async move {
         loop {
             utils::sleep(std::time::Duration::from_millis(50)).await;
-            exact_progress.set(player.peek().get_position().as_secs_f64());
+            exact_progress.set(ctrl.displayed_progress_secs_f64());
         }
     });
 
@@ -116,11 +116,29 @@ pub fn Fullscreen(
 
         let fetch_id = fetch_gen.peek().wrapping_add(1);
         fetch_gen.set(fetch_id);
-        lyrics.set(None);
 
         if title.is_empty() {
+            lyrics.set(Some(None));
             return;
         }
+
+        if let Some(cached) = utils::lyrics::cached_lyrics(
+            &artist,
+            &title,
+            &album,
+            duration,
+            &track_path,
+        ) {
+            let display = cached.or_else(|| {
+                Some(utils::lyrics::Lyrics::Plain(
+                    i18n::t("lyrics_not_found").to_string(),
+                ))
+            });
+            lyrics.set(Some(display));
+            return;
+        }
+
+        lyrics.set(None);
 
         spawn(async move {
             let result = utils::lyrics::fetch_lyrics(
