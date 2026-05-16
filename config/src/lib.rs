@@ -612,6 +612,7 @@ pub fn default_sidebar_order() -> Vec<String> {
         "artists".to_string(),
         "playlists".to_string(),
         "favorites".to_string(),
+        "radio".to_string(),
         "activity".to_string(),
         "ytdlp".to_string(),
     ]
@@ -713,6 +714,16 @@ impl AppConfig {
         }
     }
 
+    pub fn migrate_sidebar_order(&mut self) {
+        let all_keys = default_sidebar_order();
+        for key in &all_keys {
+            if !self.sidebar_order.iter().any(|k| k == key) {
+                self.sidebar_order.push(key.to_string());
+            }
+        }
+        self.sidebar_order.retain(|k| all_keys.contains(k));
+    }
+
     pub fn push_recent(&mut self, id: String, server: bool) {
         let list = if server {
             &mut self.recently_played_server
@@ -761,6 +772,7 @@ impl AppConfig {
             Ok(data) => match serde_json::from_str::<Self>(&data) {
                 Ok(mut config) => {
                     config.migrate_home_sections();
+                    config.migrate_sidebar_order();
                     config
                 }
                 Err(e) => {

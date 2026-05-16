@@ -54,6 +54,7 @@ pub struct PlayerController {
     pub play_generation: Signal<usize>,
     pending_resume: Signal<Option<PendingResumeState>>,
     pub pending_crossfade_ui: Signal<Option<PendingCrossfadeUiState>>,
+    pub radio_task: Signal<Option<dioxus_core::Task>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -332,6 +333,7 @@ impl PlayerController {
     fn play_track_no_history_with_transition(&mut self, idx: usize, allow_crossfade: bool) {
         self.play_generation.with_mut(|g| *g += 1);
         let current_gen = *self.play_generation.peek();
+        self.cancel_radio_task();
 
         if let Some(track) = self.current_track(idx) {
             let path_str = track.path.to_string_lossy().to_string();
@@ -353,16 +355,18 @@ impl PlayerController {
                 .next()
                 .unwrap_or_default()
                 .to_ascii_lowercase();
+            let is_radio_item = scheme.as_str() == "radio";
             let is_server_item = matches!(scheme.as_str(), "jellyfin" | "subsonic" | "custom");
 
-            if is_server_item {
+            if is_server_item || is_radio_item {
                 let parts: Vec<&str> = path_str.split(':').collect();
                 let id = parts.get(1).unwrap_or(&"").to_string();
+                let stream_id = parts.get(2).unwrap_or(&"").to_string();
 
                 // Check offline cache first
                 #[cfg(not(target_arch = "wasm32"))]
                 {
-                    let offline_path = {
+                    let offline_path = if is_server_item {
                         let raw = self
                             .config
                             .read()
@@ -386,6 +390,8 @@ impl PlayerController {
                         } else {
                             raw
                         }
+                    } else {
+                        None
                     };
                     if let Some(local_path) = offline_path {
                         if let Ok((source, hint)) = decoder::open_file(&local_path) {
@@ -471,57 +477,63 @@ impl PlayerController {
                 }
 
                 if let Some((stream_url, cover_url)) = {
-                    let conf = self.config.read();
-                    conf.server.as_ref().map(|server| match server.service {
-                        MusicService::Jellyfin => {
-                            let mut stream_url =
-                                format!("{}/Audio/{}/stream?static=true", server.url, id);
-                            if let Some(token) = &server.access_token {
-                                stream_url.push_str(&format!("&api_key={}", token));
-                            }
+                    if is_radio_item {
+                        let stream_url = radio::stations::stream_url(&id, &stream_id);
+                        Some((stream_url.to_string(), String::new()))
+                    } else {
+                        let conf = self.config.read();
+                        conf.server.as_ref().map(|server| match server.service {
+                            MusicService::Jellyfin => {
+                                let mut stream_url =
+                                    format!("{}/Audio/{}/stream?static=true", server.url, id);
+                                if let Some(token) = &server.access_token {
+                                    stream_url.push_str(&format!("&api_key={}", token));
+                                }
 
-                            let cover_url = {
-                                let path_str = track.path.to_string_lossy();
-                                utils::jellyfin_image::jellyfin_image_url_from_path(
-                                    &path_str,
-                                    &server.url,
-                                    server.access_token.as_deref(),
-                                    800,
-                                    90,
-                                )
-                                .unwrap_or_default()
-                            };
-
-                            (stream_url, cover_url)
-                        }
-                        MusicService::Subsonic | MusicService::Custom => {
-                            let (stream_url, cover_url) = if let (Some(password), Some(username)) =
-                                (&server.access_token, &server.user_id)
-                            {
-                                let remote = ::server::subsonic::SubsonicClient::new(
-                                    &server.url,
-                                    username,
-                                    password,
-                                );
-                                let stream_url = remote.stream_url(&id).unwrap_or_default();
-                                let cover_url =
-                                    utils::subsonic_image::subsonic_image_url_from_path(
+                                let cover_url = {
+                                    let path_str = track.path.to_string_lossy();
+                                    utils::jellyfin_image::jellyfin_image_url_from_path(
                                         &path_str,
                                         &server.url,
                                         server.access_token.as_deref(),
                                         800,
                                         90,
                                     )
-                                    .or_else(|| remote.cover_art_url(&id, Some(800)).ok())
-                                    .unwrap_or_default();
-                                (stream_url, cover_url)
-                            } else {
-                                (String::new(), String::new())
-                            };
+                                    .unwrap_or_default()
+                                };
 
-                            (stream_url, cover_url)
-                        }
-                    })
+                                (stream_url, cover_url)
+                            }
+                            MusicService::Subsonic | MusicService::Custom => {
+                                let (stream_url, cover_url) =
+                                    if let (Some(password), Some(username)) =
+                                        (&server.access_token, &server.user_id)
+                                    {
+                                        let remote = ::server::subsonic::SubsonicClient::new(
+                                            &server.url,
+                                            username,
+                                            password,
+                                        );
+                                        let stream_url = remote.stream_url(&id).unwrap_or_default();
+                                        let cover_url =
+                                            utils::subsonic_image::subsonic_image_url_from_path(
+                                                &path_str,
+                                                &server.url,
+                                                server.access_token.as_deref(),
+                                                800,
+                                                90,
+                                            )
+                                            .or_else(|| remote.cover_art_url(&id, Some(800)).ok())
+                                            .unwrap_or_default();
+                                        (stream_url, cover_url)
+                                    } else {
+                                        (String::new(), String::new())
+                                    };
+
+                                (stream_url, cover_url)
+                            }
+                        })
+                    }
                 } {
                     if stream_url.is_empty() {
                         self.is_loading.set(false);
@@ -544,6 +556,11 @@ impl PlayerController {
                     let mut pending_crossfade_ui = self.pending_crossfade_ui;
                     let mut pending_resume = self.pending_resume;
                     let cfg_signal = self.config;
+                    let mut radio_task = self.radio_task;
+                    let mut current_song_title = self.current_song_title;
+                    let mut current_song_artist = self.current_song_artist;
+                    let mut current_song_album = self.current_song_album;
+                    let mut current_song_cover_url = self.current_song_cover_url;
 
                     if !use_crossfade {
                         self.hydrate_current_track_metadata(idx, 0);
@@ -552,12 +569,19 @@ impl PlayerController {
 
                     self.is_loading.set(true);
 
+                    let is_radio = track.path.to_string_lossy().starts_with("radio:");
+
                     #[cfg(not(target_arch = "wasm32"))]
                     spawn(async move {
-                        let stream = utils::stream_buffer::StreamBuffer::new(stream_url);
+                        let stream = utils::stream_buffer::StreamBuffer::new(stream_url, is_radio);
                         let source_res = tokio::task::spawn_blocking(move || {
-                            let (source, hint) = decoder::from_stream(stream);
-                            Ok::<_, std::io::Error>((source, hint))
+                            if is_radio {
+                                let (source, hint) = decoder::from_stream_with_hint(stream, "ogg");
+                                Ok::<_, std::io::Error>((source, hint))
+                            } else {
+                                let (source, hint) = decoder::from_stream(stream);
+                                Ok::<_, std::io::Error>((source, hint))
+                            }
                         })
                         .await;
 
@@ -612,267 +636,329 @@ impl PlayerController {
                                 is_playing.set(true);
                                 skip_in_progress.set(false);
 
-                                let scrobble_track = track.clone();
-                                let scrobble_gen = current_gen;
-                                let scrobble_play_gen = play_generation;
-                                let scrobble_cfg = cfg_signal;
-                                let scrobble_id = id.clone();
-                                let duration_secs = scrobble_track.duration;
-                                let threshold_secs =
-                                    std::cmp::min(240, (duration_secs / 2) as u64);
+                                let is_radio_item =
+                                    track.path.to_string_lossy().starts_with("radio:");
+                                let path_lossy = track.path.to_string_lossy().to_string();
+                                let parts: Vec<&str> = path_lossy.split(':').collect();
+                                let (station_id, stream_id) = if is_radio_item {
+                                    (
+                                        parts.get(1).unwrap_or(&"").to_string(),
+                                        parts.get(2).unwrap_or(&"").to_string(),
+                                    )
+                                } else {
+                                    (String::new(), String::new())
+                                };
 
-                                spawn(async move {
-                                    // track must be longer than 30 seconds
-                                    if duration_secs < 30 {
-                                        return;
-                                    }
+                                if let Some(task) = radio_task.take() {
+                                    task.cancel();
+                                }
 
+                                if is_radio_item {
                                     {
-                                        let subsonic_creds = {
-                                            let conf = scrobble_cfg.read();
-                                            conf.server.as_ref().and_then(|s| {
-                                                if matches!(
-                                                    s.service,
-                                                    MusicService::Subsonic | MusicService::Custom
-                                                ) {
-                                                    if let (Some(pw), Some(un)) =
-                                                        (&s.access_token, &s.user_id)
-                                                    {
-                                                        Some((
-                                                            s.url.clone(),
-                                                            un.clone(),
-                                                            pw.clone(),
-                                                        ))
+                                        let provider: Box<dyn radio::RadioMetadataProvider> =
+                                            match station_id.as_str() {
+                                                "listen_moe" => {
+                                                    Box::new(radio::listen_moe::ListenMoeProvider)
+                                                }
+                                                "j1" => Box::new(radio::j1::J1Provider),
+                                                "doujinstyle" => Box::new(
+                                                    radio::doujinstyle::DoujinstyleProvider,
+                                                ),
+                                                "vocaloid" => {
+                                                    Box::new(radio::vocaloid::VocaloidProvider)
+                                                }
+                                                _ => {
+                                                    tracing::warn!("[radio] No metadata provider for station: {}", station_id);
+                                                    is_loading.set(false);
+                                                    is_playing.set(true);
+                                                    skip_in_progress.set(false);
+                                                    return;
+                                                }
+                                            };
+
+                                        let task = spawn(async move {
+                                            let mut rx = provider.start(&stream_id);
+                                            while let Some(meta) = rx.recv().await {
+                                                current_song_title.set(meta.title.clone());
+                                                current_song_artist.set(meta.artist.clone());
+                                                current_song_album.set(meta.station.clone());
+                                                current_song_cover_url
+                                                    .set(meta.cover_url.unwrap_or_default());
+                                            }
+                                        });
+
+                                        radio_task.set(Some(task));
+                                    }
+                                }
+                                // Don't scrobble if the track is a radio item
+                                if !is_radio_item {
+                                    let scrobble_track = track.clone();
+                                    let scrobble_gen = current_gen;
+                                    let scrobble_play_gen = play_generation;
+                                    let scrobble_cfg = cfg_signal;
+                                    let scrobble_id = id.clone();
+                                    let duration_secs = scrobble_track.duration;
+                                    let threshold_secs =
+                                        std::cmp::min(240, (duration_secs / 2) as u64);
+
+                                    spawn(async move {
+                                        // track must be longer than 30 seconds
+                                        if duration_secs < 30 {
+                                            return;
+                                        }
+
+                                        {
+                                            let subsonic_creds = {
+                                                let conf = scrobble_cfg.read();
+                                                conf.server.as_ref().and_then(|s| {
+                                                    if matches!(
+                                                        s.service,
+                                                        MusicService::Subsonic
+                                                            | MusicService::Custom
+                                                    ) {
+                                                        if let (Some(pw), Some(un)) =
+                                                            (&s.access_token, &s.user_id)
+                                                        {
+                                                            Some((
+                                                                s.url.clone(),
+                                                                un.clone(),
+                                                                pw.clone(),
+                                                            ))
+                                                        } else {
+                                                            None
+                                                        }
                                                     } else {
                                                         None
                                                     }
-                                                } else {
-                                                    None
-                                                }
-                                            })
-                                        };
-                                        if let Some((url, username, password)) = subsonic_creds {
-                                            let client =
-                                                ::server::subsonic::SubsonicClient::new(
-                                                    &url, &username, &password,
-                                                );
-                                            if let Err(e) =
-                                                client.scrobble_now_playing(&scrobble_id).await
+                                                })
+                                            };
+                                            if let Some((url, username, password)) = subsonic_creds
                                             {
-                                                tracing::warn!(
-                                                    "Subsonic now-playing failed: {}",
-                                                    e
-                                                );
+                                                let client =
+                                                    ::server::subsonic::SubsonicClient::new(
+                                                        &url, &username, &password,
+                                                    );
+                                                if let Err(e) =
+                                                    client.scrobble_now_playing(&scrobble_id).await
+                                                {
+                                                    tracing::warn!(
+                                                        "Subsonic now-playing failed: {}",
+                                                        e
+                                                    );
+                                                }
                                             }
                                         }
-                                    }
 
-                                    // Last.fm now-playing
-                                    let lastfm_api_key =
-                                        scrobble_cfg.read().lastfm_api_key.clone();
-                                    let lastfm_api_secret =
-                                        scrobble_cfg.read().lastfm_api_secret.clone();
-                                    let lastfm_session_key =
-                                        scrobble_cfg.read().lastfm_session_key.clone();
-                                    let has_lastfm = !lastfm_api_key.is_empty()
-                                        && !lastfm_api_secret.is_empty();
+                                        // Last.fm now-playing
+                                        let lastfm_api_key =
+                                            scrobble_cfg.read().lastfm_api_key.clone();
+                                        let lastfm_api_secret =
+                                            scrobble_cfg.read().lastfm_api_secret.clone();
+                                        let lastfm_session_key =
+                                            scrobble_cfg.read().lastfm_session_key.clone();
+                                        let has_lastfm = !lastfm_api_key.is_empty()
+                                            && !lastfm_api_secret.is_empty();
 
-                                    if has_lastfm {
-                                        let playing_now = scrobble::lastfm::make_playing_now(
-                                            &scrobble_track.artist,
-                                            &scrobble_track.title,
-                                            Some(&scrobble_track.album),
-                                        );
-                                        if let Err(e) = scrobble::lastfm::submit_now_playing(
-                                            &lastfm_api_key,
-                                            &lastfm_api_secret,
-                                            &lastfm_session_key,
-                                            &playing_now,
-                                        )
-                                        .await
-                                        {
-                                            tracing::warn!("Last.fm now playing failed: {}", e);
-                                        }
-                                    }
-
-                                    // MusicBrainz playing_now
-                                    let token_raw =
-                                        scrobble_cfg.read().musicbrainz_token.clone();
-                                    if !token_raw.is_empty() {
-                                        let auth = if token_raw.contains(' ') {
-                                            token_raw.clone()
-                                        } else {
-                                            format!("Token {}", token_raw)
-                                        };
-                                        let playing_now =
-                                            scrobble::musicbrainz::make_playing_now(
+                                        if has_lastfm {
+                                            let playing_now = scrobble::lastfm::make_playing_now(
                                                 &scrobble_track.artist,
                                                 &scrobble_track.title,
                                                 Some(&scrobble_track.album),
                                             );
-                                        if let Err(e) =
-                                            scrobble::musicbrainz::submit_listens(
+                                            if let Err(e) = scrobble::lastfm::submit_now_playing(
+                                                &lastfm_api_key,
+                                                &lastfm_api_secret,
+                                                &lastfm_session_key,
+                                                &playing_now,
+                                            )
+                                            .await
+                                            {
+                                                tracing::warn!("Last.fm now playing failed: {}", e);
+                                            }
+                                        }
+
+                                        // MusicBrainz playing_now
+                                        let token_raw =
+                                            scrobble_cfg.read().musicbrainz_token.clone();
+                                        if !token_raw.is_empty() {
+                                            let auth = if token_raw.contains(' ') {
+                                                token_raw.clone()
+                                            } else {
+                                                format!("Token {}", token_raw)
+                                            };
+                                            let playing_now =
+                                                scrobble::musicbrainz::make_playing_now(
+                                                    &scrobble_track.artist,
+                                                    &scrobble_track.title,
+                                                    Some(&scrobble_track.album),
+                                                );
+                                            if let Err(e) = scrobble::musicbrainz::submit_listens(
                                                 &auth,
                                                 vec![playing_now],
                                                 "playing_now",
                                             )
                                             .await
-                                        {
-                                            tracing::warn!(
-                                                "MusicBrainz playing_now failed: {}",
-                                                e
-                                            );
+                                            {
+                                                tracing::warn!(
+                                                    "MusicBrainz playing_now failed: {}",
+                                                    e
+                                                );
+                                            }
                                         }
-                                    }
 
-                                    // threshold sleep
-                                    tokio::time::sleep(Duration::from_secs(threshold_secs))
-                                        .await;
+                                        // threshold sleep
+                                        tokio::time::sleep(Duration::from_secs(threshold_secs))
+                                            .await;
 
-                                    if *scrobble_play_gen.read() != scrobble_gen {
-                                        return;
-                                    }
+                                        if *scrobble_play_gen.read() != scrobble_gen {
+                                            return;
+                                        }
 
-                                    // post-threshold: actual scrobbles
+                                        // post-threshold: actual scrobbles
 
-                                    // Subsonic scrobble
-                                    {
-                                        let subsonic_creds = {
-                                            let conf = scrobble_cfg.read();
-                                            conf.server.as_ref().and_then(|s| {
-                                                if matches!(
-                                                    s.service,
-                                                    MusicService::Subsonic | MusicService::Custom
-                                                ) {
-                                                    if let (Some(pw), Some(un)) =
-                                                        (&s.access_token, &s.user_id)
-                                                    {
-                                                        Some((
-                                                            s.url.clone(),
-                                                            un.clone(),
-                                                            pw.clone(),
-                                                        ))
+                                        // Subsonic scrobble
+                                        {
+                                            let subsonic_creds = {
+                                                let conf = scrobble_cfg.read();
+                                                conf.server.as_ref().and_then(|s| {
+                                                    if matches!(
+                                                        s.service,
+                                                        MusicService::Subsonic
+                                                            | MusicService::Custom
+                                                    ) {
+                                                        if let (Some(pw), Some(un)) =
+                                                            (&s.access_token, &s.user_id)
+                                                        {
+                                                            Some((
+                                                                s.url.clone(),
+                                                                un.clone(),
+                                                                pw.clone(),
+                                                            ))
+                                                        } else {
+                                                            None
+                                                        }
                                                     } else {
                                                         None
                                                     }
-                                                } else {
-                                                    None
+                                                })
+                                            };
+                                            if let Some((url, username, password)) = subsonic_creds
+                                            {
+                                                let client =
+                                                    ::server::subsonic::SubsonicClient::new(
+                                                        &url, &username, &password,
+                                                    );
+                                                match client.scrobble(&scrobble_id).await {
+                                                    Ok(_) => tracing::info!(
+                                                        "Subsonic scrobbled: {} - {}",
+                                                        scrobble_track.artist,
+                                                        scrobble_track.title
+                                                    ),
+                                                    Err(e) => tracing::warn!(
+                                                        "Subsonic scrobble failed: {}",
+                                                        e
+                                                    ),
                                                 }
-                                            })
-                                        };
-                                        if let Some((url, username, password)) = subsonic_creds {
-                                            let client =
-                                                ::server::subsonic::SubsonicClient::new(
-                                                    &url, &username, &password,
-                                                );
-                                            match client.scrobble(&scrobble_id).await {
+                                            }
+                                        }
+
+                                        // Last.fm scrobble
+                                        if has_lastfm {
+                                            let scrobble = scrobble::lastfm::make_scrobble(
+                                                &scrobble_track.artist,
+                                                &scrobble_track.title,
+                                                Some(&scrobble_track.album),
+                                            );
+                                            match scrobble::lastfm::submit_scrobble(
+                                                &lastfm_api_key,
+                                                &lastfm_api_secret,
+                                                &lastfm_session_key,
+                                                &scrobble,
+                                            )
+                                            .await
+                                            {
                                                 Ok(_) => tracing::info!(
-                                                    "Subsonic scrobbled: {} - {}",
+                                                    "Last.fm scrobbled: {} - {}",
                                                     scrobble_track.artist,
                                                     scrobble_track.title
                                                 ),
-                                                Err(e) => tracing::warn!(
-                                                    "Subsonic scrobble failed: {}",
-                                                    e
-                                                ),
-                                            }
-                                        }
-                                    }
-
-                                    // Last.fm scrobble
-                                    if has_lastfm {
-                                        let scrobble = scrobble::lastfm::make_scrobble(
-                                            &scrobble_track.artist,
-                                            &scrobble_track.title,
-                                            Some(&scrobble_track.album),
-                                        );
-                                        match scrobble::lastfm::submit_scrobble(
-                                            &lastfm_api_key,
-                                            &lastfm_api_secret,
-                                            &lastfm_session_key,
-                                            &scrobble,
-                                        )
-                                        .await
-                                        {
-                                            Ok(_) => tracing::info!(
-                                                "Last.fm scrobbled: {} - {}",
-                                                scrobble_track.artist,
-                                                scrobble_track.title
-                                            ),
-                                            Err(e) => {
-                                                tracing::warn!("Last.fm scrobble failed: {}", e)
-                                            }
-                                        }
-                                    }
-
-                                    // MusicBrainz single listen
-                                    let token_raw =
-                                        scrobble_cfg.read().musicbrainz_token.clone();
-                                    if !token_raw.is_empty() {
-                                        let auth = if token_raw.contains(' ') {
-                                            token_raw
-                                        } else {
-                                            format!("Token {}", token_raw)
-                                        };
-                                        let listen = scrobble::musicbrainz::make_listen(
-                                            &scrobble_track.artist,
-                                            &scrobble_track.title,
-                                            Some(&scrobble_track.album),
-                                        );
-                                        match scrobble::musicbrainz::submit_listens(
-                                            &auth,
-                                            vec![listen],
-                                            "single",
-                                        )
-                                        .await
-                                        {
-                                            Ok(_) => tracing::info!(
-                                                "MusicBrainz scrobbled: {} - {}",
-                                                scrobble_track.artist,
-                                                scrobble_track.title
-                                            ),
-                                            Err(e) => {
-                                                tracing::warn!(
-                                                    "MusicBrainz scrobble failed: {}",
-                                                    e
-                                                )
-                                            }
-                                        }
-                                    }
-                                });
-
-                                let cover_url = cover_url.clone();
-                                let track = track.clone();
-                                let mut player = player;
-                                let play_generation = play_generation;
-
-                                spawn(async move {
-                                    if let Ok(response) = reqwest::get(&cover_url).await {
-                                        if let Ok(bytes) = response.bytes().await {
-                                            let temp_dir = std::env::temp_dir();
-                                            let random_id: u64 = rand::random();
-                                            let file_path = temp_dir
-                                                .join(format!("kopuz_cover_{}.jpg", random_id));
-
-                                            if tokio::fs::write(&file_path, bytes).await.is_ok() {
-                                                if *play_generation.read() == current_gen {
-                                                    let path_str =
-                                                        file_path.to_string_lossy().to_string();
-                                                    let new_meta = NowPlayingMeta {
-                                                        title: track.title,
-                                                        artist: track.artist,
-                                                        album: track.album,
-                                                        duration: std::time::Duration::from_secs(
-                                                            track.duration,
-                                                        ),
-                                                        artwork: Some(path_str),
-                                                    };
-                                                    player.write().update_metadata(new_meta);
+                                                Err(e) => {
+                                                    tracing::warn!("Last.fm scrobble failed: {}", e)
                                                 }
                                             }
                                         }
-                                    }
-                                });
+
+                                        // MusicBrainz single listen
+                                        let token_raw =
+                                            scrobble_cfg.read().musicbrainz_token.clone();
+                                        if !token_raw.is_empty() {
+                                            let auth = if token_raw.contains(' ') {
+                                                token_raw
+                                            } else {
+                                                format!("Token {}", token_raw)
+                                            };
+                                            let listen = scrobble::musicbrainz::make_listen(
+                                                &scrobble_track.artist,
+                                                &scrobble_track.title,
+                                                Some(&scrobble_track.album),
+                                            );
+                                            match scrobble::musicbrainz::submit_listens(
+                                                &auth,
+                                                vec![listen],
+                                                "single",
+                                            )
+                                            .await
+                                            {
+                                                Ok(_) => tracing::info!(
+                                                    "MusicBrainz scrobbled: {} - {}",
+                                                    scrobble_track.artist,
+                                                    scrobble_track.title
+                                                ),
+                                                Err(e) => {
+                                                    tracing::warn!(
+                                                        "MusicBrainz scrobble failed: {}",
+                                                        e
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    });
+
+                                    let cover_url = cover_url.clone();
+                                    let track = track.clone();
+                                    let mut player = player;
+                                    let play_generation = play_generation;
+
+                                    spawn(async move {
+                                        if let Ok(response) = reqwest::get(&cover_url).await {
+                                            if let Ok(bytes) = response.bytes().await {
+                                                let temp_dir = std::env::temp_dir();
+                                                let random_id: u64 = rand::random();
+                                                let file_path = temp_dir
+                                                    .join(format!("kopuz_cover_{}.jpg", random_id));
+
+                                                if tokio::fs::write(&file_path, bytes).await.is_ok()
+                                                {
+                                                    if *play_generation.read() == current_gen {
+                                                        let path_str =
+                                                            file_path.to_string_lossy().to_string();
+                                                        let new_meta = NowPlayingMeta {
+                                                            title: track.title,
+                                                            artist: track.artist,
+                                                            album: track.album,
+                                                            duration:
+                                                                std::time::Duration::from_secs(
+                                                                    track.duration,
+                                                                ),
+                                                            artwork: Some(path_str),
+                                                        };
+                                                        player.write().update_metadata(new_meta);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    });
+                                }
                             }
                         } else {
                             is_loading.set(false);
@@ -911,14 +997,15 @@ impl PlayerController {
                             skip_in_progress.set(false);
 
                             if started {
+
+                            if !is_radio_item {
                                 let scrobble_track = track.clone();
                                 let scrobble_gen = current_gen;
                                 let scrobble_play_gen = play_generation;
                                 let scrobble_cfg = cfg_signal;
                                 let scrobble_id = id.clone();
                                 let duration_secs = scrobble_track.duration;
-                                let threshold_secs =
-                                    std::cmp::min(240, (duration_secs / 2) as u64);
+                                let threshold_secs = std::cmp::min(240, (duration_secs / 2) as u64);
 
                                 spawn(async move {
                                     if duration_secs < 30 {
@@ -950,10 +1037,9 @@ impl PlayerController {
                                             })
                                         };
                                         if let Some((url, username, password)) = subsonic_creds {
-                                            let client =
-                                                ::server::subsonic::SubsonicClient::new(
-                                                    &url, &username, &password,
-                                                );
+                                            let client = ::server::subsonic::SubsonicClient::new(
+                                                &url, &username, &password,
+                                            );
                                             if let Err(e) =
                                                 client.scrobble_now_playing(&scrobble_id).await
                                             {
@@ -965,14 +1051,13 @@ impl PlayerController {
                                         }
                                     }
 
-                                    let lastfm_api_key =
-                                        scrobble_cfg.read().lastfm_api_key.clone();
+                                    let lastfm_api_key = scrobble_cfg.read().lastfm_api_key.clone();
                                     let lastfm_api_secret =
                                         scrobble_cfg.read().lastfm_api_secret.clone();
                                     let lastfm_session_key =
                                         scrobble_cfg.read().lastfm_session_key.clone();
-                                    let has_lastfm = !lastfm_api_key.is_empty()
-                                        && !lastfm_api_secret.is_empty();
+                                    let has_lastfm =
+                                        !lastfm_api_key.is_empty() && !lastfm_api_secret.is_empty();
 
                                     if has_lastfm {
                                         let playing_now = scrobble::lastfm::make_playing_now(
@@ -992,32 +1077,26 @@ impl PlayerController {
                                         }
                                     }
 
-                                    let token_raw =
-                                        scrobble_cfg.read().musicbrainz_token.clone();
+                                    let token_raw = scrobble_cfg.read().musicbrainz_token.clone();
                                     if !token_raw.is_empty() {
                                         let auth = if token_raw.contains(' ') {
                                             token_raw.clone()
                                         } else {
                                             format!("Token {}", token_raw)
                                         };
-                                        let playing_now =
-                                            scrobble::musicbrainz::make_playing_now(
-                                                &scrobble_track.artist,
-                                                &scrobble_track.title,
-                                                Some(&scrobble_track.album),
-                                            );
-                                        if let Err(e) =
-                                            scrobble::musicbrainz::submit_listens(
-                                                &auth,
-                                                vec![playing_now],
-                                                "playing_now",
-                                            )
-                                            .await
+                                        let playing_now = scrobble::musicbrainz::make_playing_now(
+                                            &scrobble_track.artist,
+                                            &scrobble_track.title,
+                                            Some(&scrobble_track.album),
+                                        );
+                                        if let Err(e) = scrobble::musicbrainz::submit_listens(
+                                            &auth,
+                                            vec![playing_now],
+                                            "playing_now",
+                                        )
+                                        .await
                                         {
-                                            tracing::warn!(
-                                                "MusicBrainz playing_now failed: {}",
-                                                e
-                                            );
+                                            tracing::warn!("MusicBrainz playing_now failed: {}", e);
                                         }
                                     }
 
@@ -1053,10 +1132,9 @@ impl PlayerController {
                                             })
                                         };
                                         if let Some((url, username, password)) = subsonic_creds {
-                                            let client =
-                                                ::server::subsonic::SubsonicClient::new(
-                                                    &url, &username, &password,
-                                                );
+                                            let client = ::server::subsonic::SubsonicClient::new(
+                                                &url, &username, &password,
+                                            );
                                             match client.scrobble(&scrobble_id).await {
                                                 Ok(_) => tracing::info!(
                                                     "Subsonic scrobbled: {} - {}",
@@ -1096,8 +1174,7 @@ impl PlayerController {
                                         }
                                     }
 
-                                    let token_raw =
-                                        scrobble_cfg.read().musicbrainz_token.clone();
+                                    let token_raw = scrobble_cfg.read().musicbrainz_token.clone();
                                     if !token_raw.is_empty() {
                                         let auth = if token_raw.contains(' ') {
                                             token_raw
@@ -1122,14 +1199,12 @@ impl PlayerController {
                                                 scrobble_track.title
                                             ),
                                             Err(e) => {
-                                                tracing::warn!(
-                                                    "MusicBrainz scrobble failed: {}",
-                                                    e
-                                                )
+                                                tracing::warn!("MusicBrainz scrobble failed: {}", e)
                                             }
                                         }
                                     }
-                                });
+                                    });
+                                }
                             }
                         } else {
                             is_loading.set(false);
@@ -1206,134 +1281,134 @@ impl PlayerController {
                         if clear_pending_resume_on_success {
                             self.clear_pending_resume();
                         }
+                        if !is_radio_item {
+                            let cfg_signal = self.config;
+                            let play_generation_signal = self.play_generation;
+                            let gen_snapshot = current_gen;
+                            let scrobble_track = track.clone();
 
-                        let cfg_signal = self.config;
-                        let play_generation_signal = self.play_generation;
-                        let gen_snapshot = current_gen;
-                        let scrobble_track = track.clone();
+                            let duration_secs = scrobble_track.duration;
+                            let threshold_secs = std::cmp::min(240, (duration_secs / 2) as u64);
 
-                        let duration_secs = scrobble_track.duration;
-                        let threshold_secs = std::cmp::min(240, (duration_secs / 2) as u64);
-
-                        spawn(async move {
-                            // track must be longer than 30 seconds
-                            if duration_secs < 30 {
-                                return;
-                            }
-
-                            // Last.fm now-playing
-                            let lastfm_api_key = cfg_signal.read().lastfm_api_key.clone();
-                            let lastfm_api_secret =
-                                cfg_signal.read().lastfm_api_secret.clone();
-                            let lastfm_session_key =
-                                cfg_signal.read().lastfm_session_key.clone();
-                            let has_lastfm =
-                                !lastfm_api_key.is_empty() && !lastfm_api_secret.is_empty();
-
-                            if has_lastfm {
-                                let playing_now = scrobble::lastfm::make_playing_now(
-                                    &scrobble_track.artist,
-                                    &scrobble_track.title,
-                                    Some(&scrobble_track.album),
-                                );
-                                if let Err(e) = scrobble::lastfm::submit_now_playing(
-                                    &lastfm_api_key,
-                                    &lastfm_api_secret,
-                                    &lastfm_session_key,
-                                    &playing_now,
-                                )
-                                .await
-                                {
-                                    tracing::warn!("Last.fm now playing failed: {}", e);
+                            spawn(async move {
+                                // track must be longer than 30 seconds
+                                if duration_secs < 30 {
+                                    return;
                                 }
-                            }
 
-                            // MusicBrainz playing_now
-                            let token_raw = cfg_signal.read().musicbrainz_token.clone();
-                            if !token_raw.is_empty() {
-                                let auth = if token_raw.contains(' ') {
-                                    token_raw.clone()
-                                } else {
-                                    format!("Token {}", token_raw)
-                                };
-                                let playing_now = scrobble::musicbrainz::make_playing_now(
-                                    &scrobble_track.artist,
-                                    &scrobble_track.title,
-                                    Some(&scrobble_track.album),
-                                );
-                                if let Err(e) = scrobble::musicbrainz::submit_listens(
-                                    &auth,
-                                    vec![playing_now],
-                                    "playing_now",
-                                )
-                                .await
-                                {
-                                    tracing::warn!("MusicBrainz playing_now failed: {}", e);
-                                }
-                            }
+                                // Last.fm now-playing
+                                let lastfm_api_key = cfg_signal.read().lastfm_api_key.clone();
+                                let lastfm_api_secret = cfg_signal.read().lastfm_api_secret.clone();
+                                let lastfm_session_key =
+                                    cfg_signal.read().lastfm_session_key.clone();
+                                let has_lastfm =
+                                    !lastfm_api_key.is_empty() && !lastfm_api_secret.is_empty();
 
-                            tokio::time::sleep(std::time::Duration::from_secs(threshold_secs))
-                                .await;
-
-                            if *play_generation_signal.read() != gen_snapshot {
-                                return;
-                            }
-
-                            if has_lastfm {
-                                let scrobble = scrobble::lastfm::make_scrobble(
-                                    &scrobble_track.artist,
-                                    &scrobble_track.title,
-                                    Some(&scrobble_track.album),
-                                );
-                                match scrobble::lastfm::submit_scrobble(
-                                    &lastfm_api_key,
-                                    &lastfm_api_secret,
-                                    &lastfm_session_key,
-                                    &scrobble,
-                                )
-                                .await
-                                {
-                                    Ok(_) => tracing::info!(
-                                        "Last.fm scrobbled: {} - {}",
-                                        scrobble_track.artist,
-                                        scrobble_track.title
-                                    ),
-                                    Err(e) => {
-                                        tracing::warn!("Last.fm scrobble failed: {}", e)
+                                if has_lastfm {
+                                    let playing_now = scrobble::lastfm::make_playing_now(
+                                        &scrobble_track.artist,
+                                        &scrobble_track.title,
+                                        Some(&scrobble_track.album),
+                                    );
+                                    if let Err(e) = scrobble::lastfm::submit_now_playing(
+                                        &lastfm_api_key,
+                                        &lastfm_api_secret,
+                                        &lastfm_session_key,
+                                        &playing_now,
+                                    )
+                                    .await
+                                    {
+                                        tracing::warn!("Last.fm now playing failed: {}", e);
                                     }
                                 }
-                            }
 
-                            let token_raw = cfg_signal.read().musicbrainz_token.clone();
-                            if !token_raw.is_empty() {
-                                let auth = if token_raw.contains(' ') {
-                                    token_raw
-                                } else {
-                                    format!("Token {}", token_raw)
-                                };
-                                let listen = scrobble::musicbrainz::make_listen(
-                                    &scrobble_track.artist,
-                                    &scrobble_track.title,
-                                    Some(&scrobble_track.album),
-                                );
-                                match scrobble::musicbrainz::submit_listens(
-                                    &auth,
-                                    vec![listen],
-                                    "single",
-                                )
-                                .await
-                                {
-                                    Ok(_) => tracing::info!(
-                                        "MusicBrainz scrobbled: {} - {}",
-                                        scrobble_track.artist,
-                                        scrobble_track.title
-                                    ),
-                                    Err(e) => {
-                                        tracing::warn!("MusicBrainz scrobble failed: {}", e)
+                                // MusicBrainz playing_now
+                                let token_raw = cfg_signal.read().musicbrainz_token.clone();
+                                if !token_raw.is_empty() {
+                                    let auth = if token_raw.contains(' ') {
+                                        token_raw.clone()
+                                    } else {
+                                        format!("Token {}", token_raw)
+                                    };
+                                    let playing_now = scrobble::musicbrainz::make_playing_now(
+                                        &scrobble_track.artist,
+                                        &scrobble_track.title,
+                                        Some(&scrobble_track.album),
+                                    );
+                                    if let Err(e) = scrobble::musicbrainz::submit_listens(
+                                        &auth,
+                                        vec![playing_now],
+                                        "playing_now",
+                                    )
+                                    .await
+                                    {
+                                        tracing::warn!("MusicBrainz playing_now failed: {}", e);
                                     }
                                 }
-                            }
-                        });
+
+                                tokio::time::sleep(std::time::Duration::from_secs(threshold_secs))
+                                    .await;
+
+                                if *play_generation_signal.read() != gen_snapshot {
+                                    return;
+                                }
+
+                                if has_lastfm {
+                                    let scrobble = scrobble::lastfm::make_scrobble(
+                                        &scrobble_track.artist,
+                                        &scrobble_track.title,
+                                        Some(&scrobble_track.album),
+                                    );
+                                    match scrobble::lastfm::submit_scrobble(
+                                        &lastfm_api_key,
+                                        &lastfm_api_secret,
+                                        &lastfm_session_key,
+                                        &scrobble,
+                                    )
+                                    .await
+                                    {
+                                        Ok(_) => tracing::info!(
+                                            "Last.fm scrobbled: {} - {}",
+                                            scrobble_track.artist,
+                                            scrobble_track.title
+                                        ),
+                                        Err(e) => {
+                                            tracing::warn!("Last.fm scrobble failed: {}", e)
+                                        }
+                                    }
+                                }
+
+                                let token_raw = cfg_signal.read().musicbrainz_token.clone();
+                                if !token_raw.is_empty() {
+                                    let auth = if token_raw.contains(' ') {
+                                        token_raw
+                                    } else {
+                                        format!("Token {}", token_raw)
+                                    };
+                                    let listen = scrobble::musicbrainz::make_listen(
+                                        &scrobble_track.artist,
+                                        &scrobble_track.title,
+                                        Some(&scrobble_track.album),
+                                    );
+                                    match scrobble::musicbrainz::submit_listens(
+                                        &auth,
+                                        vec![listen],
+                                        "single",
+                                    )
+                                    .await
+                                    {
+                                        Ok(_) => tracing::info!(
+                                            "MusicBrainz scrobbled: {} - {}",
+                                            scrobble_track.artist,
+                                            scrobble_track.title
+                                        ),
+                                        Err(e) => {
+                                            tracing::warn!("MusicBrainz scrobble failed: {}", e)
+                                        }
+                                    }
+                                }
+                            });
+                        }
                     }
                 }
             }
@@ -1508,21 +1583,73 @@ impl PlayerController {
         }
     }
 
+    pub fn set_loop_mode(&mut self, mode: LoopMode) {
+        self.loop_mode.set(mode);
+    }
+    fn cancel_radio_task(&mut self) {
+            if let Some(task) = self.radio_task.take() {
+            task.cancel();
+        }
+    }
+    pub fn play_radio(&mut self, station_id: &str, stream_id: &str) {
+        let path = format!("radio:{}:{}", station_id, stream_id);
+        let track = Track {
+            path: std::path::PathBuf::from(path),
+            album_id: "".to_string(),
+            title: stream_id.to_string(),
+            artist: station_id.to_string(),
+            album: "Live Radio".to_string(),
+            duration: u64::MAX,
+            khz: 0,
+            bitrate: 0,
+            track_number: None,
+            disc_number: None,
+            musicbrainz_release_id: None,
+            playlist_item_id: None,
+            artists: vec![],
+        };
+
+        let mut q = self.queue.write();
+        q.clear();
+        q.push(track);
+        drop(q);
+
+        self.shuffle_order.set(vec![0]);
+        self.current_queue_index.set(0);
+        self.history.write().clear();
+        self.play_track_no_history_with_transition(0, false);
+    }
+
     pub fn toggle_loop(&mut self) {
         self.loop_mode.with_mut(|l| *l = l.next());
     }
 
     pub fn pause(&mut self) {
-        self.player.write().pause();
+        let idx = *self.current_queue_index.peek();
+        let is_radio = self
+            .current_track(idx)
+            .map_or(false, |t| t.path.to_string_lossy().starts_with("radio:"));
+
+        if is_radio {
+            self.player.write().stop_for_transition();
+        } else {
+            self.player.write().pause();
+        }
         self.is_playing.set(false);
     }
 
     pub fn resume(&mut self) {
-        if !self.player.peek().can_resume() {
-            let idx = *self.current_queue_index.peek();
+        let idx = *self.current_queue_index.peek();
+        let is_radio = self
+            .current_track(idx)
+            .map_or(false, |t| t.path.to_string_lossy().starts_with("radio:"));
+
+        if is_radio || !self.player.peek().can_resume() {
             if let Some(track) = self.current_track(idx) {
-                let progress_secs = (*self.current_song_progress.peek()).min(track.duration);
-                self.set_pending_resume_for_track(&track, progress_secs);
+                if !is_radio {
+                    let progress_secs = (*self.current_song_progress.peek()).min(track.duration);
+                    self.set_pending_resume_for_track(&track, progress_secs);
+                }
                 self.play_track_no_history(idx);
             }
             return;
@@ -1634,6 +1761,7 @@ pub fn use_player_controller(
     let loop_mode = use_signal(|| LoopMode::None);
     let pending_resume = use_signal(|| None::<PendingResumeState>);
     let pending_crossfade_ui = use_signal(|| None::<PendingCrossfadeUiState>);
+    let radio_task = use_signal(|| None::<dioxus_core::Task>);
 
     PlayerController {
         player,
@@ -1660,5 +1788,6 @@ pub fn use_player_controller(
         play_generation,
         pending_resume,
         pending_crossfade_ui,
+        radio_task,
     }
 }

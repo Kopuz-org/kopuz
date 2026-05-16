@@ -12,6 +12,8 @@ artist = Előadó
 home = Kezdőlap
 search = Keresés
 favorites = Kedvencek
+radio = Rádió
+discover = Felfedezés
 logs = Naplók
 activity = Tevékenység
 general = Általános
@@ -355,3 +357,17 @@ metadata = Metaadatok
 artist_photo_source = Előadó fotójának forrása
 artist_photo = Előadó fotója
 album_cover = Albumborító
+
+# Radio Page
+radio_filter_stations = Állomások szűrése…
+radio_subtitle = Hallgass élő internetes rádióállomásokat
+radio_no_stations_match = Nincs a keresésnek megfelelő állomás
+radio_station_col = Állomás
+radio_description_col = Leírás
+radio_streams_col = Folyamok
+radio_play = Lejátszás
+radio_listen_moe_desc = Anime és koreai popzene, 24/7.
+radio_j1_desc = Aktuális slágerek és klasszikus dalok Japánból.
+radio_doujinstyle_desc = Doujin zene, videojátékok zenéi és még sok más.
+radio_vocaloid_desc = Vocaloid slágerek Japánból. Mindent játszunk!
+radio_live_stream = Élő adás

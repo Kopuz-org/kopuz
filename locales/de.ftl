@@ -12,6 +12,8 @@ artist = Künstler
 home = Start
 search = Suchen
 favorites = Favoriten
+radio = Radio
+discover = Entdecken
 logs = Protokolle
 activity = Aktivität
 general = Allgemein
@@ -355,3 +357,17 @@ metadata = Metadaten
 artist_photo_source = Künstlerfoto-Quelle
 artist_photo = Künstlerfoto
 album_cover = Albumcover
+
+# Radio Page
+radio_filter_stations = Sender filtern…
+radio_subtitle = Hören Sie Live-Internetradio-Streams
+radio_no_stations_match = Keine Sender entsprechen Ihrer Suche
+radio_station_col = Sender
+radio_description_col = Beschreibung
+radio_streams_col = Streams
+radio_play = Abspielen
+radio_listen_moe_desc = Anime und koreanische Popmusik, 24/7.
+radio_j1_desc = Aktuelle Chart-Hits und klassische Lieder aus Japan.
+radio_doujinstyle_desc = Doujin-Musik, Videospiel-Soundtracks und mehr.
+radio_vocaloid_desc = Vocaloid-Hits aus Japan. Wir spielen alles!
+radio_live_stream = Live-Stream

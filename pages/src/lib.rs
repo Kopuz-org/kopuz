@@ -6,6 +6,7 @@ pub mod home;
 pub mod library;
 pub mod local;
 pub mod playlists;
+pub mod radio;
 pub mod search;
 pub mod server;
 pub mod settings;

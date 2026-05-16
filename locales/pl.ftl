@@ -12,6 +12,8 @@ artist = Wykonawca
 home = Strona Główna
 search = Szukaj
 favorites = Ulubione
+radio = Radio
+discover = Odkrywaj
 logs = Logi 
 activity = Aktywność
 general = Generalne
@@ -355,3 +357,17 @@ metadata = Metadane
 artist_photo_source = Źródło zdjęcia artysty
 artist_photo = Zdjęcie artysty
 album_cover = Okładka albumu
+
+# Radio Page
+radio_filter_stations = Filtruj stacje…
+radio_subtitle = Słuchaj na żywo stacji radiowych w internecie
+radio_no_stations_match = Żadna stacja nie pasuje do Twojego wyszukiwania
+radio_station_col = Stacja
+radio_description_col = Opis
+radio_streams_col = Strumienie
+radio_play = Odtwórz
+radio_listen_moe_desc = Muzyka z anime i koreański pop, 24/7.
+radio_j1_desc = Obecne hity i klasyczne piosenki z Japonii.
+radio_doujinstyle_desc = Muzyka doujin, ścieżki dźwiękowe z gier wideo i więcej.
+radio_vocaloid_desc = Hity Vocaloid z Japonii. Gramy wszystko!
+radio_live_stream = Transmisja na żywo

@@ -12,6 +12,8 @@ artist = Artist
 home = Acasă
 search = Căutare
 favorites = Favorite
+radio = Radio
+discover = Descoperă
 logs = Jurnale
 activity = Activitate
 general = General
@@ -355,3 +357,17 @@ metadata = Metadate
 artist_photo_source = Sursă fotografie artist
 artist_photo = Fotografie artist
 album_cover = Copertă album
+
+# Radio Page
+radio_filter_stations = Filtrează stațiile…
+radio_subtitle = Ascultă posturi de radio online live
+radio_no_stations_match = Niciun post nu corespunde căutării tale
+radio_station_col = Post
+radio_description_col = Descriere
+radio_streams_col = Fluxuri
+radio_play = Redare
+radio_listen_moe_desc = Muzică anime și k-pop, 24/7.
+radio_j1_desc = Hituri actuale și melodii clasice din Japonia.
+radio_doujinstyle_desc = Muzică doujin, coloane sonore de jocuri video și altele.
+radio_vocaloid_desc = Hituri Vocaloid din Japonia. Punem orice!
+radio_live_stream = Transmisie în direct

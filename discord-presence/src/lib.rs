@@ -45,7 +45,11 @@ impl Presence {
         let start_time = now - elapsed_secs as i64;
         let end_time = start_time + duration_secs as i64;
 
-        let timestamps = Timestamps::new().start(start_time).end(end_time);
+        let timestamps = if duration_secs == u64::MAX {
+            Timestamps::new().start(start_time)
+        } else {
+            Timestamps::new().start(start_time).end(end_time)
+        };
 
         let state = format!("by {artist}");
 

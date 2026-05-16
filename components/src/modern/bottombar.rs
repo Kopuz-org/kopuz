@@ -73,6 +73,8 @@ pub fn BottombarModern(
         PlayerBarPosition::Top => "border-b border-white/5",
     };
 
+    let is_radio = *current_song_duration.read() == u64::MAX;
+
     rsx! {
         div {
             class: "h-16 bg-black/70 backdrop-blur-xl {border_class} px-4 flex items-center gap-3 select-none shrink-0",
@@ -160,7 +162,7 @@ pub fn BottombarModern(
                     class: "flex items-center gap-1.5 w-full",
                     span { class: "text-[9px] text-slate-600 font-mono shrink-0 w-7 text-right", "{fmt_time(display_progress)}" }
                     div {
-                        class: "flex-1 h-[3px] bg-white/10 rounded-full group cursor-pointer relative",
+                        class: format!("flex-1 h-[3px] bg-white/10 rounded-full relative {}", if is_radio { "" } else { "group cursor-pointer" }),
                         div {
                             class: "absolute top-0 left-0 h-full bg-white/60 group-hover:bg-white rounded-full transition-colors pointer-events-none",
                             style: "width: {progress_percent}%",
@@ -174,7 +176,8 @@ pub fn BottombarModern(
                             min: "0",
                             max: "{*current_song_duration.read()}",
                             value: "{display_progress}",
-                            class: "absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer z-10",
+                            class: format!("absolute top-0 left-0 w-full h-full opacity-0 z-10 {}", if is_radio { "pointer-events-none" } else { "cursor-pointer" }),
+                            disabled: is_radio,
                             onchange: move |evt| {
                                 if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
                                     player.write().seek(std::time::Duration::from_secs(val));

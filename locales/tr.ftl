@@ -12,6 +12,8 @@ artist = Sanatçı
 home = Ana Sayfa
 search = Ara
 favorites = Favoriler
+radio = Radyo
+discover = Keşfet
 logs = Günlükler
 activity = Aktivite
 general = Genel
@@ -355,3 +357,17 @@ metadata = Meta veri
 artist_photo_source = Sanatçı fotoğraf kaynağı
 artist_photo = Sanatçı fotoğrafı
 album_cover = Albüm kapağı
+
+# Radio Page
+radio_filter_stations = İstasyonları filtrele…
+radio_subtitle = Canlı internet radyo yayınlarını dinleyin
+radio_no_stations_match = Aramanızla eşleşen istasyon yok
+radio_station_col = İstasyon
+radio_description_col = Açıklama
+radio_streams_col = Yayınlar
+radio_play = Oynat
+radio_listen_moe_desc = Anime ve Kore pop müziği, 7/24.
+radio_j1_desc = Japonya'dan güncel liste başı şarkılar ve klasikler.
+radio_doujinstyle_desc = Doujin müziği, video oyunu müzikleri ve daha fazlası.
+radio_vocaloid_desc = Japonya'dan Vocaloid hitleri. Her şeyi çalıyoruz!
+radio_live_stream = Canlı Yayın

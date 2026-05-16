@@ -12,6 +12,8 @@ artist = アーティスト
 home = ホーム
 search = 検索
 favorites = お気に入り
+radio = ラジオ
+discover = 見つける
 logs = ログ
 activity = アクティビティ
 general = 一般
@@ -361,3 +363,17 @@ metadata = メタデータ
 artist_photo_source = アーティスト写真のソース
 artist_photo = アーティスト写真
 album_cover = アルバムカバー
+
+# Radio Page
+radio_filter_stations = ステーションをフィルタリング…
+radio_subtitle = ライブインターネットラジオストリームを聴く
+radio_no_stations_match = 検索に一致するステーションはありません
+radio_station_col = ステーション
+radio_description_col = 説明
+radio_streams_col = ストリーム
+radio_play = 再生
+radio_listen_moe_desc = アニメとK-Pop音楽を24時間年中無休で。
+radio_j1_desc = 日本の最新チャートヒットと名曲。
+radio_doujinstyle_desc = 同人音楽、ビデオゲームのサウンドトラックなど。
+radio_vocaloid_desc = 日本のボーカロイドヒット曲。何でも再生します！
+radio_live_stream = ライブストリーム

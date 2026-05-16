@@ -12,6 +12,8 @@ artist = 艺术家
 home = 首页
 search = 搜索
 favorites = 收藏
+radio = 电台
+discover = 发现
 logs = 日志
 activity = 活动
 general = 通用
@@ -355,3 +357,17 @@ metadata = 元数据
 artist_photo_source = 艺术家照片来源
 artist_photo = 艺术家照片
 album_cover = 专辑封面
+
+# Radio Page
+radio_filter_stations = 过滤电台…
+radio_subtitle = 收听实时网络电台流
+radio_no_stations_match = 没有与您的搜索匹配的电台
+radio_station_col = 电台
+radio_description_col = 描述
+radio_streams_col = 流
+radio_play = 播放
+radio_listen_moe_desc = 动漫和韩国流行音乐，24/7。
+radio_j1_desc = 来自日本的当前热门歌曲和经典歌曲。
+radio_doujinstyle_desc = 同人音乐，视频游戏原声带等。
+radio_vocaloid_desc = 来自日本的Vocaloid热门歌曲。我们什么都播！
+radio_live_stream = 直播

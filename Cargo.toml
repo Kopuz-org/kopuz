@@ -6,7 +6,7 @@ members = [
    "pages",
    "player",
    "reader",
-   "server", "utils", "config", "kopuz_route", "discord-presence", "scrobble", "i18n",
+   "server", "utils", "config", "kopuz_route", "discord-presence", "scrobble", "i18n", "radio",
 ]
 resolver = "3"
 
@@ -52,6 +52,7 @@ server = { path = "./server" }
 kopuz_route = { path = "./kopuz_route" }
 discord-presence = { path = "./discord-presence" }
 scrobble = { path = "./scrobble" }
+radio = { path = "./radio" }
 
 [profile.release]
 strip = "symbols"

@@ -12,6 +12,8 @@ artist = Артист
 home = Главная
 search = Поиск
 favorites = Избранное
+radio = Радио
+discover = Обзор
 logs = Журналы
 activity = Активность
 general = Общие
@@ -355,3 +357,17 @@ metadata = Метаданные
 artist_photo_source = Источник фото исполнителя
 artist_photo = Фото исполнителя
 album_cover = Обложка альбома
+
+# Radio Page
+radio_filter_stations = Фильтр станций…
+radio_subtitle = Слушайте прямые трансляции интернет-радио
+radio_no_stations_match = Нет станций, соответствующих вашему запросу
+radio_station_col = Станция
+radio_description_col = Описание
+radio_streams_col = Потоки
+radio_play = Играть
+radio_listen_moe_desc = Аниме и корейская поп-музыка, 24/7.
+radio_j1_desc = Современные хиты и классические песни из Японии.
+radio_doujinstyle_desc = Додзин-музыка, саундтреки к видеоиграм и многое другое.
+radio_vocaloid_desc = Вокалоидные хиты из Японии. Мы играем все!
+radio_live_stream = Прямой эфир

@@ -14,6 +14,7 @@ reqwest = { workspace = true }
 server = { workspace = true }
 scrobble = { workspace = true }
 web-time = { workspace = true }
+radio = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 tokio = { workspace = true }

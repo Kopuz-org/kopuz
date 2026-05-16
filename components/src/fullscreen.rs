@@ -6,6 +6,7 @@ use dioxus::prelude::*;
 use hooks::use_player_controller::{LoopMode, PlayerController};
 use player::player::Player;
 use reader::Library;
+use crate::shared::fmt_time;
 
 #[component]
 pub fn Fullscreen(
@@ -50,11 +51,6 @@ pub fn Fullscreen(
         }
     });
 
-    let format_time = |seconds: u64| {
-        let minutes = seconds / 60;
-        let seconds = seconds % 60;
-        format!("{}:{:02}", minutes, seconds)
-    };
     let format_queue_duration = |seconds: u64| {
         let hours = seconds / 3600;
         let minutes = (seconds % 3600) / 60;
@@ -288,6 +284,8 @@ pub fn Fullscreen(
         format_queue_duration(up_next_duration)
     );
 
+    let is_radio = *current_song_duration.read() == u64::MAX;
+
     rsx! {
             div {
                 class: "fixed inset-0 z-50 flex flex-col text-white select-none",
@@ -355,9 +353,9 @@ pub fn Fullscreen(
                         style: "max-width: 420px;",
                         div {
                             class: "flex items-center gap-3",
-                            span { class: "text-xs text-white/70 font-mono", style: "width: 50px; text-align: left;", "{format_time(display_progress)}" }
+                            span { class: "text-xs text-white/70 font-mono", style: "width: 50px; text-align: left;", "{fmt_time(display_progress)}" }
                             div {
-                                class: "flex-1 cursor-pointer relative",
+                                class: format!("flex-1 {} relative", if is_radio { "" } else { "cursor-pointer" }),
                                 style: "height: 20px;",
                                 div {
                                     class: "absolute bg-white/20 rounded-full",
@@ -376,7 +374,8 @@ pub fn Fullscreen(
                                     min: "0",
                                     max: "{*current_song_duration.read()}",
                                     value: "{display_progress}",
-                                    class: "absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer",
+                                    class: format!("absolute top-0 left-0 w-full h-full opacity-0 {}", if is_radio { "" } else { "cursor-pointer" }),
+                                    disabled: is_radio,
                                     onchange: move |evt| {
                                         if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
                                             player.write().seek(std::time::Duration::from_secs(val));
@@ -393,7 +392,7 @@ pub fn Fullscreen(
                                     }
                                 }
                             }
-                            span { class: "text-xs text-white/70 font-mono", style: "width: 50px; text-align: right;", "{format_time(*current_song_duration.read())}" }
+                            span { class: "text-xs text-white/70 font-mono", style: "width: 50px; text-align: right;", "{fmt_time(*current_song_duration.read())}" }
                         }
                     }
 

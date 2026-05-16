@@ -22,6 +22,7 @@ const TOP_MENU: &[SidebarItem] = &[
     SidebarItem { key: "artists",   route: Route::Artist,    icon: "fa-solid fa-user" },
     SidebarItem { key: "playlists", route: Route::Playlists, icon: "fa-solid fa-list" },
     SidebarItem { key: "favorites", route: Route::Favorites, icon: "fa-solid fa-heart" },
+    SidebarItem { key: "radio",     route: Route::Radio,     icon: "fa-solid fa-radio" },
     SidebarItem { key: "activity",  route: Route::Activity,  icon: "fa-solid fa-chart-simple" },
     SidebarItem { key: "ytdlp",     route: Route::Ytdlp,     icon: "fa-solid fa-download" },
 ];
@@ -35,6 +36,7 @@ const TOP_MENU: &[SidebarItem] = &[
     SidebarItem { key: "artists",   route: Route::Artist,    icon: "fa-solid fa-user" },
     SidebarItem { key: "playlists", route: Route::Playlists, icon: "fa-solid fa-list" },
     SidebarItem { key: "favorites", route: Route::Favorites, icon: "fa-solid fa-heart" },
+    SidebarItem { key: "radio",     route: Route::Radio,     icon: "fa-solid fa-radio" },
     SidebarItem { key: "activity",  route: Route::Activity,  icon: "fa-solid fa-chart-simple" },
 ];
 

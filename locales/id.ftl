@@ -12,6 +12,8 @@ artist = Artis
 home = Beranda
 search = Cari
 favorites = Favorit
+radio = Radio
+discover = Temukan
 logs = Log
 activity = Activitas
 general = Umum
@@ -354,3 +356,17 @@ metadata = Metadata
 artist_photo_source = Sumber foto artis
 artist_photo = Foto artis
 album_cover = Sampul album
+
+# Radio Page
+radio_filter_stations = Saring stasiun…
+radio_subtitle = Dengarkan siaran radio internet langsung
+radio_no_stations_match = Tidak ada stasiun yang cocok dengan pencarian Anda
+radio_station_col = Stasiun
+radio_description_col = Deskripsi
+radio_streams_col = Siaran
+radio_play = Putar
+radio_listen_moe_desc = Musik anime dan pop Korea, 24/7.
+radio_j1_desc = Hits tangga lagu saat ini dan lagu klasik dari Jepang.
+radio_doujinstyle_desc = Musik doujin, soundtrack video game, dan banyak lagi.
+radio_vocaloid_desc = Hits Vocaloid dari Jepang. Kami memainkan semuanya!
+radio_live_stream = Siaran Langsung

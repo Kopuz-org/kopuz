@@ -12,6 +12,8 @@ artist = jan pali
 home = tomo
 search = o alasa
 favorites = olin
+radio = ilo kalama
+discover = lukin sin
 logs = sitelen sona
 activity = pali
 general = ale
@@ -355,3 +357,17 @@ metadata = ijo nanpa
 artist_photo_source = nasin sitelen jan pali
 artist_photo = sitelen jan pali
 album_cover = sitelen kulupu pi kalama sama
+
+# Radio Page
+radio_filter_stations = o lukin e ilo kalama…
+radio_subtitle = o kute e ilo kalama linja
+radio_no_stations_match = ilo kalama ala li sama wile sina
+radio_station_col = ilo kalama
+radio_description_col = sona
+radio_streams_col = linja kalama
+radio_play = o kalama
+radio_listen_moe_desc = kalama musi pi ma Nijon en ma Kanto.
+radio_j1_desc = kalama musi suli pi ma Nijon.
+radio_doujinstyle_desc = kalama musi pi musi sitelen.
+radio_vocaloid_desc = kalama musi pi ilo kalama.
+radio_live_stream = linja kalama tenpo ni

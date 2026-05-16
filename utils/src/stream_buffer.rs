@@ -22,10 +22,12 @@ pub struct StreamBuffer {
 }
 
 impl StreamBuffer {
-    pub fn new(url: String) -> Self {
+    pub fn new(url: String, is_radio: bool) -> Self {
+        let prebuffer_size = if is_radio { 16 * 1024 } else { MIN_PREBUFFER_BYTES };
+
         let state = Arc::new((
             Mutex::new(SharedState {
-                buffer: Vec::with_capacity(MIN_PREBUFFER_BYTES * 4),
+                buffer: Vec::with_capacity(prebuffer_size * 4),
                 done: false,
                 error: None,
                 total_size: None,
@@ -36,9 +38,11 @@ impl StreamBuffer {
 
         let state_clone = state.clone();
 
-        tokio::spawn(async move {
+        let handle = tokio::runtime::Handle::current();
+        handle.spawn(async move {
             let client = reqwest::Client::builder()
                 .tcp_nodelay(true)
+                .user_agent("Kopuz/0.5.5")
                 .build()
                 .unwrap_or_else(|_| reqwest::Client::new());
 
@@ -89,10 +93,10 @@ impl StreamBuffer {
                             if !state.prebuffer_ready {
                                 let is_small_file = state
                                     .total_size
-                                    .map(|s| s <= MIN_PREBUFFER_BYTES as u64)
+                                    .map(|s| s <= prebuffer_size as u64)
                                     .unwrap_or(false);
 
-                                if total_buffered >= MIN_PREBUFFER_BYTES || is_small_file {
+                                if total_buffered >= prebuffer_size || is_small_file {
                                     state.prebuffer_ready = true;
                                 }
                             }

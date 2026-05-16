@@ -12,6 +12,8 @@ artist = 󱤑󱥉
 home = 󱥭
 search = 󱥄󱤃
 favorites = 󱥅
+radio = ilo kalama
+discover = lukin sin
 logs = 󱥠󱥡
 activity = 󱥉
 general = 󱤄
@@ -356,3 +358,17 @@ metadata = Metadata
 artist_photo_source = Artist Photo Source
 artist_photo = Artist Photo
 album_cover = Album Cover
+
+# Radio Page
+radio_filter_stations = o lukin e ilo kalama…
+radio_subtitle = o kute e ilo kalama linja
+radio_no_stations_match = ilo kalama ala li sama wile sina
+radio_station_col = ilo kalama
+radio_description_col = sona
+radio_streams_col = linja kalama
+radio_play = o kalama
+radio_listen_moe_desc = kalama musi pi ma Nijon en ma Kanto.
+radio_j1_desc = kalama musi suli pi ma Nijon.
+radio_doujinstyle_desc = kalama musi pi musi sitelen.
+radio_vocaloid_desc = kalama musi pi ilo kalama.
+radio_live_stream = linja kalama tenpo ni

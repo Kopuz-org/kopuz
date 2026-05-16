@@ -12,6 +12,8 @@ artist = Καλλιτέχνης
 home = Αρχική
 search = Αναζήτηση
 favorites = Αγαπημένα
+radio = Ραδιόφωνο
+discover = Ανακάλυψη
 logs = Καταγραφές
 activity = Δραστηριότητες
 general = Γενικά
@@ -355,3 +357,17 @@ metadata = Μεταδεδομένα
 artist_photo_source = Πηγή φωτογραφίας καλλιτέχνη
 artist_photo = Φωτογραφία καλλιτέχνη
 album_cover = Εξώφυλλο άλμπουμ
+
+# Radio Page
+radio_filter_stations = Φιλτράρισμα σταθμών…
+radio_subtitle = Συντονιστείτε σε ζωντανές ροές διαδικτυακού ραδιοφώνου
+radio_no_stations_match = Κανένας σταθμός δεν ταιριάζει με την αναζήτησή σας
+radio_station_col = Σταθμός
+radio_description_col = Περιγραφή
+radio_streams_col = Ροές
+radio_play = Αναπαραγωγή
+radio_listen_moe_desc = Μουσική anime και κορεατική ποπ, 24/7.
+radio_j1_desc = Τρέχουσες επιτυχίες και κλασικά τραγούδια από την Ιαπωνία.
+radio_doujinstyle_desc = Μουσική doujin, soundtrack βιντεοπαιχνιδιών και πολλά άλλα.
+radio_vocaloid_desc = Επιτυχίες Vocaloid από την Ιαπωνία. Παίζουμε τα πάντα!
+radio_live_stream = Ζωντανή μετάδοση

@@ -12,6 +12,8 @@ artist = אמן
 home = בית
 search = חיפוש
 favorites = מועדפים
+radio = רדיו
+discover = גלה
 logs = יומנים
 activity = פעילות
 general = כללי
@@ -355,3 +357,17 @@ metadata = מטא-נתונים
 artist_photo_source = מקור תמונת אמן
 artist_photo = תמונת אמן
 album_cover = עטיפת אלבום
+
+# Radio Page
+radio_filter_stations = סנן תחנות…
+radio_subtitle = האזן לתחנות רדיו חיות באינטרנט
+radio_no_stations_match = אין תחנות התואמות לחיפוש שלך
+radio_station_col = תחנה
+radio_description_col = תיאור
+radio_streams_col = זרמים
+radio_play = נגן
+radio_listen_moe_desc = מוזיקת אנימה ופופ קוריאני, 24/7.
+radio_j1_desc = להיטי מצעדים שירים קלאסיים מיפן.
+radio_doujinstyle_desc = מוזיקת דוג'ין, פסקולים של משחקי וידאו ועוד.
+radio_vocaloid_desc = להיטי ווקאלויד מיפן. אנחנו מנגנים הכל!
+radio_live_stream = שידור חי

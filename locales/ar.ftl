@@ -12,6 +12,8 @@ artist = الفنان
 home = الرئيسية
 search = بحث
 favorites = المفضلة
+radio = Radio
+discover = Discover
 logs = السجلات
 activity = النشاط
 general = عام
@@ -361,3 +363,17 @@ metadata = بيانات وصفية
 artist_photo_source = مصدر صورة الفنان
 artist_photo = صورة الفنان
 album_cover = غلاف الألبوم
+
+# Radio Page
+radio_filter_stations = تصفية المحطات…
+radio_subtitle = استمع إلى محطات الراديو المباشرة عبر الإنترنت
+radio_no_stations_match = لا توجد محطات تطابق بحثك
+radio_station_col = محطة
+radio_description_col = الوصف
+radio_streams_col = البث
+radio_play = تشغيل
+radio_listen_moe_desc = موسيقى الأنمي والبوب الكوري، 24/7.
+radio_j1_desc = أحدث الأغاني الناجحة والأغاني الكلاسيكية من اليابان.
+radio_doujinstyle_desc = موسيقى الدوجين، الموسيقى التصويرية لألعاب الفيديو، والمزيد.
+radio_vocaloid_desc = أغاني فوكالويد من اليابان. نحن نشغل كل شيء!
+radio_live_stream = بث مباشر

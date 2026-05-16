@@ -65,6 +65,8 @@ pub fn BottombarNormal(
         PlayerBarPosition::Top => "border-b border-white/5",
     };
 
+    let is_radio = *current_song_duration.read() == u64::MAX;
+
     rsx! {
         div {
             class: "h-24 bg-black/60 {border_class} px-4 flex items-center justify-between select-text shrink-0",
@@ -159,7 +161,7 @@ pub fn BottombarNormal(
                     class: "flex items-center gap-2 w-full",
                     span { class: "text-[10px] text-slate-500 w-8 text-right font-mono", "{fmt_time(display_progress)}" }
                     div {
-                        class: "flex-1 h-1 bg-white/10 rounded-full group cursor-pointer relative",
+                        class: format!("flex-1 h-1 bg-white/10 rounded-full relative {}", if is_radio { "" } else { "group cursor-pointer" }),
                         div {
                             class: "absolute top-0 left-0 h-full bg-white group-hover:bg-green-500 rounded-full transition-colors pointer-events-none",
                             style: "width: {progress_percent}%",
@@ -170,7 +172,8 @@ pub fn BottombarNormal(
                             min: "0",
                             max: "{*current_song_duration.read()}",
                             value: "{display_progress}",
-                            class: "absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer z-10",
+                            class: format!("absolute top-0 left-0 w-full h-full opacity-0 z-10 {}", if is_radio { "pointer-events-none" } else { "cursor-pointer" }),
+                            disabled: is_radio,
                             onchange: move |evt| {
                                 if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
                                     player.write().seek(std::time::Duration::from_secs(val));

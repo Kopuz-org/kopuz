@@ -62,3 +62,47 @@ pub fn from_stream(
     let hint = Hint::new();
     (source, hint)
 }
+
+/// a read-only source wrapper for non-seekable streams source (e.g. internet radio).
+struct ReadOnlySource {
+    inner: Box<dyn Read + Send + Sync>,
+}
+
+impl Read for ReadOnlySource {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.inner.read(buf)
+    }
+}
+
+impl Seek for ReadOnlySource {
+    fn seek(&mut self, _pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "seek not supported on radio stream",
+        ))
+    }
+}
+
+impl MediaSource for ReadOnlySource {
+    fn is_seekable(&self) -> bool {
+        false
+    }
+
+    fn byte_len(&self) -> Option<u64> {
+        None
+    }
+}
+
+/// Create a media source from a non-seekable stream with an explicit format hint.
+/// Used for internet radio streams where seeking is not possible.
+pub fn from_stream_with_hint(
+    stream: impl Read + Send + Sync + 'static,
+    extension: &str,
+) -> (Box<dyn MediaSource>, Hint) {
+    let source: Box<dyn MediaSource> = Box::new(ReadOnlySource {
+        inner: Box::new(stream),
+    });
+    let mut hint = Hint::new();
+    hint.with_extension(extension);
+    (source, hint)
+}

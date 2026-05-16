@@ -12,6 +12,8 @@ artist = Artist
 home = Home
 search = Search
 favorites = Favorites
+radio = Radio
+discover = Discover
 logs = Logs
 activity = Activity
 general = General
@@ -347,3 +349,17 @@ metadata = Metadata
 artist_photo_source = Artist Photo Source
 artist_photo = Artist Photo
 album_cover = Album Cover
+
+# Radio Page
+radio_filter_stations = Filter stations…
+radio_subtitle = Tune in to live internet radio streams
+radio_no_stations_match = No stations match your search
+radio_station_col = Station
+radio_description_col = Description
+radio_streams_col = Streams
+radio_play = Play
+radio_listen_moe_desc = Anime and Korean pop music, 24/7.
+radio_j1_desc = Current chart hits and classic songs from Japan.
+radio_doujinstyle_desc = Doujin music, video game soundtracks, and more.
+radio_vocaloid_desc = Vocaloid Hits from Japan. We play it all!
+radio_live_stream = Live Stream
