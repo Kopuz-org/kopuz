@@ -42,7 +42,7 @@ impl StreamBuffer {
         handle.spawn(async move {
             let client = reqwest::Client::builder()
                 .tcp_nodelay(true)
-                .user_agent("Kopuz/0.5.5")
+                .user_agent(concat!("Kopuz/", env!("CARGO_PKG_VERSION")))
                 .build()
                 .unwrap_or_else(|_| reqwest::Client::new());
 

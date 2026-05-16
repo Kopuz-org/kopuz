@@ -1,6 +1,6 @@
 [package]
 name = "kopuz"
-version = "0.5.5"
+version.workspace = true
 edition = "2024"
 
 [package.metadata.bundle]

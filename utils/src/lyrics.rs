@@ -583,7 +583,7 @@ async fn fetch_from_lrclib(artist: &str, title: &str, album: &str, duration: u64
     let client = reqwest::Client::new();
     let res = client
         .get(&url)
-        .header("User-Agent", "kopuz/0.5.5")
+        .header("User-Agent", concat!("Kopuz/", env!("CARGO_PKG_VERSION")))
         .send()
         .await
         .ok()?;
@@ -603,7 +603,7 @@ async fn fetch_from_lrclib(artist: &str, title: &str, album: &str, duration: u64
     );
     let search_res = client
         .get(&search_url)
-        .header("User-Agent", "kopuz/0.5.5")
+        .header("User-Agent", concat!("Kopuz/", env!("CARGO_PKG_VERSION")))
         .send()
         .await
         .ok()?;

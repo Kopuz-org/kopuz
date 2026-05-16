@@ -1,6 +1,6 @@
 [package]
 name = "pages"
-version = "0.3.6"
+version.workspace = true
 edition = "2024"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
