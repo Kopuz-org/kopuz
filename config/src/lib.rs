@@ -715,16 +715,13 @@ impl AppConfig {
     }
 
     pub fn migrate_sidebar_order(&mut self) {
-        let all_keys: &[&str] = &[
-            "home", "search", "library", "albums", "artists",
-            "playlists", "favorites", "radio", "activity", "ytdlp",
-        ];
-        for key in all_keys {
+        let all_keys = default_sidebar_order();
+        for key in &all_keys {
             if !self.sidebar_order.iter().any(|k| k == key) {
                 self.sidebar_order.push(key.to_string());
             }
         }
-        self.sidebar_order.retain(|k| all_keys.contains(&k.as_str()));
+        self.sidebar_order.retain(|k| all_keys.contains(k));
     }
 
     pub fn push_recent(&mut self, id: String, server: bool) {
