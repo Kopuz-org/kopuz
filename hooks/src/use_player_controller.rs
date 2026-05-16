@@ -152,7 +152,8 @@ impl PlayerController {
     }
 
     fn prefetch_lyrics_for_track(&self, track: &Track) {
-        if track.title.trim().is_empty() {
+        let track_path = track.path.to_string_lossy();
+        if track.title.trim().is_empty() || track_path.starts_with("radio:") {
             return;
         }
 
