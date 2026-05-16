@@ -113,7 +113,7 @@ pub fn LyricsPanel(
 
 #[component]
 pub fn QueuePanel(
-    items: Vec<(usize, reader::Track)>,
+    items: Memo<Vec<(usize, reader::Track)>>,
     library: Signal<Library>,
     config: Signal<AppConfig>,
     current_queue_index: Signal<usize>,
@@ -180,6 +180,7 @@ pub fn QueuePanel(
         }
     };
 
+    let items = items.read();
     let current_idx = *current_queue_index.read();
     let (back_items, up_next_items) = (
         items.get(..current_idx).unwrap_or_default(),
@@ -431,19 +432,22 @@ pub fn Rightbar(
 
     let active_tab_val = *active_tab.read();
 
-    let q = queue.read();
-    let is_shuffle = *ctrl.shuffle.read();
-    let items: Vec<_> = if is_shuffle {
-        ctrl.shuffle_order
-            .read()
-            .iter()
-            .filter_map(|&qi| q.get(qi).cloned().map(|t| (qi, t)))
-            .collect()
-    } else {
-        (0..q.len())
-            .filter_map(|qi| q.get(qi).cloned().map(|t| (qi, t)))
-            .collect()
-    };
+    let items = use_memo(move || {
+        let q = queue.read();
+        let is_shuffle = *ctrl.shuffle.read();
+
+        if is_shuffle {
+            ctrl.shuffle_order
+                .read()
+                .iter()
+                .filter_map(|&qi| q.get(qi).cloned().map(|t| (qi, t)))
+                .collect::<Vec<_>>()
+        } else {
+            (0..q.len())
+                .filter_map(|qi| q.get(qi).cloned().map(|t| (qi, t)))
+                .collect::<Vec<_>>()
+        }
+    });
 
     rsx! {
         div {
