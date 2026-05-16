@@ -414,7 +414,19 @@ pub fn TrackRow(
             }
 
             div { class: "min-w-0 pr-4",
-                p { class: "text-sm text-slate-500 truncate", "{track.album}" }
+                p {
+                    class: "text-sm text-slate-500 truncate cursor-pointer hover:underline hover:text-slate-400 transition-colors",
+                    onclick: {
+                        let album_id = track.album_id.clone();
+                        move |evt: MouseEvent| {
+                            evt.stop_propagation();
+                            if !is_selection_mode {
+                                nav_ctrl.navigate_to_album(album_id.clone());
+                            }
+                        }
+                    },
+                    "{track.album}"
+                }
             }
 
             div { class: "flex items-center justify-end",

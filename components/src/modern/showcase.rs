@@ -2,12 +2,14 @@ use config::AppConfig;
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
+use crate::NavigationController;
 use crate::showcase::{self, ShowcaseProps, SortField};
 
 #[component]
 pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
     let mut ctrl = use_context::<PlayerController>();
     let config = use_context::<Signal<AppConfig>>();
+    let nav_ctrl = use_context::<NavigationController>();
 
     let total_seconds: u64 = props.tracks.iter().map(|t| t.duration).sum();
     let duration_min = total_seconds / 60;
@@ -179,9 +181,9 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                         let is_playing = currently_playing_idx == Some(idx);
                         let is_selected = props.selected_tracks.contains(&track.path);
                         let track_dur = fmt_dur(track.duration);
-                        let title = track.title.clone(); // dead code
                         let artist = track.artist.clone();
                         let album = track.album.clone();
+                        let album_id = track.album_id.clone();
                         let row_num = display_idx + 1;
 
                         let cover_url: Option<utils::CoverUrl> = {
@@ -266,16 +268,30 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
 
                                 div { class: "flex items-center min-w-0 pr-4",
                                     span {
-                                        class: "text-sm truncate",
+                                        class: "text-sm truncate cursor-pointer hover:underline",
                                         style: "color: rgba(255,255,255,0.45);",
+                                        onclick: {
+                                            let artist = artist.clone();
+                                            move |evt: MouseEvent| {
+                                                evt.stop_propagation();
+                                                nav_ctrl.navigate_to_artist(artist.clone());
+                                            }
+                                        },
                                         "{artist}"
                                     }
                                 }
 
                                 div { class: "flex items-center min-w-0 pr-4",
                                     span {
-                                        class: "text-sm truncate",
+                                        class: "text-sm truncate cursor-pointer hover:underline",
                                         style: "color: rgba(255,255,255,0.35);",
+                                        onclick: {
+                                            let album_id = album_id.clone();
+                                            move |evt: MouseEvent| {
+                                                evt.stop_propagation();
+                                                nav_ctrl.navigate_to_album(album_id.clone());
+                                            }
+                                        },
                                         "{album}"
                                     }
                                 }
