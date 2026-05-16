@@ -2,7 +2,7 @@ use config::AppConfig;
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
-use crate::showcase::ShowcaseProps;
+use crate::showcase::{self, ShowcaseProps, SortField};
 
 #[component]
 pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
@@ -29,6 +29,8 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
 
     let tracks_for_shuffle = props.tracks.clone();
     let fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
+    let mut sort_state = use_signal(|| None);
+    let sorted_indices = showcase::sorted_track_indices(&props.tracks, *sort_state.read());
 
     rsx! {
         div { class: "w-full max-w-[1600px] mx-auto select-none pb-8",
@@ -132,22 +134,55 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                     class: "grid px-6 py-2 text-[10px] font-bold uppercase tracking-widest border-b",
                     style: "grid-template-columns: 40px 1fr 200px 200px 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);",
                     div { class: "flex items-center", "#" }
-                    div { "{i18n::t(\"title\")}" }
-                    div { "{i18n::t(\"artist\")}" }
-                    div { "{i18n::t(\"album\")}" }
-                    div { class: "text-right", i { class: "fa-regular fa-clock" } }
+                    button {
+                        class: "flex items-center gap-1 uppercase tracking-widest text-left hover:text-white transition-colors",
+                        onclick: move |_| {
+                                                    let next = showcase::next_sort_state(*sort_state.peek(), SortField::Title);
+                                                    sort_state.set(next);
+                                                },
+                        "{i18n::t(\"title\")}"
+                        i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Title)} text-[9px]" }
+                    }
+                    button {
+                        class: "flex items-center gap-1 uppercase tracking-widest text-left hover:text-white transition-colors",
+                        onclick: move |_| {
+                                                    let next = showcase::next_sort_state(*sort_state.peek(), SortField::Artist);
+                                                    sort_state.set(next);
+                                                },
+                        "{i18n::t(\"artist\")}"
+                        i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Artist)} text-[9px]" }
+                    }
+                    button {
+                        class: "flex items-center gap-1 uppercase tracking-widest text-left hover:text-white transition-colors",
+                        onclick: move |_| {
+                                                    let next = showcase::next_sort_state(*sort_state.peek(), SortField::Album);
+                                                    sort_state.set(next);
+                                                },
+                        "{i18n::t(\"album\")}"
+                        i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Album)} text-[9px]" }
+                    }
+                    button {
+                        class: "flex items-center justify-end gap-1 uppercase tracking-widest text-right hover:text-white transition-colors",
+                        onclick: move |_| {
+                                                    let next = showcase::next_sort_state(*sort_state.peek(), SortField::Duration);
+                                                    sort_state.set(next);
+                                                },
+                        i { class: "fa-regular fa-clock" }
+                        i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Duration)} text-[9px]" }
+                    }
                     div {}
                 }
 
-                for (idx, track) in props.tracks.iter().enumerate() {
+                for (display_idx, idx) in sorted_indices.iter().copied().enumerate() {
                     {
+                        let track = &props.tracks[idx];
                         let is_playing = currently_playing_idx == Some(idx);
                         let is_selected = props.selected_tracks.contains(&track.path);
                         let track_dur = fmt_dur(track.duration);
-                        let title = track.title.clone();
+                        let title = track.title.clone(); // dead code
                         let artist = track.artist.clone();
                         let album = track.album.clone();
-                        let row_num = idx + 1;
+                        let row_num = display_idx + 1;
 
                         let cover_url: Option<utils::CoverUrl> = {
                             let path_str = track.path.to_string_lossy();
@@ -225,7 +260,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                         } else {
                                             "color: rgba(255,255,255,0.9);"
                                         },
-                                        "{title}"
+                                        "{track.title}"
                                     }
                                 }
 

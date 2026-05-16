@@ -1,5 +1,5 @@
-use crate::dots_menu::{DotsMenu, MenuAction};
 use crate::NavigationController;
+use crate::dots_menu::{DotsMenu, MenuAction};
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use reader::models::Track;
@@ -301,16 +301,16 @@ pub fn TrackRow(
         };
     }
 
-    rsx! {
+    // normal UI
+    return rsx! {
         div {
-            class: format!(
-                "flex items-center p-2 rounded-lg hover:bg-white/5 group transition-colors relative select-none {}",
-                if is_selected { "bg-white/10" } else { "" }
-            ),
+            class: "grid items-center p-2 rounded-lg hover:bg-white/5 group transition-colors relative select-none",
             style: if is_currently_playing {
-                "background-color: color-mix(in oklab, var(--color-indigo-500) 12%, transparent);"
+                "grid-template-columns: 40px minmax(0, 1fr) 200px 200px 64px 40px; column-gap: 1.5rem; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent);"
+            } else if is_selected {
+                "grid-template-columns: 40px minmax(0, 1fr) 200px 200px 64px 40px; column-gap: 1.5rem; background: rgba(255,255,255,0.07);"
             } else {
-                ""
+                "grid-template-columns: 40px minmax(0, 1fr) 200px 200px 64px 40px; column-gap: 1.5rem;"
             },
             onclick: move |evt| {
                 evt.stop_propagation();
@@ -338,8 +338,8 @@ pub fn TrackRow(
                 }
             },
 
-            if on_select.is_some() && is_selection_mode {
-                div { class: "mr-4 flex items-center justify-center w-6 h-6 shrink-0",
+            div { class: "flex items-center w-10 shrink-0",
+                if on_select.is_some() && is_selection_mode {
                     button {
                         class: if is_selected {
                             "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
@@ -355,25 +355,28 @@ pub fn TrackRow(
                             i { class: "fa-solid fa-check", style: "font-size: 9px;" }
                         }
                     }
+                } else if is_currently_playing {
+                    i { class: "fa-solid fa-volume-high text-xs", style: "color: var(--color-indigo-500);" }
+                } else if let Some(n) = row_num {
+                    span { class: "text-xs text-slate-500", "{n}" }
                 }
             }
 
-            div { class: "relative w-10 h-10 bg-white/5 rounded overflow-hidden flex items-center justify-center mr-4 shrink-0",
-                i { class: "fa-solid fa-music text-white/20 absolute" }
-                if let Some(url) = cover_url {
-                    div {
-                        class: "absolute inset-0 bg-cover bg-center",
-                        style: "background-image: url('{url.as_ref()}');"
+            div { class: "flex items-center min-w-0 pr-4",
+                div { class: "relative w-10 h-10 bg-white/5 rounded overflow-hidden flex items-center justify-center mr-4 shrink-0",
+                    i { class: "fa-solid fa-music text-white/20 absolute" }
+                    if let Some(url) = cover_url {
+                        div {
+                            class: "absolute inset-0 bg-cover bg-center",
+                            style: "background-image: url('{url.as_ref()}');"
+                        }
+                    }
+                    if is_downloaded && !is_currently_playing {
+                        div { class: "absolute bottom-0 right-0 w-3 h-3 bg-indigo-500 rounded-tl flex items-center justify-center",
+                            i { class: "fa-solid fa-check text-white", style: "font-size: 6px;" }
+                        }
                     }
                 }
-                if is_downloaded && !is_currently_playing {
-                    div { class: "absolute bottom-0 right-0 w-3 h-3 bg-indigo-500 rounded-tl flex items-center justify-center",
-                        i { class: "fa-solid fa-check text-white", style: "font-size: 6px;" }
-                    }
-                }
-            }
-
-            div { class: "flex-1 min-w-0 pr-4",
                 p {
                     class: "text-sm font-medium truncate cursor-pointer hover:underline",
                     style: if is_currently_playing {
@@ -392,8 +395,11 @@ pub fn TrackRow(
                     },
                     "{track.title}"
                 }
+            }
+
+            div { class: "min-w-0 pr-4",
                 p {
-                    class: "text-xs text-slate-500 truncate cursor-pointer hover:underline hover:text-slate-400 transition-colors",
+                    class: "text-sm text-slate-500 truncate cursor-pointer hover:underline hover:text-slate-400 transition-colors",
                     onclick: {
                         let artist = track.artist.clone();
                         move |evt: MouseEvent| {
@@ -407,40 +413,50 @@ pub fn TrackRow(
                 }
             }
 
-            if !is_selection_mode {
-                DotsMenu {
-                    actions,
-                    is_open: is_menu_open,
-                    on_open: move |_| on_click_menu.call(()),
-                    on_close: move |_| on_close_menu.call(()),
-                    button_class: "opacity-0 group-hover:opacity-100 focus:opacity-100".to_string(),
-                    anchor: "right".to_string(),
-                    on_action: move |idx: usize| {
-                        if let Some(queue_idx) = add_to_queue_idx {
-                            if idx == queue_idx {
-                                if let Some(handler) = on_queue {
+            div { class: "min-w-0 pr-4",
+                p { class: "text-sm text-slate-500 truncate", "{track.album}" }
+            }
+
+            div { class: "flex items-center justify-end",
+                span { class: "text-xs font-mono text-slate-500", "{duration_str}" }
+            }
+
+            div { class: "flex items-center justify-end",
+                if !is_selection_mode {
+                    DotsMenu {
+                        actions,
+                        is_open: is_menu_open,
+                        on_open: move |_| on_click_menu.call(()),
+                        on_close: move |_| on_close_menu.call(()),
+                        button_class: "opacity-0 group-hover:opacity-100 focus:opacity-100".to_string(),
+                        anchor: "right".to_string(),
+                        on_action: move |idx: usize| {
+                            if let Some(queue_idx) = add_to_queue_idx {
+                                if idx == queue_idx {
+                                    if let Some(handler) = on_queue {
+                                        handler.call(());
+                                    }
+                                    return;
+                                }
+                            }
+
+                            if idx == add_to_playlist_idx {
+                                on_add_to_playlist.call(());
+                            } else if remove_action_idx == Some(idx) {
+                                if let Some(handler) = on_remove_from_playlist {
                                     handler.call(());
                                 }
-                                return;
+                            } else if has_download && idx == download_action_idx {
+                                if let Some(handler) = on_download {
+                                    handler.call(());
+                                }
+                            } else if idx == delete_action_idx {
+                                on_delete.call(());
                             }
-                        }
-
-                        if idx == add_to_playlist_idx {
-                            on_add_to_playlist.call(());
-                        } else if remove_action_idx == Some(idx) {
-                            if let Some(handler) = on_remove_from_playlist {
-                                handler.call(());
-                            }
-                        } else if has_download && idx == download_action_idx {
-                            if let Some(handler) = on_download {
-                                handler.call(());
-                            }
-                        } else if idx == delete_action_idx {
-                            on_delete.call(());
-                        }
-                    },
+                        },
+                    }
                 }
             }
         }
-    }
+    };
 }

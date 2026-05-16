@@ -1,5 +1,5 @@
 use crate::reorder_buttons::ReorderButtons;
-use crate::showcase::ShowcaseProps;
+use crate::showcase::{self, ShowcaseProps, SortField};
 use crate::track_row::TrackRow;
 use config::{AppConfig, MusicService, MusicSource};
 use dioxus::prelude::*;
@@ -16,12 +16,17 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     let is_server_source = config.read().active_source == MusicSource::Server;
 
     let offline_tracks = config.read().offline_tracks.clone();
+    let mut sort_state = use_signal(|| None);
+    let sorted_indices = showcase::sorted_track_indices(&props.tracks, *sort_state.read());
 
     let currently_playing_idx: Option<usize> = {
         let queue = ctrl.queue.read();
         let idx = *ctrl.current_queue_index.read();
         if queue.len() == props.tracks.len()
-            && queue.iter().zip(props.tracks.iter()).all(|(q, t)| q.path == t.path)
+            && queue
+                .iter()
+                .zip(props.tracks.iter())
+                .all(|(q, t)| q.path == t.path)
         {
             Some(idx)
         } else {
@@ -135,8 +140,10 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                          p { class: "text-lg", "{i18n::t(\"no_songs_here\")}" }
                      }
                  } else {
-                      div { class: "grid grid-cols-[auto_1fr_1fr_auto_auto] gap-4 px-2 py-2 border-b border-white/5 text-sm font-medium text-slate-500 mb-2 uppercase tracking-wider",
-                           div { class: "flex items-center w-24 shrink-0",
+                      div {
+                           class: "grid gap-6 px-2 py-2 border-b border-white/5 text-sm font-medium text-slate-500 mb-2 uppercase tracking-wider",
+                           style: "grid-template-columns: 40px minmax(0, 1fr) 200px 200px 64px 40px; align-items: center;",
+                           div { class: "flex items-center w-10 shrink-0",
                                if props.is_selection_mode {
                                    if let Some(handler) = props.on_select_all {
                                        div { class: "mr-4 flex items-center justify-center w-6 h-6 shrink-0",
@@ -158,12 +165,48 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                    "#"
                                }
                            }
-                           div { "{i18n::t(\"title\")}" }
-                           div { "{i18n::t(\"artist\")}" }
+                           button {
+                               class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
+                               onclick: move |_| {
+                                                                  let next = showcase::next_sort_state(*sort_state.peek(), SortField::Title);
+                                                                  sort_state.set(next);
+                                                              },
+                               "{i18n::t(\"title\")}"
+                               i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Title)} text-[10px]" }
+                           }
+                           button {
+                               class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
+                               onclick: move |_| {
+                                                                  let next = showcase::next_sort_state(*sort_state.peek(), SortField::Artist);
+                                                                  sort_state.set(next);
+                                                              },
+                               "{i18n::t(\"artist\")}"
+                               i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Artist)} text-[10px]" }
+                           }
+                           button {
+                               class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
+                               onclick: move |_| {
+                                                                  let next = showcase::next_sort_state(*sort_state.peek(), SortField::Album);
+                                                                  sort_state.set(next);
+                                                              },
+                               "{i18n::t(\"album\")}"
+                               i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Album)} text-[10px]" }
+                           }
+                           button {
+                               class: "flex items-center justify-end gap-1 uppercase tracking-wider text-right hover:text-white transition-colors",
+                               onclick: move |_| {
+                                                                  let next = showcase::next_sort_state(*sort_state.peek(), SortField::Duration);
+                                                                  sort_state.set(next);
+                                                              },
+                               i { class: "fa-regular fa-clock" }
+                               i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Duration)} text-[10px]" }
+                           }
+                           div {}
                       }
 
-                     for (idx, track) in props.tracks.iter().enumerate() {
+                     for (display_idx, idx) in sorted_indices.iter().copied().enumerate() {
                          {
+                             let track = &props.tracks[idx];
                              let cover_url = if is_server_source {
                                  if let Some(server) = &config.read().server {
                                      let path_str = track.path.to_string_lossy();
@@ -224,6 +267,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                              is_downloaded: is_downloaded,
                                              is_downloading: is_downloading,
                                              is_currently_playing: currently_playing_idx == Some(idx),
+                                             row_num: Some(display_idx + 1),
                                              on_select: move |selected| {
                                                 if let Some(handler) = &props.on_select {
                                                     handler.call((idx, selected));
