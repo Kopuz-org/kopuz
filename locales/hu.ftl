@@ -371,3 +371,8 @@ radio_j1_desc = Aktuális slágerek és klasszikus dalok Japánból.
 radio_doujinstyle_desc = Doujin zene, videojátékok zenéi és még sok más.
 radio_vocaloid_desc = Vocaloid slágerek Japánból. Mindent játszunk!
 radio_live_stream = Élő adás
+
+auto_check_updates = Frissítések automatikus keresése
+update_available = Elérhető frissítés
+update_banner_message = A Kopuz { $version } elérhető.
+view_release = Kiadás megtekintése

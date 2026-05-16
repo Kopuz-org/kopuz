@@ -504,6 +504,8 @@ pub struct AppConfig {
     pub language: String,
     #[serde(default)]
     pub reduce_animations: bool,
+    #[serde(default = "default_auto_check_updates")]
+    pub auto_check_updates: bool,
     #[serde(default = "default_show_source_toggle")]
     pub show_source_toggle: bool,
     #[serde(default = "default_sidebar_order")]
@@ -603,6 +605,10 @@ fn default_show_source_toggle() -> bool {
     true
 }
 
+fn default_auto_check_updates() -> bool {
+    true
+}
+
 pub fn default_sidebar_order() -> Vec<String> {
     vec![
         "home".to_string(),
@@ -668,6 +674,7 @@ impl Default for AppConfig {
             lastfm_session_key: String::new(),
             language: default_language(),
             reduce_animations: false,
+            auto_check_updates: default_auto_check_updates(),
             show_source_toggle: default_show_source_toggle(),
             sidebar_order: default_sidebar_order(),
             volume: default_volume(),

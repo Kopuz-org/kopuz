@@ -198,6 +198,17 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         }
                         if !cfg!(target_arch = "wasm32") {
                             SettingItem {
+                                title: i18n::t("auto_check_updates").to_string(),
+                                control: rsx! {
+                                    ToggleSetting {
+                                        enabled: config.read().auto_check_updates,
+                                        on_change: move |val| config.write().auto_check_updates = val,
+                                    }
+                                }
+                            }
+                        }
+                        if !cfg!(target_arch = "wasm32") {
+                            SettingItem {
                                 title: i18n::t("show_source_toggle").to_string(),
                                     control: rsx! {
                                     ToggleSetting {

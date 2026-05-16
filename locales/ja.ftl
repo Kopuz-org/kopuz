@@ -377,3 +377,8 @@ radio_j1_desc = 日本の最新チャートヒットと名曲。
 radio_doujinstyle_desc = 同人音楽、ビデオゲームのサウンドトラックなど。
 radio_vocaloid_desc = 日本のボーカロイドヒット曲。何でも再生します！
 radio_live_stream = ライブストリーム
+
+auto_check_updates = アップデートを自動確認
+update_available = アップデートがあります
+update_banner_message = Kopuz { $version } が利用可能です。
+view_release = リリースを見る

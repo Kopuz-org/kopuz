@@ -377,3 +377,8 @@ radio_j1_desc = أحدث الأغاني الناجحة والأغاني الكل
 radio_doujinstyle_desc = موسيقى الدوجين، الموسيقى التصويرية لألعاب الفيديو، والمزيد.
 radio_vocaloid_desc = أغاني فوكالويد من اليابان. نحن نشغل كل شيء!
 radio_live_stream = بث مباشر
+
+auto_check_updates = التحقق التلقائي من التحديثات
+update_available = تحديث متوفر
+update_banner_message = إصدار Kopuz { $version } متوفر.
+view_release = عرض الإصدار

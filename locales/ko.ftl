@@ -371,3 +371,8 @@ radio_j1_desc = 일본의 최신 차트 히트곡 및 클래식 노래.
 radio_doujinstyle_desc = 동인 음악, 비디오 게임 사운드트랙 등.
 radio_vocaloid_desc = 일본의 보컬로이드 히트곡. 모든 것을 재생합니다!
 radio_live_stream = 라이브 스트림
+
+auto_check_updates = 업데이트 자동 확인
+update_available = 업데이트 उपलब्ध
+update_banner_message = Kopuz { $version }을(를) 사용할 수 있습니다.
+view_release = 릴리스 보기
