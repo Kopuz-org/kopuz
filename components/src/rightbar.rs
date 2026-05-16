@@ -108,25 +108,27 @@ pub fn Rightbar(
         });
     });
 
-    let _update_func = eval(
-        r#"
-        let currEl;
+    use_effect(move || {
+        let _update_func = eval(
+            r#"
+            let currEl;
 
-        window.rightbar_updateLyrics = (nextIndex) => {
-            let nextEl = document.getElementById(`rightbar-lyrics-${nextIndex}`)
-            if (currEl != nextEl) {
-                if (currEl) {
-                    currEl.classList = 'text-white/40 transition-all duration-300 hover:text-white/60 cursor-pointer';
-                }
+            window.rightbar_updateLyrics = (nextIndex) => {
+                let nextEl = document.getElementById(`rightbar-lyrics-${nextIndex}`)
+                if (currEl != nextEl) {
+                    if (currEl) {
+                        currEl.classList = 'text-white/40 transition-all duration-300 hover:text-white/60 cursor-pointer';
+                    }
 
-                if (nextEl) {
-                    nextEl.classList = 'text-white text-lg font-bold transition-all duration-300';
-                    nextEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    currEl = nextEl;
+                    if (nextEl) {
+                        nextEl.classList = 'text-white text-lg font-bold transition-all duration-300';
+                        nextEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        currEl = nextEl;
+                    }
                 }
-            }
-        }"#,
-    );
+            }"#,
+        );
+    });
 
     use_resource(move || {
         let lyrics = lyrics.read().clone();
