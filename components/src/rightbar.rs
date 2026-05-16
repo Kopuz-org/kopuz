@@ -56,7 +56,7 @@ pub fn LyricsPanel(
                 let mut sleep_duration_ms = 50;
 
                 loop {
-                    let current_time = ctrl.player.peek().get_position().as_secs_f64();
+                    let current_time = ctrl.displayed_progress_secs_f64();
                     if let Some(next_index) =
                         lines.iter().rposition(|l| l.start_time <= current_time)
                     {
@@ -317,6 +317,15 @@ pub fn Rightbar(
     let mut fetch_gen: Signal<u32> = use_signal(|| 0);
     let mut last_key: Signal<String> = use_signal(String::new);
 
+    let js_scroll_to_top = || {
+        let _scroll_to_top = eval(
+            r#"
+                const el = document.getElementById('rightbar-content');
+                if (el) { el.scrollTo({top: 0, left: 0, behavior: 'auto'}); }
+            "#,
+        );
+    };
+
     use_effect(move || {
         let title = current_song_title.read().clone();
         let track_path = {
@@ -391,6 +400,14 @@ pub fn Rightbar(
                 lyrics.set(Some(display));
             }
         });
+
+        js_scroll_to_top();
+    });
+
+    // reset scroll position on tab change
+    use_effect(move || {
+        let _tab = active_tab.read();
+        js_scroll_to_top();
     });
 
     let mut is_resizing = use_signal(|| false);
@@ -503,6 +520,7 @@ pub fn Rightbar(
             }
 
             div {
+                id: "rightbar-content",
                 class: "flex-1 overflow-y-auto px-2 py-2 space-y-1 relative",
 
                 if active_tab_val == Tabs::Lyrics {
