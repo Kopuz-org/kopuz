@@ -254,23 +254,20 @@ pub fn use_player_task(ctrl: PlayerController) {
                     let current_idx = *ctrl.current_queue_index.read();
                     if *ctrl.shuffle.read() {
                         let order = ctrl.shuffle_order.read();
-                        let current = order.get(current_idx).and_then(|&idx| q.get(idx)).cloned();
                         let next = order
                             .get(current_idx + 1)
                             .and_then(|&idx| q.get(idx))
                             .cloned();
-                        (current, next)
+                        next
                     } else {
-                        let current = q.get(current_idx).cloned();
-                        let next = q.get(current_idx + 1).cloned();
-                        (current, next)
+                        q.get(current_idx + 1).cloned()
                     }
                 };
 
-                if let (Some(current_track), next_track) = lyrics_prefetch {
-                    let current_track_key = current_track.path.to_string_lossy().to_string();
-                    if last_lyrics_prefetch_track.as_ref() != Some(&current_track_key) {
-                        last_lyrics_prefetch_track = Some(current_track_key);
+                if let Some(next_track) = lyrics_prefetch {
+                    let next_track_key = next_track.path.to_string_lossy().to_string();
+                    if last_lyrics_prefetch_track.as_ref() != Some(&next_track_key) {
+                        last_lyrics_prefetch_track = Some(next_track_key);
                         let (server_url, server_token, server_user_id) = {
                             let conf = config.read();
                             if let Some(server) = &conf.server {
@@ -285,33 +282,18 @@ pub fn use_player_task(ctrl: PlayerController) {
                         };
 
                         spawn(async move {
-                            let current_track_path = current_track.path.to_string_lossy().into_owned();
+                            let next_track_path = next_track.path.to_string_lossy().into_owned();
                             let _ = utils::lyrics::fetch_lyrics(
-                                &current_track.artist,
-                                &current_track.title,
-                                &current_track.album,
-                                current_track.duration,
-                                &current_track_path,
+                                &next_track.artist,
+                                &next_track.title,
+                                &next_track.album,
+                                next_track.duration,
+                                &next_track_path,
                                 server_url.as_deref(),
                                 server_token.as_deref(),
                                 server_user_id.as_deref(),
                             )
                             .await;
-
-                            if let Some(next_track) = next_track {
-                                let next_track_path = next_track.path.to_string_lossy().into_owned();
-                                let _ = utils::lyrics::fetch_lyrics(
-                                    &next_track.artist,
-                                    &next_track.title,
-                                    &next_track.album,
-                                    next_track.duration,
-                                    &next_track_path,
-                                    server_url.as_deref(),
-                                    server_token.as_deref(),
-                                    server_user_id.as_deref(),
-                                )
-                                .await;
-                            }
                         });
                     }
                 }

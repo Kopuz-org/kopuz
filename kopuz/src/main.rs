@@ -749,6 +749,7 @@ fn App() -> Element {
     let current_song_khz = use_signal(|| 0u32);
     let current_song_bitrate = use_signal(|| 0u16);
     let current_song_progress = use_signal(|| 0u64);
+    let current_track_snapshot = use_signal(|| None::<reader::Track>);
     let mut volume = use_signal(|| 1.0f32);
     let mut persisted_volume = use_signal(|| 1.0f32);
     let mut configured_music_dirs = use_signal(|| config.peek().music_directory.clone());
@@ -850,6 +851,7 @@ fn App() -> Element {
         current_song_duration,
         current_song_progress,
         current_song_cover_url,
+        current_track_snapshot,
         volume,
         library,
         config,

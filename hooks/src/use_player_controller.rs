@@ -48,6 +48,7 @@ pub struct PlayerController {
     pub current_song_duration: Signal<u64>,
     pub current_song_progress: Signal<u64>,
     pub current_song_cover_url: Signal<String>,
+    pub current_track_snapshot: Signal<Option<Track>>,
     pub volume: Signal<f32>,
     pub library: Signal<Library>,
     pub config: Signal<AppConfig>,
@@ -149,42 +150,7 @@ impl PlayerController {
         self.current_song_duration.set(0);
         self.current_song_progress.set(0);
         self.current_song_cover_url.set(String::new());
-    }
-
-    fn prefetch_lyrics_for_track(&self, track: &Track) {
-        let track_path = track.path.to_string_lossy();
-        if track.title.trim().is_empty() || track_path.starts_with("radio:") {
-            return;
-        }
-
-        let track = track.clone();
-        let (server_url, server_token, server_user_id) = {
-            let conf = self.config.read();
-            if let Some(server) = &conf.server {
-                (
-                    Some(server.url.clone()),
-                    server.access_token.clone(),
-                    server.user_id.clone(),
-                )
-            } else {
-                (None, None, None)
-            }
-        };
-
-        spawn(async move {
-            let track_path = track.path.to_string_lossy().into_owned();
-            let _ = utils::lyrics::fetch_lyrics(
-                &track.artist,
-                &track.title,
-                &track.album,
-                track.duration,
-                &track_path,
-                server_url.as_deref(),
-                server_token.as_deref(),
-                server_user_id.as_deref(),
-            )
-            .await;
-        });
+        self.current_track_snapshot.set(None);
     }
 
     fn hydrate_current_track_metadata(&mut self, idx: usize, progress_secs: u64) {
@@ -200,7 +166,7 @@ impl PlayerController {
             self.current_song_progress.set(progress_secs);
             self.current_song_cover_url
                 .set(self.cover_url_for_track(&track));
-            self.prefetch_lyrics_for_track(&track);
+            self.current_track_snapshot.set(Some(track));
         } else {
             self.current_queue_index.set(0);
             self.clear_current_track_metadata();
@@ -1798,6 +1764,7 @@ pub fn use_player_controller(
     current_song_duration: Signal<u64>,
     current_song_progress: Signal<u64>,
     current_song_cover_url: Signal<String>,
+    current_track_snapshot: Signal<Option<Track>>,
     volume: Signal<f32>,
     library: Signal<Library>,
     config: Signal<AppConfig>,
@@ -1832,6 +1799,7 @@ pub fn use_player_controller(
         current_song_duration,
         current_song_progress,
         current_song_cover_url,
+        current_track_snapshot,
         volume,
         library,
         config,

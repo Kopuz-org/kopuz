@@ -84,23 +84,31 @@ pub fn Fullscreen(
     let mut last_key: Signal<String> = use_signal(String::new);
 
     use_effect(move || {
-        let title = current_song_title.read().clone();
-        let track_path = {
-            let q = queue.read();
-            let idx = *current_queue_index.read();
-            q.get(idx)
-                .map(|t| t.path.to_string_lossy().into_owned())
-                .unwrap_or_default()
+        let current_track = ctrl.current_track_snapshot.read().clone();
+
+        let (title, artist, album, duration, track_path) = if let Some(track) = current_track {
+            (
+                track.title,
+                track.artist,
+                track.album,
+                track.duration,
+                track.path.to_string_lossy().into_owned(),
+            )
+        } else {
+            (
+                current_song_title.read().clone(),
+                current_song_artist.read().clone(),
+                current_song_album.read().clone(),
+                *current_song_duration.read(),
+                String::new(),
+            )
         };
-        let new_key = format!("{}|{}", title, track_path);
+
+        let new_key = format!("{title}|{track_path}");
         if *last_key.peek() == new_key {
             return;
         }
         last_key.set(new_key);
-
-        let artist = current_song_artist.peek().clone();
-        let album = current_song_album.peek().clone();
-        let duration = *current_song_duration.peek();
         let (server_url, server_token, server_user_id) = {
             let conf = config.peek();
             if let Some(server) = &conf.server {
