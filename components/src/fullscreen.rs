@@ -84,16 +84,7 @@ pub fn Fullscreen(
     let mut last_key: Signal<String> = use_signal(String::new);
 
     use_effect(move || {
-        let current_track = {
-            let q = queue.read();
-            let idx = *current_queue_index.read();
-            let queue_idx = if *ctrl.shuffle.read() {
-                ctrl.shuffle_order.read().get(idx).copied()
-            } else {
-                Some(idx)
-            };
-            queue_idx.and_then(|queue_idx| q.get(queue_idx).cloned())
-        };
+        let current_track = ctrl.current_track_snapshot.read().clone();
 
         let (title, artist, album, duration, track_path) = if let Some(track) = current_track {
             (

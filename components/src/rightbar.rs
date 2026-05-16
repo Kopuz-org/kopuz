@@ -39,18 +39,10 @@ pub fn Rightbar(
     let mut lyrics: Signal<Option<Option<utils::lyrics::Lyrics>>> = use_signal(|| None);
     let mut fetch_gen: Signal<u32> = use_signal(|| 0);
     let mut last_key: Signal<String> = use_signal(String::new);
+    let mut last_scrolled_lyric_index: Signal<Option<usize>> = use_signal(|| None);
 
     use_effect(move || {
-        let current_track = {
-            let q = queue.read();
-            let idx = *current_queue_index.read();
-            let queue_idx = if *ctrl.shuffle.read() {
-                ctrl.shuffle_order.read().get(idx).copied()
-            } else {
-                Some(idx)
-            };
-            queue_idx.and_then(|queue_idx| q.get(queue_idx).cloned())
-        };
+        let current_track = ctrl.current_track_snapshot.read().clone();
 
         let (title, artist, album, duration, track_path) = if let Some(track) = current_track {
             (
@@ -151,19 +143,39 @@ pub fn Rightbar(
     });
 
     use_effect(move || {
-        let _idx = active_lyric_index();
-        if *active_tab.read() == 2 {
+        let idx = active_lyric_index();
+        if *active_tab.read() != 2 {
+            last_scrolled_lyric_index.set(None);
             let _ = eval(
                 r#"
-                setTimeout(() => {
-                    let el = document.getElementById('rightbar-active-lyric');
-                    if (el) {
-                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    }
-                }, 50);
+                if (window.__kopuzRightbarLyricScrollTimeout) {
+                    clearTimeout(window.__kopuzRightbarLyricScrollTimeout);
+                    window.__kopuzRightbarLyricScrollTimeout = null;
+                }
                 "#,
             );
+            return;
         }
+
+        if *last_scrolled_lyric_index.peek() == Some(idx) {
+            return;
+        }
+
+        last_scrolled_lyric_index.set(Some(idx));
+        let _ = eval(
+            r#"
+            if (window.__kopuzRightbarLyricScrollTimeout) {
+                clearTimeout(window.__kopuzRightbarLyricScrollTimeout);
+            }
+            window.__kopuzRightbarLyricScrollTimeout = setTimeout(() => {
+                let el = document.getElementById('rightbar-active-lyric');
+                if (el) {
+                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+                window.__kopuzRightbarLyricScrollTimeout = null;
+            }, 50);
+            "#,
+        );
     });
 
     let get_track_cover = |track: &reader::Track| -> Option<utils::CoverUrl> {
@@ -394,17 +406,16 @@ pub fn Rightbar(
                     if back_items.is_empty() {
                         div { class: "text-white/30 text-center py-10 text-sm", "{i18n::t(\"no_previous_songs\")}" }
                     } else {
-                    for (list_pos, (queue_idx, track)) in back_items.iter().enumerate() {
+                    for (queue_idx, track) in back_items.iter() {
                         {
                             let queue_idx = *queue_idx;
-                            let track_idx = list_pos;
                             let cover_url = get_track_cover(&track);
                             rsx! {
                                 div {
                                     key: "{queue_idx}",
                                     class: "flex items-center gap-3 px-2 py-2 hover:bg-white/5 cursor-pointer rounded-lg transition-colors group",
                                     style: "content-visibility: auto; contain-intrinsic-size: 0 56px;",
-                                    ondoubleclick: move |_| play_song_at_index(track_idx),
+                                    ondoubleclick: move |_| play_song_at_index(queue_idx),
                                     div {
                                         class: "rounded-md overflow-hidden bg-black/30 flex-shrink-0 shadow-sm",
                                         style: "width: 40px; height: 40px;",
@@ -436,19 +447,18 @@ pub fn Rightbar(
                             class: "px-2 pt-1 pb-2 text-[11px] uppercase tracking-[0.18em] text-slate-500",
                             "{up_next_summary}"
                         }
-                        for (list_pos, (queue_idx, track)) in up_next_items.iter().enumerate() {
+                        for (queue_idx, track) in up_next_items.iter() {
                             {
                                 let queue_idx = *queue_idx;
                                 let cover_url = get_track_cover(&track);
-                                let track_idx = current_idx + 1 + list_pos;
-                                let can_move_up = track_idx > current_idx + 1;
-                                let can_move_down = track_idx + 1 < q.len();
+                                let can_move_up = queue_idx > 0;
+                                let can_move_down = queue_idx + 1 < q.len();
                                 rsx! {
                                     div {
                                         key: "{queue_idx}",
                                         class: "flex items-center gap-3 px-2 py-2 hover:bg-white/5 cursor-pointer rounded-lg transition-colors group",
                                         style: "content-visibility: auto; contain-intrinsic-size: 0 56px;",
-                                        ondoubleclick: move |_| play_song_at_index(track_idx),
+                                        ondoubleclick: move |_| play_song_at_index(queue_idx),
                                         div {
                                             class: "rounded-md overflow-hidden bg-black/30 flex-shrink-0 shadow-sm",
                                             style: "width: 40px; height: 40px;",
@@ -470,8 +480,8 @@ pub fn Rightbar(
                                             can_move_up,
                                             can_move_down,
                                             class: "flex flex-col pr-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity".to_string(),
-                                            on_move_up: move |_| move_queue_item(track_idx, track_idx - 1),
-                                            on_move_down: move |_| move_queue_item(track_idx, track_idx + 1),
+                                            on_move_up: move |_| move_queue_item(queue_idx, queue_idx - 1),
+                                            on_move_down: move |_| move_queue_item(queue_idx, queue_idx + 1),
                                         }
                                     }
                                 }
