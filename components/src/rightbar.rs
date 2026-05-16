@@ -25,14 +25,6 @@ pub fn Rightbar(
 
     let mut active_tab = use_signal(|| 1usize);
     let mut ctrl = use_context::<PlayerController>();
-    let mut exact_progress = use_signal(|| 0.0_f64);
-
-    use_future(move || async move {
-        loop {
-            utils::sleep(std::time::Duration::from_millis(50)).await;
-            exact_progress.set(ctrl.displayed_progress_secs_f64());
-        }
-    });
 
     let config = use_context::<Signal<AppConfig>>();
 
@@ -79,13 +71,9 @@ pub fn Rightbar(
             return;
         }
 
-        if let Some(cached) = utils::lyrics::cached_lyrics(
-            &artist,
-            &title,
-            &album,
-            duration,
-            &track_path,
-        ) {
+        if let Some(cached) =
+            utils::lyrics::cached_lyrics(&artist, &title, &album, duration, &track_path)
+        {
             let display = cached.or_else(|| {
                 Some(utils::lyrics::Lyrics::Plain(
                     i18n::t("lyrics_not_found").to_string(),
@@ -120,32 +108,55 @@ pub fn Rightbar(
         });
     });
 
-    let active_lyric_index = use_memo(move || {
-        if *active_tab.read() == 2 {
-            if let Some(Some(utils::lyrics::Lyrics::Synced(lines))) = &*lyrics.read() {
-                let current_time = *exact_progress.read();
-                return lines
-                    .iter()
-                    .rposition(|l| l.start_time <= current_time)
-                    .unwrap_or(0);
-            }
-        }
-        0
-    });
+    let _update_func = eval(
+        r#"
+        let currEl;
 
-    use_effect(move || {
-        let _idx = active_lyric_index();
-        if *active_tab.read() == 2 {
-            let _ = eval(
-                r#"
-                setTimeout(() => {
-                    let el = document.getElementById('rightbar-active-lyric');
-                    if (el) {
-                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        window.rightbar_updateLyrics = (nextIndex) => {
+            let nextEl = document.getElementById(`rightbar-lyrics-${nextIndex}`)
+            if (currEl != nextEl) {
+                if (currEl) {
+                    currEl.classList = 'text-white/40 transition-all duration-300 hover:text-white/60 cursor-pointer';
+                }
+
+                if (nextEl) {
+                    nextEl.classList = 'text-white text-lg font-bold transition-all duration-300';
+                    nextEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    currEl = nextEl;
+                }
+            }
+        }"#,
+    );
+
+    use_resource(move || {
+        let lyrics = lyrics.read().clone();
+
+        async move {
+            if let Some(Some(utils::lyrics::Lyrics::Synced(lines))) = lyrics {
+                let mut sleep_duration_ms = 50;
+
+                loop {
+                    if *active_tab.peek() == 2 {
+                        let current_time = ctrl.player.peek().get_position().as_secs_f64();
+                        if let Some(next_index) =
+                            lines.iter().rposition(|l| l.start_time <= current_time)
+                        {
+                            let _ = eval(&format!("window.rightbar_updateLyrics({next_index})"));
+
+                            sleep_duration_ms = lines
+                                .get(next_index.saturating_add(1))
+                                .map(|line| {
+                                    ((line.start_time - current_time) * 1000.0)
+                                        .max(16.0)
+                                        .min(50.0) as u64
+                                })
+                                .unwrap_or(50);
+                        }
                     }
-                }, 50);
-                "#,
-            );
+
+                    utils::sleep(std::time::Duration::from_millis(sleep_duration_ms)).await;
+                }
+            }
         }
     });
 
@@ -245,31 +256,22 @@ pub fn Rightbar(
     let q = queue.read();
     let current_idx = *current_queue_index.read();
     let is_shuffle = *ctrl.shuffle.read();
-
-    let (back_items, up_next_items): (Vec<_>, Vec<_>) = if is_shuffle {
-        let order = ctrl.shuffle_order.read();
-        let back = order
-            .get(..current_idx)
-            .unwrap_or_default()
+    let items: Vec<_> = if is_shuffle {
+        ctrl.shuffle_order
+            .read()
             .iter()
             .filter_map(|&qi| q.get(qi).cloned().map(|t| (qi, t)))
-            .collect();
-        let next = order
-            .get(current_idx + 1..)
-            .unwrap_or_default()
-            .iter()
-            .filter_map(|&qi| q.get(qi).cloned().map(|t| (qi, t)))
-            .collect();
-        (back, next)
+            .collect()
     } else {
-        let back = (0..current_idx)
+        (0..q.len())
             .filter_map(|qi| q.get(qi).cloned().map(|t| (qi, t)))
-            .collect();
-        let next = (current_idx + 1..q.len())
-            .filter_map(|qi| q.get(qi).cloned().map(|t| (qi, t)))
-            .collect();
-        (back, next)
+            .collect()
     };
+
+    let (back_items, up_next_items) = (
+        items.get(..current_idx).unwrap_or_default(),
+        items.get(current_idx + 1..).unwrap_or_default(),
+    );
 
     let up_next_count = up_next_items.len();
     let up_next_duration: u64 = up_next_items.iter().map(|(_, t)| t.duration).sum();
@@ -281,6 +283,8 @@ pub fn Rightbar(
         ),
         format_queue_duration(up_next_duration)
     );
+
+    let active_tab_val = *active_tab.read();
 
     rsx! {
         div {
@@ -301,7 +305,7 @@ pub fn Rightbar(
                 div {
                     class: "flex items-center gap-1",
                     button {
-                        class: if *active_tab.read() == 0 {
+                        class: if active_tab_val == 0 {
                             "px-2 py-1 text-[10px] font-medium tracking-wider text-white border-b-2 border-white"
                         } else {
                             "px-2 py-1 text-[10px] font-medium tracking-wider text-white/40 hover:text-white/70 transition-colors"
@@ -310,7 +314,7 @@ pub fn Rightbar(
                         "{back_text}"
                     }
                     button {
-                        class: if *active_tab.read() == 1 {
+                        class: if active_tab_val == 1 {
                             "px-2 py-1 text-[10px] font-medium tracking-wider text-white border-b-2 border-white"
                         } else {
                             "px-2 py-1 text-[10px] font-medium tracking-wider text-white/40 hover:text-white/70 transition-colors"
@@ -319,7 +323,7 @@ pub fn Rightbar(
                         "{up_next_text}"
                     }
                     button {
-                        class: if *active_tab.read() == 2 {
+                        class: if active_tab_val == 2 {
                             "px-2 py-1 text-[10px] font-medium tracking-wider text-white border-b-2 border-white"
                         } else {
                             "px-2 py-1 text-[10px] font-medium tracking-wider text-white/40 hover:text-white/70 transition-colors"
@@ -338,22 +342,17 @@ pub fn Rightbar(
             div {
                 class: "flex-1 overflow-y-auto px-2 py-2 space-y-1 relative",
 
-                if *active_tab.read() == 2 {
+                if active_tab_val == 2 {
                     div {
                         class: "text-white/70 text-center py-4 px-4 leading-relaxed font-medium text-sm flex flex-col gap-4",
                         match &*lyrics.read() {
                             Some(Some(utils::lyrics::Lyrics::Synced(lines))) => {
-                                let active_idx = active_lyric_index();
                                 rsx! {
                                     for (i, line) in lines.iter().enumerate() {
                                         div {
                                             key: "{i}",
-                                            id: if i == active_idx { "rightbar-active-lyric" } else { "" },
-                                            class: if i == active_idx {
-                                                "text-white text-lg font-bold transition-all duration-300"
-                                            } else {
-                                                "text-white/40 transition-all duration-300 hover:text-white/60 cursor-pointer"
-                                            },
+                                            id: "rightbar-lyrics-{i}",
+                                            class:  "text-white/40 transition-all duration-300 hover:text-white/60 cursor-pointer",
                                             onclick: {
                                                 let st = line.start_time;
                                                 move |_| {
@@ -373,7 +372,7 @@ pub fn Rightbar(
                             None => rsx! { "{i18n::t(\"loading_lyrics\")}" },
                         }
                     }
-                } else if *active_tab.read() == 0 {
+                } else if active_tab_val == 0 {
                     if back_items.is_empty() {
                         div { class: "text-white/30 text-center py-10 text-sm", "{i18n::t(\"no_previous_songs\")}" }
                     } else {
@@ -411,7 +410,7 @@ pub fn Rightbar(
                             }
                         }
 
-                } else if *active_tab.read() == 1 {
+                } else if active_tab_val == 1 {
                     if up_next_items.is_empty() {
                         div { class: "text-white/30 text-center py-10 text-sm", "{i18n::t(\"no_more_songs\")}" }
                     } else {
