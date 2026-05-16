@@ -3348,6 +3348,7 @@ dependencies = [
  "utils",
  "uuid 1.20.0",
  "web-sys",
+ "webbrowser",
  "webkit2gtk",
  "winres",
 ]
