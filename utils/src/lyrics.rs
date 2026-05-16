@@ -213,7 +213,14 @@ pub async fn fetch_lyrics(
                 key: cache_key.clone(),
             })
         } else {
-            None
+            if let Some(cached) = lyrics_cache()
+                .lock()
+                .ok()
+                .and_then(|mut cache| cache.get_cloned(&cache_key))
+            {
+                return cached;
+            }
+            return None;
         }
     };
 
