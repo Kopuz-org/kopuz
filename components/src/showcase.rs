@@ -51,18 +51,17 @@ pub fn sorted_track_indices(tracks: &[Track], sort_state: SortState) -> Vec<usiz
             let left = &tracks[left_idx];
             let right = &tracks[right_idx];
 
-            let ordering = match field {
+            let primary = match field {
                 SortField::Title => compare_text(&left.title, &right.title),
                 SortField::Artist => compare_text(&left.artist, &right.artist),
                 SortField::Album => compare_text(&left.album, &right.album),
                 SortField::Duration => left.duration.cmp(&right.duration),
-            }
-            .then_with(|| left_idx.cmp(&right_idx));
-
-            match direction {
-                SortDirection::Asc => ordering,
-                SortDirection::Desc => ordering.reverse(),
-            }
+            };
+            let directional = match direction {
+                SortDirection::Asc => primary,
+                SortDirection::Desc => primary.reverse(),
+            };
+            directional.then_with(|| left_idx.cmp(&right_idx))
         });
     }
 
