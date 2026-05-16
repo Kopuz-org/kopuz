@@ -33,12 +33,11 @@ pub fn LyricsPanel(
                             if (currEl) {
                                 currEl.className = 'text-white/40 transition-all duration-300 hover:text-white/60 cursor-pointer';
                             }
-
                             if (nextEl) {
                                 nextEl.className = 'text-white text-lg font-bold transition-all duration-300';
                                 nextEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                currEl = nextEl;
                             }
+                            currEl = nextEl;
                         }
                     }"#,
             );
@@ -53,7 +52,7 @@ pub fn LyricsPanel(
 
         async move {
             if let Some(Some(utils::lyrics::Lyrics::Synced(lines))) = lyrics {
-                let mut sleep_duration_ms = 50;
+                let mut sleep_duration_ms: u64;
 
                 loop {
                     let current_time = ctrl.displayed_progress_secs_f64();
@@ -72,6 +71,7 @@ pub fn LyricsPanel(
                             .unwrap_or(50);
                     } else {
                         let _ = eval("window.rightbar_updateLyrics(-1)");
+                        sleep_duration_ms = 50;
                     }
 
                     utils::sleep(std::time::Duration::from_millis(sleep_duration_ms)).await;
