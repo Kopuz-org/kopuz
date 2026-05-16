@@ -10,6 +10,9 @@ members = [
 ]
 resolver = "3"
 
+[workspace.package]
+version = "0.5.5"
+
 [workspace.dependencies]
 dioxus = { version = "0.7.5", features = [] }
 getrandom = { version = "0.2", features = ["js"] }
@@ -73,4 +76,3 @@ inherits = "dev"
 
 [profile.android-dev]
 inherits = "dev"
-

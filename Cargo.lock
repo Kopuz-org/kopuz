@@ -686,7 +686,7 @@ dependencies = [
 
 [[package]]
 name = "components"
-version = "0.3.6"
+version = "0.5.5"
 dependencies = [
  "config",
  "dioxus",
@@ -719,7 +719,7 @@ dependencies = [
 
 [[package]]
 name = "config"
-version = "0.3.6"
+version = "0.5.5"
 dependencies = [
  "directories",
  "serde",
@@ -1688,7 +1688,7 @@ dependencies = [
 
 [[package]]
 name = "discord-presence"
-version = "0.3.6"
+version = "0.5.5"
 dependencies = [
  "discord-rich-presence",
  "reader",
@@ -2713,7 +2713,7 @@ checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
 name = "hooks"
-version = "0.3.6"
+version = "0.5.5"
 dependencies = [
  "config",
  "dioxus",
@@ -3354,7 +3354,7 @@ dependencies = [
 
 [[package]]
 name = "kopuz_route"
-version = "0.3.6"
+version = "0.5.5"
 
 [[package]]
 name = "kuchikiki"
@@ -4411,7 +4411,7 @@ dependencies = [
 
 [[package]]
 name = "pages"
-version = "0.3.6"
+version = "0.5.5"
 dependencies = [
  "components",
  "config",
@@ -4677,7 +4677,7 @@ checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 
 [[package]]
 name = "player"
-version = "0.3.6"
+version = "0.5.5"
 dependencies = [
  "block2",
  "config",
@@ -4991,7 +4991,7 @@ checksum = "69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f"
 
 [[package]]
 name = "radio"
-version = "0.1.0"
+version = "0.5.5"
 dependencies = [
  "futures-util",
  "reqwest 0.12.28",
@@ -5202,7 +5202,7 @@ checksum = "56cf8381505b60ae18a4097f1d0be093287ca3bf4fbb23d36ac5ad3bba335daa"
 
 [[package]]
 name = "reader"
-version = "0.3.6"
+version = "0.5.5"
 dependencies = [
  "lofty",
  "serde",
@@ -5511,7 +5511,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "scrobble"
-version = "0.3.6"
+version = "0.5.5"
 dependencies = [
  "config",
  "dioxus",
@@ -5704,7 +5704,7 @@ dependencies = [
 
 [[package]]
 name = "server"
-version = "0.3.6"
+version = "0.5.5"
 dependencies = [
  "config",
  "jellyfin-sdk-rust",
@@ -7013,7 +7013,7 @@ checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
 
 [[package]]
 name = "utils"
-version = "0.3.6"
+version = "0.5.5"
 dependencies = [
  "color-thief",
  "gloo-timers",
