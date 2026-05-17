@@ -12,13 +12,10 @@ pub fn fmt_time(secs: u64) -> String {
 }
 
 pub fn get_favorite(
-    queue: &Signal<Vec<reader::models::Track>>,
-    current_queue_index: &Signal<usize>,
+    current_track: Option<&reader::models::Track>,
     favorites_store: &Signal<FavoritesStore>,
 ) -> bool {
-    let q = queue.read();
-    let idx = *current_queue_index.read();
-    if let Some(track) = q.get(idx) {
+    if let Some(track) = current_track {
         let path_str = track.path.to_string_lossy();
         if path_str.starts_with("jellyfin:")
             || path_str.starts_with("subsonic:")
@@ -39,15 +36,11 @@ pub fn get_favorite(
 }
 
 pub fn toggle_favorite(
-    queue: Signal<Vec<reader::models::Track>>,
-    current_queue_index: Signal<usize>,
+    current_track: Option<reader::models::Track>,
     mut favorites_store: Signal<FavoritesStore>,
     config: Signal<config::AppConfig>,
 ) {
-    let q = queue.read();
-    let idx = *current_queue_index.read();
-    if let Some(track) = q.get(idx).cloned() {
-        drop(q);
+    if let Some(track) = current_track {
         let path_str = track.path.to_string_lossy().to_string();
         let is_server_item = path_str.starts_with("jellyfin:")
             || path_str.starts_with("subsonic:")
