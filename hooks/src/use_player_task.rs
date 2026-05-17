@@ -240,9 +240,9 @@ pub fn use_player_task(ctrl: PlayerController) {
 
                 {
                     let current_path: Option<String> = {
-                        let q = ctrl.queue.read();
                         let idx = *ctrl.current_queue_index.read();
-                        q.get(idx).map(|t| t.path.to_string_lossy().to_string())
+                        ctrl.get_track_at(idx)
+                            .map(|t| t.path.to_string_lossy().to_string())
                     };
                     if let Some(path) = current_path {
                         if is_playing && last_recent_path.as_ref() != Some(&path) {
@@ -259,18 +259,8 @@ pub fn use_player_task(ctrl: PlayerController) {
                 }
 
                 let lyrics_prefetch = {
-                    let q = ctrl.queue.read();
                     let current_idx = *ctrl.current_queue_index.read();
-                    if *ctrl.shuffle.read() {
-                        let order = ctrl.shuffle_order.read();
-                        let next = order
-                            .get(current_idx + 1)
-                            .and_then(|&idx| q.get(idx))
-                            .cloned();
-                        next
-                    } else {
-                        q.get(current_idx + 1).cloned()
-                    }
+                    ctrl.get_track_at(current_idx + 1)
                 };
 
                 if let Some(next_track) = lyrics_prefetch {
@@ -368,9 +358,8 @@ pub fn use_player_task(ctrl: PlayerController) {
                         }
 
                         let track = {
-                            let q = ctrl.queue.read();
-                            let idx = *ctrl.current_queue_index.read();
-                            q.get(idx).cloned()
+                            let current_idx = *ctrl.current_queue_index.read();
+                            ctrl.get_track_at(current_idx)
                         };
 
                         if let Some(track) = track {
@@ -477,9 +466,9 @@ pub fn use_player_task(ctrl: PlayerController) {
                                 discord_cover_url.set(Some(cover.clone()));
                             } else {
                                 let mbid = {
-                                    let q = ctrl.queue.read();
                                     let idx = *ctrl.current_queue_index.read();
-                                    q.get(idx).and_then(|t| t.musicbrainz_release_id.clone())
+                                    ctrl.get_track_at(idx)
+                                        .and_then(|t| t.musicbrainz_release_id.clone())
                                 };
                                 let artist_c = artist.clone();
                                 let album_c = album.clone();
@@ -543,9 +532,8 @@ pub fn use_player_task(ctrl: PlayerController) {
                         ctrl.skip_in_progress.set(true);
                         {
                             let mut config_write = config.write();
-                            let q = ctrl.queue.peek();
                             let idx = *ctrl.current_queue_index.peek();
-                            if let Some(track) = q.get(idx) {
+                            if let Some(track) = ctrl.get_track_at(idx) {
                                 let track_id = track.path.to_string_lossy().to_string();
                                 *config_write.listen_counts.entry(track_id).or_insert(0) += 1;
                             }
@@ -579,7 +567,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                             let mut config_write = config.write();
                             let q = ctrl.queue.peek();
                             let idx = *ctrl.current_queue_index.peek();
-                            if let Some(track) = q.get(idx) {
+                            if let Some(track) = ctrl.get_track_at(idx) {
                                 let track_id = track.path.to_string_lossy().to_string();
                                 *config_write.listen_counts.entry(track_id).or_insert(0) += 1;
                             }

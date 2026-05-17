@@ -77,17 +77,25 @@ impl PlayerController {
         track.path.to_string_lossy().to_string()
     }
 
-    fn current_track(&self, idx: usize) -> Option<Track> {
-        let idx = if *self.shuffle.peek() {
-            *self
-                .shuffle_order
-                .peek()
-                .get(idx)
-                .expect("shuffle order index out of bounds")
+    pub fn get_queue_index(&self, idx: usize) -> Option<usize> {
+        if *self.shuffle.peek() {
+            self.shuffle_order.peek().get(idx).cloned()
         } else {
-            idx
-        };
+            Some(idx)
+        }
+    }
+
+    pub fn get_current_track_index(&self) -> Option<usize> {
+        self.get_queue_index(*self.current_queue_index.peek())
+    }
+
+    pub fn get_track_at(&self, idx: usize) -> Option<Track> {
+        let idx = self.get_queue_index(idx)?;
         self.queue.peek().get(idx).cloned()
+    }
+
+    pub fn current_track(&self) -> Option<Track> {
+        self.get_track_at(*self.current_queue_index.peek())
     }
 
     fn cover_url_for_track(&self, track: &Track) -> String {
@@ -154,7 +162,7 @@ impl PlayerController {
     }
 
     fn hydrate_current_track_metadata(&mut self, idx: usize, progress_secs: u64) {
-        if let Some(track) = self.current_track(idx) {
+        if let Some(track) = self.get_track_at(idx) {
             let progress_secs = progress_secs.min(track.duration);
             self.current_queue_index.set(idx);
             self.current_song_title.set(track.title.clone());
@@ -351,7 +359,7 @@ impl PlayerController {
         let current_gen = *self.play_generation.peek();
         self.cancel_radio_task();
 
-        if let Some(track) = self.current_track(idx) {
+        if let Some(track) = self.get_track_at(idx) {
             let path_str = track.path.to_string_lossy().to_string();
             let (restore_seek_secs, clear_pending_resume_on_success) =
                 self.pending_resume_seek(&track);
@@ -1666,7 +1674,7 @@ impl PlayerController {
     pub fn pause(&mut self) {
         let idx = *self.current_queue_index.peek();
         let is_radio = self
-            .current_track(idx)
+            .get_track_at(idx)
             .map_or(false, |t| t.path.to_string_lossy().starts_with("radio:"));
 
         if is_radio {
@@ -1680,11 +1688,11 @@ impl PlayerController {
     pub fn resume(&mut self) {
         let idx = *self.current_queue_index.peek();
         let is_radio = self
-            .current_track(idx)
+            .get_track_at(idx)
             .map_or(false, |t| t.path.to_string_lossy().starts_with("radio:"));
 
         if is_radio || !self.player.peek().can_resume() {
-            if let Some(track) = self.current_track(idx) {
+            if let Some(track) = self.get_track_at(idx) {
                 if !is_radio {
                     let progress_secs = (*self.current_song_progress.peek()).min(track.duration);
                     self.set_pending_resume_for_track(&track, progress_secs);
@@ -1764,9 +1772,7 @@ impl PlayerController {
         }
 
         let idx = current_queue_index.min(queue_len - 1);
-        let track = self
-            .current_track(idx)
-            .expect("queue index should be valid");
+        let track = self.get_track_at(idx).expect("queue index should be valid");
         let progress_secs = progress_secs.min(track.duration);
 
         self.hydrate_current_track_metadata(idx, progress_secs);
