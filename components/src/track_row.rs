@@ -237,6 +237,7 @@ pub fn TrackRow(
                                 }
                             }
                         },
+                        ondoubleclick: move |evt| evt.stop_propagation(),
                         "{track.title}"
                     }
                     if is_downloaded {
@@ -260,6 +261,7 @@ pub fn TrackRow(
                                 }
                             }
                         },
+                        ondoubleclick: move |evt| evt.stop_propagation(),
                         "{track.artist}"
                     }
                 }
@@ -277,6 +279,7 @@ pub fn TrackRow(
                                 }
                             }
                         },
+                        ondoubleclick: move |evt| evt.stop_propagation(),
                         "{track.album}"
                     }
                 }
@@ -412,6 +415,7 @@ pub fn TrackRow(
                             }
                         }
                     },
+                    ondoubleclick: move |evt| evt.stop_propagation(),
                     "{track.title}"
                 }
             }
@@ -429,6 +433,7 @@ pub fn TrackRow(
                             }
                         }
                     },
+                    ondoubleclick: move |evt| evt.stop_propagation(),
                     "{track.artist}"
                 }
             }
@@ -446,6 +451,7 @@ pub fn TrackRow(
                             }
                         }
                     },
+                    ondoubleclick: move |evt| evt.stop_propagation(),
                     "{track.album}"
                 }
             }

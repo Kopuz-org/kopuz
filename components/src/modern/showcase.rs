@@ -274,6 +274,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                         } else {
                                             "color: rgba(255,255,255,0.9);"
                                         },
+                                        ondoubleclick: move |evt| evt.stop_propagation(),
                                         "{track.title}"
                                     }
                                 }
@@ -289,6 +290,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                                 nav_ctrl.navigate_to_artist(artist.clone());
                                             }
                                         },
+                                        ondoubleclick: move |evt| evt.stop_propagation(),
                                         "{artist}"
                                     }
                                 }
@@ -304,6 +306,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                                 nav_ctrl.navigate_to_album(album_id.clone());
                                             }
                                         },
+                                        ondoubleclick: move |evt| evt.stop_propagation(),
                                         "{album}"
                                     }
                                 }
