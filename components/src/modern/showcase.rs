@@ -179,7 +179,12 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                     {
                         let idx = *idx;
                         let is_playing = currently_playing_idx == Some(display_idx);
-                        let is_selected = props.selected_tracks.contains(&track.path);
+                        let is_selected = props.is_selection_mode && props.selected_tracks.contains(&track.path);
+                        let selection_shadow = if is_selected {
+                            "inset 0 0 0 9999px rgba(255,255,255,0.07)"
+                        } else {
+                            "none"
+                        };
                         let track_dur = fmt_dur(track.duration);
                         let artist = track.artist.clone();
                         let album = track.album.clone();
@@ -217,11 +222,9 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                 key: "{track.path.display()}",
                                 class: "grid px-2 py-1.5 rounded-lg mx-1 group cursor-default transition-colors hover:bg-white/5",
                                 style: if is_playing {
-                                    format!("grid-template-columns: 40px 1fr 180px 180px 56px 40px; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent);")
-                                } else if is_selected {
-                                    "grid-template-columns: 40px 1fr 180px 180px 56px 40px; background: rgba(255,255,255,0.07);".to_string()
+                                    format!("grid-template-columns: 40px 1fr 180px 180px 56px 40px; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent); box-shadow: {selection_shadow};")
                                 } else {
-                                    "grid-template-columns: 40px 1fr 180px 180px 56px 40px;".to_string()
+                                    format!("grid-template-columns: 40px 1fr 180px 180px 56px 40px; box-shadow: {selection_shadow};")
                                 },
                                 ondoubleclick: move |_| {
                                     ctrl.queue.set(play_queue.clone());

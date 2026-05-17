@@ -42,6 +42,12 @@ pub fn TrackRow(
     let config = use_context::<Signal<AppConfig>>();
     let nav_ctrl = use_context::<NavigationController>();
     let is_modern = config.read().ui_style == UiStyle::Modern;
+    let show_selection_highlight = is_selection_mode && is_selected;
+    let selection_shadow = if show_selection_highlight {
+        "inset 0 0 0 9999px rgba(255,255,255,0.07)"
+    } else {
+        "none"
+    };
     let add_to_queue_text = i18n::t("add_to_queue").to_string();
     let add_to_playlist_text = i18n::t("add_to_playlist").to_string();
     let remove_from_playlist_text = i18n::t("remove_from_playlist").to_string();
@@ -141,11 +147,9 @@ pub fn TrackRow(
             div {
                 class: "grid px-2 py-1.5 rounded-lg mx-1 group cursor-default transition-colors hover:bg-white/5 select-none",
                 style: if is_currently_playing {
-                    "grid-template-columns: 40px 1fr 180px 180px 56px 40px; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent);"
-                } else if is_selected {
-                    "grid-template-columns: 40px 1fr 180px 180px 56px 40px; background: rgba(255,255,255,0.07);"
+                    format!("grid-template-columns: 40px 1fr 180px 180px 56px 40px; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent); box-shadow: {selection_shadow};")
                 } else {
-                    "grid-template-columns: 40px 1fr 180px 180px 56px 40px;"
+                    format!("grid-template-columns: 40px 1fr 180px 180px 56px 40px; box-shadow: {selection_shadow};")
                 },
                 onclick: move |evt| {
                     evt.stop_propagation();
@@ -323,11 +327,9 @@ pub fn TrackRow(
         div {
             class: "grid items-center p-2 rounded-lg hover:bg-white/5 group transition-colors relative select-none",
             style: if is_currently_playing {
-                "grid-template-columns: 40px minmax(0, 1fr) 200px 200px 64px 40px; column-gap: 1.5rem; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent);"
-            } else if is_selected {
-                "grid-template-columns: 40px minmax(0, 1fr) 200px 200px 64px 40px; column-gap: 1.5rem; background: rgba(255,255,255,0.07);"
+                format!("grid-template-columns: 40px minmax(0, 1fr) 200px 200px 64px 40px; column-gap: 1.5rem; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent); box-shadow: {selection_shadow};")
             } else {
-                "grid-template-columns: 40px minmax(0, 1fr) 200px 200px 64px 40px; column-gap: 1.5rem;"
+                format!("grid-template-columns: 40px minmax(0, 1fr) 200px 200px 64px 40px; column-gap: 1.5rem; box-shadow: {selection_shadow};")
             },
             onclick: move |evt| {
                 evt.stop_propagation();
