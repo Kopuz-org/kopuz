@@ -13,8 +13,14 @@ use components::{
 use dioxus::desktop::RequestAsyncResponder;
 #[cfg(not(target_arch = "wasm32"))]
 use dioxus::desktop::tao::dpi::LogicalSize;
+#[cfg(not(target_arch = "wasm32"))]
+use dioxus::desktop::tao::window::Icon;
 #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
 use dioxus::desktop::tao::platform::macos::WindowBuilderExtMacOS;
+#[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
+use dioxus::desktop::tao::platform::windows::WindowExtWindows;
+#[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
+use windows::Win32::Foundation::HWND;
 use dioxus::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
 use discord_presence::Presence;
@@ -32,6 +38,8 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod queue_state;
 mod web_storage;
+#[cfg(target_os = "windows")]
+mod windows_titlebar;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn migrate_legacy_locations() {
@@ -76,6 +84,14 @@ const QUEUE_STATE_PROGRESS_STEP_SECS: u64 = 5;
 
 #[cfg(not(target_arch = "wasm32"))]
 static PRESENCE: std::sync::OnceLock<Option<Arc<Presence>>> = std::sync::OnceLock::new();
+
+#[cfg(not(target_arch = "wasm32"))]
+fn build_window_icon() -> Option<Icon> {
+    let image = image::load_from_memory(include_bytes!("../assets/logo-512.png")).ok()?;
+    let image = image.into_rgba8();
+    let (width, height) = image.dimensions();
+    Icon::from_rgba(image.into_raw(), width, height).ok()
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -467,6 +483,10 @@ fn main() {
             .with_title("Kopuz")
             .with_resizable(true)
             .with_inner_size(LogicalSize::new(1350.0, 800.0));
+
+        if let Some(icon) = build_window_icon() {
+            window = window.with_window_icon(Some(icon));
+        }
 
         #[cfg(target_os = "macos")]
         {
@@ -942,6 +962,15 @@ fn App() -> Element {
         let mode = config.read().titlebar_mode;
         let win = dioxus::desktop::use_window();
         win.set_decorations(mode == config::TitlebarMode::System);
+    });
+
+    #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
+    use_effect(move || {
+        let mode = config.read().titlebar_mode;
+        let win = dioxus::desktop::use_window();
+        let hwnd = HWND(win.window.hwnd() as _);
+        windows_titlebar::install(hwnd);
+        windows_titlebar::set_custom_titlebar_enabled(mode == config::TitlebarMode::Custom);
     });
 
     use_effect(move || {
