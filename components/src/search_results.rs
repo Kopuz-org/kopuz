@@ -1,3 +1,4 @@
+use crate::showcase::{self, SortField};
 use crate::track_row::TrackRow;
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
@@ -31,25 +32,71 @@ pub fn SearchResults(
     let config = use_context::<Signal<AppConfig>>();
     let offline_tracks = config.read().offline_tracks.clone();
     let is_modern = config.read().ui_style == UiStyle::Modern;
+    let mut sort_state = use_signal(|| None);
+    let tracks_for_sorting: Vec<Track> = tracks.iter().map(|(t, _)| t.clone()).collect();
+    let sorted_indices = showcase::sorted_track_indices(&tracks_for_sorting, *sort_state.read());
+    let sorted_tracks: Vec<(Track, Option<utils::CoverUrl>)> = sorted_indices
+        .iter()
+        .map(|&idx| tracks[idx].clone())
+        .collect();
 
     rsx! {
         div { class: "mt-8 space-y-8",
             if !tracks.is_empty() {
                 div {
                     h2 { class: "text-xl font-semibold text-white/80 mb-4", "{i18n::t(\"tracks\")}" }
-                    if is_modern {
-                        div {
-                            class: "grid px-3 py-2 text-[10px] font-bold uppercase tracking-widest border-b mb-1",
-                            style: "grid-template-columns: 40px 1fr 180px 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);",
-                            div {}
-                            div { "{i18n::t(\"title\")}" }
-                            div { "{i18n::t(\"artist\")}" }
-                            div { class: "text-right pr-2", i { class: "fa-regular fa-clock" } }
-                            div {}
+                    div {
+                        class: if is_modern {
+                            "grid px-3 py-2 text-[10px] font-bold uppercase tracking-widest border-b mb-1"
+                        } else {
+                            "grid gap-6 px-2 py-2 border-b border-white/5 text-sm font-medium text-slate-500 mb-2 uppercase tracking-wider"
+                        },
+                        style: if is_modern {
+                            "grid-template-columns: 40px 1fr 180px 180px 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);"
+                        } else {
+                            "grid-template-columns: 40px minmax(0, 1fr) 200px 200px 64px 40px; align-items: center;"
+                        },
+                        div { "#" }
+                        button {
+                            class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
+                            onclick: move |_| {
+                                let next = showcase::next_sort_state(*sort_state.peek(), SortField::Title);
+                                sort_state.set(next);
+                            },
+                            "{i18n::t(\"title\")}"
+                            i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Title)} text-[10px]" }
                         }
+                        button {
+                            class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
+                            onclick: move |_| {
+                                let next = showcase::next_sort_state(*sort_state.peek(), SortField::Artist);
+                                sort_state.set(next);
+                            },
+                            "{i18n::t(\"artist\")}"
+                            i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Artist)} text-[10px]" }
+                        }
+                        button {
+                            class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
+                            onclick: move |_| {
+                                let next = showcase::next_sort_state(*sort_state.peek(), SortField::Album);
+                                sort_state.set(next);
+                            },
+                            "{i18n::t(\"album\")}"
+                            i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Album)} text-[10px]" }
+                        }
+                        button {
+                            class: "flex items-center justify-end gap-1 uppercase tracking-wider text-right hover:text-white transition-colors",
+                            onclick: move |_| {
+                                let next = showcase::next_sort_state(*sort_state.peek(), SortField::Duration);
+                                sort_state.set(next);
+                            },
+                            i { class: "fa-regular fa-clock" }
+                            i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Duration)} text-[10px]" }
+                        }
+                        div {}
                     }
                     div { class: if is_modern { "" } else { "space-y-2" },
-                        for (idx, (track, cover_url)) in tracks.iter().enumerate() {
+                        for (idx, (track, cover_url)) in sorted_tracks.iter().enumerate() {
                             {
                                 let track = track.clone();
                                 let track_key = track.path.display().to_string();
@@ -58,7 +105,7 @@ pub fn SearchResults(
                                 let track_queue = track.clone();
                                 let track_delete = track.clone();
                                 let is_menu_open = active_menu_track.read().as_ref() == Some(&track.path);
-                                let search_queue: Vec<Track> = tracks.iter().map(|(t, _)| t.clone()).collect();
+                                let search_queue: Vec<Track> = sorted_tracks.iter().map(|(t, _)| t.clone()).collect();
                                 let item_id: Option<String> = {
                                     let s = track.path.to_string_lossy();
                                     if s.starts_with("jellyfin:") {

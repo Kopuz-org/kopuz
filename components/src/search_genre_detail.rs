@@ -1,3 +1,4 @@
+use crate::showcase::{self, SortField};
 use crate::track_row::TrackRow;
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
@@ -31,6 +32,13 @@ pub fn SearchGenreDetail(
     let config = use_context::<Signal<AppConfig>>();
     let offline_tracks = config.read().offline_tracks.clone();
     let is_modern = config.read().ui_style == UiStyle::Modern;
+    let mut sort_state = use_signal(|| None);
+    let tracks_for_sorting: Vec<Track> = genre_tracks.iter().map(|(t, _)| t.clone()).collect();
+    let sorted_indices = showcase::sorted_track_indices(&tracks_for_sorting, *sort_state.read());
+    let sorted_genre_tracks: Vec<(Track, Option<utils::CoverUrl>)> = sorted_indices
+        .iter()
+        .map(|&idx| genre_tracks[idx].clone())
+        .collect();
 
     rsx! {
         div {
@@ -79,7 +87,7 @@ pub fn SearchGenreDetail(
                                     class: "inline-flex items-center justify-center gap-2 h-9 px-5 rounded-full text-sm font-semibold text-white transition-opacity hover:opacity-90 active:scale-95",
                                     style: "background: var(--color-indigo-500);",
                                     onclick: {
-                                        let tracks_play: Vec<Track> = genre_tracks.iter().map(|(t, _)| t.clone()).collect();
+                                        let tracks_play: Vec<Track> = sorted_genre_tracks.iter().map(|(t, _)| t.clone()).collect();
                                         move |_| {
                                             let is_shuffle = *ctrl.shuffle.peek();
                                             if is_shuffle {
@@ -100,7 +108,7 @@ pub fn SearchGenreDetail(
                                         "background: color-mix(in oklab, var(--color-indigo-500) 25%, transparent); border: 1px solid color-mix(in oklab, var(--color-indigo-500) 40%, transparent);"
                                     },
                                     onclick: {
-                                        let tracks_shuffle: Vec<Track> = genre_tracks.iter().map(|(t, _)| t.clone()).collect();
+                                        let tracks_shuffle: Vec<Track> = sorted_genre_tracks.iter().map(|(t, _)| t.clone()).collect();
                                         move |_| {
                                             ctrl.toggle_shuffle();
                                             ctrl.play_queue_shuffled(tracks_shuffle.clone());
@@ -139,19 +147,58 @@ pub fn SearchGenreDetail(
                 }
             }
 
-            if is_modern {
-                div {
-                    class: "grid px-3 py-2 text-[10px] font-bold uppercase tracking-widest border-b mb-1",
-                    style: "grid-template-columns: 40px 1fr 180px 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);",
-                    div {}
-                    div { "{i18n::t(\"title\")}" }
-                    div { "{i18n::t(\"artist\")}" }
-                    div { class: "text-right pr-2", i { class: "fa-regular fa-clock" } }
-                    div {}
+            div {
+                class: if is_modern {
+                    "grid px-3 py-2 text-[10px] font-bold uppercase tracking-widest border-b mb-1"
+                } else {
+                    "grid gap-6 px-2 py-2 border-b border-white/5 text-sm font-medium text-slate-500 mb-2 uppercase tracking-wider"
+                },
+                style: if is_modern {
+                    "grid-template-columns: 40px 1fr 180px 180px 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);"
+                } else {
+                    "grid-template-columns: 40px minmax(0, 1fr) 200px 200px 64px 40px; align-items: center;"
+                },
+                div { "#" }
+                button {
+                    class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
+                    onclick: move |_| {
+                        let next = showcase::next_sort_state(*sort_state.peek(), SortField::Title);
+                        sort_state.set(next);
+                    },
+                    "{i18n::t(\"title\")}"
+                    i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Title)} text-[10px]" }
                 }
+                button {
+                    class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
+                    onclick: move |_| {
+                        let next = showcase::next_sort_state(*sort_state.peek(), SortField::Artist);
+                        sort_state.set(next);
+                    },
+                    "{i18n::t(\"artist\")}"
+                    i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Artist)} text-[10px]" }
+                }
+                button {
+                    class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
+                    onclick: move |_| {
+                        let next = showcase::next_sort_state(*sort_state.peek(), SortField::Album);
+                        sort_state.set(next);
+                    },
+                    "{i18n::t(\"album\")}"
+                    i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Album)} text-[10px]" }
+                }
+                button {
+                    class: "flex items-center justify-end gap-1 uppercase tracking-wider text-right hover:text-white transition-colors",
+                    onclick: move |_| {
+                        let next = showcase::next_sort_state(*sort_state.peek(), SortField::Duration);
+                        sort_state.set(next);
+                    },
+                    i { class: "fa-regular fa-clock" }
+                    i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Duration)} text-[10px]" }
+                }
+                div {}
             }
             div { class: if is_modern { "pb-20" } else { "space-y-1 pb-20" },
-                 for (idx, (track, cover_url)) in genre_tracks.iter().enumerate() {
+                 for (idx, (track, cover_url)) in sorted_genre_tracks.iter().enumerate() {
                      {
                          let track = track.clone();
                          let track_key = track.path.display().to_string();
@@ -160,7 +207,7 @@ pub fn SearchGenreDetail(
                          let track_queue = track.clone();
                          let track_delete = track.clone();
                          let is_menu_open = active_menu_track.read().as_ref() == Some(&track.path);
-                         let genre_tracks_list: Vec<Track> = genre_tracks.iter().map(|(t, _)| t.clone()).collect();
+                         let genre_tracks_list: Vec<Track> = sorted_genre_tracks.iter().map(|(t, _)| t.clone()).collect();
                          let item_id: Option<String> = {
                              let s = track.path.to_string_lossy();
                              if s.starts_with("jellyfin:") {
