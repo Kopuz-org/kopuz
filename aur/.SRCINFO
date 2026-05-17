@@ -1,7 +1,7 @@
 pkgbase = kopuz
 	pkgdesc = A modern music player
-	pkgver = 0.5.5
-	pkgrel = 2
+	pkgver = 0.6.0
+	pkgrel = 1
 	url = https://github.com/temidaradev/kopuz
 	arch = x86_64
 	license = MIT
@@ -21,7 +21,7 @@ pkgbase = kopuz
 	depends = opus
 	options = !lto
 	options = !debug
-	source = kopuz-0.5.5.tar.gz::https://github.com/temidaradev/kopuz/archive/refs/tags/v0.5.5.tar.gz
-	sha256sums = 100c042a73b436a84f751abf51721bb26b3223d45b5d892ba0c81d41751e4a28
+	source = kopuz-0.6.0.tar.gz::https://github.com/temidaradev/kopuz/archive/refs/tags/v0.6.0.tar.gz
+	sha256sums = ace51aed719e114271e083210c222bf6078c6e47e4d0c0b692e8834d2bd525bf
 
 pkgname = kopuz
