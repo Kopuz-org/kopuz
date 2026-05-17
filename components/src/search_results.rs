@@ -34,6 +34,7 @@ pub fn SearchResults(
     let is_modern = config.read().ui_style == UiStyle::Modern;
     let sort_state = use_signal(|| None);
     let sorted_tracks = showcase::sorted_track_pairs(&tracks, *sort_state.read());
+    let search_queue: Vec<Track> = sorted_tracks.iter().map(|(t, _)| t.clone()).collect();
 
     rsx! {
         div { class: "mt-8 space-y-8",
@@ -87,8 +88,8 @@ pub fn SearchResults(
                                 let track_add = track.clone();
                                 let track_queue = track.clone();
                                 let track_delete = track.clone();
+                                let queue_source = search_queue.clone();
                                 let is_menu_open = active_menu_track.read().as_ref() == Some(&track.path);
-                                let search_queue: Vec<Track> = sorted_tracks.iter().map(|(t, _)| t.clone()).collect();
                                 let item_id: Option<String> = {
                                     let s = track.path.to_string_lossy();
                                     if s.starts_with("jellyfin:") {
@@ -141,7 +142,7 @@ pub fn SearchResults(
                                             }
                                         },
                                         on_play: move |_| {
-                                            queue.set(search_queue.clone());
+                                            queue.set(queue_source.clone());
                                             ctrl.play_track(idx);
                                         }
                                     }

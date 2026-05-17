@@ -34,6 +34,8 @@ pub fn SearchGenreDetail(
     let is_modern = config.read().ui_style == UiStyle::Modern;
     let sort_state = use_signal(|| None);
     let sorted_genre_tracks = showcase::sorted_track_pairs(&genre_tracks, *sort_state.read());
+    let genre_tracks_list: Vec<Track> =
+        sorted_genre_tracks.iter().map(|(t, _)| t.clone()).collect();
 
     rsx! {
         div {
@@ -82,7 +84,7 @@ pub fn SearchGenreDetail(
                                     class: "inline-flex items-center justify-center gap-2 h-9 px-5 rounded-full text-sm font-semibold text-white transition-opacity hover:opacity-90 active:scale-95",
                                     style: "background: var(--color-indigo-500);",
                                     onclick: {
-                                        let tracks_play: Vec<Track> = sorted_genre_tracks.iter().map(|(t, _)| t.clone()).collect();
+                                        let tracks_play = genre_tracks_list.clone();
                                         move |_| {
                                             let is_shuffle = *ctrl.shuffle.peek();
                                             if is_shuffle {
@@ -103,7 +105,7 @@ pub fn SearchGenreDetail(
                                         "background: color-mix(in oklab, var(--color-indigo-500) 25%, transparent); border: 1px solid color-mix(in oklab, var(--color-indigo-500) 40%, transparent);"
                                     },
                                     onclick: {
-                                        let tracks_shuffle: Vec<Track> = sorted_genre_tracks.iter().map(|(t, _)| t.clone()).collect();
+                                        let tracks_shuffle = genre_tracks_list.clone();
                                         move |_| {
                                             ctrl.toggle_shuffle();
                                             ctrl.play_queue_shuffled(tracks_shuffle.clone());
@@ -189,8 +191,8 @@ pub fn SearchGenreDetail(
                          let track_add = track.clone();
                          let track_queue = track.clone();
                          let track_delete = track.clone();
+                         let queue_source = genre_tracks_list.clone();
                          let is_menu_open = active_menu_track.read().as_ref() == Some(&track.path);
-                         let genre_tracks_list: Vec<Track> = sorted_genre_tracks.iter().map(|(t, _)| t.clone()).collect();
                          let item_id: Option<String> = {
                              let s = track.path.to_string_lossy();
                              if s.starts_with("jellyfin:") {
@@ -243,7 +245,7 @@ pub fn SearchGenreDetail(
                                      }
                                  },
                                  on_play: move |_| {
-                                     queue.set(genre_tracks_list.clone());
+                                     queue.set(queue_source.clone());
                                      ctrl.play_track(idx);
                                  }
                              }
