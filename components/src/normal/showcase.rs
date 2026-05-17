@@ -145,68 +145,73 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                          p { class: "text-lg", "{i18n::t(\"no_songs_here\")}" }
                      }
                  } else {
-                      div {
-                           class: "grid gap-6 px-2 py-2 border-b border-white/5 text-sm font-medium text-slate-500 mb-2 uppercase tracking-wider",
-                           style: "grid-template-columns: 40px minmax(0, 1fr) 200px 200px 64px 40px; align-items: center;",
-                           div { class: "flex items-center w-10 shrink-0",
-                               if props.is_selection_mode {
-                                   if let Some(handler) = props.on_select_all {
-                                       div { class: "mr-4 flex items-center justify-center w-6 h-6 shrink-0",
-                                           button {
-                                               class: if props.all_selected {
-                                                   "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
-                                               } else {
-                                                   "w-4 h-4 rounded border border-white/20 bg-white/5 hover:border-white/50 transition-colors"
-                                               },
-                                               aria_label: if props.all_selected { "Deselect all tracks" } else { "Select all tracks" },
-                                               onclick: move |_| handler.call(!props.all_selected),
-                                               if props.all_selected {
-                                                   i { class: "fa-solid fa-check", style: "font-size: 9px;" }
+                      div { class: "flex items-center mb-2",
+                           div {
+                               class: "grid flex-1 gap-6 px-2 py-2 border-b border-white/5 text-sm font-medium text-slate-500 uppercase tracking-wider",
+                               style: "grid-template-columns: 40px minmax(0, 1fr) 200px 200px 64px 40px; align-items: center;",
+                               div { class: "flex items-center w-10 shrink-0",
+                                   if props.is_selection_mode {
+                                       if let Some(handler) = props.on_select_all {
+                                           div { class: "mr-4 flex items-center justify-center w-6 h-6 shrink-0",
+                                               button {
+                                                   class: if props.all_selected {
+                                                       "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
+                                                   } else {
+                                                       "w-4 h-4 rounded border border-white/20 bg-white/5 hover:border-white/50 transition-colors"
+                                                   },
+                                                   aria_label: if props.all_selected { "Deselect all tracks" } else { "Select all tracks" },
+                                                   onclick: move |_| handler.call(!props.all_selected),
+                                                   if props.all_selected {
+                                                       i { class: "fa-solid fa-check", style: "font-size: 9px;" }
+                                                   }
                                                }
                                            }
                                        }
+                                   } else {
+                                       "#"
                                    }
-                               } else {
-                                   "#"
                                }
+                               button {
+                                   class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
+                                   onclick: move |_| {
+                                       let next = showcase::next_sort_state(*sort_state.peek(), SortField::Title);
+                                       sort_state.set(next);
+                                   },
+                                   "{i18n::t(\"title\")}"
+                                   i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Title)} text-[10px]" }
+                               }
+                               button {
+                                   class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
+                                   onclick: move |_| {
+                                       let next = showcase::next_sort_state(*sort_state.peek(), SortField::Artist);
+                                       sort_state.set(next);
+                                   },
+                                   "{i18n::t(\"artist\")}"
+                                   i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Artist)} text-[10px]" }
+                               }
+                               button {
+                                   class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
+                                   onclick: move |_| {
+                                       let next = showcase::next_sort_state(*sort_state.peek(), SortField::Album);
+                                       sort_state.set(next);
+                                   },
+                                   "{i18n::t(\"album\")}"
+                                   i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Album)} text-[10px]" }
+                               }
+                               button {
+                                   class: "flex items-center justify-end gap-1 uppercase tracking-wider text-right hover:text-white transition-colors",
+                                   onclick: move |_| {
+                                       let next = showcase::next_sort_state(*sort_state.peek(), SortField::Duration);
+                                       sort_state.set(next);
+                                   },
+                                   i { class: "fa-regular fa-clock" }
+                                   i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Duration)} text-[10px]" }
+                               }
+                               div {}
                            }
-                           button {
-                               class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
-                               onclick: move |_| {
-                                                                  let next = showcase::next_sort_state(*sort_state.peek(), SortField::Title);
-                                                                  sort_state.set(next);
-                                                              },
-                               "{i18n::t(\"title\")}"
-                               i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Title)} text-[10px]" }
+                           if props.is_reorderable && !props.is_selection_mode {
+                               div { class: "pr-2 shrink-0", style: "width: 22px;" }
                            }
-                           button {
-                               class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
-                               onclick: move |_| {
-                                                                  let next = showcase::next_sort_state(*sort_state.peek(), SortField::Artist);
-                                                                  sort_state.set(next);
-                                                              },
-                               "{i18n::t(\"artist\")}"
-                               i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Artist)} text-[10px]" }
-                           }
-                           button {
-                               class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
-                               onclick: move |_| {
-                                                                  let next = showcase::next_sort_state(*sort_state.peek(), SortField::Album);
-                                                                  sort_state.set(next);
-                                                              },
-                               "{i18n::t(\"album\")}"
-                               i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Album)} text-[10px]" }
-                           }
-                           button {
-                               class: "flex items-center justify-end gap-1 uppercase tracking-wider text-right hover:text-white transition-colors",
-                               onclick: move |_| {
-                                                                  let next = showcase::next_sort_state(*sort_state.peek(), SortField::Duration);
-                                                                  sort_state.set(next);
-                                                              },
-                               i { class: "fa-regular fa-clock" }
-                               i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Duration)} text-[10px]" }
-                           }
-                           div {}
                       }
 
                      for (display_idx, idx) in sorted_indices.iter().copied().enumerate() {
