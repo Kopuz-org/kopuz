@@ -1,5 +1,6 @@
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
+use components::showcase::{self, SortField};
 use components::track_row::TrackRow;
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
@@ -24,6 +25,7 @@ pub fn LocalFavorites(
     // Multi-selection state
     let mut is_selection_mode = use_signal(|| false);
     let mut selected_tracks = use_signal(|| HashSet::<PathBuf>::new());
+    let mut sort_state = use_signal(|| None);
 
     let displayed_tracks: Vec<(reader::models::Track, Option<utils::CoverUrl>)> = {
         let store = favorites_store.read();
@@ -50,8 +52,19 @@ pub fn LocalFavorites(
             .collect()
     };
 
-    let queue_tracks: Vec<reader::models::Track> =
+    let tracks_for_sorting: Vec<reader::models::Track> =
         displayed_tracks.iter().map(|(t, _)| t.clone()).collect();
+    let sorted_indices = showcase::sorted_track_indices(&tracks_for_sorting, *sort_state.read());
+    let sorted_displayed_tracks: Vec<(reader::models::Track, Option<utils::CoverUrl>)> =
+        sorted_indices
+            .iter()
+            .map(|&idx| displayed_tracks[idx].clone())
+            .collect();
+
+    let queue_tracks: Vec<reader::models::Track> = sorted_displayed_tracks
+        .iter()
+        .map(|(t, _)| t.clone())
+        .collect();
     let queue_tracks_for_selection = queue_tracks.clone();
 
     let currently_playing_idx: Option<usize> = {
@@ -70,7 +83,7 @@ pub fn LocalFavorites(
     let is_modern = config.read().ui_style == UiStyle::Modern;
 
     let tracks_nodes =
-        displayed_tracks
+        sorted_displayed_tracks
             .iter()
             .cloned()
             .enumerate()
@@ -288,10 +301,42 @@ pub fn LocalFavorites(
                         "grid-template-columns: 40px minmax(0, 1fr) 200px 200px 64px 40px; align-items: center;"
                     },
                     div {}
-                    div { "{i18n::t(\"title\")}" }
-                    div { "{i18n::t(\"artist\")}" }
-                    div { "{i18n::t(\"album\")}" }
-                    div { class: "text-right pr-2", i { class: "fa-regular fa-clock" } }
+                    button {
+                        class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
+                        onclick: move |_| {
+                            let next = showcase::next_sort_state(*sort_state.peek(), SortField::Title);
+                            sort_state.set(next);
+                        },
+                        "{i18n::t(\"title\")}"
+                        i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Title)} text-[10px]" }
+                    }
+                    button {
+                        class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
+                        onclick: move |_| {
+                            let next = showcase::next_sort_state(*sort_state.peek(), SortField::Artist);
+                            sort_state.set(next);
+                        },
+                        "{i18n::t(\"artist\")}"
+                        i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Artist)} text-[10px]" }
+                    }
+                    button {
+                        class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
+                        onclick: move |_| {
+                            let next = showcase::next_sort_state(*sort_state.peek(), SortField::Album);
+                            sort_state.set(next);
+                        },
+                        "{i18n::t(\"album\")}"
+                        i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Album)} text-[10px]" }
+                    }
+                    button {
+                        class: "flex items-center justify-end gap-1 uppercase tracking-wider text-right hover:text-white transition-colors",
+                        onclick: move |_| {
+                            let next = showcase::next_sort_state(*sort_state.peek(), SortField::Duration);
+                            sort_state.set(next);
+                        },
+                        i { class: "fa-regular fa-clock" }
+                        i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Duration)} text-[10px]" }
+                    }
                     div {}
                 }
                 div {
