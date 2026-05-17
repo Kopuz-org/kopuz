@@ -1,21 +1,26 @@
 #![cfg(target_os = "windows")]
 
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::MulDiv;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallWindowProcW, EnableMenuItem, GWL_STYLE, GWLP_WNDPROC, GetSystemMenu, GetWindowLongPtrW,
-    GetWindowRect, HTCAPTION, HTCLIENT, HTMAXBUTTON, HTSYSMENU, MF_BYCOMMAND, MF_ENABLED,
-    MF_GRAYED, SC_MAXIMIZE, SC_MOVE, SC_RESTORE, SC_SIZE, SetWindowLongPtrW, TPM_RETURNCMD,
-    TPM_RIGHTBUTTON, TrackPopupMenu, WM_NCHITTEST, WM_NCRBUTTONUP, WM_SYSCOMMAND, WNDPROC,
-    WS_MAXIMIZE,
+    CallWindowProcW, DefWindowProcW, EnableMenuItem, GWL_STYLE, GWLP_WNDPROC, GetSystemMenu,
+    GetWindowLongPtrW, GetWindowRect, HTCAPTION, HTCLIENT, HTMAXBUTTON, HTSYSMENU,
+    MF_BYCOMMAND, MF_ENABLED, MF_GRAYED, SC_MAXIMIZE, SC_MOVE, SC_RESTORE, SC_SIZE,
+    SetWindowLongPtrW, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_NCHITTEST,
+    WM_NCRBUTTONUP, WM_SYSCOMMAND, WNDPROC, WS_MAXIMIZE,
 };
 
 static CUSTOM_TITLEBAR_ENABLED: AtomicBool = AtomicBool::new(false);
-static INSTALLED_HWND: OnceLock<isize> = OnceLock::new();
-static PREV_WNDPROC: OnceLock<isize> = OnceLock::new();
+static SUBCLASS_STATE: OnceLock<Mutex<SubclassState>> = OnceLock::new();
+
+#[derive(Default)]
+struct SubclassState {
+    hwnd: Option<isize>,
+    prev_wndproc: Option<isize>,
+}
 
 const TITLEBAR_HEIGHT_DIP: i32 = 36;
 const TITLEBAR_BUTTON_WIDTH_DIP: i32 = 44;
@@ -30,10 +35,18 @@ pub fn install(hwnd: HWND) {
         return;
     }
 
-    if let Some(installed) = INSTALLED_HWND.get()
-        && *installed == hwnd.0 as isize
-    {
+    let Ok(mut state) = subclass_state().lock() else {
         return;
+    };
+
+    if state.hwnd == Some(hwnd.0 as isize) && state.prev_wndproc.is_some() {
+        return;
+    }
+
+    if let (Some(old_hwnd), Some(old_prev)) = (state.hwnd, state.prev_wndproc) {
+        unsafe {
+            let _ = SetWindowLongPtrW(HWND(old_hwnd as _), GWLP_WNDPROC, old_prev);
+        }
     }
 
     let prev = unsafe {
@@ -45,8 +58,8 @@ pub fn install(hwnd: HWND) {
     };
 
     if prev != 0 {
-        let _ = PREV_WNDPROC.set(prev);
-        let _ = INSTALLED_HWND.set(hwnd.0 as isize);
+        state.hwnd = Some(hwnd.0 as isize);
+        state.prev_wndproc = Some(prev);
     }
 }
 
@@ -179,10 +192,24 @@ fn point_from_lparam(lparam: LPARAM) -> POINT {
 }
 
 fn call_prev_wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    let Some(prev) = PREV_WNDPROC.get().copied() else {
-        return LRESULT(0);
+    let prev = {
+        let Ok(state) = subclass_state().lock() else {
+            return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
+        };
+        if state.hwnd != Some(hwnd.0 as isize) {
+            return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
+        }
+        state.prev_wndproc
+    };
+
+    let Some(prev) = prev else {
+        return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
     };
 
     let prev_proc: WNDPROC = unsafe { std::mem::transmute(prev) };
     unsafe { CallWindowProcW(prev_proc, hwnd, msg, wparam, lparam) }
+}
+
+fn subclass_state() -> &'static Mutex<SubclassState> {
+    SUBCLASS_STATE.get_or_init(|| Mutex::new(SubclassState::default()))
 }
