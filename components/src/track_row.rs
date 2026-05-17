@@ -141,11 +141,11 @@ pub fn TrackRow(
             div {
                 class: "grid px-2 py-1.5 rounded-lg mx-1 group cursor-default transition-colors hover:bg-white/5 select-none",
                 style: if is_currently_playing {
-                    "grid-template-columns: 40px 1fr 180px 56px 40px; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent);"
+                    "grid-template-columns: 40px 1fr 180px 180px 56px 40px; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent);"
                 } else if is_selected {
-                    "grid-template-columns: 40px 1fr 180px 56px 40px; background: rgba(255,255,255,0.07);"
+                    "grid-template-columns: 40px 1fr 180px 180px 56px 40px; background: rgba(255,255,255,0.07);"
                 } else {
-                    "grid-template-columns: 40px 1fr 180px 56px 40px;"
+                    "grid-template-columns: 40px 1fr 180px 180px 56px 40px;"
                 },
                 onclick: move |evt| {
                     evt.stop_propagation();
@@ -257,6 +257,23 @@ pub fn TrackRow(
                             }
                         },
                         "{track.artist}"
+                    }
+                }
+
+                div { class: "flex items-center min-w-0 pr-3",
+                    span {
+                        class: "text-sm truncate cursor-pointer hover:underline",
+                        style: "color: rgba(255,255,255,0.35);",
+                        onclick: {
+                            let album_id = track.album_id.clone();
+                            move |evt: MouseEvent| {
+                                evt.stop_propagation();
+                                if !is_selection_mode {
+                                    nav_ctrl.navigate_to_album(album_id.clone());
+                                }
+                            }
+                        },
+                        "{track.album}"
                     }
                 }
 
@@ -400,6 +417,7 @@ pub fn TrackRow(
             div { class: "min-w-0 pr-4",
                 p {
                     class: "text-sm text-slate-500 truncate cursor-pointer hover:underline hover:text-slate-400 transition-colors",
+                    style: "color: rgba(255,255,255,0.45);",
                     onclick: {
                         let artist = track.artist.clone();
                         move |evt: MouseEvent| {
@@ -416,6 +434,7 @@ pub fn TrackRow(
             div { class: "min-w-0 pr-4",
                 p {
                     class: "text-sm text-slate-500 truncate cursor-pointer hover:underline hover:text-slate-400 transition-colors",
+                    style: "color: rgba(255,255,255,0.3);",
                     onclick: {
                         let album_id = track.album_id.clone();
                         move |evt: MouseEvent| {
@@ -430,7 +449,7 @@ pub fn TrackRow(
             }
 
             div { class: "flex items-center justify-end",
-                span { class: "text-xs font-mono text-slate-500", "{duration_str}" }
+                span { class: "text-xs font-mono text-slate-500", style: "color: rgba(255,255,255,0.3);", "{duration_str}" }
             }
 
             div { class: "flex items-center justify-end",

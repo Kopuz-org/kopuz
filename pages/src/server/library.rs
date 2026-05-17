@@ -567,16 +567,23 @@ pub fn JellyfinLibrary(
                 }
             }
 
-            if is_modern {
-                div {
-                    class: "grid px-3 py-2 text-[10px] font-bold uppercase tracking-widest border-b mb-1",
-                    style: "grid-template-columns: 40px 1fr 180px 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);",
-                    div {}
-                    div { "{i18n::t(\"title\")}" }
-                    div { "{i18n::t(\"artist\")}" }
-                    div { class: "text-right pr-2", i { class: "fa-regular fa-clock" } }
-                    div {}
-                }
+            div {
+                class: if is_modern {
+                    "grid px-3 py-2 text-[10px] font-bold uppercase tracking-widest border-b mb-1"
+                } else {
+                    "grid gap-6 px-2 py-2 border-b border-white/5 text-sm font-medium text-slate-500 mb-2 uppercase tracking-wider"
+                },
+                style: if is_modern {
+                    "grid-template-columns: 40px 1fr 180px 180px 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);"
+                } else {
+                    "grid-template-columns: 40px minmax(0, 1fr) 200px 200px 64px 40px; align-items: center;"
+                },
+                div {}
+                div { "{i18n::t(\"title\")}" }
+                div { "{i18n::t(\"artist\")}" }
+                div { "{i18n::t(\"album\")}" }
+                div { class: "text-right pr-2", i { class: "fa-regular fa-clock" } }
+                div {}
             }
 
             div {
