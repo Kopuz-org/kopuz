@@ -58,6 +58,7 @@
             shellHook = ''
               export RUSTFLAGS="-C link-arg=-fuse-ld=lld"
               export GIO_MODULE_DIR="${pkgs.glib-networking}/lib/gio/modules/"
+              export GSETTINGS_SCHEMA_DIR=${pkgs.glib.getSchemaPath pkgs.gtk3}
               export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath buildInputs}:$LD_LIBRARY_PATH"
               export WEBKIT_DISABLE_COMPOSITING_MODE="1"
             '';
