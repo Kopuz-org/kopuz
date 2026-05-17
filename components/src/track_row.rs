@@ -399,7 +399,7 @@ pub fn TrackRow(
                     style: if is_currently_playing {
                         "color: var(--color-indigo-500);"
                     } else {
-                        "opacity: 0.9;"
+                        "color: rgba(255,255,255,0.9);"
                     },
                     onclick: {
                         let album_id = track.album_id.clone();
