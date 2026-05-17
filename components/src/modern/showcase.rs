@@ -138,8 +138,8 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                 }
             } else {
                 div {
-                    class: "grid px-6 py-2 text-[10px] font-bold uppercase tracking-widest border-b",
-                    style: "grid-template-columns: 40px 1fr 200px 200px 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);",
+                    class: "grid px-3 py-2 text-[10px] font-bold uppercase tracking-widest border-b mb-1",
+                    style: "grid-template-columns: 40px 1fr 180px 180px 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);",
                     div { class: "flex items-center", "#" }
                     button {
                         class: "flex items-center gap-1 uppercase tracking-widest text-left hover:text-white transition-colors",
@@ -220,13 +220,13 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                         rsx! {
                             div {
                                 key: "{track.path.display()}",
-                                class: "grid px-6 py-1.5 rounded-lg mx-2 group cursor-default transition-colors hover:bg-white/5",
+                                class: "grid px-2 py-1.5 rounded-lg mx-1 group cursor-default transition-colors hover:bg-white/5",
                                 style: if is_playing {
-                                    format!("grid-template-columns: 40px 1fr 200px 200px 56px 40px; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent);")
+                                    format!("grid-template-columns: 40px 1fr 180px 180px 56px 40px; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent);")
                                 } else if is_selected {
-                                    "grid-template-columns: 40px 1fr 200px 200px 56px 40px; background: rgba(255,255,255,0.07);".to_string()
+                                    "grid-template-columns: 40px 1fr 180px 180px 56px 40px; background: rgba(255,255,255,0.07);".to_string()
                                 } else {
-                                    "grid-template-columns: 40px 1fr 200px 200px 56px 40px;".to_string()
+                                    "grid-template-columns: 40px 1fr 180px 180px 56px 40px;".to_string()
                                 },
                                 ondoubleclick: move |_| {
                                     ctrl.queue.set(play_queue.clone());
