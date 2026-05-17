@@ -1,5 +1,5 @@
-use crate::dots_menu::{DotsMenu, MenuAction};
 use crate::NavigationController;
+use crate::dots_menu::{DotsMenu, MenuAction};
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use reader::models::Track;
@@ -42,6 +42,12 @@ pub fn TrackRow(
     let config = use_context::<Signal<AppConfig>>();
     let nav_ctrl = use_context::<NavigationController>();
     let is_modern = config.read().ui_style == UiStyle::Modern;
+    let show_selection_highlight = is_selection_mode && is_selected;
+    let selection_shadow = if show_selection_highlight {
+        "inset 0 0 0 9999px rgba(255,255,255,0.07)"
+    } else {
+        "none"
+    };
     let add_to_queue_text = i18n::t("add_to_queue").to_string();
     let add_to_playlist_text = i18n::t("add_to_playlist").to_string();
     let remove_from_playlist_text = i18n::t("remove_from_playlist").to_string();
@@ -141,11 +147,9 @@ pub fn TrackRow(
             div {
                 class: "grid px-2 py-1.5 rounded-lg mx-1 group cursor-default transition-colors hover:bg-white/5 select-none",
                 style: if is_currently_playing {
-                    "grid-template-columns: 40px 1fr 180px 56px 40px; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent);"
-                } else if is_selected {
-                    "grid-template-columns: 40px 1fr 180px 56px 40px; background: rgba(255,255,255,0.07);"
+                    format!("grid-template-columns: 40px 1fr 180px 180px 56px 40px; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent); box-shadow: {selection_shadow};")
                 } else {
-                    "grid-template-columns: 40px 1fr 180px 56px 40px;"
+                    format!("grid-template-columns: 40px 1fr 180px 180px 56px 40px; box-shadow: {selection_shadow};")
                 },
                 onclick: move |evt| {
                     evt.stop_propagation();
@@ -233,6 +237,7 @@ pub fn TrackRow(
                                 }
                             }
                         },
+                        ondoubleclick: move |evt| evt.stop_propagation(),
                         "{track.title}"
                     }
                     if is_downloaded {
@@ -256,7 +261,26 @@ pub fn TrackRow(
                                 }
                             }
                         },
+                        ondoubleclick: move |evt| evt.stop_propagation(),
                         "{track.artist}"
+                    }
+                }
+
+                div { class: "flex items-center min-w-0 pr-3",
+                    span {
+                        class: "text-sm truncate cursor-pointer hover:underline",
+                        style: "color: rgba(255,255,255,0.35);",
+                        onclick: {
+                            let album_id = track.album_id.clone();
+                            move |evt: MouseEvent| {
+                                evt.stop_propagation();
+                                if !is_selection_mode {
+                                    nav_ctrl.navigate_to_album(album_id.clone());
+                                }
+                            }
+                        },
+                        ondoubleclick: move |evt| evt.stop_propagation(),
+                        "{track.album}"
                     }
                 }
 
@@ -301,16 +325,14 @@ pub fn TrackRow(
         };
     }
 
-    rsx! {
+    // normal UI
+    return rsx! {
         div {
-            class: format!(
-                "flex items-center p-2 rounded-lg hover:bg-white/5 group transition-colors relative select-none {}",
-                if is_selected { "bg-white/10" } else { "" }
-            ),
+            class: "grid items-center p-2 rounded-lg hover:bg-white/5 group transition-colors relative select-none",
             style: if is_currently_playing {
-                "background-color: color-mix(in oklab, var(--color-indigo-500) 12%, transparent);"
+                format!("grid-template-columns: 40px minmax(0, 1fr) 200px 200px 64px 40px; column-gap: 1.5rem; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent); box-shadow: {selection_shadow};")
             } else {
-                ""
+                format!("grid-template-columns: 40px minmax(0, 1fr) 200px 200px 64px 40px; column-gap: 1.5rem; box-shadow: {selection_shadow};")
             },
             onclick: move |evt| {
                 evt.stop_propagation();
@@ -338,8 +360,8 @@ pub fn TrackRow(
                 }
             },
 
-            if on_select.is_some() && is_selection_mode {
-                div { class: "mr-4 flex items-center justify-center w-6 h-6 shrink-0",
+            div { class: "flex items-center w-10 shrink-0",
+                if on_select.is_some() && is_selection_mode {
                     button {
                         class: if is_selected {
                             "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
@@ -355,31 +377,34 @@ pub fn TrackRow(
                             i { class: "fa-solid fa-check", style: "font-size: 9px;" }
                         }
                     }
+                } else if is_currently_playing {
+                    i { class: "fa-solid fa-volume-high text-xs", style: "color: var(--color-indigo-500);" }
+                } else if let Some(n) = row_num {
+                    span { class: "text-xs text-slate-500", "{n}" }
                 }
             }
 
-            div { class: "relative w-10 h-10 bg-white/5 rounded overflow-hidden flex items-center justify-center mr-4 shrink-0",
-                i { class: "fa-solid fa-music text-white/20 absolute" }
-                if let Some(url) = cover_url {
-                    div {
-                        class: "absolute inset-0 bg-cover bg-center",
-                        style: "background-image: url('{url.as_ref()}');"
+            div { class: "flex items-center min-w-0 pr-4",
+                div { class: "relative w-10 h-10 bg-white/5 rounded overflow-hidden flex items-center justify-center mr-4 shrink-0",
+                    i { class: "fa-solid fa-music text-white/20 absolute" }
+                    if let Some(url) = cover_url {
+                        div {
+                            class: "absolute inset-0 bg-cover bg-center",
+                            style: "background-image: url('{url.as_ref()}');"
+                        }
+                    }
+                    if is_downloaded && !is_currently_playing {
+                        div { class: "absolute bottom-0 right-0 w-3 h-3 bg-indigo-500 rounded-tl flex items-center justify-center",
+                            i { class: "fa-solid fa-check text-white", style: "font-size: 6px;" }
+                        }
                     }
                 }
-                if is_downloaded && !is_currently_playing {
-                    div { class: "absolute bottom-0 right-0 w-3 h-3 bg-indigo-500 rounded-tl flex items-center justify-center",
-                        i { class: "fa-solid fa-check text-white", style: "font-size: 6px;" }
-                    }
-                }
-            }
-
-            div { class: "flex-1 min-w-0 pr-4",
                 p {
                     class: "text-sm font-medium truncate cursor-pointer hover:underline",
                     style: if is_currently_playing {
                         "color: var(--color-indigo-500);"
                     } else {
-                        "opacity: 0.9;"
+                        "color: rgba(255,255,255,0.9);"
                     },
                     onclick: {
                         let album_id = track.album_id.clone();
@@ -390,10 +415,15 @@ pub fn TrackRow(
                             }
                         }
                     },
+                    ondoubleclick: move |evt| evt.stop_propagation(),
                     "{track.title}"
                 }
+            }
+
+            div { class: "min-w-0 pr-4",
                 p {
-                    class: "text-xs text-slate-500 truncate cursor-pointer hover:underline hover:text-slate-400 transition-colors",
+                    class: "text-sm text-slate-500 truncate cursor-pointer hover:underline hover:text-slate-400 transition-colors",
+                    style: "color: rgba(255,255,255,0.45);",
                     onclick: {
                         let artist = track.artist.clone();
                         move |evt: MouseEvent| {
@@ -403,44 +433,69 @@ pub fn TrackRow(
                             }
                         }
                     },
+                    ondoubleclick: move |evt| evt.stop_propagation(),
                     "{track.artist}"
                 }
             }
 
-            if !is_selection_mode {
-                DotsMenu {
-                    actions,
-                    is_open: is_menu_open,
-                    on_open: move |_| on_click_menu.call(()),
-                    on_close: move |_| on_close_menu.call(()),
-                    button_class: "opacity-0 group-hover:opacity-100 focus:opacity-100".to_string(),
-                    anchor: "right".to_string(),
-                    on_action: move |idx: usize| {
-                        if let Some(queue_idx) = add_to_queue_idx {
-                            if idx == queue_idx {
-                                if let Some(handler) = on_queue {
-                                    handler.call(());
-                                }
-                                return;
+            div { class: "min-w-0 pr-4",
+                p {
+                    class: "text-sm text-slate-500 truncate cursor-pointer hover:underline hover:text-slate-400 transition-colors",
+                    style: "color: rgba(255,255,255,0.3);",
+                    onclick: {
+                        let album_id = track.album_id.clone();
+                        move |evt: MouseEvent| {
+                            evt.stop_propagation();
+                            if !is_selection_mode {
+                                nav_ctrl.navigate_to_album(album_id.clone());
                             }
-                        }
-
-                        if idx == add_to_playlist_idx {
-                            on_add_to_playlist.call(());
-                        } else if remove_action_idx == Some(idx) {
-                            if let Some(handler) = on_remove_from_playlist {
-                                handler.call(());
-                            }
-                        } else if has_download && idx == download_action_idx {
-                            if let Some(handler) = on_download {
-                                handler.call(());
-                            }
-                        } else if idx == delete_action_idx {
-                            on_delete.call(());
                         }
                     },
+                    ondoubleclick: move |evt| evt.stop_propagation(),
+                    "{track.album}"
+                }
+            }
+
+            div { class: "flex items-center justify-end",
+                span { class: "text-xs font-mono text-slate-500", style: "color: rgba(255,255,255,0.3);", "{duration_str}" }
+            }
+
+            div { class: "flex items-center justify-end",
+                if !is_selection_mode {
+                    DotsMenu {
+                        actions,
+                        is_open: is_menu_open,
+                        on_open: move |_| on_click_menu.call(()),
+                        on_close: move |_| on_close_menu.call(()),
+                        button_class: "opacity-0 group-hover:opacity-100 focus:opacity-100".to_string(),
+                        anchor: "right".to_string(),
+                        on_action: move |idx: usize| {
+                            if let Some(queue_idx) = add_to_queue_idx {
+                                if idx == queue_idx {
+                                    if let Some(handler) = on_queue {
+                                        handler.call(());
+                                    }
+                                    return;
+                                }
+                            }
+
+                            if idx == add_to_playlist_idx {
+                                on_add_to_playlist.call(());
+                            } else if remove_action_idx == Some(idx) {
+                                if let Some(handler) = on_remove_from_playlist {
+                                    handler.call(());
+                                }
+                            } else if has_download && idx == download_action_idx {
+                                if let Some(handler) = on_download {
+                                    handler.call(());
+                                }
+                            } else if idx == delete_action_idx {
+                                on_delete.call(());
+                            }
+                        },
+                    }
                 }
             }
         }
-    }
+    };
 }

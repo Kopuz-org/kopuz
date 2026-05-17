@@ -3,6 +3,7 @@ use ::server::jellyfin::JellyfinClient;
 use ::server::subsonic::SubsonicClient;
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
+use components::showcase::{self, SortField};
 use components::track_row::TrackRow;
 use config::{AppConfig, MusicService, UiStyle};
 use dioxus::prelude::*;
@@ -27,6 +28,7 @@ pub fn JellyfinFavorites(
     // Multi-selection state
     let mut is_selection_mode = use_signal(|| false);
     let mut selected_tracks = use_signal(|| HashSet::<PathBuf>::new());
+    let sort_state = use_signal(|| None);
     let mut show_playlist_modal = use_signal(|| false);
     let mut selected_track_for_playlist = use_signal(|| None::<PathBuf>);
     let download_queue = use_context::<Signal<DownloadQueue>>();
@@ -124,26 +126,30 @@ pub fn JellyfinFavorites(
             .collect()
     };
 
-    let queue_tracks: Vec<reader::models::Track> =
-        displayed_tracks.iter().map(|(t, _)| t.clone()).collect();
+    let sorted_displayed_tracks =
+        showcase::sorted_track_pairs(&displayed_tracks, *sort_state.read());
 
-    let currently_playing_idx: Option<usize> = {
+    let queue_tracks: Vec<reader::models::Track> = sorted_displayed_tracks
+        .iter()
+        .map(|(t, _)| t.clone())
+        .collect();
+
+    let currently_playing_path = {
         let queue = ctrl.queue.read();
-        let q_idx = *ctrl.current_queue_index.read();
-        if queue.len() == queue_tracks.len()
-            && queue.iter().zip(queue_tracks.iter()).all(|(q, t)| q.path == t.path)
-        {
-            Some(q_idx)
+        let idx = *ctrl.current_queue_index.read();
+        let queue_idx = if *ctrl.shuffle.read() {
+            ctrl.shuffle_order.read().get(idx).copied().unwrap_or(idx)
         } else {
-            None
-        }
+            idx
+        };
+        queue.get(queue_idx).map(|track| track.path.clone())
     };
 
-    let displayed_tracks_for_selection = displayed_tracks.clone();
+    let displayed_tracks_for_selection = sorted_displayed_tracks.clone();
     let is_empty = displayed_tracks.is_empty();
     let is_modern = config.read().ui_style == UiStyle::Modern;
 
-    let tracks_nodes = displayed_tracks
+    let tracks_nodes = sorted_displayed_tracks
         .iter()
         .cloned()
         .enumerate()
@@ -157,7 +163,7 @@ pub fn JellyfinFavorites(
             let track_key = format!("{}-{}", track.path.display(), idx);
             let is_menu_open = active_menu_track.read().as_ref() == Some(&track.path);
             let is_selected = selected_tracks.read().contains(&track_path);
-            let is_currently_playing = currently_playing_idx == Some(idx);
+            let matches_current_path = currently_playing_path.as_ref() == Some(&track.path);
 
             let path_str = track.path.to_string_lossy().to_string();
             let item_id: String = path_str.split(':').nth(1).unwrap_or("").to_string();
@@ -178,7 +184,7 @@ pub fn JellyfinFavorites(
                     cover_url: cover_url.clone(),
                     row_num: Some(idx + 1),
                     is_menu_open,
-                    is_currently_playing,
+                    is_currently_playing: matches_current_path,
                     is_selection_mode: is_selection_mode(),
                     is_selected,
                     is_downloaded,
@@ -427,16 +433,43 @@ pub fn JellyfinFavorites(
                     }
                     span { "{i18n::t(\"select_all\")}" }
                 }
-                if is_modern {
-                    div {
-                        class: "grid px-3 py-2 text-[10px] font-bold uppercase tracking-widest border-b mb-1",
-                        style: "grid-template-columns: 40px 1fr 180px 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);",
-                        div {}
-                        div { "{i18n::t(\"title\")}" }
-                        div { "{i18n::t(\"artist\")}" }
-                        div { class: "text-right pr-2", i { class: "fa-regular fa-clock" } }
-                        div {}
+                div {
+                    class: if is_modern {
+                        "grid px-3 py-2 text-[10px] font-bold uppercase tracking-widest border-b mb-1"
+                    } else {
+                        "grid gap-6 px-2 py-2 border-b border-white/5 text-sm font-medium text-slate-500 mb-2 uppercase tracking-wider"
+                    },
+                    style: if is_modern {
+                        "grid-template-columns: 40px 1fr 180px 180px 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);"
+                    } else {
+                        "grid-template-columns: 40px minmax(0, 1fr) 200px 200px 64px 40px; align-items: center;"
+                    },
+                    div {}
+                    button {
+                        class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
+                        onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Title),
+                        "{i18n::t(\"title\")}"
+                        i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Title)} text-[10px]" }
                     }
+                    button {
+                        class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
+                        onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Artist),
+                        "{i18n::t(\"artist\")}"
+                        i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Artist)} text-[10px]" }
+                    }
+                    button {
+                        class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
+                        onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Album),
+                        "{i18n::t(\"album\")}"
+                        i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Album)} text-[10px]" }
+                    }
+                    button {
+                        class: "flex items-center justify-end gap-1 uppercase tracking-wider text-right hover:text-white transition-colors",
+                        onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Duration),
+                        i { class: "fa-regular fa-clock" }
+                        i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Duration)} text-[10px]" }
+                    }
+                    div {}
                 }
                 div {
                     class: if is_modern { "" } else { "space-y-1" },

@@ -1,5 +1,5 @@
 use crate::reorder_buttons::ReorderButtons;
-use crate::showcase::ShowcaseProps;
+use crate::showcase::{self, ShowcaseProps, SortField};
 use crate::track_row::TrackRow;
 use config::{AppConfig, MusicService, MusicSource};
 use dioxus::prelude::*;
@@ -16,18 +16,35 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     let is_server_source = config.read().active_source == MusicSource::Server;
 
     let offline_tracks = config.read().offline_tracks.clone();
+    let sort_state = use_signal(|| None);
+    let indexed_tracks: Vec<_> = props
+        .tracks
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(idx, track)| (track, idx))
+        .collect();
+    let sorted_track_pairs = showcase::sorted_track_pairs(&indexed_tracks, *sort_state.read());
+    let sorted_tracks: Vec<_> = sorted_track_pairs
+        .iter()
+        .map(|(track, _)| track.clone())
+        .collect();
 
-    let currently_playing_idx: Option<usize> = {
+    let currently_playing_path = {
         let queue = ctrl.queue.read();
         let idx = *ctrl.current_queue_index.read();
-        if queue.len() == props.tracks.len()
-            && queue.iter().zip(props.tracks.iter()).all(|(q, t)| q.path == t.path)
-        {
-            Some(idx)
+        let queue_idx = if *ctrl.shuffle.read() {
+            ctrl.shuffle_order.read().get(idx).copied().unwrap_or(idx)
         } else {
-            None
-        }
+            idx
+        };
+        queue.get(queue_idx).map(|track| track.path.clone())
     };
+    let current_song_title = ctrl.current_song_title.read().clone();
+    let current_song_artist = ctrl.current_song_artist.read().clone();
+    let current_song_album = ctrl.current_song_album.read().clone();
+    let current_song_duration = *ctrl.current_song_duration.read();
+    let tracks_for_play_all = sorted_tracks.clone();
 
     let all_downloaded = !props.tracks.is_empty()
         && props.tracks.iter().all(|t| {
@@ -97,7 +114,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                         }
                         button {
                              class: "w-14 h-14 rounded-full bg-indigo-500 hover:bg-indigo-400 text-black flex items-center justify-center transition-transform hover:scale-105",
-                             onclick: move |_| props.on_play_all.call(()),
+                             onclick: move |_| ctrl.play_queue_linear(tracks_for_play_all.clone()),
                              i { class: "fa-solid fa-play text-xl ml-1" }
                          }
                          if props.on_download_all.is_some() || props.on_delete_all.is_some() {
@@ -135,35 +152,66 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                          p { class: "text-lg", "{i18n::t(\"no_songs_here\")}" }
                      }
                  } else {
-                      div { class: "grid grid-cols-[auto_1fr_1fr_auto_auto] gap-4 px-2 py-2 border-b border-white/5 text-sm font-medium text-slate-500 mb-2 uppercase tracking-wider",
-                           div { class: "flex items-center w-24 shrink-0",
-                               if props.is_selection_mode {
-                                   if let Some(handler) = props.on_select_all {
-                                       div { class: "mr-4 flex items-center justify-center w-6 h-6 shrink-0",
-                                           button {
-                                               class: if props.all_selected {
-                                                   "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
-                                               } else {
-                                                   "w-4 h-4 rounded border border-white/20 bg-white/5 hover:border-white/50 transition-colors"
-                                               },
-                                               aria_label: if props.all_selected { "Deselect all tracks" } else { "Select all tracks" },
-                                               onclick: move |_| handler.call(!props.all_selected),
-                                               if props.all_selected {
-                                                   i { class: "fa-solid fa-check", style: "font-size: 9px;" }
+                      div { class: "flex items-center mb-2",
+                           div {
+                               class: "grid flex-1 gap-6 px-2 py-2 border-b border-white/5 text-sm font-medium text-slate-500 uppercase tracking-wider",
+                               style: "grid-template-columns: 40px minmax(0, 1fr) 200px 200px 64px 40px; align-items: center;",
+                               div { class: "flex items-center w-10 shrink-0",
+                                   if props.is_selection_mode {
+                                       if let Some(handler) = props.on_select_all {
+                                           div { class: "mr-4 flex items-center justify-center w-6 h-6 shrink-0",
+                                               button {
+                                                   class: if props.all_selected {
+                                                       "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
+                                                   } else {
+                                                       "w-4 h-4 rounded border border-white/20 bg-white/5 hover:border-white/50 transition-colors"
+                                                   },
+                                                   aria_label: if props.all_selected { "Deselect all tracks" } else { "Select all tracks" },
+                                                   onclick: move |_| handler.call(!props.all_selected),
+                                                   if props.all_selected {
+                                                       i { class: "fa-solid fa-check", style: "font-size: 9px;" }
+                                                   }
                                                }
                                            }
                                        }
+                                   } else {
+                                       "#"
                                    }
-                               } else {
-                                   "#"
                                }
+                               button {
+                                   class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
+                                   onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Title),
+                                   "{i18n::t(\"title\")}"
+                                   i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Title)} text-[10px]" }
+                               }
+                               button {
+                                   class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
+                                   onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Artist),
+                                   "{i18n::t(\"artist\")}"
+                                   i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Artist)} text-[10px]" }
+                               }
+                               button {
+                                   class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
+                                   onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Album),
+                                   "{i18n::t(\"album\")}"
+                                   i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Album)} text-[10px]" }
+                               }
+                               button {
+                                   class: "flex items-center justify-end gap-1 uppercase tracking-wider text-right hover:text-white transition-colors",
+                                   onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Duration),
+                                   i { class: "fa-regular fa-clock" }
+                                   i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Duration)} text-[10px]" }
+                               }
+                               div {}
                            }
-                           div { "{i18n::t(\"title\")}" }
-                           div { "{i18n::t(\"artist\")}" }
+                           if props.is_reorderable && !props.is_selection_mode {
+                               div { class: "pr-2 shrink-0", style: "width: 22px;" }
+                           }
                       }
 
-                     for (idx, track) in props.tracks.iter().enumerate() {
+                     for (display_idx, (track, idx)) in sorted_track_pairs.iter().enumerate() {
                          {
+                             let idx = *idx;
                              let cover_url = if is_server_source {
                                  if let Some(server) = &config.read().server {
                                      let path_str = track.path.to_string_lossy();
@@ -197,6 +245,13 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                              };
 
                              let is_selected = props.selected_tracks.contains(&track.path);
+                             let matches_current_path = currently_playing_path.as_ref() == Some(&track.path);
+                             let matches_current_metadata = !current_song_title.is_empty()
+                                 && track.title == current_song_title
+                                 && track.artist == current_song_artist
+                                 && track.album == current_song_album
+                                 && track.duration == current_song_duration;
+                             let is_currently_playing: bool = matches_current_path || matches_current_metadata;
                              let track_count = props.tracks.len();
                              let can_move_up = props.is_reorderable && idx > 0;
                              let can_move_down = props.is_reorderable && idx + 1 < track_count;
@@ -209,6 +264,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                  false
                              };
                              let is_downloading = false;
+                             let play_queue = sorted_tracks.clone();
 
                              rsx! {
                                  div {
@@ -223,7 +279,8 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                              is_selected: is_selected,
                                              is_downloaded: is_downloaded,
                                              is_downloading: is_downloading,
-                                             is_currently_playing: currently_playing_idx == Some(idx),
+                                             is_currently_playing,
+                                             row_num: Some(display_idx + 1),
                                              on_select: move |selected| {
                                                 if let Some(handler) = &props.on_select {
                                                     handler.call((idx, selected));
@@ -269,7 +326,10 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                                      handler.call(idx);
                                                  }
                                              },
-                                             on_play: move |_| props.on_play.call(idx)
+                                             on_play: move |_| {
+                                                 ctrl.queue.set(play_queue.clone());
+                                                 ctrl.play_track(display_idx);
+                                             }
                                          }
                                      }
                                      if props.is_reorderable && !props.is_selection_mode {

@@ -2,33 +2,49 @@ use config::AppConfig;
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
-use crate::showcase::ShowcaseProps;
+use crate::NavigationController;
+use crate::showcase::{self, ShowcaseProps, SortField};
 
 #[component]
 pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
     let mut ctrl = use_context::<PlayerController>();
     let config = use_context::<Signal<AppConfig>>();
+    let nav_ctrl = use_context::<NavigationController>();
 
     let total_seconds: u64 = props.tracks.iter().map(|t| t.duration).sum();
     let duration_min = total_seconds / 60;
 
-    let currently_playing_idx: Option<usize> = {
+    let fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
+    let sort_state = use_signal(|| None);
+    let indexed_tracks: Vec<_> = props
+        .tracks
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(idx, track)| (track, idx))
+        .collect();
+    let sorted_track_pairs = showcase::sorted_track_pairs(&indexed_tracks, *sort_state.read());
+    let sorted_tracks: Vec<_> = sorted_track_pairs
+        .iter()
+        .map(|(track, _)| track.clone())
+        .collect();
+    let tracks_for_shuffle = sorted_tracks.clone();
+
+    let currently_playing_path = {
         let queue = ctrl.queue.read();
         let idx = *ctrl.current_queue_index.read();
-        if queue.len() == props.tracks.len()
-            && queue
-                .iter()
-                .zip(props.tracks.iter())
-                .all(|(q, t)| q.path == t.path)
-        {
-            Some(idx)
+        let queue_idx = if *ctrl.shuffle.read() {
+            ctrl.shuffle_order.read().get(idx).copied().unwrap_or(idx)
         } else {
-            None
-        }
+            idx
+        };
+        queue.get(queue_idx).map(|track| track.path.clone())
     };
-
-    let tracks_for_shuffle = props.tracks.clone();
-    let fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
+    let current_song_title = ctrl.current_song_title.read().clone();
+    let current_song_artist = ctrl.current_song_artist.read().clone();
+    let current_song_album = ctrl.current_song_album.read().clone();
+    let current_song_duration = *ctrl.current_song_duration.read();
+    let tracks_for_play_all = sorted_tracks.clone();
 
     rsx! {
         div { class: "w-full max-w-[1600px] mx-auto select-none pb-8",
@@ -79,7 +95,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                             button {
                                 class: "inline-flex items-center justify-center gap-2 h-9 px-5 rounded-full text-sm font-semibold text-white transition-opacity hover:opacity-90 active:scale-95",
                                 style: "background: var(--color-indigo-500);",
-                                onclick: move |_| props.on_play_all.call(()),
+                                onclick: move |_| ctrl.play_queue_linear(tracks_for_play_all.clone()),
                                 i { class: "fa-solid fa-play text-xs" }
                                 "{i18n::t(\"play\")}"
                             }
@@ -129,25 +145,60 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                 }
             } else {
                 div {
-                    class: "grid px-6 py-2 text-[10px] font-bold uppercase tracking-widest border-b",
-                    style: "grid-template-columns: 40px 1fr 200px 200px 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);",
+                    class: "grid px-3 py-2 text-[10px] font-bold uppercase tracking-widest border-b mb-1",
+                    style: "grid-template-columns: 40px 1fr 180px 180px 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);",
                     div { class: "flex items-center", "#" }
-                    div { "{i18n::t(\"title\")}" }
-                    div { "{i18n::t(\"artist\")}" }
-                    div { "{i18n::t(\"album\")}" }
-                    div { class: "text-right", i { class: "fa-regular fa-clock" } }
+                    button {
+                        class: "flex items-center gap-1 uppercase tracking-widest text-left hover:text-white transition-colors",
+                        onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Title),
+                        "{i18n::t(\"title\")}"
+                        i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Title)} text-[9px]" }
+                    }
+                    button {
+                        class: "flex items-center gap-1 uppercase tracking-widest text-left hover:text-white transition-colors",
+                        onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Artist),
+                        "{i18n::t(\"artist\")}"
+                        i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Artist)} text-[9px]" }
+                    }
+                    button {
+                        class: "flex items-center gap-1 uppercase tracking-widest text-left hover:text-white transition-colors",
+                        onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Album),
+                        "{i18n::t(\"album\")}"
+                        i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Album)} text-[9px]" }
+                    }
+                    button {
+                        class: "flex items-center justify-end gap-1 uppercase tracking-widest text-right hover:text-white transition-colors",
+                        onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Duration),
+                        i { class: "fa-regular fa-clock" }
+                        i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Duration)} text-[9px]" }
+                    }
                     div {}
                 }
 
-                for (idx, track) in props.tracks.iter().enumerate() {
+                for (display_idx, (track, idx)) in sorted_track_pairs.iter().enumerate() {
                     {
-                        let is_playing = currently_playing_idx == Some(idx);
-                        let is_selected = props.selected_tracks.contains(&track.path);
+                        let idx = *idx;
+                        let matches_current_path = currently_playing_path.as_ref() == Some(&track.path);
+                        let matches_current_metadata = !current_song_title.is_empty()
+                            && track.title == current_song_title
+                            && track.artist == current_song_artist
+                            && track.album == current_song_album
+                            && track.duration == current_song_duration;
+                        let is_playing: bool = matches_current_path || matches_current_metadata;
+                        let is_selected = props.is_selection_mode && props.selected_tracks.contains(&track.path);
+                        let selection_shadow = if is_selected {
+                            "inset 0 0 0 9999px rgba(255,255,255,0.07)"
+                        } else {
+                            "none"
+                        };
                         let track_dur = fmt_dur(track.duration);
-                        let title = track.title.clone();
                         let artist = track.artist.clone();
                         let album = track.album.clone();
-                        let row_num = idx + 1;
+                        let album_id = track.album_id.clone();
+                        let row_num = display_idx + 1;
+
+                        let play_queue = sorted_tracks.clone();
+                        let play_queue_button = sorted_tracks.clone();
 
                         let cover_url: Option<utils::CoverUrl> = {
                             let path_str = track.path.to_string_lossy();
@@ -175,15 +226,16 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                         rsx! {
                             div {
                                 key: "{track.path.display()}",
-                                class: "grid px-6 py-1.5 rounded-lg mx-2 group cursor-default transition-colors hover:bg-white/5",
+                                class: "grid px-2 py-1.5 rounded-lg mx-1 group cursor-default transition-colors hover:bg-white/5",
                                 style: if is_playing {
-                                    format!("grid-template-columns: 40px 1fr 200px 200px 56px 40px; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent);")
-                                } else if is_selected {
-                                    "grid-template-columns: 40px 1fr 200px 200px 56px 40px; background: rgba(255,255,255,0.07);".to_string()
+                                    format!("grid-template-columns: 40px 1fr 180px 180px 56px 40px; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent); box-shadow: {selection_shadow};")
                                 } else {
-                                    "grid-template-columns: 40px 1fr 200px 200px 56px 40px;".to_string()
+                                    format!("grid-template-columns: 40px 1fr 180px 180px 56px 40px; box-shadow: {selection_shadow};")
                                 },
-                                ondoubleclick: move |_| props.on_play.call(idx),
+                                ondoubleclick: move |_| {
+                                    ctrl.queue.set(play_queue.clone());
+                                    ctrl.play_track(display_idx);
+                                },
 
                                 div { class: "flex items-center",
                                     if is_playing {
@@ -199,7 +251,10 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                         }
                                         button {
                                             class: "hidden group-hover:flex items-center justify-center",
-                                            onclick: move |_| props.on_play.call(idx),
+                                            onclick: move |_| {
+                                                ctrl.queue.set(play_queue_button.clone());
+                                                ctrl.play_track(display_idx);
+                                            },
                                             i { class: "fa-solid fa-play text-xs", style: "color: rgba(255,255,255,0.8);" }
                                         }
                                     }
@@ -225,22 +280,39 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                         } else {
                                             "color: rgba(255,255,255,0.9);"
                                         },
-                                        "{title}"
+                                        ondoubleclick: move |evt| evt.stop_propagation(),
+                                        "{track.title}"
                                     }
                                 }
 
                                 div { class: "flex items-center min-w-0 pr-4",
                                     span {
-                                        class: "text-sm truncate",
+                                        class: "text-sm truncate cursor-pointer hover:underline",
                                         style: "color: rgba(255,255,255,0.45);",
+                                        onclick: {
+                                            let artist = artist.clone();
+                                            move |evt: MouseEvent| {
+                                                evt.stop_propagation();
+                                                nav_ctrl.navigate_to_artist(artist.clone());
+                                            }
+                                        },
+                                        ondoubleclick: move |evt| evt.stop_propagation(),
                                         "{artist}"
                                     }
                                 }
 
                                 div { class: "flex items-center min-w-0 pr-4",
                                     span {
-                                        class: "text-sm truncate",
+                                        class: "text-sm truncate cursor-pointer hover:underline",
                                         style: "color: rgba(255,255,255,0.35);",
+                                        onclick: {
+                                            let album_id = album_id.clone();
+                                            move |evt: MouseEvent| {
+                                                evt.stop_propagation();
+                                                nav_ctrl.navigate_to_album(album_id.clone());
+                                            }
+                                        },
+                                        ondoubleclick: move |evt| evt.stop_propagation(),
                                         "{album}"
                                     }
                                 }
