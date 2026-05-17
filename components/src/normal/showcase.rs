@@ -16,11 +16,18 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     let is_server_source = config.read().active_source == MusicSource::Server;
 
     let offline_tracks = config.read().offline_tracks.clone();
-    let mut sort_state = use_signal(|| None);
-    let sorted_indices = showcase::sorted_track_indices(&props.tracks, *sort_state.read());
-    let sorted_tracks: Vec<_> = sorted_indices
+    let sort_state = use_signal(|| None);
+    let indexed_tracks: Vec<_> = props
+        .tracks
         .iter()
-        .map(|&idx| props.tracks[idx].clone())
+        .cloned()
+        .enumerate()
+        .map(|(idx, track)| (track, idx))
+        .collect();
+    let sorted_track_pairs = showcase::sorted_track_pairs(&indexed_tracks, *sort_state.read());
+    let sorted_tracks: Vec<_> = sorted_track_pairs
+        .iter()
+        .map(|(track, _)| track.clone())
         .collect();
 
     let currently_playing_idx: Option<usize> = {
@@ -173,37 +180,25 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                }
                                button {
                                    class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
-                                   onclick: move |_| {
-                                       let next = showcase::next_sort_state(*sort_state.peek(), SortField::Title);
-                                       sort_state.set(next);
-                                   },
+                                   onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Title),
                                    "{i18n::t(\"title\")}"
                                    i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Title)} text-[10px]" }
                                }
                                button {
                                    class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
-                                   onclick: move |_| {
-                                       let next = showcase::next_sort_state(*sort_state.peek(), SortField::Artist);
-                                       sort_state.set(next);
-                                   },
+                                   onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Artist),
                                    "{i18n::t(\"artist\")}"
                                    i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Artist)} text-[10px]" }
                                }
                                button {
                                    class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
-                                   onclick: move |_| {
-                                       let next = showcase::next_sort_state(*sort_state.peek(), SortField::Album);
-                                       sort_state.set(next);
-                                   },
+                                   onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Album),
                                    "{i18n::t(\"album\")}"
                                    i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Album)} text-[10px]" }
                                }
                                button {
                                    class: "flex items-center justify-end gap-1 uppercase tracking-wider text-right hover:text-white transition-colors",
-                                   onclick: move |_| {
-                                       let next = showcase::next_sort_state(*sort_state.peek(), SortField::Duration);
-                                       sort_state.set(next);
-                                   },
+                                   onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Duration),
                                    i { class: "fa-regular fa-clock" }
                                    i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Duration)} text-[10px]" }
                                }
@@ -214,9 +209,9 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                            }
                       }
 
-                     for (display_idx, idx) in sorted_indices.iter().copied().enumerate() {
+                     for (display_idx, (track, idx)) in sorted_track_pairs.iter().enumerate() {
                          {
-                             let track = &props.tracks[idx];
+                             let idx = *idx;
                              let cover_url = if is_server_source {
                                  if let Some(server) = &config.read().server {
                                      let path_str = track.path.to_string_lossy();

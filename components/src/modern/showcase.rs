@@ -15,11 +15,18 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
     let duration_min = total_seconds / 60;
 
     let fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
-    let mut sort_state = use_signal(|| None);
-    let sorted_indices = showcase::sorted_track_indices(&props.tracks, *sort_state.read());
-    let sorted_tracks: Vec<_> = sorted_indices
+    let sort_state = use_signal(|| None);
+    let indexed_tracks: Vec<_> = props
+        .tracks
         .iter()
-        .map(|&idx| props.tracks[idx].clone())
+        .cloned()
+        .enumerate()
+        .map(|(idx, track)| (track, idx))
+        .collect();
+    let sorted_track_pairs = showcase::sorted_track_pairs(&indexed_tracks, *sort_state.read());
+    let sorted_tracks: Vec<_> = sorted_track_pairs
+        .iter()
+        .map(|(track, _)| track.clone())
         .collect();
     let tracks_for_shuffle = sorted_tracks.clone();
 
@@ -143,46 +150,34 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                     div { class: "flex items-center", "#" }
                     button {
                         class: "flex items-center gap-1 uppercase tracking-widest text-left hover:text-white transition-colors",
-                        onclick: move |_| {
-                                                    let next = showcase::next_sort_state(*sort_state.peek(), SortField::Title);
-                                                    sort_state.set(next);
-                                                },
+                        onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Title),
                         "{i18n::t(\"title\")}"
                         i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Title)} text-[9px]" }
                     }
                     button {
                         class: "flex items-center gap-1 uppercase tracking-widest text-left hover:text-white transition-colors",
-                        onclick: move |_| {
-                                                    let next = showcase::next_sort_state(*sort_state.peek(), SortField::Artist);
-                                                    sort_state.set(next);
-                                                },
+                        onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Artist),
                         "{i18n::t(\"artist\")}"
                         i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Artist)} text-[9px]" }
                     }
                     button {
                         class: "flex items-center gap-1 uppercase tracking-widest text-left hover:text-white transition-colors",
-                        onclick: move |_| {
-                                                    let next = showcase::next_sort_state(*sort_state.peek(), SortField::Album);
-                                                    sort_state.set(next);
-                                                },
+                        onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Album),
                         "{i18n::t(\"album\")}"
                         i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Album)} text-[9px]" }
                     }
                     button {
                         class: "flex items-center justify-end gap-1 uppercase tracking-widest text-right hover:text-white transition-colors",
-                        onclick: move |_| {
-                                                    let next = showcase::next_sort_state(*sort_state.peek(), SortField::Duration);
-                                                    sort_state.set(next);
-                                                },
+                        onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Duration),
                         i { class: "fa-regular fa-clock" }
                         i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Duration)} text-[9px]" }
                     }
                     div {}
                 }
 
-                for (display_idx, idx) in sorted_indices.iter().copied().enumerate() {
+                for (display_idx, (track, idx)) in sorted_track_pairs.iter().enumerate() {
                     {
-                        let track = &props.tracks[idx];
+                        let idx = *idx;
                         let is_playing = currently_playing_idx == Some(display_idx);
                         let is_selected = props.selected_tracks.contains(&track.path);
                         let track_dur = fmt_dur(track.duration);

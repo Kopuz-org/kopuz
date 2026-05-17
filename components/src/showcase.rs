@@ -31,6 +31,11 @@ pub fn next_sort_state(current: SortState, field: SortField) -> SortState {
     }
 }
 
+pub fn toggle_sort_state(mut sort_state: Signal<SortState>, field: SortField) {
+    let next = next_sort_state(*sort_state.peek(), field);
+    sort_state.set(next);
+}
+
 pub fn sort_icon(sort_state: SortState, field: SortField) -> &'static str {
     match sort_state {
         Some((current_field, SortDirection::Asc)) if current_field == field => {
@@ -41,6 +46,17 @@ pub fn sort_icon(sort_state: SortState, field: SortField) -> &'static str {
         }
         _ => "fa-solid fa-sort",
     }
+}
+
+pub fn sorted_track_pairs<T: Clone>(
+    tracks: &[(Track, T)],
+    sort_state: SortState,
+) -> Vec<(Track, T)> {
+    let tracks_for_sorting: Vec<Track> = tracks.iter().map(|(track, _)| track.clone()).collect();
+    sorted_track_indices(&tracks_for_sorting, sort_state)
+        .into_iter()
+        .map(|idx| tracks[idx].clone())
+        .collect()
 }
 
 pub fn sorted_track_indices(tracks: &[Track], sort_state: SortState) -> Vec<usize> {

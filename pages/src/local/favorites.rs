@@ -25,7 +25,7 @@ pub fn LocalFavorites(
     // Multi-selection state
     let mut is_selection_mode = use_signal(|| false);
     let mut selected_tracks = use_signal(|| HashSet::<PathBuf>::new());
-    let mut sort_state = use_signal(|| None);
+    let sort_state = use_signal(|| None);
 
     let displayed_tracks: Vec<(reader::models::Track, Option<utils::CoverUrl>)> = {
         let store = favorites_store.read();
@@ -52,14 +52,8 @@ pub fn LocalFavorites(
             .collect()
     };
 
-    let tracks_for_sorting: Vec<reader::models::Track> =
-        displayed_tracks.iter().map(|(t, _)| t.clone()).collect();
-    let sorted_indices = showcase::sorted_track_indices(&tracks_for_sorting, *sort_state.read());
-    let sorted_displayed_tracks: Vec<(reader::models::Track, Option<utils::CoverUrl>)> =
-        sorted_indices
-            .iter()
-            .map(|&idx| displayed_tracks[idx].clone())
-            .collect();
+    let sorted_displayed_tracks =
+        showcase::sorted_track_pairs(&displayed_tracks, *sort_state.read());
 
     let queue_tracks: Vec<reader::models::Track> = sorted_displayed_tracks
         .iter()
@@ -71,7 +65,10 @@ pub fn LocalFavorites(
         let queue = ctrl.queue.read();
         let q_idx = *ctrl.current_queue_index.read();
         if queue.len() == queue_tracks.len()
-            && queue.iter().zip(queue_tracks.iter()).all(|(q, t)| q.path == t.path)
+            && queue
+                .iter()
+                .zip(queue_tracks.iter())
+                .all(|(q, t)| q.path == t.path)
         {
             Some(q_idx)
         } else {
@@ -303,37 +300,25 @@ pub fn LocalFavorites(
                     div {}
                     button {
                         class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
-                        onclick: move |_| {
-                            let next = showcase::next_sort_state(*sort_state.peek(), SortField::Title);
-                            sort_state.set(next);
-                        },
+                        onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Title),
                         "{i18n::t(\"title\")}"
                         i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Title)} text-[10px]" }
                     }
                     button {
                         class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
-                        onclick: move |_| {
-                            let next = showcase::next_sort_state(*sort_state.peek(), SortField::Artist);
-                            sort_state.set(next);
-                        },
+                        onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Artist),
                         "{i18n::t(\"artist\")}"
                         i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Artist)} text-[10px]" }
                     }
                     button {
                         class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
-                        onclick: move |_| {
-                            let next = showcase::next_sort_state(*sort_state.peek(), SortField::Album);
-                            sort_state.set(next);
-                        },
+                        onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Album),
                         "{i18n::t(\"album\")}"
                         i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Album)} text-[10px]" }
                     }
                     button {
                         class: "flex items-center justify-end gap-1 uppercase tracking-wider text-right hover:text-white transition-colors",
-                        onclick: move |_| {
-                            let next = showcase::next_sort_state(*sort_state.peek(), SortField::Duration);
-                            sort_state.set(next);
-                        },
+                        onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Duration),
                         i { class: "fa-regular fa-clock" }
                         i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Duration)} text-[10px]" }
                     }
