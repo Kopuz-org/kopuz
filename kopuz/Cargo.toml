@@ -5,7 +5,7 @@ edition = "2024"
 
 [package.metadata.bundle]
 identifier = "com.temidaradev.kopuz"
-icon = ["../assets/logo.png"]
+icon = ["assets/app.ico", "assets/logo.png"]
 category = "public.app-category.music"
 
 [package.metadata.bundle.macos]
