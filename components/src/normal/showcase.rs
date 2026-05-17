@@ -18,14 +18,18 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     let offline_tracks = config.read().offline_tracks.clone();
     let mut sort_state = use_signal(|| None);
     let sorted_indices = showcase::sorted_track_indices(&props.tracks, *sort_state.read());
+    let sorted_tracks: Vec<_> = sorted_indices
+        .iter()
+        .map(|&idx| props.tracks[idx].clone())
+        .collect();
 
     let currently_playing_idx: Option<usize> = {
         let queue = ctrl.queue.read();
         let idx = *ctrl.current_queue_index.read();
-        if queue.len() == props.tracks.len()
+        if queue.len() == sorted_tracks.len()
             && queue
                 .iter()
-                .zip(props.tracks.iter())
+                .zip(sorted_tracks.iter())
                 .all(|(q, t)| q.path == t.path)
         {
             Some(idx)
@@ -33,6 +37,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
             None
         }
     };
+    let tracks_for_play_all = sorted_tracks.clone();
 
     let all_downloaded = !props.tracks.is_empty()
         && props.tracks.iter().all(|t| {
@@ -102,7 +107,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                         }
                         button {
                              class: "w-14 h-14 rounded-full bg-indigo-500 hover:bg-indigo-400 text-black flex items-center justify-center transition-transform hover:scale-105",
-                             onclick: move |_| props.on_play_all.call(()),
+                             onclick: move |_| ctrl.play_queue_linear(tracks_for_play_all.clone()),
                              i { class: "fa-solid fa-play text-xl ml-1" }
                          }
                          if props.on_download_all.is_some() || props.on_delete_all.is_some() {
@@ -252,6 +257,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                  false
                              };
                              let is_downloading = false;
+                             let play_queue = sorted_tracks.clone();
 
                              rsx! {
                                  div {
@@ -266,7 +272,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                              is_selected: is_selected,
                                              is_downloaded: is_downloaded,
                                              is_downloading: is_downloading,
-                                             is_currently_playing: currently_playing_idx == Some(idx),
+                                             is_currently_playing: currently_playing_idx == Some(display_idx),
                                              row_num: Some(display_idx + 1),
                                              on_select: move |selected| {
                                                 if let Some(handler) = &props.on_select {
@@ -313,7 +319,10 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                                      handler.call(idx);
                                                  }
                                              },
-                                             on_play: move |_| props.on_play.call(idx)
+                                             on_play: move |_| {
+                                                 ctrl.queue.set(play_queue.clone());
+                                                 ctrl.play_track(display_idx);
+                                             }
                                          }
                                      }
                                      if props.is_reorderable && !props.is_selection_mode {

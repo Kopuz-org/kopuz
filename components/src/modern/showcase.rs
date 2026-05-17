@@ -14,13 +14,22 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
     let total_seconds: u64 = props.tracks.iter().map(|t| t.duration).sum();
     let duration_min = total_seconds / 60;
 
+    let fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
+    let mut sort_state = use_signal(|| None);
+    let sorted_indices = showcase::sorted_track_indices(&props.tracks, *sort_state.read());
+    let sorted_tracks: Vec<_> = sorted_indices
+        .iter()
+        .map(|&idx| props.tracks[idx].clone())
+        .collect();
+    let tracks_for_shuffle = sorted_tracks.clone();
+
     let currently_playing_idx: Option<usize> = {
         let queue = ctrl.queue.read();
         let idx = *ctrl.current_queue_index.read();
-        if queue.len() == props.tracks.len()
+        if queue.len() == sorted_tracks.len()
             && queue
                 .iter()
-                .zip(props.tracks.iter())
+                .zip(sorted_tracks.iter())
                 .all(|(q, t)| q.path == t.path)
         {
             Some(idx)
@@ -28,11 +37,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
             None
         }
     };
-
-    let tracks_for_shuffle = props.tracks.clone();
-    let fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
-    let mut sort_state = use_signal(|| None);
-    let sorted_indices = showcase::sorted_track_indices(&props.tracks, *sort_state.read());
+    let tracks_for_play_all = sorted_tracks.clone();
 
     rsx! {
         div { class: "w-full max-w-[1600px] mx-auto select-none pb-8",
@@ -83,7 +88,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                             button {
                                 class: "inline-flex items-center justify-center gap-2 h-9 px-5 rounded-full text-sm font-semibold text-white transition-opacity hover:opacity-90 active:scale-95",
                                 style: "background: var(--color-indigo-500);",
-                                onclick: move |_| props.on_play_all.call(()),
+                                onclick: move |_| ctrl.play_queue_linear(tracks_for_play_all.clone()),
                                 i { class: "fa-solid fa-play text-xs" }
                                 "{i18n::t(\"play\")}"
                             }
@@ -178,13 +183,16 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                 for (display_idx, idx) in sorted_indices.iter().copied().enumerate() {
                     {
                         let track = &props.tracks[idx];
-                        let is_playing = currently_playing_idx == Some(idx);
+                        let is_playing = currently_playing_idx == Some(display_idx);
                         let is_selected = props.selected_tracks.contains(&track.path);
                         let track_dur = fmt_dur(track.duration);
                         let artist = track.artist.clone();
                         let album = track.album.clone();
                         let album_id = track.album_id.clone();
                         let row_num = display_idx + 1;
+
+                        let play_queue = sorted_tracks.clone();
+                        let play_queue_button = sorted_tracks.clone();
 
                         let cover_url: Option<utils::CoverUrl> = {
                             let path_str = track.path.to_string_lossy();
@@ -220,7 +228,10 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                 } else {
                                     "grid-template-columns: 40px 1fr 200px 200px 56px 40px;".to_string()
                                 },
-                                ondoubleclick: move |_| props.on_play.call(idx),
+                                ondoubleclick: move |_| {
+                                    ctrl.queue.set(play_queue.clone());
+                                    ctrl.play_track(display_idx);
+                                },
 
                                 div { class: "flex items-center",
                                     if is_playing {
@@ -236,7 +247,10 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                         }
                                         button {
                                             class: "hidden group-hover:flex items-center justify-center",
-                                            onclick: move |_| props.on_play.call(idx),
+                                            onclick: move |_| {
+                                                ctrl.queue.set(play_queue_button.clone());
+                                                ctrl.play_track(display_idx);
+                                            },
                                             i { class: "fa-solid fa-play text-xs", style: "color: rgba(255,255,255,0.8);" }
                                         }
                                     }
