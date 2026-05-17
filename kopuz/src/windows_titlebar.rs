@@ -3,7 +3,6 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
-use windows::Win32::Graphics::Gdi::MulDiv;
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
     CallWindowProcW, DefWindowProcW, EnableMenuItem, GWL_STYLE, GWLP_WNDPROC, GetSystemMenu,
@@ -83,8 +82,9 @@ unsafe extern "system" fn titlebar_wndproc(
             prev
         }
         WM_NCRBUTTONUP => {
+            let hit = wparam.0 as u32;
             if CUSTOM_TITLEBAR_ENABLED.load(Ordering::Relaxed)
-                && matches!(wparam.0 as i32, HTCAPTION | HTSYSMENU)
+                && (hit == HTCAPTION || hit == HTSYSMENU)
             {
                 show_system_menu(hwnd, lparam);
                 return LRESULT(0);
@@ -96,16 +96,16 @@ unsafe extern "system" fn titlebar_wndproc(
     }
 }
 
-fn custom_titlebar_hit_test(hwnd: HWND, lparam: LPARAM) -> Option<i32> {
+fn custom_titlebar_hit_test(hwnd: HWND, lparam: LPARAM) -> Option<u32> {
     let mut window_rect = RECT::default();
-    if unsafe { !GetWindowRect(hwnd, &mut window_rect).as_bool() } {
+    if unsafe { GetWindowRect(hwnd, &mut window_rect).is_err() } {
         return None;
     }
 
     let point = point_from_lparam(lparam);
     let dpi = unsafe { GetDpiForWindow(hwnd) as i32 };
-    let titlebar_height = MulDiv(TITLEBAR_HEIGHT_DIP, dpi, 96);
-    let button_width = MulDiv(TITLEBAR_BUTTON_WIDTH_DIP, dpi, 96);
+    let titlebar_height = scale_dip(TITLEBAR_HEIGHT_DIP, dpi);
+    let button_width = scale_dip(TITLEBAR_BUTTON_WIDTH_DIP, dpi);
 
     if point.y < window_rect.top || point.y >= window_rect.top + titlebar_height {
         return None;
@@ -165,18 +165,18 @@ fn show_system_menu(hwnd: HWND, lparam: LPARAM) {
             TPM_RETURNCMD | TPM_RIGHTBUTTON,
             point.x,
             point.y,
-            0,
+            Some(0),
             hwnd,
             None,
         )
     };
 
-    if command != 0 {
+    if command.0 != 0 {
         unsafe {
             let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
-                hwnd,
+                Some(hwnd),
                 WM_SYSCOMMAND,
-                WPARAM(command as usize),
+                WPARAM(command.0 as usize),
                 LPARAM(0),
             );
         }
@@ -189,6 +189,10 @@ fn point_from_lparam(lparam: LPARAM) -> POINT {
         x: (raw & 0xFFFF) as i16 as i32,
         y: ((raw >> 16) & 0xFFFF) as i16 as i32,
     }
+}
+
+fn scale_dip(value: i32, dpi: i32) -> i32 {
+    (value * dpi + 48) / 96
 }
 
 fn call_prev_wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
