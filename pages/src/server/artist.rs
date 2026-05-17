@@ -339,7 +339,6 @@ pub fn JellyfinArtist(
                                         }
                                     }
                                     h3 { class: "text-white font-medium truncate text-center w-full group-hover:text-indigo-400 transition-colors", "{artist}" }
-                                    p { class: "text-xs text-slate-500 uppercase tracking-wider mt-1", "{i18n::t(\"artist\")}" }
                                 }
                             }
                         }
@@ -771,7 +770,7 @@ pub fn JellyfinArtist(
                         } else {
                             components::showcase::Showcase {
                                 name: name.clone(),
-                                description: i18n::t("artist").to_string(),
+                                description: String::new(),
                                 cover_url: artist_cover(),
                                 tracks: artist_tracks(),
                                 library,

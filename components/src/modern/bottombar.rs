@@ -55,7 +55,8 @@ pub fn BottombarModern(
     let mut ctrl = use_context::<PlayerController>();
     let nav_ctrl = use_context::<NavigationController>();
 
-    let is_favorite = get_favorite(&queue, &current_queue_index, &favorites_store);
+    let current_track_snapshot = ctrl.current_track_snapshot.read().clone();
+    let is_favorite = get_favorite(current_track_snapshot.as_ref(), &favorites_store);
     let heart_class = if is_favorite {
         "text-red-400 hover:text-red-300 transition-colors"
     } else {
@@ -205,7 +206,7 @@ pub fn BottombarModern(
                 button {
                     class: "{heart_class} w-7 h-7 flex items-center justify-center",
                     title: if is_favorite { i18n::t("remove_from_favorites").to_string() } else { i18n::t("add_to_favorites").to_string() },
-                    onclick: move |_| toggle_favorite(queue, current_queue_index, favorites_store, config),
+                    onclick: move |_| toggle_favorite(ctrl.current_track_snapshot.read().clone(), favorites_store, config),
                     i { class: "{heart_icon} text-xs" }
                 }
                 div {
