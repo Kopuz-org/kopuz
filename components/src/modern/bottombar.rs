@@ -143,8 +143,10 @@ pub fn BottombarModern(
                     span {
                         class: "text-xs font-semibold text-white/90 truncate hover:underline cursor-pointer shrink-0 max-w-[40%]",
                         onclick: move |_| {
-                            let idx = *current_queue_index.read();
-                            let album_id = queue.read().get(idx).map(|t| t.album_id.clone()).unwrap_or_default();
+                            let album_id = current_track_snapshot
+                                .as_ref()
+                                .map(|track| track.album_id.clone())
+                                .unwrap_or_default();
                             nav_ctrl.navigate_to_album(album_id);
                         },
                         "{current_song_title}"

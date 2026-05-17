@@ -91,8 +91,10 @@ pub fn BottombarNormal(
                     span {
                         class: "text-sm font-bold text-white/90 truncate hover:underline cursor-pointer",
                         onclick: move |_| {
-                            let idx = *current_queue_index.read();
-                            let album_id = queue.read().get(idx).map(|t| t.album_id.clone()).unwrap_or_default();
+                            let album_id = current_track_snapshot
+                                .as_ref()
+                                .map(|track| track.album_id.clone())
+                                .unwrap_or_default();
                             nav_ctrl.navigate_to_album(album_id);
                         },
                         "{current_song_title}"
