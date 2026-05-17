@@ -30,20 +30,20 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
         .map(|(track, _)| track.clone())
         .collect();
 
-    let currently_playing_idx: Option<usize> = {
+    let currently_playing_path = {
         let queue = ctrl.queue.read();
         let idx = *ctrl.current_queue_index.read();
-        if queue.len() == sorted_tracks.len()
-            && queue
-                .iter()
-                .zip(sorted_tracks.iter())
-                .all(|(q, t)| q.path == t.path)
-        {
-            Some(idx)
+        let queue_idx = if *ctrl.shuffle.read() {
+            ctrl.shuffle_order.read().get(idx).copied().unwrap_or(idx)
         } else {
-            None
-        }
+            idx
+        };
+        queue.get(queue_idx).map(|track| track.path.clone())
     };
+    let current_song_title = ctrl.current_song_title.read().clone();
+    let current_song_artist = ctrl.current_song_artist.read().clone();
+    let current_song_album = ctrl.current_song_album.read().clone();
+    let current_song_duration = *ctrl.current_song_duration.read();
     let tracks_for_play_all = sorted_tracks.clone();
 
     let all_downloaded = !props.tracks.is_empty()
@@ -245,6 +245,13 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                              };
 
                              let is_selected = props.selected_tracks.contains(&track.path);
+                             let matches_current_path = currently_playing_path.as_ref() == Some(&track.path);
+                             let matches_current_metadata = !current_song_title.is_empty()
+                                 && track.title == current_song_title
+                                 && track.artist == current_song_artist
+                                 && track.album == current_song_album
+                                 && track.duration == current_song_duration;
+                             let is_currently_playing: bool = matches_current_path || matches_current_metadata;
                              let track_count = props.tracks.len();
                              let can_move_up = props.is_reorderable && idx > 0;
                              let can_move_down = props.is_reorderable && idx + 1 < track_count;
@@ -272,7 +279,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                              is_selected: is_selected,
                                              is_downloaded: is_downloaded,
                                              is_downloading: is_downloading,
-                                             is_currently_playing: currently_playing_idx == Some(display_idx),
+                                             is_currently_playing,
                                              row_num: Some(display_idx + 1),
                                              on_select: move |selected| {
                                                 if let Some(handler) = &props.on_select {

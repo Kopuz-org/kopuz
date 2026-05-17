@@ -30,20 +30,20 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
         .collect();
     let tracks_for_shuffle = sorted_tracks.clone();
 
-    let currently_playing_idx: Option<usize> = {
+    let currently_playing_path = {
         let queue = ctrl.queue.read();
         let idx = *ctrl.current_queue_index.read();
-        if queue.len() == sorted_tracks.len()
-            && queue
-                .iter()
-                .zip(sorted_tracks.iter())
-                .all(|(q, t)| q.path == t.path)
-        {
-            Some(idx)
+        let queue_idx = if *ctrl.shuffle.read() {
+            ctrl.shuffle_order.read().get(idx).copied().unwrap_or(idx)
         } else {
-            None
-        }
+            idx
+        };
+        queue.get(queue_idx).map(|track| track.path.clone())
     };
+    let current_song_title = ctrl.current_song_title.read().clone();
+    let current_song_artist = ctrl.current_song_artist.read().clone();
+    let current_song_album = ctrl.current_song_album.read().clone();
+    let current_song_duration = *ctrl.current_song_duration.read();
     let tracks_for_play_all = sorted_tracks.clone();
 
     rsx! {
@@ -178,7 +178,13 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                 for (display_idx, (track, idx)) in sorted_track_pairs.iter().enumerate() {
                     {
                         let idx = *idx;
-                        let is_playing = currently_playing_idx == Some(display_idx);
+                        let matches_current_path = currently_playing_path.as_ref() == Some(&track.path);
+                        let matches_current_metadata = !current_song_title.is_empty()
+                            && track.title == current_song_title
+                            && track.artist == current_song_artist
+                            && track.album == current_song_album
+                            && track.duration == current_song_duration;
+                        let is_playing: bool = matches_current_path || matches_current_metadata;
                         let is_selected = props.is_selection_mode && props.selected_tracks.contains(&track.path);
                         let selection_shadow = if is_selected {
                             "inset 0 0 0 9999px rgba(255,255,255,0.07)"
