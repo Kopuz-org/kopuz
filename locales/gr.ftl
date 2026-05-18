@@ -374,6 +374,7 @@ radio_listen_moe_desc = Μουσική anime και κορεατική ποπ, 2
 radio_j1_desc = Τρέχουσες επιτυχίες και κλασικά τραγούδια από την Ιαπωνία.
 radio_doujinstyle_desc = Μουσική doujin, soundtrack βιντεοπαιχνιδιών και πολλά άλλα.
 radio_vocaloid_desc = Επιτυχίες Vocaloid από την Ιαπωνία. Παίζουμε τα πάντα!
+radio_asiadreamradio_desc = Η καρδιά της μουσικής J-Pop - J-Pop, J-Rock, J-HipHop, J-Jazz, κλασικά.
 radio_live_stream = Ζωντανή μετάδοση
 
 auto_check_updates = Αυτόματος έλεγχος ενημερώσεων

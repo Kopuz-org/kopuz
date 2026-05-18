@@ -374,6 +374,7 @@ radio_listen_moe_desc = מוזיקת אנימה ופופ קוריאני, 24/7.
 radio_j1_desc = להיטי מצעדים שירים קלאסיים מיפן.
 radio_doujinstyle_desc = מוזיקת דוג'ין, פסקולים של משחקי וידאו ועוד.
 radio_vocaloid_desc = להיטי ווקאלויד מיפן. אנחנו מנגנים הכל!
+radio_asiadreamradio_desc = הלב של מוזיקת ג'יי-פופ - ג'יי-פופ, ג'יי-רוק, ג'יי-היפ הופ, ג'יי-ג'אז, קלאסיקות.
 radio_live_stream = שידור חי
 
 auto_check_updates = בדיקה אוטומטית לעדכונים

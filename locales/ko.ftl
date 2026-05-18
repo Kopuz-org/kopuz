@@ -374,6 +374,7 @@ radio_listen_moe_desc = 애니메이션 및 한국 팝 음악, 24/7.
 radio_j1_desc = 일본의 최신 차트 히트곡 및 클래식 노래.
 radio_doujinstyle_desc = 동인 음악, 비디오 게임 사운드트랙 등.
 radio_vocaloid_desc = 일본의 보컬로이드 히트곡. 모든 것을 재생합니다!
+radio_asiadreamradio_desc = 제이팝 음악의 중심 - 제이팝, 제이락, 제이힙합, 제이재즈, 클래식.
 radio_live_stream = 라이브 스트림
 
 auto_check_updates = 업데이트 자동 확인

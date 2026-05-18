@@ -374,6 +374,7 @@ radio_listen_moe_desc = Anime ve Kore pop müziği, 7/24.
 radio_j1_desc = Japonya'dan güncel liste başı şarkılar ve klasikler.
 radio_doujinstyle_desc = Doujin müziği, video oyunu müzikleri ve daha fazlası.
 radio_vocaloid_desc = Japonya'dan Vocaloid hitleri. Her şeyi çalıyoruz!
+radio_asiadreamradio_desc = J-Pop müziğinin kalbi - J-Pop, J-Rock, J-HipHop, J-Jazz, klasikler.
 radio_live_stream = Canlı Yayın
 
 auto_check_updates = Güncellemeleri otomatik denetle
