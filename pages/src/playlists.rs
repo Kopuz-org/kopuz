@@ -1,11 +1,11 @@
+use ::server::jellyfin::JellyfinClient;
+use ::server::subsonic::SubsonicClient;
 use components::folder_detail::FolderDetail;
 use components::playlist_detail::PlaylistDetail;
 use components::playlist_popups::AddPlaylistPopup;
 use config::{AppConfig, MusicService, MusicSource, UiStyle};
 use dioxus::prelude::*;
 use reader::{Library, PlaylistStore};
-use ::server::jellyfin::JellyfinClient;
-use ::server::subsonic::SubsonicClient;
 
 use crate::local::playlists::LocalPlaylists;
 use crate::server::download_manager::{DownloadQueue, DownloadStatus, queue_downloads};
@@ -28,15 +28,25 @@ pub fn PlaylistsPage(
     let mut playlist_refresh_trigger = use_signal(|| 0u64);
 
     let handle_add_playlist = move |_| {
-        if saving() { return; }
+        if saving() {
+            return;
+        }
         let name = playlist_name();
         if is_server {
             let server_vals = {
                 let conf = config.peek();
                 conf.server.as_ref().and_then(|s| {
                     if let (Some(tok), Some(uid)) = (&s.access_token, &s.user_id) {
-                        Some((s.service, s.url.clone(), tok.clone(), uid.clone(), conf.device_id.clone()))
-                    } else { None }
+                        Some((
+                            s.service,
+                            s.url.clone(),
+                            tok.clone(),
+                            uid.clone(),
+                            conf.device_id.clone(),
+                        ))
+                    } else {
+                        None
+                    }
                 })
             };
             if let Some((service, url, token, user_id, device_id)) = server_vals {
@@ -45,7 +55,8 @@ pub fn PlaylistsPage(
                 spawn(async move {
                     let result = match service {
                         MusicService::Jellyfin => {
-                            let remote = JellyfinClient::new(&url, Some(&token), &device_id, Some(&user_id));
+                            let remote =
+                                JellyfinClient::new(&url, Some(&token), &device_id, Some(&user_id));
                             remote.create_playlist(&name, &[]).await
                         }
                         MusicService::Subsonic | MusicService::Custom => {
@@ -245,7 +256,31 @@ pub fn PlaylistsPage(
                         playlist_name: playlist_name,
                         error: error,
                         on_close: move |_| { error.set(None); show_add_playlist.set(false); },
-                        on_save: handle_add_playlist
+                        on_save: handle_add_playlist,
+                        show_add_folder: !is_server,
+                        on_add_folder: move |folder_path: String| {
+                            let folder_path_buf = std::path::PathBuf::from(&folder_path);
+                            let folder_name = folder_path_buf
+                                .file_name()
+                                .map(|name| name.to_string_lossy().to_string())
+                                .unwrap_or_else(|| folder_path.clone());
+                            let tracks = library
+                                .read()
+                                .tracks
+                                .iter()
+                                .filter(|track| track.path.starts_with(&folder_path_buf))
+                                .map(|track| track.path.clone())
+                                .collect();
+
+                            playlist_store.write().playlists.push(reader::models::Playlist {
+                                id: uuid::Uuid::new_v4().to_string(),
+                                name: folder_name,
+                                tracks,
+                                cover_path: None,
+                            });
+                            error.set(None);
+                            playlist_name.set(String::new());
+                        }
                     }
                 }
 
