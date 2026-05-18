@@ -77,6 +77,7 @@ impl PlayerController {
         track.path.to_string_lossy().to_string()
     }
 
+    /// Retrieves the queue index for a given index, taking into account the shuffle state.
     pub fn get_queue_index(&self, idx: usize) -> Option<usize> {
         if *self.shuffle.peek() {
             self.shuffle_order.peek().get(idx).cloned()
@@ -85,15 +86,19 @@ impl PlayerController {
         }
     }
 
+    /// Retrieves the current track index in the queue, taking into account the shuffle state.
+    /// Useful when it is not required to be a reactive value
     pub fn get_current_track_index(&self) -> Option<usize> {
         self.get_queue_index(*self.current_queue_index.peek())
     }
 
+    /// Retrieves the track at a given index in the queue, taking into account the shuffle state.
     pub fn get_track_at(&self, idx: usize) -> Option<Track> {
         let idx = self.get_queue_index(idx)?;
         self.queue.peek().get(idx).cloned()
     }
 
+    /// Retrieves the current track
     pub fn current_track(&self) -> Option<Track> {
         self.get_track_at(*self.current_queue_index.peek())
     }
