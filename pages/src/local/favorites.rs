@@ -96,6 +96,7 @@ pub fn LocalFavorites(
                             cover_url: cover_url.clone(),
                             row_num: Some(idx + 1),
                         is_menu_open,
+                            is_album: false,
                         is_currently_playing: matches_current_path,
                         is_selection_mode: is_selection_mode(),
                         is_selected,
@@ -145,6 +146,12 @@ pub fn LocalFavorites(
                     }
                 }
             });
+
+    let columns_modern =
+        { "40px minmax(200px, 1fr) minmax(100px,200px) minmax(100px,200px) 64px 40px".to_string() };
+
+    let columns_normal =
+        { "20px minmax(200px, 1fr) minmax(100px,200px) minmax(100px,200px) 64px 40px".to_string() };
 
     rsx! {
         div {
@@ -278,14 +285,14 @@ pub fn LocalFavorites(
                 }
                 div {
                     class: if is_modern {
-                        "grid px-3 py-2 text-[10px] font-bold uppercase tracking-widest border-b mb-1"
+                        "grid px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-white/25 border-b mb-1 border-white/5"
                     } else {
                         "grid gap-6 px-2 py-2 border-b border-white/5 text-sm font-medium text-slate-500 mb-2 uppercase tracking-wider"
                     },
                     style: if is_modern {
-                        "grid-template-columns: 40px 1fr 180px 180px 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);"
+                        "grid-template-columns: {columns_modern};"
                     } else {
-                        "grid-template-columns: 40px minmax(0, 1fr) 200px 200px 64px 40px; align-items: center;"
+                        "grid-template-columns: {columns_normal}; align-items: center;"
                     },
                     div {}
                     button {

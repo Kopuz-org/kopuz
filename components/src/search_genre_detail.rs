@@ -4,8 +4,8 @@ use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 use player::player;
-use reader::Library;
 use reader::models::Track;
+use reader::Library;
 
 #[component]
 pub fn SearchGenreDetail(
@@ -216,6 +216,7 @@ pub fn SearchGenreDetail(
                                  cover_url: cover_url.clone(),
                                  row_num: Some(idx + 1),
                                  is_menu_open: is_menu_open,
+                                 is_album: false,
                                  is_downloaded: is_downloaded,
                                  on_click_menu: move |_| {
                                      if active_menu_track.read().as_ref() == Some(&track_menu.path) {

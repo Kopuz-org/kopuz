@@ -178,6 +178,7 @@ pub fn JellyfinFavorites(
                     cover_url: cover_url.clone(),
                     row_num: Some(idx + 1),
                     is_menu_open,
+                    is_album: false,
                     is_currently_playing: matches_current_path,
                     is_selection_mode: is_selection_mode(),
                     is_selected,

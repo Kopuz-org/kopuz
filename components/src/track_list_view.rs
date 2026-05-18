@@ -13,6 +13,8 @@ pub struct TrackListViewProps {
     pub tracks: Vec<Track>,
     pub library: Signal<Library>,
     pub playlist_store: Signal<PlaylistStore>,
+    #[props(default = false)]
+    pub is_album: bool,
     pub on_close: EventHandler<()>,
     pub on_cover_click: Option<EventHandler<()>>,
     pub on_delete_track: Option<EventHandler<usize>>,
@@ -71,6 +73,7 @@ pub fn TrackListView(mut props: TrackListViewProps) -> Element {
                 cover_url: props.cover_url.clone(),
                 tracks: props.tracks.clone(),
                 library: props.library,
+                is_album: props.is_album,
                 is_selection_mode: is_selection_mode(),
                 selected_tracks: selected_tracks.read().clone(),
                 all_selected: !props.tracks.is_empty()

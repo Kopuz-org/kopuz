@@ -1,4 +1,4 @@
-use crate::server::download_manager::{DownloadQueue, DownloadStatus, queue_downloads};
+use crate::server::download_manager::{queue_downloads, DownloadQueue, DownloadStatus};
 use components::dots_menu::{DotsMenu, MenuAction};
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
@@ -840,6 +840,7 @@ pub fn JellyfinAlbumDetails(
                                     cover_url: track_cover_url,
                                     row_num: Some(idx + 1),
                                     is_menu_open,
+                                    is_album: true,
                                     is_currently_playing: currently_playing_idx == Some(idx),
                                     is_selection_mode: is_selection_mode(),
                                     is_selected: selected_tracks.read().contains(&track_path),

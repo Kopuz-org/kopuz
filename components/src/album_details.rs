@@ -25,10 +25,13 @@ pub fn AlbumDetails(
         .filter(|t| t.album_id == album_id)
         .cloned()
         .collect();
+
     tracks.sort_by(|a, b| {
-        a.track_number
-            .cmp(&b.track_number)
-            .then_with(|| a.title.cmp(&b.title))
+        a.disc_number.cmp(&b.disc_number).then_with(|| {
+            a.track_number
+                .cmp(&b.track_number)
+                .then_with(|| a.title.cmp(&b.title))
+        })
     });
 
     drop(lib);
@@ -40,6 +43,7 @@ pub fn AlbumDetails(
             name: album_title,
             description: album_artist,
             cover_url,
+            is_album: true,
             back_label: i18n::t("back_to_albums").to_string(),
             tracks,
             library,

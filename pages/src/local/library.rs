@@ -152,6 +152,7 @@ div {
                         track: track.clone(),
                         cover_url: cover_url.clone(),
                         is_menu_open,
+                        is_album: false,
                         is_currently_playing,
                         is_selection_mode: is_selection_mode(),
                         is_selected,

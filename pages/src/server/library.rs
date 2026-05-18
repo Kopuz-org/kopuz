@@ -26,9 +26,12 @@ pub fn JellyfinLibrary(
     let mut has_fetched = use_signal(|| false);
     let mut fetch_generation = use_signal(|| 0usize);
     let mut sort_order = use_signal(|| config.peek().sort_order.clone());
-    let mut scroll_positions =
-        use_context::<Signal<std::collections::HashMap<Route, f64>>>();
-    let saved_scroll = scroll_positions.peek().get(&Route::Library).copied().unwrap_or(0.0);
+    let mut scroll_positions = use_context::<Signal<std::collections::HashMap<Route, f64>>>();
+    let saved_scroll = scroll_positions
+        .peek()
+        .get(&Route::Library)
+        .copied()
+        .unwrap_or(0.0);
     let mut scroll_stat = use_signal(move || saved_scroll);
     use_effect(move || {
         let curr = sort_order.read().clone();
@@ -182,9 +185,7 @@ pub fn JellyfinLibrary(
         let queue = ctrl.queue.read();
         let q_idx = *ctrl.current_queue_index.read();
         let qt = queue_tracks();
-        if queue.len() == qt.len()
-            && queue.iter().zip(qt.iter()).all(|(q, t)| q.path == t.path)
-        {
+        if queue.len() == qt.len() && queue.iter().zip(qt.iter()).all(|(q, t)| q.path == t.path) {
             Some(q_idx)
         } else {
             None
@@ -229,6 +230,7 @@ pub fn JellyfinLibrary(
                     cover_url: cover_url.clone(),
                     row_num: Some(idx + 1),
                     is_menu_open,
+                    is_album: false,
                     is_currently_playing,
                     is_selection_mode: is_selection_mode(),
                     is_selected,
