@@ -18,8 +18,9 @@ dist/
 devenv.local.nix
 devenv.local.yaml
 
-# direnv
+# Nix
 .direnv
+/result*
 
 # pre-commit
 .pre-commit-config.yaml
