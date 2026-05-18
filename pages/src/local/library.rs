@@ -23,9 +23,12 @@ pub fn LocalLibrary(
 ) -> Element {
     let items = use_library_items(library);
     let mut sort_order = items.sort_order;
-    let mut scroll_positions =
-        use_context::<Signal<std::collections::HashMap<Route, f64>>>();
-    let saved_scroll = scroll_positions.peek().get(&Route::Library).copied().unwrap_or(0.0);
+    let mut scroll_positions = use_context::<Signal<std::collections::HashMap<Route, f64>>>();
+    let saved_scroll = scroll_positions
+        .peek()
+        .get(&Route::Library)
+        .copied()
+        .unwrap_or(0.0);
     let mut scroll_stat = use_signal(move || saved_scroll);
     let mut container_height = use_signal(|| f64::NAN);
 
@@ -104,9 +107,7 @@ pub fn LocalLibrary(
         let queue = ctrl.queue.read();
         let q_idx = *ctrl.current_queue_index.read();
         let all = displayed_tracks.read();
-        if queue.len() == all.len()
-            && queue.iter().zip(all.iter()).all(|(q, t)| q.path == t.path)
-        {
+        if queue.len() == all.len() && queue.iter().zip(all.iter()).all(|(q, t)| q.path == t.path) {
             Some(q_idx)
         } else {
             None
@@ -300,8 +301,7 @@ div {
                 if is_modern {
                     div {
                         p {
-                            class: "text-[10px] font-bold tracking-widest uppercase mb-0.5",
-                            style: "color: rgba(255,255,255,0.35);",
+                            class: "text-[10px] font-bold tracking-widest uppercase mb-0.5 text-white/35",
                             "{i18n::t(\"library\")}"
                         }
                         h1 { class: "text-2xl font-bold text-white", "{i18n::t(\"your_library\")}" }
@@ -395,12 +395,12 @@ div {
 
             div {
                 class: if is_modern {
-                    "grid px-3 py-2 text-[10px] font-bold uppercase tracking-widest border-b mb-1"
+                    "grid px-3 py-2 text-[10px] font-bold uppercase tracking-widest border-b mb-1 text-white/25 border-white/5"
                 } else {
                     "grid gap-6 px-2 py-2 border-b border-white/5 text-sm font-medium text-slate-500 mb-2 uppercase tracking-wider"
                 },
                 style: if is_modern {
-                    "grid-template-columns: 40px 1fr 180px 180px 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);"
+                    "grid-template-columns: 40px 1fr 180px 180px 56px 40px;"
                 } else {
                     "grid-template-columns: 40px minmax(0, 1fr) 200px 200px 64px 40px; align-items: center;"
                 },

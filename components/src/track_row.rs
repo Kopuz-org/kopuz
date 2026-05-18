@@ -194,8 +194,7 @@ pub fn TrackRow(
                     } else {
                         if let Some(n) = row_num {
                             span {
-                                class: "text-xs group-hover:hidden",
-                                style: "color: rgba(255,255,255,0.25);",
+                                class: "text-xs group-hover:hidden text-color/25",
                                 "{n}"
                             }
                         }
@@ -206,7 +205,7 @@ pub fn TrackRow(
                                 "flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                             },
                             onclick: move |_| on_play.call(()),
-                            i { class: "fa-solid fa-play text-xs", style: "color: rgba(255,255,255,0.8);" }
+                            i { class: "fa-solid fa-play text-xs text-color/80" }
                         }
                     }
                 }
@@ -226,7 +225,7 @@ pub fn TrackRow(
                         style: if is_currently_playing {
                             "color: var(--color-indigo-500); font-weight: 600;"
                         } else {
-                            "color: rgba(255,255,255,0.9);"
+                            "color: var(--color-white); opacity: 0.9;"
                         },
                         onclick: {
                             let album_id = track.album_id.clone();
@@ -251,7 +250,7 @@ pub fn TrackRow(
                 div { class: "flex items-center min-w-0 pr-3",
                     span {
                         class: "text-sm truncate cursor-pointer hover:underline",
-                        style: "color: rgba(255,255,255,0.45);",
+                        style: "color: var(--color-white) opacity: 0.45;",
                         onclick: {
                             let artist = track.artist.clone();
                             move |evt: MouseEvent| {
@@ -269,7 +268,7 @@ pub fn TrackRow(
                 div { class: "flex items-center min-w-0 pr-3",
                     span {
                         class: "text-sm truncate cursor-pointer hover:underline",
-                        style: "color: rgba(255,255,255,0.35);",
+                        style: "color: var(--color-white) opacity: 0.35;",
                         onclick: {
                             let album_id = track.album_id.clone();
                             move |evt: MouseEvent| {
@@ -287,7 +286,7 @@ pub fn TrackRow(
                 div { class: "flex items-center justify-end pr-2",
                     span {
                         class: "text-xs font-mono",
-                        style: "color: rgba(255,255,255,0.3);",
+                        style: "color: var(--color-white) opacity: 0.3;",
                         "{duration_str}"
                     }
                 }
@@ -404,7 +403,7 @@ pub fn TrackRow(
                     style: if is_currently_playing {
                         "color: var(--color-indigo-500);"
                     } else {
-                        "color: rgba(255,255,255,0.9);"
+                        "color: var(--color-white) opacity: 0.9;"
                     },
                     onclick: {
                         let album_id = track.album_id.clone();
@@ -423,7 +422,7 @@ pub fn TrackRow(
             div { class: "min-w-0 pr-4",
                 p {
                     class: "text-sm text-slate-500 truncate cursor-pointer hover:underline hover:text-slate-400 transition-colors",
-                    style: "color: rgba(255,255,255,0.45);",
+                    style: "color: var(--color-white) opacity: 0.45;",
                     onclick: {
                         let artist = track.artist.clone();
                         move |evt: MouseEvent| {
@@ -441,7 +440,7 @@ pub fn TrackRow(
             div { class: "min-w-0 pr-4",
                 p {
                     class: "text-sm text-slate-500 truncate cursor-pointer hover:underline hover:text-slate-400 transition-colors",
-                    style: "color: rgba(255,255,255,0.3);",
+                    style: "color: var(--color-white) opacity: 0.3;",
                     onclick: {
                         let album_id = track.album_id.clone();
                         move |evt: MouseEvent| {
@@ -457,7 +456,7 @@ pub fn TrackRow(
             }
 
             div { class: "flex items-center justify-end",
-                span { class: "text-xs font-mono text-slate-500", style: "color: rgba(255,255,255,0.3);", "{duration_str}" }
+                span { class: "text-xs font-mono text-slate-500", style: "color: var(--color-white) opacity: 0.3;", "{duration_str}" }
             }
 
             div { class: "flex items-center justify-end",

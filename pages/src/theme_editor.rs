@@ -218,11 +218,11 @@ pub fn ThemeEditorPage(config: Signal<AppConfig>, #[props(default)] embedded: bo
                                 let blur_key = key_str.clone();
                                 rsx! {
                                     div { class: "flex items-center justify-between gap-4",
-                                        span { class: "text-sm text-slate-300", "{label}" }
+                                        span { class: "text-sm text-white/70", "{label}" }
                                         div { class: "flex items-center gap-2 shrink-0",
                                             input {
                                                 r#type: "color",
-                                                class: "w-8 h-8 shrink-0 rounded cursor-pointer border border-white/10 bg-transparent",
+                                                class: "w-8 h-8 shrink-0 rounded cursor-pointer  border border-white/10 bg-transparent",
                                                 value: "{picker_value}",
                                                 aria_label: color_input_label,
                                                 oninput: move |e| {
@@ -233,7 +233,7 @@ pub fn ThemeEditorPage(config: Signal<AppConfig>, #[props(default)] embedded: bo
                                             }
                                             input {
                                                 r#type: "text",
-                                                class: "w-24 shrink-0 bg-black/20 border border-white/10 rounded px-2 py-1 text-xs text-slate-300 font-mono uppercase focus:outline-none focus:border-white/30",
+                                                class: "w-24 shrink-0 bg-black/20 border border-white/10 rounded px-2 py-1 text-xs text-white/90 font-mono uppercase focus:outline-none focus:border-white/30",
                                                 value: "{input_value}",
                                                 aria_label: hex_input_label,
                                                 maxlength: 7,

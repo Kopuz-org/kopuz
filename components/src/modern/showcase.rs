@@ -2,8 +2,8 @@ use config::AppConfig;
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
-use crate::NavigationController;
 use crate::showcase::{self, ShowcaseProps, SortField};
+use crate::NavigationController;
 
 #[component]
 pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
@@ -63,7 +63,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                         }
                     } else {
                         div { class: "w-full h-full flex items-center justify-center",
-                            i { class: "fa-solid fa-music text-4xl", style: "color: rgba(255,255,255,0.15);" }
+                            i { class: "fa-solid fa-music text-4xl", style: "color: var(--color-white) opacity: 0.15;" }
                         }
                     }
                 }
@@ -72,7 +72,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                     if !props.description.is_empty() {
                         p {
                             class: "text-xs font-bold tracking-widest uppercase mb-1",
-                            style: "color: rgba(255,255,255,0.35);",
+                            style: "color: var(--color-white) opacity: 0.35;",
                             "{props.description}"
                         }
                     }
@@ -82,7 +82,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                     }
                     p {
                         class: "text-sm mb-3",
-                        style: "color: rgba(255,255,255,0.45);",
+                        style: "color: var(--color-white) opacity: 0.45;",
                         {
                             let count = props.tracks.len();
                             let song_text = i18n::t_with("showcase_song_count", &[("count", count.to_string())]);
@@ -115,8 +115,8 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                             }
                             if props.on_download_all.is_some() || props.on_delete_all.is_some() {
                                 button {
-                                    class: "inline-flex items-center justify-center h-9 w-9 rounded-full text-sm font-medium transition-colors hover:bg-white/10",
-                                    style: "color: rgba(255,255,255,0.6); border: 1px solid rgba(255,255,255,0.12);",
+                                    class: "inline-flex items-center justify-center h-9 w-9 rounded-full text-sm font-medium transition-colors border border-white/12 hover:bg-white/10",
+                                    style: "color: var(--color-white) opacity: 0.6;",
                                     disabled: props.is_downloading_all,
                                     onclick: move |_| {
                                         if props.on_delete_all.is_some() {
@@ -140,13 +140,13 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
 
             if props.tracks.is_empty() {
                 div { class: "flex flex-col items-center justify-center py-16 gap-3",
-                    i { class: "fa-regular fa-folder-open text-4xl", style: "color: rgba(255,255,255,0.15);" }
-                    p { class: "text-sm", style: "color: rgba(255,255,255,0.3);", "{i18n::t(\"no_songs_here\")}" }
+                    i { class: "fa-regular fa-folder-open text-4xl", style: "color: var(--color-white) opacity: 0.15;" }
+                    p { class: "text-sm", style: "color: var(--color-white) opacity: 0.3;", "{i18n::t(\"no_songs_here\")}" }
                 }
             } else {
                 div {
-                    class: "grid px-3 py-2 text-[10px] font-bold uppercase tracking-widest border-b mb-1",
-                    style: "grid-template-columns: 40px 1fr 180px 180px 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);",
+                    class: "grid px-3 py-2 text-[10px] font-bold text-slate-500 border-white/5 uppercase tracking-widest border-b mb-1",
+                    style: "grid-template-columns: 40px 1fr 180px 180px 56px 40px;;",
                     div { class: "flex items-center", "#" }
                     button {
                         class: "flex items-center gap-1 uppercase tracking-widest text-left hover:text-white transition-colors",
@@ -187,7 +187,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                         let is_playing: bool = matches_current_path || matches_current_metadata;
                         let is_selected = props.is_selection_mode && props.selected_tracks.contains(&track.path);
                         let selection_shadow = if is_selected {
-                            "inset 0 0 0 9999px rgba(255,255,255,0.07)"
+                            "inset 0 0 0 9999px color: var(--color-white) opacity: 0.07;"
                         } else {
                             "none"
                         };
@@ -246,7 +246,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                     } else {
                                         span {
                                             class: "text-xs group-hover:hidden",
-                                            style: "color: rgba(255,255,255,0.25);",
+                                            style: "color: var(--color-white) opacity: 0.25;",
                                             "{row_num}"
                                         }
                                         button {
@@ -255,7 +255,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                                 ctrl.queue.set(play_queue_button.clone());
                                                 ctrl.play_track(display_idx);
                                             },
-                                            i { class: "fa-solid fa-play text-xs", style: "color: rgba(255,255,255,0.8);" }
+                                            i { class: "fa-solid fa-play text-xs", style: "color: var(--color-white) opacity: 0.8;" }
                                         }
                                     }
                                 }
@@ -270,7 +270,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                                 decoding: "async",
                                             }
                                         } else {
-                                            i { class: "fa-solid fa-music", style: "color: rgba(255,255,255,0.2); font-size: 10px;" }
+                                            i { class: "fa-solid fa-music", style: "color: var(--color-white) opacity: 0.2; font-size: 10px;" }
                                         }
                                     }
                                     span {
@@ -278,7 +278,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                         style: if is_playing {
                                             "color: var(--color-indigo-500); font-weight: 600;"
                                         } else {
-                                            "color: rgba(255,255,255,0.9);"
+                                            "color: var(--color-white) opacity: 0.9;"
                                         },
                                         ondoubleclick: move |evt| evt.stop_propagation(),
                                         "{track.title}"
@@ -288,7 +288,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                 div { class: "flex items-center min-w-0 pr-4",
                                     span {
                                         class: "text-sm truncate cursor-pointer hover:underline",
-                                        style: "color: rgba(255,255,255,0.45);",
+                                        style: "color: var(--color-white) opacity: 0.45;",
                                         onclick: {
                                             let artist = artist.clone();
                                             move |evt: MouseEvent| {
@@ -304,7 +304,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                 div { class: "flex items-center min-w-0 pr-4",
                                     span {
                                         class: "text-sm truncate cursor-pointer hover:underline",
-                                        style: "color: rgba(255,255,255,0.35);",
+                                        style: "color: var(--color-white) opacity: 0.35;",
                                         onclick: {
                                             let album_id = album_id.clone();
                                             move |evt: MouseEvent| {
@@ -320,7 +320,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                 div { class: "flex items-center justify-end",
                                     span {
                                         class: "text-xs font-mono",
-                                        style: "color: rgba(255,255,255,0.3);",
+                                        style: "color: var(--color-white) opacity: 0.3;",
                                         "{track_dur}"
                                     }
                                 }
@@ -329,7 +329,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                     if let Some(ref _handler) = props.on_click_menu {
                                         button {
                                             class: "w-6 h-6 flex items-center justify-center rounded transition-colors hover:bg-white/10",
-                                            style: "color: rgba(255,255,255,0.5);",
+                                            style: "color: var(--color-white) opacity: 0.5;",
                                             onclick: move |_| {
                                                 if let Some(ref h) = props.on_click_menu { h.call(idx); }
                                             },
