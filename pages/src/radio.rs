@@ -66,7 +66,23 @@ const STATIONS: &[RadioStation] = &[
         streams: &[
             RadioStream { name: "radio_live_stream", id: "main", icon: "fa-solid fa-play" },
         ],
-    }
+    },
+    RadioStation {
+        id: "asiadreamradio",
+        name: "Asia DREAM Radio",
+        description: "radio_asiadreamradio_desc",
+        icon: "fa-solid fa-radio",
+        streams: &[
+            RadioStream { name: "Japan Hits",           id: "japan_hits",     icon: "fa-solid fa-fire" },
+            RadioStream { name: "J-Pop Powerplay",      id: "jpop_power",     icon: "fa-solid fa-bolt" },
+            RadioStream { name: "J-Pop Kawaii",         id: "jpop_kawaii",    icon: "fa-solid fa-heart" },
+            RadioStream { name: "J-Rock Powerplay",     id: "jrock",          icon: "fa-solid fa-guitar" },
+            RadioStream { name: "J-Club Hip-Hop",       id: "jclub_hiphop",   icon: "fa-solid fa-record-vinyl" },
+            RadioStream { name: "Jazz Sakura",          id: "jazz_sakura",    icon: "fa-solid fa-headphones" },
+            RadioStream { name: "J-Sakura Natsukashii", id: "natsukashii",    icon: "fa-solid fa-clock-rotate-left" },
+            RadioStream { name: "Bandstand Jazz",       id: "bandstand_jazz", icon: "fa-solid fa-music" },
+        ],
+    },
 ];
 
 #[component]

@@ -380,6 +380,7 @@ radio_listen_moe_desc = アニメとK-Pop音楽を24時間年中無休で。
 radio_j1_desc = 日本の最新チャートヒットと名曲。
 radio_doujinstyle_desc = 同人音楽、ビデオゲームのサウンドトラックなど。
 radio_vocaloid_desc = 日本のボーカロイドヒット曲。何でも再生します！
+radio_asiadreamradio_desc = ジェイポップミュージックの中心 - ジェイポップ、ジェイロック、ジェイヒップホップ、ジェイジャズ、クラシック。
 radio_live_stream = ライブストリーム
 
 auto_check_updates = アップデートを自動確認

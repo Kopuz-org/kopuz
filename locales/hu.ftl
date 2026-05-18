@@ -374,6 +374,7 @@ radio_listen_moe_desc = Anime és koreai popzene, 24/7.
 radio_j1_desc = Aktuális slágerek és klasszikus dalok Japánból.
 radio_doujinstyle_desc = Doujin zene, videojátékok zenéi és még sok más.
 radio_vocaloid_desc = Vocaloid slágerek Japánból. Mindent játszunk!
+radio_asiadreamradio_desc = A J-Pop zene szíve - J-Pop, J-Rock, J-HipHop, J-Jazz, klasszikusok.
 radio_live_stream = Élő adás
 
 auto_check_updates = Frissítések automatikus keresése

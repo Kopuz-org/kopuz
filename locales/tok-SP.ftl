@@ -375,6 +375,7 @@ radio_listen_moe_desc = kalama musi pi ma Nijon en ma Kanto.
 radio_j1_desc = kalama musi suli pi ma Nijon.
 radio_doujinstyle_desc = kalama musi pi musi sitelen.
 radio_vocaloid_desc = kalama musi pi ilo kalama.
+radio_asiadreamradio_desc = insa pi kalama musi J-Pop - J-Pop, J-Rock, J-HipHop, J-Jazz, kalama pi tenpo pini.
 radio_live_stream = linja kalama tenpo ni
 
 auto_check_updates = lukin pi sin namako lon tenpo ale

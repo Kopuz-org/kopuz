@@ -374,6 +374,7 @@ radio_listen_moe_desc = Muzyka z anime i koreański pop, 24/7.
 radio_j1_desc = Obecne hity i klasyczne piosenki z Japonii.
 radio_doujinstyle_desc = Muzyka doujin, ścieżki dźwiękowe z gier wideo i więcej.
 radio_vocaloid_desc = Hity Vocaloid z Japonii. Gramy wszystko!
+radio_asiadreamradio_desc = Serce muzyki J-Pop - J-Pop, J-Rock, J-HipHop, J-Jazz, klasyki.
 radio_live_stream = Transmisja na żywo
 
 auto_check_updates = Automatycznie sprawdzaj aktualizacje
