@@ -15,6 +15,10 @@ pub fn LocalPlaylists(
     let mut active_menu = use_signal(|| Option::<String>::None);
     let mut open_folder_id = use_signal(|| Option::<String>::None);
     let mut move_target_id = use_signal(|| Option::<String>::None);
+    let mut rename_playlist_id = use_signal(|| Option::<String>::None);
+    let mut rename_playlist_name = use_signal(String::new);
+    let mut rename_folder_id = use_signal(|| Option::<String>::None);
+    let mut rename_folder_name = use_signal(String::new);
 
     let store = playlist_store.read();
     let lib = library.read();
@@ -43,21 +47,26 @@ pub fn LocalPlaylists(
         vec![]
     };
 
-    let delete_text = i18n::t("delete_playlist").to_string();
+    let delete_playlist_text = i18n::t("delete_playlist").to_string();
+    let rename_playlist_text = i18n::t("rename_playlist").to_string();
+    let rename_folder_text = i18n::t("rename_folder").to_string();
     let move_text = i18n::t("move_to_folder").to_string();
     let remove_folder_text = i18n::t("remove_from_folder").to_string();
-    let delete_folder_text = i18n::t("delete_playlist").to_string(); // reuse
+    let delete_folder_text = i18n::t("delete_folder").to_string();
 
     let playlist_actions = vec![
         MenuAction::new(move_text.as_str(), "fa-solid fa-folder-open"),
-        MenuAction::new(delete_text.as_str(), "fa-solid fa-trash").destructive(),
+        MenuAction::new(rename_playlist_text.as_str(), "fa-solid fa-pen"),
+        MenuAction::new(delete_playlist_text.as_str(), "fa-solid fa-trash").destructive(),
     ];
     let folder_playlist_actions = vec![
         MenuAction::new(move_text.as_str(), "fa-solid fa-folder-open"),
         MenuAction::new(remove_folder_text.as_str(), "fa-solid fa-folder-minus"),
-        MenuAction::new(delete_text.as_str(), "fa-solid fa-trash").destructive(),
+        MenuAction::new(rename_playlist_text.as_str(), "fa-solid fa-pen"),
+        MenuAction::new(delete_playlist_text.as_str(), "fa-solid fa-trash").destructive(),
     ];
     let folder_actions = vec![
+        MenuAction::new(rename_folder_text.as_str(), "fa-solid fa-pen"),
         MenuAction::new(delete_folder_text.as_str(), "fa-solid fa-trash").destructive(),
     ];
 
@@ -82,6 +91,60 @@ pub fn LocalPlaylists(
                     playlist_store,
                     playlist_id: target_id,
                     on_close: move |_| move_target_id.set(None),
+                }
+            }
+
+            if let Some(rename_id) = rename_playlist_id.read().clone() {
+                RenameTextModal {
+                    title: rename_playlist_text.clone(),
+                    value: rename_playlist_name,
+                    on_close: move |_| {
+                        rename_playlist_id.set(None);
+                        rename_playlist_name.set(String::new());
+                    },
+                    on_save: move |_| {
+                        let name = rename_playlist_name.read().trim().to_string();
+                        if name.is_empty() {
+                            return;
+                        }
+                        if let Some(playlist) = playlist_store
+                            .write()
+                            .playlists
+                            .iter_mut()
+                            .find(|playlist| playlist.id == rename_id)
+                        {
+                            playlist.name = name;
+                        }
+                        rename_playlist_id.set(None);
+                        rename_playlist_name.set(String::new());
+                    },
+                }
+            }
+
+            if let Some(rename_id) = rename_folder_id.read().clone() {
+                RenameTextModal {
+                    title: rename_folder_text.clone(),
+                    value: rename_folder_name,
+                    on_close: move |_| {
+                        rename_folder_id.set(None);
+                        rename_folder_name.set(String::new());
+                    },
+                    on_save: move |_| {
+                        let name = rename_folder_name.read().trim().to_string();
+                        if name.is_empty() {
+                            return;
+                        }
+                        if let Some(folder) = playlist_store
+                            .write()
+                            .folders
+                            .iter_mut()
+                            .find(|folder| folder.id == rename_id)
+                        {
+                            folder.name = name;
+                        }
+                        rename_folder_id.set(None);
+                        rename_folder_name.set(String::new());
+                    },
                 }
             }
 
@@ -111,6 +174,7 @@ pub fn LocalPlaylists(
                                 let pid_click = playlist.id.clone();
                                 let pid_menu = playlist.id.clone();
                                 let pid_action = playlist.id.clone();
+                                let playlist_name_for_rename = playlist.name.clone();
                                 let fid_remove = folder.id.clone();
                                 let is_menu_open = active_menu.read().as_deref() == Some(playlist.id.as_str());
 
@@ -159,6 +223,11 @@ pub fn LocalPlaylists(
                                                                 }
                                                                 active_menu.set(None);
                                                             }
+                                                            2 => {
+                                                                rename_playlist_id.set(Some(pid_action.clone()));
+                                                                rename_playlist_name.set(playlist_name_for_rename.clone());
+                                                                active_menu.set(None);
+                                                            }
                                                             _ => {
                                                                 playlist_store.write().playlists.retain(|p| p.id != pid_action);
                                                                 for f in &mut playlist_store.write().folders {
@@ -192,7 +261,9 @@ pub fn LocalPlaylists(
                                     let fid_open = folder.id.clone();
                                     let fid_menu = folder.id.clone();
                                     let fid_del = folder.id.clone();
+                                    let fid_rename = folder.id.clone();
                                     let fname = folder.name.clone();
+                                    let fname_rename = folder.name.clone();
                                     let count = folder.playlist_ids.len();
                                     let is_menu_open = active_menu.read().as_deref() == Some(folder.id.as_str());
 
@@ -230,10 +301,19 @@ pub fn LocalPlaylists(
                                                         on_close: move |_| active_menu.set(None),
                                                         button_class: "opacity-0 group-hover:opacity-100 focus:opacity-100".to_string(),
                                                         anchor: "right".to_string(),
-                                                        on_action: move |_| {
-                                                            let mut store = playlist_store.write();
-                                                            store.folders.retain(|f| f.id != fid_del);
-                                                            active_menu.set(None);
+                                                        on_action: move |idx: usize| {
+                                                            match idx {
+                                                                0 => {
+                                                                    rename_folder_id.set(Some(fid_rename.clone()));
+                                                                    rename_folder_name.set(fname_rename.clone());
+                                                                    active_menu.set(None);
+                                                                }
+                                                                _ => {
+                                                                    let mut store = playlist_store.write();
+                                                                    store.folders.retain(|f| f.id != fid_del);
+                                                                    active_menu.set(None);
+                                                                }
+                                                            }
                                                         },
                                                     }
                                                 }
@@ -255,6 +335,7 @@ pub fn LocalPlaylists(
                                     let pid_click = playlist.id.clone();
                                     let pid_menu = playlist.id.clone();
                                     let pid_action = playlist.id.clone();
+                                    let playlist_name_for_rename = playlist.name.clone();
                                     let is_menu_open = active_menu.read().as_deref() == Some(playlist.id.as_str());
 
                                     rsx! {
@@ -295,6 +376,11 @@ pub fn LocalPlaylists(
                                                         on_action: move |idx: usize| {
                                                             match idx {
                                                                 0 => { move_target_id.set(Some(pid_action.clone())); active_menu.set(None); }
+                                                                1 => {
+                                                                    rename_playlist_id.set(Some(pid_action.clone()));
+                                                                    rename_playlist_name.set(playlist_name_for_rename.clone());
+                                                                    active_menu.set(None);
+                                                                }
                                                                 _ => {
                                                                     playlist_store.write().playlists.retain(|p| p.id != pid_action);
                                                                     active_menu.set(None);
@@ -309,6 +395,50 @@ pub fn LocalPlaylists(
                                 })}
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn RenameTextModal(
+    title: String,
+    value: Signal<String>,
+    on_close: EventHandler<()>,
+    on_save: EventHandler<()>,
+) -> Element {
+    rsx! {
+        div {
+            class: "fixed inset-0 bg-black/70 flex items-center justify-center z-50",
+            onclick: move |_| on_close.call(()),
+            div {
+                class: "bg-neutral-900 border border-white/10 rounded-2xl p-6 w-80 shadow-2xl",
+                onclick: move |evt| evt.stop_propagation(),
+                h2 { class: "text-lg font-bold text-white mb-4", "{title}" }
+                input {
+                    class: "w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 mb-4",
+                    value: "{value()}",
+                    oninput: move |evt| value.set(evt.value()),
+                    onkeydown: move |evt| {
+                        evt.stop_propagation();
+                        if evt.key() == Key::Enter {
+                            on_save.call(());
+                        }
+                    },
+                }
+                div { class: "flex justify-end gap-2",
+                    button {
+                        class: "px-3 py-2 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-white/10 transition-colors",
+                        onclick: move |_| on_close.call(()),
+                        "{i18n::t(\"cancel\")}"
+                    }
+                    button {
+                        class: "px-3 py-2 bg-white text-black rounded-lg text-sm font-medium hover:bg-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+                        disabled: value.read().trim().is_empty(),
+                        onclick: move |_| on_save.call(()),
+                        "{i18n::t(\"save\")}"
                     }
                 }
             }
