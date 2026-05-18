@@ -82,11 +82,11 @@
                 },
                 {
                     "type": "file",
-                    "path": "kopuz/assets/logo-512.png"
+                    "path": "crates/kopuz/assets/logo-512.png"
                 },
                 {
                     "type": "file",
-                    "path": "kopuz/assets/logo-128.png"
+                    "path": "crates/kopuz/assets/logo-128.png"
                 }
             ]
         }

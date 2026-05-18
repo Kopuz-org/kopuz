@@ -57,7 +57,7 @@ package() {
     sed -i "s|Exec=kopuz|Exec=/usr/bin/kopuz|" \
         "$pkgdir/usr/share/applications/com.temidaradev.kopuz.desktop"
 
-    install -Dm644 "kopuz/assets/logo.png" \
+    install -Dm644 "crates/kopuz/assets/logo.png" \
         "$pkgdir/usr/share/icons/hicolor/256x256/apps/com.temidaradev.kopuz.png"
 
     install -Dm644 "data/com.temidaradev.kopuz.metainfo.xml" \

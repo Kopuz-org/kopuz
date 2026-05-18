@@ -1,12 +1,19 @@
 [workspace]
 members = [
-   "kopuz",
-   "components",
-   "hooks",
-   "pages",
-   "player",
-   "reader",
-   "server", "utils", "config", "kopuz_route", "discord-presence", "scrobble", "i18n", "radio",
+   "crates/kopuz",
+   "crates/components",
+   "crates/hooks",
+   "crates/pages",
+   "crates/player",
+   "crates/reader",
+   "crates/server",
+   "crates/utils",
+   "crates/config",
+   "crates/kopuz_route",
+   "crates/discord-presence",
+   "crates/scrobble",
+   "crates/i18n",
+   "crates/radio",
 ]
 resolver = "3"
 
@@ -42,20 +49,20 @@ directories = "6.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2"
-i18n = { path = "./i18n" }
-player = { path = "./player" }
-reader = { path = "./reader" }
-components = { path = "./components" }
-hooks = { path = "./hooks" }
-pages = { path = "./pages" }
-utils = { path = "./utils" }
-config = { path = "./config" }
-kopuz = { path = "./kopuz" }
-server = { path = "./server" }
-kopuz_route = { path = "./kopuz_route" }
-discord-presence = { path = "./discord-presence" }
-scrobble = { path = "./scrobble" }
-radio = { path = "./radio" }
+i18n = { path = "./crates/i18n" }
+player = { path = "./crates/player" }
+reader = { path = "./crates/reader" }
+components = { path = "./crates/components" }
+hooks = { path = "./crates/hooks" }
+pages = { path = "./crates/pages" }
+utils = { path = "./crates/utils" }
+config = { path = "./crates/config" }
+kopuz = { path = "./crates/kopuz" }
+server = { path = "./crates/server" }
+kopuz_route = { path = "./crates/kopuz_route" }
+discord-presence = { path = "./crates/discord-presence" }
+scrobble = { path = "./crates/scrobble" }
+radio = { path = "./crates/radio" }
 
 [profile.release]
 strip = "symbols"

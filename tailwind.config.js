@@ -2,16 +2,16 @@
 module.exports = {
   mode: "all",
   content: [
-    "./kopuz/**/*.{rs,html,css}",
-    "./components/**/*.{rs,html,css}",
-    "./pages/**/*.{rs,html,css}",
-    "./hooks/**/*.{rs,html,css}",
-    "./player/**/*.{rs,html,css}",
-    "./reader/**/*.{rs,html,css}",
-    "./server/**/*.{rs,html,css}",
-    "./utils/**/*.{rs,html,css}",
-    "./config/**/*.{rs,html,css}",
-    "./kopuz_route/**/*.{rs,html,css}",
+    "./crates/kopuz/**/*.{rs,html,css}",
+    "./crates/components/**/*.{rs,html,css}",
+    "./crates/pages/**/*.{rs,html,css}",
+    "./crates/hooks/**/*.{rs,html,css}",
+    "./crates/player/**/*.{rs,html,css}",
+    "./crates/reader/**/*.{rs,html,css}",
+    "./crates/server/**/*.{rs,html,css}",
+    "./crates/utils/**/*.{rs,html,css}",
+    "./crates/config/**/*.{rs,html,css}",
+    "./crates/kopuz_route/**/*.{rs,html,css}",
   ],
   theme: {
     extend: {

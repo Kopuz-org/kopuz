@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="kopuz/assets/banner.png" alt="Kopuz Logo" height="300"/>
+  <img src="crates/kopuz/assets/banner.png" alt="Kopuz Logo" height="300"/>
 
 # Kopuz
 
@@ -115,7 +115,7 @@ Kopuz is soon available on Flathub. To install from source manifest:
 ```bash
 git clone https://github.com/temidaradev/kopuz
 cd kopuz
-flatpak-builder --user --install --force-clean build-dir com.temidaradev.kopuz.json
+flatpak-builder --user --install --force-clean build-dir packaging/flatpak/com.temidaradev.kopuz.json
 flatpak run com.temidaradev.kopuz
 ```
 
