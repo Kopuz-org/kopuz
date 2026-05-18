@@ -1,3 +1,14 @@
+// macOS system integration: media keys, Now Playing info, audio session, power
+// management, and run loop heartbeat for remote command dispatching.
+//
+// Architecture:
+// - init() sets up: NSProcessInfo (prevent App Nap), IOKit (no idle sleep),
+//   AVAudioSession (background playback), MPRemoteCommandCenter (media keys),
+//   CFRunLoopTimer (periodic heartbeat to wake the Tokio runtime)
+// - update_now_playing() pushes metadata + artwork to MPNowPlayingInfoCenter
+// - CFRunLoopWakeUp() is called to unblock the main thread from Tokio tasks
+// - All Objective-C/CoreFoundation FFI is documented with // SAFETY: invariants
+
 use std::ptr::NonNull;
 use std::sync::Mutex as StdMutex;
 use std::sync::{Arc, OnceLock};
@@ -18,6 +29,10 @@ use objc2_media_player::{
     MPRemoteCommandHandlerStatus,
 };
 
+// SAFETY:
+// These are well-documented CoreFoundation C functions. The FFI
+// signatures match the official Apple headers. Each call site
+// documents why the specific call is safe.
 unsafe extern "C" {
     fn CFRunLoopGetMain() -> *mut std::ffi::c_void;
     fn CFRunLoopWakeUp(rl: *mut std::ffi::c_void);
@@ -41,6 +56,10 @@ unsafe extern "C" {
 
 type IOPMAssertionID = u32;
 #[link(name = "IOKit", kind = "framework")]
+// SAFETY:
+// IOPMAssertionCreateWithName is a documented IOKit function.
+// The FFI signature matches Apple's IOPMLib.h header. The call
+// site documents the specific safety invariants.
 unsafe extern "C" {
     fn IOPMAssertionCreateWithName(
         assertion_type: *const std::ffi::c_void,
@@ -51,6 +70,11 @@ unsafe extern "C" {
 }
 
 pub fn wake_run_loop() {
+    // SAFETY:
+    // - CFRunLoopGetMain() always returns a valid reference to the main
+    //   thread's run loop; it never returns null.
+    // - CFRunLoopWakeUp is safe to call on any valid run loop and does
+    //   not require additional synchronization.
     unsafe { CFRunLoopWakeUp(CFRunLoopGetMain()) }
 }
 
@@ -62,10 +86,6 @@ pub enum SystemEvent {
     Next,
     Prev,
 }
-
-struct ThreadSafeArtwork(objc2::rc::Retained<MPMediaItemArtwork>);
-unsafe impl Send for ThreadSafeArtwork {}
-unsafe impl Sync for ThreadSafeArtwork {}
 
 static BACKGROUND_HANDLER: OnceLock<Arc<StdMutex<Option<Box<dyn Fn(SystemEvent) + Send + Sync>>>>> =
     OnceLock::new();
@@ -113,6 +133,12 @@ fn dispatch_event(event: SystemEvent) {
     wake_run_loop();
 }
 
+// SAFETY:
+// - This function matches the C callback signature expected by
+//   CFRunLoopTimerCreate (CFRunLoopTimerCallBack).
+// - It only calls wake_tokio() which is a safe Rust function.
+// - Parameters are unused, so their raw pointer values are never
+//   dereferenced.
 unsafe extern "C" fn main_loop_heartbeat(
     _timer: *mut std::ffi::c_void,
     _info: *mut std::ffi::c_void,
@@ -122,109 +148,131 @@ unsafe extern "C" fn main_loop_heartbeat(
 
 pub fn init() {
     static ONCE: OnceLock<()> = OnceLock::new();
-    ONCE.get_or_init(|| unsafe {
-        use objc2::ClassType;
-        let process_info: *mut AnyObject = objc2::msg_send![NSProcessInfo::class(), processInfo];
-        let reason = NSString::from_str("Kopuz Background Audio Playback");
-        let options: u64 = 0x00FFFFFF | 0xFF00000000;
-        let activity: *mut AnyObject =
-            objc2::msg_send![process_info, beginActivityWithOptions: options, reason: &*reason];
-        if !activity.is_null() {
-            let _: *mut AnyObject = objc2::msg_send![activity, retain];
-            println!("[macos] App Nap bypassed with NSProcessInfo activity (latency-critical)");
-        }
+    ONCE.get_or_init(|| {
+        // SAFETY:
+        // - msg_send! on NSProcessInfo, AVFoundation, and MediaPlayer objects
+        //   is safe because these are well-known Apple frameworks that do not
+        //   require special threading or memory management beyond retain/release,
+        //   which objc2 handles automatically.
+        // - transmute from &NSString to *const c_void is sound because
+        //   NSString is a valid Objective-C object with a stable memory layout
+        //   compatible with CoreFoundation's CFStringRef.
+        // - IOPMAssertionCreateWithName expects a CFStringRef; transmuting
+        //   NSString to *const c_void is valid for the same reason (toll-free
+        //   bridging between CFStringRef and NSString).
+        // - CFRunLoopGetMain() always returns a valid run loop reference.
+        // - CFRunLoopTimerCreate with null allocator uses the default allocator,
+        //   which is correct for CoreFoundation.
+        // - kCFRunLoopCommonModes is a valid CFStringRef constant.
+        // - main_loop_heartbeat matches the required C callback signature.
+        // - All pointers passed to CoreFoundation functions are valid for the
+        //   duration of the calls.
+        // - The activity pointer from beginActivityWithOptions: is checked for
+        //   null before being used.
+        unsafe {
+            use objc2::ClassType;
+            let process_info: *mut AnyObject = objc2::msg_send![NSProcessInfo::class(), processInfo];
+            let reason = NSString::from_str("Kopuz Background Audio Playback");
+            let options: u64 = 0x00FFFFFF | 0xFF00000000;
+            let activity: *mut AnyObject =
+                objc2::msg_send![process_info, beginActivityWithOptions: options, reason: &*reason];
+            if !activity.is_null() {
+                let _: *mut AnyObject = objc2::msg_send![activity, retain];
+                println!("[macos] App Nap bypassed with NSProcessInfo activity (latency-critical)");
+            }
 
-        let assertion_type = NSString::from_str("NoIdleSleepAssertion");
-        let assertion_reason = NSString::from_str("Kopuz is playing audio");
-        let mut assertion_id: IOPMAssertionID = 0;
-        let kr = IOPMAssertionCreateWithName(
-            std::mem::transmute::<&objc2_foundation::NSString, *const std::ffi::c_void>(
-                &*assertion_type,
-            ),
-            255,
-            std::mem::transmute::<&objc2_foundation::NSString, *const std::ffi::c_void>(
-                &*assertion_reason,
-            ),
-            &mut assertion_id,
-        );
-        if kr == 0 {
-            println!(
-                "[macos] IOKit power assertion created (id={})",
-                assertion_id
+            let assertion_type = NSString::from_str("NoIdleSleepAssertion");
+            let assertion_reason = NSString::from_str("Kopuz is playing audio");
+            let mut assertion_id: IOPMAssertionID = 0;
+            let kr = IOPMAssertionCreateWithName(
+                std::mem::transmute::<&objc2_foundation::NSString, *const std::ffi::c_void>(
+                    &*assertion_type,
+                ),
+                255,
+                std::mem::transmute::<&objc2_foundation::NSString, *const std::ffi::c_void>(
+                    &*assertion_reason,
+                ),
+                &mut assertion_id,
             );
-        } else {
-            eprintln!("[macos] Failed to create IOKit power assertion: {}", kr);
-        }
+            if kr == 0 {
+                println!(
+                    "[macos] IOKit power assertion created (id={})",
+                    assertion_id
+                );
+            } else {
+                eprintln!("[macos] Failed to create IOKit power assertion: {}", kr);
+            }
 
-        let session = AVAudioSession::sharedInstance();
-        if let Err(e) = session.setCategory_error(AVAudioSessionCategoryPlayback.unwrap()) {
-            eprintln!("[macos] Failed to set AVAudioSession category: {:?}", e);
-        }
-        if let Err(e) = session.setActive_error(true) {
-            eprintln!("[macos] Failed to activate AVAudioSession: {:?}", e);
-        } else {
-            println!("[macos] AVAudioSession configured for background playback");
-        }
+            let session = AVAudioSession::sharedInstance();
+            if let Err(e) = session.setCategory_error(AVAudioSessionCategoryPlayback.unwrap()) {
+                eprintln!("[macos] Failed to set AVAudioSession category: {:?}", e);
+            }
+            if let Err(e) = session.setActive_error(true) {
+                eprintln!("[macos] Failed to activate AVAudioSession: {:?}", e);
+            } else {
+                println!("[macos] AVAudioSession configured for background playback");
+            }
 
-        let center = MPRemoteCommandCenter::sharedCommandCenter();
+            let center = MPRemoteCommandCenter::sharedCommandCenter();
 
-        center.playCommand().addTargetWithHandler(&RcBlock::new(
-            move |_: NonNull<MPRemoteCommandEvent>| {
-                dispatch_event(SystemEvent::Play);
-                MPRemoteCommandHandlerStatus::Success
-            },
-        ));
+            center.playCommand().addTargetWithHandler(&RcBlock::new(
+                move |_: NonNull<MPRemoteCommandEvent>| {
+                    dispatch_event(SystemEvent::Play);
+                    MPRemoteCommandHandlerStatus::Success
+                },
+            ));
 
-        center.pauseCommand().addTargetWithHandler(&RcBlock::new(
-            move |_: NonNull<MPRemoteCommandEvent>| {
-                dispatch_event(SystemEvent::Pause);
-                MPRemoteCommandHandlerStatus::Success
-            },
-        ));
+            center.pauseCommand().addTargetWithHandler(&RcBlock::new(
+                move |_: NonNull<MPRemoteCommandEvent>| {
+                    dispatch_event(SystemEvent::Pause);
+                    MPRemoteCommandHandlerStatus::Success
+                },
+            ));
 
-        center
-            .togglePlayPauseCommand()
-            .addTargetWithHandler(&RcBlock::new(move |_: NonNull<MPRemoteCommandEvent>| {
-                dispatch_event(SystemEvent::Toggle);
-                MPRemoteCommandHandlerStatus::Success
-            }));
+            center
+                .togglePlayPauseCommand()
+                .addTargetWithHandler(&RcBlock::new(move |_: NonNull<MPRemoteCommandEvent>| {
+                    dispatch_event(SystemEvent::Toggle);
+                    MPRemoteCommandHandlerStatus::Success
+                }));
 
-        center
-            .nextTrackCommand()
-            .addTargetWithHandler(&RcBlock::new(move |_: NonNull<MPRemoteCommandEvent>| {
-                dispatch_event(SystemEvent::Next);
-                MPRemoteCommandHandlerStatus::Success
-            }));
+            center
+                .nextTrackCommand()
+                .addTargetWithHandler(&RcBlock::new(move |_: NonNull<MPRemoteCommandEvent>| {
+                    dispatch_event(SystemEvent::Next);
+                    MPRemoteCommandHandlerStatus::Success
+                }));
 
-        center
-            .previousTrackCommand()
-            .addTargetWithHandler(&RcBlock::new(move |_: NonNull<MPRemoteCommandEvent>| {
-                dispatch_event(SystemEvent::Prev);
-                MPRemoteCommandHandlerStatus::Success
-            }));
+            center
+                .previousTrackCommand()
+                .addTargetWithHandler(&RcBlock::new(move |_: NonNull<MPRemoteCommandEvent>| {
+                    dispatch_event(SystemEvent::Prev);
+                    MPRemoteCommandHandlerStatus::Success
+                }));
 
-        let fire_date = CFAbsoluteTimeGetCurrent();
-        let timer = CFRunLoopTimerCreate(
-            std::ptr::null(),
-            fire_date,
-            0.25,
-            0,
-            0,
-            main_loop_heartbeat,
-            std::ptr::null(),
-        );
-        if !timer.is_null() {
-            CFRunLoopAddTimer(CFRunLoopGetMain(), timer, kCFRunLoopCommonModes);
-            println!("[macos] CFRunLoopTimer heartbeat started on main run loop (250ms)");
-        } else {
-            eprintln!("[macos] Failed to create CFRunLoopTimer, falling back to thread");
-            std::thread::spawn(|| {
-                loop {
-                    std::thread::sleep(std::time::Duration::from_millis(250));
-                    wake_tokio();
-                    wake_run_loop();
-                }
-            });
+            let fire_date = CFAbsoluteTimeGetCurrent();
+            let timer = CFRunLoopTimerCreate(
+                std::ptr::null(),
+                fire_date,
+                0.25,
+                0,
+                0,
+                main_loop_heartbeat,
+                std::ptr::null(),
+            );
+            if !timer.is_null() {
+                CFRunLoopAddTimer(CFRunLoopGetMain(), timer, kCFRunLoopCommonModes);
+                println!("[macos] CFRunLoopTimer heartbeat started on main run loop (250ms)");
+            } else {
+                eprintln!("[macos] Failed to create CFRunLoopTimer, falling back to thread");
+                std::thread::spawn(|| {
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_millis(250));
+                        wake_tokio();
+                        wake_run_loop();
+                    }
+                });
+            }
         }
     });
 }
@@ -240,9 +288,23 @@ pub fn update_now_playing(
 ) {
     init();
 
-    static ARTWORK_CACHE: OnceLock<std::sync::Mutex<Option<(String, ThreadSafeArtwork)>>> =
-        OnceLock::new();
-
+    // SAFETY:
+    // - This entire block interacts with MediaPlayer framework objects
+    //   (MPNowPlayingInfoCenter, MPMediaItemArtwork) which are thread-safe
+    //   and designed to be called from any thread on macOS.
+    // - transmute from NSString/NSNumber to AnyObject is safe because
+    //   these Foundation types inherit from NSObject and their memory
+    //   layout is compatible. The protocol conformance is verified by
+    //   the existing type system.
+    // - transmute from NSMutableDictionary to NSDictionary is safe because
+    //   NSMutableDictionary is a subclass of NSDictionary; the upcast is
+    //   valid in Objective-C and matches what the framework expects.
+    // - Retained::from_raw on the artwork pointer is safe because the
+    //   pointer was just returned by initWithImage: which follows the
+    //   "alloc-init" convention (returns +1 retain count), and from_raw
+    //   takes ownership without over-releasing.
+    // - The artwork pointer null-check ensures we only convert valid
+    //   pointers to Retained.
     unsafe {
         let center = MPNowPlayingInfoCenter::defaultCenter();
 
@@ -281,48 +343,24 @@ pub fn update_now_playing(
         );
 
         if let Some(path) = artwork_path {
-            let cache_lock = ARTWORK_CACHE.get_or_init(|| std::sync::Mutex::new(None));
-            let mut cache = cache_lock.lock().unwrap();
+            let ns_path = NSString::from_str(path);
+            if let Some(image) = NSImage::initWithContentsOfFile(NSImage::alloc(), &ns_path) {
+                use objc2::msg_send;
+                let artwork_alloc = MPMediaItemArtwork::alloc();
+                let artwork_ptr: *mut MPMediaItemArtwork = std::mem::transmute(artwork_alloc);
+                let artwork_raw: *mut MPMediaItemArtwork =
+                    msg_send![artwork_ptr, initWithImage: &*image];
 
-            let cached_artwork = if let Some((cached_path, artwork_wrapper)) = &*cache {
-                if cached_path == path {
-                    Some(artwork_wrapper.0.clone())
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
+                if !artwork_raw.is_null() {
+                    let retained: objc2::rc::Retained<MPMediaItemArtwork> =
+                        objc2::rc::Retained::from_raw(artwork_raw).expect("retained artwork");
 
-            if let Some(artwork) = cached_artwork {
-                let artwork_ref: &AnyObject =
-                    &*(std::mem::transmute::<_, *const AnyObject>(&*artwork));
-                info.setObject_forKey(
-                    artwork_ref,
-                    ProtocolObject::from_ref(MPMediaItemPropertyArtwork),
-                );
-            } else {
-                let ns_path = NSString::from_str(path);
-                if let Some(image) = NSImage::initWithContentsOfFile(NSImage::alloc(), &ns_path) {
-                    use objc2::msg_send;
-                    let artwork_alloc = MPMediaItemArtwork::alloc();
-                    let artwork_ptr: *mut MPMediaItemArtwork = std::mem::transmute(artwork_alloc);
-                    let artwork_raw: *mut MPMediaItemArtwork =
-                        msg_send![artwork_ptr, initWithImage: &*image];
-
-                    if !artwork_raw.is_null() {
-                        let retained: objc2::rc::Retained<MPMediaItemArtwork> =
-                            objc2::rc::Retained::from_raw(artwork_raw).expect("retained artwork");
-
-                        let artwork_ref: &AnyObject =
-                            &*(std::mem::transmute::<_, *const AnyObject>(&*retained));
-                        info.setObject_forKey(
-                            artwork_ref,
-                            ProtocolObject::from_ref(MPMediaItemPropertyArtwork),
-                        );
-
-                        *cache = Some((path.to_string(), ThreadSafeArtwork(retained)));
-                    }
+                    let artwork_ref: &AnyObject =
+                        &*(std::mem::transmute::<_, *const AnyObject>(&*retained));
+                    info.setObject_forKey(
+                        artwork_ref,
+                        ProtocolObject::from_ref(MPMediaItemPropertyArtwork),
+                    );
                 }
             }
         }
@@ -335,6 +373,14 @@ pub fn update_now_playing(
 }
 
 pub fn refresh_now_playing() {
+    // SAFETY:
+    // - MPNowPlayingInfoCenter::defaultCenter() returns a valid,
+    //   thread-safe singleton.
+    // - nowPlayingInfo() returns an Option that may be None; we pass
+    //   None through as_deref() which maps to nil, which is a valid
+    //   argument for setNowPlayingInfo (clears the info).
+    // - setNowPlayingInfo accepts an optional dictionary; no
+    //   preconditions are violated here.
     unsafe {
         let center = MPNowPlayingInfoCenter::defaultCenter();
         let existing = center.nowPlayingInfo();

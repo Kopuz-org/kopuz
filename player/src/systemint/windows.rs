@@ -1,3 +1,16 @@
+// Windows system integration: System Media Transport Controls (SMTC),
+// media keys, Now Playing info, and HWND discovery.
+//
+// Architecture:
+// - COM must be initialized on the thread that uses WinRT APIs. Since the
+//   Tokio thread pool does not call CoInitializeEx, setup runs on a
+//   dedicated std::thread::spawn thread.
+// - HWND discovery uses EnumWindows to find the process's visible window.
+//   If none exists yet, a message-only window (HWND_MESSAGE) is created.
+// - SMTC button events (play/pause/next/prev/seek) are forwarded to the
+//   player via an unbounded mpsc channel.
+// - CoInitializeEx + WinRT/COM FFI is documented with // SAFETY: invariants.
+
 use std::sync::OnceLock;
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
@@ -33,13 +46,9 @@ pub enum SystemEvent {
     Seek(f64),
 }
 
-struct SendableSmtc(SystemMediaTransportControls);
-unsafe impl Send for SendableSmtc {}
-unsafe impl Sync for SendableSmtc {}
-
+static SMTC: OnceLock<SystemMediaTransportControls> = OnceLock::new();
 static EVENT_SENDER: OnceLock<UnboundedSender<SystemEvent>> = OnceLock::new();
 static EVENT_RECEIVER: OnceLock<Mutex<UnboundedReceiver<SystemEvent>>> = OnceLock::new();
-static SMTC: OnceLock<SendableSmtc> = OnceLock::new();
 
 fn get_tx() -> UnboundedSender<SystemEvent> {
     EVENT_SENDER
@@ -72,11 +81,28 @@ struct EnumData {
     any_hwnd: HWND,
 }
 
+// SAFETY:
+// - This function matches the expected C callback signature for
+//   EnumWindows (WNDENUMPROC). The system calls it for each top-level
+//   window.
+// - LPARAM contains a valid pointer to an EnumData struct allocated
+//   on the stack in find_main_hwnd(). The reference does not escape
+//   because EnumWindows calls this callback synchronously.
+// - GetWindowThreadProcessId and IsWindowVisible are safe to call
+//   with any valid HWND.
 unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    // SAFETY:
+    // - LPARAM is a valid pointer to an EnumData struct that lives
+    //   on the caller's stack for the duration of EnumWindows.
     let data = unsafe { &mut *(lparam.0 as *mut EnumData) };
     let mut pid = 0u32;
+    // SAFETY: GetWindowThreadProcessId is safe with a valid HWND
+    // and a mutable output pointer.
     unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
-    if pid == data.pid && unsafe { IsWindowVisible(hwnd).as_bool() } {
+    if pid == data.pid
+    // SAFETY: IsWindowVisible is safe to call with any HWND.
+    && unsafe { IsWindowVisible(hwnd).as_bool() }
+    {
         data.hwnd = hwnd;
         BOOL(0) // stop enumeration
     } else {
@@ -88,6 +114,13 @@ unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
 }
 
 fn create_message_window() -> Option<HWND> {
+    // SAFETY:
+    // - CreateWindowExW with HWND_MESSAGE creates a message-only window,
+    //   which does not require a parent window or a window procedure.
+    // - All parameters are well-formed: class name is "STATIC" (a
+    //   standard Windows class), title is a valid wide string, and
+    //   dimensions are zero (message windows have no visual presence).
+    // - The return value is checked for null to ensure validity.
     let hwnd = unsafe {
         CreateWindowExW(
             WINDOW_EX_STYLE::default(),
@@ -112,12 +145,20 @@ fn create_message_window() -> Option<HWND> {
 
 fn find_main_hwnd() -> Option<HWND> {
     let mut data = EnumData {
+        // SAFETY: GetCurrentProcessId is a simple system call that
+        // always succeeds and requires no special setup.
         pid: unsafe { GetCurrentProcessId() },
         hwnd: HWND(std::ptr::null_mut()),
         any_hwnd: HWND(std::ptr::null_mut()),
     };
 
-    // return Err even on success
+    // SAFETY:
+    // - EnumWindows is safe to call with a valid callback pointer and
+    //   a user-data parameter.
+    // - enum_proc is a valid C callback matching the expected signature.
+    // - LPARAM contains a valid pointer to `data`, which lives on the
+    //   stack for the duration of the EnumWindows call.
+    // - EnumWindows is synchronous, so the reference does not escape.
     let _ = unsafe { EnumWindows(Some(enum_proc), LPARAM(&mut data as *mut EnumData as isize)) };
 
     if !data.hwnd.0.is_null() {
@@ -139,7 +180,18 @@ fn setup_smtc(hwnd: HWND) {
         return;
     }
 
-    let result = (|| unsafe {
+    let result = (|| {
+        // SAFETY:
+        // - RoGetActivationFactory is a WinRT API that is safe to call
+        //   after CoInitializeEx has been initialized on this thread.
+        // - ISystemMediaTransportControlsInterop::GetForWindow is safe
+        //   with a valid HWND (either a visible window or a message-only
+        //   window).
+        // - All subsequent SMTC method calls are thread-safe COM/WinRT
+        //   operations that do not violate memory safety.
+        // - The TypedEventHandler closures capture the sender by value
+        //   and do not introduce data races.
+        unsafe {
         let class_id = windows::core::HSTRING::from("Windows.Media.SystemMediaTransportControls");
         let interop: ISystemMediaTransportControlsInterop = RoGetActivationFactory(&class_id)?;
         let smtc: SystemMediaTransportControls = interop.GetForWindow(hwnd)?;
@@ -193,11 +245,12 @@ fn setup_smtc(hwnd: HWND) {
         ))?;
 
         windows::core::Result::Ok(smtc)
+        }
     })();
 
     match result {
         Ok(smtc) => {
-            if SMTC.set(SendableSmtc(smtc)).is_ok() {
+            if SMTC.set(smtc).is_ok() {
                 println!("[windows] SMTC initialised");
             }
         }
@@ -214,6 +267,13 @@ pub fn init() {
         std::thread::spawn(|| {
             // CoInitializeEx must be called on the thread that uses WinRT/COM.
             // The tokio thread pool does not do this, so setup_smtc must run here.
+            // SAFETY:
+            // - CoInitializeEx initializes COM for the calling thread with
+            //   the specified concurrency model (apartment-threaded).
+            // - It is safe to call once per thread; subsequent calls return
+            //   S_FALSE or RPC_E_CHANGED_MODE, which we ignore.
+            // - The None parameter means we are not aggregating another
+            //   COM object.
             unsafe {
                 let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
             }
@@ -277,7 +337,6 @@ pub fn update_now_playing(
     }
 
     let Some(smtc) = SMTC.get() else { return };
-    let smtc = &smtc.0;
 
     let _ = smtc.SetPlaybackStatus(if playing {
         MediaPlaybackStatus::Playing
@@ -308,7 +367,7 @@ pub fn update_now_playing(
                     if let Some(bytes) = fetch_artwork_bytes(&art_owned) {
                         if let Some(stream_ref) = stream_ref_from_bytes(&bytes) {
                             if let Some(smtc) = SMTC.get() {
-                                if let Ok(updater) = smtc.0.DisplayUpdater() {
+                                if let Ok(updater) = smtc.DisplayUpdater() {
                                     let _ = updater.SetThumbnail(&stream_ref);
                                     let _ = updater.Update();
                                 }
