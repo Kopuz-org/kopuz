@@ -31,15 +31,10 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
     let tracks_for_shuffle = sorted_tracks.clone();
 
     let currently_playing_path = {
-        let queue = ctrl.queue.read();
         let idx = *ctrl.current_queue_index.read();
-        let queue_idx = if *ctrl.shuffle.read() {
-            ctrl.shuffle_order.read().get(idx).copied().unwrap_or(idx)
-        } else {
-            idx
-        };
-        queue.get(queue_idx).map(|track| track.path.clone())
+        ctrl.get_track_at(idx).map(|track| track.path.clone())
     };
+
     let current_song_title = ctrl.current_song_title.read().clone();
     let current_song_artist = ctrl.current_song_artist.read().clone();
     let current_song_album = ctrl.current_song_album.read().clone();

@@ -333,15 +333,19 @@ pub fn JellyfinAlbumDetails(
 
     let currently_playing_idx: Option<usize> = {
         let queue = ctrl.queue.read();
-        let q_idx = *ctrl.current_queue_index.read();
-        let tracks: Vec<_> = album_tracks().into_iter().map(|(t, _)| t).collect();
-        if queue.len() == tracks.len()
-            && queue
-                .iter()
-                .zip(tracks.iter())
-                .all(|(q, t)| q.path == t.path)
-        {
-            Some(q_idx)
+        let current_index = *ctrl.current_queue_index.read();
+        if let Some(q_idx) = ctrl.get_queue_index(current_index) {
+            let tracks: Vec<_> = album_tracks().into_iter().map(|(t, _)| t).collect();
+            if queue.len() == tracks.len()
+                && queue
+                    .iter()
+                    .zip(tracks.iter())
+                    .all(|(q, t)| q.path == t.path)
+            {
+                Some(q_idx)
+            } else {
+                None
+            }
         } else {
             None
         }

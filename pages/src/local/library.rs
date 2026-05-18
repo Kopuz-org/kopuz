@@ -107,10 +107,16 @@ pub fn LocalLibrary(
 
     let currently_playing_idx: Option<usize> = use_memo(move || {
         let queue = ctrl.queue.read();
-        let q_idx = *ctrl.current_queue_index.read();
-        let all = displayed_tracks.read();
-        if queue.len() == all.len() && queue.iter().zip(all.iter()).all(|(q, t)| q.path == t.path) {
-            Some(q_idx)
+        let current_index = *ctrl.current_queue_index.read();
+        if let Some(q_idx) = ctrl.get_queue_index(current_index) {
+            let all = displayed_tracks.read();
+            if queue.len() == all.len()
+                && queue.iter().zip(all.iter()).all(|(q, t)| q.path == t.path)
+            {
+                Some(q_idx)
+            } else {
+                None
+            }
         } else {
             None
         }
