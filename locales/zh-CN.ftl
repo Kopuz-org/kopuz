@@ -326,6 +326,7 @@ crossfade = 交叉淡入淡出
 crossfade_off = 关闭
 
 continue_listening = 继续收听
+music = 音乐
 made_for_you = 为你定制
 recently_added = 最近添加
 customize_home = 自定义主页
@@ -376,3 +377,5 @@ auto_check_updates = 自动检查更新
 update_available = 有可用更新
 update_banner_message = Kopuz { $version } 现已可用。
 view_release = 查看发行版
+
+volume_scroll_step = 音量滚动步长

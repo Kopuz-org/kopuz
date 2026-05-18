@@ -488,6 +488,20 @@ pub fn Fullscreen(
                         div {
                             class: "flex-1 cursor-pointer relative",
                             style: "height: 20px;",
+                            onwheel: move |evt| {
+                                evt.stop_propagation();
+                                let dy = evt.delta().strip_units().y;
+                                if dy.abs() < f64::EPSILON {
+                                    return;
+                                }
+                                let step = config.read().volume_scroll_step.max(0.0);
+                                let dir = if dy < 0.0 { 1.0 } else { -1.0 };
+                                let current = *volume.read();
+                                let new_val = (current + dir * step).clamp(0.0, 1.0);
+                                player.write().set_volume(new_val);
+                                volume.set(new_val);
+                                persisted_volume.set(new_val);
+                            },
                             div {
                                 class: "absolute bg-white rounded-full",
                                 style: "height: 4px; top: 8px; left: 6px; right: 0;"

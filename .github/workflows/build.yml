@@ -18,7 +18,31 @@ jobs:
       - name: Check locale parity against en.ftl
         run: nix shell nixpkgs#nushell --command nu scripts/check_locales.nu
 
-  build:
+      - name: Check Rust i18n usage against en.ftl
+        run: nix shell nixpkgs#nushell --command nu scripts/check_i18n_usage.nu
+
+  pr-build:
+    if: github.event_name == 'pull_request'
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            system: x86_64-linux
+          - os: macos-latest
+            system: aarch64-darwin
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Run Nix checks
+        run: nix build .#checks.${{ matrix.system }}.default
+
+  push-build:
+    if: github.event_name == 'push'
     strategy:
       matrix:
         include:
@@ -39,7 +63,21 @@ jobs:
           name: kopuz
           authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
 
-      - name: Build package
-        run: |
-          nix build .#packages.${{ matrix.system }}.default
-          cachix push kopuz result
+      - name: Build Nix package
+        run: nix build .#packages.${{ matrix.system }}.default
+
+      - name: Push result to Cachix
+        run: cachix push kopuz result
+
+  windows-build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build Windows app
+        run: cargo build -p kopuz --locked

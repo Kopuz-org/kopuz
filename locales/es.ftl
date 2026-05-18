@@ -327,6 +327,7 @@ crossfade = Fundido cruzado
 crossfade_off = Apagado
 
 continue_listening = Seguir escuchando
+music = Música
 made_for_you = Hecho para ti
 recently_added = Añadido recientemente
 customize_home = Personalizar inicio
@@ -377,3 +378,5 @@ auto_check_updates = Buscar actualizaciones automáticamente
 update_available = Actualización disponible
 update_banner_message = Kopuz { $version } está disponible.
 view_release = Ver lanzamiento
+
+volume_scroll_step = Paso de desplazamiento del volumen

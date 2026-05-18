@@ -332,6 +332,7 @@ crossfade = クロスフェード
 crossfade_off = オフ
 
 continue_listening = 続きを聴く
+music = 音楽
 made_for_you = あなたのために
 recently_added = 最近追加
 customize_home = ホームをカスタマイズ
@@ -382,3 +383,5 @@ auto_check_updates = アップデートを自動確認
 update_available = アップデートがあります
 update_banner_message = Kopuz { $version } が利用可能です。
 view_release = リリースを見る
+
+volume_scroll_step = 音量スクロールステップ

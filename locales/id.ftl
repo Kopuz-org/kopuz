@@ -325,6 +325,7 @@ crossfade = Crossfade
 crossfade_off = Mati
 
 continue_listening = Lanjutkan mendengarkan
+music = Musik
 made_for_you = Dibuat untukmu
 recently_added = Baru ditambahkan
 customize_home = Sesuaikan beranda
@@ -375,3 +376,5 @@ auto_check_updates = Periksa pembaruan otomatis
 update_available = Pembaruan tersedia
 update_banner_message = Kopuz { $version } tersedia.
 view_release = Lihat rilis
+
+volume_scroll_step = Langkah Gulir Volume

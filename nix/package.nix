@@ -23,7 +23,7 @@
 
 rustPlatform.buildRustPackage rec {
   pname = "kopuz";
-  version = "0.5.5";
+  version = "0.6.0";
 
   src = fetchFromGitHub {
     owner = "temidaradev";

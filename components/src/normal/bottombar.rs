@@ -51,7 +51,8 @@ pub fn BottombarNormal(
     let mut ctrl = use_context::<PlayerController>();
     let nav_ctrl = use_context::<NavigationController>();
 
-    let is_favorite = get_favorite(&queue, &current_queue_index, &favorites_store);
+    let current_track_snapshot = ctrl.current_track_snapshot.read().clone();
+    let is_favorite = get_favorite(current_track_snapshot.as_ref(), &favorites_store);
     let heart_class = if is_favorite {
         "ml-2 text-red-400 hover:text-red-300 transition-colors"
     } else {
@@ -90,8 +91,10 @@ pub fn BottombarNormal(
                     span {
                         class: "text-sm font-bold text-white/90 truncate hover:underline cursor-pointer",
                         onclick: move |_| {
-                            let idx = *current_queue_index.read();
-                            let album_id = queue.read().get(idx).map(|t| t.album_id.clone()).unwrap_or_default();
+                            let album_id = current_track_snapshot
+                                .as_ref()
+                                .map(|track| track.album_id.clone())
+                                .unwrap_or_default();
                             nav_ctrl.navigate_to_album(album_id);
                         },
                         "{current_song_title}"
@@ -108,7 +111,7 @@ pub fn BottombarNormal(
                 button {
                     class: "{heart_class}",
                     title: if is_favorite { i18n::t("remove_from_favorites").to_string() } else { i18n::t("add_to_favorites").to_string() },
-                    onclick: move |_| toggle_favorite(queue, current_queue_index, favorites_store, config),
+                    onclick: move |_| toggle_favorite(ctrl.current_track_snapshot.read().clone(), favorites_store, config),
                     i { class: "{heart_icon}" }
                 }
             }
@@ -220,6 +223,24 @@ pub fn BottombarNormal(
                     }
                     div {
                         class: "w-24 h-1 bg-white/10 rounded-full group/vol cursor-pointer relative",
+                        onwheel: move |evt| {
+                            evt.stop_propagation();
+                            let dy = evt.delta().strip_units().y;
+                            if dy.abs() < f64::EPSILON {
+                                return;
+                            }
+                            let step = config.read().volume_scroll_step.max(0.0);
+                            let dir = if dy < 0.0 { 1.0 } else { -1.0 };
+                            let current = *volume.read();
+                            let new_val = (current + dir * step).clamp(0.0, 1.0);
+                            player.write().set_volume(new_val);
+                            volume.set(new_val);
+                            persisted_volume.set(new_val);
+                            is_muted.set(new_val <= f32::EPSILON);
+                            if new_val > f32::EPSILON {
+                                volume_before_mute.set(new_val);
+                            }
+                        },
                         div {
                             class: "absolute top-0 left-0 h-full bg-white group-hover/vol:bg-green-500 rounded-full transition-colors pointer-events-none",
                             style: "width: {volume_percent}%",

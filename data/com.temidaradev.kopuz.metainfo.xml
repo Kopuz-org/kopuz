@@ -38,6 +38,13 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.6.0" date="2026-05-17">
+      <description>
+        <p>
+            New Vaxry theme is here, Radio stations are here too, made improvements for all platform, scrollable volume bar added, switched to cubic volume bar for better volume control experience.
+        </p>
+      </description>
+    </release>
     <release version="0.5.5" date="2026-05-10">
       <description>
         <p>Bug fixes for linux, and now linux local side is way more better because we added limit to image sizes (since bigger = more computing = less performance) and if the image size is over the limit app lowers quality, a lot of server side bugs fixed, crossfade and gapless has added.</p>

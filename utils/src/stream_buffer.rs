@@ -23,7 +23,11 @@ pub struct StreamBuffer {
 
 impl StreamBuffer {
     pub fn new(url: String, is_radio: bool) -> Self {
-        let prebuffer_size = if is_radio { 16 * 1024 } else { MIN_PREBUFFER_BYTES };
+        let prebuffer_size = if is_radio {
+            16 * 1024
+        } else {
+            MIN_PREBUFFER_BYTES
+        };
 
         let state = Arc::new((
             Mutex::new(SharedState {
@@ -132,6 +136,20 @@ impl StreamBuffer {
         while !state.prebuffer_ready && !state.done {
             state = cvar.wait(state).unwrap();
         }
+    }
+
+    pub fn wait_for_total_size(&self) {
+        let (lock, cvar) = &*self.state;
+        let mut state = lock.lock().unwrap();
+        while state.total_size.is_none() && !state.done {
+            state = cvar.wait(state).unwrap();
+        }
+    }
+
+    pub fn known_total_size(&self) -> Option<u64> {
+        let (lock, _) = &*self.state;
+        let state = lock.lock().unwrap();
+        state.total_size.or(Some(state.buffer.len() as u64))
     }
 
     fn wait_for_buffer_ahead(&self, min_ahead: usize) {

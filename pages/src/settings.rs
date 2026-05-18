@@ -458,6 +458,32 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             }
                         }
                         SettingItem {
+                            title: i18n::t("volume_scroll_step").to_string(),
+                            control: rsx! {
+                                div { class: "flex items-center gap-3 min-w-[220px]",
+                                    input {
+                                        r#type: "range",
+                                        min: "1",
+                                        max: "50",
+                                        step: "1",
+                                        value: format!("{}", (config.read().volume_scroll_step * 100.0).round() as i32),
+                                        class: "w-40",
+                                        style: "accent-color: var(--color-indigo-500);",
+                                        oninput: move |evt| {
+                                            if let Ok(pct) = evt.value().parse::<i32>() {
+                                                let clamped = pct.clamp(1, 50);
+                                                config.write().volume_scroll_step = clamped as f32 / 100.0;
+                                            }
+                                        }
+                                    }
+                                    span {
+                                        class: "text-xs font-mono text-white/80 w-16 text-right",
+                                        "{(config.read().volume_scroll_step * 100.0).round() as i32}%"
+                                    }
+                                }
+                            }
+                        }
+                        SettingItem {
                             title: i18n::t("channel_mode").to_string(),
                             control: rsx! {
                                 ChannelModeSelector {

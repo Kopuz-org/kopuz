@@ -326,6 +326,7 @@ crossfade = Çapraz Geçiş
 crossfade_off = Kapalı
 
 continue_listening = Dinlemeye devam et
+music = Müzik
 made_for_you = Sana özel
 recently_added = Son eklenenler
 customize_home = Ana sayfayı özelleştir
@@ -376,3 +377,5 @@ auto_check_updates = Güncellemeleri otomatik denetle
 update_available = Güncelleme mevcut
 update_banner_message = Kopuz { $version } kullanılabilir.
 view_release = Sürümü görüntüle
+
+volume_scroll_step = Ses kaydırma adımı

@@ -326,6 +326,7 @@ crossfade = Întrepătrundere
 crossfade_off = Oprit
 
 continue_listening = Continuă ascultarea
+music = Muzică
 made_for_you = Făcut pentru tine
 recently_added = Adăugate recent
 customize_home = Personalizează pagina principală
@@ -376,3 +377,5 @@ auto_check_updates = Verifică automat actualizările
 update_available = Actualizare disponibilă
 update_banner_message = Kopuz { $version } este disponibil.
 view_release = Vezi lansarea
+
+volume_scroll_step = Pas de derulare a volumului

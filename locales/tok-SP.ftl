@@ -327,6 +327,7 @@ crossfade = 󱥭 󱤴
 crossfade_off = 󱤄
 
 continue_listening = Continue Listening
+music = 󱤕󱤻
 made_for_you = Made For You
 recently_added = Recently Added
 customize_home = Customize Home
@@ -377,3 +378,5 @@ auto_check_updates = lukin pi sin namako lon tenpo ale
 update_available = sin namako li lon
 update_banner_message = Kopuz { $version } li lon.
 view_release = o lukin e lipu pi sin namako
+
+volume_scroll_step = nasin tawa kalama

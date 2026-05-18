@@ -63,6 +63,15 @@ pub fn from_stream(
     (source, hint)
 }
 
+pub fn from_stream_with_len(
+    stream: impl Read + Seek + Send + Sync + 'static,
+    len: Option<u64>,
+) -> (Box<dyn MediaSource>, Hint) {
+    let source: Box<dyn MediaSource> = Box::new(ReadSeekSource::new(Box::new(stream), len));
+    let hint = Hint::new();
+    (source, hint)
+}
+
 /// a read-only source wrapper for non-seekable streams source (e.g. internet radio).
 struct ReadOnlySource {
     inner: Box<dyn Read + Send + Sync>,

@@ -326,6 +326,7 @@ crossfade = 크로스페이드
 crossfade_off = 끄기
 
 continue_listening = 계속 듣기
+music = 음악
 made_for_you = 당신을 위해
 recently_added = 최근 추가됨
 customize_home = 홈 맞춤설정
@@ -376,3 +377,5 @@ auto_check_updates = 업데이트 자동 확인
 update_available = 업데이트가 있습니다
 update_banner_message = Kopuz { $version }을(를) 사용할 수 있습니다.
 view_release = 릴리스 보기
+
+volume_scroll_step = 볼륨 스크롤 단계

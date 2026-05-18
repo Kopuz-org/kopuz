@@ -145,7 +145,7 @@ pub fn JellyfinLibrary(
     } else {
         (container_h / row_height).ceil() as usize
     };
-    let buffer_size = 10;
+    let buffer_size = 10000;
     let total_tracks = all_tracks.len();
 
     let start_index = {

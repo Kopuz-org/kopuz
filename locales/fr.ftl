@@ -327,6 +327,7 @@ crossfade = Fondu enchaîné
 crossfade_off = Désactivé
 
 continue_listening = Continuer l'écoute
+music = Musique
 made_for_you = Fait pour vous
 recently_added = Ajouté récemment
 customize_home = Personnaliser l'accueil
@@ -377,3 +378,5 @@ auto_check_updates = Vérifier automatiquement les mises à jour
 update_available = Mise à jour disponible
 update_banner_message = Kopuz { $version } est disponible.
 view_release = Voir la version
+
+volume_scroll_step = Pas de défilement du volume

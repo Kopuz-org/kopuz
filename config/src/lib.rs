@@ -512,6 +512,8 @@ pub struct AppConfig {
     pub sidebar_order: Vec<String>,
     #[serde(default = "default_volume")]
     pub volume: f32,
+    #[serde(default = "default_volume_scroll_step")]
+    pub volume_scroll_step: f32,
     #[serde(default = "default_crossfade_seconds")]
     pub crossfade_seconds: u8,
     #[serde(default)]
@@ -628,6 +630,10 @@ fn default_volume() -> f32 {
     1.0
 }
 
+fn default_volume_scroll_step() -> f32 {
+    0.05
+}
+
 fn default_crossfade_seconds() -> u8 {
     0
 }
@@ -678,6 +684,7 @@ impl Default for AppConfig {
             show_source_toggle: default_show_source_toggle(),
             sidebar_order: default_sidebar_order(),
             volume: default_volume(),
+            volume_scroll_step: default_volume_scroll_step(),
             crossfade_seconds: default_crossfade_seconds(),
             custom_themes: HashMap::new(),
             back_behavior: BackBehavior::RewindThenPrev,

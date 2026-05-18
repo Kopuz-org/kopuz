@@ -326,6 +326,7 @@ crossfade = Crossfade (Σταδιακή μίξη)
 crossfade_off = Ανενεργό
 
 continue_listening = Συνέχιση ακρόασης
+music = Μουσική
 made_for_you = Φτιαγμένο για σένα
 recently_added = Προστέθηκαν πρόσφατα
 customize_home = Προσαρμογή αρχικής
@@ -376,3 +377,5 @@ auto_check_updates = Αυτόματος έλεγχος ενημερώσεων
 update_available = Διαθέσιμη ενημέρωση
 update_banner_message = Το Kopuz { $version } είναι διαθέσιμο.
 view_release = Προβολή έκδοσης
+
+volume_scroll_step = Βήμα κύλισης έντασης

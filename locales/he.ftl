@@ -326,6 +326,7 @@ crossfade = מעבר הדרגתי
 crossfade_off = כבוי
 
 continue_listening = המשך האזנה
+music = מוזיקה
 made_for_you = נוצר עבורך
 recently_added = נוסף לאחרונה
 customize_home = התאמת הבית
@@ -376,3 +377,5 @@ auto_check_updates = בדיקה אוטומטית לעדכונים
 update_available = עדכון זמין
 update_banner_message = ‏Kopuz { $version } זמין.
 view_release = הצג גרסה
+
+volume_scroll_step = צעד גלילת עוצמה

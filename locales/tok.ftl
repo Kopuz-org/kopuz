@@ -326,6 +326,7 @@ crossfade = ante kalama
 crossfade_off = ala
 
 continue_listening = o kute sin
+music = kalama musi
 made_for_you = pali tawa sina
 recently_added = kalama sin pi tenpo poka
 customize_home = o ante e tomo
@@ -376,3 +377,5 @@ auto_check_updates = lukin pi sin namako lon tenpo ale
 update_available = sin namako li lon
 update_banner_message = Kopuz { $version } li lon.
 view_release = o lukin e lipu pi sin namako
+
+volume_scroll_step = nasin tawa kalama

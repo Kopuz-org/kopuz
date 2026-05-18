@@ -25,6 +25,14 @@ enum BgCmd {
     Prev,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct JellyfinCacheKey {
+    url: String,
+    access_token: Option<String>,
+    device_id: String,
+    user_id: Option<String>,
+}
+
 static BG_CMD_TX: std::sync::OnceLock<std::sync::Mutex<std::sync::mpsc::Sender<BgCmd>>> =
     std::sync::OnceLock::new();
 static BG_CMD_RX: std::sync::OnceLock<std::sync::Mutex<std::sync::mpsc::Receiver<BgCmd>>> =
@@ -206,6 +214,7 @@ pub fn use_player_task(ctrl: PlayerController) {
             let mut last_recent_path: Option<String> = None;
             #[cfg(not(target_arch = "wasm32"))]
             let bg_notify = BG_NOTIFY.get_or_init(tokio::sync::Notify::new);
+            let mut jellyfin_client_cache: Option<(JellyfinCacheKey, Arc<JellyfinClient>)> = None;
             loop {
                 #[cfg(not(target_arch = "wasm32"))]
                 tokio::select! {
@@ -327,12 +336,28 @@ pub fn use_player_task(ctrl: PlayerController) {
 
                 if let Some((server, device_id)) = jellyfin_info {
                     if server.service == MusicService::Jellyfin {
-                        let remote = Arc::new(JellyfinClient::new(
-                            &server.url,
-                            server.access_token.as_deref(),
-                            &device_id,
-                            server.user_id.as_deref(),
-                        ));
+                        let key = JellyfinCacheKey {
+                            url: server.url.clone(),
+                            access_token: server.access_token,
+                            device_id: device_id.clone(),
+                            user_id: server.user_id,
+                        };
+
+                        let remote = match &jellyfin_client_cache {
+                            Some((cached_key, cached_client)) if cached_key == &key => {
+                                cached_client.clone()
+                            }
+                            _ => {
+                                let client = Arc::new(JellyfinClient::new(
+                                    &key.url,
+                                    key.access_token.as_deref(),
+                                    &key.device_id,
+                                    key.user_id.as_deref(),
+                                ));
+                                jellyfin_client_cache = Some((key, client.clone()));
+                                client
+                            }
+                        };
 
                         if last_ping.elapsed().as_secs() >= 30 {
                             let remote = remote.clone();

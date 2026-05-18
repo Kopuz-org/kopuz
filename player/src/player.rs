@@ -146,7 +146,9 @@ pub struct Player {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Player {
-    fn preferred_stream_config(supported_config: &cpal::SupportedStreamConfig) -> cpal::StreamConfig {
+    fn preferred_stream_config(
+        supported_config: &cpal::SupportedStreamConfig,
+    ) -> cpal::StreamConfig {
         let mut stream_config = supported_config.config();
         stream_config.buffer_size = match supported_config.buffer_size() {
             cpal::SupportedBufferSize::Range { min, max } => {
@@ -198,8 +200,7 @@ impl Player {
         let active_consumer = Arc::new(Mutex::new(None::<Arc<Mutex<rb::Consumer<f32>>>>));
         let fading_consumer = Arc::new(Mutex::new(None::<Arc<Mutex<rb::Consumer<f32>>>>));
         let crossfade_state = Arc::new(Mutex::new(None::<CrossfadeState>));
-        let fading_session_state =
-            Arc::new(Mutex::new(None::<Arc<Mutex<PlaybackState>>>));
+        let fading_session_state = Arc::new(Mutex::new(None::<Arc<Mutex<PlaybackState>>>));
 
         let channels = stream_config.channels as usize;
         let device_sample_rate = stream_config.sample_rate;
@@ -285,14 +286,10 @@ impl Player {
                                         let fade_out_gain = 1.0 - fade_in_gain;
                                         for ch in 0..channels {
                                             let index = frame_idx * channels + ch;
-                                            let active = active_samples
-                                                .get(index)
-                                                .copied()
-                                                .unwrap_or(0.0);
-                                            let fading = fading_samples
-                                                .get(index)
-                                                .copied()
-                                                .unwrap_or(0.0);
+                                            let active =
+                                                active_samples.get(index).copied().unwrap_or(0.0);
+                                            let fading =
+                                                fading_samples.get(index).copied().unwrap_or(0.0);
                                             data[index] =
                                                 active * fade_in_gain + fading * fade_out_gain;
                                         }
@@ -341,8 +338,7 @@ impl Player {
                         }
                         if let Ok(fading_state_guard) = stream_fading_session_state.lock() {
                             if let Some(fading_state) = fading_state_guard.as_ref() {
-                                let mut st =
-                                    fading_state.lock().unwrap_or_else(|e| e.into_inner());
+                                let mut st = fading_state.lock().unwrap_or_else(|e| e.into_inner());
                                 st.stopped = true;
                                 st.finished = true;
                             }
@@ -351,7 +347,8 @@ impl Player {
 
                     if channels > 0 && device_sample_rate > 0 {
                         stream_position.fetch_add(
-                            (read as u64 * 1_000_000) / (channels as u64 * device_sample_rate as u64),
+                            (read as u64 * 1_000_000)
+                                / (channels as u64 * device_sample_rate as u64),
                             Ordering::Relaxed,
                         );
                     }
@@ -488,12 +485,7 @@ impl Player {
 
         self.stop_fading_session();
 
-        let previous_volume = {
-            self.state
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .volume
-        };
+        let previous_volume = { self.state.lock().unwrap_or_else(|e| e.into_inner()).volume };
         let old_state = self.state.clone();
         let old_consumer = self.ring_buf_consumer.take();
         let old_ring_buf = self.ring_buf.take();
@@ -535,8 +527,7 @@ impl Player {
             *active_consumer = Some(consumer);
         }
         if let Ok(mut fade) = self.crossfade_state.lock() {
-            let total_frames =
-                (duration.as_secs_f64() * device_sample_rate as f64).round() as u64;
+            let total_frames = (duration.as_secs_f64() * device_sample_rate as f64).round() as u64;
             *fade = Some(CrossfadeState {
                 total_frames: total_frames.max(1),
                 progress_frames: 0,
@@ -756,11 +747,22 @@ impl Player {
                         time,
                         track_id: Some(track_id),
                     };
-                    if let Err(e) = format.seek(SeekMode::Coarse, seek_to) {
-                        eprintln!("seek error: {}", e);
-                    } else {
-                        decoder.reset();
+                    drop(st);
+                    let seek_result =
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            format.seek(SeekMode::Coarse, seek_to)
+                        }));
+                    match seek_result {
+                        Ok(Ok(_)) => decoder.reset(),
+                        Ok(Err(e)) => eprintln!("seek error: {}", e),
+                        Err(_) => {
+                            eprintln!(
+                                "seek panicked inside symphonia demuxer; continuing playback"
+                            );
+                            decoder.reset();
+                        }
                     }
+                    continue;
                 }
 
                 while st.paused && !st.stopped {
@@ -1061,6 +1063,18 @@ impl Player {
     }
 
     pub fn seek(&mut self, time: Duration) {
+        const END_GUARD: Duration = Duration::from_millis(2000);
+        let time = if let Some(meta) = &self.now_playing {
+            if meta.duration > END_GUARD {
+                let max = meta.duration - END_GUARD;
+                if time > max { max } else { time }
+            } else {
+                Duration::ZERO
+            }
+        } else {
+            time
+        };
+
         self.stop_fading_session();
         {
             let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
@@ -1356,12 +1370,7 @@ impl Player {
         }
     }
 
-    pub fn crossfade_to(
-        &mut self,
-        url: String,
-        meta: NowPlayingMeta,
-        _duration: Duration,
-    ) {
+    pub fn crossfade_to(&mut self, url: String, meta: NowPlayingMeta, _duration: Duration) {
         self.play_url(url, meta);
     }
 

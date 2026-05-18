@@ -51,7 +51,8 @@ pub fn LocalLibrary(
     let displayed_tracks = use_memo(move || (items.all_tracks)());
     let album_covers = use_memo(move || (items.album_covers)());
 
-    let cover_urls = std::sync::Arc::new(album_covers());
+    let cover_urls_memo = use_memo(move || std::sync::Arc::new(album_covers()));
+    let cover_urls = cover_urls_memo();
 
     let scroll_top = *scroll_stat.read();
     let row_height = ITEM_HEIGHT;
@@ -61,17 +62,18 @@ pub fn LocalLibrary(
     } else {
         (container_h / row_height).ceil() as usize
     };
-    let buffer_size = 10;
+    let buffer_size = 10000;
 
     let (total_tracks, is_empty) = {
         let t = displayed_tracks.read();
         (t.len(), t.is_empty())
     };
 
-    let all_selected = !is_empty
-        && displayed_tracks()
-            .iter()
-            .all(|track| selected_tracks.read().contains(&track.path));
+    let all_selected = !is_empty && {
+        let tracks = displayed_tracks.read();
+        let sel = selected_tracks.read();
+        sel.len() >= tracks.len() && tracks.iter().all(|track| sel.contains(&track.path))
+    };
 
     let start_index = {
         let max_start = total_tracks.saturating_sub(1);
@@ -103,7 +105,7 @@ pub fn LocalLibrary(
         (total_height - rendered_height - top_pad).max(0.0)
     };
 
-    let currently_playing_idx: Option<usize> = {
+    let currently_playing_idx: Option<usize> = use_memo(move || {
         let queue = ctrl.queue.read();
         let q_idx = *ctrl.current_queue_index.read();
         let all = displayed_tracks.read();
@@ -112,7 +114,7 @@ pub fn LocalLibrary(
         } else {
             None
         }
-    };
+    })();
 
     let tracks_nodes = {
         let all_tracks = displayed_tracks.read();

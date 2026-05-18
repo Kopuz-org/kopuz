@@ -326,6 +326,7 @@ crossfade = Áttűnés
 crossfade_off = Ki
 
 continue_listening = Hallgatás folytatása
+music = Zene
 made_for_you = Neked készült
 recently_added = Nemrég hozzáadott
 customize_home = Kezdőlap testreszabása
@@ -376,3 +377,5 @@ auto_check_updates = Frissítések automatikus keresése
 update_available = Elérhető frissítés
 update_banner_message = A Kopuz { $version } elérhető.
 view_release = Kiadás megtekintése
+
+volume_scroll_step = Hangerő görgetési lépés

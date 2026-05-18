@@ -49,6 +49,7 @@
               mold
               flatpak
               flatpak-builder
+              appstream
               rustToolchain
               dioxus-cli
               nodejs_22
@@ -91,6 +92,10 @@
           };
         }
       );
+
+      checks = forAllSystems (system: {
+        default = self.packages.${system}.default;
+      });
 
       apps = forAllSystems (system: {
         default = {
