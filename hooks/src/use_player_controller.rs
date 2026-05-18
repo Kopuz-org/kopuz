@@ -697,7 +697,8 @@ impl PlayerController {
                                                 ),
                                                 "vocaloid" => {
                                                     Box::new(radio::vocaloid::VocaloidProvider)
-                                                }
+                                                },
+                                                "asiadreamradio" => Box::new(radio::asiadreamradio::AsiaDreamRadioProvider),
                                                 _ => {
                                                     tracing::warn!(
                                                         "[radio] No metadata provider for station: {}",

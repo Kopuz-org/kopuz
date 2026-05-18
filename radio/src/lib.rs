@@ -8,6 +8,8 @@ pub mod j1;
 pub mod doujinstyle;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod vocaloid;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod asiadreamradio;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RadioMetadata {

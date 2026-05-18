@@ -371,4 +371,5 @@ radio_listen_moe_desc = Anime and Korean pop music, 24/7.
 radio_j1_desc = Current chart hits and classic songs from Japan.
 radio_doujinstyle_desc = Doujin music, video game soundtracks, and more.
 radio_vocaloid_desc = Vocaloid Hits from Japan. We play it all!
+radio_asiadreamradio_desc = The Heart of J-Pop Music - J-Pop, J-Rock, J-HipHop, J-Jazz, Classics.
 radio_live_stream = Live Stream
