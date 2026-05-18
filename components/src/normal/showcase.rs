@@ -62,7 +62,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
             }
         });
 
-    let mut columns = if props.is_album {
+    let columns = if props.is_album {
         "20px minmax(200px, 1fr) minmax(100px,400px) 64px 40px".to_string()
     } else {
         "20px minmax(200px, 1fr) minmax(100px,200px) minmax(100px,200px) 64px 40px".to_string()

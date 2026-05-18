@@ -53,7 +53,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
     let current_song_duration = *ctrl.current_song_duration.read();
     let tracks_for_play_all = sorted_tracks.clone();
 
-    let mut columns = if props.is_album {
+    let columns = if props.is_album {
         "40px minmax(200px, 1fr) minmax(100px,400px) 64px 40px".to_string()
     } else {
         "40px minmax(200px, 1fr) minmax(100px,200px) minmax(100px,200px) 64px 40px".to_string()
