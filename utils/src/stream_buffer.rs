@@ -1,6 +1,8 @@
 use std::cmp::min;
 use std::io::{Error as IoError, ErrorKind, Read, Result as IoResult, Seek, SeekFrom};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::{Mutex, Notify};
 
 const MIN_PREBUFFER_BYTES: usize = 256 * 1024; // 256KB
 
@@ -17,7 +19,7 @@ struct SharedState {
 }
 
 pub struct StreamBuffer {
-    state: Arc<(Mutex<SharedState>, Condvar)>,
+    state: Arc<(Mutex<SharedState>, Notify)>,
     pos: u64,
 }
 
@@ -37,7 +39,7 @@ impl StreamBuffer {
                 total_size: None,
                 prebuffer_ready: false,
             }),
-            Condvar::new(),
+            Notify::new(),
         ));
 
         let state_clone = state.clone();
@@ -53,21 +55,21 @@ impl StreamBuffer {
             match client.get(&url).send().await {
                 Ok(mut response) => {
                     if !response.status().is_success() {
-                        let (lock, cvar) = &*state_clone;
-                        let mut state = lock.lock().unwrap();
+                        let (lock, notify) = &*state_clone;
+                        let mut state = lock.lock().await;
                         state.error = Some(format!("HTTP {}", response.status()));
                         state.done = true;
                         state.prebuffer_ready = true;
-                        cvar.notify_all();
+                        notify.notify_waiters();
                         return;
                     }
 
                     let total_size = response.content_length();
                     {
-                        let (lock, cvar) = &*state_clone;
-                        let mut state = lock.lock().unwrap();
+                        let (lock, notify) = &*state_clone;
+                        let mut state = lock.lock().await;
                         state.total_size = total_size;
-                        cvar.notify_all();
+                        notify.notify_waiters();
                     }
 
                     let mut total_buffered = 0usize;
@@ -79,18 +81,18 @@ impl StreamBuffer {
                         let chunk_len = chunk.len();
 
                         if total_buffered + chunk_len > MAX_BUFFER_SIZE {
-                            let (lock, cvar) = &*state_clone;
-                            let mut state = lock.lock().unwrap();
+                            let (lock, notify) = &*state_clone;
+                            let mut state = lock.lock().await;
                             state.error = Some("Buffer limit exceeded (1GB)".to_string());
                             state.done = true;
                             state.prebuffer_ready = true;
-                            cvar.notify_all();
+                            notify.notify_waiters();
                             break;
                         }
 
                         {
-                            let (lock, cvar) = &*state_clone;
-                            let mut state = lock.lock().unwrap();
+                            let (lock, notify) = &*state_clone;
+                            let mut state = lock.lock().await;
                             state.buffer.extend_from_slice(&chunk);
                             total_buffered += chunk_len;
 
@@ -105,23 +107,23 @@ impl StreamBuffer {
                                 }
                             }
 
-                            cvar.notify_all();
+                            notify.notify_waiters();
                         }
                     }
 
-                    let (lock, cvar) = &*state_clone;
-                    let mut state = lock.lock().unwrap();
+                    let (lock, notify) = &*state_clone;
+                    let mut state = lock.lock().await;
                     state.done = true;
                     state.prebuffer_ready = true;
-                    cvar.notify_all();
+                    notify.notify_waiters();
                 }
                 Err(e) => {
-                    let (lock, cvar) = &*state_clone;
-                    let mut state = lock.lock().unwrap();
+                    let (lock, notify) = &*state_clone;
+                    let mut state = lock.lock().await;
                     state.error = Some(e.to_string());
                     state.done = true;
                     state.prebuffer_ready = true;
-                    cvar.notify_all();
+                    notify.notify_waiters();
                 }
             }
         });
@@ -130,41 +132,47 @@ impl StreamBuffer {
     }
 
     fn wait_for_prebuffer(&self) {
-        let (lock, cvar) = &*self.state;
-        let mut state = lock.lock().unwrap();
-
-        while !state.prebuffer_ready && !state.done {
-            state = cvar.wait(state).unwrap();
+        let (lock, _notify) = &*self.state;
+        loop {
+            let state = lock.blocking_lock();
+            if state.prebuffer_ready || state.done {
+                return;
+            }
+            drop(state);
+            std::thread::sleep(Duration::from_millis(5));
         }
     }
 
     pub fn wait_for_total_size(&self) {
-        let (lock, cvar) = &*self.state;
-        let mut state = lock.lock().unwrap();
-        while state.total_size.is_none() && !state.done {
-            state = cvar.wait(state).unwrap();
+        let (lock, _notify) = &*self.state;
+        loop {
+            let state = lock.blocking_lock();
+            if state.total_size.is_some() || state.done {
+                return;
+            }
+            drop(state);
+            std::thread::sleep(Duration::from_millis(5));
         }
     }
 
     pub fn known_total_size(&self) -> Option<u64> {
         let (lock, _) = &*self.state;
-        let state = lock.lock().unwrap();
+        let state = lock.blocking_lock();
         state.total_size.or(Some(state.buffer.len() as u64))
     }
 
     fn wait_for_buffer_ahead(&self, min_ahead: usize) {
-        let (lock, cvar) = &*self.state;
-        let mut state = lock.lock().unwrap();
-
+        let (lock, _notify) = &*self.state;
         loop {
+            let state = lock.blocking_lock();
             let buffer_len = state.buffer.len() as u64;
             let buffered_ahead = buffer_len.saturating_sub(self.pos) as usize;
 
             if buffered_ahead >= min_ahead || state.done || state.error.is_some() {
                 return;
             }
-
-            state = cvar.wait(state).unwrap();
+            drop(state);
+            std::thread::sleep(Duration::from_millis(5));
         }
     }
 }
@@ -177,7 +185,7 @@ impl Read for StreamBuffer {
 
         {
             let (lock, _) = &*self.state;
-            let state = lock.lock().unwrap();
+            let state = lock.blocking_lock();
             let buffer_len = state.buffer.len() as u64;
             let buffered_ahead = buffer_len.saturating_sub(self.pos) as usize;
 
@@ -187,14 +195,14 @@ impl Read for StreamBuffer {
             }
         }
 
-        let (lock, cvar) = &*self.state;
-        let mut state = lock.lock().unwrap();
-
-        if let Some(err) = &state.error {
-            return Err(IoError::new(ErrorKind::Other, err.clone()));
-        }
-
+        let (lock, _notify) = &*self.state;
         loop {
+            let state = lock.blocking_lock();
+
+            if let Some(err) = &state.error {
+                return Err(IoError::new(ErrorKind::Other, err.clone()));
+            }
+
             let current_len = state.buffer.len() as u64;
 
             if self.pos < current_len {
@@ -214,19 +222,16 @@ impl Read for StreamBuffer {
                 return Ok(0);
             }
 
-            state = cvar.wait(state).unwrap();
-
-            if let Some(err) = &state.error {
-                return Err(IoError::new(ErrorKind::Other, err.clone()));
-            }
+            drop(state);
+            std::thread::sleep(Duration::from_millis(5));
         }
     }
 }
 
 impl Seek for StreamBuffer {
     fn seek(&mut self, pos: SeekFrom) -> IoResult<u64> {
-        let (lock, _cvar) = &*self.state;
-        let state = lock.lock().unwrap();
+        let (lock, _notify) = &*self.state;
+        let state = lock.blocking_lock();
 
         let len = state.buffer.len() as u64;
         let total = state.total_size.unwrap_or(len);
