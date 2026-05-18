@@ -1772,7 +1772,17 @@ impl PlayerController {
         }
 
         let idx = current_queue_index.min(queue_len - 1);
-        let track = self.get_track_at(idx).expect("queue index should be valid");
+        let Some(track) = self.get_track_at(idx) else {
+            self.current_queue_index.set(0);
+            self.pending_resume.set(None);
+            self.clear_current_track_metadata();
+            tracing::warn!(
+                "Could not find track at index {} while restoring queue state. (queue_len={})",
+                idx,
+                queue_len
+            );
+            return;
+        };
         let progress_secs = progress_secs.min(track.duration);
 
         self.hydrate_current_track_metadata(idx, progress_secs);
