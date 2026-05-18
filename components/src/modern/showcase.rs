@@ -329,7 +329,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                     if let Some(ref _handler) = props.on_click_menu {
                                         button {
                                             class: "w-6 h-6 flex items-center justify-center rounded transition-colors hover:bg-white/10",
-                                            style: "color: var(--color-white) opacity: 0.5;",
+                                            style: "color: var(--color-white); opacity: 0.5;",
                                             onclick: move |_| {
                                                 if let Some(ref h) = props.on_click_menu { h.call(idx); }
                                             },
