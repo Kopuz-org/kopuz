@@ -12,8 +12,8 @@
 // - CoInitializeEx + WinRT/COM FFI is documented with // SAFETY: invariants.
 
 use std::os::windows::ffi::OsStrExt;
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
+use std::sync::{Mutex as StdMutex, OnceLock};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
 use windows::core::{BOOL, PCWSTR, Ref, w};
@@ -162,6 +162,7 @@ const TASKBAR_NEXT_ID: u32 = 0x4b03;
 static TASKBAR_HWND: AtomicIsize = AtomicIsize::new(0);
 static TASKBAR_PREV_WNDPROC: AtomicIsize = AtomicIsize::new(0);
 static TASKBAR_BUTTONS_ADDED: AtomicBool = AtomicBool::new(false);
+static TASKBAR_SUBCLASS_LOCK: OnceLock<StdMutex<()>> = OnceLock::new();
 
 unsafe extern "system" fn taskbar_wndproc(
     hwnd: HWND,
@@ -202,7 +203,23 @@ fn call_taskbar_prev_wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARA
 }
 
 fn install_taskbar_subclass(hwnd: HWND) {
-    if hwnd.0.is_null() || TASKBAR_HWND.load(Ordering::Acquire) == hwnd.0 as isize {
+    if hwnd.0.is_null() {
+        return;
+    }
+
+    let Ok(_guard) = TASKBAR_SUBCLASS_LOCK
+        .get_or_init(|| StdMutex::new(()))
+        .lock()
+    else {
+        return;
+    };
+
+    let installed_hwnd = TASKBAR_HWND.load(Ordering::Acquire);
+    if installed_hwnd == hwnd.0 as isize {
+        return;
+    }
+    if installed_hwnd != 0 {
+        eprintln!("[windows] Taskbar subclass already installed for another HWND");
         return;
     }
 
