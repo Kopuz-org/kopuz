@@ -39,9 +39,10 @@ pub fn SearchResults(
         let idx = *ctrl.current_queue_index.read();
         ctrl.get_track_at(idx).map(|track| track.path.clone())
     };
-    let current_song_title = current_song_title.read().clone();
-    let current_song_artist = current_song_artist.read().clone();
-    let current_song_duration = *current_song_duration.read();
+    let current_song_title = ctrl.current_song_title.read().clone();
+    let current_song_artist = ctrl.current_song_artist.read().clone();
+    let current_song_album = ctrl.current_song_album.read().clone();
+    let current_song_duration = *ctrl.current_song_duration.read();
 
     rsx! {
         div { class: "mt-8 space-y-8",
@@ -100,6 +101,7 @@ pub fn SearchResults(
                                 let matches_current_metadata = currently_playing_path.is_none()
                                     && !current_song_title.is_empty()
                                     && track.title == current_song_title
+                                    && track.album == current_song_album
                                     && track.artist == current_song_artist
                                     && track.duration == current_song_duration;
                                 let is_currently_playing: bool = matches_current_path || matches_current_metadata;
