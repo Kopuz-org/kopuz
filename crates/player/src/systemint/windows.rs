@@ -35,8 +35,8 @@ use windows::{
         System::WinRT::RoGetActivationFactory,
         UI::{
             Shell::{
-                ITaskbarList3, THB_FLAGS, THB_ICON, THB_TOOLTIP, THBF_ENABLED, THUMBBUTTON,
-                TaskbarList,
+                ITaskbarList3, THB_FLAGS, THB_ICON, THB_TOOLTIP, THBF_ENABLED, THBN_CLICKED,
+                THUMBBUTTON, TaskbarList,
             },
             WindowsAndMessaging::{
                 CallWindowProcW, CreateWindowExW, DefWindowProcW, EnumWindows, GWLP_WNDPROC,
@@ -155,9 +155,9 @@ fn create_message_window() -> Option<HWND> {
     }
 }
 
-const TASKBAR_PREV_ID: u32 = 1;
-const TASKBAR_PLAY_PAUSE_ID: u32 = 2;
-const TASKBAR_NEXT_ID: u32 = 3;
+const TASKBAR_PREV_ID: u32 = 0x4b01;
+const TASKBAR_PLAY_PAUSE_ID: u32 = 0x4b02;
+const TASKBAR_NEXT_ID: u32 = 0x4b03;
 
 static TASKBAR_HWND: AtomicIsize = AtomicIsize::new(0);
 static TASKBAR_PREV_WNDPROC: AtomicIsize = AtomicIsize::new(0);
@@ -171,16 +171,20 @@ unsafe extern "system" fn taskbar_wndproc(
 ) -> LRESULT {
     if msg == WM_COMMAND {
         let command_id = (wparam.0 & 0xffff) as u32;
-        let event = match command_id {
-            TASKBAR_PREV_ID => Some(SystemEvent::Prev),
-            TASKBAR_PLAY_PAUSE_ID => Some(SystemEvent::Toggle),
-            TASKBAR_NEXT_ID => Some(SystemEvent::Next),
-            _ => None,
-        };
+        let notification_code = ((wparam.0 >> 16) & 0xffff) as u32;
 
-        if let Some(event) = event {
-            let _ = get_tx().send(event);
-            return LRESULT(0);
+        if notification_code == THBN_CLICKED {
+            let event = match command_id {
+                TASKBAR_PREV_ID => Some(SystemEvent::Prev),
+                TASKBAR_PLAY_PAUSE_ID => Some(SystemEvent::Toggle),
+                TASKBAR_NEXT_ID => Some(SystemEvent::Next),
+                _ => None,
+            };
+
+            if let Some(event) = event {
+                let _ = get_tx().send(event);
+                return LRESULT(0);
+            }
         }
     }
 
