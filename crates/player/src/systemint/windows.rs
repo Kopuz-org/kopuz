@@ -11,10 +11,12 @@
 //   player via an unbounded mpsc channel.
 // - CoInitializeEx + WinRT/COM FFI is documented with // SAFETY: invariants.
 
+use std::os::windows::ffi::OsStrExt;
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use tokio::sync::Mutex;
 use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
-use windows::core::{BOOL, Ref, w};
+use windows::core::{BOOL, PCWSTR, Ref, w};
 use windows::{
     Foundation::{TimeSpan, TypedEventHandler, Uri},
     Media::{
@@ -25,13 +27,23 @@ use windows::{
     },
     Storage::Streams::{DataWriter, InMemoryRandomAccessStream, RandomAccessStreamReference},
     Win32::{
-        Foundation::{HWND, LPARAM},
-        System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx},
+        Foundation::{HWND, LPARAM, LRESULT, WPARAM},
+        System::Com::{
+            CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
+        },
         System::Threading::GetCurrentProcessId,
         System::WinRT::RoGetActivationFactory,
-        UI::WindowsAndMessaging::{
-            CreateWindowExW, EnumWindows, GetWindowThreadProcessId, HWND_MESSAGE, IsWindowVisible,
-            WINDOW_EX_STYLE, WINDOW_STYLE,
+        UI::{
+            Shell::{
+                ITaskbarList3, THB_FLAGS, THB_ICON, THB_TOOLTIP, THBF_ENABLED, THUMBBUTTON,
+                TaskbarList,
+            },
+            WindowsAndMessaging::{
+                CallWindowProcW, CreateWindowExW, DefWindowProcW, EnumWindows, GWLP_WNDPROC,
+                GetWindowThreadProcessId, HICON, HWND_MESSAGE, IMAGE_ICON, IsWindowVisible,
+                LR_DEFAULTSIZE, LR_LOADFROMFILE, LoadImageW, SetWindowLongPtrW, WINDOW_EX_STYLE,
+                WINDOW_STYLE, WM_COMMAND, WNDPROC,
+            },
         },
     },
 };
@@ -143,6 +155,202 @@ fn create_message_window() -> Option<HWND> {
     }
 }
 
+const TASKBAR_PREV_ID: u32 = 1;
+const TASKBAR_PLAY_PAUSE_ID: u32 = 2;
+const TASKBAR_NEXT_ID: u32 = 3;
+
+static TASKBAR_HWND: AtomicIsize = AtomicIsize::new(0);
+static TASKBAR_PREV_WNDPROC: AtomicIsize = AtomicIsize::new(0);
+static TASKBAR_BUTTONS_ADDED: AtomicBool = AtomicBool::new(false);
+
+unsafe extern "system" fn taskbar_wndproc(
+    hwnd: HWND,
+    msg: u32,
+    wparam: WPARAM,
+    lparam: LPARAM,
+) -> LRESULT {
+    if msg == WM_COMMAND {
+        let command_id = (wparam.0 & 0xffff) as u32;
+        let event = match command_id {
+            TASKBAR_PREV_ID => Some(SystemEvent::Prev),
+            TASKBAR_PLAY_PAUSE_ID => Some(SystemEvent::Toggle),
+            TASKBAR_NEXT_ID => Some(SystemEvent::Next),
+            _ => None,
+        };
+
+        if let Some(event) = event {
+            let _ = get_tx().send(event);
+            return LRESULT(0);
+        }
+    }
+
+    call_taskbar_prev_wndproc(hwnd, msg, wparam, lparam)
+}
+
+fn call_taskbar_prev_wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    let prev = TASKBAR_PREV_WNDPROC.load(Ordering::Acquire);
+    if prev == 0 {
+        return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
+    }
+
+    let prev_proc: WNDPROC = unsafe { std::mem::transmute(prev) };
+    unsafe { CallWindowProcW(prev_proc, hwnd, msg, wparam, lparam) }
+}
+
+fn install_taskbar_subclass(hwnd: HWND) {
+    if hwnd.0.is_null() || TASKBAR_HWND.load(Ordering::Acquire) == hwnd.0 as isize {
+        return;
+    }
+
+    let wndproc = taskbar_wndproc as *const () as isize;
+    let prev = unsafe { SetWindowLongPtrW(hwnd, GWLP_WNDPROC, wndproc) };
+    if prev != 0 {
+        TASKBAR_PREV_WNDPROC.store(prev, Ordering::Release);
+        TASKBAR_HWND.store(hwnd.0 as isize, Ordering::Release);
+    }
+}
+
+fn fill_tip(buf: &mut [u16; 260], text: &str) {
+    for (idx, unit) in text.encode_utf16().take(buf.len() - 1).enumerate() {
+        buf[idx] = unit;
+    }
+}
+
+fn make_icon(kind: TaskbarIconKind) -> Option<HICON> {
+    let icon_path = find_toolbar_icon(kind)?;
+    let mut wide_path: Vec<u16> = icon_path.as_os_str().encode_wide().collect();
+    wide_path.push(0);
+
+    let handle = unsafe {
+        LoadImageW(
+            None,
+            PCWSTR(wide_path.as_ptr()),
+            IMAGE_ICON,
+            0,
+            0,
+            LR_LOADFROMFILE | LR_DEFAULTSIZE,
+        )
+        .ok()?
+    };
+
+    Some(HICON(handle.0))
+}
+
+fn find_toolbar_icon(kind: TaskbarIconKind) -> Option<std::path::PathBuf> {
+    let file_name = match kind {
+        TaskbarIconKind::Previous => "backward-step-solid-full.ico",
+        TaskbarIconKind::Play => "play-solid-full.ico",
+        TaskbarIconKind::Pause => "pause-solid-full.ico",
+        TaskbarIconKind::Next => "forward-step-solid-full.ico",
+    };
+
+    let mut bases = Vec::new();
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            bases.push(exe_dir.join("assets").join("toolbar_icons"));
+            bases.push(exe_dir.join("kopuz").join("assets").join("toolbar_icons"));
+        }
+    }
+
+    if let Ok(current_dir) = std::env::current_dir() {
+        bases.push(current_dir.join("assets").join("toolbar_icons"));
+        bases.push(
+            current_dir
+                .join("kopuz")
+                .join("assets")
+                .join("toolbar_icons"),
+        );
+    }
+
+    bases.push(
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("kopuz")
+            .join("assets")
+            .join("toolbar_icons"),
+    );
+
+    bases
+        .into_iter()
+        .map(|base| base.join(file_name))
+        .find(|path| path.is_file())
+}
+
+#[derive(Clone, Copy)]
+enum TaskbarIconKind {
+    Previous,
+    Play,
+    Pause,
+    Next,
+}
+
+fn taskbar_button(id: u32, icon: HICON, tip: &str) -> THUMBBUTTON {
+    let mut button = THUMBBUTTON {
+        dwMask: THB_ICON | THB_TOOLTIP | THB_FLAGS,
+        iId: id,
+        iBitmap: 0,
+        hIcon: icon,
+        szTip: [0; 260],
+        dwFlags: THBF_ENABLED,
+    };
+    fill_tip(&mut button.szTip, tip);
+    button
+}
+
+fn create_taskbar_list() -> windows::core::Result<ITaskbarList3> {
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let taskbar: ITaskbarList3 = CoCreateInstance(&TaskbarList, None, CLSCTX_INPROC_SERVER)?;
+        taskbar.HrInit()?;
+        Ok(taskbar)
+    }
+}
+
+fn setup_taskbar_buttons(hwnd: HWND, playing: bool) {
+    if hwnd.0.is_null() || hwnd == HWND_MESSAGE {
+        return;
+    }
+
+    install_taskbar_subclass(hwnd);
+
+    let result = (|| -> windows::core::Result<()> {
+        let taskbar = create_taskbar_list()?;
+        let Some(prev_icon) = make_icon(TaskbarIconKind::Previous) else {
+            return Ok(());
+        };
+        let Some(play_pause_icon) = make_icon(if playing {
+            TaskbarIconKind::Pause
+        } else {
+            TaskbarIconKind::Play
+        }) else {
+            return Ok(());
+        };
+        let Some(next_icon) = make_icon(TaskbarIconKind::Next) else {
+            return Ok(());
+        };
+        let play_pause_tip = if playing { "Pause" } else { "Play" };
+        let buttons = [
+            taskbar_button(TASKBAR_PREV_ID, prev_icon, "Previous"),
+            taskbar_button(TASKBAR_PLAY_PAUSE_ID, play_pause_icon, play_pause_tip),
+            taskbar_button(TASKBAR_NEXT_ID, next_icon, "Next"),
+        ];
+
+        unsafe {
+            if TASKBAR_BUTTONS_ADDED.swap(true, Ordering::AcqRel) {
+                taskbar.ThumbBarUpdateButtons(hwnd, &buttons)?;
+            } else {
+                taskbar.ThumbBarAddButtons(hwnd, &buttons)?;
+            }
+        }
+        Ok(())
+    })();
+
+    if let Err(e) = result {
+        eprintln!("[windows] Taskbar media buttons setup failed: {e:?}");
+    }
+}
+
 fn find_main_hwnd() -> Option<HWND> {
     let mut data = EnumData {
         // SAFETY: GetCurrentProcessId is a simple system call that
@@ -192,65 +400,67 @@ fn setup_smtc(hwnd: HWND) {
         // - The TypedEventHandler closures capture the sender by value
         //   and do not introduce data races.
         unsafe {
-        let class_id = windows::core::HSTRING::from("Windows.Media.SystemMediaTransportControls");
-        let interop: ISystemMediaTransportControlsInterop = RoGetActivationFactory(&class_id)?;
-        let smtc: SystemMediaTransportControls = interop.GetForWindow(hwnd)?;
+            let class_id =
+                windows::core::HSTRING::from("Windows.Media.SystemMediaTransportControls");
+            let interop: ISystemMediaTransportControlsInterop = RoGetActivationFactory(&class_id)?;
+            let smtc: SystemMediaTransportControls = interop.GetForWindow(hwnd)?;
 
-        smtc.SetIsEnabled(true)?;
-        smtc.SetIsPlayEnabled(true)?;
-        smtc.SetIsPauseEnabled(true)?;
-        smtc.SetIsNextEnabled(true)?;
-        smtc.SetIsPreviousEnabled(true)?;
-        smtc.SetIsStopEnabled(true)?;
+            smtc.SetIsEnabled(true)?;
+            smtc.SetIsPlayEnabled(true)?;
+            smtc.SetIsPauseEnabled(true)?;
+            smtc.SetIsNextEnabled(true)?;
+            smtc.SetIsPreviousEnabled(true)?;
+            smtc.SetIsStopEnabled(true)?;
 
-        let tx = get_tx();
-        let seek_tx = tx.clone();
+            let tx = get_tx();
+            let seek_tx = tx.clone();
 
-        smtc.ButtonPressed(&TypedEventHandler::new(
-            move |_: Ref<SystemMediaTransportControls>,
-                  args: Ref<SystemMediaTransportControlsButtonPressedEventArgs>|
-                  -> windows::core::Result<()> {
-                if let Some(args) = args.as_ref() {
-                    let btn: SystemMediaTransportControlsButton = args.Button()?;
-                    let evt = if btn == SystemMediaTransportControlsButton::Play {
-                        Some(SystemEvent::Play)
-                    } else if btn == SystemMediaTransportControlsButton::Pause {
-                        Some(SystemEvent::Pause)
-                    } else if btn == SystemMediaTransportControlsButton::Next {
-                        Some(SystemEvent::Next)
-                    } else if btn == SystemMediaTransportControlsButton::Previous {
-                        Some(SystemEvent::Prev)
-                    } else {
-                        None
-                    };
-                    if let Some(e) = evt {
-                        let _ = tx.send(e);
+            smtc.ButtonPressed(&TypedEventHandler::new(
+                move |_: Ref<SystemMediaTransportControls>,
+                      args: Ref<SystemMediaTransportControlsButtonPressedEventArgs>|
+                      -> windows::core::Result<()> {
+                    if let Some(args) = args.as_ref() {
+                        let btn: SystemMediaTransportControlsButton = args.Button()?;
+                        let evt = if btn == SystemMediaTransportControlsButton::Play
+                            || btn == SystemMediaTransportControlsButton::Pause
+                        {
+                            Some(SystemEvent::Toggle)
+                        } else if btn == SystemMediaTransportControlsButton::Next {
+                            Some(SystemEvent::Next)
+                        } else if btn == SystemMediaTransportControlsButton::Previous {
+                            Some(SystemEvent::Prev)
+                        } else {
+                            None
+                        };
+                        if let Some(e) = evt {
+                            let _ = tx.send(e);
+                        }
                     }
-                }
-                Ok(())
-            },
-        ))?;
+                    Ok(())
+                },
+            ))?;
 
-        smtc.PlaybackPositionChangeRequested(&TypedEventHandler::new(
-            move |_: Ref<SystemMediaTransportControls>,
-                  args: Ref<PlaybackPositionChangeRequestedEventArgs>|
-                  -> windows::core::Result<()> {
-                if let Some(args) = args.as_ref() {
-                    let pos = args.RequestedPlaybackPosition()?;
-                    let secs = pos.Duration as f64 / 10_000_000.0;
-                    let _ = seek_tx.send(SystemEvent::Seek(secs));
-                }
-                Ok(())
-            },
-        ))?;
+            smtc.PlaybackPositionChangeRequested(&TypedEventHandler::new(
+                move |_: Ref<SystemMediaTransportControls>,
+                      args: Ref<PlaybackPositionChangeRequestedEventArgs>|
+                      -> windows::core::Result<()> {
+                    if let Some(args) = args.as_ref() {
+                        let pos = args.RequestedPlaybackPosition()?;
+                        let secs = pos.Duration as f64 / 10_000_000.0;
+                        let _ = seek_tx.send(SystemEvent::Seek(secs));
+                    }
+                    Ok(())
+                },
+            ))?;
 
-        windows::core::Result::Ok(smtc)
+            windows::core::Result::Ok(smtc)
         }
     })();
 
     match result {
         Ok(smtc) => {
             if SMTC.set(smtc).is_ok() {
+                setup_taskbar_buttons(hwnd, false);
                 println!("[windows] SMTC initialised");
             }
         }
@@ -383,6 +593,10 @@ pub fn update_now_playing(
 
     let duration = _duration;
     let position = _position;
+    if let Some(hwnd) = find_main_hwnd() {
+        setup_taskbar_buttons(hwnd, playing);
+    }
+
     if duration > 0.0 {
         if let Ok(timeline) = SystemMediaTransportControlsTimelineProperties::new() {
             let _ = timeline.SetStartTime(secs_to_timespan(0.0));
