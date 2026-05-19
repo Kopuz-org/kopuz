@@ -97,7 +97,8 @@ pub fn SearchResults(
                                 let track_delete = track.clone();
                                 let queue_source = search_queue.clone();
                                 let matches_current_path = currently_playing_path.as_ref() == Some(&track.path);
-                                let matches_current_metadata = !current_song_title.is_empty()
+                                let matches_current_metadata = currently_playing_path.is_none()
+                                    && !current_song_title.is_empty()
                                     && track.title == current_song_title
                                     && track.artist == current_song_artist
                                     && track.duration == current_song_duration;
