@@ -56,6 +56,7 @@ pub struct PlayerController {
     pending_resume: Signal<Option<PendingResumeState>>,
     pub pending_crossfade_ui: Signal<Option<PendingCrossfadeUiState>>,
     pub radio_task: Signal<Option<dioxus_core::Task>>,
+    pub station_registry: Signal<radio::registry::StationRegistry>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -507,8 +508,11 @@ impl PlayerController {
 
                 if let Some((stream_url, cover_url)) = {
                     if is_radio_item {
-                        let stream_url = radio::stations::stream_url(&id, &stream_id);
-                        Some((stream_url.to_string(), String::new()))
+                        if let Some(stream_url) = self.station_registry.read().get(&id).and_then(|s| s.streams.iter().find(|str| str.id == stream_id)).map(|s| s.url.clone()) {
+                            Some((stream_url, String::new()))
+                        } else {
+                            None
+                        }
                     } else {
                         let conf = self.config.read();
                         conf.server.as_ref().map(|server| match server.service {
@@ -590,6 +594,7 @@ impl PlayerController {
                     let mut current_song_artist = self.current_song_artist;
                     let mut current_song_album = self.current_song_album;
                     let mut current_song_cover_url = self.current_song_cover_url;
+                    let station_registry = self.station_registry;
 
                     if !use_crossfade {
                         self.hydrate_current_track_metadata(idx, 0);
@@ -685,33 +690,9 @@ impl PlayerController {
                                 }
 
                                 if is_radio_item {
-                                    {
-                                        let provider: Box<dyn radio::RadioMetadataProvider> =
-                                            match station_id.as_str() {
-                                                "listen_moe" => {
-                                                    Box::new(radio::listen_moe::ListenMoeProvider)
-                                                }
-                                                "j1" => Box::new(radio::j1::J1Provider),
-                                                "doujinstyle" => Box::new(
-                                                    radio::doujinstyle::DoujinstyleProvider,
-                                                ),
-                                                "vocaloid" => {
-                                                    Box::new(radio::vocaloid::VocaloidProvider)
-                                                },
-                                                "asiadreamradio" => Box::new(radio::asiadreamradio::AsiaDreamRadioProvider),
-                                                _ => {
-                                                    tracing::warn!(
-                                                        "[radio] No metadata provider for station: {}",
-                                                        station_id
-                                                    );
-                                                    is_loading.set(false);
-                                                    is_playing.set(true);
-                                                    skip_in_progress.set(false);
-                                                    return;
-                                                }
-                                            };
-
+                                    if let Some(provider) = station_registry.read().create_provider(&station_id) {
                                         let task = spawn(async move {
+                                            use radio::provider::RadioMetadataProvider;
                                             let mut rx = provider.start(&stream_id);
                                             while let Some(meta) = rx.recv().await {
                                                 current_song_title.set(meta.title.clone());
@@ -723,6 +704,8 @@ impl PlayerController {
                                         });
 
                                         radio_task.set(Some(task));
+                                    } else {
+                                        tracing::warn!("[radio] No metadata provider for station: {}", station_id);
                                     }
                                 }
                                 // Don't scrobble if the track is a radio item
@@ -1824,6 +1807,7 @@ pub fn use_player_controller(
     let pending_resume = use_signal(|| None::<PendingResumeState>);
     let pending_crossfade_ui = use_signal(|| None::<PendingCrossfadeUiState>);
     let radio_task = use_signal(|| None::<dioxus_core::Task>);
+    let station_registry = use_context::<Signal<radio::registry::StationRegistry>>();
 
     PlayerController {
         player,
@@ -1852,5 +1836,6 @@ pub fn use_player_controller(
         pending_resume,
         pending_crossfade_ui,
         radio_task,
+        station_registry,
     }
 }

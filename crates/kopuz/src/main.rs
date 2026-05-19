@@ -840,6 +840,37 @@ fn App() -> Element {
     #[cfg(not(target_arch = "wasm32"))]
     provide_context(presence.clone());
 
+    let mut station_registry = use_signal(|| radio::registry::StationRegistry::new());
+    provide_context(station_registry);
+
+    use_effect(move || {
+        let registry_paths: Vec<String> = config
+            .read()
+            .radio_registries
+            .iter()
+            .filter(|r| r.enabled)
+            .map(|r| r.url.clone())
+            .collect();
+
+        spawn(async move {
+            let mut new_registry = radio::registry::StationRegistry::new();
+            let mut import_count = 0;
+
+            for path in registry_paths {
+                match new_registry.import_registry(&path).await {
+                    Ok(_) => import_count += 1,
+                    Err(e) => tracing::warn!("Failed to import registry from {}: {}", path, e),
+                }
+            }
+
+            station_registry.set(new_registry);
+
+            if import_count > 0 {
+                tracing::info!("Imported {} external radio registries", import_count);
+            }
+        });
+    });
+
     let mut selected_album_id = use_signal(String::new);
     let mut selected_playlist_id = use_signal(|| None::<String>);
     let mut selected_artist_name = use_signal(String::new);
