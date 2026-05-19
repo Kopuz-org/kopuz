@@ -4,8 +4,8 @@ use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 use player::player;
-use reader::models::{Album, Track};
 use reader::Library;
+use reader::models::{Album, Track};
 
 #[component]
 pub fn SearchResults(
@@ -35,6 +35,13 @@ pub fn SearchResults(
     let sort_state = use_signal(|| None);
     let sorted_tracks = showcase::sorted_track_pairs(&tracks, *sort_state.read());
     let search_queue: Vec<Track> = sorted_tracks.iter().map(|(t, _)| t.clone()).collect();
+    let currently_playing_path = {
+        let idx = *ctrl.current_queue_index.read();
+        ctrl.get_track_at(idx).map(|track| track.path.clone())
+    };
+    let current_song_title = current_song_title.read().clone();
+    let current_song_artist = current_song_artist.read().clone();
+    let current_song_duration = *current_song_duration.read();
 
     rsx! {
         div { class: "mt-8 space-y-8",
@@ -89,6 +96,12 @@ pub fn SearchResults(
                                 let track_queue = track.clone();
                                 let track_delete = track.clone();
                                 let queue_source = search_queue.clone();
+                                let matches_current_path = currently_playing_path.as_ref() == Some(&track.path);
+                                let matches_current_metadata = !current_song_title.is_empty()
+                                    && track.title == current_song_title
+                                    && track.artist == current_song_artist
+                                    && track.duration == current_song_duration;
+                                let is_currently_playing: bool = matches_current_path || matches_current_metadata;
                                 let is_menu_open = active_menu_track.read().as_ref() == Some(&track.path);
                                 let item_id: Option<String> = {
                                     let s = track.path.to_string_lossy();
@@ -115,6 +128,7 @@ pub fn SearchResults(
                                         is_menu_open: is_menu_open,
                                         is_album: false,
                                         is_downloaded: is_downloaded,
+                                        is_currently_playing,
                                         on_click_menu: move |_| {
                                             if active_menu_track.read().as_ref() == Some(&track_menu.path) {
                                                 active_menu_track.set(None);
