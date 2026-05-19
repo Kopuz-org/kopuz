@@ -32,55 +32,30 @@
         system:
         let
           pkgs = pkgsForEach system;
-          buildInputs = with pkgs; [
-            webkitgtk_4_1
-            gtk3
-            libsoup_3
-            glib-networking
-            wayland
-            alsa-lib
-            xdotool
-            openssl
-          ];
 
-          rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-            extensions = [
-              "rust-src"
-              "rust-analyzer"
+          # Scoped sharedArgs in one so to not leak into 'pkgs'
+          sharedArgs = {
+            buildInputs = with pkgs; [
+              webkitgtk_4_1
+              gtk3
+              libsoup_3
+              glib-networking
+              wayland
+              alsa-lib
+              xdotool
+              openssl
             ];
+
+            rustToolchain = pkgs.rust-bin.stable.latest.default.override {
+              extensions = [
+                "rust-src"
+                "rust-analyzer"
+              ];
+            };
           };
         in
         {
-          default = pkgs.mkShell {
-            inherit buildInputs;
-
-            nativeBuildInputs = with pkgs; [
-              # Build deps
-              rustToolchain
-              dioxus-cli
-              pkg-config
-              cmake
-              clang
-              lld
-              mold
-
-              # Packaging
-              flatpak
-              flatpak-builder
-
-              appstream
-              nodejs_22
-              yt-dlp
-            ];
-
-            env = {
-              RUSTFLAGS = "-C link-arg=-fuse-ld=lld";
-              GIO_MODULE_DIR = "${pkgs.glib-networking}/lib/gio/modules/";
-              GSETTINGS_SCHEMA_DIR = "${pkgs.glib.getSchemaPath pkgs.gtk3}";
-              LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath buildInputs}:$LD_LIBRARY_PATH";
-              WEBKIT_DISABLE_COMPOSITING_MODE = "1";
-            };
-          };
+          default = pkgs.callPackage ./packaging/nix/shell.nix { inherit sharedArgs; };
         }
       );
 
