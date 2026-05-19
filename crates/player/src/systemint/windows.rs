@@ -150,19 +150,28 @@ fn create_message_window() -> Option<HWND> {
         )
     };
     match hwnd {
-        Ok(h) if !h.0.is_null() => Some(h),
+        Ok(h) if !h.0.is_null() => {
+            MESSAGE_ONLY_HWND.store(h.0 as isize, Ordering::Release);
+            Some(h)
+        }
         _ => None,
     }
+}
+
+fn is_message_only_window(hwnd: HWND) -> bool {
+    !hwnd.0.is_null() && MESSAGE_ONLY_HWND.load(Ordering::Acquire) == hwnd.0 as isize
 }
 
 const TASKBAR_PREV_ID: u32 = 0x4b01;
 const TASKBAR_PLAY_PAUSE_ID: u32 = 0x4b02;
 const TASKBAR_NEXT_ID: u32 = 0x4b03;
 
+static MESSAGE_ONLY_HWND: AtomicIsize = AtomicIsize::new(0);
 static TASKBAR_HWND: AtomicIsize = AtomicIsize::new(0);
 static TASKBAR_PREV_WNDPROC: AtomicIsize = AtomicIsize::new(0);
 static TASKBAR_BUTTONS_ADDED: AtomicBool = AtomicBool::new(false);
 static TASKBAR_SUBCLASS_LOCK: OnceLock<StdMutex<()>> = OnceLock::new();
+static TASKBAR_BUTTONS_LOCK: OnceLock<StdMutex<()>> = OnceLock::new();
 
 unsafe extern "system" fn taskbar_wndproc(
     hwnd: HWND,
@@ -329,11 +338,18 @@ fn create_taskbar_list() -> windows::core::Result<ITaskbarList3> {
 }
 
 fn setup_taskbar_buttons(hwnd: HWND, playing: bool) {
-    if hwnd.0.is_null() || hwnd == HWND_MESSAGE {
+    if hwnd.0.is_null() || hwnd == HWND_MESSAGE || is_message_only_window(hwnd) {
         return;
     }
 
     install_taskbar_subclass(hwnd);
+
+    let Ok(_guard) = TASKBAR_BUTTONS_LOCK
+        .get_or_init(|| StdMutex::new(()))
+        .lock()
+    else {
+        return;
+    };
 
     let result = (|| -> windows::core::Result<()> {
         let taskbar = create_taskbar_list()?;
@@ -358,10 +374,11 @@ fn setup_taskbar_buttons(hwnd: HWND, playing: bool) {
         ];
 
         unsafe {
-            if TASKBAR_BUTTONS_ADDED.swap(true, Ordering::AcqRel) {
+            if TASKBAR_BUTTONS_ADDED.load(Ordering::Acquire) {
                 taskbar.ThumbBarUpdateButtons(hwnd, &buttons)?;
             } else {
                 taskbar.ThumbBarAddButtons(hwnd, &buttons)?;
+                TASKBAR_BUTTONS_ADDED.store(true, Ordering::Release);
             }
         }
         Ok(())
