@@ -4999,19 +4999,8 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
- "tokio",
- "tokio-tungstenite",
- "tracing",
-]
-
-[[package]]
-name = "radio-provider"
-version = "0.5.5"
-dependencies = [
- "futures-util",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
+ "tempfile",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-tungstenite",
  "tracing",

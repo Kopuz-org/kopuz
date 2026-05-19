@@ -1,4 +1,5 @@
-use crate::manifest::FieldMapping;
+use crate::manifest::{EntrySelector, FieldMapping, MatchValueFrom};
+use std::collections::HashMap;
 use serde_json::Value;
 
 /// Traverse a JSON value using a dot-notation path.
@@ -94,6 +95,34 @@ pub fn extract_artwork(json: &Value, mapping: &FieldMapping) -> Option<String> {
     } else {
         Some(extracted)
     }
+}
+
+/// Select the correct entry from a JSON array for a specific stream.
+/// Used when a single API response contains data for multiple channels.
+/// e.g: J1 Station
+pub fn select_entry<'a>(
+    json: &'a Value,
+    selector: &EntrySelector,
+    stream_id: &str,
+    stream_name_map: &HashMap<String, String>,
+) -> Option<&'a Value> {
+    let array = extract_value(json, &selector.array_path)?;
+    let arr = array.as_array()?;
+
+    let match_value = match selector.match_value_from {
+        MatchValueFrom::StreamName => stream_name_map
+            .get(stream_id)
+            .map(|s| s.as_str())
+            .unwrap_or(stream_id),
+        MatchValueFrom::StreamId => stream_id,
+    };
+
+    arr.iter().find(|entry| {
+        extract_value(entry, &selector.match_field)
+            .and_then(|v| v.as_str())
+            .map(|s| s == match_value)
+            .unwrap_or(false)
+    })
 }
 
 #[cfg(test)]
@@ -201,5 +230,146 @@ mod tests {
             extract_artwork(&json, &mapping),
             Some("https://cdn.example.com/image123.jpg".to_string())
         );
+    }
+
+    // select_entry tests
+
+    /// J1-style: API returns array for multiple channels, select by display name
+    #[test]
+    fn test_select_entry_stream_name() {
+        let json = serde_json::json!({
+            "station": [
+                { "name": "J1 HITS", "title": "Song A", "artist": "Artist A", "image_url": "a.png" },
+                { "name": "J1 GOLD", "title": "Song B", "artist": "Artist B", "image_url": "b.png" }
+            ]
+        });
+        let selector = EntrySelector {
+            array_path: "station".into(),
+            match_field: "name".into(),
+            match_value_from: MatchValueFrom::StreamName,
+        };
+        let mut name_map = HashMap::new();
+        name_map.insert("J1HITS".to_string(), "J1 HITS".to_string());
+        name_map.insert("J1GOLD".to_string(), "J1 GOLD".to_string());
+
+        // Selecting HITS
+        let entry = select_entry(&json, &selector, "J1HITS", &name_map).unwrap();
+        assert_eq!(entry["title"].as_str().unwrap(), "Song A");
+        assert_eq!(entry["artist"].as_str().unwrap(), "Artist A");
+
+        // Selecting GOLD
+        let entry = select_entry(&json, &selector, "J1GOLD", &name_map).unwrap();
+        assert_eq!(entry["title"].as_str().unwrap(), "Song B");
+        assert_eq!(entry["artist"].as_str().unwrap(), "Artist B");
+    }
+
+    /// Match directly against raw stream_id
+    #[test]
+    fn test_select_entry_stream_id() {
+        let json = serde_json::json!({
+            "channels": [
+                { "id": "ch_alpha", "now_playing": "Track X" },
+                { "id": "ch_beta",  "now_playing": "Track Y" }
+            ]
+        });
+        let selector = EntrySelector {
+            array_path: "channels".into(),
+            match_field: "id".into(),
+            match_value_from: MatchValueFrom::StreamId,
+        };
+        let empty_map = HashMap::new();
+
+        let entry = select_entry(&json, &selector, "ch_beta", &empty_map).unwrap();
+        assert_eq!(entry["now_playing"].as_str().unwrap(), "Track Y");
+    }
+
+    /// StreamName falls back to stream_id when stream_name_map has no entry
+    #[test]
+    fn test_select_entry_stream_name_fallback() {
+        let json = serde_json::json!({
+            "station": [
+                { "name": "main", "title": "Fallback" }
+            ]
+        });
+        let selector = EntrySelector {
+            array_path: "station".into(),
+            match_field: "name".into(),
+            match_value_from: MatchValueFrom::StreamName,
+        };
+        let empty_map = HashMap::new();
+
+        // No entry in stream_name_map, so stream_id "main" is used directly
+        let entry = select_entry(&json, &selector, "main", &empty_map).unwrap();
+        assert_eq!(entry["title"].as_str().unwrap(), "Fallback");
+    }
+
+    /// Returns None when no array entry matches
+    #[test]
+    fn test_select_entry_no_match() {
+        let json = serde_json::json!({
+            "station": [
+                { "name": "J1 HITS", "title": "Song A" }
+            ]
+        });
+        let selector = EntrySelector {
+            array_path: "station".into(),
+            match_field: "name".into(),
+            match_value_from: MatchValueFrom::StreamId,
+        };
+        let empty_map = HashMap::new();
+
+        assert!(select_entry(&json, &selector, "nonexistent", &empty_map).is_none());
+    }
+
+    /// Returns None when array_path points to a non-array value
+    #[test]
+    fn test_select_entry_not_an_array() {
+        let json = serde_json::json!({
+            "station": { "name": "single" }
+        });
+        let selector = EntrySelector {
+            array_path: "station".into(),
+            match_field: "name".into(),
+            match_value_from: MatchValueFrom::StreamId,
+        };
+        let empty_map = HashMap::new();
+
+        assert!(select_entry(&json, &selector, "single", &empty_map).is_none());
+    }
+
+    /// Returns None when array_path doesn't exist
+    #[test]
+    fn test_select_entry_missing_path() {
+        let json = serde_json::json!({ "other": 42 });
+        let selector = EntrySelector {
+            array_path: "station".into(),
+            match_field: "name".into(),
+            match_value_from: MatchValueFrom::StreamId,
+        };
+        let empty_map = HashMap::new();
+
+        assert!(select_entry(&json, &selector, "x", &empty_map).is_none());
+    }
+
+    /// Works with a nested array path
+    #[test]
+    fn test_select_entry_nested_array_path() {
+        let json = serde_json::json!({
+            "data": {
+                "streams": [
+                    { "key": "a", "song": "Hello" },
+                    { "key": "b", "song": "World" }
+                ]
+            }
+        });
+        let selector = EntrySelector {
+            array_path: "data.streams".into(),
+            match_field: "key".into(),
+            match_value_from: MatchValueFrom::StreamId,
+        };
+        let empty_map = HashMap::new();
+
+        let entry = select_entry(&json, &selector, "b", &empty_map).unwrap();
+        assert_eq!(entry["song"].as_str().unwrap(), "World");
     }
 }

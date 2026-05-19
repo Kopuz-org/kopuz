@@ -49,7 +49,6 @@ directories = "6.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
 tracing-appender = "0.2"
-<<<<<<< HEAD
 i18n = { path = "./crates/i18n" }
 player = { path = "./crates/player" }
 reader = { path = "./crates/reader" }
@@ -64,23 +63,6 @@ kopuz_route = { path = "./crates/kopuz_route" }
 discord-presence = { path = "./crates/discord-presence" }
 scrobble = { path = "./crates/scrobble" }
 radio = { path = "./crates/radio" }
-=======
-i18n = { path = "./i18n" }
-player = { path = "./player" }
-reader = { path = "./reader" }
-components = { path = "./components" }
-hooks = { path = "./hooks" }
-pages = { path = "./pages" }
-utils = { path = "./utils" }
-config = { path = "./config" }
-kopuz = { path = "./kopuz" }
-server = { path = "./server" }
-kopuz_route = { path = "./kopuz_route" }
-discord-presence = { path = "./discord-presence" }
-scrobble = { path = "./scrobble" }
-radio = { path = "./radio" }
-radio-provider = { path = "./radio-provider" }
->>>>>>> c1cfd72 (feat(radio_provider): init)
 
 [profile.release]
 strip = "symbols"
