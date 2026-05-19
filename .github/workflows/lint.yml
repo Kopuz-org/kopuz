@@ -1,0 +1,26 @@
+name: lint
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'README.md'
+      - '.github/workflows/lint.yml'
+  pull_request:
+    branches: [master]
+    paths:
+      - 'README.md'
+      - '.github/workflows/lint.yml'
+
+jobs:
+  deno-fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Check README.md formatting
+        run: deno fmt --check README.md
