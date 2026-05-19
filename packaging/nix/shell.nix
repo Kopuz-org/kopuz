@@ -3,16 +3,19 @@
   lib,
   mkShell,
   dioxus-cli,
+  just,
   pkg-config,
   cmake,
   clang,
   lld,
   mold,
+  tailwindcss_4,
   flatpak,
   flatpak-builder,
   appstream,
   nodejs_22,
   yt-dlp,
+  deno,
   glib-networking,
   glib,
   gtk3,
@@ -24,11 +27,13 @@ mkShell {
     # Build deps
     sharedArgs.rustToolchain
     dioxus-cli
+    just
     pkg-config
     cmake
     clang
     lld
     mold
+    tailwindcss_4
 
     # Packaging
     flatpak
@@ -37,6 +42,7 @@ mkShell {
     appstream
     nodejs_22
     yt-dlp
+    deno
   ];
 
   env = {
