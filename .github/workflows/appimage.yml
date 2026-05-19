@@ -45,7 +45,7 @@ jobs:
         run: npm install
 
       - name: Build CSS
-        run: npx @tailwindcss/cli -i ./tailwind.css -o ./kopuz/assets/tailwind.css --content './kopuz/**/*.rs,./components/**/*.rs,./pages/**/*.rs,./hooks/**/*.rs,./player/**/*.rs,./reader/**/*.rs'
+        run: npx @tailwindcss/cli -i ./tailwind.css -o ./crates/kopuz/assets/tailwind.css --content './crates/kopuz/**/*.rs,./crates/components/**/*.rs,./crates/pages/**/*.rs,./crates/hooks/**/*.rs,./crates/player/**/*.rs,./crates/reader/**/*.rs'
 
       - name: Build binary
         run: dx build --package kopuz --release
@@ -58,7 +58,7 @@ jobs:
 
           cp target/dx/kopuz/release/linux/app/kopuz AppDir/usr/bin/kopuz
           cp data/com.temidaradev.kopuz.desktop AppDir/usr/share/applications/
-          cp kopuz/assets/logo.png AppDir/usr/share/icons/hicolor/256x256/apps/com.temidaradev.kopuz.png
+          cp crates/kopuz/assets/logo.png AppDir/usr/share/icons/hicolor/256x256/apps/com.temidaradev.kopuz.png
 
       - name: Download linuxdeploy
         run: |

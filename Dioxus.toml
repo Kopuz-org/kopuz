@@ -3,7 +3,7 @@ name = "kopuz"
 default_platform = "desktop"
 
 [application.assets]
-base_path = "kopuz/assets"
+base_path = "crates/kopuz/assets"
 
 [bundle]
 identifier = "com.temidaradev.kopuz"

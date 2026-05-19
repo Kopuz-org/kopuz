@@ -2,7 +2,7 @@ serve:
 	dx serve
 
 tailwind:
-	npx @tailwindcss/cli -i ./tailwind.css -o ./kopuz/assets/tailwind.css --content './kopuz/**/*.rs,./components/**/*.rs,./pages/**/*.rs,./hooks/**/*.rs,./player/**/*.rs,./reader/**/*.rs'
+	npx @tailwindcss/cli -i ./tailwind.css -o ./crates/kopuz/assets/tailwind.css --content './crates/kopuz/**/*.rs,./crates/components/**/*.rs,./crates/pages/**/*.rs,./crates/hooks/**/*.rs,./crates/player/**/*.rs,./crates/reader/**/*.rs'
 
 build: tailwind
 	dx build --package kopuz --release
@@ -13,8 +13,8 @@ run-release:
 	cd target/dx/kopuz/release/linux/app && ./kopuz
 
 flatpak:
-	@chmod +x build-flatpak.sh
-	./build-flatpak.sh
+	@chmod +x packaging/flatpak/build-flatpak.sh
+	./packaging/flatpak/build-flatpak.sh
 
 flatpak-install: flatpak
 

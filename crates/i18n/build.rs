@@ -2,7 +2,7 @@ use std::{env, fs, path::PathBuf};
 
 fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-    let locales_dir = PathBuf::from(&manifest_dir).join("../locales");
+    let locales_dir = PathBuf::from(&manifest_dir).join("../../locales");
 
     let mut languages: Vec<(String, String)> = vec![];
 
@@ -41,7 +41,7 @@ fn main() {
     code.push_str("    match lang {\n");
     for (lang_code, _) in &languages {
         code.push_str(&format!(
-            "        \"{lang_code}\" => Some(include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../locales/{lang_code}.ftl\"))),\n"
+            "        \"{lang_code}\" => Some(include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../../locales/{lang_code}.ftl\"))),\n"
         ));
     }
     code.push_str("        _ => None,\n");
