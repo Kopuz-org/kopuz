@@ -125,7 +125,14 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                         }
                         button {
                              class: "w-14 h-14 rounded-full bg-indigo-500 hover:bg-indigo-400 text-black flex items-center justify-center transition-transform hover:scale-105",
-                             onclick: move |_| ctrl.play_queue_linear(tracks_for_play_all.clone()),
+                             onclick: move |_| {
+                                let is_shuffle = *ctrl.shuffle.peek();
+                                if is_shuffle {
+                                    ctrl.play_queue_shuffled(tracks_for_play_all.clone());
+                                } else {
+                                    ctrl.play_queue_linear(tracks_for_play_all.clone());
+                                }
+                             },
                              i { class: "fa-solid fa-play text-xl ml-1" }
                          }
                          if props.on_download_all.is_some() || props.on_delete_all.is_some() {

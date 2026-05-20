@@ -108,7 +108,14 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                             button {
                                 class: "inline-flex items-center justify-center gap-2 h-9 px-5 rounded-full text-sm font-semibold text-white transition-opacity hover:opacity-90 active:scale-95",
                                 style: "background: var(--color-indigo-500);",
-                                onclick: move |_| ctrl.play_queue_linear(tracks_for_play_all.clone()),
+                                onclick: move |_| {
+                                    let is_shuffle = *ctrl.shuffle.peek();
+                                    if is_shuffle {
+                                        ctrl.play_queue_shuffled(tracks_for_play_all.clone());
+                                    } else {
+                                        ctrl.play_queue_linear(tracks_for_play_all.clone());
+                                    }
+                                },
                                 i { class: "fa-solid fa-play text-xs" }
                                 "{i18n::t(\"play\")}"
                             }
