@@ -172,7 +172,7 @@ pub fn ServerSettings(
     let login_text = i18n::t("login");
     let delete_text = i18n::t("delete");
     let switch_text = i18n::t("switch_to_server");
-    let active_text = i18n::t("active");
+    let active_text = i18n::t("active_server");
     let active_id = active.as_ref().and_then(|s| s.id.clone());
 
     rsx! {
