@@ -72,7 +72,7 @@ pub fn LyricsView(
     });
 
     use_resource(move || {
-        let mut lyrics = lyrics.read().clone();
+        let lyrics = lyrics.read().clone();
 
         // scroll to top on lyrics change
         let _scroll_to_top = eval(&format!(
@@ -80,40 +80,40 @@ pub fn LyricsView(
         ));
 
         async move {
-            if let Some(Some(utils::lyrics::Lyrics::Synced(lines))) = &mut lyrics {
+            if let Some(Some(utils::lyrics::Lyrics::Synced(lines))) = lyrics {
                 let mut sleep_duration_ms: u64;
 
+                let mut time_map = lines
+                    .iter()
+                    .enumerate()
+                    .map(|(i, l)| (i, l.start_time))
+                    .collect::<Vec<_>>();
                 // Can be removed if we are sure that the lyrics are always already sorted
-                lines.sort_by(|a, b| {
-                    a.start_time
-                        .partial_cmp(&b.start_time)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
+                time_map.sort_by(|a, b| a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal));
 
                 loop {
                     let current_time = ctrl.displayed_progress_secs_f64();
-                    if let Some(next_index) =
+                    if let Some(sorted_idx) =
                         // Binary search to find the next line to display
                         // `partition_point` returns the index of the first element that is greater or equal than `current_time`
                         // so we subtract 1 to get the index of the last element that is less than to `current_time`.
                         // 0 means that the first element is greater or equal than `current_time`, so we are before the first line.
-                        match lines.partition_point(|l| l.start_time < current_time) {
+                        match time_map.partition_point(|(_, t)| *t < current_time) {
                                 0 => None,
                                 n => Some(n - 1),
                             }
                     {
-                        let _ = eval(&format!("window.__{layout}_updateLyrics({next_index})"));
+                        let line_idx = time_map[sorted_idx].0;
+                        let _ = eval(&format!("window.__{layout}_updateLyrics({line_idx})"));
 
-                        sleep_duration_ms = lines
-                            .get(next_index.saturating_add(1))
-                            .map(|line| {
-                                ((line.start_time - current_time) * 1000.0)
-                                    .max(16.0)
-                                    .min(50.0) as u64
+                        sleep_duration_ms = time_map
+                            .get(sorted_idx.saturating_add(1))
+                            .map(|(_, next_time)| {
+                                ((*next_time - current_time) * 1000.0).max(16.0).min(50.0) as u64
                             })
                             .unwrap_or(50);
                     } else {
-                        // we are before the first line, invalidate current line and rewind to the start
+                        // we are before the first line, invalidate current line
                         let _ = eval(&format!("window.__{layout}_updateLyrics(-1)"));
                         sleep_duration_ms = 50;
                     }
