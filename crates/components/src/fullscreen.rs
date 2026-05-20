@@ -1,4 +1,5 @@
 use crate::reorder_buttons::ReorderButtons;
+use crate::shared::fmt_time;
 use crate::titlebar::Titlebar;
 use config::AppConfig;
 use dioxus::document::eval;
@@ -6,7 +7,6 @@ use dioxus::prelude::*;
 use hooks::use_player_controller::{LoopMode, PlayerController};
 use player::player::Player;
 use reader::Library;
-use crate::shared::fmt_time;
 
 #[component]
 pub fn Fullscreen(
@@ -130,13 +130,9 @@ pub fn Fullscreen(
             return;
         }
 
-        if let Some(cached) = utils::lyrics::cached_lyrics(
-            &artist,
-            &title,
-            &album,
-            duration,
-            &track_path,
-        ) {
+        if let Some(cached) =
+            utils::lyrics::cached_lyrics(&artist, &title, &album, duration, &track_path)
+        {
             let display = cached.or_else(|| {
                 Some(utils::lyrics::Lyrics::Plain(
                     i18n::t("lyrics_not_found").to_string(),
@@ -426,7 +422,12 @@ pub fn Fullscreen(
                         class: "flex items-center justify-between w-full mb-8",
                         style: "max-width: 420px;",
                         button {
-                            class: format!("{} transition-all active:scale-95 relative flex-shrink-0", if *ctrl.shuffle.read() { "text-white" } else { "text-white/50 hover:text-white" }),
+                            class: format!("{} transition-all active:scale-95 relative flex-shrink-0 focus:outline-none", if *ctrl.shuffle.read() { "text-white" } else { "text-white/50 hover:text-white focus:outline-none" }),
+                            onkeydown: move |e| {
+                                if e.key() == Key::Character(" ".to_string()) {
+                                    e.prevent_default();
+                                }
+                            },
                             onclick: move |_| ctrl.toggle_shuffle(),
                             title: if *ctrl.shuffle.read() { i18n::t("shuffle_on").to_string() } else { i18n::t("shuffle_off").to_string() },
                             i { class: "fa-solid fa-shuffle text-lg" }
@@ -434,21 +435,36 @@ pub fn Fullscreen(
                         div {
                             class: "flex items-center gap-8",
                             button {
-                                class: "text-white hover:text-white/80 transition-colors flex-shrink-0",
+                                class: "text-white hover:text-white/80 transition-colors flex-shrink-0 focus:outline-none",
+                                onkeydown: move |e| {
+                                    if e.key() == Key::Character(" ".to_string()) {
+                                        e.prevent_default();
+                                    }
+                                },
                                 onclick: move |_| {
                                     ctrl.play_prev();
                                 },
                                 i { class: "fa-solid fa-backward-step text-3xl" }
                             }
                             button {
-                                class: "w-20 h-20 bg-white text-black hover:bg-white/90 rounded-full flex items-center justify-center transition-all flex-shrink-0 shadow-lg hover:scale-105 active:scale-95",
+                                class: "w-20 h-20 bg-white text-black hover:bg-white/90 rounded-full flex items-center justify-center transition-all flex-shrink-0 shadow-lg hover:scale-105 active:scale-95 focus:outline-none",
+                                onkeydown: move |e| {
+                                    if e.key() == Key::Character(" ".to_string()) {
+                                        e.prevent_default();
+                                    }
+                                },
                                 onclick: move |_| {
                                     ctrl.toggle();
                                 },
                                 i { class: if *is_playing.read() { "fa-solid fa-pause text-3xl" } else { "fa-solid fa-play text-3xl ml-1" } }
                             }
                             button {
-                                class: "text-white hover:text-white/80 transition-colors flex-shrink-0",
+                                class: "text-white hover:text-white/80 transition-colors flex-shrink-0 focus:outline-none",
+                                onkeydown: move |e| {
+                                    if e.key() == Key::Character(" ".to_string()) {
+                                        e.prevent_default();
+                                    }
+                                },
                                 onclick: move |_| {
                                     ctrl.play_next();
                                 },
@@ -456,13 +472,18 @@ pub fn Fullscreen(
                             }
                         }
                         button {
-                            class: format!("{} transition-all active:scale-95 relative flex-shrink-0",
+                            class: format!("{} transition-all active:scale-95 relative flex-shrink-0 focus:outline-none",
                                 match *ctrl.loop_mode.read() {
                                     LoopMode::None => "text-white/50 hover:text-white",
                                     LoopMode::Queue => "text-white",
                                     LoopMode::Track => "text-white",
                                 }
                             ),
+                            onkeydown: move |e| {
+                                if e.key() == Key::Character(" ".to_string()) {
+                                    e.prevent_default();
+                                }
+                            },
                             onclick: move |_| ctrl.toggle_loop(),
                             title: match *ctrl.loop_mode.read() {
                                 LoopMode::None => i18n::t("repeat_off").to_string(),
@@ -550,27 +571,43 @@ pub fn Fullscreen(
                         class: "flex items-center gap-1 px-6 pt-4 pb-2 border-b border-white/10",
                         button {
                             class: if *active_tab.read() == 0 {
-                                "px-4 py-2 text-xs font-medium tracking-wider text-white border-b-2 border-white"
+                                "px-4 py-2 text-xs font-medium tracking-wider text-white border-b-2 border-white focus:outline-none"
                             } else {
-                                "px-4 py-2 text-xs font-medium tracking-wider text-white/40 hover:text-white/70 transition-colors"
+                                "px-4 py-2 text-xs font-medium tracking-wider text-white/40 hover:text-white/70 transition-colors focus:outline-none"
+                            },
+                            onkeydown: move |e| {
+                                if e.key() == Key::Character(" ".to_string()) {
+                                    e.prevent_default();
+                                }
                             },
                             onclick: move |_| active_tab.set(0),
                             "{i18n::t(\"back_to_previous\")}"
                         }
                         button {
                             class: if *active_tab.read() == 1 {
-                                "px-4 py-2 text-xs font-medium tracking-wider text-white border-b-2 border-white"
+                                "px-4 py-2 text-xs font-medium tracking-wider text-white border-b-2 border-white focus:outline-none"
                             } else {
-                                "px-4 py-2 text-xs font-medium tracking-wider text-white/40 hover:text-white/70 transition-colors"
+                                "px-4 py-2 text-xs font-medium tracking-wider text-white/40 hover:text-white/70 transition-colors focus:outline-none"
+                            },
+
+                            onkeydown: move |e| {
+                                if e.key() == Key::Character(" ".to_string()) {
+                                    e.prevent_default();
+                                }
                             },
                             onclick: move |_| active_tab.set(1),
                             "{i18n::t(\"up_next\")}"
                         }
                         button {
                             class: if *active_tab.read() == 2 {
-                                "px-4 py-2 text-xs font-medium tracking-wider text-white border-b-2 border-white"
+                                "px-4 py-2 text-xs font-medium tracking-wider text-white border-b-2 border-white focus:outline-none"
                             } else {
-                                "px-4 py-2 text-xs font-medium tracking-wider text-white/40 hover:text-white/70 transition-colors"
+                                "px-4 py-2 text-xs font-medium tracking-wider text-white/40 hover:text-white/70 transition-colors focus:outline-none"
+                            },
+                            onkeydown: move |e| {
+                                if e.key() == Key::Character(" ".to_string()) {
+                                    e.prevent_default();
+                                }
                             },
                             onclick: move |_| active_tab.set(2),
                             "{i18n::t(\"lyrics\")}"

@@ -83,30 +83,50 @@ pub fn BottombarModern(
             div {
                 class: "flex items-center gap-2 shrink-0",
                 button {
-                    class: format!("w-7 h-7 flex items-center justify-center transition-all active:scale-90 {}",
+                    class: format!("w-7 h-7 flex items-center justify-center transition-all active:scale-90 focus:outline-none {}",
                         if *ctrl.shuffle.read() { "text-white" } else { "text-slate-500 hover:text-white" }
                     ),
                     title: if *ctrl.shuffle.read() { i18n::t("shuffle_on").to_string() } else { i18n::t("shuffle_off").to_string() },
+                    onkeydown: move |e| {
+                        if e.key() == Key::Character(" ".to_string()) {
+                            e.prevent_default();
+                        }
+                    },
                     onclick: move |_| ctrl.toggle_shuffle(),
                     i { class: "fa-solid fa-shuffle text-[11px]" }
                 }
                 button {
-                    class: "w-7 h-7 flex items-center justify-center text-slate-400 hover:text-white transition-all active:scale-90",
+                    class: "w-7 h-7 flex items-center justify-center text-slate-400 hover:text-white transition-all active:scale-90 focus:outline-none",
+                    onkeydown: move |e| {
+                        if e.key() == Key::Character(" ".to_string()) {
+                            e.prevent_default();
+                        }
+                    },
                     onclick: move |_| ctrl.play_prev(),
                     i { class: "fa-solid fa-backward-step text-sm" }
                 }
                 button {
-                    class: "w-8 h-8 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-all active:scale-95",
+                    class: "w-8 h-8 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-all active:scale-95 focus:outline-none",
+                    onkeydown: move |e| {
+                        if e.key() == Key::Character(" ".to_string()) {
+                            e.prevent_default();
+                        }
+                    },
                     onclick: move |_| ctrl.toggle(),
                     i { class: if *is_playing.read() { "fa-solid fa-pause text-xs" } else { "fa-solid fa-play text-xs ml-0.5" } }
                 }
                 button {
-                    class: "w-7 h-7 flex items-center justify-center text-slate-400 hover:text-white transition-all active:scale-90",
+                    class: "w-7 h-7 flex items-center justify-center text-slate-400 hover:text-white transition-all active:scale-90 focus:outline-none",
+                    onkeydown: move |e| {
+                        if e.key() == Key::Character(" ".to_string()) {
+                            e.prevent_default();
+                        }
+                    },
                     onclick: move |_| ctrl.play_next(),
                     i { class: "fa-solid fa-forward-step text-sm" }
                 }
                 button {
-                    class: format!("w-7 h-7 flex items-center justify-center transition-all active:scale-90 relative {}",
+                    class: format!("w-7 h-7 flex items-center justify-center transition-all active:scale-90 relative focus:outline-none {}",
                         match *ctrl.loop_mode.read() {
                             LoopMode::None => "text-slate-500 hover:text-white",
                             _ => "text-white",
@@ -116,6 +136,11 @@ pub fn BottombarModern(
                         LoopMode::None => i18n::t("repeat_off").to_string(),
                         LoopMode::Queue => i18n::t("repeat_queue").to_string(),
                         LoopMode::Track => i18n::t("repeat_track").to_string(),
+                    },
+                    onkeydown: move |e| {
+                        if e.key() == Key::Character(" ".to_string()) {
+                            e.prevent_default();
+                        }
                     },
                     onclick: move |_| ctrl.toggle_loop(),
                     i { class: "fa-solid fa-repeat text-[11px]" }
@@ -206,15 +231,20 @@ pub fn BottombarModern(
             div {
                 class: "flex items-center gap-2 shrink-0",
                 button {
-                    class: "{heart_class} w-7 h-7 flex items-center justify-center",
+                    class: "{heart_class} w-7 h-7 flex items-center justify-center focus:outline-none",
                     title: if is_favorite { i18n::t("remove_from_favorites").to_string() } else { i18n::t("add_to_favorites").to_string() },
+                    onkeydown: move |e| {
+                        if e.key() == Key::Character(" ".to_string()) {
+                            e.prevent_default();
+                        }
+                    },
                     onclick: move |_| toggle_favorite(ctrl.current_track_snapshot.read().clone(), favorites_store, config),
                     i { class: "{heart_icon} text-xs" }
                 }
                 div {
                     class: "flex items-center gap-1.5",
                     button {
-                        class: "w-6 h-6 flex items-center justify-center text-slate-500 hover:text-white transition-colors",
+                        class: "w-6 h-6 flex items-center justify-center text-slate-500 hover:text-white transition-colors focus:outline-none",
                         onclick: move |_| {
                             let muted = *is_muted.read();
                             if muted {
@@ -229,6 +259,11 @@ pub fn BottombarModern(
                                 volume.set(0.0);
                                 persisted_volume.set(0.0);
                                 is_muted.set(true);
+                            }
+                        },
+                        onkeydown: move |e| {
+                            if e.key() == Key::Character(" ".to_string()) {
+                                e.prevent_default();
                             }
                         },
                         i { class: if *is_muted.read() { "fa-solid fa-volume-xmark text-[10px]" } else { "fa-solid fa-volume-high text-[10px]" } }
@@ -288,12 +323,22 @@ pub fn BottombarModern(
                     }
                 }
                 button {
-                    class: "w-7 h-7 flex items-center justify-center text-slate-500 hover:text-white transition-colors",
+                    class: "w-7 h-7 flex items-center justify-center text-slate-500 hover:text-white transition-colors focus:outline-none",
+                    onkeydown: move |e| {
+                        if e.key() == Key::Character(" ".to_string()) {
+                            e.prevent_default();
+                        }
+                    },
                     onclick: move |_| { let c = *is_rightbar_open.read(); is_rightbar_open.set(!c); },
                     i { class: "fa-solid fa-list text-[10px]" }
                 }
                 button {
-                    class: "w-7 h-7 flex items-center justify-center text-slate-500 hover:text-white transition-colors",
+                    class: "w-7 h-7 flex items-center justify-center text-slate-500 hover:text-white transition-colors focus:outline-none",
+                    onkeydown: move |e| {
+                        if e.key() == Key::Character(" ".to_string()) {
+                            e.prevent_default();
+                        }
+                    },
                     onclick: move |_| is_fullscreen.set(true),
                     i { class: "fa-solid fa-up-right-and-down-left-from-center text-[10px]" }
                 }

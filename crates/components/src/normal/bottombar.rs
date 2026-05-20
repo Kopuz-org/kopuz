@@ -32,7 +32,11 @@ pub fn BottombarNormal(
     let initial_volume = *volume.read();
     let mut is_muted = use_signal(move || initial_volume <= f32::EPSILON);
     let mut volume_before_mute = use_signal(move || {
-        if initial_volume > f32::EPSILON { initial_volume } else { 0.5f32 }
+        if initial_volume > f32::EPSILON {
+            initial_volume
+        } else {
+            0.5f32
+        }
     });
 
     let display_progress = if *is_dragging.read() {
@@ -58,7 +62,11 @@ pub fn BottombarNormal(
     } else {
         "ml-2 text-slate-400 hover:text-red-400 transition-colors"
     };
-    let heart_icon = if is_favorite { "fa-solid fa-heart" } else { "fa-regular fa-heart" };
+    let heart_icon = if is_favorite {
+        "fa-solid fa-heart"
+    } else {
+        "fa-regular fa-heart"
+    };
 
     let position = config.read().player_bar_position;
     let border_class = match position {
@@ -109,7 +117,12 @@ pub fn BottombarNormal(
                     }
                 }
                 button {
-                    class: "{heart_class}",
+                    class: "{heart_class} focus:outline-none",
+                    onkeydown: move |e| {
+                        if e.key() == Key::Character(" ".to_string()) {
+                            e.prevent_default();
+                        }
+                    },
                     title: if is_favorite { i18n::t("remove_from_favorites").to_string() } else { i18n::t("add_to_favorites").to_string() },
                     onclick: move |_| toggle_favorite(ctrl.current_track_snapshot.read().clone(), favorites_store, config),
                     i { class: "{heart_icon}" }
@@ -121,28 +134,49 @@ pub fn BottombarNormal(
                 div {
                     class: "flex items-center gap-6",
                     button {
-                        class: format!("{} transition-all active:scale-95 relative", if *ctrl.shuffle.read() { "text-white" } else { "text-slate-400 hover:text-white" }),
+                        class: format!("{} transition-all active:scale-95 relative focus:outline-none", if *ctrl.shuffle.read() { "text-white" } else { "text-slate-400 hover:text-white" }),
+                        onkeydown: move |e| {
+                            if e.key() == Key::Character(" ".to_string()) {
+                                e.prevent_default();
+                            }
+                        },
                         title: if *ctrl.shuffle.read() { i18n::t("shuffle_on").to_string() } else { i18n::t("shuffle_off").to_string() },
                         onclick: move |_| ctrl.toggle_shuffle(),
                         i { class: "fa-solid fa-shuffle text-sm" }
                     }
                     button {
-                        class: "text-slate-400 hover:text-white transition-all active:scale-90",
+                        class: "text-slate-400 hover:text-white transition-all active:scale-90 focus:outline-none",
+                        onkeydown: move |e| {
+                            if e.key() == Key::Character(" ".to_string()) {
+                                e.prevent_default();
+                            }
+                        },
                         onclick: move |_| ctrl.play_prev(),
                         i { class: "fa-solid fa-backward-step text-xl" }
                     }
                     button {
-                        class: "w-10 h-10 bg-white rounded-full flex items-center justify-center text-black hover:scale-105 active:scale-95 transition-all",
+                        class: "w-12 h-10 bg-white rounded-full flex items-center justify-center text-black hover:scale-105 active:scale-95 transition-all focus:outline-none",
+                        onkeydown: move |e| {
+                            if e.key() == Key::Character(" ".to_string()) {
+                                e.prevent_default();
+                            }
+                        },
+                        tabindex: -1,
                         onclick: move |_| ctrl.toggle(),
                         i { class: if *is_playing.read() { "fa-solid fa-pause text-lg" } else { "fa-solid fa-play text-lg ml-0.5" } }
                     }
                     button {
-                        class: "text-slate-400 hover:text-white transition-all active:scale-90",
+                        class: "text-slate-400 hover:text-white transition-all active:scale-90 focus:outline-none",
+                        onkeydown: move |e| {
+                            if e.key() == Key::Character(" ".to_string()) {
+                                e.prevent_default();
+                            }
+                        },
                         onclick: move |_| ctrl.play_next(),
                         i { class: "fa-solid fa-forward-step text-xl" }
                     }
                     button {
-                        class: format!("{} transition-all active:scale-95 relative",
+                        class: format!("{} transition-all active:scale-95 relative focus:outline-none",
                             match *ctrl.loop_mode.read() {
                                 LoopMode::None => "text-slate-400 hover:text-white",
                                 _ => "text-white",
@@ -152,6 +186,11 @@ pub fn BottombarNormal(
                             LoopMode::None => i18n::t("repeat_off").to_string(),
                             LoopMode::Queue => i18n::t("repeat_queue").to_string(),
                             LoopMode::Track => i18n::t("repeat_track").to_string(),
+                        },
+                        onkeydown: move |e| {
+                            if e.key() == Key::Character(" ".to_string()) {
+                                e.prevent_default();
+                            }
                         },
                         onclick: move |_| ctrl.toggle_loop(),
                         i { class: "fa-solid fa-repeat text-sm" }
@@ -202,7 +241,12 @@ pub fn BottombarNormal(
                 div {
                     class: "flex items-center gap-2 group",
                     button {
-                        class: "text-slate-400 hover:text-white transition-colors",
+                        class: "text-slate-400 hover:text-white transition-colors focus:outline-none",
+                        onkeydown: move |e| {
+                            if e.key() == Key::Character(" ".to_string()) {
+                                e.prevent_default();
+                            }
+                        },
                         onclick: move |_| {
                             let muted = *is_muted.read();
                             if muted {
@@ -273,12 +317,22 @@ pub fn BottombarNormal(
                     }
                 }
                 button {
-                    class: "text-slate-400 hover:text-white",
+                    class: "text-slate-400 hover:text-white focus:outline-none",
+                    onkeydown: move |e| {
+                        if e.key() == Key::Character(" ".to_string()) {
+                            e.prevent_default();
+                        }
+                    },
                     onclick: move |_| { let c = *is_rightbar_open.read(); is_rightbar_open.set(!c); },
                     i { class: "fa-solid fa-list text-xs" }
                 }
                 button {
-                    class: "text-slate-400 hover:text-white",
+                    class: "text-slate-400 hover:text-white focus:outline-none",
+                    onkeydown: move |e| {
+                        if e.key() == Key::Character(" ".to_string()) {
+                            e.prevent_default();
+                        }
+                    },
                     onclick: move |_| is_fullscreen.set(true),
                     i { class: "fa-solid fa-up-right-and-down-left-from-center text-xs" }
                 }
