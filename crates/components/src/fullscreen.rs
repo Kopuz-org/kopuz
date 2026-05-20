@@ -420,21 +420,21 @@ pub fn Fullscreen(
                         }
                     }
 
-                    QueueListView {
-                        items,
-                        library,
-                        config,
-                        current_queue_index,
-                        layout: crate::queue_list_view::LayoutMode::Fullscreen,
-                        is_open: *active_tab.read() == 0,
-                    }
-
-                    LyricsView {
-                        lyrics,
-                        current_song_progress,
-                        config,
-                        layout: crate::lyrics_view::LayoutMode::Fullscreen,
-                        is_open: *active_tab.read() == 1,
+                    if *active_tab.read() == 0 {
+                        QueueListView {
+                            items,
+                            library,
+                            config,
+                            current_queue_index,
+                            layout: crate::queue_list_view::LayoutMode::Fullscreen,
+                        }
+                    } else if *active_tab.read() == 1 {
+                        LyricsView {
+                            lyrics,
+                            current_song_progress,
+                            config,
+                            layout: crate::lyrics_view::LayoutMode::Fullscreen,
+                        }
                     }
                 } // flex-1 panels row
             }

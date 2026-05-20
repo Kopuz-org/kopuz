@@ -215,21 +215,22 @@ pub fn Rightbar(
                 }
             }
 
-            QueueListView {
-                items,
-                library,
-                config,
-                current_queue_index,
-                layout: crate::queue_list_view::LayoutMode::Rightbar,
-                is_open: *active_tab.read() == 0,
+            if *active_tab.read() == 0 {
+                QueueListView {
+                    items,
+                    library,
+                    config,
+                    current_queue_index,
+                    layout: crate::queue_list_view::LayoutMode::Rightbar,
+                }
             }
-
-            LyricsView {
-                lyrics,
-                current_song_progress,
-                config,
-                layout: crate::lyrics_view::LayoutMode::Rightbar,
-                is_open: *active_tab.read() == 1,
+            else if *active_tab.read() == 1 {
+                LyricsView {
+                    lyrics,
+                    current_song_progress,
+                    config,
+                    layout: crate::lyrics_view::LayoutMode::Rightbar,
+                }
             }
         }
     }

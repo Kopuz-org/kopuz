@@ -163,13 +163,8 @@ pub fn QueueListView(
     config: Signal<AppConfig>,
     current_queue_index: Signal<usize>,
     layout: LayoutMode,
-    is_open: bool,
 ) -> Element {
     let mut ctrl = use_context::<PlayerController>();
-
-    if !is_open {
-        return rsx! {};
-    }
 
     // Clear functions when the component is dropped
     use_drop(move || {
