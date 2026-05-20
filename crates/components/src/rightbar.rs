@@ -1,4 +1,5 @@
-use crate::reorder_buttons::ReorderButtons;
+use crate::lyrics_view::LyricsView;
+use crate::queue_list_view::QueueListView;
 use config::AppConfig;
 use dioxus::document::eval;
 use dioxus::prelude::*;
@@ -19,27 +20,19 @@ pub fn Rightbar(
     mut current_song_artist: Signal<String>,
     mut current_song_album: Signal<String>,
 ) -> Element {
+    let ctrl = use_context::<PlayerController>();
+
     if !*is_rightbar_open.read() {
         return rsx! { div {} };
     }
 
-    let mut active_tab = use_signal(|| 1usize);
-    let mut ctrl = use_context::<PlayerController>();
-    let mut exact_progress = use_signal(|| 0.0_f64);
-
-    use_future(move || async move {
-        loop {
-            utils::sleep(std::time::Duration::from_millis(50)).await;
-            exact_progress.set(ctrl.displayed_progress_secs_f64());
-        }
-    });
+    let mut active_tab = use_signal(|| 0usize);
 
     let config = use_context::<Signal<AppConfig>>();
 
     let mut lyrics: Signal<Option<Option<utils::lyrics::Lyrics>>> = use_signal(|| None);
     let mut fetch_gen: Signal<u32> = use_signal(|| 0);
     let mut last_key: Signal<String> = use_signal(String::new);
-    let mut last_scrolled_lyric_index: Signal<Option<usize>> = use_signal(|| None);
 
     use_effect(move || {
         let current_track = ctrl.current_track_snapshot.read().clone();
@@ -88,13 +81,9 @@ pub fn Rightbar(
             return;
         }
 
-        if let Some(cached) = utils::lyrics::cached_lyrics(
-            &artist,
-            &title,
-            &album,
-            duration,
-            &track_path,
-        ) {
+        if let Some(cached) =
+            utils::lyrics::cached_lyrics(&artist, &title, &album, duration, &track_path)
+        {
             let display = cached.or_else(|| {
                 Some(utils::lyrics::Lyrics::Plain(
                     i18n::t("lyrics_not_found").to_string(),
@@ -129,102 +118,6 @@ pub fn Rightbar(
         });
     });
 
-    let active_lyric_index = use_memo(move || {
-        if *active_tab.read() == 2 {
-            if let Some(Some(utils::lyrics::Lyrics::Synced(lines))) = &*lyrics.read() {
-                let current_time = *exact_progress.read();
-                return lines
-                    .iter()
-                    .rposition(|l| l.start_time <= current_time)
-                    .unwrap_or(0);
-            }
-        }
-        0
-    });
-
-    use_effect(move || {
-        let idx = active_lyric_index();
-        if *active_tab.read() != 2 {
-            last_scrolled_lyric_index.set(None);
-            let _ = eval(
-                r#"
-                if (window.__kopuzRightbarLyricScrollTimeout) {
-                    clearTimeout(window.__kopuzRightbarLyricScrollTimeout);
-                    window.__kopuzRightbarLyricScrollTimeout = null;
-                }
-                "#,
-            );
-            return;
-        }
-
-        if *last_scrolled_lyric_index.peek() == Some(idx) {
-            return;
-        }
-
-        last_scrolled_lyric_index.set(Some(idx));
-        let _ = eval(
-            r#"
-            if (window.__kopuzRightbarLyricScrollTimeout) {
-                clearTimeout(window.__kopuzRightbarLyricScrollTimeout);
-            }
-            window.__kopuzRightbarLyricScrollTimeout = setTimeout(() => {
-                let el = document.getElementById('rightbar-active-lyric');
-                if (el) {
-                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                }
-                window.__kopuzRightbarLyricScrollTimeout = null;
-            }, 50);
-            "#,
-        );
-    });
-
-    let get_track_cover = |track: &reader::Track| -> Option<utils::CoverUrl> {
-        let lib = library.read();
-        let conf = config.read();
-
-        let is_server_track = conf.active_source == config::MusicSource::Server;
-
-        if is_server_track {
-            if let Some(server) = &conf.server {
-                let path_str = track.path.to_string_lossy();
-                let url = match server.service {
-                    config::MusicService::Jellyfin => {
-                        utils::jellyfin_image::jellyfin_image_url_from_path(
-                            &path_str,
-                            &server.url,
-                            server.access_token.as_deref(),
-                            80,
-                            80,
-                        )
-                    }
-                    config::MusicService::Subsonic | config::MusicService::Custom => {
-                        utils::subsonic_image::subsonic_image_url_from_path(
-                            &path_str,
-                            &server.url,
-                            server.access_token.as_deref(),
-                            80,
-                            80,
-                        )
-                    }
-                };
-                return utils::map_cover_url(url);
-            }
-            None
-        } else {
-            lib.albums
-                .iter()
-                .find(|a| a.id == track.album_id)
-                .and_then(|album| utils::format_artwork_url(album.cover_path.as_ref()))
-        }
-    };
-
-    let mut play_song_at_index = move |index: usize| {
-        ctrl.play_track_no_history(index);
-    };
-    let mut move_queue_item = move |from: usize, to: usize| {
-        ctrl.move_queue_item(from, to);
-    };
-
     let mut is_resizing = use_signal(|| false);
 
     use_effect(move || {
@@ -258,65 +151,29 @@ pub fn Rightbar(
         }
     });
 
-    let back_text = i18n::t("back").to_string().to_uppercase();
     let up_next_text = i18n::t("up_next").to_string();
     let lyrics_text = i18n::t("lyrics").to_string();
-    let format_queue_duration = |seconds: u64| {
-        let hours = seconds / 3600;
-        let minutes = (seconds % 3600) / 60;
-        let secs = seconds % 60;
-        if hours > 0 {
-            format!("{hours}:{minutes:02}:{secs:02}")
+
+    let items = {
+        let q = queue.read();
+        let is_shuffle = *ctrl.shuffle.read();
+
+        let base = if is_shuffle {
+            ctrl.shuffle_order
+                .read()
+                .iter()
+                .filter_map(|&qi| q.get(qi).cloned().map(|t| t))
+                .collect::<Vec<_>>()
         } else {
-            format!("{minutes}:{secs:02}")
-        }
-    };
-    let q = queue.read();
-    let current_idx = *current_queue_index.read();
-    let is_shuffle = *ctrl.shuffle.read();
+            (0..q.len())
+                .filter_map(|qi| q.get(qi).cloned().map(|t| t))
+                .collect::<Vec<_>>()
+        };
 
-    let (back_items, up_next_items): (Vec<_>, Vec<_>) = if is_shuffle {
-        let order = ctrl.shuffle_order.read();
-        let back = order
-            .get(..current_idx)
-            .unwrap_or_default()
-            .iter()
-            .enumerate()
-            .filter_map(|(logical_idx, &queue_idx)| {
-                q.get(queue_idx).cloned().map(|t| (logical_idx, t))
-            })
-            .collect();
-        let next = order
-            .get(current_idx + 1..)
-            .unwrap_or_default()
-            .iter()
-            .enumerate()
-            .filter_map(|(offset, &queue_idx)| {
-                let logical_idx = current_idx + 1 + offset;
-                q.get(queue_idx).cloned().map(|t| (logical_idx, t))
-            })
-            .collect();
-        (back, next)
-    } else {
-        let back = (0..current_idx)
-            .filter_map(|qi| q.get(qi).cloned().map(|t| (qi, t)))
-            .collect();
-        let next = (current_idx + 1..q.len())
-            .filter_map(|qi| q.get(qi).cloned().map(|t| (qi, t)))
-            .collect();
-        (back, next)
+        (0..15)
+            .flat_map(|_| base.iter().cloned())
+            .collect::<Vec<_>>()
     };
-
-    let up_next_count = up_next_items.len();
-    let up_next_duration: u64 = up_next_items.iter().map(|(_, t)| t.duration).sum();
-    let up_next_summary = format!(
-        "{} • {}",
-        i18n::t_with(
-            "showcase_song_count",
-            &[("count", up_next_count.to_string())]
-        ),
-        format_queue_duration(up_next_duration)
-    );
 
     rsx! {
         div {
@@ -343,7 +200,7 @@ pub fn Rightbar(
                             "px-2 py-1 text-[10px] font-medium tracking-wider text-white/40 hover:text-white/70 transition-colors"
                         },
                         onclick: move |_| active_tab.set(0),
-                        "{back_text}"
+                        "{up_next_text}"
                     }
                     button {
                         class: if *active_tab.read() == 1 {
@@ -352,15 +209,6 @@ pub fn Rightbar(
                             "px-2 py-1 text-[10px] font-medium tracking-wider text-white/40 hover:text-white/70 transition-colors"
                         },
                         onclick: move |_| active_tab.set(1),
-                        "{up_next_text}"
-                    }
-                    button {
-                        class: if *active_tab.read() == 2 {
-                            "px-2 py-1 text-[10px] font-medium tracking-wider text-white border-b-2 border-white"
-                        } else {
-                            "px-2 py-1 text-[10px] font-medium tracking-wider text-white/40 hover:text-white/70 transition-colors"
-                        },
-                        onclick: move |_| active_tab.set(2),
                         "{lyrics_text}"
                     }
                 }
@@ -371,131 +219,21 @@ pub fn Rightbar(
                 }
             }
 
-            div {
-                class: "flex-1 overflow-y-auto px-2 py-2 space-y-1 relative",
+            QueueListView {
+                items,
+                library,
+                config,
+                current_queue_index,
+                layout: crate::queue_list_view::LayoutMode::Rightbar,
+                is_open: *active_tab.read() == 0,
+            }
 
-                if *active_tab.read() == 2 {
-                    div {
-                        class: "text-white/70 text-center py-4 px-4 leading-relaxed font-medium text-sm flex flex-col gap-4",
-                        match &*lyrics.read() {
-                            Some(Some(utils::lyrics::Lyrics::Synced(lines))) => {
-                                let active_idx = active_lyric_index();
-                                rsx! {
-                                    for (i, line) in lines.iter().enumerate() {
-                                        div {
-                                            key: "{i}",
-                                            id: if i == active_idx { "rightbar-active-lyric" } else { "" },
-                                            class: if i == active_idx {
-                                                "text-white text-lg font-bold transition-all duration-300"
-                                            } else {
-                                                "text-white/40 transition-all duration-300 hover:text-white/60 cursor-pointer"
-                                            },
-                                            onclick: {
-                                                let st = line.start_time;
-                                                move |_| {
-                                                    ctrl.player.write().seek(std::time::Duration::from_secs_f64(st));
-                                                    current_song_progress.set(st as u64);
-                                                }
-                                            },
-                                            "{line.text}"
-                                        }
-                                    }
-                                }
-                            }
-                            Some(Some(utils::lyrics::Lyrics::Plain(text))) => rsx! {
-                                div { class: "whitespace-pre-wrap", "{text}" }
-                            },
-                            Some(None) => rsx! { "" },
-                            None => rsx! { "{i18n::t(\"loading_lyrics\")}" },
-                        }
-                    }
-                } else if *active_tab.read() == 0 {
-                    if back_items.is_empty() {
-                        div { class: "text-white/30 text-center py-10 text-sm", "{i18n::t(\"no_previous_songs\")}" }
-                    } else {
-                    for (queue_idx, track) in back_items.iter() {
-                        {
-                            let queue_idx = *queue_idx;
-                            let cover_url = get_track_cover(&track);
-                            rsx! {
-                                div {
-                                    key: "{queue_idx}",
-                                    class: "flex items-center gap-3 px-2 py-2 hover:bg-white/5 cursor-pointer rounded-lg transition-colors group",
-                                    style: "content-visibility: auto; contain-intrinsic-size: 0 56px;",
-                                    ondoubleclick: move |_| play_song_at_index(queue_idx),
-                                    div {
-                                        class: "rounded-md overflow-hidden bg-black/30 flex-shrink-0 shadow-sm",
-                                        style: "width: 40px; height: 40px;",
-                                        if let Some(ref url) = cover_url {
-                                            img { src: "{url.as_ref()}", class: "w-full h-full object-cover" }
-                                        } else {
-                                                    div {
-                                                        class: "w-full h-full flex items-center justify-center",
-                                                        i { class: "fa-solid fa-music text-white/20", style: "font-size: 12px;" }
-                                                    }
-                                                }
-                                            }
-                                            div {
-                                                class: "flex-1 min-w-0 flex flex-col justify-center gap-0.5",
-                                                div { class: "text-sm text-white truncate font-medium", "{track.title}" }
-                                                div { class: "text-xs text-white/50 truncate group-hover:text-white/70", "{track.artist}" }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                } else if *active_tab.read() == 1 {
-                    if up_next_items.is_empty() {
-                        div { class: "text-white/30 text-center py-10 text-sm", "{i18n::t(\"no_more_songs\")}" }
-                    } else {
-                        div {
-                            class: "px-2 pt-1 pb-2 text-[11px] uppercase tracking-[0.18em] text-slate-500",
-                            "{up_next_summary}"
-                        }
-                        for (queue_idx, track) in up_next_items.iter() {
-                            {
-                                let queue_idx = *queue_idx;
-                                let cover_url = get_track_cover(&track);
-                                let can_move_up = queue_idx > 0;
-                                let can_move_down = queue_idx + 1 < q.len();
-                                rsx! {
-                                    div {
-                                        key: "{queue_idx}",
-                                        class: "flex items-center gap-3 px-2 py-2 hover:bg-white/5 cursor-pointer rounded-lg transition-colors group",
-                                        style: "content-visibility: auto; contain-intrinsic-size: 0 56px;",
-                                        ondoubleclick: move |_| play_song_at_index(queue_idx),
-                                        div {
-                                            class: "rounded-md overflow-hidden bg-black/30 flex-shrink-0 shadow-sm",
-                                            style: "width: 40px; height: 40px;",
-                                            if let Some(ref url) = cover_url {
-                                                img { src: "{url.as_ref()}", class: "w-full h-full object-cover" }
-                                    } else {
-                                        div {
-                                            class: "w-full h-full flex items-center justify-center",
-                                            i { class: "fa-solid fa-music text-white/20", style: "font-size: 12px;" }
-                                        }
-                                    }
-                                        }
-                                        div {
-                                            class: "flex-1 min-w-0 flex flex-col justify-center gap-0.5",
-                                            div { class: "text-sm text-white truncate font-medium", "{track.title}" }
-                                            div { class: "text-xs text-white/50 truncate group-hover:text-white/70", "{track.artist}" }
-                                        }
-                                        ReorderButtons {
-                                            can_move_up,
-                                            can_move_down,
-                                            class: "flex flex-col pr-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity".to_string(),
-                                            on_move_up: move |_| move_queue_item(queue_idx, queue_idx - 1),
-                                            on_move_down: move |_| move_queue_item(queue_idx, queue_idx + 1),
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+            LyricsView {
+                lyrics,
+                current_song_progress,
+                config,
+                layout: crate::lyrics_view::LayoutMode::Rightbar,
+                is_open: *active_tab.read() == 1,
             }
         }
     }
