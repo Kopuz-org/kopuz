@@ -272,6 +272,31 @@ pub fn Rightbar(
     });
 
     use_effect(move || {
+        spawn(async move {
+            let mut outside_mouseup = eval(
+                r#"
+                if (!window.__kopuzRightbarOutsideMouseUpInstalled) {
+                    window.__kopuzRightbarOutsideMouseUpInstalled = true;
+                    document.addEventListener('mouseup', (event) => {
+                        const target = event.target;
+                        const insideRightbar = !!(target && target.closest && target.closest('#kopuz-rightbar-root'));
+                        if (!insideRightbar) {
+                            dioxus.send('outside');
+                        }
+                    }, true);
+                }
+                "#,
+            );
+
+            while outside_mouseup.recv::<Value>().await.is_ok() {
+                is_queue_drag_over.set(false);
+                queue_drop_index.set(None);
+                cancel_dragged_queue_track();
+            }
+        });
+    });
+
+    use_effect(move || {
         if *is_resizing.read() {
             spawn(async move {
                 let mut eval = eval(
@@ -364,6 +389,7 @@ pub fn Rightbar(
 
     rsx! {
         div {
+            id: "kopuz-rightbar-root",
             class: "bg-black/40 border-l border-white/5 flex flex-col h-full flex-shrink-0 z-10 relative",
             style: "width: {width}px; min-width: {width}px;",
             onmouseleave: move |_| {
