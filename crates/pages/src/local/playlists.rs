@@ -84,18 +84,11 @@ pub fn LocalPlaylists(
             .as_ref()
             .and_then(|path| utils::format_artwork_url(Some(path)))
             .or_else(|| {
-                playlist
-                    .tracks
-                    .first()
-                    .and_then(|first_path| {
-                        lib.tracks.iter().find(|t| t.path == *first_path)
-                    })
-                    .and_then(|track| {
-                        lib.albums.iter().find(|a| a.id == track.album_id)
-                    })
-                    .and_then(|album| {
-                        utils::format_artwork_url(album.cover_path.as_ref())
-                    })
+                let first_path = playlist.tracks.first()?;
+                let track = lib.tracks.iter().find(|t| t.path == *first_path)?;
+                let album = lib.albums.iter().find(|a| a.id == track.album_id)?;
+    
+                utils::format_artwork_url(album.cover_path.as_ref())
             })
     };
 
