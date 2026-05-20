@@ -495,6 +495,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub server: Option<MusicServer>,
     #[serde(default)]
+    pub servers: Vec<SavedServer>,
+    #[serde(default)]
     pub active_source: MusicSource,
     #[serde(default)]
     pub source_explicitly_set: bool,
@@ -584,6 +586,8 @@ pub struct MusicServer {
     pub service: MusicService,
     pub access_token: Option<String>,
     pub user_id: Option<String>,
+    #[serde(default)]
+    pub id: Option<String>,
 }
 
 pub type JellyfinServer = MusicServer;
@@ -601,7 +605,37 @@ impl MusicServer {
             service,
             access_token: None,
             user_id: None,
+            id: Some(uuid::Uuid::new_v4().to_string()),
         }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SavedServer {
+    pub id: String,
+    pub name: String,
+    pub url: String,
+    #[serde(default)]
+    pub service: MusicService,
+}
+
+impl SavedServer {
+    pub fn new(name: String, url: String, service: MusicService) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            name,
+            url: url.trim_end_matches('/').to_string(),
+            service,
+        }
+    }
+
+    pub fn matches(&self, server: &MusicServer) -> bool {
+        if let Some(sid) = server.id.as_ref() {
+            if sid == &self.id {
+                return true;
+            }
+        }
+        self.url == server.url && self.service == server.service
     }
 }
 
@@ -687,6 +721,7 @@ impl Default for AppConfig {
             .unwrap_or_else(|| PathBuf::from("./assets"));
         Self {
             server: None,
+            servers: Vec::new(),
             active_source: MusicSource::Local,
             source_explicitly_set: false,
             music_directory: vec![music_directory],
@@ -751,6 +786,48 @@ impl AppConfig {
         }
     }
 
+    pub fn migrate_servers(&mut self) {
+        if let Some(server) = self.server.as_mut() {
+            if server.id.is_none() {
+                server.id = Some(uuid::Uuid::new_v4().to_string());
+            }
+        }
+        if let Some(server) = self.server.clone() {
+            let already = self.servers.iter().any(|s| s.matches(&server));
+            if !already {
+                let id = server
+                    .id
+                    .clone()
+                    .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+                self.servers.push(SavedServer {
+                    id,
+                    name: server.name.clone(),
+                    url: server.url.clone(),
+                    service: server.service,
+                });
+            }
+        }
+    }
+
+    pub fn add_saved_server(&mut self, entry: SavedServer) {
+        if !self.servers.iter().any(|s| s.id == entry.id) {
+            self.servers.push(entry);
+        }
+    }
+
+    pub fn remove_saved_server(&mut self, id: &str) {
+        self.servers.retain(|s| s.id != id);
+        if let Some(active) = &self.server {
+            if active.id.as_deref() == Some(id) {
+                self.server = None;
+            }
+        }
+    }
+
+    pub fn find_saved_server(&self, id: &str) -> Option<&SavedServer> {
+        self.servers.iter().find(|s| s.id == id)
+    }
+
     pub fn migrate_sidebar_order(&mut self) {
         let all_keys = default_sidebar_order();
         for key in &all_keys {
@@ -800,6 +877,7 @@ impl Default for MusicServer {
             service: MusicService::Jellyfin,
             access_token: None,
             user_id: None,
+            id: None,
         }
     }
 }
@@ -827,6 +905,7 @@ impl AppConfig {
                     config.migrate_home_sections();
                     config.migrate_sidebar_order();
                     config.migrate_registry_paths();
+                    config.migrate_servers();
                     config
                 }
                 Err(e) => {

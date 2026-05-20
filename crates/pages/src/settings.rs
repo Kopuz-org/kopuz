@@ -84,18 +84,29 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         }
 
         let selected_service = server_service();
+        let display_name = if server_name().is_empty() {
+            format!("Local {}", selected_service.display_name())
+        } else {
+            server_name()
+        };
 
         let new_server = config::MusicServer::new_with_service(
-            if server_name().is_empty() {
-                format!("Local {}", selected_service.display_name())
-            } else {
-                server_name()
-            },
+            display_name.clone(),
             server_url(),
             selected_service,
         );
 
-        config.write().server = Some(new_server);
+        let saved = config::SavedServer {
+            id: new_server.id.clone().unwrap_or_default(),
+            name: new_server.name.clone(),
+            url: new_server.url.clone(),
+            service: new_server.service,
+        };
+        {
+            let mut cfg = config.write();
+            cfg.add_saved_server(saved);
+            cfg.server = Some(new_server);
+        }
 
         server_name.set(String::new());
         server_url.set(String::new());
@@ -104,6 +115,29 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         show_add_server.set(false);
 
         show_login.set(true);
+    };
+
+    let handle_switch_server = move |id: String| {
+        let server = {
+            let cfg = config.read();
+            cfg.find_saved_server(&id).cloned()
+        };
+        if let Some(saved) = server {
+            let active = config::MusicServer {
+                name: saved.name,
+                url: saved.url,
+                service: saved.service,
+                access_token: None,
+                user_id: None,
+                id: Some(saved.id),
+            };
+            config.write().server = Some(active);
+            show_login.set(true);
+        }
+    };
+
+    let handle_delete_saved = move |id: String| {
+        config.write().remove_saved_server(&id);
     };
 
     let handle_login = move |_| {
@@ -264,12 +298,14 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         }
 
                         SettingItem {
-                            title: i18n::t("media_server").to_string(),
+                            title: i18n::t("media_servers").to_string(),
                             control: rsx! {
                                 ServerSettings {
-                                    server: config.read().server.clone(),
+                                    active: config.read().server.clone(),
+                                    servers: config.read().servers.clone(),
                                     on_add: move |_| show_add_server.set(true),
-                                    on_delete: move |_| config.write().server = None,
+                                    on_delete: handle_delete_saved,
+                                    on_switch: handle_switch_server,
                                     on_login: move |_| show_login.set(true),
                                 }
                             }
