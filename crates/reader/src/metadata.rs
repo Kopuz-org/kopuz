@@ -191,6 +191,7 @@ pub fn read(track_path: &Path, cover_cache: &Path, library: &mut Library) -> Opt
             genre,
             year,
             cover_path: cover,
+            manual_cover: false,
         });
     }
 
@@ -381,6 +382,7 @@ fn read_with_symphonia(track_path: &Path, cover_cache: &Path, library: &mut Libr
             genre,
             year,
             cover_path: cover,
+            manual_cover: false,
         });
     }
 

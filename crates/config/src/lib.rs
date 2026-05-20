@@ -2,6 +2,15 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::fs;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum FetchStrategy {
+    #[default]
+    MusicBrainzFirst,
+    LastFmFirst,
+    MusicBrainzOnly,
+    LastFmOnly,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct YtdlpOptions {
     #[serde(default = "default_true")]
@@ -552,6 +561,10 @@ pub struct AppConfig {
     pub listen_now_style: ListenNowStyle,
     #[serde(default)]
     pub artist_photo_source: ArtistPhotoSource,
+    #[serde(default)]
+    pub auto_fetch_covers: bool,
+    #[serde(default)]
+    pub cover_fetch_strategy: FetchStrategy,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -610,6 +623,8 @@ fn default_show_source_toggle() -> bool {
 fn default_auto_check_updates() -> bool {
     true
 }
+
+
 
 pub fn default_sidebar_order() -> Vec<String> {
     vec![
@@ -704,6 +719,8 @@ impl Default for AppConfig {
             recently_played_server: Vec::new(),
             listen_now_style: ListenNowStyle::default(),
             artist_photo_source: ArtistPhotoSource::AlbumCover,
+            auto_fetch_covers: true,
+            cover_fetch_strategy: FetchStrategy::default(),
         }
     }
 }

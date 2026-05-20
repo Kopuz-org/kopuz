@@ -88,6 +88,7 @@ pub async fn sync_server_library(
                                 .unwrap_or_default(),
                             year: album_item.production_year.unwrap_or(0),
                             cover_path,
+                            manual_cover: false,
                         });
                     }
 
@@ -280,6 +281,7 @@ pub async fn fetch_subsonic_library(
                 genre: album_genre,
                 year: album.year.unwrap_or(0),
                 cover_path: Some(PathBuf::from(album_id_prefixed.clone())),
+                manual_cover: false,
             });
 
             let songs = remote.get_album_songs(&album.id).await.map_err(|e| {

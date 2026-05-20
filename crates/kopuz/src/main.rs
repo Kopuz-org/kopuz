@@ -1336,6 +1336,12 @@ fn App() -> Element {
         }
         let configured_dirs = configured_music_dirs.read().clone();
         let _ = trigger_rescan.read();
+        let fetch_covers = config.peek().auto_fetch_covers;
+        let fetch_strategy = config.peek().cover_fetch_strategy;
+        let lastfm_key = {
+            let key = config.peek().lastfm_api_key.trim().to_owned();
+            (!key.is_empty()).then_some(key)
+        };
 
         #[cfg(not(target_arch = "wasm32"))]
         spawn(async move {
@@ -1379,6 +1385,9 @@ fn App() -> Element {
                         cover_cache(),
                         &mut current_lib,
                         progress_cb.clone(),
+                        fetch_covers,
+                        fetch_strategy,
+                        lastfm_key.clone(),
                     )
                     .await;
                 }

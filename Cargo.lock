@@ -5206,7 +5206,9 @@ checksum = "56cf8381505b60ae18a4097f1d0be093287ca3bf4fbb23d36ac5ad3bba335daa"
 name = "reader"
 version = "0.6.0"
 dependencies = [
+ "config",
  "lofty",
+ "reqwest 0.12.28",
  "serde",
  "serde_json",
  "symphonia",

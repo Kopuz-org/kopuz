@@ -10,6 +10,8 @@ pub struct Album {
     pub genre: String,
     pub year: u16,
     pub cover_path: Option<PathBuf>,
+    #[serde(default)]
+    pub manual_cover: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -109,8 +111,12 @@ impl Library {
     pub fn add_album(&mut self, album: Album) {
         if let Some(index) = self.albums.iter().position(|a| a.id == album.id) {
             let mut new_album = album;
-            if new_album.cover_path.is_none() {
-                new_album.cover_path = self.albums[index].cover_path.clone();
+            let existing = &self.albums[index];
+            if new_album.cover_path.is_none() || existing.manual_cover {
+                new_album.cover_path = existing.cover_path.clone();
+            }
+            if existing.manual_cover {
+                new_album.manual_cover = true;
             }
             self.albums[index] = new_album;
         } else {

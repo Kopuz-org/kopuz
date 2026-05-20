@@ -1,3 +1,5 @@
+use super::cover_fetcher::CoverFetcher;
+use config::FetchStrategy;
 use super::metadata::read;
 use super::models::Library;
 use super::utils::is_artist_image_file;
@@ -16,6 +18,9 @@ pub async fn scan_directory(
     cover_cache: PathBuf,
     library: &mut Library,
     on_progress: Arc<dyn Fn(String) + Send + Sync>,
+    auto_fetch_covers: bool,
+    fetch_strategy: FetchStrategy,
+    lastfm_api_key: Option<String>,
 ) -> std::io::Result<()> {
     library
         .local_artist_images
@@ -82,6 +87,22 @@ pub async fn scan_directory(
                     .or_insert(img_path);
             }
         }
+    }
+
+    if auto_fetch_covers {
+        let fetcher = CoverFetcher::new(
+            cover_cache,
+            fetch_strategy,
+            lastfm_api_key,
+            on_progress.clone(),
+        );
+        let report = fetcher.fetch_missing_covers(library).await;
+        tracing::info!(
+            "Cover auto-fetch: {} found, {} missing, {} errors",
+            report.found,
+            report.missing,
+            report.errors,
+        );
     }
 
     Ok(())
