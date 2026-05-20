@@ -77,7 +77,7 @@ async fn fetch_content(url_or_path: &str, base_url_or_dir: Option<&str>) -> Resu
 
         let text = std::fs::read_to_string(&path)?;
         let parent = path.parent().unwrap_or(Path::new("")).to_string_lossy().to_string();
-        
+
         Ok((text, parent))
     }
 }
@@ -97,6 +97,14 @@ impl StationRegistry {
             match fetch_content(&station_ref.manifest_url, Some(&base_url_or_dir)).await {
                 Ok((manifest_content, _)) => {
                     if let Ok(manifest) = serde_json::from_str::<StationManifest>(&manifest_content) {
+                        if manifest.id != station_ref.id {
+                            tracing::warn!(
+                                "Manifest id mismatch: index id={} manifest id={}",
+                                station_ref.id,
+                                manifest.id
+                            );
+                            continue;
+                        }
                         if manifest.validate().is_ok() {
                             self.stations.insert(manifest.id.clone(), manifest);
                         } else {

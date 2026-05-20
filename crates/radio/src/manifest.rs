@@ -154,10 +154,20 @@ impl StationManifest {
                     if !ws.url.starts_with("wss://") {
                         return Err(ManifestError::InsecureUrl(ws.url.clone()));
                     }
+                    for url in ws.stream_url_map.values() {
+                        if !url.starts_with("wss://") {
+                            return Err(ManifestError::InsecureUrl(url.clone()));
+                        }
+                             }
                 }
                 MetadataSourceDef::Rest(rest) => {
                     if !rest.url.starts_with("https://") {
                         return Err(ManifestError::InsecureUrl(rest.url.clone()));
+                    }
+                    for url in rest.stream_url_map.values() {
+                        if !url.starts_with("https://") {
+                            return Err(ManifestError::InsecureUrl(url.clone()));
+                        }
                     }
                 }
             }

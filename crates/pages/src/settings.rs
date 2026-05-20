@@ -37,7 +37,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     let mut registry_error = use_signal(|| Option::<String>::None);
 
     let handle_add_registry = move |_| {
-        let url = registry_url();
+        let url = registry_url().trim().to_string();
         if url.is_empty() {
             registry_error.set(Some("Registry path cannot be empty".to_string()));
             return;

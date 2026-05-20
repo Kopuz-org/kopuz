@@ -188,6 +188,9 @@ async fn start_ws_metadata(
     let url = def.stream_url_map.get(&stream_id).unwrap_or(&def.url).clone();
 
     loop {
+        if tx.is_closed() {
+            return;
+        }
         tracing::debug!("Connecting to WebSocket: {}", url);
         match tokio_tungstenite::connect_async(&url).await {
             Ok((mut ws_stream, _)) => {
@@ -197,12 +200,16 @@ async fn start_ws_metadata(
                     .heartbeat
                     .as_ref()
                     .map(|h| h.default_interval_ms)
-                    .unwrap_or(15000);
+                    .unwrap_or(15000)
+                    .max(1);
 
                 let mut heartbeat_timer = time::interval(Duration::from_millis(heartbeat_interval_ms));
                 heartbeat_timer.tick().await;
 
                 loop {
+                    if tx.is_closed() {
+                        return;
+                    }
                     tokio::select! {
                         _ = heartbeat_timer.tick(), if def.heartbeat.is_some() => {
                             if let Some(hb) = &def.heartbeat {
@@ -247,7 +254,9 @@ async fn start_ws_metadata(
                 tracing::warn!("WebSocket connection failed: {}", e);
             }
         }
-
+        if tx.is_closed() {
+            return;
+        }
         // Wait before reconnecting
         time::sleep(Duration::from_secs(5)).await;
     }
