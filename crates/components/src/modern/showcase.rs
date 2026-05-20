@@ -2,9 +2,11 @@ use config::AppConfig;
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
+use crate::NavigationController;
+use crate::constants::{COLUMNS_MODERN, COLUMNS_MODERN_ALBUM};
+use crate::header::Header;
 use crate::showcase::{self, ShowcaseProps, SortField};
 use crate::track_row::TrackRow;
-use crate::NavigationController;
 use std::collections::HashSet;
 
 #[component]
@@ -52,12 +54,6 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
     let current_song_album = ctrl.current_song_album.read().clone();
     let current_song_duration = *ctrl.current_song_duration.read();
     let tracks_for_play_all = sorted_tracks.clone();
-
-    let columns = if props.is_album {
-        "40px minmax(200px, 1fr) minmax(100px,400px) 64px 40px".to_string()
-    } else {
-        "40px minmax(200px, 1fr) minmax(100px,200px) minmax(100px,200px) 64px 40px".to_string()
-    };
 
     rsx! {
         div { class: "w-full max-w-[1600px] mx-auto select-none pb-8",
@@ -164,59 +160,13 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                     p { class: "text-sm", style: "color: var(--color-white); opacity: 0.3;", "{i18n::t(\"no_songs_here\")}" }
                 }
             } else {
-                div {
-                    class: "grid px-3 py-2 text-[10px] font-bold text-slate-500 border-white/5 uppercase tracking-widest border-b mb-1",
-                    style: "grid-template-columns: {columns};",
-                    div {
-                        class: "flex items-center h-4 shrink-0",
-                        if props.is_selection_mode {
-                            if let Some(handler) = props.on_select_all {
-                                div { class: "flex items-center w-6 h-6 shrink-0",
-                                      button {
-                                          class: if props.all_selected {
-                                              "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
-                                          } else {
-                                              "w-4 h-4 rounded border border-white/20 bg-white/5 hover:border-white/50 transition-colors"
-                                          },
-                                          aria_label: if props.all_selected { "Deselect all tracks" } else { "Select all tracks" },
-                                          onclick: move |_| handler.call(!props.all_selected),
-                                          if props.all_selected {
-                                              i { class: "fa-solid fa-check", style: "font-size: 9px;" }
-                                          }
-                                      }
-                                }
-                            }
-                        } else {
-                            "#"
-                        }
-                    }
-                    button {
-                        class: "flex items-center gap-1 uppercase tracking-widest text-left hover:text-white transition-colors",
-                        onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Title),
-                        "{i18n::t(\"title\")}"
-                        i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Title)} text-[9px]" }
-                    }
-                    button {
-                        class: "flex items-center gap-1 uppercase tracking-widest text-left hover:text-white transition-colors",
-                        onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Artist),
-                        "{i18n::t(\"artist\")}"
-                        i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Artist)} text-[9px]" }
-                    }
-                    if !props.is_album {
-                        button {
-                            class: "flex items-center gap-1 uppercase tracking-widest text-left hover:text-white transition-colors",
-                            onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Album),
-                            "{i18n::t(\"album\")}"
-                            i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Album)} text-[9px]" }
-                        }
-                    }
-                    button {
-                        class: "flex items-center justify-end gap-1 uppercase tracking-widest text-right hover:text-white transition-colors",
-                        onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Duration),
-                        i { class: "fa-regular fa-clock" }
-                        i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Duration)} text-[9px]" }
-                    }
-                    div {}
+                Header{
+                    is_modern: true,
+                    is_album: props.is_album,
+                    is_selection_mode: props.is_selection_mode,
+                    on_select_all: props.on_select_all,
+                    all_selected: props.all_selected,
+                    sort_state: sort_state
                 }
 
                 for (display_idx, (track, idx)) in sorted_track_pairs.iter().enumerate() {
@@ -283,6 +233,12 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                             is_new_disc = true;
                             last_disc_size = display_idx;
                         }
+
+                        let columns = if props.is_album {
+                            COLUMNS_MODERN_ALBUM
+                        } else {
+                            COLUMNS_MODERN
+                        };
 
                         rsx! {
                             div {

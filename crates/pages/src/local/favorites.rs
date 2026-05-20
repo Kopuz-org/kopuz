@@ -1,3 +1,4 @@
+use components::constants::{COLUMNS_MODERN, COLUMNS_NORMAL};
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
 use components::showcase::{self, SortField};
@@ -147,12 +148,6 @@ pub fn LocalFavorites(
                 }
             });
 
-    let columns_modern =
-        { "40px minmax(200px, 1fr) minmax(100px,200px) minmax(100px,200px) 64px 40px".to_string() };
-
-    let columns_normal =
-        { "20px minmax(200px, 1fr) minmax(100px,200px) minmax(100px,200px) 64px 40px".to_string() };
-
     rsx! {
         div {
             if *show_playlist_modal.read() {
@@ -285,14 +280,14 @@ pub fn LocalFavorites(
                 }
                 div {
                     class: if is_modern {
-                        "grid px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-white/25 border-b mb-1 border-white/5"
+                        "grid px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-white/50 border-b mb-1 border-white/10"
                     } else {
-                        "grid gap-6 px-2 py-2 border-b border-white/5 text-sm font-medium text-slate-500 mb-2 uppercase tracking-wider"
+                        "grid gap-6 px-2 py-2 border-b border-white/10 text-sm font-medium text-white/50 mb-2 uppercase tracking-wider items-center;"
                     },
                     style: if is_modern {
-                        "grid-template-columns: {columns_modern};"
+                        "grid-template-columns: {COLUMNS_MODERN};"
                     } else {
-                        "grid-template-columns: {columns_normal}; align-items: center;"
+                        "grid-template-columns: {COLUMNS_NORMAL};"
                     },
                     div {}
                     button {

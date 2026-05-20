@@ -1,4 +1,5 @@
 use crate::NavigationController;
+use crate::constants::*;
 use crate::dots_menu::{DotsMenu, MenuAction};
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
@@ -144,9 +145,9 @@ pub fn TrackRow(
     let duration_str = fmt_dur(track.duration);
 
     let columns_modern = if is_album {
-        "40px minmax(200px, 1fr) minmax(100px,400px) 64px 40px".to_string()
+        COLUMNS_MODERN_ALBUM
     } else {
-        "40px minmax(200px, 1fr) minmax(100px,200px) minmax(100px,200px) 64px 40px".to_string()
+        COLUMNS_MODERN
     };
 
     if is_modern {
@@ -340,9 +341,9 @@ pub fn TrackRow(
     }
 
     let columns_normal = if is_album {
-        "20px minmax(200px, 1fr) minmax(100px,400px) 64px 40px".to_string()
+        COLUMNS_NORMAL_ALBUM
     } else {
-        "20px minmax(200px, 1fr) minmax(100px,200px) minmax(100px,200px) 64px 40px".to_string()
+        COLUMNS_NORMAL
     };
 
     // normal UI

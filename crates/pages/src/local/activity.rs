@@ -57,19 +57,20 @@ pub fn LocalLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Element
             .map(|track| {
                 let track_id = track.path.to_string_lossy().to_string();
                 let plays = conf.listen_counts.get(&track_id).copied().unwrap_or(0);
-                let (genre, cover_url) = album_map
-                    .get(&track.album_id)
-                    .cloned()
-                    .unwrap_or_default();
+                let (genre, cover_url) =
+                    album_map.get(&track.album_id).cloned().unwrap_or_default();
                 (track, plays, genre, cover_url)
             })
             .collect::<Vec<(Track, u64, String, Option<CoverUrl>)>>()
     });
 
     let is_modern = config.read().ui_style == UiStyle::Modern;
-    let mut scroll_positions =
-        use_context::<Signal<std::collections::HashMap<Route, f64>>>();
-    let saved_scroll = scroll_positions.peek().get(&Route::Activity).copied().unwrap_or(0.0);
+    let mut scroll_positions = use_context::<Signal<std::collections::HashMap<Route, f64>>>();
+    let saved_scroll = scroll_positions
+        .peek()
+        .get(&Route::Activity)
+        .copied()
+        .unwrap_or(0.0);
 
     rsx! {
         div {
@@ -112,7 +113,7 @@ pub fn LocalLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Element
 
                 div { class: "flex items-center px-4 py-3 mb-2 text-xs font-semibold tracking-wider text-slate-400 uppercase border-b border-white/10",
                     div { class: "w-12 shrink-0 text-center", "#" }
-                    div { class: "flex-1 min-w-0 pl-14 pr-4", "{i18n::t(\"title\")}" }
+                    div { class: "flex-1 min-w-0 pr-4", "{i18n::t(\"title\")}" }
                     div { class: "w-48 lg:w-64 shrink-0 hidden md:block pr-4", "{i18n::t(\"album\")}" }
                     div { class: "w-24 shrink-0 hidden lg:block pr-4", "{i18n::t(\"genre\")}" }
                     div { class: "w-24 shrink-0 text-right", "{i18n::t(\"time\")}" }
@@ -135,7 +136,7 @@ pub fn LocalLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Element
                                         ctrl.queue.set(track_data.read().iter().map(|(t, _, _, _)| t.clone()).collect());
                                         ctrl.play_track(idx);
                                     },
-                                    div { class: "w-12 shrink-0 flex items-center justify-center tabular-nums text-slate-500 font-medium group-hover:text-white transition-colors relative",
+                                    div { class: "w-12 shrink-0 flex items-center justify-center tabular-nums text-white/50 font-medium group-hover:text-white transition-colors relative",
                                         span { class: "group-hover:opacity-0 transition-opacity", "{idx + 1}" }
                                         i { class: "fa-solid fa-play absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity" }
                                     }

@@ -1,3 +1,4 @@
+use crate::header::Header;
 use crate::showcase::{self, SortField};
 use crate::track_row::TrackRow;
 use config::{AppConfig, UiStyle};
@@ -151,44 +152,10 @@ pub fn SearchGenreDetail(
                      }
                 }
             }
-
-            div {
-                class: if is_modern {
-                    "grid px-3 py-2 text-[10px] font-bold uppercase tracking-widest border-b mb-1"
-                } else {
-                    "grid gap-6 px-2 py-2 border-b border-white/5 text-sm font-medium text-slate-500 mb-2 uppercase tracking-wider"
-                },
-                style: if is_modern {
-                    "grid-template-columns: 40px 1fr 180px 180px 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);"
-                } else {
-                    "grid-template-columns: 40px minmax(0, 1fr) 200px 200px 64px 40px; align-items: center;"
-                },
-                div { "#" }
-                button {
-                    class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
-                    onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Title),
-                    "{i18n::t(\"title\")}"
-                    i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Title)} text-[10px]" }
-                }
-                button {
-                    class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
-                    onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Artist),
-                    "{i18n::t(\"artist\")}"
-                    i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Artist)} text-[10px]" }
-                }
-                button {
-                    class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
-                    onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Album),
-                    "{i18n::t(\"album\")}"
-                    i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Album)} text-[10px]" }
-                }
-                button {
-                    class: "flex items-center justify-end gap-1 uppercase tracking-wider text-right hover:text-white transition-colors",
-                    onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Duration),
-                    i { class: "fa-regular fa-clock" }
-                    i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Duration)} text-[10px]" }
-                }
-                div {}
+            Header{
+                is_modern: is_modern,
+                is_album: false,
+                sort_state: sort_state
             }
             div { class: if is_modern { "pb-20" } else { "space-y-1 pb-20" },
                  for (idx, (track, cover_url)) in sorted_genre_tracks.iter().enumerate() {
