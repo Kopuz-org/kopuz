@@ -106,7 +106,7 @@ pub struct CustomTheme {
 }
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum MusicSource {
     #[default]
     Local,
