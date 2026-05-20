@@ -319,8 +319,8 @@ pub fn QueueListView(
         ctrl.play_track_no_history(index);
     };
 
-    let mut move_queue_item = move |from: usize, to: usize| {
-        ctrl.move_queue_item(from, to);
+    let mut swap_queue_item = move |from: usize, to: usize| {
+        ctrl.swap_queue_item(from, to);
     };
 
     let queue_count = items.len();
@@ -381,8 +381,8 @@ pub fn QueueListView(
                                 can_move_up: queue_idx > 0,
                                 can_move_down: queue_idx + 1 < queue_count,
                                 on_play: move |_| play_song_at_index(queue_idx),
-                                on_move_up: move |_| move_queue_item(queue_idx, queue_idx - 1),
-                                on_move_down: move |_| move_queue_item(queue_idx, queue_idx + 1),
+                                on_move_up: move |_| swap_queue_item(queue_idx, queue_idx - 1),
+                                on_move_down: move |_| swap_queue_item(queue_idx, queue_idx + 1),
                             }
                         }
                     }
