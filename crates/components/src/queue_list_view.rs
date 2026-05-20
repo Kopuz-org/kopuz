@@ -41,7 +41,10 @@ pub fn QueueRow(
                LayoutMode::Fullscreen=> "flex items-center gap-4 px-4 py-3 hover:bg-white/5 cursor-pointer rounded transition-colors group",
                LayoutMode::Rightbar => "flex items-center gap-3 px-2 py-2 hover:bg-white/5 cursor-pointer rounded transition-colors group",
             },
-            style:  "content-visibility: auto; contain-intrinsic-size: 0 56px;",
+            style: match layout {
+                LayoutMode::Fullscreen => "",
+                LayoutMode::Rightbar => "content-visibility: auto; contain-intrinsic-size: 0 56px;",
+            },
             ondoubleclick: move |_| on_play.call(()),
 
             div {
