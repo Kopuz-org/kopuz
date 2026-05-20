@@ -4,6 +4,40 @@ use crate::dots_menu::{DotsMenu, MenuAction};
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use reader::models::Track;
+use std::sync::{Mutex, OnceLock};
+
+static DRAGGED_QUEUE_TRACK: OnceLock<Mutex<Option<Track>>> = OnceLock::new();
+
+fn dragged_queue_track() -> &'static Mutex<Option<Track>> {
+    DRAGGED_QUEUE_TRACK.get_or_init(|| Mutex::new(None))
+}
+
+pub fn take_dragged_queue_track() -> Option<Track> {
+    dragged_queue_track().lock().ok()?.take()
+}
+
+pub fn has_dragged_queue_track() -> bool {
+    dragged_queue_track()
+        .lock()
+        .map(|guard| guard.is_some())
+        .unwrap_or(false)
+}
+
+fn set_dragged_queue_track(track: Track) {
+    if let Ok(mut guard) = dragged_queue_track().lock() {
+        *guard = Some(track);
+    }
+}
+
+pub fn cancel_dragged_queue_track() {
+    clear_dragged_queue_track();
+}
+
+fn clear_dragged_queue_track() {
+    if let Ok(mut guard) = dragged_queue_track().lock() {
+        *guard = None;
+    }
+}
 
 fn handle_select_click(
     is_selected: bool,
@@ -50,6 +84,8 @@ pub fn TrackRow(
     } else {
         "none"
     };
+    let drag_track_mouse = track.clone();
+    let drag_track_normal_mouse = track.clone();
     let add_to_queue_text = i18n::t("add_to_queue").to_string();
     let add_to_playlist_text = i18n::t("add_to_playlist").to_string();
     let remove_from_playlist_text = i18n::t("remove_from_playlist").to_string();
@@ -153,7 +189,7 @@ pub fn TrackRow(
     if is_modern {
         return rsx! {
             div {
-                class: "grid px-2 py-1.5 rounded-lg mx-1 group cursor-default transition-colors hover:bg-white/5 select-none",
+                class: "kopuz-track-row-draggable grid px-2 py-1.5 rounded-lg mx-1 group cursor-grab active:cursor-grabbing transition-colors hover:bg-white/5 select-none",
                 style: if is_currently_playing {
                     format!("grid-template-columns: {columns_modern}; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent); box-shadow: {selection_shadow};")
                 } else {
@@ -169,9 +205,18 @@ pub fn TrackRow(
                         handle_select_click(is_selected, is_selection_mode, on_select);
                     }
                 },
+                draggable: "false",
                 ondoubleclick: move |_| { if !is_selection_mode { on_play.call(()); } },
-                onmousedown: move |_| start_long_press(),
-                onmouseup: move |_| cancel_long_press(),
+                onmousedown: move |_| {
+                    if !is_selection_mode {
+                        set_dragged_queue_track(drag_track_mouse.clone());
+                    }
+                    start_long_press();
+                },
+                onmouseup: move |_| {
+                    cancel_long_press();
+                    clear_dragged_queue_track();
+                },
                 onmouseleave: move |_| cancel_long_press(),
                 ontouchstart: move |_| start_long_press(),
                 ontouchend: move |_| cancel_long_press(),
@@ -349,12 +394,13 @@ pub fn TrackRow(
     // normal UI
     return rsx! {
         div {
-            class: "grid items-center h-14 p-2 rounded-lg hover:bg-white/5 group transition-colors relative select-none",
+            class: "kopuz-track-row-draggable grid items-center h-14 p-2 rounded-lg hover:bg-white/5 group transition-colors relative select-none cursor-grab active:cursor-grabbing",
             style: if is_currently_playing {
                 format!("grid-template-columns: {columns_normal}; column-gap: 1.5rem; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent); box-shadow: {selection_shadow};")
             } else {
                 format!("grid-template-columns: {columns_normal}; column-gap: 1.5rem; box-shadow: {selection_shadow};")
             },
+            draggable: "false",
             onclick: move |evt| {
                 evt.stop_propagation();
                 if *long_press_occurred.read() {
@@ -369,8 +415,16 @@ pub fn TrackRow(
                     on_play.call(());
                 }
             },
-            onmousedown: move |_| start_long_press(),
-            onmouseup: move |_| cancel_long_press(),
+            onmousedown: move |_| {
+                if !is_selection_mode {
+                    set_dragged_queue_track(drag_track_normal_mouse.clone());
+                }
+                start_long_press();
+            },
+            onmouseup: move |_| {
+                cancel_long_press();
+                clear_dragged_queue_track();
+            },
             onmouseleave: move |_| cancel_long_press(),
             ontouchstart: move |_| start_long_press(),
             ontouchend: move |_| cancel_long_press(),

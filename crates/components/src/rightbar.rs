@@ -1,4 +1,7 @@
 use crate::reorder_buttons::ReorderButtons;
+use crate::track_row::{
+    cancel_dragged_queue_track, has_dragged_queue_track, take_dragged_queue_track,
+};
 use config::AppConfig;
 use dioxus::document::eval;
 use dioxus::prelude::*;
@@ -26,6 +29,8 @@ pub fn Rightbar(
     let mut active_tab = use_signal(|| 1usize);
     let mut ctrl = use_context::<PlayerController>();
     let mut exact_progress = use_signal(|| 0.0_f64);
+    let mut is_queue_drag_over = use_signal(|| false);
+    let mut queue_drop_index = use_signal(|| None::<usize>);
 
     use_future(move || async move {
         loop {
@@ -88,13 +93,9 @@ pub fn Rightbar(
             return;
         }
 
-        if let Some(cached) = utils::lyrics::cached_lyrics(
-            &artist,
-            &title,
-            &album,
-            duration,
-            &track_path,
-        ) {
+        if let Some(cached) =
+            utils::lyrics::cached_lyrics(&artist, &title, &album, duration, &track_path)
+        {
             let display = cached.or_else(|| {
                 Some(utils::lyrics::Lyrics::Plain(
                     i18n::t("lyrics_not_found").to_string(),
@@ -228,6 +229,49 @@ pub fn Rightbar(
     let mut is_resizing = use_signal(|| false);
 
     use_effect(move || {
+        let _ = eval(
+            r#"
+            if (!document.__kopuzTrackDragInstalled) {
+                document.__kopuzTrackDragInstalled = true;
+
+                const isTrackRowDrag = (event) => {
+                    return !!(event.target && event.target.closest && event.target.closest('.kopuz-track-row-draggable'));
+                };
+
+                const isRightbarDrop = (event) => {
+                    const direct = event.target && event.target.closest && event.target.closest('#kopuz-rightbar-dropzone');
+                    if (direct) return true;
+                    const hovered = document.elementFromPoint(event.clientX, event.clientY);
+                    return !!(hovered && hovered.closest && hovered.closest('#kopuz-rightbar-dropzone'));
+                };
+
+                document.addEventListener('dragstart', (event) => {
+                    if (!isTrackRowDrag(event) || !event.dataTransfer) return;
+                    event.dataTransfer.effectAllowed = 'copyMove';
+                    event.dataTransfer.setData('text/plain', 'kopuz-track');
+                    event.dataTransfer.setData('application/x-kopuz-track', '1');
+                }, true);
+
+                const acceptRightbarDrop = (event) => {
+                    if (!isRightbarDrop(event)) return;
+                    event.preventDefault();
+                    if (event.dataTransfer) {
+                        event.dataTransfer.dropEffect = 'copy';
+                    }
+                };
+
+                window.addEventListener('dragenter', acceptRightbarDrop, true);
+                window.addEventListener('dragover', acceptRightbarDrop, true);
+                window.addEventListener('drop', acceptRightbarDrop, true);
+                document.addEventListener('dragenter', acceptRightbarDrop, true);
+                document.addEventListener('dragover', acceptRightbarDrop, true);
+                document.addEventListener('drop', acceptRightbarDrop, true);
+            }
+            "#,
+        );
+    });
+
+    use_effect(move || {
         if *is_resizing.read() {
             spawn(async move {
                 let mut eval = eval(
@@ -322,6 +366,10 @@ pub fn Rightbar(
         div {
             class: "bg-black/40 border-l border-white/5 flex flex-col h-full flex-shrink-0 z-10 relative",
             style: "width: {width}px; min-width: {width}px;",
+            onmouseleave: move |_| {
+                is_queue_drag_over.set(false);
+                queue_drop_index.set(None);
+            },
 
             div {
                 class: "absolute -left-1 top-0 w-3 h-full cursor-col-resize hover:bg-white/20 transition-colors z-50 group/handle",
@@ -372,6 +420,7 @@ pub fn Rightbar(
             }
 
             div {
+                id: "kopuz-rightbar-dropzone",
                 class: "flex-1 overflow-y-auto px-2 py-2 space-y-1 relative",
 
                 if *active_tab.read() == 2 {
@@ -452,6 +501,34 @@ pub fn Rightbar(
                     } else {
                         div {
                             class: "px-2 pt-1 pb-2 text-[11px] uppercase tracking-[0.18em] text-slate-500",
+                            onmouseenter: move |evt| {
+                                evt.stop_propagation();
+                                is_queue_drag_over.set(false);
+                                queue_drop_index.set(None);
+                            },
+                            onmousemove: move |evt| {
+                                evt.stop_propagation();
+                                is_queue_drag_over.set(false);
+                                queue_drop_index.set(None);
+                            },
+                            onmouseup: move |evt| {
+                                evt.stop_propagation();
+                                is_queue_drag_over.set(false);
+                                queue_drop_index.set(None);
+                                cancel_dragged_queue_track();
+                            },
+                            ondragenter: move |evt| {
+                                evt.prevent_default();
+                                evt.stop_propagation();
+                                is_queue_drag_over.set(false);
+                                queue_drop_index.set(None);
+                            },
+                            ondragover: move |evt| {
+                                evt.prevent_default();
+                                evt.stop_propagation();
+                                is_queue_drag_over.set(false);
+                                queue_drop_index.set(None);
+                            },
                             "{up_next_summary}"
                         }
                         for (queue_idx, track) in up_next_items.iter() {
@@ -460,13 +537,77 @@ pub fn Rightbar(
                                 let cover_url = get_track_cover(&track);
                                 let can_move_up = queue_idx > 0;
                                 let can_move_down = queue_idx + 1 < q.len();
+                                let is_drop_target = *queue_drop_index.read() == Some(queue_idx);
                                 rsx! {
                                     div {
                                         key: "{queue_idx}",
-                                        class: "flex items-center gap-3 px-2 py-2 hover:bg-white/5 cursor-pointer rounded-lg transition-colors group",
-                                        style: "content-visibility: auto; contain-intrinsic-size: 0 56px;",
-                                        ondoubleclick: move |_| play_song_at_index(queue_idx),
+                                        onmouseenter: move |_| {
+                                            if has_dragged_queue_track() {
+                                                is_queue_drag_over.set(true);
+                                                queue_drop_index.set(Some(queue_idx));
+                                            }
+                                        },
+                                        onmousemove: move |_| {
+                                            if has_dragged_queue_track() {
+                                                is_queue_drag_over.set(true);
+                                                queue_drop_index.set(Some(queue_idx));
+                                            }
+                                        },
+                                        onmouseup: move |evt| {
+                                            evt.stop_propagation();
+                                            is_queue_drag_over.set(false);
+                                            queue_drop_index.set(None);
+                                            if let Some(track) = take_dragged_queue_track() {
+                                                if *ctrl.shuffle.peek() {
+                                                    ctrl.add_to_queue(vec![track]);
+                                                } else {
+                                                    let insert_at = queue_idx.min(ctrl.queue.peek().len());
+                                                    ctrl.queue.with_mut(|q| q.insert(insert_at, track));
+                                                }
+                                                active_tab.set(1);
+                                            }
+                                        },
+                                        ondragenter: move |evt| {
+                                            evt.prevent_default();
+                                            evt.stop_propagation();
+                                            is_queue_drag_over.set(true);
+                                            queue_drop_index.set(Some(queue_idx));
+                                        },
+                                        ondragover: move |evt| {
+                                            evt.prevent_default();
+                                            evt.stop_propagation();
+                                            is_queue_drag_over.set(true);
+                                            queue_drop_index.set(Some(queue_idx));
+                                        },
+                                        ondrop: move |evt| {
+                                            evt.prevent_default();
+                                            evt.stop_propagation();
+                                            is_queue_drag_over.set(false);
+                                            queue_drop_index.set(None);
+                                            if let Some(track) = take_dragged_queue_track() {
+                                                if *ctrl.shuffle.peek() {
+                                                    ctrl.add_to_queue(vec![track]);
+                                                } else {
+                                                    let insert_at = queue_idx.min(ctrl.queue.peek().len());
+                                                    ctrl.queue.with_mut(|q| q.insert(insert_at, track));
+                                                }
+                                                active_tab.set(1);
+                                            }
+                                        },
+                                        if is_drop_target {
+                                            div {
+                                                class: "px-1 py-2 pointer-events-none",
+                                                div {
+                                                    class: "w-full rounded-full",
+                                                    style: "height: 3px; background: var(--color-indigo-500); box-shadow: 0 0 10px rgba(129, 140, 248, 0.8);"
+                                                }
+                                            }
+                                        }
                                         div {
+                                            class: "flex items-center gap-3 px-2 py-2 hover:bg-white/5 cursor-pointer rounded-lg transition-colors group",
+                                            style: "content-visibility: auto; contain-intrinsic-size: 0 56px;",
+                                            ondoubleclick: move |_| play_song_at_index(queue_idx),
+                                            div {
                                             class: "rounded-md overflow-hidden bg-black/30 flex-shrink-0 shadow-sm",
                                             style: "width: 40px; height: 40px;",
                                             if let Some(ref url) = cover_url {
@@ -487,8 +628,76 @@ pub fn Rightbar(
                                             can_move_up,
                                             can_move_down,
                                             class: "flex flex-col pr-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity".to_string(),
-                                            on_move_up: move |_| move_queue_item(queue_idx, queue_idx - 1),
+                                            on_move_up: move |_| {
+                                                if let Some(prev_idx) = queue_idx.checked_sub(1) {
+                                                    move_queue_item(queue_idx, prev_idx);
+                                                }
+                                            },
                                             on_move_down: move |_| move_queue_item(queue_idx, queue_idx + 1),
+                                        }
+                                    }
+                                }
+                            }
+                            }
+                        }
+                        {
+                            let end_drop_index = q.len();
+                            let is_end_drop_target = *queue_drop_index.read() == Some(end_drop_index);
+                            rsx! {
+                                div {
+                                    key: "queue-drop-end-{end_drop_index}",
+                                    class: "px-1 py-2",
+                                    style: "min-height: 45vh;",
+                                    onmouseenter: move |_| {
+                                        if has_dragged_queue_track() {
+                                            is_queue_drag_over.set(true);
+                                            queue_drop_index.set(Some(end_drop_index));
+                                        }
+                                    },
+                                    onmousemove: move |_| {
+                                        if has_dragged_queue_track() {
+                                            is_queue_drag_over.set(true);
+                                            queue_drop_index.set(Some(end_drop_index));
+                                        }
+                                    },
+                                    onmouseup: move |evt| {
+                                        evt.stop_propagation();
+                                        is_queue_drag_over.set(false);
+                                        queue_drop_index.set(None);
+                                        if let Some(track) = take_dragged_queue_track() {
+                                            ctrl.add_to_queue(vec![track]);
+                                            active_tab.set(1);
+                                        }
+                                    },
+                                    ondragenter: move |evt| {
+                                        evt.prevent_default();
+                                        evt.stop_propagation();
+                                        is_queue_drag_over.set(true);
+                                        queue_drop_index.set(Some(end_drop_index));
+                                    },
+                                    ondragover: move |evt| {
+                                        evt.prevent_default();
+                                        evt.stop_propagation();
+                                        is_queue_drag_over.set(true);
+                                        queue_drop_index.set(Some(end_drop_index));
+                                    },
+                                    ondrop: move |evt| {
+                                        evt.prevent_default();
+                                        evt.stop_propagation();
+                                        is_queue_drag_over.set(false);
+                                        queue_drop_index.set(None);
+                                        if let Some(track) = take_dragged_queue_track() {
+                                            ctrl.add_to_queue(vec![track]);
+                                            active_tab.set(1);
+                                        }
+                                    },
+                                    if is_end_drop_target {
+                                        div {
+                                            class: "pointer-events-none",
+                                            div {
+                                                class: "w-full rounded-full",
+                                                style: "height: 3px; background: var(--color-indigo-500); box-shadow: 0 0 10px rgba(129, 140, 248, 0.8);"
+                                            }
                                         }
                                     }
                                 }
