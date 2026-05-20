@@ -31,7 +31,6 @@ pub fn default_radio_registries() -> Vec<RegistryEntry> {
         is_default: true,
     }]
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct YtdlpOptions {
     #[serde(default = "default_true")]

@@ -1421,6 +1421,9 @@ fn App() -> Element {
                         cover_cache(),
                         &mut current_lib,
                         progress_cb.clone(),
+                        fetch_covers,
+                        fetch_strategy,
+                        lastfm_key.clone(),
                     )
                     .await;
                 }
