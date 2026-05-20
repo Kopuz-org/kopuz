@@ -158,7 +158,7 @@ pub fn Rightbar(
         let q = queue.read();
         let is_shuffle = *ctrl.shuffle.read();
 
-        let base = if is_shuffle {
+        if is_shuffle {
             ctrl.shuffle_order
                 .read()
                 .iter()
@@ -168,11 +168,7 @@ pub fn Rightbar(
             (0..q.len())
                 .filter_map(|qi| q.get(qi).cloned().map(|t| t))
                 .collect::<Vec<_>>()
-        };
-
-        (0..15)
-            .flat_map(|_| base.iter().cloned())
-            .collect::<Vec<_>>()
+        }
     };
 
     rsx! {
