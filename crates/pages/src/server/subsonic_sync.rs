@@ -6,7 +6,17 @@ use reader::Library;
 use reader::models::{Album, Track};
 use std::collections::HashSet;
 use std::path::PathBuf;
+use tracing::info;
 use utils;
+
+fn normalize_album_id(id: &str) -> String {
+    let parts: Vec<&str> = id.split(':').collect();
+    if parts.len() >= 2 && (parts[0] == "subsonic" || parts[0] == "custom" || parts[0] == "jellyfin") {
+        format!("{}:{}", parts[0], parts[1])
+    } else {
+        id.to_string()
+    }
+}
 
 pub struct SubsonicLibraryData {
     pub albums: Vec<Album>,
@@ -41,6 +51,8 @@ pub async fn sync_server_library(
     };
 
     let (service, server_url, token, user_id, device_id) = snapshot;
+
+    info!("Starting server library sync for service: {:?}", service);
 
     match service {
         MusicService::Jellyfin => {
@@ -93,6 +105,7 @@ pub async fn sync_server_library(
                     }
 
                     album_start_index += count;
+                    info!("Fetched {} albums from Jellyfin...", out_albums.len());
                     if count < album_limit {
                         break;
                     }
@@ -148,6 +161,7 @@ pub async fn sync_server_library(
                     }
 
                     start_index += count;
+                    info!("Fetched {} tracks from Jellyfin...", out_tracks.len());
                     if count < limit {
                         break;
                     }
@@ -181,9 +195,10 @@ pub async fn sync_server_library(
                 let old_albums = std::mem::take(&mut lib_write.jellyfin_albums);
                 lib_write.jellyfin_tracks.clear();
                 lib_write.jellyfin_genres.clear();
+                info!("Cleared old jellyfin library data.");
                 for album in out_albums {
                     let mut merged = album;
-                    if let Some(old) = old_albums.iter().find(|a| a.id == merged.id) {
+                    if let Some(old) = old_albums.iter().find(|a| normalize_album_id(&a.id) == normalize_album_id(&merged.id)) {
                         if merged.cover_path.is_none() || old.manual_cover {
                             merged.cover_path = old.cover_path.clone();
                         }
@@ -195,11 +210,17 @@ pub async fn sync_server_library(
                 }
             } else {
                 for album in out_albums {
-                    if !lib_write
-                        .jellyfin_albums
-                        .iter()
-                        .any(|a| a.id == album.id)
-                    {
+                    if let Some(index) = lib_write.jellyfin_albums.iter().position(|a| normalize_album_id(&a.id) == normalize_album_id(&album.id)) {
+                        let mut new_album = album;
+                        let existing = &lib_write.jellyfin_albums[index];
+                        if new_album.cover_path.is_none() || existing.manual_cover {
+                            new_album.cover_path = existing.cover_path.clone();
+                        }
+                        if existing.manual_cover {
+                            new_album.manual_cover = true;
+                        }
+                        lib_write.jellyfin_albums[index] = new_album;
+                    } else {
                         lib_write.jellyfin_albums.push(album);
                     }
                 }
@@ -217,24 +238,57 @@ pub async fn sync_server_library(
                 lib_write.jellyfin_genres = out_genres;
             }
             lib_write.server_artist_images = artist_images;
+            info!("Jellyfin sync completed successfully.");
         }
         MusicService::Subsonic | MusicService::Custom => {
+            info!("Fetching Subsonic/Custom library...");
             let data = fetch_subsonic_library(service, &server_url, &user_id, &token).await?;
             let mut lib_write = library.write();
-            let old_albums = std::mem::replace(&mut lib_write.jellyfin_albums, data.albums);
-            for album in &mut lib_write.jellyfin_albums {
-                if let Some(old) = old_albums.iter().find(|a| a.id == album.id) {
-                    if album.cover_path.is_none() || old.manual_cover {
-                        album.cover_path = old.cover_path.clone();
+            if clear_first {
+                let old_albums = std::mem::take(&mut lib_write.jellyfin_albums);
+                lib_write.jellyfin_tracks.clear();
+                lib_write.jellyfin_genres.clear();
+                info!("Cleared old subsonic/custom library data.");
+                for album in data.albums {
+                    let mut merged = album;
+                    if let Some(old) = old_albums.iter().find(|a| normalize_album_id(&a.id) == normalize_album_id(&merged.id)) {
+                        if merged.cover_path.is_none() || old.manual_cover {
+                            merged.cover_path = old.cover_path.clone();
+                        }
+                        if old.manual_cover {
+                            merged.manual_cover = true;
+                        }
                     }
-                    if old.manual_cover {
-                        album.manual_cover = true;
+                    lib_write.jellyfin_albums.push(merged);
+                }
+            } else {
+                for album in data.albums {
+                    if let Some(index) = lib_write.jellyfin_albums.iter().position(|a| normalize_album_id(&a.id) == normalize_album_id(&album.id)) {
+                        let mut new_album = album;
+                        let existing = &lib_write.jellyfin_albums[index];
+                        if new_album.cover_path.is_none() || existing.manual_cover {
+                            new_album.cover_path = existing.cover_path.clone();
+                        }
+                        if existing.manual_cover {
+                            new_album.manual_cover = true;
+                        }
+                        lib_write.jellyfin_albums[index] = new_album;
+                    } else {
+                        lib_write.jellyfin_albums.push(album);
                     }
                 }
             }
-            lib_write.jellyfin_tracks = data.tracks;
-            lib_write.jellyfin_genres = data.genres;
-            lib_write.server_artist_images = data.artist_images;
+            
+            for track in data.tracks {
+                if !lib_write.jellyfin_tracks.iter().any(|t| t.path == track.path) {
+                    lib_write.jellyfin_tracks.push(track);
+                }
+            }
+            if !data.genres.is_empty() {
+                lib_write.jellyfin_genres = data.genres;
+            }
+            lib_write.server_artist_images.extend(data.artist_images);
+            info!("Subsonic/Custom sync completed successfully.");
         }
     }
 
@@ -280,6 +334,7 @@ pub async fn fetch_subsonic_library(
         }
 
         let count = albums.len();
+        info!("Processing {} Subsonic/Custom albums (total {} so far)...", count, offset + count);
 
         for album in albums {
             let album_cover_tag = album

@@ -28,3 +28,4 @@ tokio = { workspace = true }
 rand = { workspace = true }
 i18n = { workspace = true }
 lofty.workspace = true
+tracing = { workspace = true }
