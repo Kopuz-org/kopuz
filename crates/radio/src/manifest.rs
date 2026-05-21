@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 fn default_icon() -> String {
     "fa-solid fa-radio".to_string()
@@ -118,6 +118,8 @@ pub struct FieldMapping {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ManifestError {
+    #[error("Unsupported schema version: {0}")]
+    UnsupportedSchemaVersion(String),
     #[error("Manifest ID must contain only alphanumeric characters, underscores, and dashes")]
     InvalidId,
     #[error("Manifest name cannot be empty")]
@@ -128,10 +130,17 @@ pub enum ManifestError {
     InsecureUrl(String),
     #[error("Manifest must contain at least one stream")]
     NoStreams,
+    #[error("Stream ID cannot be empty")]
+    EmptyStreamId,
+    #[error("Duplicate stream ID: {0}")]
+    DuplicateStreamId(String),
 }
 
 impl StationManifest {
     pub fn validate(&self) -> Result<(), ManifestError> {
+        if !matches!(self.schema_version.as_str(), "1" | "1.0") {
+            return Err(ManifestError::UnsupportedSchemaVersion(self.schema_version.clone()));
+        }
         // ID check
         if self.id.trim().is_empty()
             || !self
@@ -154,7 +163,15 @@ impl StationManifest {
             return Err(ManifestError::NoStreams);
         }
 
+        let mut seen_stream_ids: HashSet<String> = HashSet::new();
+
         for stream in &self.streams {
+            if stream.id.trim().is_empty() {
+                return Err(ManifestError::EmptyStreamId);
+            }
+            if !seen_stream_ids.insert(stream.id.clone()) {
+                return Err(ManifestError::DuplicateStreamId(stream.id.clone()));
+            }
             if !stream.url.starts_with("https://") && !stream.url.starts_with("wss://") {
                 return Err(ManifestError::InsecureUrl(stream.url.clone()));
             }
@@ -170,7 +187,7 @@ impl StationManifest {
                         if !url.starts_with("wss://") {
                             return Err(ManifestError::InsecureUrl(url.clone()));
                         }
-                             }
+                    }
                 }
                 MetadataSourceDef::Rest(rest) => {
                     if !rest.url.starts_with("https://") {
@@ -188,7 +205,6 @@ impl StationManifest {
         Ok(())
     }
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "snake_case")]
@@ -211,7 +227,6 @@ pub struct EntrySelector {
     #[serde(default)]
     pub match_value_from: MatchValueFrom,
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -273,7 +288,10 @@ mod tests {
 
         manifest.name = "Valid Name".into();
         manifest.description = "   ".into();
-        assert!(matches!(manifest.validate(), Err(ManifestError::EmptyDescription)));
+        assert!(matches!(
+            manifest.validate(),
+            Err(ManifestError::EmptyDescription)
+        ));
     }
 
     #[test]
@@ -380,7 +398,10 @@ mod tests {
         match manifest.metadata.unwrap() {
             MetadataSourceDef::Rest(rest) => {
                 assert_eq!(rest.stream_url_map.len(), 2);
-                assert_eq!(rest.stream_url_map.get("japan_hits").unwrap(), "https://api.example.com/server1");
+                assert_eq!(
+                    rest.stream_url_map.get("japan_hits").unwrap(),
+                    "https://api.example.com/server1"
+                );
                 assert_eq!(rest.poll_interval_secs, 10);
             }
             _ => panic!("expected Rest"),

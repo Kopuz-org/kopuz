@@ -12,8 +12,6 @@ pub struct RadioProps {
     pub config: Signal<config::AppConfig>,
 }
 
-
-
 #[component]
 pub fn Radio(props: RadioProps) -> Element {
     let mut ctrl = use_context::<PlayerController>();
@@ -22,7 +20,12 @@ pub fn Radio(props: RadioProps) -> Element {
 
     let registry = use_context::<Signal<radio::registry::StationRegistry>>();
     // can panic, will check again later.
-    let stations: Vec<radio::manifest::StationManifest> = registry.read().all_stations().into_iter().cloned().collect();
+    let stations: Vec<radio::manifest::StationManifest> = registry
+        .read()
+        .all_stations()
+        .into_iter()
+        .cloned()
+        .collect();
 
     // Search / filter
     let mut filter = use_signal(|| String::new());
@@ -40,7 +43,9 @@ pub fn Radio(props: RadioProps) -> Element {
             } else {
                 i18n::t(&s.name).to_lowercase().contains(&query)
                     || i18n::t(&s.description).to_lowercase().contains(&query)
-                    || s.streams.iter().any(|st| i18n::t(&st.name).to_lowercase().contains(&query))
+                    || s.streams
+                        .iter()
+                        .any(|st| i18n::t(&st.name).to_lowercase().contains(&query))
             }
         })
         .collect();

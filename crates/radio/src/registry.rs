@@ -93,7 +93,13 @@ async fn fetch_content(url_or_path: &str, base_url_or_dir: Option<&str>) -> Resu
                 format!("{}/{}", base_url_or_dir.unwrap(), url_or_path.trim_start_matches("./"))
             };
 
-            let text = reqwest::get(&url)
+            let client = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
+                .build()
+                .map_err(|e| RegistryError::Network(e.to_string()))?;
+
+            let text = client.get(&url)
+                .send()
                 .await
                 .map_err(|e| RegistryError::Network(e.to_string()))?
                 .text()

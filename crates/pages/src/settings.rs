@@ -230,7 +230,11 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                         match temp_registry.import_registry(&url).await {
                                             Ok(_) => {
                                                 let mut cfg = config.write();
-                                                if let Some(entry) = cfg.radio_registries.get_mut(index) {
+                                                if let Some(entry) = cfg
+                                                .radio_registries
+                                                .iter_mut()
+                                                .find(|entry| entry.url == url)
+                                                {
                                                     entry.enabled = true;
                                                 }
                                                 registry_toggle_error.set(None);
