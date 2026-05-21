@@ -13,7 +13,9 @@ fn dragged_queue_track() -> &'static Mutex<Option<Track>> {
 }
 
 pub fn take_dragged_queue_track() -> Option<Track> {
-    dragged_queue_track().lock().ok()?.take()
+    let track = dragged_queue_track().lock().ok()?.take();
+    hide_queue_drag_preview();
+    track
 }
 
 pub fn has_dragged_queue_track() -> bool {
