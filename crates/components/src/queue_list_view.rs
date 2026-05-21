@@ -121,6 +121,19 @@ pub fn QueueSummary(
     current_queue_index: Signal<usize>,
     layout: LayoutMode,
 ) -> Element {
+    let ctrl = use_context::<PlayerController>();
+    let is_radio = if let Some(track) = ctrl.get_track_at(*current_queue_index.read()) {
+        // As of today, radio tracks have a duration of u64::MAX, if this
+        // invariant ever changes, this logic must be updated as well
+        track.duration == u64::MAX
+    } else {
+        false
+    };
+
+    if is_radio {
+        return rsx! {};
+    }
+
     let format_queue_duration = |seconds: u64| {
         let hours = seconds / 3600;
         let minutes = (seconds % 3600) / 60;
@@ -357,7 +370,7 @@ pub fn QueueListView(
                 queue_count,
                 queue_duration,
                 current_queue_index,
-                layout: layout.clone()
+                layout: layout.clone(),
             }
 
             div {
