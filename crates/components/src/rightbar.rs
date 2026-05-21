@@ -247,7 +247,7 @@ pub fn Rightbar(
                     document.addEventListener('mouseup', (event) => {
                         const target = event.target;
                         const insideRightbar = !!(target && target.closest && target.closest('#rightbar-root'));
-                        const overQueueTarget = !!(target && target.closest && target.closest('.kopuz-rightbar-queue-drop-target'));
+                        const overQueueTarget = !!(target && target.closest && target.closest('.rightbar-queue-drop-target'));
                         if (!insideRightbar || !overQueueTarget) {
                             dioxus.send('cancel');
                         }

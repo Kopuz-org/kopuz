@@ -5,6 +5,7 @@ use reader::{FavoritesStore, Library};
 
 use crate::modern::bottombar::BottombarModern;
 use crate::normal::bottombar::BottombarNormal;
+use crate::queue_drag::set_queue_drag_enabled;
 
 #[component]
 pub fn Bottombar(
@@ -25,6 +26,9 @@ pub fn Bottombar(
     persisted_volume: Signal<f32>,
     is_rightbar_open: Signal<bool>,
 ) -> Element {
+    let c = *is_rightbar_open.read();
+    set_queue_drag_enabled(c);
+
     match config.read().ui_style {
         UiStyle::Normal => rsx! {
             BottombarNormal {

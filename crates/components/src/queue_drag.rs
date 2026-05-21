@@ -2,11 +2,24 @@ use dioxus::document::eval;
 use dioxus::prelude::*;
 use reader::models::Track;
 use serde_json::json;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 pub const RIGHTBAR_DROPZONE_ID: &str = "rightbar-dropzone";
-pub const RIGHTBAR_QUEUE_DROP_TARGET_CLASS: &str = "kopuz-rightbar-queue-drop-target";
+pub const RIGHTBAR_QUEUE_DROP_TARGET_CLASS: &str = "rightbar-queue-drop-target";
 pub static DRAGGED_QUEUE_TRACK: OnceLock<Mutex<Option<Track>>> = OnceLock::new();
+static QUEUE_DRAG_ENABLED: AtomicBool = AtomicBool::new(false);
+
+pub fn set_queue_drag_enabled(enabled: bool) {
+    QUEUE_DRAG_ENABLED.store(enabled, Ordering::Relaxed);
+    if !enabled {
+        clear_dragged_queue_track();
+    }
+}
+
+pub fn is_queue_drag_enabled() -> bool {
+    QUEUE_DRAG_ENABLED.load(Ordering::Relaxed)
+}
 
 fn dragged_queue_track() -> &'static Mutex<Option<Track>> {
     DRAGGED_QUEUE_TRACK.get_or_init(|| Mutex::new(None))
@@ -31,6 +44,10 @@ pub fn set_dragged_queue_track(
     client_x: f64,
     client_y: f64,
 ) {
+    if !is_queue_drag_enabled() {
+        return;
+    }
+
     let title = track.title.clone();
     let artist = track.artist.clone();
     if let Ok(mut guard) = dragged_queue_track().lock() {
@@ -98,11 +115,11 @@ pub fn install_rightbar_drag_handlers() {
             document.__kopuzTrackDragInstalled = true;
 
             const isTrackRowDrag = (event) => {
-                return !!(event.target && event.target.closest && event.target.closest('.kopuz-track-row-draggable'));
+                return !!(event.target && event.target.closest && event.target.closest('.track-row-draggable'));
             };
 
             const isRightbarDrop = (event) => {
-                const selector = '.kopuz-rightbar-queue-drop-target';
+                const selector = '.rightbar-queue-drop-target';
                 const direct = event.target && event.target.closest && event.target.closest(selector);
                 if (direct) return true;
                 const hovered = document.elementFromPoint(event.clientX, event.clientY);
@@ -111,7 +128,7 @@ pub fn install_rightbar_drag_handlers() {
 
             const syncQueueDragPreviewTheme = (preview) => {
                 const themedRoot = Array.from(document.querySelectorAll('[class*="theme-"]'))
-                    .find((el) => el.id !== 'kopuz-queue-drag-preview' && Array.from(el.classList).some((cls) => cls.startsWith('theme-')));
+                    .find((el) => el.id !== 'queue-drag-preview' && Array.from(el.classList).some((cls) => cls.startsWith('theme-')));
                 Array.from(preview.classList)
                     .filter((cls) => cls.startsWith('theme-'))
                     .forEach((cls) => preview.classList.remove(cls));
@@ -123,14 +140,14 @@ pub fn install_rightbar_drag_handlers() {
             };
 
             const ensureQueueDragPreview = () => {
-                let preview = document.getElementById('kopuz-queue-drag-preview');
+                let preview = document.getElementById('queue-drag-preview');
                 if (preview) {
                     syncQueueDragPreviewTheme(preview);
                     return preview;
                 }
 
                 preview = document.createElement('div');
-                preview.id = 'kopuz-queue-drag-preview';
+                preview.id = 'queue-drag-preview';
                 preview.style.cssText = `
                     position: fixed;
                     left: 0;
@@ -162,7 +179,7 @@ pub fn install_rightbar_drag_handlers() {
             };
 
             const moveQueueDragPreview = (clientX, clientY) => {
-                const preview = document.getElementById('kopuz-queue-drag-preview');
+                const preview = document.getElementById('queue-drag-preview');
                 if (!preview || preview.style.display === 'none') return;
                 preview.style.transform = `translate3d(${clientX + 14}px, ${clientY + 14}px, 0)`;
             };
@@ -198,7 +215,7 @@ pub fn install_rightbar_drag_handlers() {
             };
 
             window.__kopuzHideQueueDragPreview = () => {
-                const preview = document.getElementById('kopuz-queue-drag-preview');
+                const preview = document.getElementById('queue-drag-preview');
                 if (!preview) return;
                 preview.style.display = 'none';
                 preview.style.transform = 'translate3d(-9999px, -9999px, 0)';
@@ -211,8 +228,8 @@ pub fn install_rightbar_drag_handlers() {
             document.addEventListener('dragstart', (event) => {
                 if (!isTrackRowDrag(event) || !event.dataTransfer) return;
                 event.dataTransfer.effectAllowed = 'copyMove';
-                event.dataTransfer.setData('text/plain', 'kopuz-track');
-                event.dataTransfer.setData('application/x-kopuz-track', '1');
+                event.dataTransfer.setData('text/plain', 'track');
+                event.dataTransfer.setData('application/x-track', '1');
             }, true);
 
             let rightbarAutoScrollFrame = null;
