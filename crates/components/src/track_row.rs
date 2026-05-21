@@ -1,55 +1,10 @@
 use crate::NavigationController;
 use crate::constants::*;
 use crate::dots_menu::{DotsMenu, MenuAction};
+use crate::queue_drag::{clear_dragged_queue_track, handle_select_click, set_dragged_queue_track};
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use reader::models::Track;
-use std::sync::{Mutex, OnceLock};
-
-static DRAGGED_QUEUE_TRACK: OnceLock<Mutex<Option<Track>>> = OnceLock::new();
-
-fn dragged_queue_track() -> &'static Mutex<Option<Track>> {
-    DRAGGED_QUEUE_TRACK.get_or_init(|| Mutex::new(None))
-}
-
-pub fn take_dragged_queue_track() -> Option<Track> {
-    dragged_queue_track().lock().ok()?.take()
-}
-
-pub fn has_dragged_queue_track() -> bool {
-    dragged_queue_track()
-        .lock()
-        .map(|guard| guard.is_some())
-        .unwrap_or(false)
-}
-
-fn set_dragged_queue_track(track: Track) {
-    if let Ok(mut guard) = dragged_queue_track().lock() {
-        *guard = Some(track);
-    }
-}
-
-pub fn cancel_dragged_queue_track() {
-    clear_dragged_queue_track();
-}
-
-fn clear_dragged_queue_track() {
-    if let Ok(mut guard) = dragged_queue_track().lock() {
-        *guard = None;
-    }
-}
-
-fn handle_select_click(
-    is_selected: bool,
-    is_selection_mode: bool,
-    on_select: Option<EventHandler<bool>>,
-) {
-    if is_selection_mode {
-        if let Some(handler) = on_select {
-            handler.call(!is_selected);
-        }
-    }
-}
 
 #[component]
 pub fn TrackRow(

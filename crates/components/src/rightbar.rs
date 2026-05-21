@@ -1,11 +1,10 @@
 use crate::queue_drag::{
-    RIGHTBAR_DROPZONE_ID, cancel_rightbar_drag, clear_rightbar_drag_state,
+    RIGHTBAR_DROPZONE_ID, cancel_rightbar_drag, clear_rightbar_drag_state, has_dragged_queue_track,
     install_rightbar_drag_handlers, rightbar_auto_scroll, rightbar_queue_row_class,
-    start_rightbar_reorder, stop_rightbar_auto_scroll, update_rightbar_drop_target,
-    update_rightbar_end_drop_target,
+    start_rightbar_reorder, stop_rightbar_auto_scroll, take_dragged_queue_track,
+    update_rightbar_drop_target, update_rightbar_end_drop_target,
 };
 use crate::reorder_buttons::ReorderButtons;
-use crate::track_row::{has_dragged_queue_track, take_dragged_queue_track};
 use config::AppConfig;
 use dioxus::document::eval;
 use dioxus::prelude::*;
