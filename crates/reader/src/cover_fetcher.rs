@@ -164,10 +164,14 @@ impl CoverFetcher {
     }
 
     async fn search_musicbrainz_release(&self, album: &str, artist: &str) -> Option<String> {
+        let (esc_album, esc_artist) = (
+            album.replace('\\', "\\\\").replace('"', "\\\""),
+            artist.replace('\\', "\\\\").replace('"', "\\\""),
+        );
         let query = if artist.is_empty() || artist == "Unknown Artist" {
-            format!("release:\"{}\"", album)
+            format!("release:\"{}\"", esc_album)
         } else {
-            format!("release:\"{}\" AND artist:\"{}\"", album, artist)
+            format!("release:\"{}\" AND artist:\"{}\"", esc_album, esc_artist)
         };
 
         self.sleep_rate_limit().await;

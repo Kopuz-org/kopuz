@@ -178,13 +178,30 @@ pub async fn sync_server_library(
 
             let mut lib_write = library.write();
             if clear_first {
+                let old_albums = std::mem::take(&mut lib_write.jellyfin_albums);
                 lib_write.jellyfin_tracks.clear();
-                lib_write.jellyfin_albums.clear();
                 lib_write.jellyfin_genres.clear();
-            }
-            for album in out_albums {
-                if !lib_write.jellyfin_albums.iter().any(|a| a.id == album.id) {
-                    lib_write.jellyfin_albums.push(album);
+                for album in out_albums {
+                    let mut merged = album;
+                    if let Some(old) = old_albums.iter().find(|a| a.id == merged.id) {
+                        if merged.cover_path.is_none() || old.manual_cover {
+                            merged.cover_path = old.cover_path.clone();
+                        }
+                        if old.manual_cover {
+                            merged.manual_cover = true;
+                        }
+                    }
+                    lib_write.jellyfin_albums.push(merged);
+                }
+            } else {
+                for album in out_albums {
+                    if !lib_write
+                        .jellyfin_albums
+                        .iter()
+                        .any(|a| a.id == album.id)
+                    {
+                        lib_write.jellyfin_albums.push(album);
+                    }
                 }
             }
             for track in out_tracks {
@@ -204,7 +221,17 @@ pub async fn sync_server_library(
         MusicService::Subsonic | MusicService::Custom => {
             let data = fetch_subsonic_library(service, &server_url, &user_id, &token).await?;
             let mut lib_write = library.write();
-            lib_write.jellyfin_albums = data.albums;
+            let old_albums = std::mem::replace(&mut lib_write.jellyfin_albums, data.albums);
+            for album in &mut lib_write.jellyfin_albums {
+                if let Some(old) = old_albums.iter().find(|a| a.id == album.id) {
+                    if album.cover_path.is_none() || old.manual_cover {
+                        album.cover_path = old.cover_path.clone();
+                    }
+                    if old.manual_cover {
+                        album.manual_cover = true;
+                    }
+                }
+            }
             lib_write.jellyfin_tracks = data.tracks;
             lib_write.jellyfin_genres = data.genres;
             lib_write.server_artist_images = data.artist_images;
