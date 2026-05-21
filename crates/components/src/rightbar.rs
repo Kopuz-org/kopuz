@@ -1,8 +1,9 @@
 use crate::queue_drag::{
-    RIGHTBAR_DROPZONE_ID, cancel_rightbar_drag, clear_rightbar_drag_state, has_dragged_queue_track,
-    install_rightbar_drag_handlers, rightbar_auto_scroll, rightbar_queue_row_class,
-    start_rightbar_reorder, stop_rightbar_auto_scroll, take_dragged_queue_track,
-    update_rightbar_drop_target, update_rightbar_end_drop_target,
+    RIGHTBAR_DROPZONE_ID, RIGHTBAR_QUEUE_DROP_TARGET_CLASS, cancel_rightbar_drag,
+    clear_rightbar_drop_target, has_dragged_queue_track, install_rightbar_drag_handlers,
+    rightbar_auto_scroll, rightbar_queue_row_class, start_rightbar_reorder,
+    stop_rightbar_auto_scroll, take_dragged_queue_track, update_rightbar_drop_target,
+    update_rightbar_end_drop_target,
 };
 use crate::reorder_buttons::ReorderButtons;
 use config::AppConfig;
@@ -363,12 +364,7 @@ pub fn Rightbar(
             class: "bg-black/40 border-l border-white/5 flex flex-col h-full flex-shrink-0 z-10 relative",
             style: "width: {width}px; min-width: {width}px;",
             onmouseleave: move |_| {
-                clear_rightbar_drag_state(
-                    is_queue_drag_over,
-                    queue_drop_index,
-                    queue_reorder_from,
-                    queue_reorder_did_move,
-                );
+                clear_rightbar_drop_target(is_queue_drag_over, queue_drop_index);
                 stop_rightbar_auto_scroll();
             },
 
@@ -383,23 +379,12 @@ pub fn Rightbar(
 
             div {
                 class: "flex items-center justify-between px-4 py-4 border-b border-white/10",
-                // more safety while dragging
                 onmouseenter: move |_| {
-                    clear_rightbar_drag_state(
-                        is_queue_drag_over,
-                        queue_drop_index,
-                        queue_reorder_from,
-                        queue_reorder_did_move,
-                    );
+                    clear_rightbar_drop_target(is_queue_drag_over, queue_drop_index);
                     stop_rightbar_auto_scroll();
                 },
                 onmousemove: move |_| {
-                    clear_rightbar_drag_state(
-                        is_queue_drag_over,
-                        queue_drop_index,
-                        queue_reorder_from,
-                        queue_reorder_did_move,
-                    );
+                    clear_rightbar_drop_target(is_queue_drag_over, queue_drop_index);
                     stop_rightbar_auto_scroll();
                 },
                 onmouseup: move |_| {
@@ -412,21 +397,11 @@ pub fn Rightbar(
                 },
                 ondragenter: move |evt| {
                     evt.prevent_default();
-                    clear_rightbar_drag_state(
-                        is_queue_drag_over,
-                        queue_drop_index,
-                        queue_reorder_from,
-                        queue_reorder_did_move,
-                    );
+                    clear_rightbar_drop_target(is_queue_drag_over, queue_drop_index);
                 },
                 ondragover: move |evt| {
                     evt.prevent_default();
-                    clear_rightbar_drag_state(
-                        is_queue_drag_over,
-                        queue_drop_index,
-                        queue_reorder_from,
-                        queue_reorder_did_move,
-                    );
+                    clear_rightbar_drop_target(is_queue_drag_over, queue_drop_index);
                 },
                 ondrop: move |evt| {
                     evt.prevent_default();
@@ -563,21 +538,11 @@ pub fn Rightbar(
                             class: "px-2 pt-1 pb-2 text-[11px] uppercase tracking-[0.18em] text-slate-500",
                             onmouseenter: move |evt| {
                                 evt.stop_propagation();
-                                clear_rightbar_drag_state(
-                                    is_queue_drag_over,
-                                    queue_drop_index,
-                                    queue_reorder_from,
-                                    queue_reorder_did_move,
-                                );
+                                clear_rightbar_drop_target(is_queue_drag_over, queue_drop_index);
                             },
                             onmousemove: move |evt| {
                                 evt.stop_propagation();
-                                clear_rightbar_drag_state(
-                                    is_queue_drag_over,
-                                    queue_drop_index,
-                                    queue_reorder_from,
-                                    queue_reorder_did_move,
-                                );
+                                clear_rightbar_drop_target(is_queue_drag_over, queue_drop_index);
                             },
                             onmouseup: move |evt| {
                                 evt.stop_propagation();
@@ -591,22 +556,12 @@ pub fn Rightbar(
                             ondragenter: move |evt| {
                                 evt.prevent_default();
                                 evt.stop_propagation();
-                                clear_rightbar_drag_state(
-                                    is_queue_drag_over,
-                                    queue_drop_index,
-                                    queue_reorder_from,
-                                    queue_reorder_did_move,
-                                );
+                                clear_rightbar_drop_target(is_queue_drag_over, queue_drop_index);
                             },
                             ondragover: move |evt| {
                                 evt.prevent_default();
                                 evt.stop_propagation();
-                                clear_rightbar_drag_state(
-                                    is_queue_drag_over,
-                                    queue_drop_index,
-                                    queue_reorder_from,
-                                    queue_reorder_did_move,
-                                );
+                                clear_rightbar_drop_target(is_queue_drag_over, queue_drop_index);
                             },
                             "{up_next_summary}"
                         }
@@ -623,6 +578,7 @@ pub fn Rightbar(
                                 rsx! {
                                     div {
                                         key: "{queue_idx}",
+                                        class: RIGHTBAR_QUEUE_DROP_TARGET_CLASS,
                                         onmouseenter: move |_| {
                                             update_rightbar_drop_target(
                                                 queue_idx,
@@ -760,7 +716,7 @@ pub fn Rightbar(
                             rsx! {
                                 div {
                                     key: "queue-drop-end-{end_drop_index}",
-                                    class: "px-1 py-2",
+                                    class: "{RIGHTBAR_QUEUE_DROP_TARGET_CLASS} px-1 py-2",
                                     style: "min-height: 45vh;",
                                     onmouseenter: move |_| {
                                         update_rightbar_end_drop_target(

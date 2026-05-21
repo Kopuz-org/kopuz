@@ -4,6 +4,7 @@ use reader::models::Track;
 use std::sync::{Mutex, OnceLock};
 
 pub const RIGHTBAR_DROPZONE_ID: &str = "rightbar-dropzone";
+pub const RIGHTBAR_QUEUE_DROP_TARGET_CLASS: &str = "kopuz-rightbar-queue-drop-target";
 pub static DRAGGED_QUEUE_TRACK: OnceLock<Mutex<Option<Track>>> = OnceLock::new();
 
 fn dragged_queue_track() -> &'static Mutex<Option<Track>> {
@@ -60,10 +61,11 @@ pub fn install_rightbar_drag_handlers() {
             };
 
             const isRightbarDrop = (event) => {
-                const direct = event.target && event.target.closest && event.target.closest('#rightbar-dropzone');
+                const selector = '.kopuz-rightbar-queue-drop-target';
+                const direct = event.target && event.target.closest && event.target.closest(selector);
                 if (direct) return true;
                 const hovered = document.elementFromPoint(event.clientX, event.clientY);
-                return !!(hovered && hovered.closest && hovered.closest('#rightbar-dropzone'));
+                return !!(hovered && hovered.closest && hovered.closest(selector));
             };
 
             document.addEventListener('dragstart', (event) => {
@@ -161,14 +163,21 @@ pub fn stop_rightbar_auto_scroll() {
         eval("if (window.__kopuzRightbarStopAutoScroll) window.__kopuzRightbarStopAutoScroll();");
 }
 
-pub fn clear_rightbar_drag_state(
+pub fn clear_rightbar_drop_target(
     mut is_queue_drag_over: Signal<bool>,
     mut queue_drop_index: Signal<Option<usize>>,
-    mut queue_reorder_from: Signal<Option<usize>>,
-    mut queue_reorder_did_move: Signal<bool>,
 ) {
     is_queue_drag_over.set(false);
     queue_drop_index.set(None);
+}
+
+pub fn clear_rightbar_drag_state(
+    is_queue_drag_over: Signal<bool>,
+    queue_drop_index: Signal<Option<usize>>,
+    mut queue_reorder_from: Signal<Option<usize>>,
+    mut queue_reorder_did_move: Signal<bool>,
+) {
+    clear_rightbar_drop_target(is_queue_drag_over, queue_drop_index);
     queue_reorder_from.set(None);
     queue_reorder_did_move.set(false);
 }
