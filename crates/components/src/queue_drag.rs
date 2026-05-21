@@ -1,6 +1,7 @@
 use dioxus::document::eval;
 use dioxus::prelude::*;
 use reader::models::Track;
+use serde_json::json;
 use std::sync::{Mutex, OnceLock};
 
 pub const RIGHTBAR_DROPZONE_ID: &str = "rightbar-dropzone";
@@ -22,10 +23,18 @@ pub fn has_dragged_queue_track() -> bool {
         .unwrap_or(false)
 }
 
-pub fn set_dragged_queue_track(track: Track) {
+pub fn set_dragged_queue_track(
+    track: Track,
+    cover_url: Option<String>,
+    client_x: f64,
+    client_y: f64,
+) {
+    let title = track.title.clone();
+    let artist = track.artist.clone();
     if let Ok(mut guard) = dragged_queue_track().lock() {
         *guard = Some(track);
     }
+    show_queue_drag_preview(&title, &artist, cover_url.as_deref(), client_x, client_y);
 }
 
 pub fn cancel_dragged_queue_track() {
@@ -36,6 +45,36 @@ pub fn clear_dragged_queue_track() {
     if let Ok(mut guard) = dragged_queue_track().lock() {
         *guard = None;
     }
+    hide_queue_drag_preview();
+}
+
+pub fn move_queue_drag_preview(client_x: f64, client_y: f64) {
+    let _ = eval(&format!(
+        "if (window.__kopuzMoveQueueDragPreview) window.__kopuzMoveQueueDragPreview({client_x}, {client_y});"
+    ));
+}
+
+fn show_queue_drag_preview(
+    title: &str,
+    artist: &str,
+    cover_url: Option<&str>,
+    client_x: f64,
+    client_y: f64,
+) {
+    let payload = json!({
+        "title": title,
+        "artist": artist,
+        "coverUrl": cover_url,
+        "clientX": client_x,
+        "clientY": client_y,
+    });
+    let _ = eval(&format!(
+        "if (window.__kopuzShowQueueDragPreview) window.__kopuzShowQueueDragPreview({payload});"
+    ));
+}
+
+fn hide_queue_drag_preview() {
+    let _ = eval("if (window.__kopuzHideQueueDragPreview) window.__kopuzHideQueueDragPreview();");
 }
 
 pub fn handle_select_click(
@@ -67,6 +106,105 @@ pub fn install_rightbar_drag_handlers() {
                 const hovered = document.elementFromPoint(event.clientX, event.clientY);
                 return !!(hovered && hovered.closest && hovered.closest(selector));
             };
+
+            const syncQueueDragPreviewTheme = (preview) => {
+                const themedRoot = Array.from(document.querySelectorAll('[class*="theme-"]'))
+                    .find((el) => el.id !== 'kopuz-queue-drag-preview' && Array.from(el.classList).some((cls) => cls.startsWith('theme-')));
+                Array.from(preview.classList)
+                    .filter((cls) => cls.startsWith('theme-'))
+                    .forEach((cls) => preview.classList.remove(cls));
+                if (themedRoot) {
+                    Array.from(themedRoot.classList)
+                        .filter((cls) => cls.startsWith('theme-'))
+                        .forEach((cls) => preview.classList.add(cls));
+                }
+            };
+
+            const ensureQueueDragPreview = () => {
+                let preview = document.getElementById('kopuz-queue-drag-preview');
+                if (preview) {
+                    syncQueueDragPreviewTheme(preview);
+                    return preview;
+                }
+
+                preview = document.createElement('div');
+                preview.id = 'kopuz-queue-drag-preview';
+                preview.style.cssText = `
+                    position: fixed;
+                    left: 0;
+                    top: 0;
+                    width: 260px;
+                    display: none;
+                    align-items: center;
+                    gap: 10px;
+                    padding: 8px 10px;
+                    border-radius: 12px;
+                    border: 1px solid rgba(255,255,255,0.12);
+                    background-color: var(--color-neutral-900);
+                    box-shadow: 0 16px 45px rgba(0,0,0,0.38);
+                    backdrop-filter: blur(16px);
+                    pointer-events: none;
+                    z-index: 2147483647;
+                    transform: translate3d(-9999px, -9999px, 0);
+                `;
+                preview.innerHTML = `
+                    <div data-cover style="width:40px;height:40px;border-radius:8px;overflow:hidden;background:rgba(255,255,255,0.06);flex:0 0 auto;display:flex;align-items:center;justify-content:center;"></div>
+                    <div style="min-width:0;display:flex;flex-direction:column;gap:2px;">
+                        <div data-title style="font-size:13px;font-weight:600;color:var(--color-white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+                        <div data-artist style="font-size:11px;color:var(--color-slate-400);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></div>
+                    </div>
+                `;
+                syncQueueDragPreviewTheme(preview);
+                document.body.appendChild(preview);
+                return preview;
+            };
+
+            const moveQueueDragPreview = (clientX, clientY) => {
+                const preview = document.getElementById('kopuz-queue-drag-preview');
+                if (!preview || preview.style.display === 'none') return;
+                preview.style.transform = `translate3d(${clientX + 14}px, ${clientY + 14}px, 0)`;
+            };
+
+            window.__kopuzMoveQueueDragPreview = moveQueueDragPreview;
+            window.__kopuzShowQueueDragPreview = ({ title, artist, coverUrl, clientX, clientY }) => {
+                const preview = ensureQueueDragPreview();
+                syncQueueDragPreviewTheme(preview);
+                const cover = preview.querySelector('[data-cover]');
+                const titleEl = preview.querySelector('[data-title]');
+                const artistEl = preview.querySelector('[data-artist]');
+
+                if (titleEl) titleEl.textContent = title || '';
+                if (artistEl) artistEl.textContent = artist || '';
+                if (cover) {
+                    cover.textContent = '';
+                    cover.innerHTML = '';
+                    if (coverUrl) {
+                        const img = document.createElement('img');
+                        img.src = coverUrl;
+                        img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
+                        cover.appendChild(img);
+                    } else {
+                        const icon = document.createElement('i');
+                        icon.className = 'fa-solid fa-music';
+                        icon.style.cssText = 'font-size:12px;color:rgba(255,255,255,0.24);';
+                        cover.appendChild(icon);
+                    }
+                }
+
+                preview.style.display = 'flex';
+                moveQueueDragPreview(clientX, clientY);
+            };
+
+            window.__kopuzHideQueueDragPreview = () => {
+                const preview = document.getElementById('kopuz-queue-drag-preview');
+                if (!preview) return;
+                preview.style.display = 'none';
+                preview.style.transform = 'translate3d(-9999px, -9999px, 0)';
+            };
+
+            document.addEventListener('mousemove', (event) => {
+                moveQueueDragPreview(event.clientX, event.clientY);
+            }, true);
 
             document.addEventListener('dragstart', (event) => {
                 if (!isTrackRowDrag(event) || !event.dataTransfer) return;

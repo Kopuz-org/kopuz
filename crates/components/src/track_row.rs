@@ -41,6 +41,8 @@ pub fn TrackRow(
     };
     let drag_track_mouse = track.clone();
     let drag_track_normal_mouse = track.clone();
+    let drag_cover_url = cover_url.as_ref().map(|url| url.as_ref().to_string());
+    let drag_cover_url_normal = drag_cover_url.clone();
     let add_to_queue_text = i18n::t("add_to_queue").to_string();
     let add_to_playlist_text = i18n::t("add_to_playlist").to_string();
     let remove_from_playlist_text = i18n::t("remove_from_playlist").to_string();
@@ -162,9 +164,15 @@ pub fn TrackRow(
                 },
                 draggable: "false",
                 ondoubleclick: move |_| { if !is_selection_mode { on_play.call(()); } },
-                onmousedown: move |_| {
+                onmousedown: move |evt| {
                     if !is_selection_mode {
-                        set_dragged_queue_track(drag_track_mouse.clone());
+                        let coords = evt.client_coordinates();
+                        set_dragged_queue_track(
+                            drag_track_mouse.clone(),
+                            drag_cover_url.clone(),
+                            coords.x,
+                            coords.y,
+                        );
                     }
                     start_long_press();
                 },
@@ -370,9 +378,15 @@ pub fn TrackRow(
                     on_play.call(());
                 }
             },
-            onmousedown: move |_| {
+            onmousedown: move |evt| {
                 if !is_selection_mode {
-                    set_dragged_queue_track(drag_track_normal_mouse.clone());
+                    let coords = evt.client_coordinates();
+                    set_dragged_queue_track(
+                        drag_track_normal_mouse.clone(),
+                        drag_cover_url_normal.clone(),
+                        coords.x,
+                        coords.y,
+                    );
                 }
                 start_long_press();
             },
