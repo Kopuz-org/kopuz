@@ -1,7 +1,11 @@
-use crate::reorder_buttons::ReorderButtons;
-use crate::track_row::{
-    cancel_dragged_queue_track, has_dragged_queue_track, take_dragged_queue_track,
+use crate::queue_drag::{
+    RIGHTBAR_DROPZONE_ID, cancel_rightbar_drag, clear_rightbar_drag_state,
+    install_rightbar_drag_handlers, rightbar_auto_scroll, rightbar_queue_row_class,
+    start_rightbar_reorder, stop_rightbar_auto_scroll, update_rightbar_drop_target,
+    update_rightbar_end_drop_target,
 };
+use crate::reorder_buttons::ReorderButtons;
+use crate::track_row::{has_dragged_queue_track, take_dragged_queue_track};
 use config::AppConfig;
 use dioxus::document::eval;
 use dioxus::prelude::*;
@@ -231,104 +235,7 @@ pub fn Rightbar(
     let mut is_resizing = use_signal(|| false);
 
     use_effect(move || {
-        let _ = eval(
-            r#"
-            if (!document.__kopuzTrackDragInstalled) {
-                document.__kopuzTrackDragInstalled = true;
-
-                const isTrackRowDrag = (event) => {
-                    return !!(event.target && event.target.closest && event.target.closest('.kopuz-track-row-draggable'));
-                };
-
-                const isRightbarDrop = (event) => {
-                    const direct = event.target && event.target.closest && event.target.closest('#rightbar-dropzone');
-                    if (direct) return true;
-                    const hovered = document.elementFromPoint(event.clientX, event.clientY);
-                    return !!(hovered && hovered.closest && hovered.closest('#rightbar-dropzone'));
-                };
-
-                document.addEventListener('dragstart', (event) => {
-                    if (!isTrackRowDrag(event) || !event.dataTransfer) return;
-                    event.dataTransfer.effectAllowed = 'copyMove';
-                    event.dataTransfer.setData('text/plain', 'kopuz-track');
-                    event.dataTransfer.setData('application/x-kopuz-track', '1');
-                }, true);
-
-                let rightbarAutoScrollFrame = null;
-                let rightbarAutoScrollY = null;
-
-                window.__kopuzRightbarStopAutoScroll = () => {
-                    rightbarAutoScrollY = null;
-                    if (rightbarAutoScrollFrame !== null) {
-                        cancelAnimationFrame(rightbarAutoScrollFrame);
-                        rightbarAutoScrollFrame = null;
-                    }
-                };
-
-                const rightbarAutoScrollTick = () => {
-                    const zone = document.getElementById('rightbar-dropzone');
-                    if (!zone || rightbarAutoScrollY === null) {
-                        window.__kopuzRightbarStopAutoScroll();
-                        return;
-                    }
-
-                    const rect = zone.getBoundingClientRect();
-                    const threshold = Math.min(96, Math.max(48, rect.height * 0.18));
-                    const maxStep = 14;
-                    let step = 0;
-
-                    if (rightbarAutoScrollY < rect.top + threshold) {
-                        const distance = Math.max(0, rightbarAutoScrollY - rect.top);
-                        const factor = 1 - Math.min(distance / threshold, 1);
-                        step = -Math.max(2, maxStep * factor);
-                    } else if (rightbarAutoScrollY > rect.bottom - threshold) {
-                        const distance = Math.max(0, rect.bottom - rightbarAutoScrollY);
-                        const factor = 1 - Math.min(distance / threshold, 1);
-                        step = Math.max(2, maxStep * factor);
-                    }
-
-                    if (step !== 0) {
-                        zone.scrollTop += step;
-                        rightbarAutoScrollFrame = requestAnimationFrame(rightbarAutoScrollTick);
-                    } else {
-                        window.__kopuzRightbarStopAutoScroll();
-                    }
-                };
-
-                window.__kopuzRightbarAutoScroll = (clientY) => {
-                    const zone = document.getElementById('rightbar-dropzone');
-                    if (!zone) return;
-
-                    rightbarAutoScrollY = clientY;
-                    if (rightbarAutoScrollFrame === null) {
-                        rightbarAutoScrollFrame = requestAnimationFrame(rightbarAutoScrollTick);
-                    }
-                };
-
-                const acceptRightbarDrop = (event) => {
-                    if (!isRightbarDrop(event)) return;
-                    event.preventDefault();
-                    window.__kopuzRightbarAutoScroll(event.clientY);
-                    if (event.dataTransfer) {
-                        event.dataTransfer.dropEffect = 'copy';
-                    }
-                };
-
-                window.addEventListener('dragenter', acceptRightbarDrop, true);
-                window.addEventListener('dragover', acceptRightbarDrop, true);
-                window.addEventListener('drop', acceptRightbarDrop, true);
-                window.addEventListener('drop', window.__kopuzRightbarStopAutoScroll, true);
-                window.addEventListener('mouseup', window.__kopuzRightbarStopAutoScroll, true);
-                window.addEventListener('dragend', window.__kopuzRightbarStopAutoScroll, true);
-                document.addEventListener('dragenter', acceptRightbarDrop, true);
-                document.addEventListener('dragover', acceptRightbarDrop, true);
-                document.addEventListener('drop', acceptRightbarDrop, true);
-                document.addEventListener('drop', window.__kopuzRightbarStopAutoScroll, true);
-                document.addEventListener('mouseup', window.__kopuzRightbarStopAutoScroll, true);
-                document.addEventListener('dragend', window.__kopuzRightbarStopAutoScroll, true);
-            }
-            "#,
-        );
+        install_rightbar_drag_handlers();
     });
 
     use_effect(move || {
@@ -349,11 +256,12 @@ pub fn Rightbar(
             );
 
             while outside_mouseup.recv::<Value>().await.is_ok() {
-                is_queue_drag_over.set(false);
-                queue_drop_index.set(None);
-                queue_reorder_from.set(None);
-                queue_reorder_did_move.set(false);
-                cancel_dragged_queue_track();
+                cancel_rightbar_drag(
+                    is_queue_drag_over,
+                    queue_drop_index,
+                    queue_reorder_from,
+                    queue_reorder_did_move,
+                );
             }
         });
     });
@@ -455,11 +363,13 @@ pub fn Rightbar(
             class: "bg-black/40 border-l border-white/5 flex flex-col h-full flex-shrink-0 z-10 relative",
             style: "width: {width}px; min-width: {width}px;",
             onmouseleave: move |_| {
-                is_queue_drag_over.set(false);
-                queue_drop_index.set(None);
-                queue_reorder_from.set(None);
-                queue_reorder_did_move.set(false);
-                let _ = eval("if (window.__kopuzRightbarStopAutoScroll) window.__kopuzRightbarStopAutoScroll();");
+                clear_rightbar_drag_state(
+                    is_queue_drag_over,
+                    queue_drop_index,
+                    queue_reorder_from,
+                    queue_reorder_did_move,
+                );
+                stop_rightbar_auto_scroll();
             },
 
             div {
@@ -475,41 +385,57 @@ pub fn Rightbar(
                 class: "flex items-center justify-between px-4 py-4 border-b border-white/10",
                 // more safety while dragging
                 onmouseenter: move |_| {
-                    is_queue_drag_over.set(false);
-                    queue_drop_index.set(None);
-                    queue_reorder_from.set(None);
-                    queue_reorder_did_move.set(false);
-                    let _ = eval("if (window.__kopuzRightbarStopAutoScroll) window.__kopuzRightbarStopAutoScroll();");
+                    clear_rightbar_drag_state(
+                        is_queue_drag_over,
+                        queue_drop_index,
+                        queue_reorder_from,
+                        queue_reorder_did_move,
+                    );
+                    stop_rightbar_auto_scroll();
                 },
                 onmousemove: move |_| {
-                    is_queue_drag_over.set(false);
-                    queue_drop_index.set(None);
-                    queue_reorder_from.set(None);
-                    queue_reorder_did_move.set(false);
-                    let _ = eval("if (window.__kopuzRightbarStopAutoScroll) window.__kopuzRightbarStopAutoScroll();");
+                    clear_rightbar_drag_state(
+                        is_queue_drag_over,
+                        queue_drop_index,
+                        queue_reorder_from,
+                        queue_reorder_did_move,
+                    );
+                    stop_rightbar_auto_scroll();
                 },
                 onmouseup: move |_| {
-                    is_queue_drag_over.set(false);
-                    queue_drop_index.set(None);
-                    queue_reorder_from.set(None);
-                    queue_reorder_did_move.set(false);
-                    cancel_dragged_queue_track();
+                    cancel_rightbar_drag(
+                        is_queue_drag_over,
+                        queue_drop_index,
+                        queue_reorder_from,
+                        queue_reorder_did_move,
+                    );
                 },
                 ondragenter: move |evt| {
                     evt.prevent_default();
-                    is_queue_drag_over.set(false);
-                    queue_drop_index.set(None);
+                    clear_rightbar_drag_state(
+                        is_queue_drag_over,
+                        queue_drop_index,
+                        queue_reorder_from,
+                        queue_reorder_did_move,
+                    );
                 },
                 ondragover: move |evt| {
                     evt.prevent_default();
-                    is_queue_drag_over.set(false);
-                    queue_drop_index.set(None);
+                    clear_rightbar_drag_state(
+                        is_queue_drag_over,
+                        queue_drop_index,
+                        queue_reorder_from,
+                        queue_reorder_did_move,
+                    );
                 },
                 ondrop: move |evt| {
                     evt.prevent_default();
-                    is_queue_drag_over.set(false);
-                    queue_drop_index.set(None);
-                    cancel_dragged_queue_track();
+                    cancel_rightbar_drag(
+                        is_queue_drag_over,
+                        queue_drop_index,
+                        queue_reorder_from,
+                        queue_reorder_did_move,
+                    );
                 },
                 div {
                     class: "flex items-center gap-1",
@@ -549,12 +475,11 @@ pub fn Rightbar(
             }
 
             div {
-                id: "rightbar-dropzone",
+                id: RIGHTBAR_DROPZONE_ID,
                 class: "flex-1 overflow-y-auto px-2 py-2 space-y-1 relative",
                 onmousemove: move |evt| {
                     if has_dragged_queue_track() || queue_reorder_from.read().is_some() {
-                        let y = evt.client_coordinates().y;
-                        let _ = eval(&format!("if (window.__kopuzRightbarAutoScroll) window.__kopuzRightbarAutoScroll({y});"));
+                        rightbar_auto_scroll(evt.client_coordinates().y);
                     }
                 },
 
@@ -638,37 +563,50 @@ pub fn Rightbar(
                             class: "px-2 pt-1 pb-2 text-[11px] uppercase tracking-[0.18em] text-slate-500",
                             onmouseenter: move |evt| {
                                 evt.stop_propagation();
-                                is_queue_drag_over.set(false);
-                                queue_drop_index.set(None);
-                                queue_reorder_from.set(None);
-                                queue_reorder_did_move.set(false);
+                                clear_rightbar_drag_state(
+                                    is_queue_drag_over,
+                                    queue_drop_index,
+                                    queue_reorder_from,
+                                    queue_reorder_did_move,
+                                );
                             },
                             onmousemove: move |evt| {
                                 evt.stop_propagation();
-                                is_queue_drag_over.set(false);
-                                queue_drop_index.set(None);
-                                queue_reorder_from.set(None);
-                                queue_reorder_did_move.set(false);
+                                clear_rightbar_drag_state(
+                                    is_queue_drag_over,
+                                    queue_drop_index,
+                                    queue_reorder_from,
+                                    queue_reorder_did_move,
+                                );
                             },
                             onmouseup: move |evt| {
                                 evt.stop_propagation();
-                                is_queue_drag_over.set(false);
-                                queue_drop_index.set(None);
-                                queue_reorder_from.set(None);
-                                queue_reorder_did_move.set(false);
-                                cancel_dragged_queue_track();
+                                cancel_rightbar_drag(
+                                    is_queue_drag_over,
+                                    queue_drop_index,
+                                    queue_reorder_from,
+                                    queue_reorder_did_move,
+                                );
                             },
                             ondragenter: move |evt| {
                                 evt.prevent_default();
                                 evt.stop_propagation();
-                                is_queue_drag_over.set(false);
-                                queue_drop_index.set(None);
+                                clear_rightbar_drag_state(
+                                    is_queue_drag_over,
+                                    queue_drop_index,
+                                    queue_reorder_from,
+                                    queue_reorder_did_move,
+                                );
                             },
                             ondragover: move |evt| {
                                 evt.prevent_default();
                                 evt.stop_propagation();
-                                is_queue_drag_over.set(false);
-                                queue_drop_index.set(None);
+                                clear_rightbar_drag_state(
+                                    is_queue_drag_over,
+                                    queue_drop_index,
+                                    queue_reorder_from,
+                                    queue_reorder_did_move,
+                                );
                             },
                             "{up_next_summary}"
                         }
@@ -681,37 +619,27 @@ pub fn Rightbar(
                                 let is_reorder_source = *queue_reorder_from.read() == Some(queue_idx);
                                 let is_drop_target = *queue_drop_index.read() == Some(queue_idx)
                                     && *queue_reorder_from.read() != Some(queue_idx);
-                                let row_class = if is_reorder_source {
-                                    "flex items-center gap-3 px-2 py-2 bg-white/10 cursor-grabbing rounded-lg transition-colors group opacity-70"
-                                } else {
-                                    "flex items-center gap-3 px-2 py-2 hover:bg-white/5 cursor-grab active:cursor-grabbing rounded-lg transition-colors group"
-                                };
+                                let row_class = rightbar_queue_row_class(is_reorder_source);
                                 rsx! {
                                     div {
                                         key: "{queue_idx}",
                                         onmouseenter: move |_| {
-                                            if let Some(from) = *queue_reorder_from.read() {
-                                                is_queue_drag_over.set(true);
-                                                queue_drop_index.set(Some(queue_idx));
-                                                if from != queue_idx {
-                                                    queue_reorder_did_move.set(true);
-                                                }
-                                            } else if has_dragged_queue_track() {
-                                                is_queue_drag_over.set(true);
-                                                queue_drop_index.set(Some(queue_idx));
-                                            }
+                                            update_rightbar_drop_target(
+                                                queue_idx,
+                                                queue_reorder_from,
+                                                is_queue_drag_over,
+                                                queue_drop_index,
+                                                queue_reorder_did_move,
+                                            );
                                         },
                                         onmousemove: move |_| {
-                                            if let Some(from) = *queue_reorder_from.read() {
-                                                is_queue_drag_over.set(true);
-                                                queue_drop_index.set(Some(queue_idx));
-                                                if from != queue_idx {
-                                                    queue_reorder_did_move.set(true);
-                                                }
-                                            } else if has_dragged_queue_track() {
-                                                is_queue_drag_over.set(true);
-                                                queue_drop_index.set(Some(queue_idx));
-                                            }
+                                            update_rightbar_drop_target(
+                                                queue_idx,
+                                                queue_reorder_from,
+                                                is_queue_drag_over,
+                                                queue_drop_index,
+                                                queue_reorder_did_move,
+                                            );
                                         },
                                         onmouseup: move |evt| {
                                             evt.stop_propagation();
@@ -777,9 +705,12 @@ pub fn Rightbar(
                                             style: "content-visibility: auto; contain-intrinsic-size: 0 56px;",
                                             onmousedown: move |evt| {
                                                 evt.stop_propagation();
-                                                queue_reorder_from.set(Some(queue_idx));
-                                                queue_drop_index.set(Some(queue_idx));
-                                                queue_reorder_did_move.set(false);
+                                                start_rightbar_reorder(
+                                                    queue_idx,
+                                                    queue_drop_index,
+                                                    queue_reorder_from,
+                                                    queue_reorder_did_move,
+                                                );
                                             },
                                             ondoubleclick: move |_| {
                                                 if !*queue_reorder_did_move.read() {
@@ -832,28 +763,22 @@ pub fn Rightbar(
                                     class: "px-1 py-2",
                                     style: "min-height: 45vh;",
                                     onmouseenter: move |_| {
-                                        if let Some(from) = *queue_reorder_from.read() {
-                                            is_queue_drag_over.set(true);
-                                            queue_drop_index.set(Some(end_drop_index));
-                                            if from + 1 < end_drop_index {
-                                                queue_reorder_did_move.set(true);
-                                            }
-                                        } else if has_dragged_queue_track() {
-                                            is_queue_drag_over.set(true);
-                                            queue_drop_index.set(Some(end_drop_index));
-                                        }
+                                        update_rightbar_end_drop_target(
+                                            end_drop_index,
+                                            queue_reorder_from,
+                                            is_queue_drag_over,
+                                            queue_drop_index,
+                                            queue_reorder_did_move,
+                                        );
                                     },
                                     onmousemove: move |_| {
-                                        if let Some(from) = *queue_reorder_from.read() {
-                                            is_queue_drag_over.set(true);
-                                            queue_drop_index.set(Some(end_drop_index));
-                                            if from + 1 < end_drop_index {
-                                                queue_reorder_did_move.set(true);
-                                            }
-                                        } else if has_dragged_queue_track() {
-                                            is_queue_drag_over.set(true);
-                                            queue_drop_index.set(Some(end_drop_index));
-                                        }
+                                        update_rightbar_end_drop_target(
+                                            end_drop_index,
+                                            queue_reorder_from,
+                                            is_queue_drag_over,
+                                            queue_drop_index,
+                                            queue_reorder_did_move,
+                                        );
                                     },
                                     onmouseup: move |evt| {
                                         evt.stop_propagation();

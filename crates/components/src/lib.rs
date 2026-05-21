@@ -15,6 +15,7 @@ pub mod header;
 pub mod playlist_detail;
 pub mod playlist_modal;
 pub mod playlist_popups;
+pub mod queue_drag;
 pub mod reorder_buttons;
 pub mod rightbar;
 pub mod search_bar;
