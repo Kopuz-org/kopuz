@@ -182,12 +182,15 @@ pub fn LocalHome(
         let mut seen_albums = std::collections::HashSet::new();
         for path in conf.recently_played.iter() {
             if let Some(track) = track_by_path.get(path) {
+                if track.title.trim().is_empty() {
+                    continue;
+                }
                 let album = album_by_id.get(track.album_id.as_str()).copied().cloned();
                 if let Some(ref album_ref) = album {
                     if is_unknown_album(&album_ref.title) || is_unknown_artist(&album_ref.artist) {
                         continue;
                     }
-                } else if is_unknown_artist(&track.artist) && track.title.trim().is_empty() {
+                } else if is_unknown_artist(&track.artist) {
                     continue;
                 }
                 if let Some(ref a) = album {
@@ -217,7 +220,7 @@ pub fn LocalHome(
 
         for path in conf.recently_played.iter() {
             if let Some(track) = track_by_path.get(path) {
-                if is_unknown_artist(&track.artist) && track.title.trim().is_empty() {
+                if track.title.trim().is_empty() {
                     continue;
                 }
                 let album = album_by_id.get(track.album_id.as_str()).copied().cloned();
@@ -568,6 +571,9 @@ fn LocalHeroBanner(
     let hero_title = hero_entry
         .as_ref()
         .map(|(track, album_opt)| {
+            if !track.title.trim().is_empty() {
+                return track.title.clone();
+            }
             if let Some(album) = album_opt.as_ref() {
                 if !is_unknown_album(&album.title) {
                     return album.title.clone();

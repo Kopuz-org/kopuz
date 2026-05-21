@@ -254,12 +254,15 @@ pub fn JellyfinHome(
         let mut seen_albums = std::collections::HashSet::new();
         for id in conf.recently_played_server.iter() {
             if let Some(track) = track_by_id.get(id) {
+                if track.title.trim().is_empty() {
+                    continue;
+                }
                 let album = album_by_id.get(track.album_id.as_str()).copied().cloned();
                 if let Some(ref album_ref) = album {
                     if is_unknown_album(&album_ref.title) || is_unknown_artist(&album_ref.artist) {
                         continue;
                     }
-                } else if is_unknown_artist(&track.artist) && track.title.trim().is_empty() {
+                } else if is_unknown_artist(&track.artist) {
                     continue;
                 }
                 if let Some(ref a) = album {
@@ -293,7 +296,7 @@ pub fn JellyfinHome(
 
         for id in conf.recently_played_server.iter() {
             if let Some(track) = track_by_id.get(id) {
-                if is_unknown_artist(&track.artist) && track.title.trim().is_empty() {
+                if track.title.trim().is_empty() {
                     continue;
                 }
                 let album = album_by_id.get(track.album_id.as_str()).copied().cloned();
@@ -421,15 +424,14 @@ pub fn JellyfinHome(
 
     let jellyfin_hero_cover = use_memo(move || {
         let conf = config.read();
-        let lib = library.read();
-        let shuffled = jellyfin_shuffled.read();
-        let Some((album_id, ..)) = shuffled.first() else {
-            return None;
-        };
-        let Some(album) = lib.jellyfin_albums.iter().find(|a| a.id == *album_id) else {
-            return None;
-        };
         let Some(server) = &conf.server else {
+            return None;
+        };
+        let entry = hero_entry.read();
+        let Some((_, album_opt, _)) = entry.as_ref() else {
+            return None;
+        };
+        let Some(album) = album_opt.as_ref() else {
             return None;
         };
         album.cover_path.as_ref().and_then(|cover_path| {
@@ -736,14 +738,7 @@ fn ServerHeroBanner(
     let show_empty_state = hero_entry.is_none();
     let hero_title = hero_entry
         .as_ref()
-        .map(|(track, album_opt, _)| {
-            if let Some(album) = album_opt.as_ref() {
-                if !is_unknown_album(&album.title) {
-                    return album.title.clone();
-                }
-            }
-            track.title.clone()
-        })
+        .map(|(track, _, _)| track.title.clone())
         .unwrap_or_default();
     let hero_artist = hero_entry
         .as_ref()
@@ -763,7 +758,7 @@ fn ServerHeroBanner(
             if !show_empty_state {
                 if let Some((_, _album_opt, entry_cover)) = hero_entry.as_ref() {
                     div { class: "absolute inset-0",
-                        if let Some(url) = entry_cover.clone().or(hero_cover.clone()) {
+                        if let Some(url) = hero_cover.clone().or(entry_cover.clone()) {
                             img { src: "{url}", class: "w-full h-full object-cover", decoding: "async" }
                         }
                         div { class: "absolute inset-0 bg-gradient-to-r from-black/90 via-black/40 to-transparent" }
