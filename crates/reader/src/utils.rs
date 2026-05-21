@@ -36,10 +36,16 @@ pub fn find_folder_cover(dir: &Path) -> Option<PathBuf> {
         if !path.is_file() {
             continue;
         }
-        let stem = path.file_stem().and_then(|s| s.to_str())?;
-        let ext = path.extension().and_then(|e| e.to_str())?;
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+            continue;
+        };
 
-        if candidates.iter().any(|c| c.eq_ignore_ascii_case(stem)) && extensions.iter().any(|e| e.eq_ignore_ascii_case(ext)) {
+        if candidates.iter().any(|c| c.eq_ignore_ascii_case(stem))
+            && extensions.iter().any(|e| e.eq_ignore_ascii_case(ext))
+        {
             return Some(path);
         }
     }
