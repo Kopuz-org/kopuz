@@ -27,12 +27,20 @@ fn remove_stale_cover_variants(album_id: &str, cache_dir: &Path, keep_path: &Pat
 }
 
 pub fn find_folder_cover(dir: &Path) -> Option<PathBuf> {
-    let candidates = ["cover.jpg", "cover.png", "folder.jpg", "album.jpg"];
+    let candidates = ["cover", "folder", "album"];
+    let extensions = ["jpg", "jpeg", "png", "webp"];
 
-    for name in candidates {
-        let p = dir.join(name);
-        if p.exists() {
-            return Some(p);
+    let entries = std::fs::read_dir(dir).ok()?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let stem = path.file_stem().and_then(|s| s.to_str())?;
+        let ext = path.extension().and_then(|e| e.to_str())?;
+
+        if candidates.iter().any(|c| c.eq_ignore_ascii_case(stem)) && extensions.iter().any(|e| e.eq_ignore_ascii_case(ext)) {
+            return Some(path);
         }
     }
     None
