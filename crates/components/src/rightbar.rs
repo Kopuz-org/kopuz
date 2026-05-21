@@ -252,9 +252,61 @@ pub fn Rightbar(
                     event.dataTransfer.setData('application/x-kopuz-track', '1');
                 }, true);
 
+                let rightbarAutoScrollFrame = null;
+                let rightbarAutoScrollY = null;
+
+                window.__kopuzRightbarStopAutoScroll = () => {
+                    rightbarAutoScrollY = null;
+                    if (rightbarAutoScrollFrame !== null) {
+                        cancelAnimationFrame(rightbarAutoScrollFrame);
+                        rightbarAutoScrollFrame = null;
+                    }
+                };
+
+                const rightbarAutoScrollTick = () => {
+                    const zone = document.getElementById('rightbar-dropzone');
+                    if (!zone || rightbarAutoScrollY === null) {
+                        window.__kopuzRightbarStopAutoScroll();
+                        return;
+                    }
+
+                    const rect = zone.getBoundingClientRect();
+                    const threshold = Math.min(96, Math.max(48, rect.height * 0.18));
+                    const maxStep = 14;
+                    let step = 0;
+
+                    if (rightbarAutoScrollY < rect.top + threshold) {
+                        const distance = Math.max(0, rightbarAutoScrollY - rect.top);
+                        const factor = 1 - Math.min(distance / threshold, 1);
+                        step = -Math.max(2, maxStep * factor);
+                    } else if (rightbarAutoScrollY > rect.bottom - threshold) {
+                        const distance = Math.max(0, rect.bottom - rightbarAutoScrollY);
+                        const factor = 1 - Math.min(distance / threshold, 1);
+                        step = Math.max(2, maxStep * factor);
+                    }
+
+                    if (step !== 0) {
+                        zone.scrollTop += step;
+                        rightbarAutoScrollFrame = requestAnimationFrame(rightbarAutoScrollTick);
+                    } else {
+                        window.__kopuzRightbarStopAutoScroll();
+                    }
+                };
+
+                window.__kopuzRightbarAutoScroll = (clientY) => {
+                    const zone = document.getElementById('rightbar-dropzone');
+                    if (!zone) return;
+
+                    rightbarAutoScrollY = clientY;
+                    if (rightbarAutoScrollFrame === null) {
+                        rightbarAutoScrollFrame = requestAnimationFrame(rightbarAutoScrollTick);
+                    }
+                };
+
                 const acceptRightbarDrop = (event) => {
                     if (!isRightbarDrop(event)) return;
                     event.preventDefault();
+                    window.__kopuzRightbarAutoScroll(event.clientY);
                     if (event.dataTransfer) {
                         event.dataTransfer.dropEffect = 'copy';
                     }
@@ -263,9 +315,15 @@ pub fn Rightbar(
                 window.addEventListener('dragenter', acceptRightbarDrop, true);
                 window.addEventListener('dragover', acceptRightbarDrop, true);
                 window.addEventListener('drop', acceptRightbarDrop, true);
+                window.addEventListener('drop', window.__kopuzRightbarStopAutoScroll, true);
+                window.addEventListener('mouseup', window.__kopuzRightbarStopAutoScroll, true);
+                window.addEventListener('dragend', window.__kopuzRightbarStopAutoScroll, true);
                 document.addEventListener('dragenter', acceptRightbarDrop, true);
                 document.addEventListener('dragover', acceptRightbarDrop, true);
                 document.addEventListener('drop', acceptRightbarDrop, true);
+                document.addEventListener('drop', window.__kopuzRightbarStopAutoScroll, true);
+                document.addEventListener('mouseup', window.__kopuzRightbarStopAutoScroll, true);
+                document.addEventListener('dragend', window.__kopuzRightbarStopAutoScroll, true);
             }
             "#,
         );
@@ -395,6 +453,8 @@ pub fn Rightbar(
             onmouseleave: move |_| {
                 is_queue_drag_over.set(false);
                 queue_drop_index.set(None);
+                // auto scroll while dragging
+                let _ = eval("if (window.__kopuzRightbarStopAutoScroll) window.__kopuzRightbarStopAutoScroll();");
             },
 
             div {
@@ -412,10 +472,12 @@ pub fn Rightbar(
                 onmouseenter: move |_| {
                     is_queue_drag_over.set(false);
                     queue_drop_index.set(None);
+                    let _ = eval("if (window.__kopuzRightbarStopAutoScroll) window.__kopuzRightbarStopAutoScroll();");
                 },
                 onmousemove: move |_| {
                     is_queue_drag_over.set(false);
                     queue_drop_index.set(None);
+                    let _ = eval("if (window.__kopuzRightbarStopAutoScroll) window.__kopuzRightbarStopAutoScroll();");
                 },
                 onmouseup: move |_| {
                     is_queue_drag_over.set(false);
@@ -478,6 +540,12 @@ pub fn Rightbar(
             div {
                 id: "rightbar-dropzone",
                 class: "flex-1 overflow-y-auto px-2 py-2 space-y-1 relative",
+                onmousemove: move |evt| {
+                    if has_dragged_queue_track() {
+                        let y = evt.client_coordinates().y;
+                        let _ = eval(&format!("if (window.__kopuzRightbarAutoScroll) window.__kopuzRightbarAutoScroll({y});"));
+                    }
+                },
 
                 if *active_tab.read() == 2 {
                     div {
