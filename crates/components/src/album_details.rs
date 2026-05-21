@@ -60,7 +60,7 @@ pub fn AlbumDetails(
                         .await;
                     if let Some(file) = file {
                         let path = file.path().to_path_buf();
-                        let data = match std::fs::read(&path) {
+                        let data = match tokio::fs::read(&path).await {
                             Ok(d) => d,
                             Err(_) => return,
                         };
@@ -90,7 +90,7 @@ pub fn AlbumDetails(
                                         album.manual_cover = old_manual;
                                     }
                                 }
-                                let _ = std::fs::remove_file(&saved);
+                                let _ = tokio::fs::remove_file(&saved).await;
                             }
                         }
                     }

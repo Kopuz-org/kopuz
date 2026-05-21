@@ -1,0 +1,11 @@
+{
+  "registry_name": "Official Kopuz Radio Registry",
+  "description": "Default radio stations",
+  "stations": [
+    { "id": "listen_moe", "manifest_url": "./stations/listen_moe.json" },
+    { "id": "j1", "manifest_url": "./stations/j1.json" },
+    { "id": "doujinstyle", "manifest_url": "./stations/doujinstyle.json" },
+    { "id": "vocaloid", "manifest_url": "./stations/vocaloid.json" },
+    { "id": "asiadreamradio", "manifest_url": "./stations/asiadreamradio.json" }
+  ]
+}

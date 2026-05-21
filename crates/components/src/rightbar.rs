@@ -88,13 +88,9 @@ pub fn Rightbar(
             return;
         }
 
-        if let Some(cached) = utils::lyrics::cached_lyrics(
-            &artist,
-            &title,
-            &album,
-            duration,
-            &track_path,
-        ) {
+        if let Some(cached) =
+            utils::lyrics::cached_lyrics(&artist, &title, &album, duration, &track_path)
+        {
             let display = cached.or_else(|| {
                 Some(utils::lyrics::Lyrics::Plain(
                     i18n::t("lyrics_not_found").to_string(),

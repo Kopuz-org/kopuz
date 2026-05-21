@@ -236,7 +236,11 @@ fn find_symphonia_tag<'a>(
         })
 }
 
-fn read_with_symphonia(track_path: &Path, cover_cache: &Path, library: &mut Library) -> Option<Track> {
+fn read_with_symphonia(
+    track_path: &Path,
+    cover_cache: &Path,
+    library: &mut Library,
+) -> Option<Track> {
     let file = std::fs::File::open(track_path).ok()?;
     let file_size = file.metadata().ok().map(|m| m.len()).unwrap_or(0);
 
@@ -346,9 +350,12 @@ fn read_with_symphonia(track_path: &Path, cover_cache: &Path, library: &mut Libr
         disc_number: find_symphonia_tag(&tags, StandardTagKey::DiscNumber, &["DISCNUMBER"])
             .and_then(symphonia_tag_to_string)
             .and_then(|value| value.parse().ok()),
-        musicbrainz_release_id:
-            find_symphonia_tag(&tags, StandardTagKey::MusicBrainzAlbumId, &["MUSICBRAINZ_ALBUMID"])
-                .and_then(symphonia_tag_to_string),
+        musicbrainz_release_id: find_symphonia_tag(
+            &tags,
+            StandardTagKey::MusicBrainzAlbumId,
+            &["MUSICBRAINZ_ALBUMID"],
+        )
+        .and_then(symphonia_tag_to_string),
         playlist_item_id: None,
     };
 
@@ -366,14 +373,10 @@ fn read_with_symphonia(track_path: &Path, cover_cache: &Path, library: &mut Libr
         let genre = find_symphonia_tag(&tags, StandardTagKey::Genre, &["GENRE"])
             .and_then(symphonia_tag_to_string)
             .unwrap_or_else(|| "Unknown".to_string());
-        let year = find_symphonia_tag(
-            &tags,
-            StandardTagKey::Date,
-            &["DATE", "YEAR"],
-        )
-        .and_then(symphonia_tag_to_string)
-        .and_then(|value| value.get(..4).and_then(|prefix| prefix.parse::<u16>().ok()))
-        .unwrap_or(0);
+        let year = find_symphonia_tag(&tags, StandardTagKey::Date, &["DATE", "YEAR"])
+            .and_then(symphonia_tag_to_string)
+            .and_then(|value| value.get(..4).and_then(|prefix| prefix.parse::<u16>().ok()))
+            .unwrap_or(0);
 
         library.add_album(Album {
             id: album_id.clone(),

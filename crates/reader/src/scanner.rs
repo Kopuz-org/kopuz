@@ -10,7 +10,11 @@ use tokio::sync::Mutex;
 
 fn normalize_artist_key(value: &str) -> Option<String> {
     let normalized = value.trim().to_lowercase();
-    if normalized.is_empty() { None } else { Some(normalized) }
+    if normalized.is_empty() {
+        None
+    } else {
+        Some(normalized)
+    }
 }
 
 pub async fn scan_directory(
@@ -70,9 +74,13 @@ pub async fn scan_directory(
             .filter(|t| t.path.starts_with(&img_dir))
             .filter_map(|t| {
                 let mut set = HashSet::new();
-                if let Some(a) = normalize_artist_key(&t.artist) { set.insert(a); }
+                if let Some(a) = normalize_artist_key(&t.artist) {
+                    set.insert(a);
+                }
                 for a in &t.artists {
-                    if let Some(a) = normalize_artist_key(a) { set.insert(a); }
+                    if let Some(a) = normalize_artist_key(a) {
+                        set.insert(a);
+                    }
                 }
                 if set.is_empty() { None } else { Some(set) }
             })
@@ -124,7 +132,10 @@ async fn collect_audio_files(
 
         while let Ok(Some(entry)) = entries.next_entry().await {
             let path = entry.path();
-            let is_dir = tokio::fs::metadata(&path).await.map(|t| t.is_dir()).unwrap_or(false);
+            let is_dir = tokio::fs::metadata(&path)
+                .await
+                .map(|t| t.is_dir())
+                .unwrap_or(false);
             if is_dir {
                 dirs.push(path);
             } else if is_artist_image_file(&path) {

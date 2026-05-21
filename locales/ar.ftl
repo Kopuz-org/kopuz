@@ -113,6 +113,11 @@ playlist_name_placeholder = اسم قائمة التشغيل
 playlist_name_input = اسم قائمة التشغيل
 add_media_server = إضافة خادم وسائط
 media_server = خادم الوسائط
+media_servers = خوادم الوسائط
+saved_servers = الخوادم المحفوظة
+switch_to_server = تبديل
+active_server = نشط
+no_saved_servers = لا توجد خوادم محفوظة
 jellyfin = Jellyfin
 subsonic = Subsonic
 custom_manual = مخصص (API يدوي)
@@ -389,3 +394,19 @@ update_banner_message = إصدار Kopuz { $version } متوفر.
 view_release = عرض الإصدار
 
 volume_scroll_step = خطوة تمرير الصوت
+
+# Radio Registries
+radio_registry_url_placeholder = مسار محلي أو رابط لـ index.json
+add_radio_registry = إضافة سجل راديو
+radio_default_registry = السجل الافتراضي
+
+
+radio_registry_empty_path = لا يمكن أن يكون مسار السجل فارغًا
+radio_registry_exists = السجل موجود بالفعل
+radio_registry_import_failed = فشل استيراد السجل: { $error }
+radio_registry_enable_failed = فشل تمكين السجل: { $error }
+radio_registries_active = { $enabled_count }/{ $total } نشط
+radio_registries_empty = لم يتم تكوين أي سجلات
+offline_downloads = التنزيلات دون اتصال
+download_quality = جودة التنزيل
+saving = جارٍ الحفظ...

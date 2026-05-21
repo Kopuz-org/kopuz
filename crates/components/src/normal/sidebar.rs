@@ -15,29 +15,105 @@ struct SidebarItem {
 
 #[cfg(not(target_arch = "wasm32"))]
 const TOP_MENU: &[SidebarItem] = &[
-    SidebarItem { key: "home",      route: Route::Home,      icon: "fa-solid fa-house" },
-    SidebarItem { key: "search",    route: Route::Search,    icon: "fa-solid fa-magnifying-glass" },
-    SidebarItem { key: "library",   route: Route::Library,   icon: "fa-solid fa-book" },
-    SidebarItem { key: "albums",    route: Route::Album,     icon: "fa-solid fa-music" },
-    SidebarItem { key: "artists",   route: Route::Artist,    icon: "fa-solid fa-user" },
-    SidebarItem { key: "playlists", route: Route::Playlists, icon: "fa-solid fa-list" },
-    SidebarItem { key: "favorites", route: Route::Favorites, icon: "fa-solid fa-heart" },
-    SidebarItem { key: "radio",     route: Route::Radio,     icon: "fa-solid fa-radio" },
-    SidebarItem { key: "activity",  route: Route::Activity,  icon: "fa-solid fa-chart-simple" },
-    SidebarItem { key: "ytdlp",     route: Route::Ytdlp,     icon: "fa-solid fa-download" },
+    SidebarItem {
+        key: "home",
+        route: Route::Home,
+        icon: "fa-solid fa-house",
+    },
+    SidebarItem {
+        key: "search",
+        route: Route::Search,
+        icon: "fa-solid fa-magnifying-glass",
+    },
+    SidebarItem {
+        key: "library",
+        route: Route::Library,
+        icon: "fa-solid fa-book",
+    },
+    SidebarItem {
+        key: "albums",
+        route: Route::Album,
+        icon: "fa-solid fa-music",
+    },
+    SidebarItem {
+        key: "artists",
+        route: Route::Artist,
+        icon: "fa-solid fa-user",
+    },
+    SidebarItem {
+        key: "playlists",
+        route: Route::Playlists,
+        icon: "fa-solid fa-list",
+    },
+    SidebarItem {
+        key: "favorites",
+        route: Route::Favorites,
+        icon: "fa-solid fa-heart",
+    },
+    SidebarItem {
+        key: "radio",
+        route: Route::Radio,
+        icon: "fa-solid fa-radio",
+    },
+    SidebarItem {
+        key: "activity",
+        route: Route::Activity,
+        icon: "fa-solid fa-chart-simple",
+    },
+    SidebarItem {
+        key: "ytdlp",
+        route: Route::Ytdlp,
+        icon: "fa-solid fa-download",
+    },
 ];
 
 #[cfg(target_arch = "wasm32")]
 const TOP_MENU: &[SidebarItem] = &[
-    SidebarItem { key: "home",      route: Route::Home,      icon: "fa-solid fa-house" },
-    SidebarItem { key: "search",    route: Route::Search,    icon: "fa-solid fa-magnifying-glass" },
-    SidebarItem { key: "library",   route: Route::Library,   icon: "fa-solid fa-book" },
-    SidebarItem { key: "albums",    route: Route::Album,     icon: "fa-solid fa-music" },
-    SidebarItem { key: "artists",   route: Route::Artist,    icon: "fa-solid fa-user" },
-    SidebarItem { key: "playlists", route: Route::Playlists, icon: "fa-solid fa-list" },
-    SidebarItem { key: "favorites", route: Route::Favorites, icon: "fa-solid fa-heart" },
-    SidebarItem { key: "radio",     route: Route::Radio,     icon: "fa-solid fa-radio" },
-    SidebarItem { key: "activity",  route: Route::Activity,  icon: "fa-solid fa-chart-simple" },
+    SidebarItem {
+        key: "home",
+        route: Route::Home,
+        icon: "fa-solid fa-house",
+    },
+    SidebarItem {
+        key: "search",
+        route: Route::Search,
+        icon: "fa-solid fa-magnifying-glass",
+    },
+    SidebarItem {
+        key: "library",
+        route: Route::Library,
+        icon: "fa-solid fa-book",
+    },
+    SidebarItem {
+        key: "albums",
+        route: Route::Album,
+        icon: "fa-solid fa-music",
+    },
+    SidebarItem {
+        key: "artists",
+        route: Route::Artist,
+        icon: "fa-solid fa-user",
+    },
+    SidebarItem {
+        key: "playlists",
+        route: Route::Playlists,
+        icon: "fa-solid fa-list",
+    },
+    SidebarItem {
+        key: "favorites",
+        route: Route::Favorites,
+        icon: "fa-solid fa-heart",
+    },
+    SidebarItem {
+        key: "radio",
+        route: Route::Radio,
+        icon: "fa-solid fa-radio",
+    },
+    SidebarItem {
+        key: "activity",
+        route: Route::Activity,
+        icon: "fa-solid fa-chart-simple",
+    },
 ];
 
 const BOTTOM_MENU: &[SidebarItem] = &[SidebarItem {
@@ -53,7 +129,11 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
     let mut is_collapsed = use_signal(|| false);
     let mut is_resizing = use_signal(|| false);
 
-    let current_width = if *is_collapsed.read() { 72 } else { *width.read() };
+    let current_width = if *is_collapsed.read() {
+        72
+    } else {
+        *width.read()
+    };
 
     let onmousemove = move |evt: MouseEvent| {
         if *is_resizing.read() {
@@ -73,19 +153,31 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
 
     let onmouseup = move |_| is_resizing.set(false);
 
-    let extra_padding = if cfg!(target_os = "macos") { "pt-10" } else { "" };
+    let extra_padding = if cfg!(target_os = "macos") {
+        "pt-10"
+    } else {
+        ""
+    };
 
     let is_rtl = i18n::is_rtl();
     let border_side = if is_rtl { "border-l" } else { "border-r" };
 
     let is_server = config.read().active_source == MusicSource::Server;
-    let local_class  = if !is_server { "text-white" } else { "text-slate-500 hover:text-slate-300" };
-    let server_class = if  is_server { "text-white" } else { "text-slate-500 hover:text-slate-300" };
+    let local_class = if !is_server {
+        "text-white"
+    } else {
+        "text-slate-500 hover:text-slate-300"
+    };
+    let server_class = if is_server {
+        "text-white"
+    } else {
+        "text-slate-500 hover:text-slate-300"
+    };
     let slider_style = match (is_rtl, is_server) {
         (false, false) => "left: 4px; width: calc(50% - 4px);",
-        (false, true)  => "left: calc(50% + 2px); width: calc(50% - 4px);",
-        (true,  false) => "right: 4px; width: calc(50% - 4px);",
-        (true,  true)  => "right: calc(50% + 2px); width: calc(50% - 4px);",
+        (false, true) => "left: calc(50% + 2px); width: calc(50% - 4px);",
+        (true, false) => "right: 4px; width: calc(50% - 4px);",
+        (true, true) => "right: calc(50% + 2px); width: calc(50% - 4px);",
     };
 
     let ordered_items: Vec<SidebarItem> = {
@@ -237,7 +329,11 @@ fn SidebarLink(
     on_move_down: EventHandler<()>,
 ) -> Element {
     let is_collapsed = *collapsed.read();
-    let alignment_class = if is_collapsed { "justify-center" } else { "justify-start px-3" };
+    let alignment_class = if is_collapsed {
+        "justify-center"
+    } else {
+        "justify-start px-3"
+    };
     let indicator_base = if is_rtl {
         "absolute right-0 w-0.5 rounded-l-full transition-all duration-300"
     } else {
@@ -250,7 +346,11 @@ fn SidebarLink(
         "text-slate-400 hover:text-white/90 hover:bg-white/5"
     };
 
-    let opacity_class = if active { "opacity-100" } else { "opacity-70 group-hover:opacity-100" };
+    let opacity_class = if active {
+        "opacity-100"
+    } else {
+        "opacity-70 group-hover:opacity-100"
+    };
 
     rsx! {
         div { class: "flex items-center group",

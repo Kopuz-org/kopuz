@@ -12,99 +12,40 @@ pub struct RadioProps {
     pub config: Signal<config::AppConfig>,
 }
 
-#[derive(PartialEq, Clone)]
-struct RadioStream {
-    name: &'static str,
-    id: &'static str,
-    icon: &'static str,
-}
-
-#[derive(PartialEq, Clone)]
-struct RadioStation {
-    id: &'static str,
-    name: &'static str,
-    description: &'static str,
-    icon: &'static str,
-    streams: &'static [RadioStream],
-}
-
-const STATIONS: &[RadioStation] = &[
-    RadioStation {
-        id: "listen_moe",
-        name: "LISTEN.moe",
-        description: "radio_listen_moe_desc",
-        icon: "fa-solid fa-radio",
-        streams: &[
-            RadioStream { name: "J-Pop", id: "jpop", icon: "fa-solid fa-music" },
-            RadioStream { name: "K-Pop", id: "kpop", icon: "fa-solid fa-compact-disc" },
-        ],
-    },
-    RadioStation {
-        id: "j1",
-        name: "J1 Tokyo",
-        description: "radio_j1_desc",
-        icon: "fa-solid fa-radio",
-        streams: &[
-            RadioStream { name: "J1 HITS", id: "J1HITS", icon: "fa-solid fa-fire" },
-            RadioStream { name: "J1 GOLD", id: "J1GOLD", icon: "fa-solid fa-compact-disc" },
-        ],
-    },
-    RadioStation {
-        id: "doujinstyle",
-        name: "Doujinstyle",
-        description: "radio_doujinstyle_desc",
-        icon: "fa-solid fa-radio",
-        streams: &[
-            RadioStream { name: "radio_live_stream", id: "main", icon: "fa-solid fa-play" },
-        ],
-    },
-    RadioStation {
-        id: "vocaloid",
-        name: "Vocaloid Radio",
-        description: "radio_vocaloid_desc",
-        icon: "fa-solid fa-radio",
-        streams: &[
-            RadioStream { name: "radio_live_stream", id: "main", icon: "fa-solid fa-play" },
-        ],
-    },
-    RadioStation {
-        id: "asiadreamradio",
-        name: "Asia DREAM Radio",
-        description: "radio_asiadreamradio_desc",
-        icon: "fa-solid fa-radio",
-        streams: &[
-            RadioStream { name: "Japan Hits",           id: "japan_hits",     icon: "fa-solid fa-fire" },
-            RadioStream { name: "J-Pop Powerplay",      id: "jpop_power",     icon: "fa-solid fa-bolt" },
-            RadioStream { name: "J-Pop Kawaii",         id: "jpop_kawaii",    icon: "fa-solid fa-heart" },
-            RadioStream { name: "J-Rock Powerplay",     id: "jrock",          icon: "fa-solid fa-guitar" },
-            RadioStream { name: "J-Club Hip-Hop",       id: "jclub_hiphop",   icon: "fa-solid fa-record-vinyl" },
-            RadioStream { name: "Jazz Sakura",          id: "jazz_sakura",    icon: "fa-solid fa-headphones" },
-            RadioStream { name: "J-Sakura Natsukashii", id: "natsukashii",    icon: "fa-solid fa-clock-rotate-left" },
-            RadioStream { name: "Bandstand Jazz",       id: "bandstand_jazz", icon: "fa-solid fa-music" },
-        ],
-    },
-];
-
 #[component]
 pub fn Radio(props: RadioProps) -> Element {
     let mut ctrl = use_context::<PlayerController>();
     let config = use_context::<Signal<config::AppConfig>>();
     let is_modern = config.read().ui_style == UiStyle::Modern;
 
+    let registry = use_context::<Signal<radio::registry::StationRegistry>>();
+    // can panic, will check again later.
+    let stations: Vec<radio::manifest::StationManifest> = registry
+        .read()
+        .all_stations()
+        .into_iter()
+        .cloned()
+        .collect();
+
     // Search / filter
     let mut filter = use_signal(|| String::new());
     let debounce_gen = use_hook(|| Arc::new(AtomicU64::new(0))).clone();
 
+    // Expanded stations set for stream overflow
+    let mut expanded_stations = use_signal(|| std::collections::HashSet::<String>::new());
+
     let query = filter.read().to_lowercase();
-    let filtered: Vec<&RadioStation> = STATIONS
+    let filtered: Vec<&radio::manifest::StationManifest> = stations
         .iter()
         .filter(|s| {
             if query.is_empty() {
                 true
             } else {
-                i18n::t(s.name).to_lowercase().contains(&query)
-                    || i18n::t(s.description).to_lowercase().contains(&query)
-                    || s.streams.iter().any(|st| i18n::t(st.name).to_lowercase().contains(&query))
+                i18n::t(&s.name).to_lowercase().contains(&query)
+                    || i18n::t(&s.description).to_lowercase().contains(&query)
+                    || s.streams
+                        .iter()
+                        .any(|st| i18n::t(&st.name).to_lowercase().contains(&query))
             }
         })
         .collect();
@@ -234,74 +175,149 @@ pub fn Radio(props: RadioProps) -> Element {
                         }
 
                         for station in filtered.iter() {
+                            // Outer wrapper — not a grid, expanded row renders below without overlap
                             div {
-                                class: "grid items-center px-4 py-2.5 rounded-lg mx-1 group cursor-pointer transition-colors hover:bg-white/[0.04]",
-                                style: "grid-template-columns: 48px 1fr 1.5fr 180px;",
+                                class: "rounded-lg mx-1 group cursor-pointer transition-colors hover:bg-white/[0.04]",
                                 onclick: {
-                                    let station_id = station.id;
-                                    let stream_id = station.streams.first().map(|s| s.id).unwrap_or("");
+                                    let station_id = station.id.clone();
+                                    let stream_id = station.streams.first().map(|s| s.id.clone()).unwrap_or_default();
                                     move |_| {
-                                        ctrl.play_radio(station_id, stream_id);
+                                        ctrl.play_radio(&station_id, &stream_id);
                                     }
                                 },
 
-                                div { class: "flex items-center justify-center",
-                                    div {
-                                        class: "w-9 h-9 rounded-lg flex items-center justify-center shrink-0",
-                                        style: "background: color-mix(in oklab, var(--color-indigo-500) 15%, transparent);",
-                                        i {
-                                            class: "{station.icon} text-base",
-                                            style: "color: var(--color-indigo-500);",
+                                div {
+                                    class: "grid items-center px-4 py-2.5",
+                                    style: "grid-template-columns: 48px 1fr 1.5fr 180px;",
+
+                                    div { class: "flex items-center justify-center",
+                                        div {
+                                            class: "w-9 h-9 rounded-lg flex items-center justify-center shrink-0",
+                                            style: "background: color-mix(in oklab, var(--color-indigo-500) 15%, transparent);",
+                                            i {
+                                                class: "{station.icon} text-base",
+                                                style: "color: var(--color-indigo-500);",
+                                            }
+                                        }
+                                    }
+
+                                    div { class: "flex items-center min-w-0 pr-4",
+                                        span {
+                                            class: "text-sm font-semibold truncate text-white",
+                                            "{i18n::t(&station.name)}"
+                                        }
+                                    }
+
+                                    div { class: "flex items-center justify-start text-left min-w-0 pr-4",
+                                        span {
+                                            class: "text-sm truncate w-full",
+                                            style: "color: rgba(255,255,255,0.4);",
+                                            "{i18n::t(&station.description)}"
+                                        }
+                                    }
+
+                                    div { class: "flex items-center gap-2 justify-end min-w-0",
+                                        if station.streams.len() == 1 {
+                                            button {
+                                                class: "inline-flex items-center justify-center w-8 h-8 rounded-full transition-all opacity-0 group-hover:opacity-100",
+                                                style: "background: color-mix(in oklab, var(--color-indigo-500) 20%, transparent); color: var(--color-indigo-400);",
+                                                onclick: {
+                                                    let station_id = station.id.clone();
+                                                    let stream_id = station.streams.first().map(|s| s.id.clone()).unwrap_or_default();
+                                                    move |evt: MouseEvent| {
+                                                        evt.stop_propagation();
+                                                        ctrl.play_radio(&station_id, &stream_id);
+                                                    }
+                                                },
+                                                i { class: "fa-solid fa-play text-xs" }
+                                            }
+                                        } else {
+                                            if station.streams.len() == 2 {
+                                                for stream in &station.streams {
+                                                    button {
+                                                        class: "inline-flex items-center gap-2 h-8 px-4 rounded-full text-sm font-medium transition-all hover:opacity-90 active:scale-95 whitespace-nowrap",
+                                                        style: "background: color-mix(in oklab, var(--color-indigo-500) 20%, transparent); color: var(--color-indigo-400); border: 1px solid color-mix(in oklab, var(--color-indigo-500) 30%, transparent);",
+                                                        onclick: {
+                                                            let station_id = station.id.clone();
+                                                            let stream_id = stream.id.clone();
+                                                            move |evt: MouseEvent| {
+                                                                evt.stop_propagation();
+                                                                ctrl.play_radio(&station_id, &stream_id);
+                                                            }
+                                                        },
+                                                        i { class: "{stream.icon.as_deref().unwrap_or(\"fa-solid fa-play\")} text-xs" }
+                                                        "{i18n::t(&stream.name)}"
+                                                    }
+                                                }
+                                            } else {
+                                                if expanded_stations.read().contains(&station.id) {
+                                                    button {
+                                                        class: "inline-flex items-center justify-center w-8 h-8 rounded-full transition-all shrink-0 hover:opacity-80",
+                                                        style: "background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.4);",
+                                                        onclick: {
+                                                            let station_id = station.id.clone();
+                                                            move |evt: MouseEvent| {
+                                                                evt.stop_propagation();
+                                                                expanded_stations.write().remove(&station_id);
+                                                            }
+                                                        },
+                                                        i { class: "fa-solid fa-chevron-up text-xs" }
+                                                    }
+                                                } else {
+                                                    if let Some(first) = station.streams.first() {
+                                                        button {
+                                                            class: "inline-flex items-center gap-2 h-8 px-4 rounded-full text-sm font-medium transition-all hover:opacity-90 active:scale-95 whitespace-nowrap",
+                                                            style: "background: color-mix(in oklab, var(--color-indigo-500) 20%, transparent); color: var(--color-indigo-400); border: 1px solid color-mix(in oklab, var(--color-indigo-500) 30%, transparent);",
+                                                            onclick: {
+                                                                let station_id = station.id.clone();
+                                                                let stream_id = first.id.clone();
+                                                                move |evt: MouseEvent| {
+                                                                    evt.stop_propagation();
+                                                                    ctrl.play_radio(&station_id, &stream_id);
+                                                                }
+                                                            },
+                                                            i { class: "{first.icon.as_deref().unwrap_or(\"fa-solid fa-play\")} text-xs" }
+                                                            "{i18n::t(&first.name)}"
+                                                        }
+                                                    }
+                                                    button {
+                                                        class: "inline-flex items-center justify-center h-8 px-3 rounded-full text-xs font-semibold transition-all hover:opacity-80 shrink-0 whitespace-nowrap",
+                                                        style: "background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.5); border: 1px solid rgba(255,255,255,0.08);",
+                                                        onclick: {
+                                                            let station_id = station.id.clone();
+                                                            move |evt: MouseEvent| {
+                                                                evt.stop_propagation();
+                                                                expanded_stations.write().insert(station_id.clone());
+                                                            }
+                                                        },
+                                                        "+{station.streams.len() - 1}"
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
 
-                                div { class: "flex items-center min-w-0 pr-4",
-                                    span {
-                                        class: "text-sm font-semibold truncate text-white",
-                                        "{i18n::t(station.name)}"
-                                    }
-                                }
-
-                                div { class: "flex items-center justify-start text-left min-w-0 pr-4",
-                                    span {
-                                        class: "text-sm truncate w-full",
-                                        style: "color: rgba(255,255,255,0.4);",
-                                        "{i18n::t(station.description)}"
-                                    }
-                                }
-
-                                div { class: "flex items-center gap-2 justify-end",
-                                    if station.streams.len() > 1 {
-                                        for stream in station.streams {
+                                // Expanded stream row — full width below grid, no overlap possible
+                                if expanded_stations.read().contains(&station.id) {
+                                    div {
+                                        class: "flex flex-wrap items-center gap-2 px-4 pb-3",
+                                        style: "padding-left: calc(48px + 1rem);",
+                                        for stream in &station.streams {
                                             button {
                                                 class: "inline-flex items-center gap-2 h-8 px-4 rounded-full text-sm font-medium transition-all hover:opacity-90 active:scale-95 whitespace-nowrap",
                                                 style: "background: color-mix(in oklab, var(--color-indigo-500) 20%, transparent); color: var(--color-indigo-400); border: 1px solid color-mix(in oklab, var(--color-indigo-500) 30%, transparent);",
                                                 onclick: {
-                                                    let station_id = station.id;
-                                                    let stream_id = stream.id;
+                                                    let station_id = station.id.clone();
+                                                    let stream_id = stream.id.clone();
                                                     move |evt: MouseEvent| {
                                                         evt.stop_propagation();
-                                                        ctrl.play_radio(station_id, stream_id);
+                                                        ctrl.play_radio(&station_id, &stream_id);
                                                     }
                                                 },
-                                                i { class: "{stream.icon} text-xs" }
-                                                "{i18n::t(stream.name)}"
+                                                i { class: "{stream.icon.as_deref().unwrap_or(\"fa-solid fa-play\")} text-xs" }
+                                                "{i18n::t(&stream.name)}"
                                             }
-                                        }
-                                    } else {
-                                        button {
-                                            class: "inline-flex items-center justify-center w-8 h-8 rounded-full transition-all opacity-0 group-hover:opacity-100",
-                                            style: "background: color-mix(in oklab, var(--color-indigo-500) 20%, transparent); color: var(--color-indigo-400);",
-                                            onclick: {
-                                                let station_id = station.id;
-                                                let stream_id = station.streams.first().map(|s| s.id).unwrap_or("");
-                                                move |evt: MouseEvent| {
-                                                    evt.stop_propagation();
-                                                    ctrl.play_radio(station_id, stream_id);
-                                                }
-                                            },
-                                            i { class: "fa-solid fa-play text-xs" }
                                         }
                                     }
                                 }
@@ -319,10 +335,10 @@ pub fn Radio(props: RadioProps) -> Element {
                                 class: "group relative rounded-2xl overflow-hidden border transition-all duration-300 cursor-pointer hover:border-white/15",
                                 style: "border-color: rgba(255,255,255,0.06); background: rgba(255,255,255,0.03);",
                                 onclick: {
-                                    let station_id = station.id;
-                                    let stream_id = station.streams.first().map(|s| s.id).unwrap_or("");
+                                    let station_id = station.id.clone();
+                                    let stream_id = station.streams.first().map(|s| s.id.clone()).unwrap_or_default();
                                     move |_| {
-                                        ctrl.play_radio(station_id, stream_id);
+                                        ctrl.play_radio(&station_id, &stream_id);
                                     }
                                 },
 
@@ -339,30 +355,30 @@ pub fn Radio(props: RadioProps) -> Element {
                                     div { class: "flex-1 min-w-0",
                                         h2 {
                                             class: "text-lg font-bold text-white mb-0.5 truncate",
-                                            "{i18n::t(station.name)}"
+                                            "{i18n::t(&station.name)}"
                                         }
                                         p {
                                             class: "text-xs mb-3 leading-relaxed",
                                             style: "color: var(--color-slate-400);",
-                                            "{i18n::t(station.description)}"
+                                            "{i18n::t(&station.description)}"
                                         }
 
                                         if station.streams.len() > 1 {
                                             div { class: "flex flex-wrap items-center gap-2",
-                                                for stream in station.streams {
+                                                for stream in &station.streams {
                                                     button {
                                                         class: "px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 flex items-center gap-1.5 hover:scale-[1.02] active:scale-95 whitespace-nowrap",
                                                         style: "background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent); border: 1px solid color-mix(in oklab, var(--color-indigo-500) 25%, transparent); color: var(--color-indigo-400);",
                                                         onclick: {
-                                                            let station_id = station.id;
-                                                            let stream_id = stream.id;
+                                                            let station_id = station.id.clone();
+                                                            let stream_id = stream.id.clone();
                                                             move |evt: MouseEvent| {
                                                                 evt.stop_propagation();
-                                                                ctrl.play_radio(station_id, stream_id);
+                                                                ctrl.play_radio(&station_id, &stream_id);
                                                             }
                                                         },
-                                                        i { class: "{stream.icon} text-xs" }
-                                                        "{i18n::t(stream.name)}"
+                                                        i { class: "{stream.icon.as_deref().unwrap_or(\"fa-solid fa-play\")} text-xs" }
+                                                        "{i18n::t(&stream.name)}"
                                                     }
                                                 }
                                             }

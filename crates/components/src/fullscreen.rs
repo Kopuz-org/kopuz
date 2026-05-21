@@ -1,4 +1,5 @@
 use crate::reorder_buttons::ReorderButtons;
+use crate::shared::fmt_time;
 use crate::titlebar::Titlebar;
 use config::AppConfig;
 use dioxus::document::eval;
@@ -6,7 +7,6 @@ use dioxus::prelude::*;
 use hooks::use_player_controller::{LoopMode, PlayerController};
 use player::player::Player;
 use reader::Library;
-use crate::shared::fmt_time;
 
 #[component]
 pub fn Fullscreen(
@@ -130,13 +130,9 @@ pub fn Fullscreen(
             return;
         }
 
-        if let Some(cached) = utils::lyrics::cached_lyrics(
-            &artist,
-            &title,
-            &album,
-            duration,
-            &track_path,
-        ) {
+        if let Some(cached) =
+            utils::lyrics::cached_lyrics(&artist, &title, &album, duration, &track_path)
+        {
             let display = cached.or_else(|| {
                 Some(utils::lyrics::Lyrics::Plain(
                     i18n::t("lyrics_not_found").to_string(),

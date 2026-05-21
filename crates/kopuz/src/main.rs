@@ -13,14 +13,12 @@ use components::{
 use dioxus::desktop::RequestAsyncResponder;
 #[cfg(not(target_arch = "wasm32"))]
 use dioxus::desktop::tao::dpi::LogicalSize;
-#[cfg(not(target_arch = "wasm32"))]
-use dioxus::desktop::tao::window::Icon;
 #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
 use dioxus::desktop::tao::platform::macos::WindowBuilderExtMacOS;
 #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
 use dioxus::desktop::tao::platform::windows::WindowExtWindows;
-#[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
-use windows::Win32::Foundation::HWND;
+#[cfg(not(target_arch = "wasm32"))]
+use dioxus::desktop::tao::window::Icon;
 use dioxus::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
 use discord_presence::Presence;
@@ -35,6 +33,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+#[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
+use windows::Win32::Foundation::HWND;
 
 mod queue_state;
 mod web_storage;
@@ -839,6 +839,41 @@ fn App() -> Element {
     let presence = PRESENCE.get().cloned().flatten();
     #[cfg(not(target_arch = "wasm32"))]
     provide_context(presence.clone());
+
+    let mut station_registry = use_signal(|| radio::registry::StationRegistry::new());
+    provide_context(station_registry);
+
+    use_effect(move || {
+        if !*initial_load_done.read() {
+            return;
+        }
+
+        let registry_paths: Vec<String> = config
+            .read()
+            .radio_registries
+            .iter()
+            .filter(|r| r.enabled)
+            .map(|r| r.url.clone())
+            .collect();
+
+        spawn(async move {
+            let mut new_registry = radio::registry::StationRegistry::new();
+            let mut import_count = 0;
+
+            for path in registry_paths {
+                match new_registry.import_registry(&path).await {
+                    Ok(_) => import_count += 1,
+                    Err(e) => tracing::warn!("Failed to import registry from {}: {}", path, e),
+                }
+            }
+
+            station_registry.set(new_registry);
+
+            if import_count > 0 {
+                tracing::info!("Imported {} external radio registries", import_count);
+            }
+        });
+    });
 
     let mut selected_album_id = use_signal(String::new);
     let mut selected_playlist_id = use_signal(|| None::<String>);

@@ -2,10 +2,10 @@ use crate::theme_editor::ThemeEditorPage;
 use ::server::provider::ProviderClient;
 use components::settings_items::{
     BackBehaviorSelector, ChannelModeSelector, DiscordPresenceSettings, EqualizerPanel,
-    LanguageSelector, LastFmSettings, MultiDirectoryPicker, MusicBrainzSettings, ServerSettings,
-    SettingItem, ThemeSelector, ToggleSetting,
+    LanguageSelector, LastFmSettings, MultiDirectoryPicker, MusicBrainzSettings,
+    RadioRegistryDropdown, ServerSettings, SettingItem, ThemeSelector, ToggleSetting,
 };
-use components::settings_popups::{AddServerPopup, LoginPopup};
+use components::settings_popups::{AddRegistryPopup, AddServerPopup, LoginPopup};
 use config::{AppConfig, ArtistPhotoSource, MusicService, OfflineQuality};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
@@ -32,6 +32,54 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     let mut login_error = use_signal(|| Option::<String>::None);
     let mut is_loading = use_signal(|| false);
 
+    let mut show_add_registry = use_signal(|| false);
+    let mut registry_url = use_signal(|| String::new());
+    let mut registry_error = use_signal(|| Option::<String>::None);
+    let mut registry_loading = use_signal(|| false);
+    let mut registry_toggle_error = use_signal(|| Option::<String>::None);
+
+    let handle_add_registry = move |_| {
+        let url = registry_url().trim().to_string();
+        if url.is_empty() {
+            registry_error.set(Some(i18n::t("radio_registry_empty_path").to_string()));
+            return;
+        }
+
+        if config.read().radio_registries.iter().any(|r| r.url == url) {
+            registry_error.set(Some(i18n::t("radio_registry_exists").to_string()));
+            return;
+        }
+
+        registry_loading.set(true);
+        registry_error.set(None);
+
+        spawn(async move {
+            let mut temp_registry = radio::registry::StationRegistry::new();
+            match temp_registry.import_registry(&url).await {
+                Ok(_) => {
+                    let mut current_config = config.write();
+                    if !current_config.radio_registries.iter().any(|r| r.url == url) {
+                        current_config.radio_registries.push(config::RegistryEntry {
+                            url,
+                            enabled: true,
+                            is_default: false,
+                        });
+                    }
+                    registry_url.set(String::new());
+                    registry_error.set(None);
+                    show_add_registry.set(false);
+                }
+                Err(e) => {
+                    registry_error.set(Some(i18n::t_with(
+                        "radio_registry_import_failed",
+                        &[("error", e.to_string())],
+                    )));
+                }
+            }
+            registry_loading.set(false);
+        });
+    };
+
     let handle_add_server = move |_| {
         if !server_url().starts_with("http") {
             error.set(Some(i18n::t("invalid_server_url").to_string()));
@@ -39,18 +87,29 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         }
 
         let selected_service = server_service();
+        let display_name = if server_name().is_empty() {
+            format!("Local {}", selected_service.display_name())
+        } else {
+            server_name()
+        };
 
         let new_server = config::MusicServer::new_with_service(
-            if server_name().is_empty() {
-                format!("Local {}", selected_service.display_name())
-            } else {
-                server_name()
-            },
+            display_name.clone(),
             server_url(),
             selected_service,
         );
 
-        config.write().server = Some(new_server);
+        let saved = config::SavedServer {
+            id: new_server.id.clone().unwrap_or_default(),
+            name: new_server.name.clone(),
+            url: new_server.url.clone(),
+            service: new_server.service,
+        };
+        {
+            let mut cfg = config.write();
+            cfg.add_saved_server(saved);
+            cfg.server = Some(new_server);
+        }
 
         server_name.set(String::new());
         server_url.set(String::new());
@@ -59,6 +118,29 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         show_add_server.set(false);
 
         show_login.set(true);
+    };
+
+    let handle_switch_server = move |id: String| {
+        let server = {
+            let cfg = config.read();
+            cfg.find_saved_server(&id).cloned()
+        };
+        if let Some(saved) = server {
+            let active = config::MusicServer {
+                name: saved.name,
+                url: saved.url,
+                service: saved.service,
+                access_token: None,
+                user_id: None,
+                id: Some(saved.id),
+            };
+            config.write().server = Some(active);
+            show_login.set(true);
+        }
+    };
+
+    let handle_delete_saved = move |id: String| {
+        config.write().remove_saved_server(&id);
     };
 
     let handle_login = move |_| {
@@ -165,13 +247,68 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             }
                         }
 
+                        RadioRegistryDropdown {
+                            registries: config.read().radio_registries.clone(),
+                            error: registry_toggle_error,
+                            on_toggle: move |index: usize| {
+                                let (is_enabling, url) = {
+                                    let cfg = config.read();
+                                    let entry = cfg.radio_registries.get(index);
+                                    (
+                                        entry.map(|e| !e.enabled).unwrap_or(false),
+                                        entry.map(|e| e.url.clone()).unwrap_or_default(),
+                                    )
+                                };
+
+                                if is_enabling && !url.is_empty() {
+                                    registry_toggle_error.set(None);
+                                    spawn(async move {
+                                        let mut temp_registry = radio::registry::StationRegistry::new();
+                                        match temp_registry.import_registry(&url).await {
+                                            Ok(_) => {
+                                                let mut cfg = config.write();
+                                                if let Some(entry) = cfg
+                                                .radio_registries
+                                                .iter_mut()
+                                                .find(|entry| entry.url == url)
+                                                {
+                                                    entry.enabled = true;
+                                                }
+                                                registry_toggle_error.set(None);
+                                            }
+                                            Err(e) => {
+                                                registry_toggle_error.set(Some(i18n::t_with("radio_registry_enable_failed", &[("error", e.to_string())])));
+                                            }
+                                        }
+                                    });
+                                } else {
+                                    let mut cfg = config.write();
+                                    if let Some(entry) = cfg.radio_registries.get_mut(index) {
+                                        entry.enabled = false;
+                                    }
+                                    registry_toggle_error.set(None);
+                                }
+                            },
+                            on_add: move |_| show_add_registry.set(true),
+                            on_delete: move |index: usize| {
+                                let mut cfg = config.write();
+                                if index < cfg.radio_registries.len()
+                                    && !cfg.radio_registries[index].is_default
+                                {
+                                    cfg.radio_registries.remove(index);
+                                }
+                            }
+                        }
+
                         SettingItem {
-                            title: i18n::t("media_server").to_string(),
+                            title: i18n::t("media_servers").to_string(),
                             control: rsx! {
                                 ServerSettings {
-                                    server: config.read().server.clone(),
+                                    active: config.read().server.clone(),
+                                    servers: config.read().servers.clone(),
                                     on_add: move |_| show_add_server.set(true),
-                                    on_delete: move |_| config.write().server = None,
+                                    on_delete: handle_delete_saved,
+                                    on_switch: handle_switch_server,
                                     on_login: move |_| show_login.set(true),
                                 }
                             }
@@ -362,11 +499,11 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     section {
                         h2 {
                             class: "text-lg font-semibold text-white/80 mb-4 border-b border-white/5 pb-2",
-                            "Offline Downloads"
+                            "{i18n::t(\"offline_downloads\")}"
                         }
                         div { class: "space-y-4",
                             SettingItem {
-                                title: "Download Quality".to_string(),
+                                title: i18n::t("download_quality").to_string(),
                                 control: rsx! {
                                     select {
                                         class: "bg-stone-800 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-indigo-500",
@@ -519,6 +656,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     ThemeEditorPage { config, embedded: true }
                 }
 
+
+
                 if show_add_server() {
                     AddServerPopup {
                         server_name,
@@ -527,6 +666,16 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         error,
                         on_close: move |_| show_add_server.set(false),
                         on_save: handle_add_server
+                    }
+                }
+
+                if show_add_registry() {
+                    AddRegistryPopup {
+                        registry_url,
+                        error: registry_error,
+                        loading: registry_loading,
+                        on_close: move |_| show_add_registry.set(false),
+                        on_save: handle_add_registry
                     }
                 }
 

@@ -28,8 +28,11 @@ impl CoverFetcher {
         lastfm_api_key: Option<String>,
         on_progress: Arc<dyn Fn(String) + Send + Sync>,
     ) -> Self {
+        let lastfm_api_key = lastfm_api_key
+            .map(|key| key.trim().to_string())
+            .filter(|key| !key.is_empty());
         let client = reqwest::Client::builder()
-            .user_agent("Kopuz/0.6.0 (music-player)")
+            .user_agent(concat!("Kopuz/", env!("CARGO_PKG_VERSION"), " (music-player)"))
             .timeout(Duration::from_secs(15))
             .build()
             .unwrap_or_default();

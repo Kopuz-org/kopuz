@@ -113,6 +113,11 @@ playlist_name_placeholder = Lejátszási lista neve
 playlist_name_input = Lejátszási lista neve
 add_media_server = Médiaszerver hozzáadása
 media_server = Médiaszerver
+media_servers = Médiaszerverek
+saved_servers = Mentett szerverek
+switch_to_server = Váltás
+active_server = Aktív
+no_saved_servers = Nincsenek mentett szerverek
 jellyfin = Jellyfin
 subsonic = Subsonic
 custom_manual = Egyéni (manuális API)
@@ -383,3 +388,19 @@ update_banner_message = A Kopuz { $version } elérhető.
 view_release = Kiadás megtekintése
 
 volume_scroll_step = Hangerő görgetési lépés
+
+# Radio Registries
+radio_registry_url_placeholder = URL vagy helyi útvonal az index.json-hoz
+add_radio_registry = Rádió Regiszter Hozzáadása
+radio_default_registry = Alapértelmezett Regiszter
+
+
+radio_registry_empty_path = A nyilvántartási útvonal nem lehet üres
+radio_registry_exists = A nyilvántartás már létezik
+radio_registry_import_failed = A nyilvántartás importálása sikertelen: { $error }
+radio_registry_enable_failed = A nyilvántartás engedélyezése sikertelen: { $error }
+radio_registries_active = { $enabled_count }/{ $total } aktív
+radio_registries_empty = Nincsenek nyilvántartások konfigurálva
+offline_downloads = Offline letöltések
+download_quality = Letöltés minősége
+saving = Mentés...
