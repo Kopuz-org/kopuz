@@ -391,11 +391,11 @@ radio_default_registry = Реєстр за Замовчуванням
 
 
 radio_registry_empty_path = Шлях до реєстру не може бути порожнім
-radio_registry_exists = Реестр уже існує
+radio_registry_exists = Реєстр уже існує
 radio_registry_import_failed = Не вдалося імпортувати реєстр: { $error }
 radio_registry_enable_failed = Не вдалося ввімкнути реєстр: { $error }
 radio_registries_active = { $enabled_count }/{ $total } активно
-radio_registries_empty = Реестры не налаштовані
+radio_registries_empty = Реєстри не налаштовані
 offline_downloads = Офлайн-завантаження
 download_quality = Якість завантаження
 saving = Збереження...
