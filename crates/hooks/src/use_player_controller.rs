@@ -1714,21 +1714,75 @@ impl PlayerController {
         }
     }
 
-    pub fn move_queue_item(&mut self, from: usize, to: usize) {
-        self.move_physical_queue_item(from, to);
-    }
+    // Swaps two queue items, taking into account shuffle state and current queue index
+    pub fn swap_queue_item(&mut self, from: usize, to: usize) {
+        let shuffle = *self.shuffle.peek();
+        let len = if shuffle {
+            self.shuffle_order.len()
+        } else {
+            self.queue.peek().len()
+        };
 
-    fn move_physical_queue_item(&mut self, from: usize, to: usize) {
-        let len = self.queue.peek().len();
         if from >= len || to >= len || from == to {
             return;
         }
 
-        if *self.shuffle.peek() {
+        if shuffle {
             self.shuffle_order.with_mut(|so| so.swap(from, to));
+        } else {
+            self.queue.with_mut(|so| so.swap(from, to));
+        }
+
+        let current_idx = *self.current_queue_index.peek();
+        if current_idx == from {
+            self.current_queue_index.set(to);
+        } else if current_idx == to {
+            self.current_queue_index.set(from);
+        }
+
+        self.history.with_mut(|history| {
+            for idx in history.iter_mut() {
+                if *idx == from {
+                    *idx = to;
+                } else if *idx == to {
+                    *idx = from;
+                }
+            }
+        });
+    }
+
+    pub fn move_queue_item(&mut self, from: usize, to: usize) {
+        let shuffle = *self.shuffle.peek();
+        let len = if shuffle {
+            self.shuffle_order.len()
+        } else {
+            self.queue.peek().len()
+        };
+
+        if from >= len || to >= len || from == to {
             return;
         }
 
+        if shuffle {
+            let idx = self.shuffle_order.remove(from);
+            self.shuffle_order.insert(to, idx);
+
+            let current_idx = *self.current_queue_index.peek();
+            self.current_queue_index
+                .set(Self::remap_queue_index(current_idx, from, to));
+
+            self.history.with_mut(|history| {
+                for idx in history.iter_mut() {
+                    *idx = Self::remap_queue_index(*idx, from, to);
+                }
+            });
+        } else {
+            self.move_physical_queue_item(from, to);
+        }
+    }
+
+    /// Does not check bounds. use `move_queue_item` instead.
+    fn move_physical_queue_item(&mut self, from: usize, to: usize) {
         self.queue.with_mut(|queue| {
             let track = queue.remove(from);
             queue.insert(to, track);

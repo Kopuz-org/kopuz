@@ -1493,11 +1493,13 @@ fn App() -> Element {
         ));
     });
 
-    let theme_class = if config.read().theme == "album-art" {
-        "theme-default".to_string()
-    } else {
-        format!("theme-{}", config.read().theme)
-    };
+    let theme_class = use_memo(move || {
+        if config.read().theme == "album-art" {
+            "theme-default".to_string()
+        } else {
+            format!("theme-{}", config.read().theme)
+        }
+    });
 
     let is_rtl = i18n::is_rtl();
     let dir = if is_rtl { "rtl" } else { "ltr" };
@@ -1505,11 +1507,17 @@ fn App() -> Element {
     #[cfg(not(target_arch = "wasm32"))]
     let update_banner_state = update_banner.read().clone();
 
-    let background_style = if config.read().theme == "album-art" {
-        utils::color::get_background_style(palette.read().as_deref())
-    } else {
-        "background-color: var(--color-black); background-image: none;".to_string()
-    };
+    let background_style = use_memo(move || {
+        if config.read().theme == "album-art" {
+            utils::color::get_background_style(palette.read().as_deref())
+        } else {
+            "background-color: var(--color-black); background-image: none;".to_string()
+        }
+    });
+
+    let reduce_animations = use_memo(move || config.read().reduce_animations);
+    let active_source = use_memo(move || config.read().active_source);
+
     rsx! {
         document::Link { rel: "icon", href: FAVICON }
         document::Link { rel: "stylesheet", href: MAIN_CSS }
@@ -1531,7 +1539,7 @@ fn App() -> Element {
             class: "flex flex-col h-screen text-white select-none {theme_class}",
             style: "{background_style}",
             dir: "{dir}",
-            "data-reduce-animations": "{config.read().reduce_animations}",
+            "data-reduce-animations": "{reduce_animations}",
             tabindex: "0",
             autofocus: true,
             onkeydown: move |evt| {
@@ -1546,7 +1554,8 @@ fn App() -> Element {
             if cfg!(any(target_os = "linux", target_os = "windows")) {
                 div { dir: "ltr", Titlebar {} }
             }
-            if config.read().active_source == config::MusicSource::Local {
+
+            if active_source == config::MusicSource::Local {
                 if let Some(file) = scan_current_file.read().clone() {
                     div {
                         class: "flex-shrink-0",
