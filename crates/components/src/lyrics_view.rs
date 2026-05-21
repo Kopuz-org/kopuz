@@ -83,32 +83,25 @@ pub fn LyricsView(
             if let Some(Some(utils::lyrics::Lyrics::Synced(lines))) = lyrics {
                 let mut sleep_duration_ms: u64;
 
-                let mut time_map = lines
-                    .iter()
-                    .enumerate()
-                    .map(|(i, l)| (i, l.start_time))
-                    .collect::<Vec<_>>();
-                // Can be removed if we are sure that the lyrics are always already sorted
-                time_map.sort_by(|a, b| a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal));
+                let times = lines.iter().map(|l| l.start_time).collect::<Vec<_>>();
 
                 loop {
                     let current_time = ctrl.displayed_progress_secs_f64();
-                    if let Some(sorted_idx) =
+                    if let Some(current_line_index) =
                         // Binary search to find the next line to display
                         // `partition_point` returns the index of the first element that is greater or equal than `current_time`
                         // so we subtract 1 to get the index of the last element that is less than to `current_time`.
                         // 0 means that the first element is greater or equal than `current_time`, so we are before the first line.
-                        match time_map.partition_point(|(_, t)| *t < current_time) {
+                        match times.partition_point(|&t| t < current_time) {
                                 0 => None,
                                 n => Some(n - 1),
                             }
                     {
-                        let line_idx = time_map[sorted_idx].0;
-                        let _ = eval(&format!("window.__{layout}_updateLyrics({line_idx})"));
+                        let _ = eval(&format!("window.__{layout}_updateLyrics({current_line_index})"));
 
-                        sleep_duration_ms = time_map
-                            .get(sorted_idx.saturating_add(1))
-                            .map(|(_, next_time)| {
+                        sleep_duration_ms = times
+                            .get(current_line_index.saturating_add(1))
+                            .map(|next_time| {
                                 ((*next_time - current_time) * 1000.0).max(16.0).min(50.0) as u64
                             })
                             .unwrap_or(50);
