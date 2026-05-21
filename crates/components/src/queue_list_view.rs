@@ -335,7 +335,10 @@ pub fn QueueListView(
     };
 
     let queue_count = items.len();
-    let queue_duration: u64 = items.iter().map(|t| t.duration).sum();
+    let queue_duration: u64 = items
+        .iter()
+        .filter_map(|t| (t.duration != u64::MAX).then_some(t.duration))
+        .fold(0, |acc, d| acc.saturating_add(d));
 
     rsx! {
         style {
