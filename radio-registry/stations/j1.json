@@ -11,7 +11,7 @@
   "metadata": {
     "type": "rest",
     "url": "https://json.j1fm.tokyo/whatweplay.json",
-    "poll_interval_secs": 2,
+    "poll_interval_secs": 20,
     "entry_selector": {
       "array_path": "station",
       "match_field": "name",

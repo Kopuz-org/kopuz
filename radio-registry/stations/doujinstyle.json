@@ -10,7 +10,7 @@
   "metadata": {
     "type": "rest",
     "url": "https://public.radio.co/api/v2/s5ff57669c/track/current",
-    "poll_interval_secs": 5,
+    "poll_interval_secs": 15,
     "mapping": {
       "title": "data.track_title",
       "artist": "data.track_artist",

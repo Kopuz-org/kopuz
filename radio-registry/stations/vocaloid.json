@@ -10,7 +10,7 @@
   "metadata": {
     "type": "rest",
     "url": "https://feed.platform.prod.us-west-2.tunein.com/profiles/s221579/nowPlaying",
-    "poll_interval_secs": 10,
+    "poll_interval_secs": 300,
     "mapping": {
       "title": "Primary.Title",
       "artist": "Primary.Subtitle",
