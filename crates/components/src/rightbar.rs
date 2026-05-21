@@ -239,10 +239,10 @@ pub fn Rightbar(
                 };
 
                 const isRightbarDrop = (event) => {
-                    const direct = event.target && event.target.closest && event.target.closest('#kopuz-rightbar-dropzone');
+                    const direct = event.target && event.target.closest && event.target.closest('#rightbar-dropzone');
                     if (direct) return true;
                     const hovered = document.elementFromPoint(event.clientX, event.clientY);
-                    return !!(hovered && hovered.closest && hovered.closest('#kopuz-rightbar-dropzone'));
+                    return !!(hovered && hovered.closest && hovered.closest('#rightbar-dropzone'));
                 };
 
                 document.addEventListener('dragstart', (event) => {
@@ -279,7 +279,7 @@ pub fn Rightbar(
                     window.__kopuzRightbarOutsideMouseUpInstalled = true;
                     document.addEventListener('mouseup', (event) => {
                         const target = event.target;
-                        const insideRightbar = !!(target && target.closest && target.closest('#kopuz-rightbar-root'));
+                        const insideRightbar = !!(target && target.closest && target.closest('#rightbar-root'));
                         if (!insideRightbar) {
                             dioxus.send('outside');
                         }
@@ -389,7 +389,7 @@ pub fn Rightbar(
 
     rsx! {
         div {
-            id: "kopuz-rightbar-root",
+            id: "rightbar-root",
             class: "bg-black/40 border-l border-white/5 flex flex-col h-full flex-shrink-0 z-10 relative",
             style: "width: {width}px; min-width: {width}px;",
             onmouseleave: move |_| {
@@ -446,7 +446,7 @@ pub fn Rightbar(
             }
 
             div {
-                id: "kopuz-rightbar-dropzone",
+                id: "rightbar-dropzone",
                 class: "flex-1 overflow-y-auto px-2 py-2 space-y-1 relative",
 
                 if *active_tab.read() == 2 {
