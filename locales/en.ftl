@@ -360,6 +360,12 @@ back_behavior_rewind = REWIND → PREV
 back_behavior_always_prev = ALWAYS PREV
 
 metadata = Metadata
+auto_fetch_covers = Auto-fetch album covers
+cover_fetch_strategy = Cover fetch strategy
+musicbrainz_first = MusicBrainz first
+lastfm_first = Last.fm first
+musicbrainz_only = MusicBrainz only
+lastfm_only = Last.fm only
 artist_photo_source = Artist Photo Source
 artist_photo = Artist Photo
 album_cover = Album Cover
