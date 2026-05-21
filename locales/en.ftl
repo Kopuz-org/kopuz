@@ -366,6 +366,7 @@ musicbrainz_first = MusicBrainz first
 lastfm_first = Last.fm first
 musicbrainz_only = MusicBrainz only
 lastfm_only = Last.fm only
+remove_cover = Remove cover
 artist_photo_source = Artist Photo Source
 artist_photo = Artist Photo
 album_cover = Album Cover

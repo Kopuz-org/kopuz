@@ -18,6 +18,14 @@ pub fn AlbumDetails(
     let album_title = album.title.clone();
     let album_artist = album.artist.clone();
     let cover_url = utils::format_artwork_url(album.cover_path.as_ref());
+    let current_cover = album.cover_path.clone();
+    let current_manual = album.manual_cover;
+    let cover_cache = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
+        .map(|d| d.cache_dir().join("covers"))
+        .unwrap_or_else(|| PathBuf::from("./cache/covers"));
+    let lib_path = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
+        .map(|d| d.config_dir().join("library.json"))
+        .unwrap_or_else(|| PathBuf::from("./config/library.json"));
 
     let mut tracks: Vec<_> = lib
         .tracks
@@ -38,6 +46,56 @@ pub fn AlbumDetails(
 
     let tracks_for_delete = tracks.clone();
     let aid = album_id.clone();
+    let cover_reset_action = if current_cover.is_some() {
+        let aid = aid.clone();
+        let rollback_cover = current_cover.clone();
+        let delete_cover = current_cover.clone();
+        let cover_cache = cover_cache.clone();
+        let lib_path = lib_path.clone();
+        Some(rsx! {
+            button {
+                class: "inline-flex items-center justify-center h-9 w-9 rounded-full text-sm font-medium transition-colors border border-white/12 hover:bg-white/10",
+                style: "color: var(--color-white); opacity: 0.6;",
+                aria_label: i18n::t("remove_cover").to_string(),
+                title: i18n::t("remove_cover").to_string(),
+                onclick: move |_| {
+                    let aid = aid.clone();
+                    let delete_cover = delete_cover.clone();
+                    let rollback_cover = rollback_cover.clone();
+                    let cover_cache = cover_cache.clone();
+                    let lib_path = lib_path.clone();
+                    let current_manual = current_manual;
+                    spawn(async move {
+                        let old_cover = delete_cover;
+                        {
+                            let mut lib = library.write();
+                            if let Some(album) = lib.albums.iter_mut().find(|a| a.id == aid) {
+                                album.cover_path = None;
+                                album.manual_cover = false;
+                            }
+                        }
+
+                        if library.read().save(&lib_path).is_ok() {
+                            if let Some(path) = old_cover {
+                                if path.starts_with(&cover_cache) {
+                                    let _ = tokio::fs::remove_file(&path).await;
+                                }
+                            }
+                        } else {
+                            let mut lib = library.write();
+                            if let Some(album) = lib.albums.iter_mut().find(|a| a.id == aid) {
+                                album.cover_path = rollback_cover;
+                                album.manual_cover = current_manual;
+                            }
+                        }
+                    });
+                },
+                i { class: "fa-solid fa-trash text-xs" }
+            }
+        })
+    } else {
+        None
+    };
 
     rsx! {
         crate::track_list_view::TrackListView {
@@ -96,6 +154,7 @@ pub fn AlbumDetails(
                     }
                 });
             },
+            actions: cover_reset_action,
             on_delete_track: move |idx: usize| {
                 if let Some(t) = tracks_for_delete.get(idx) {
                     #[cfg(not(target_arch = "wasm32"))]
