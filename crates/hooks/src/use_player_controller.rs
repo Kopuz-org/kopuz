@@ -1724,12 +1724,18 @@ impl PlayerController {
 
     // Swaps two queue items, taking into account shuffle state and current queue index
     pub fn swap_queue_item(&mut self, from: usize, to: usize) {
-        let len = self.queue.peek().len();
+        let shuffle = *self.shuffle.peek();
+        let len = if shuffle {
+            self.shuffle_order.len()
+        } else {
+            self.queue.peek().len()
+        };
+
         if from >= len || to >= len || from == to {
             return;
         }
 
-        if *self.shuffle.peek() {
+        if shuffle {
             self.shuffle_order.with_mut(|so| so.swap(from, to));
         } else {
             self.queue.with_mut(|so| so.swap(from, to));
@@ -1754,12 +1760,18 @@ impl PlayerController {
     }
 
     pub fn move_queue_item(&mut self, from: usize, to: usize) {
-        let len = self.queue.peek().len();
+        let shuffle = *self.shuffle.peek();
+        let len = if shuffle {
+            self.shuffle_order.len()
+        } else {
+            self.queue.peek().len()
+        };
+
         if from >= len || to >= len || from == to {
             return;
         }
 
-        if *self.shuffle.peek() {
+        if shuffle {
             let idx = self.shuffle_order.remove(from);
             self.shuffle_order.insert(to, idx);
 
