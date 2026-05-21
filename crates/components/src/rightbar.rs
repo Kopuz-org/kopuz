@@ -408,6 +408,36 @@ pub fn Rightbar(
 
             div {
                 class: "flex items-center justify-between px-4 py-4 border-b border-white/10",
+                // more safety while dragging
+                onmouseenter: move |_| {
+                    is_queue_drag_over.set(false);
+                    queue_drop_index.set(None);
+                },
+                onmousemove: move |_| {
+                    is_queue_drag_over.set(false);
+                    queue_drop_index.set(None);
+                },
+                onmouseup: move |_| {
+                    is_queue_drag_over.set(false);
+                    queue_drop_index.set(None);
+                    cancel_dragged_queue_track();
+                },
+                ondragenter: move |evt| {
+                    evt.prevent_default();
+                    is_queue_drag_over.set(false);
+                    queue_drop_index.set(None);
+                },
+                ondragover: move |evt| {
+                    evt.prevent_default();
+                    is_queue_drag_over.set(false);
+                    queue_drop_index.set(None);
+                },
+                ondrop: move |evt| {
+                    evt.prevent_default();
+                    is_queue_drag_over.set(false);
+                    queue_drop_index.set(None);
+                    cancel_dragged_queue_track();
+                },
                 div {
                     class: "flex items-center gap-1",
                     button {
