@@ -149,8 +149,8 @@ pub fn LocalFavorites(
                 }
             });
 
-    let all_selected = !displayed_tracks.is_empty()
-        && displayed_tracks
+    let all_selected = !sorted_displayed_tracks.is_empty()
+        && sorted_displayed_tracks
             .iter()
             .all(|(track, _)| selected_tracks.read().contains(&track.path));
 
