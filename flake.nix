@@ -26,36 +26,25 @@
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
       pkgsForEach = system: nixpkgs.legacyPackages.${system}.extend rust-overlay.overlays.default;
+      mkCraneLib =
+        pkgs:
+        (crane.mkLib pkgs).overrideToolchain (
+          p:
+          # We use the rust-overlay to get the stable Rust toolchain for various targets.
+          # This is not exactly necessary, but it allows for compiling for various targets
+          # with the least amount of friction. Using a rust-toolchain.toml also allows us
+          # to provide a stable toolchain for non-NixOS users as well.
+          (p.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml)
+        );
     in
     {
       devShells = forAllSystems (
         system:
         let
           pkgs = pkgsForEach system;
-
-          # Scoped sharedArgs in one so to not leak into 'pkgs'
-          sharedArgs = {
-            buildInputs = with pkgs; [
-              webkitgtk_4_1
-              gtk3
-              libsoup_3
-              glib-networking
-              wayland
-              alsa-lib
-              xdotool
-              openssl
-            ];
-
-            rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-              extensions = [
-                "rust-src"
-                "rust-analyzer"
-              ];
-            };
-          };
         in
         {
-          default = pkgs.callPackage ./packaging/nix/shell.nix { inherit sharedArgs; };
+          default = pkgs.callPackage ./packaging/nix/shell.nix { inherit self; };
         }
       );
 
@@ -63,16 +52,11 @@
         system:
         let
           pkgs = pkgsForEach system;
-          craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
-          rustToolchain = pkgs.rust-bin.stable.latest.default.override {
-            extensions = [
-              "rust-src"
-              "rust-analyzer"
-            ];
-          };
+          craneLib = mkCraneLib pkgs;
         in
         {
-          default = pkgs.callPackage ./packaging/nix/crane.nix { inherit craneLib; };
+          kopuz = pkgs.callPackage ./packaging/nix/crane.nix { inherit craneLib; };
+          default = self.packages.${system}.kopuz;
         }
       );
 
