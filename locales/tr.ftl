@@ -366,6 +366,13 @@ metadata = Meta veri
 artist_photo_source = Sanatçı fotoğraf kaynağı
 artist_photo = Sanatçı fotoğrafı
 album_cover = Albüm kapağı
+auto_fetch_covers = Albüm kapaklarını otomatik getir
+cover_fetch_strategy = Kapak getirme stratejisi
+musicbrainz_first = Önce MusicBrainz
+lastfm_first = Önce Last.fm
+musicbrainz_only = Yalnızca MusicBrainz
+lastfm_only = Yalnızca Last.fm
+remove_cover = Kapağı kaldır
 
 # Radio Page
 radio_filter_stations = İstasyonları filtrele…

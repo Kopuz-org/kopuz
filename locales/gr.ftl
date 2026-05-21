@@ -366,6 +366,13 @@ metadata = Μεταδεδομένα
 artist_photo_source = Πηγή φωτογραφίας καλλιτέχνη
 artist_photo = Φωτογραφία καλλιτέχνη
 album_cover = Εξώφυλλο άλμπουμ
+auto_fetch_covers = Αυτόματη λήψη εξωφύλλων άλμπουμ
+cover_fetch_strategy = Στρατηγική λήψης εξωφύλλων
+musicbrainz_first = MusicBrainz πρώτα
+lastfm_first = Last.fm πρώτα
+musicbrainz_only = Μόνο MusicBrainz
+lastfm_only = Μόνο Last.fm
+remove_cover = Αφαίρεση εξωφύλλου
 
 # Radio Page
 radio_filter_stations = Φιλτράρισμα σταθμών…

@@ -366,6 +366,13 @@ metadata = 메타데이터
 artist_photo_source = 아티스트 사진 출처
 artist_photo = 아티스트 사진
 album_cover = 앨범 커버
+auto_fetch_covers = 앨범 커버 자동 가져오기
+cover_fetch_strategy = 커버 가져오기 전략
+musicbrainz_first = MusicBrainz 우선
+lastfm_first = Last.fm 우선
+musicbrainz_only = MusicBrainz만
+lastfm_only = Last.fm만
+remove_cover = 커버 제거
 
 # Radio Page
 radio_filter_stations = 스테이션 필터링…

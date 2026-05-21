@@ -372,6 +372,13 @@ metadata = بيانات وصفية
 artist_photo_source = مصدر صورة الفنان
 artist_photo = صورة الفنان
 album_cover = غلاف الألبوم
+auto_fetch_covers = الجلب التلقائي لأغلفة الألبومات
+cover_fetch_strategy = استراتيجية جلب الغلاف
+musicbrainz_first = MusicBrainz أولاً
+lastfm_first = Last.fm أولاً
+musicbrainz_only = MusicBrainz فقط
+lastfm_only = Last.fm فقط
+remove_cover = إزالة الغلاف
 
 # Radio Page
 radio_filter_stations = تصفية المحطات…
