@@ -1,5 +1,6 @@
 use crate::lyrics_view::LyricsView;
 use crate::queue_list_view::QueueListView;
+use crate::reorder_buttons::ReorderButtons;
 use crate::shared::fmt_time;
 use crate::titlebar::Titlebar;
 use config::AppConfig;

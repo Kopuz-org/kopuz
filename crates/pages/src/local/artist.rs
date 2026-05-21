@@ -46,8 +46,7 @@ pub fn LocalArtist(
     let local_artists = use_memo(move || {
         let lib = library.read();
         let use_artist_photo = config.read().artist_photo_source == ArtistPhotoSource::ArtistPhoto;
-        let mut artist_map: HashMap<String, (String, Option<std::path::PathBuf>)> =
-            HashMap::new();
+        let mut artist_map: HashMap<String, (String, Option<std::path::PathBuf>)> = HashMap::new();
         for album in &lib.albums {
             artist_map
                 .entry(normalize_artist_key(&album.artist))

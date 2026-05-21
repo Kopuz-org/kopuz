@@ -113,6 +113,11 @@ playlist_name_placeholder = Όνομα λίστας αναπαραγωγής
 playlist_name_input = Όνομα Λίστας Αναπαραγωγής
 add_media_server = Προσθήκη Διακομιστή Μέσων
 media_server = Διακομιστής Μέσων
+media_servers = Διακομιστές Μέσων
+saved_servers = Αποθηκευμένοι Διακομιστές
+switch_to_server = Εναλλαγή
+active_server = Ενεργός
+no_saved_servers = Δεν υπάρχουν αποθηκευμένοι διακομιστές
 jellyfin = Jellyfin
 subsonic = Subsonic
 custom_manual = Προσαρμοσμένο (χειροκίνητο API)
@@ -383,3 +388,19 @@ update_banner_message = Το Kopuz { $version } είναι διαθέσιμο.
 view_release = Προβολή έκδοσης
 
 volume_scroll_step = Βήμα κύλισης έντασης
+
+# Radio Registries
+radio_registry_url_placeholder = Διεύθυνση URL ή τοπική διαδρομή για το index.json
+add_radio_registry = Προσθήκη Μητρώου Ραδιοφώνου
+radio_default_registry = Προεπιλεγμένο Μητρώο
+
+
+radio_registry_empty_path = Η διαδρομή μητρώου δεν μπορεί να είναι κενή
+radio_registry_exists = Το μητρώο υπάρχει ήδη
+radio_registry_import_failed = Αποτυχία εισαγωγής μητρώου: { $error }
+radio_registry_enable_failed = Αποτυχία ενεργοποίησης μητρώου: { $error }
+radio_registries_active = { $enabled_count }/{ $total } ενεργά
+radio_registries_empty = Δεν έχουν ρυθμιστεί μητρώα
+offline_downloads = Λήψεις εκτός σύνδεσης
+download_quality = Ποιότητα λήψης
+saving = Αποθήκευση...

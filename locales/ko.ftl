@@ -113,6 +113,11 @@ playlist_name_placeholder = 재생목록 이름
 playlist_name_input = 재생목록 이름
 add_media_server = 미디어 서버 추가
 media_server = 미디어 서버
+media_servers = 미디어 서버
+saved_servers = 저장된 서버
+switch_to_server = 전환
+active_server = 활성
+no_saved_servers = 저장된 서버 없음
 jellyfin = Jellyfin
 subsonic = Subsonic
 custom_manual = 사용자 지정(수동 API)
@@ -383,3 +388,19 @@ update_banner_message = Kopuz { $version }을(를) 사용할 수 있습니다.
 view_release = 릴리스 보기
 
 volume_scroll_step = 볼륨 스크롤 단계
+
+# Radio Registries
+radio_registry_url_placeholder = index.json의 URL 또는 로컬 경로
+add_radio_registry = 라디오 레지스트리 추가
+radio_default_registry = 기본 레지스트리
+
+
+radio_registry_empty_path = 레지스트리 경로를 비워둘 수 없습니다
+radio_registry_exists = 레지스트리가 이미 존재합니다
+radio_registry_import_failed = 레지스트리 가져오기 실패: { $error }
+radio_registry_enable_failed = 레지스트리 활성화 실패: { $error }
+radio_registries_active = { $enabled_count }/{ $total }개 활성화됨
+radio_registries_empty = 구성된 레지스트리가 없습니다
+offline_downloads = 오프라인 다운로드
+download_quality = 다운로드 품질
+saving = 저장 중...

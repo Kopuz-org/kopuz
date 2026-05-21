@@ -32,7 +32,11 @@ pub fn BottombarNormal(
     let initial_volume = *volume.read();
     let mut is_muted = use_signal(move || initial_volume <= f32::EPSILON);
     let mut volume_before_mute = use_signal(move || {
-        if initial_volume > f32::EPSILON { initial_volume } else { 0.5f32 }
+        if initial_volume > f32::EPSILON {
+            initial_volume
+        } else {
+            0.5f32
+        }
     });
 
     let display_progress = if *is_dragging.read() {
@@ -58,7 +62,11 @@ pub fn BottombarNormal(
     } else {
         "ml-2 text-slate-400 hover:text-red-400 transition-colors"
     };
-    let heart_icon = if is_favorite { "fa-solid fa-heart" } else { "fa-regular fa-heart" };
+    let heart_icon = if is_favorite {
+        "fa-solid fa-heart"
+    } else {
+        "fa-regular fa-heart"
+    };
 
     let position = config.read().player_bar_position;
     let border_class = match position {

@@ -113,6 +113,11 @@ playlist_name_placeholder = שם רשימת ההשמעה
 playlist_name_input = שם רשימת השמעה
 add_media_server = הוספת שרת מדיה
 media_server = שרת מדיה
+media_servers = שרתי מדיה
+saved_servers = שרתים שמורים
+switch_to_server = החלפה
+active_server = פעיל
+no_saved_servers = אין שרתים שמורים
 jellyfin = Jellyfin
 subsonic = Subsonic
 custom_manual = מותאם אישית (API ידני)
@@ -383,3 +388,19 @@ update_banner_message = ‏Kopuz { $version } זמין.
 view_release = הצג גרסה
 
 volume_scroll_step = צעד גלילת עוצמה
+
+# Radio Registries
+radio_registry_url_placeholder = כתובת URL או נתיב מקומי אל index.json
+add_radio_registry = הוסף רשם רדיו
+radio_default_registry = רשם ברירת מחדל
+
+
+radio_registry_empty_path = נתיב הרשומה אינו יכול להיות ריק
+radio_registry_exists = הרשומה כבר קיימת
+radio_registry_import_failed = ייבוא הרשומה נכשל: { $error }
+radio_registry_enable_failed = הפעלת הרשומה נכשלה: { $error }
+radio_registries_active = { $enabled_count }/{ $total } פעילים
+radio_registries_empty = לא הוגדרו רשומות
+offline_downloads = הורדות לא מקוונות
+download_quality = איכות הורדה
+saving = שומר...

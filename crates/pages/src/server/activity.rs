@@ -25,7 +25,10 @@ pub fn JellyfinLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Elem
             .map(|a| (a.id.clone(), a.genre.clone()))
             .collect();
 
-        let cover_url_base = conf.server.as_ref().map(|s| (s.url.clone(), s.access_token.clone()));
+        let cover_url_base = conf
+            .server
+            .as_ref()
+            .map(|s| (s.url.clone(), s.access_token.clone()));
 
         let mut all_tracks = lib.jellyfin_tracks.clone();
 
@@ -56,25 +59,31 @@ pub fn JellyfinLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Elem
                     .get(&track.album_id)
                     .cloned()
                     .unwrap_or_default();
-                let cover_url = cover_url_base.as_ref().map(|(url, token)| {
-                    utils::jellyfin_image::track_cover_url_with_album_fallback(
-                        &track_id,
-                        &track.album_id,
-                        url,
-                        token.as_deref(),
-                        80,
-                        80,
-                    )
-                }).flatten();
+                let cover_url = cover_url_base
+                    .as_ref()
+                    .map(|(url, token)| {
+                        utils::jellyfin_image::track_cover_url_with_album_fallback(
+                            &track_id,
+                            &track.album_id,
+                            url,
+                            token.as_deref(),
+                            80,
+                            80,
+                        )
+                    })
+                    .flatten();
                 (track, plays, genre, cover_url)
             })
             .collect::<Vec<(Track, u64, String, Option<String>)>>()
     });
 
     let is_modern = config.read().ui_style == UiStyle::Modern;
-    let mut scroll_positions =
-        use_context::<Signal<std::collections::HashMap<Route, f64>>>();
-    let saved_scroll = scroll_positions.peek().get(&Route::Activity).copied().unwrap_or(0.0);
+    let mut scroll_positions = use_context::<Signal<std::collections::HashMap<Route, f64>>>();
+    let saved_scroll = scroll_positions
+        .peek()
+        .get(&Route::Activity)
+        .copied()
+        .unwrap_or(0.0);
 
     rsx! {
         div {

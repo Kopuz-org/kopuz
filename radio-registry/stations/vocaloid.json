@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "id": "vocaloid",
+  "name": "Vocaloid Radio",
+  "description": "radio_vocaloid_desc",
+  "icon": "fa-solid fa-radio",
+  "streams": [
+    { "id": "main", "name": "radio_live_stream", "url": "https://vocaloid.radioca.st/stream", "icon": "fa-solid fa-play" }
+  ],
+  "metadata": {
+    "type": "rest",
+    "url": "https://feed.platform.prod.us-west-2.tunein.com/profiles/s221579/nowPlaying",
+    "poll_interval_secs": 300,
+    "mapping": {
+      "title": "Primary.Title",
+      "artist": "Primary.Subtitle",
+      "artwork_url": "Primary.Image"
+    }
+  }
+}

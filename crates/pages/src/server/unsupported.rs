@@ -2,8 +2,12 @@ use dioxus::prelude::*;
 
 #[component]
 pub fn UnsupportedServerView(service_name: String, feature: &'static str) -> Element {
-    let unsupported_msg = i18n::t_with("unsupported_provider", &[("service", service_name.clone())]);
-    let unsupported_desc = i18n::t_with("unsupported_provider_desc", &[("service", service_name.clone())]);
+    let unsupported_msg =
+        i18n::t_with("unsupported_provider", &[("service", service_name.clone())]);
+    let unsupported_desc = i18n::t_with(
+        "unsupported_provider_desc",
+        &[("service", service_name.clone())],
+    );
 
     rsx! {
         div {

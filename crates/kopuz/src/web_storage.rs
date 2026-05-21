@@ -1,9 +1,9 @@
 #[cfg(target_arch = "wasm32")]
 use crate::queue_state::PersistedQueueState;
 #[cfg(target_arch = "wasm32")]
-use reader::FavoritesStore;
-#[cfg(target_arch = "wasm32")]
 use kopuz_route::Route;
+#[cfg(target_arch = "wasm32")]
+use reader::FavoritesStore;
 
 #[cfg(target_arch = "wasm32")]
 const WEB_CONFIG_STORAGE_KEY: &str = "kopuz.config.v1";
@@ -211,7 +211,10 @@ pub fn load_web_queue_state() -> Option<PersistedQueueState> {
     let storage = web_sys::window()
         .and_then(|w| w.local_storage().ok())
         .flatten()?;
-    let raw = storage.get_item(WEB_QUEUE_STATE_STORAGE_KEY).ok().flatten()?;
+    let raw = storage
+        .get_item(WEB_QUEUE_STATE_STORAGE_KEY)
+        .ok()
+        .flatten()?;
     serde_json::from_str::<PersistedQueueState>(&raw).ok()
 }
 

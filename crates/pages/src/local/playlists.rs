@@ -78,10 +78,18 @@ pub fn LocalPlaylists(
     let cover_for = |pid: &str| -> Option<utils::CoverUrl> {
         let store = playlist_store.read();
         let playlist = store.playlists.iter().find(|p| p.id == pid)?;
-        let first_path = playlist.tracks.first()?;
-        let track = lib.tracks.iter().find(|t| t.path == *first_path)?;
-        let album = lib.albums.iter().find(|a| a.id == track.album_id)?;
-        utils::format_artwork_url(album.cover_path.as_ref())
+
+        playlist
+            .cover_path
+            .as_ref()
+            .and_then(|path| utils::format_artwork_url(Some(path)))
+            .or_else(|| {
+                let first_path = playlist.tracks.first()?;
+                let track = lib.tracks.iter().find(|t| t.path == *first_path)?;
+                let album = lib.albums.iter().find(|a| a.id == track.album_id)?;
+
+                utils::format_artwork_url(album.cover_path.as_ref())
+            })
     };
 
     rsx! {

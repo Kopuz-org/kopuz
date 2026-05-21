@@ -168,6 +168,11 @@ playlist_name_placeholder = Nama Playlist
 playlist_name_input = Nama Playlist
 add_media_server = Tambah Server Media
 media_server = Server Media
+media_servers = Server Media
+saved_servers = Server Tersimpan
+switch_to_server = Ganti
+active_server = Aktif
+no_saved_servers = Tidak ada server tersimpan
 jellyfin = Jellyfin
 subsonic = Subsonic
 custom_manual = Kustom (API manual)
@@ -382,3 +387,19 @@ update_banner_message = Kopuz { $version } tersedia.
 view_release = Lihat rilis
 
 volume_scroll_step = Langkah Gulir Volume
+
+# Radio Registries
+radio_registry_url_placeholder = URL atau jalur lokal ke index.json
+add_radio_registry = Tambah Registri Radio
+radio_default_registry = Registri Default
+
+
+radio_registry_empty_path = Jalur registri tidak boleh kosong
+radio_registry_exists = Registri sudah ada
+radio_registry_import_failed = Gagal mengimpor registri: { $error }
+radio_registry_enable_failed = Gagal mengaktifkan registri: { $error }
+radio_registries_active = { $enabled_count }/{ $total } aktif
+radio_registries_empty = Tidak ada registri yang dikonfigurasi
+offline_downloads = Unduhan Offline
+download_quality = Kualitas Unduhan
+saving = Menyimpan...

@@ -6,10 +6,10 @@ use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::WindowsAndMessaging::{
     CallWindowProcW, DefWindowProcW, EnableMenuItem, GWL_STYLE, GWLP_WNDPROC, GetSystemMenu,
-    GetWindowLongPtrW, GetWindowRect, HTCAPTION, HTCLIENT, HTMAXBUTTON, HTSYSMENU,
-    MF_BYCOMMAND, MF_ENABLED, MF_GRAYED, SC_MAXIMIZE, SC_MOVE, SC_RESTORE, SC_SIZE,
-    SetWindowLongPtrW, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_NCHITTEST,
-    WM_NCRBUTTONUP, WM_SYSCOMMAND, WNDPROC, WS_MAXIMIZE,
+    GetWindowLongPtrW, GetWindowRect, HTCAPTION, HTCLIENT, HTMAXBUTTON, HTSYSMENU, MF_BYCOMMAND,
+    MF_ENABLED, MF_GRAYED, SC_MAXIMIZE, SC_MOVE, SC_RESTORE, SC_SIZE, SetWindowLongPtrW,
+    TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenu, WM_NCHITTEST, WM_NCRBUTTONUP, WM_SYSCOMMAND,
+    WNDPROC, WS_MAXIMIZE,
 };
 
 static CUSTOM_TITLEBAR_ENABLED: AtomicBool = AtomicBool::new(false);
@@ -48,13 +48,7 @@ pub fn install(hwnd: HWND) {
         }
     }
 
-    let prev = unsafe {
-        SetWindowLongPtrW(
-            hwnd,
-            GWLP_WNDPROC,
-            titlebar_wndproc as usize as isize,
-        )
-    };
+    let prev = unsafe { SetWindowLongPtrW(hwnd, GWLP_WNDPROC, titlebar_wndproc as usize as isize) };
 
     if prev != 0 {
         state.hwnd = Some(hwnd.0 as isize);

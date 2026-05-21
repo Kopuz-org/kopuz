@@ -113,6 +113,11 @@ playlist_name_placeholder = Nume listă de redare
 playlist_name_input = Nume Listă de Redare
 add_media_server = Adaugă Server Media
 media_server = Server Media
+media_servers = Servere Media
+saved_servers = Servere Salvate
+switch_to_server = Comută
+active_server = Activ
+no_saved_servers = Niciun server salvat
 jellyfin = Jellyfin
 subsonic = Subsonic
 custom_manual = Personalizat (API manual)
@@ -383,3 +388,19 @@ update_banner_message = Kopuz { $version } este disponibil.
 view_release = Vezi lansarea
 
 volume_scroll_step = Pas de derulare a volumului
+
+# Radio Registries
+radio_registry_url_placeholder = URL sau cale locală către index.json
+add_radio_registry = Adaugă Registru Radio
+radio_default_registry = Registru Implicit
+
+
+radio_registry_empty_path = Calea registrului nu poate fi goală
+radio_registry_exists = Registrul există deja
+radio_registry_import_failed = Importul registrului a eșuat: { $error }
+radio_registry_enable_failed = Activarea registrului a eșuat: { $error }
+radio_registries_active = { $enabled_count }/{ $total } active
+radio_registries_empty = Niciun registru configurat
+offline_downloads = Descărcări Offline
+download_quality = Calitatea descărcării
+saving = Se salvează...

@@ -1,4 +1,4 @@
-use crate::server::download_manager::{queue_downloads, DownloadQueue, DownloadStatus};
+use crate::server::download_manager::{DownloadQueue, DownloadStatus, queue_downloads};
 use components::dots_menu::{DotsMenu, MenuAction};
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;

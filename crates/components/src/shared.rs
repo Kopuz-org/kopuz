@@ -51,7 +51,9 @@ pub fn toggle_favorite(
                 let item_id = parts[1].clone();
                 let currently_fav = favorites_store.read().is_jellyfin_favorite(&item_id);
                 let new_fav = !currently_fav;
-                favorites_store.write().set_jellyfin(item_id.clone(), new_fav);
+                favorites_store
+                    .write()
+                    .set_jellyfin(item_id.clone(), new_fav);
                 spawn(async move {
                     let server_config = {
                         let conf = config.peek();

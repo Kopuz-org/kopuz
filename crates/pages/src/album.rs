@@ -1,8 +1,8 @@
+use ::server::jellyfin::JellyfinClient;
+use ::server::subsonic::SubsonicClient;
 use config::{AppConfig, MusicService, MusicSource};
 use dioxus::prelude::*;
 use reader::{Library, PlaylistStore};
-use ::server::jellyfin::JellyfinClient;
-use ::server::subsonic::SubsonicClient;
 
 use crate::local::album::LocalAlbum;
 use crate::server::album::{ServerAlbum, ServerAlbumDetails};

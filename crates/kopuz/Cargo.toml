@@ -34,6 +34,7 @@ reader = { workspace = true }
 config = { workspace = true }
 pages = { workspace = true }
 kopuz_route = { workspace = true }
+radio = { workspace = true }
 tokio = { workspace = true }
 http = { workspace = true }
 hooks = { workspace = true }

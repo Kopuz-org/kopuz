@@ -109,6 +109,11 @@ playlist_name_placeholder = 󱥂󱥍󱦗󱤟󱤕󱦘
 playlist_name_input = 󱥂󱥍󱦗󱤟󱤕󱦘
 add_media_server = 󱥄󱥸︀󱤉󱥌
 media_server = 󱥌
+media_servers = 󱥌 󱤴
+saved_servers = 󱥌 󱥩
+switch_to_server = 󱥄󱤆
+active_server = 󱥌 󱤡
+no_saved_servers = 󱥌󱤍 󱥩
 jellyfin = Jellyfin
 subsonic = Subsonic
 custom_manual = Custom (manual API)
@@ -384,3 +389,19 @@ update_banner_message = Kopuz { $version } li lon.
 view_release = o lukin e lipu pi sin namako
 
 volume_scroll_step = nasin tawa kalama
+
+# Radio Registries
+radio_registry_url_placeholder = URL anu nasin tawa lipu index.json
+add_radio_registry = o pana e lipu kalama ilo
+radio_default_registry = lipu pi nanpa wan
+
+
+radio_registry_empty_path = nasin pi lipu ijo li ken ala ala
+radio_registry_exists = lipu ijo li lon pini
+radio_registry_import_failed = kama jo e lipu ijo li pakala: { $error }
+radio_registry_enable_failed = open e lipu ijo li pakala: { $error }
+radio_registries_active = lipu ijo { $enabled_count } tan { $total } li pali
+radio_registries_empty = lipu ijo ala li lon
+offline_downloads = ijo tawa ilo
+download_quality = pona pi ijo tawa ilo
+saving = awen...

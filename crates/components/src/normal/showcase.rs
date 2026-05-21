@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 
+use crate::constants::{COLUMNS_NORMAL, COLUMNS_NORMAL_ALBUM};
+use crate::header::Header;
 use crate::reorder_buttons::ReorderButtons;
 use crate::showcase::{self, ShowcaseProps, SortField};
 use crate::track_row::TrackRow;
@@ -63,9 +65,9 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
         });
 
     let columns = if props.is_album {
-        "20px minmax(200px, 1fr) minmax(100px,400px) 64px 40px".to_string()
+        COLUMNS_NORMAL_ALBUM
     } else {
-        "20px minmax(200px, 1fr) minmax(100px,200px) minmax(100px,200px) 64px 40px".to_string()
+        COLUMNS_NORMAL
     };
 
     rsx! {
@@ -170,64 +172,15 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                          p { class: "text-lg", "{i18n::t(\"no_songs_here\")}" }
                      }
                  } else {
-                      div { class: "flex items-center mb-2",
-                           div {
-                               class: "grid flex-1 gap-6 px-2 py-2 border-b border-white/5 text-sm font-medium text-slate-500 uppercase tracking-wider",
-                               style: "grid-template-columns: {columns}; align-items: center;",
-                               div { class: "flex justify-center items-center h-6 shrink-0",
-                                   if props.is_selection_mode {
-                                       if let Some(handler) = props.on_select_all {
-                                           div { class: "flex items-center justify-center shrink-0",
-                                               button {
-                                                   class: if props.all_selected {
-                                                       "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
-                                                   } else {
-                                                       "w-4 h-4 rounded border border-white/20 bg-white/5 hover:border-white/50 transition-colors"
-                                                   },
-                                                   aria_label: if props.all_selected { "Deselect all tracks" } else { "Select all tracks" },
-                                                   onclick: move |_| handler.call(!props.all_selected),
-                                                   if props.all_selected {
-                                                       i { class: "fa-solid fa-check", style: "font-size: 9px;" }
-                                                   }
-                                               }
-                                           }
-                                       }
-                                   } else {
-                                       "#"
-                                   }
-                               }
-                               button {
-                                   class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
-                                   onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Title),
-                                   "{i18n::t(\"title\")}"
-                                   i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Title)} text-[10px]" }
-                               }
-                               button {
-                                   class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
-                                   onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Artist),
-                                   "{i18n::t(\"artist\")}"
-                                   i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Artist)} text-[10px]" }
-                               }
-                               if !props.is_album {
-                                   button {
-                                       class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
-                                       onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Album),
-                                       "{i18n::t(\"album\")}"
-                                           i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Album)} text-[10px]" }
-                                   }
-                               }
-                               button {
-                                   class: "flex items-center justify-end gap-1 uppercase tracking-wider text-right hover:text-white transition-colors",
-                                   onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Duration),
-                                   i { class: "fa-regular fa-clock" }
-                                   i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Duration)} text-[10px]" }
-                               }
-                               div {}
-                           }
-                           if props.is_reorderable && !props.is_selection_mode {
-                               div { class: "pr-2 shrink-0", style: "width: 22px;" }
-                           }
-                      }
+                     Header {
+                         is_modern: false,
+                         is_album: props.is_album,
+                         is_selection_mode: props.is_selection_mode,
+                         on_select_all: props.on_select_all,
+                         all_selected: props.all_selected,
+                         sort_state: sort_state,
+                         is_reorderable: props.is_reorderable
+                     }
 
                      for (display_idx, (track, idx)) in sorted_track_pairs.iter().enumerate() {
                          {

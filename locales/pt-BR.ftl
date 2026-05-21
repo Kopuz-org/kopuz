@@ -168,6 +168,11 @@ playlist_name_placeholder = Nome da playlist
 playlist_name_input = Nome da playlist
 add_media_server = Adicionar servidor de mídia
 media_server = Servidor de mídia
+media_servers = Servidores de mídia
+saved_servers = Servidores salvos
+switch_to_server = Trocar
+active_server = Ativo
+no_saved_servers = Nenhum servidor salvo
 jellyfin = Jellyfin
 subsonic = Subsonic
 custom_manual = Personalizado (API manual)
@@ -382,3 +387,19 @@ update_banner_message = O Kopuz { $version } está disponível.
 view_release = Ver lançamento
 
 volume_scroll_step = Passo de rolagem do volume
+
+# Radio Registries
+radio_registry_url_placeholder = URL ou caminho local para index.json
+add_radio_registry = Adicionar Registro de Rádio
+radio_default_registry = Registro Padrão
+
+
+radio_registry_empty_path = O caminho do registro não pode estar vazio
+radio_registry_exists = O registro já existe
+radio_registry_import_failed = Falha ao importar registro: { $error }
+radio_registry_enable_failed = Falha ao ativar registro: { $error }
+radio_registries_active = { $enabled_count }/{ $total } ativos
+radio_registries_empty = Nenhum registro configurado
+offline_downloads = Downloads Offline
+download_quality = Qualidade do Download
+saving = Salvando...

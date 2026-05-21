@@ -21,6 +21,7 @@ rfd = { workspace = true }
 utils = { workspace = true }
 kopuz_route = { workspace = true }
 server = { workspace = true }
+radio = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

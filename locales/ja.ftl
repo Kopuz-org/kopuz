@@ -113,6 +113,11 @@ playlist_name_placeholder = プレイリスト名
 playlist_name_input = プレイリスト名
 add_media_server = メディアサーバーを追加
 media_server = メディアサーバー
+media_servers = メディアサーバー
+saved_servers = 保存されたサーバー
+switch_to_server = 切り替え
+active_server = アクティブ
+no_saved_servers = 保存されたサーバーはありません
 jellyfin = Jellyfin
 subsonic = Subsonic
 custom_manual = カスタム（手動API）
@@ -389,3 +394,19 @@ update_banner_message = Kopuz { $version } が利用可能です。
 view_release = リリースを見る
 
 volume_scroll_step = 音量スクロールステップ
+
+# Radio Registries
+radio_registry_url_placeholder = index.json への URL またはローカルパス
+add_radio_registry = ラジオレジストリを追加
+radio_default_registry = デフォルトレジストリ
+
+
+radio_registry_empty_path = レジストリパスを空にすることはできません
+radio_registry_exists = レジストリは既に存在します
+radio_registry_import_failed = レジストリのインポートに失敗しました: { $error }
+radio_registry_enable_failed = レジストリの有効化に失敗しました: { $error }
+radio_registries_active = { $enabled_count }/{ $total } アクティブ
+radio_registries_empty = レジストリが設定されていません
+offline_downloads = オフラインダウンロード
+download_quality = ダウンロード品質
+saving = 保存中...

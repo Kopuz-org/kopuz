@@ -88,7 +88,8 @@ pub fn PlaylistDetail(
                                                 }
                                             }
                                             let bitrate_kbps = item.bitrate.unwrap_or(0) / 1000;
-                                            let bitrate_u16 = bitrate_kbps.min(u16::MAX as u32) as u16;
+                                            let bitrate_u16 =
+                                                bitrate_kbps.min(u16::MAX as u32) as u16;
                                             let artist_str = item
                                                 .album_artist
                                                 .clone()
@@ -172,7 +173,11 @@ pub fn PlaylistDetail(
                                                 album: item.album.unwrap_or_default(),
                                                 duration: item.duration.unwrap_or(0),
                                                 khz: item.sampling_rate.unwrap_or(0),
-                                                bitrate: item.bit_rate.unwrap_or(0).min(u16::MAX as u32) as u16,
+                                                bitrate: item
+                                                    .bit_rate
+                                                    .unwrap_or(0)
+                                                    .min(u16::MAX as u32)
+                                                    as u16,
                                                 track_number: item.track,
                                                 disc_number: item.disc_number,
                                                 musicbrainz_release_id: None,

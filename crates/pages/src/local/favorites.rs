@@ -1,3 +1,5 @@
+use components::constants::{COLUMNS_MODERN, COLUMNS_NORMAL};
+use components::header::Header;
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
 use components::showcase::{self, SortField};
@@ -147,11 +149,26 @@ pub fn LocalFavorites(
                 }
             });
 
-    let columns_modern =
-        { "40px minmax(200px, 1fr) minmax(100px,200px) minmax(100px,200px) 64px 40px".to_string() };
+    let all_selected = !sorted_displayed_tracks.is_empty()
+        && sorted_displayed_tracks
+            .iter()
+            .all(|(track, _)| selected_tracks.read().contains(&track.path));
 
-    let columns_normal =
-        { "20px minmax(200px, 1fr) minmax(100px,200px) minmax(100px,200px) 64px 40px".to_string() };
+    let sorted_displayed_tracks_for_select = sorted_displayed_tracks.clone();
+    let on_select_all = move |selected: bool| {
+        if selected {
+            selected_tracks.set(
+                sorted_displayed_tracks_for_select
+                    .iter()
+                    .map(|track| track.0.path.clone())
+                    .collect(),
+            );
+            is_selection_mode.set(true);
+        } else {
+            selected_tracks.write().clear();
+            is_selection_mode.set(false);
+        }
+    };
 
     rsx! {
         div {
@@ -258,68 +275,13 @@ pub fn LocalFavorites(
                     }
                 }
             } else {
-                div {
-                    class: "flex items-center gap-3 mb-4 px-2 text-sm font-medium text-slate-500 uppercase tracking-wider",
-                    button {
-                        class: if !is_empty && displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.path)) {
-                            "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
-                        } else {
-                            "w-4 h-4 rounded border border-white/20 bg-white/5 hover:border-white/50 transition-colors"
-                        },
-                        aria_label: i18n::t("select_all_tracks"),
-                        onclick: move |_| {
-                            let all_selected = !displayed_tracks.is_empty() && displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.path));
-                            if all_selected {
-                                selected_tracks.write().clear();
-                                is_selection_mode.set(false);
-                            } else {
-                                selected_tracks.set(displayed_tracks.iter().map(|(track, _)| track.path.clone()).collect());
-                                is_selection_mode.set(true);
-                            }
-                        },
-                        if !is_empty && displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.path)) {
-                            i { class: "fa-solid fa-check", style: "font-size: 9px;" }
-                        }
-                    }
-                    span { "{i18n::t(\"select_all\")}" }
-                }
-                div {
-                    class: if is_modern {
-                        "grid px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-white/25 border-b mb-1 border-white/5"
-                    } else {
-                        "grid gap-6 px-2 py-2 border-b border-white/5 text-sm font-medium text-slate-500 mb-2 uppercase tracking-wider"
-                    },
-                    style: if is_modern {
-                        "grid-template-columns: {columns_modern};"
-                    } else {
-                        "grid-template-columns: {columns_normal}; align-items: center;"
-                    },
-                    div {}
-                    button {
-                        class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
-                        onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Title),
-                        "{i18n::t(\"title\")}"
-                        i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Title)} text-[10px]" }
-                    }
-                    button {
-                        class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
-                        onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Artist),
-                        "{i18n::t(\"artist\")}"
-                        i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Artist)} text-[10px]" }
-                    }
-                    button {
-                        class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
-                        onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Album),
-                        "{i18n::t(\"album\")}"
-                        i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Album)} text-[10px]" }
-                    }
-                    button {
-                        class: "flex items-center justify-end gap-1 uppercase tracking-wider text-right hover:text-white transition-colors",
-                        onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Duration),
-                        i { class: "fa-regular fa-clock" }
-                        i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Duration)} text-[10px]" }
-                    }
-                    div {}
+                Header {
+                    is_modern: is_modern,
+                    is_album: false,
+                    is_selection_mode: is_selection_mode(),
+                    on_select_all:on_select_all,
+                    all_selected: all_selected,
+                    sort_state: sort_state,
                 }
                 div {
                     class: if is_modern { "" } else { "space-y-1" },
