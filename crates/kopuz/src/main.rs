@@ -13,14 +13,12 @@ use components::{
 use dioxus::desktop::RequestAsyncResponder;
 #[cfg(not(target_arch = "wasm32"))]
 use dioxus::desktop::tao::dpi::LogicalSize;
-#[cfg(not(target_arch = "wasm32"))]
-use dioxus::desktop::tao::window::Icon;
 #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
 use dioxus::desktop::tao::platform::macos::WindowBuilderExtMacOS;
 #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
 use dioxus::desktop::tao::platform::windows::WindowExtWindows;
-#[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
-use windows::Win32::Foundation::HWND;
+#[cfg(not(target_arch = "wasm32"))]
+use dioxus::desktop::tao::window::Icon;
 use dioxus::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
 use discord_presence::Presence;
@@ -35,6 +33,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 #[cfg(not(target_arch = "wasm32"))]
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+#[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
+use windows::Win32::Foundation::HWND;
 
 mod queue_state;
 mod web_storage;

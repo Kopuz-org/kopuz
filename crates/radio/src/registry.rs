@@ -81,7 +81,10 @@ pub enum RegistryError {
     StationErrors(String),
 }
 
-async fn fetch_content(url_or_path: &str, base_url_or_dir: Option<&str>) -> Result<(String, String), RegistryError> {
+async fn fetch_content(
+    url_or_path: &str,
+    base_url_or_dir: Option<&str>,
+) -> Result<(String, String), RegistryError> {
     let is_http = |s: &str| s.starts_with("http://") || s.starts_with("https://");
 
     if is_http(url_or_path) || base_url_or_dir.map_or(false, is_http) {
@@ -90,7 +93,11 @@ async fn fetch_content(url_or_path: &str, base_url_or_dir: Option<&str>) -> Resu
             let url = if is_http(url_or_path) {
                 url_or_path.to_string()
             } else {
-                format!("{}/{}", base_url_or_dir.unwrap(), url_or_path.trim_start_matches("./"))
+                format!(
+                    "{}/{}",
+                    base_url_or_dir.unwrap(),
+                    url_or_path.trim_start_matches("./")
+                )
             };
 
             let client = reqwest::Client::builder()
@@ -98,7 +105,8 @@ async fn fetch_content(url_or_path: &str, base_url_or_dir: Option<&str>) -> Resu
                 .build()
                 .map_err(|e| RegistryError::Network(e.to_string()))?;
 
-            let text = client.get(&url)
+            let text = client
+                .get(&url)
                 .send()
                 .await
                 .map_err(|e| RegistryError::Network(e.to_string()))?
@@ -116,7 +124,9 @@ async fn fetch_content(url_or_path: &str, base_url_or_dir: Option<&str>) -> Resu
         }
         #[cfg(target_arch = "wasm32")]
         {
-            Err(RegistryError::Network("HTTP fetching not supported on WASM yet".into()))
+            Err(RegistryError::Network(
+                "HTTP fetching not supported on WASM yet".into(),
+            ))
         }
     } else {
         let path = if let Some(base) = base_url_or_dir {
@@ -128,7 +138,11 @@ async fn fetch_content(url_or_path: &str, base_url_or_dir: Option<&str>) -> Resu
         };
 
         let text = std::fs::read_to_string(&path)?;
-        let parent = path.parent().unwrap_or(Path::new("")).to_string_lossy().to_string();
+        let parent = path
+            .parent()
+            .unwrap_or(Path::new(""))
+            .to_string_lossy()
+            .to_string();
 
         Ok((text, parent))
     }
@@ -171,13 +185,19 @@ impl StationRegistry {
                     match serde_json::from_str::<StationManifest>(&manifest_content) {
                         Ok(manifest) => {
                             if manifest.id != station_ref.id {
-                                let msg = format!("Station id mismatch: index id={} manifest id={}", station_ref.id, manifest.id);
+                                let msg = format!(
+                                    "Station id mismatch: index id={} manifest id={}",
+                                    station_ref.id, manifest.id
+                                );
                                 tracing::warn!("{}", msg);
                                 station_errors.push(msg);
                                 continue;
                             }
                             if let Err(e) = manifest.validate() {
-                                let msg = format!("Imported station '{}' failed validation: {}", station_ref.id, e);
+                                let msg = format!(
+                                    "Imported station '{}' failed validation: {}",
+                                    station_ref.id, e
+                                );
                                 tracing::warn!("{}", msg);
                                 station_errors.push(msg);
                             } else {
@@ -185,7 +205,8 @@ impl StationRegistry {
                             }
                         }
                         Err(e) => {
-                            let msg = format!("Failed to parse station for '{}': {}", station_ref.id, e);
+                            let msg =
+                                format!("Failed to parse station for '{}': {}", station_ref.id, e);
                             tracing::warn!("{}", msg);
                             station_errors.push(msg);
                         }
@@ -267,7 +288,10 @@ mod tests {
         fs::write(&manifest_path, manifest_json).unwrap();
 
         let mut registry = StationRegistry::new();
-        registry.import_registry(index_path.to_str().unwrap()).await.unwrap();
+        registry
+            .import_registry(index_path.to_str().unwrap())
+            .await
+            .unwrap();
 
         assert_eq!(registry.stations.len(), 1);
         assert!(registry.get("test_station").is_some());
@@ -307,6 +331,9 @@ mod tests {
             "stations": [{ "id": "", "manifest_url": "url" }]
         }"#;
         let index: RegistryIndex = serde_json::from_str(invalid_json_empty_id).unwrap();
-        assert!(matches!(index.validate(), Err(IndexError::InvalidStationId(_))));
+        assert!(matches!(
+            index.validate(),
+            Err(IndexError::InvalidStationId(_))
+        ));
     }
 }

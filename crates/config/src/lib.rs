@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use std::fs;
 
 // Maybe host on the website?
-pub const DEFAULT_REGISTRY_URL: &str = "https://raw.githubusercontent.com/Kopuz-org/kopuz/refs/heads/master/radio-registry/index.json";
+pub const DEFAULT_REGISTRY_URL: &str =
+    "https://raw.githubusercontent.com/Kopuz-org/kopuz/refs/heads/master/radio-registry/index.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RegistryEntry {
@@ -774,8 +775,6 @@ impl AppConfig {
             );
         }
     }
-
-
 
     pub fn push_recent(&mut self, id: String, server: bool) {
         let list = if server {

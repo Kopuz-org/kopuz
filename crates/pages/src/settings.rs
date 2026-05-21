@@ -2,10 +2,10 @@ use crate::theme_editor::ThemeEditorPage;
 use ::server::provider::ProviderClient;
 use components::settings_items::{
     BackBehaviorSelector, ChannelModeSelector, DiscordPresenceSettings, EqualizerPanel,
-    LanguageSelector, LastFmSettings, MultiDirectoryPicker, MusicBrainzSettings, ServerSettings,
-    SettingItem, ThemeSelector, ToggleSetting, RadioRegistryDropdown,
+    LanguageSelector, LastFmSettings, MultiDirectoryPicker, MusicBrainzSettings,
+    RadioRegistryDropdown, ServerSettings, SettingItem, ThemeSelector, ToggleSetting,
 };
-use components::settings_popups::{AddServerPopup, LoginPopup, AddRegistryPopup};
+use components::settings_popups::{AddRegistryPopup, AddServerPopup, LoginPopup};
 use config::{AppConfig, ArtistPhotoSource, MusicService, OfflineQuality};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
@@ -70,7 +70,10 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     show_add_registry.set(false);
                 }
                 Err(e) => {
-                    registry_error.set(Some(i18n::t_with("radio_registry_import_failed", &[("error", e.to_string())])));
+                    registry_error.set(Some(i18n::t_with(
+                        "radio_registry_import_failed",
+                        &[("error", e.to_string())],
+                    )));
                 }
             }
             registry_loading.set(false);

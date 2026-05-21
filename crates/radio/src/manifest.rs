@@ -139,7 +139,9 @@ pub enum ManifestError {
 impl StationManifest {
     pub fn validate(&self) -> Result<(), ManifestError> {
         if !matches!(self.schema_version.as_str(), "1" | "1.0") {
-            return Err(ManifestError::UnsupportedSchemaVersion(self.schema_version.clone()));
+            return Err(ManifestError::UnsupportedSchemaVersion(
+                self.schema_version.clone(),
+            ));
         }
         // ID check
         if self.id.trim().is_empty()

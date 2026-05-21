@@ -140,9 +140,9 @@ pub async fn sync_server_library(
                             disc_number: item.parent_index_number,
                             musicbrainz_release_id: None,
                             playlist_item_id: None,
-                            artists: item.artists.unwrap_or_else(|| {
-                                item.album_artist.into_iter().collect()
-                            }),
+                            artists: item
+                                .artists
+                                .unwrap_or_else(|| item.album_artist.into_iter().collect()),
                         });
                     }
 
@@ -283,7 +283,10 @@ pub async fn fetch_subsonic_library(
             });
 
             let songs = remote.get_album_songs(&album.id).await.map_err(|e| {
-                i18n::t_with("error_fetch_songs", &[("album_id", album.id.clone()), ("error", e.to_string())])
+                i18n::t_with(
+                    "error_fetch_songs",
+                    &[("album_id", album.id.clone()), ("error", e.to_string())],
+                )
             })?;
 
             for song in songs {

@@ -171,7 +171,8 @@ pub fn init() {
         //   null before being used.
         unsafe {
             use objc2::ClassType;
-            let process_info: *mut AnyObject = objc2::msg_send![NSProcessInfo::class(), processInfo];
+            let process_info: *mut AnyObject =
+                objc2::msg_send![NSProcessInfo::class(), processInfo];
             let reason = NSString::from_str("Kopuz Background Audio Playback");
             let options: u64 = 0x00FFFFFF | 0xFF00000000;
             let activity: *mut AnyObject =

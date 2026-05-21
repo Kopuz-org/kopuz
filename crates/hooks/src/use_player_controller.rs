@@ -508,7 +508,13 @@ impl PlayerController {
 
                 if let Some((stream_url, cover_url)) = {
                     if is_radio_item {
-                        if let Some(stream_url) = self.station_registry.read().get(&id).and_then(|s| s.streams.iter().find(|str| str.id == stream_id)).map(|s| s.url.clone()) {
+                        if let Some(stream_url) = self
+                            .station_registry
+                            .read()
+                            .get(&id)
+                            .and_then(|s| s.streams.iter().find(|str| str.id == stream_id))
+                            .map(|s| s.url.clone())
+                        {
                             Some((stream_url, String::new()))
                         } else {
                             None
@@ -690,7 +696,9 @@ impl PlayerController {
                                 }
 
                                 if is_radio_item {
-                                    if let Some(provider) = station_registry.read().create_provider(&station_id) {
+                                    if let Some(provider) =
+                                        station_registry.read().create_provider(&station_id)
+                                    {
                                         let task = spawn(async move {
                                             use radio::provider::RadioMetadataProvider;
                                             let mut rx = provider.start(&stream_id);
@@ -705,7 +713,10 @@ impl PlayerController {
 
                                         radio_task.set(Some(task));
                                     } else {
-                                        tracing::warn!("[radio] No metadata provider for station: {}", station_id);
+                                        tracing::warn!(
+                                            "[radio] No metadata provider for station: {}",
+                                            station_id
+                                        );
                                     }
                                 }
                                 // Don't scrobble if the track is a radio item

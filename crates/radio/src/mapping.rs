@@ -1,6 +1,6 @@
 use crate::manifest::{EntrySelector, FieldMapping, MatchValueFrom};
-use std::collections::HashMap;
 use serde_json::Value;
+use std::collections::HashMap;
 
 /// Traverse a JSON value using a dot-notation path.
 /// Handles both object keys ("foo.bar") and array indices ("foo.0.bar").
@@ -139,8 +139,14 @@ mod tests {
             "tags": ["pop", "rock"]
         });
 
-        assert_eq!(extract_str(&json, "albums.0.image"), Some("cover.jpg".to_string()));
-        assert_eq!(extract_str(&json, "albums.1.image"), Some("back.jpg".to_string()));
+        assert_eq!(
+            extract_str(&json, "albums.0.image"),
+            Some("cover.jpg".to_string())
+        );
+        assert_eq!(
+            extract_str(&json, "albums.1.image"),
+            Some("back.jpg".to_string())
+        );
         assert_eq!(extract_str(&json, "tags.0"), Some("pop".to_string()));
         assert_eq!(extract_str(&json, "tags.2"), None);
     }

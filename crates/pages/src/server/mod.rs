@@ -1,7 +1,7 @@
 pub mod activity;
-pub mod download_manager;
 pub mod album;
 pub mod artist;
+pub mod download_manager;
 pub mod favorites;
 pub mod home;
 pub mod library;

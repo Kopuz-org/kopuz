@@ -1,4 +1,4 @@
 pub mod manifest;
-pub mod registry;
-pub mod provider;
 pub mod mapping;
+pub mod provider;
+pub mod registry;

@@ -93,9 +93,6 @@ pub fn format_artwork_url(path: Option<&impl AsRef<Path>>) -> Option<CoverUrl> {
     format_artwork_url_impl(path, None)
 }
 
-pub fn format_artwork_thumb_url(
-    path: Option<&impl AsRef<Path>>,
-    size: u32,
-) -> Option<CoverUrl> {
+pub fn format_artwork_thumb_url(path: Option<&impl AsRef<Path>>, size: u32) -> Option<CoverUrl> {
     format_artwork_url_impl(path, Some(size))
 }

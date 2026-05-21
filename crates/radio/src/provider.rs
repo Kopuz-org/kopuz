@@ -74,7 +74,9 @@ async fn start_rest_metadata(
         .timeout(Duration::from_secs(10))
         .build()
         .unwrap_or_else(|_| reqwest::Client::new());
-    let url = def.stream_url_map.get(&stream_id)
+    let url = def
+        .stream_url_map
+        .get(&stream_id)
         .cloned()
         .unwrap_or_else(|| def.url.replace("{stream_id}", &stream_id));
     let mut interval = time::interval(Duration::from_secs(def.poll_interval_secs));
@@ -109,7 +111,15 @@ async fn start_rest_metadata(
                         let artist = extract_artist(data, &def.mapping);
                         let cover_url = extract_artwork(data, &def.mapping);
 
-                        if tx.send(RadioMetadata { station: station_name.clone(), title, artist, cover_url }).is_err() {
+                        if tx
+                            .send(RadioMetadata {
+                                station: station_name.clone(),
+                                title,
+                                artist,
+                                cover_url,
+                            })
+                            .is_err()
+                        {
                             break;
                         }
                     }
@@ -122,7 +132,11 @@ async fn start_rest_metadata(
     }
 }
 
-fn process_ws_message(json: &Value, def: &WebSocketSourceDef, station_name: &str) -> Option<RadioMetadata> {
+fn process_ws_message(
+    json: &Value,
+    def: &WebSocketSourceDef,
+    station_name: &str,
+) -> Option<RadioMetadata> {
     let mut matches = true;
     if let Some(filter) = &def.message_filter {
         if let Some(op) = extract_value(json, &filter.op_field).and_then(|v| v.as_u64()) {
@@ -159,7 +173,12 @@ fn process_ws_message(json: &Value, def: &WebSocketSourceDef, station_name: &str
         let artist = extract_artist(data_root, &def.mapping);
         let cover_url = extract_artwork(data_root, &def.mapping);
 
-        Some(RadioMetadata { station: station_name.to_string(), title, artist, cover_url })
+        Some(RadioMetadata {
+            station: station_name.to_string(),
+            title,
+            artist,
+            cover_url,
+        })
     } else {
         None
     }
@@ -185,7 +204,11 @@ async fn start_ws_metadata(
     station_name: String,
     tx: mpsc::UnboundedSender<RadioMetadata>,
 ) {
-    let url = def.stream_url_map.get(&stream_id).unwrap_or(&def.url).clone();
+    let url = def
+        .stream_url_map
+        .get(&stream_id)
+        .unwrap_or(&def.url)
+        .clone();
 
     loop {
         if tx.is_closed() {
@@ -203,7 +226,8 @@ async fn start_ws_metadata(
                     .unwrap_or(15000)
                     .max(1);
 
-                let mut heartbeat_timer = time::interval(Duration::from_millis(heartbeat_interval_ms));
+                let mut heartbeat_timer =
+                    time::interval(Duration::from_millis(heartbeat_interval_ms));
                 heartbeat_timer.tick().await;
 
                 loop {
