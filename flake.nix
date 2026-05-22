@@ -67,6 +67,28 @@
       # Provides the default formatter for 'nix fmt'. For maximum compatibility, nixfmt
       # has been selected here. The -tree variant is a wrapper script that formats all
       # Nix files automatically.
-      formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixfmt-tree);
+      formatter = forAllSystems (
+        system:
+        let
+          pkgs = pkgsForEach system;
+        in
+        pkgs.writeShellApplication {
+          name = "nix3-fmt-wrapper";
+
+          runtimeInputs = [
+            pkgs.nixfmt
+            pkgs.fd
+            pkgs.deno
+          ];
+
+          text = ''
+            # Format Nix files with nixfmt
+            fd "$@" -t f -e nix -x nixfmt -q '{}'
+
+            # Format Markdown files with Deno
+            fd "$@" -t f -e md -e js -x deno fmt '{}'
+          '';
+        }
+      );
     };
 }

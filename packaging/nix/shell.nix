@@ -9,7 +9,6 @@
   appstream,
   nodejs_22,
   yt-dlp,
-  deno,
   glib-networking,
   glib,
   gtk3,
@@ -24,7 +23,6 @@ mkShell {
   nativeBuildInputs = [
     # Dev
     just
-    deno
 
     # Packaging
     flatpak

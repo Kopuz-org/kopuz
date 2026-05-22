@@ -378,7 +378,9 @@ longer than needed.
 - **USDT on Solana Chain**: "GYmnAcrA5MbF6cUxT2m5d5cwdfr14qSY9WFYRwXxaibW"
 
 ## Credits
-- Logo design by: Lucas Amorim - [His Instagram Account](https://www.instagram.com/yattets/)
+
+- Logo design by: Lucas Amorim -
+  [His Instagram Account](https://www.instagram.com/yattets/)
 
 ## Star History
 
