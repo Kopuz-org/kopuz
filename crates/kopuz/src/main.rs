@@ -1420,13 +1420,9 @@ fn App() -> Element {
                         cover_cache(),
                         &mut current_lib,
                         progress_cb.clone(),
-                        fetch_covers,
-                        fetch_strategy,
-                        lastfm_key.clone(),
                     )
                     .await;
                 }
-                drop(progress_cb);
 
                 current_lib.tracks.retain(|t| {
                     let in_configured_root = configured_dirs.iter().any(|d| t.path.starts_with(d));
@@ -1444,8 +1440,37 @@ fn App() -> Element {
                     .albums
                     .retain(|a| valid_album_ids.contains(&a.id));
 
+                // Show the library immediately — before any cover fetching.
                 library.set(current_lib.clone());
                 let _ = current_lib.save(&lib_path());
+
+                if fetch_covers {
+                    // Fetch missing covers in the background so the UI stays responsive.
+                    // Passing `progress_cb` into the task keeps the scan-progress bar
+                    // alive during fetching; it disappears automatically when the task ends.
+                    let lib_for_fetch = current_lib;
+                    spawn(async move {
+                        let fetcher = reader::cover_fetcher::CoverFetcher::new(
+                            cover_cache(),
+                            fetch_strategy,
+                            lastfm_key,
+                            progress_cb,
+                        );
+                        let mut lib = lib_for_fetch;
+                        let report = fetcher.fetch_missing_covers(&mut lib).await;
+                        tracing::info!(
+                            "Cover auto-fetch: {} found, {} missing, {} errors",
+                            report.found,
+                            report.missing,
+                            report.errors,
+                        );
+                        let _ = lib.save(&lib_path());
+                        library.set(lib);
+                    });
+                } else {
+                    // No cover fetching — drop the callback so the progress bar closes.
+                    drop(progress_cb);
+                }
             } else {
                 current_lib.tracks.clear();
                 current_lib.albums.clear();
