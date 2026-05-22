@@ -203,6 +203,24 @@ pub fn QueueSummary(
     }
 }
 
+fn rightbar_reorder_move_target(
+    from: usize,
+    drop_index: usize,
+    queue_count: usize,
+) -> Option<usize> {
+    if from >= queue_count || drop_index > queue_count {
+        return None;
+    }
+
+    let to = if from < drop_index {
+        drop_index.saturating_sub(1)
+    } else {
+        drop_index
+    };
+
+    (to < queue_count && to != from).then_some(to)
+}
+
 #[component]
 pub fn QueueListView(
     items: Vec<reader::Track>,
@@ -487,8 +505,7 @@ pub fn QueueListView(
                             && *queue_reorder_from.read() == Some(queue_idx);
                         let is_active = *current_queue_index.read() == queue_idx;
                         let is_drop_target = layout == LayoutMode::Rightbar
-                            && *queue_drop_index.read() == Some(queue_idx)
-                            && *queue_reorder_from.read() != Some(queue_idx);
+                            && *queue_drop_index.read() == Some(queue_idx);
 
                         rsx! {
                             if layout == LayoutMode::Rightbar {
@@ -517,12 +534,13 @@ pub fn QueueListView(
                                         evt.stop_propagation();
                                         pending_queue_reorder.set(None);
                                         is_queue_drag_over.set(false);
+                                        let drop_index = queue_drop_index.peek().unwrap_or(queue_idx);
                                         queue_drop_index.set(None);
                                         let reorder_from = *queue_reorder_from.read();
                                         if let Some(from) = reorder_from {
-                                            if from != queue_idx {
+                                            if let Some(to) = rightbar_reorder_move_target(from, drop_index, queue_count) {
                                                 queue_reorder_did_move.set(true);
-                                                move_queue_item(from, queue_idx);
+                                                move_queue_item(from, to);
                                             }
                                             queue_reorder_from.set(None);
                                             return;
@@ -531,7 +549,7 @@ pub fn QueueListView(
                                             if *ctrl.shuffle.peek() {
                                                 ctrl.add_to_queue(vec![track]);
                                             } else {
-                                                let insert_at = queue_idx.min(ctrl.queue.peek().len());
+                                                let insert_at = drop_index.min(ctrl.queue.peek().len());
                                                 ctrl.queue.with_mut(|q| q.insert(insert_at, track));
                                             }
                                         }
@@ -594,9 +612,28 @@ pub fn QueueListView(
                                             queue_reorder_did_move.set(false);
                                         },
                                         on_row_mouse_move: move |evt: MouseEvent| {
+                                            evt.stop_propagation();
+                                            let point = evt.element_coordinates();
+                                            let row_drop_index = if point.y >= 28.0 {
+                                                queue_idx + 1
+                                            } else {
+                                                queue_idx
+                                            };
+
+                                            if queue_reorder_from.read().is_some() {
+                                                is_queue_drag_over.set(true);
+                                                queue_drop_index.set(Some(row_drop_index));
+                                                if let Some(from) = *queue_reorder_from.read() {
+                                                    if rightbar_reorder_move_target(from, row_drop_index, queue_count).is_some() {
+                                                        queue_reorder_did_move.set(true);
+                                                    }
+                                                }
+                                                return;
+                                            }
+
                                             let pending = *pending_queue_reorder.read();
                                             if let Some((from_idx, start_x, start_y)) = pending {
-                                                if from_idx == queue_idx && queue_reorder_from.read().is_none() {
+                                                if from_idx == queue_idx {
                                                     let coords = evt.client_coordinates();
                                                     let dx = coords.x - start_x;
                                                     let dy = coords.y - start_y;
@@ -608,7 +645,10 @@ pub fn QueueListView(
                                                             queue_reorder_from,
                                                             queue_reorder_did_move,
                                                         );
-                                                        queue_reorder_did_move.set(true);
+                                                        queue_drop_index.set(Some(row_drop_index));
+                                                        if rightbar_reorder_move_target(queue_idx, row_drop_index, queue_count).is_some() {
+                                                            queue_reorder_did_move.set(true);
+                                                        }
                                                     }
                                                 }
                                             }
@@ -674,14 +714,13 @@ pub fn QueueListView(
                                     evt.stop_propagation();
                                     pending_queue_reorder.set(None);
                                     is_queue_drag_over.set(false);
+                                    let drop_index = queue_drop_index.peek().unwrap_or(end_drop_index);
                                     queue_drop_index.set(None);
                                     let reorder_from = *queue_reorder_from.read();
                                     if let Some(from) = reorder_from {
-                                        if let Some(to) = end_drop_index.checked_sub(1) {
-                                            if from != to {
-                                                queue_reorder_did_move.set(true);
-                                                move_queue_item(from, to);
-                                            }
+                                        if let Some(to) = rightbar_reorder_move_target(from, drop_index, queue_count) {
+                                            queue_reorder_did_move.set(true);
+                                            move_queue_item(from, to);
                                         }
                                         queue_reorder_from.set(None);
                                         return;
