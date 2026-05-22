@@ -1493,13 +1493,6 @@ fn App() -> Element {
             }})();"
         }
 
-        document::Script {
-            "document.addEventListener('keydown', function(e) {{
-                if(e.target.tagName === 'BUTTON' && (e.key === ' ' || e.code === 'Space')) {{
-                    e.preventDefault();
-                }}
-            }});"
-        }
         div {
             class: "flex flex-col h-screen text-white select-none {theme_class}",
             style: "{background_style}",
@@ -1514,6 +1507,7 @@ fn App() -> Element {
                     is_fullscreen.set(false);
                 } else if key == Key::Character(" ".into()) {
                     ctrl.toggle();
+                    evt.prevent_default();
                 }
             },
             if cfg!(any(target_os = "linux", target_os = "windows")) {
