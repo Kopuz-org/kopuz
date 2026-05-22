@@ -41,6 +41,7 @@ pub fn QueueRow(
     is_reorder_source: bool,
     on_play: Callback,
     on_row_mouse_down: EventHandler<MouseEvent>,
+    on_row_mouse_move: EventHandler<MouseEvent>,
     on_move_up: EventHandler<MouseEvent>,
     on_move_down: EventHandler<MouseEvent>,
 ) -> Element {
@@ -56,6 +57,7 @@ pub fn QueueRow(
                 LayoutMode::Rightbar => "content-visibility: auto; contain-intrinsic-size: 0 56px;",
             },
             onmousedown: move |evt| on_row_mouse_down.call(evt),
+            onmousemove: move |evt| on_row_mouse_move.call(evt),
             ondoubleclick: move |_| on_play.call(()),
 
             div {
@@ -199,6 +201,8 @@ pub fn QueueListView(
     let mut queue_drop_index = use_signal(|| None::<usize>);
     let mut queue_reorder_from = use_signal(|| None::<usize>);
     let mut queue_reorder_did_move = use_signal(|| false);
+    let mut pending_queue_reorder = use_signal(|| None::<(usize, f64, f64)>);
+    const QUEUE_REORDER_THRESHOLD_PX: f64 = 6.0;
     let queue_list_id = match layout {
         LayoutMode::Rightbar => RIGHTBAR_DROPZONE_ID,
         LayoutMode::Fullscreen => "fullscreen-queue-list",
@@ -239,6 +243,7 @@ pub fn QueueListView(
                     queue_reorder_from,
                     queue_reorder_did_move,
                 );
+                pending_queue_reorder.set(None);
             }
         });
     });
@@ -446,6 +451,7 @@ pub fn QueueListView(
                 onmouseleave: move |_| {
                     if layout == LayoutMode::Rightbar {
                         clear_rightbar_drop_target(is_queue_drag_over, queue_drop_index);
+                        pending_queue_reorder.set(None);
                         stop_rightbar_auto_scroll();
                     }
                 },
@@ -493,6 +499,7 @@ pub fn QueueListView(
                                     },
                                     onmouseup: move |evt| {
                                         evt.stop_propagation();
+                                        pending_queue_reorder.set(None);
                                         is_queue_drag_over.set(false);
                                         queue_drop_index.set(None);
                                         let reorder_from = *queue_reorder_from.read();
@@ -528,6 +535,7 @@ pub fn QueueListView(
                                     ondrop: move |evt| {
                                         evt.prevent_default();
                                         evt.stop_propagation();
+                                        pending_queue_reorder.set(None);
                                         is_queue_drag_over.set(false);
                                         queue_drop_index.set(None);
                                         if let Some(track) = take_dragged_queue_track() {
@@ -564,12 +572,29 @@ pub fn QueueListView(
                                         },
                                         on_row_mouse_down: move |evt: MouseEvent| {
                                             evt.stop_propagation();
-                                            start_rightbar_reorder(
-                                                queue_idx,
-                                                queue_drop_index,
-                                                queue_reorder_from,
-                                                queue_reorder_did_move,
-                                            );
+                                            let coords = evt.client_coordinates();
+                                            pending_queue_reorder.set(Some((queue_idx, coords.x, coords.y)));
+                                            queue_reorder_did_move.set(false);
+                                        },
+                                        on_row_mouse_move: move |evt: MouseEvent| {
+                                            let pending = *pending_queue_reorder.read();
+                                            if let Some((from_idx, start_x, start_y)) = pending {
+                                                if from_idx == queue_idx && queue_reorder_from.read().is_none() {
+                                                    let coords = evt.client_coordinates();
+                                                    let dx = coords.x - start_x;
+                                                    let dy = coords.y - start_y;
+                                                    if dx.hypot(dy) >= QUEUE_REORDER_THRESHOLD_PX {
+                                                        pending_queue_reorder.set(None);
+                                                        start_rightbar_reorder(
+                                                            queue_idx,
+                                                            queue_drop_index,
+                                                            queue_reorder_from,
+                                                            queue_reorder_did_move,
+                                                        );
+                                                        queue_reorder_did_move.set(true);
+                                                    }
+                                                }
+                                            }
                                         },
                                         on_move_up: move |_| {
                                             if let Some(prev_idx) = queue_idx.checked_sub(1) {
@@ -591,6 +616,7 @@ pub fn QueueListView(
                                     is_reorder_source: false,
                                     on_play: move |_| play_song_at_index(queue_idx),
                                     on_row_mouse_down: move |_: MouseEvent| {},
+                                    on_row_mouse_move: move |_: MouseEvent| {},
                                     on_move_up: move |_| move_queue_item(queue_idx, queue_idx - 1),
                                     on_move_down: move |_| move_queue_item(queue_idx, queue_idx + 1),
                                 }
@@ -628,6 +654,7 @@ pub fn QueueListView(
                                 },
                                 onmouseup: move |evt| {
                                     evt.stop_propagation();
+                                    pending_queue_reorder.set(None);
                                     is_queue_drag_over.set(false);
                                     queue_drop_index.set(None);
                                     let reorder_from = *queue_reorder_from.read();
@@ -660,6 +687,7 @@ pub fn QueueListView(
                                 ondrop: move |evt| {
                                     evt.prevent_default();
                                     evt.stop_propagation();
+                                    pending_queue_reorder.set(None);
                                     is_queue_drag_over.set(false);
                                     queue_drop_index.set(None);
                                     if let Some(track) = take_dragged_queue_track() {
