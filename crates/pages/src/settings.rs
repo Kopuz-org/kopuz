@@ -6,7 +6,7 @@ use components::settings_items::{
     RadioRegistryDropdown, ServerSettings, SettingItem, ThemeSelector, ToggleSetting,
 };
 use components::settings_popups::{AddRegistryPopup, AddServerPopup, LoginPopup};
-use config::{AppConfig, ArtistPhotoSource, MusicService, OfflineQuality};
+use config::{AppConfig, ArtistPhotoSource, FetchStrategy, MusicService, OfflineQuality};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
@@ -530,6 +530,56 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         "{i18n::t(\"metadata\")}"
                     }
                     div { class: "space-y-4",
+                        SettingItem {
+                            title: i18n::t("auto_fetch_covers").to_string(),
+                            control: rsx! {
+                                ToggleSetting {
+                                    enabled: config.read().auto_fetch_covers,
+                                    on_change: move |val| config.write().auto_fetch_covers = val,
+                                }
+                            }
+                        }
+                        SettingItem {
+                            title: i18n::t("cover_fetch_strategy").to_string(),
+                            control: rsx! {
+                                {
+                                    let current = config.read().cover_fetch_strategy;
+                                    rsx! {
+                                        select {
+                                            class: "bg-stone-800 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-indigo-500",
+                                            onchange: move |evt| {
+                                                config.write().cover_fetch_strategy = match evt.value().as_str() {
+                                                    "lastfm_first" => FetchStrategy::LastFmFirst,
+                                                    "musicbrainz_only" => FetchStrategy::MusicBrainzOnly,
+                                                    "lastfm_only" => FetchStrategy::LastFmOnly,
+                                                    _ => FetchStrategy::MusicBrainzFirst,
+                                                };
+                                            },
+                                            option {
+                                                value: "musicbrainz_first",
+                                                selected: current == FetchStrategy::MusicBrainzFirst,
+                                                "{i18n::t(\"musicbrainz_first\")}"
+                                            }
+                                            option {
+                                                value: "lastfm_first",
+                                                selected: current == FetchStrategy::LastFmFirst,
+                                                "{i18n::t(\"lastfm_first\")}"
+                                            }
+                                            option {
+                                                value: "musicbrainz_only",
+                                                selected: current == FetchStrategy::MusicBrainzOnly,
+                                                "{i18n::t(\"musicbrainz_only\")}"
+                                            }
+                                            option {
+                                                value: "lastfm_only",
+                                                selected: current == FetchStrategy::LastFmOnly,
+                                                "{i18n::t(\"lastfm_only\")}"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         SettingItem {
                             title: i18n::t("artist_photo_source").to_string(),
                             control: rsx! {

@@ -366,6 +366,13 @@ metadata = 元数据
 artist_photo_source = 艺术家照片来源
 artist_photo = 艺术家照片
 album_cover = 专辑封面
+auto_fetch_covers = 自动获取专辑封面
+cover_fetch_strategy = 获取封面策略
+musicbrainz_first = 优先 MusicBrainz
+lastfm_first = 优先 Last.fm
+musicbrainz_only = 仅限 MusicBrainz
+lastfm_only = 仅限 Last.fm
+remove_cover = 移除封面
 
 # Radio Page
 radio_filter_stations = 过滤电台…

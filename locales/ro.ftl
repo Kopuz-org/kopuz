@@ -366,6 +366,13 @@ metadata = Metadate
 artist_photo_source = Sursă fotografie artist
 artist_photo = Fotografie artist
 album_cover = Copertă album
+auto_fetch_covers = Preia automat coperțile albumelor
+cover_fetch_strategy = Strategie de preluare coperți
+musicbrainz_first = MusicBrainz mai întâi
+lastfm_first = Last.fm mai întâi
+musicbrainz_only = Doar MusicBrainz
+lastfm_only = Doar Last.fm
+remove_cover = Elimină coperta
 
 # Radio Page
 radio_filter_stations = Filtrează stațiile…

@@ -367,6 +367,13 @@ metadata = Metadatos
 artist_photo_source = Fuente de foto del artista
 artist_photo = Foto del artista
 album_cover = Portada del álbum
+auto_fetch_covers = Obtener portadas automáticamente
+cover_fetch_strategy = Estrategia de obtención de portadas
+musicbrainz_first = MusicBrainz primero
+lastfm_first = Last.fm primero
+musicbrainz_only = Solo MusicBrainz
+lastfm_only = Solo Last.fm
+remove_cover = Eliminar portada
 
 # Radio Page
 radio_filter_stations = Filtrar estaciones…

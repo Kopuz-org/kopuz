@@ -366,6 +366,13 @@ metadata = Metaadatok
 artist_photo_source = Előadó fotójának forrása
 artist_photo = Előadó fotója
 album_cover = Albumborító
+auto_fetch_covers = Album borítók automatikus letöltése
+cover_fetch_strategy = Borító letöltési stratégia
+musicbrainz_first = MusicBrainz először
+lastfm_first = Last.fm először
+musicbrainz_only = Csak MusicBrainz
+lastfm_only = Csak Last.fm
+remove_cover = Borító eltávolítása
 
 # Radio Page
 radio_filter_stations = Állomások szűrése…

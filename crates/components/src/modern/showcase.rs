@@ -60,15 +60,21 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
 
             div { class: "flex items-end gap-6 mb-8 px-6 pt-6",
                 div {
-                    class: "w-44 h-44 rounded-2xl overflow-hidden shrink-0 shadow-2xl bg-white/5",
+                    class: if props.on_cover_click.is_some() {
+                        "w-44 h-44 rounded-2xl overflow-hidden shrink-0 shadow-2xl bg-white/5 cursor-pointer"
+                    } else {
+                        "w-44 h-44 rounded-2xl overflow-hidden shrink-0 shadow-2xl bg-white/5"
+                    },
                     style: "box-shadow: 0 20px 60px rgba(0,0,0,0.6);",
+                    onclick: move |_| {
+                        if let Some(ref h) = props.on_cover_click {
+                            h.call(());
+                        }
+                    },
                     if let Some(url) = &props.cover_url {
                         img {
                             src: "{url.as_ref()}",
-                            class: "w-full h-full object-cover cursor-pointer",
-                            onclick: move |_| {
-                                if let Some(ref h) = props.on_cover_click { h.call(()); }
-                            }
+                            class: "w-full h-full object-cover",
                         }
                     } else {
                         div { class: "w-full h-full flex items-center justify-center",

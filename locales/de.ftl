@@ -366,6 +366,13 @@ metadata = Metadaten
 artist_photo_source = Künstlerfoto-Quelle
 artist_photo = Künstlerfoto
 album_cover = Albumcover
+auto_fetch_covers = Albumcover automatisch abrufen
+cover_fetch_strategy = Cover-Abrufstrategie
+musicbrainz_first = MusicBrainz zuerst
+lastfm_first = Last.fm zuerst
+musicbrainz_only = Nur MusicBrainz
+lastfm_only = Nur Last.fm
+remove_cover = Cover entfernen
 
 # Radio Page
 radio_filter_stations = Sender filtern…

@@ -366,6 +366,13 @@ metadata = Метадані
 artist_photo_source = Джерело фото виконавця
 artist_photo = Фото виконавця
 album_cover = Обкладинка альбому
+auto_fetch_covers = Автоматично завантажувати обкладинки альбомів
+cover_fetch_strategy = Стратегія завантаження обкладинок
+musicbrainz_first = MusicBrainz спочатку
+lastfm_first = Last.fm спочатку
+musicbrainz_only = Тільки MusicBrainz
+lastfm_only = Тільки Last.fm
+remove_cover = Видалити обкладинку
 
 # Radio Page
 radio_filter_stations = Фільтр станцій…

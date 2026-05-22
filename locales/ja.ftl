@@ -372,6 +372,13 @@ metadata = メタデータ
 artist_photo_source = アーティスト写真のソース
 artist_photo = アーティスト写真
 album_cover = アルバムカバー
+auto_fetch_covers = アルバムカバーを自動取得
+cover_fetch_strategy = カバー取得戦略
+musicbrainz_first = MusicBrainz優先
+lastfm_first = Last.fm優先
+musicbrainz_only = MusicBrainzのみ
+lastfm_only = Last.fmのみ
+remove_cover = カバーを削除
 
 # Radio Page
 radio_filter_stations = ステーションをフィルタリング…

@@ -365,6 +365,13 @@ metadata = Metadata
 artist_photo_source = Sumber foto artis
 artist_photo = Foto artis
 album_cover = Sampul album
+auto_fetch_covers = Ambil sampul album otomatis
+cover_fetch_strategy = Strategi pengambilan sampul
+musicbrainz_first = MusicBrainz dahulu
+lastfm_first = Last.fm dahulu
+musicbrainz_only = Hanya MusicBrainz
+lastfm_only = Hanya Last.fm
+remove_cover = Hapus sampul
 
 # Radio Page
 radio_filter_stations = Saring stasiun…

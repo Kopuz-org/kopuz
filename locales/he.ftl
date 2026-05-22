@@ -366,6 +366,13 @@ metadata = מטא-נתונים
 artist_photo_source = מקור תמונת אמן
 artist_photo = תמונת אמן
 album_cover = עטיפת אלבום
+auto_fetch_covers = הבאה אוטומטית של עטיפות אלבומים
+cover_fetch_strategy = אסטרטגיית הבאת עטיפות
+musicbrainz_first = MusicBrainz תחילה
+lastfm_first = Last.fm תחילה
+musicbrainz_only = MusicBrainz בלבד
+lastfm_only = Last.fm בלבד
+remove_cover = הסר עטיפה
 
 # Radio Page
 radio_filter_stations = סנן תחנות…

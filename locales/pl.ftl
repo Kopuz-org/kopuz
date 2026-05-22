@@ -366,6 +366,13 @@ metadata = Metadane
 artist_photo_source = Źródło zdjęcia artysty
 artist_photo = Zdjęcie artysty
 album_cover = Okładka albumu
+auto_fetch_covers = Automatyczne pobieranie okładek albumów
+cover_fetch_strategy = Strategia pobierania okładek
+musicbrainz_first = MusicBrainz najpierw
+lastfm_first = Last.fm najpierw
+musicbrainz_only = Tylko MusicBrainz
+lastfm_only = Tylko Last.fm
+remove_cover = Usuń okładkę
 
 # Radio Page
 radio_filter_stations = Filtruj stacje…

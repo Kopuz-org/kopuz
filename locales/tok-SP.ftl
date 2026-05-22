@@ -367,6 +367,13 @@ metadata = Metadata
 artist_photo_source = Artist Photo Source
 artist_photo = Artist Photo
 album_cover = Album Cover
+auto_fetch_covers = Auto-fetch album covers
+cover_fetch_strategy = Cover fetch strategy
+musicbrainz_first = MusicBrainz first
+lastfm_first = Last.fm first
+musicbrainz_only = MusicBrainz only
+lastfm_only = Last.fm only
+remove_cover = Remove cover
 
 # Radio Page
 radio_filter_stations = o lukin e ilo kalama…
