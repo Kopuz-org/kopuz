@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "id": "listen_moe",
+  "name": "LISTEN.moe",
+  "description": "radio_listen_moe_desc",
+  "icon": "fa-solid fa-radio",
+  "streams": [
+    { "id": "jpop", "name": "J-Pop", "url": "https://listen.moe/stream", "icon": "fa-solid fa-music" },
+    { "id": "kpop", "name": "K-Pop", "url": "https://listen.moe/kpop/stream", "icon": "fa-solid fa-compact-disc" }
+  ],
+  "metadata": {
+    "type": "websocket",
+    "url": "wss://listen.moe/gateway_v2",
+    "stream_url_map": {
+      "kpop": "wss://listen.moe/kpop/gateway_v2"
+    },
+    "message_filter": {
+      "op_field": "op",
+      "op_value": 1,
+      "type_field": "t",
+      "type_value": "TRACK_UPDATE",
+      "data_field": "d"
+    },
+    "heartbeat": {
+      "message": "{\"op\": 9}",
+      "interval_field": "d.heartbeat",
+      "default_interval_ms": 45000
+    },
+    "mapping": {
+      "title": "song.title",
+      "artist": "song.artists",
+      "artist_array_field": "name",
+      "artist_separator": ", ",
+      "artwork_url": "song.albums.0.image",
+      "artwork_url_template": "https://cdn.listen.moe/covers/{value}"
+    }
+  }
+}

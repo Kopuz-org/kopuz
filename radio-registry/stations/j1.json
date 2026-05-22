@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0",
+  "id": "j1",
+  "name": "J1 Tokyo",
+  "description": "radio_j1_desc",
+  "icon": "fa-solid fa-radio",
+  "streams": [
+    { "id": "J1HITS", "name": "J1 HITS", "url": "https://jenny.torontocast.com:2000/stream/J1HITS", "icon": "fa-solid fa-fire" },
+    { "id": "J1GOLD", "name": "J1 GOLD", "url": "https://jenny.torontocast.com:2000/stream/J1GOLD", "icon": "fa-solid fa-compact-disc" }
+  ],
+  "metadata": {
+    "type": "rest",
+    "url": "https://json.j1fm.tokyo/whatweplay.json",
+    "poll_interval_secs": 20,
+    "entry_selector": {
+      "array_path": "station",
+      "match_field": "name",
+      "match_value_from": "stream_name"
+    },
+    "stream_name_map": {
+      "J1HITS": "J1 HITS",
+      "J1GOLD": "J1 GOLD"
+    },
+    "mapping": {
+      "title": "title",
+      "artist": "artist",
+      "artwork_url": "image_url"
+    }
+  }
+}

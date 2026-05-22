@@ -20,7 +20,7 @@ pub fn PlaylistModal(props: PlaylistModalProps) -> Element {
     let create_text = i18n::t("create").to_string();
     let cancel_text = i18n::t("cancel").to_string();
     let playlist_name_input = i18n::t("playlist_name_input").to_string();
-    
+
     let playlists: Vec<(String, String, String)> = if props.is_jellyfin {
         store
             .jellyfin_playlists

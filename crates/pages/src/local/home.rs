@@ -10,6 +10,16 @@ fn normalize_artist_key(value: &str) -> String {
     value.trim().to_lowercase()
 }
 
+fn is_unknown_artist(value: &str) -> bool {
+    let normalized = value.trim().to_lowercase();
+    normalized.is_empty() || normalized == "unknown artist"
+}
+
+fn is_unknown_album(value: &str) -> bool {
+    let normalized = value.trim().to_lowercase();
+    normalized.is_empty() || normalized == "unknown album"
+}
+
 fn section_label(key: &str) -> String {
     let i18n_key = match key {
         "hero" => "home_section_hero",
@@ -61,6 +71,9 @@ pub fn LocalHome(
         let mut unique_albums = Vec::new();
         let mut seen_titles = std::collections::HashSet::new();
         for album in albums {
+            if is_unknown_album(&album.title) || is_unknown_artist(&album.artist) {
+                continue;
+            }
             let title_key = album.title.trim().to_lowercase();
             if seen_titles.insert(title_key) {
                 unique_albums.push(album);
@@ -105,6 +118,9 @@ pub fn LocalHome(
         let mut unique_artists = std::collections::HashSet::new();
         let mut artist_list = Vec::new();
         for album in &lib.albums {
+            if is_unknown_artist(&album.artist) {
+                continue;
+            }
             let normalized_artist = normalize_artist_key(&album.artist);
             if unique_artists.insert(normalized_artist.clone()) {
                 let cover = if use_artist_photo {
@@ -166,7 +182,17 @@ pub fn LocalHome(
         let mut seen_albums = std::collections::HashSet::new();
         for path in conf.recently_played.iter() {
             if let Some(track) = track_by_path.get(path) {
+                if track.title.trim().is_empty() {
+                    continue;
+                }
                 let album = album_by_id.get(track.album_id.as_str()).copied().cloned();
+                if let Some(ref album_ref) = album {
+                    if is_unknown_album(&album_ref.title) || is_unknown_artist(&album_ref.artist) {
+                        continue;
+                    }
+                } else if is_unknown_artist(&track.artist) {
+                    continue;
+                }
                 if let Some(ref a) = album {
                     if !seen_albums.insert(a.id.clone()) {
                         continue;
@@ -179,6 +205,29 @@ pub fn LocalHome(
             }
         }
         out
+    });
+
+    let hero_entry = use_memo(move || {
+        let lib = library.read();
+        let conf = config.read();
+        let track_by_path: HashMap<String, &Track> = lib
+            .tracks
+            .iter()
+            .map(|t| (t.path.to_string_lossy().to_string(), t))
+            .collect();
+        let album_by_id: HashMap<&str, &Album> =
+            lib.albums.iter().map(|a| (a.id.as_str(), a)).collect();
+
+        for path in conf.recently_played.iter() {
+            if let Some(track) = track_by_path.get(path) {
+                if track.title.trim().is_empty() {
+                    continue;
+                }
+                let album = album_by_id.get(track.album_id.as_str()).copied().cloned();
+                return Some(((*track).clone(), album));
+            }
+        }
+        None
     });
 
     let made_for_you = use_memo(move || {
@@ -213,7 +262,9 @@ pub fn LocalHome(
         let mut albums: Vec<Album> = lib
             .albums
             .iter()
-            .filter(|a| a.genre == top_genre)
+            .filter(|a| {
+                a.genre == top_genre && !is_unknown_album(&a.title) && !is_unknown_artist(&a.artist)
+            })
             .cloned()
             .collect();
         let mut rng = thread_rng();
@@ -227,6 +278,9 @@ pub fn LocalHome(
         let mut unique = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for album in lib.albums.iter().rev() {
+            if is_unknown_album(&album.title) || is_unknown_artist(&album.artist) {
+                continue;
+            }
             if seen.insert(album.title.trim().to_lowercase()) {
                 unique.push(album.clone());
             }
@@ -348,6 +402,7 @@ pub fn LocalHome(
                                     listen_now_style,
                                     local_shuffled(),
                                     continue_listening(),
+                                    hero_entry(),
                                     artists(),
                                     new_release_albums(),
                                     made_for_you(),
@@ -380,6 +435,7 @@ fn render_local_section(
     listen_now_style: ListenNowStyle,
     local_shuffled: Vec<Album>,
     continue_listening: Vec<(Track, Option<Album>)>,
+    hero_entry: Option<(Track, Option<Album>)>,
     artists: Vec<(String, Option<PathBuf>)>,
     new_release_albums: Vec<Album>,
     made_for_you: (String, Vec<Album>),
@@ -400,7 +456,7 @@ fn render_local_section(
                 config,
                 edit,
                 is_modern,
-                album: local_shuffled.first().cloned(),
+                hero_entry,
                 on_play_album,
             }
         },
@@ -464,7 +520,7 @@ fn LocalHeroBanner(
     mut config: Signal<AppConfig>,
     edit: bool,
     is_modern: bool,
-    album: Option<Album>,
+    hero_entry: Option<(Track, Option<Album>)>,
     on_play_album: EventHandler<String>,
 ) -> Element {
     let mut is_resizing = use_signal(|| false);
@@ -511,39 +567,78 @@ fn LocalHeroBanner(
     };
     let section_style = format!("height: {hero_height}px;");
 
+    let show_empty_state = hero_entry.is_none();
+    let hero_title = hero_entry
+        .as_ref()
+        .map(|(track, album_opt)| {
+            if !track.title.trim().is_empty() {
+                return track.title.clone();
+            }
+            if let Some(album) = album_opt.as_ref() {
+                if !is_unknown_album(&album.title) {
+                    return album.title.clone();
+                }
+            }
+            track.title.clone()
+        })
+        .unwrap_or_default();
+    let hero_artist = hero_entry
+        .as_ref()
+        .map(|(track, album_opt)| {
+            if !is_unknown_artist(&track.artist) {
+                return track.artist.clone();
+            }
+            album_opt
+                .as_ref()
+                .map(|a| a.artist.clone())
+                .unwrap_or_default()
+        })
+        .unwrap_or_default();
+    let hero_cover_path = hero_entry
+        .as_ref()
+        .and_then(|(_, album_opt)| album_opt.as_ref().and_then(|a| a.cover_path.as_ref()));
+
     rsx! {
         section { class: "{section_class}", style: "{section_style}",
-            if let Some(album) = album {
-                div { class: "absolute inset-0",
-                    if let Some(url) = utils::format_artwork_url(album.cover_path.as_ref()) {
-                        img { src: "{url.as_ref()}&hq=1", class: "w-full h-full object-cover", decoding: "async" }
+            if !show_empty_state {
+                if let Some((_, _album_opt)) = hero_entry.as_ref() {
+                    div { class: "absolute inset-0",
+                        if let Some(url) = utils::format_artwork_url(hero_cover_path) {
+                            img { src: "{url.as_ref()}&hq=1", class: "w-full h-full object-cover", decoding: "async" }
+                        }
+                        div { class: "absolute inset-0 bg-gradient-to-r from-black/90 via-black/40 to-transparent" }
                     }
-                    div { class: "absolute inset-0 bg-gradient-to-r from-black/90 via-black/40 to-transparent" }
                 }
                 div { class: "relative h-full flex flex-col justify-center p-8 md:p-12",
                     span { class: "text-indigo-400 font-bold tracking-widest uppercase text-[10px] mb-3 flex items-center gap-2",
                         i { class: "fa-solid fa-clock-rotate-left text-[8px]" }
                         "{i18n::t(\"jump_back_in\")}"
                     }
-                    h1 { class: "text-3xl md:text-5xl font-black text-white mb-4 leading-tight max-w-xl break-words", "{album.title}" }
-                    p { class: "text-base md:text-lg text-white/60 mb-8 font-medium line-clamp-1 max-w-md", "{i18n::t_with(\"by_artist_full\", &[(\"artist\", album.artist.to_string())])}" }
+                    h1 { class: "text-3xl md:text-5xl font-black text-white mb-4 leading-tight max-w-xl break-words", "{hero_title}" }
+                    if !hero_artist.is_empty() {
+                        p { class: "text-base md:text-lg text-white/60 mb-8 font-medium line-clamp-1 max-w-md", "{i18n::t_with(\"by_artist_full\", &[(\"artist\", hero_artist.clone())])}" }
+                    }
                     div { class: "flex items-center gap-4",
                         button {
                             class: "flex items-center gap-3 bg-white text-black px-8 py-3 rounded-full font-bold hover:bg-white/90 hover:scale-105 active:scale-95 transition-all w-fit",
                             onclick: {
-                                let id = album.id.clone();
-                                move |_| on_play_album.call(id.clone())
+                                let id = hero_entry.as_ref().and_then(|(_, a)| a.as_ref().map(|a| a.id.clone()));
+                                move |_| {
+                                    if let Some(id) = id.clone() {
+                                        on_play_album.call(id)
+                                    }
+                                }
                             },
                             i { class: "fa-solid fa-play text-[10px]" }
                             span { class: "text-sm", "{i18n::t(\"start_listening\")}" }
                         }
                         {
-                            let local_hero_album_id = album.id.clone();
+                            let local_hero_album_id = hero_entry.as_ref().and_then(|(_, a)| a.as_ref().map(|a| a.id.clone()));
                             let local_hero_fav = {
                                 let lib = library.read();
                                 let store = favorites_store.read();
                                 let tracks: Vec<_> = lib.tracks.iter()
-                                    .filter(|t| t.album_id == album.id)
+                                    .filter(|t| local_hero_album_id.as_deref() == Some(t.album_id.as_str()))
                                     .collect();
                                 !tracks.is_empty() && tracks.iter().all(|t| store.is_local_favorite(&t.path))
                             };
@@ -558,19 +653,22 @@ fn LocalHeroBanner(
                                 button {
                                     class: "{heart_class}",
                                     onclick: move |_| {
-                                        let lib = library.read();
-                                        let tracks: Vec<_> = lib.tracks.iter()
-                                            .filter(|t| t.album_id == local_hero_album_id)
-                                            .cloned()
-                                            .collect();
-                                        drop(lib);
-                                        let new_fav = !local_hero_fav;
-                                        for track in tracks {
-                                            let currently = favorites_store.read().is_local_favorite(&track.path);
-                                            if new_fav && !currently {
-                                                favorites_store.write().toggle_local(track.path);
-                                            } else if !new_fav && currently {
-                                                favorites_store.write().toggle_local(track.path);
+                                        if let Some(ref album_id) = local_hero_album_id {
+                                            let tracks: Vec<_> = {
+                                                let lib = library.read();
+                                                lib.tracks.iter()
+                                                    .filter(|t| &t.album_id == album_id)
+                                                    .cloned()
+                                                    .collect()
+                                            };
+                                            let new_fav = !local_hero_fav;
+                                            for track in tracks {
+                                                let currently = favorites_store.read().is_local_favorite(&track.path);
+                                                if new_fav && !currently {
+                                                    favorites_store.write().toggle_local(track.path);
+                                                } else if !new_fav && currently {
+                                                    favorites_store.write().toggle_local(track.path);
+                                                }
                                             }
                                         }
                                     },

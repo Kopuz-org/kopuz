@@ -113,6 +113,11 @@ playlist_name_placeholder = 播放列表名称
 playlist_name_input = 播放列表名称
 add_media_server = 添加媒体服务器
 media_server = 媒体服务器
+media_servers = 媒体服务器
+saved_servers = 已保存的服务器
+switch_to_server = 切换
+active_server = 活动
+no_saved_servers = 无已保存的服务器
 jellyfin = Jellyfin
 subsonic = Subsonic
 custom_manual = 自定义（手动 API）
@@ -383,3 +388,19 @@ update_banner_message = Kopuz { $version } 现已可用。
 view_release = 查看发行版
 
 volume_scroll_step = 音量滚动步长
+
+# Radio Registries
+radio_registry_url_placeholder = 指向 index.json 的 URL 或本地路径
+add_radio_registry = 添加电台注册表
+radio_default_registry = 默认注册表
+
+
+radio_registry_empty_path = 注册表路径不能为空
+radio_registry_exists = 注册表已存在
+radio_registry_import_failed = 导入注册表失败: { $error }
+radio_registry_enable_failed = 启用注册表失败: { $error }
+radio_registries_active = { $enabled_count }/{ $total } 启用
+radio_registries_empty = 未配置注册表
+offline_downloads = 离线下载
+download_quality = 下载质量
+saving = 保存中...

@@ -1,15 +1,9 @@
 {
-  sharedArgs,
+  self,
   lib,
   mkShell,
-  dioxus-cli,
+  stdenv,
   just,
-  pkg-config,
-  cmake,
-  clang,
-  lld,
-  mold,
-  tailwindcss_4,
   flatpak,
   flatpak-builder,
   appstream,
@@ -20,20 +14,17 @@
   glib,
   gtk3,
 }:
+let
+  kopuzPkg = self.packages.${stdenv.hostPlatform.system}.kopuz;
+in
 mkShell {
-  inherit (sharedArgs) buildInputs;
+  name = "kopuz-dev";
+  inputsFrom = [ kopuzPkg ];
 
   nativeBuildInputs = [
-    # Build deps
-    sharedArgs.rustToolchain
-    dioxus-cli
+    # Dev
     just
-    pkg-config
-    cmake
-    clang
-    lld
-    mold
-    tailwindcss_4
+    deno
 
     # Packaging
     flatpak
@@ -42,14 +33,13 @@ mkShell {
     appstream
     nodejs_22
     yt-dlp
-    deno
   ];
 
   env = {
     RUSTFLAGS = "-C link-arg=-fuse-ld=lld";
     GIO_MODULE_DIR = "${glib-networking}/lib/gio/modules/";
     GSETTINGS_SCHEMA_DIR = "${glib.getSchemaPath gtk3}";
-    LD_LIBRARY_PATH = "${lib.makeLibraryPath sharedArgs.buildInputs}:$LD_LIBRARY_PATH";
+    LD_LIBRARY_PATH = "${lib.makeLibraryPath kopuzPkg.buildInputs}:$LD_LIBRARY_PATH";
     WEBKIT_DISABLE_COMPOSITING_MODE = "1";
   };
 }

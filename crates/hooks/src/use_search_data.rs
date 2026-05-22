@@ -13,7 +13,11 @@ pub struct SearchData {
     pub search_query: Signal<String>,
 }
 
-fn search_local(query: &str, tracks: Vec<Track>, albums: Vec<Album>) -> Option<(TrackRes, AlbumRes)> {
+fn search_local(
+    query: &str,
+    tracks: Vec<Track>,
+    albums: Vec<Album>,
+) -> Option<(TrackRes, AlbumRes)> {
     let album_map: std::collections::HashMap<&String, &Album> =
         albums.iter().map(|a| (&a.id, a)).collect();
 
@@ -278,7 +282,11 @@ pub fn use_search_data(
         let query = search_query.read().to_lowercase();
         let (active_source, active_service, server) = {
             let conf = config.read();
-            (conf.active_source.clone(), conf.active_service(), conf.server.clone())
+            (
+                conf.active_source.clone(),
+                conf.active_service(),
+                conf.server.clone(),
+            )
         };
         let (tracks, albums) = {
             let lib = library.read();

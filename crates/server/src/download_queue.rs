@@ -27,9 +27,12 @@ pub struct DownloadQueue {
 
 impl DownloadQueue {
     pub fn is_active(&self) -> bool {
-        self.items
-            .iter()
-            .any(|i| matches!(i.status, DownloadStatus::Queued | DownloadStatus::Downloading))
+        self.items.iter().any(|i| {
+            matches!(
+                i.status,
+                DownloadStatus::Queued | DownloadStatus::Downloading
+            )
+        })
     }
 
     pub fn done_count(&self) -> usize {
@@ -76,7 +79,12 @@ impl DownloadQueue {
         let remaining: u64 = self
             .items
             .iter()
-            .filter(|i| matches!(i.status, DownloadStatus::Queued | DownloadStatus::Downloading))
+            .filter(|i| {
+                matches!(
+                    i.status,
+                    DownloadStatus::Queued | DownloadStatus::Downloading
+                )
+            })
             .map(|i| {
                 if i.bytes_total > 0 {
                     i.bytes_total.saturating_sub(i.bytes_done)
@@ -94,8 +102,12 @@ impl DownloadQueue {
     }
 
     pub fn dismiss(&mut self) {
-        self.items
-            .retain(|i| matches!(i.status, DownloadStatus::Queued | DownloadStatus::Downloading));
+        self.items.retain(|i| {
+            matches!(
+                i.status,
+                DownloadStatus::Queued | DownloadStatus::Downloading
+            )
+        });
         if self.items.is_empty() {
             self.bytes_done_session = 0;
             self.session_elapsed_secs = 0.0;
@@ -105,7 +117,10 @@ impl DownloadQueue {
     pub fn cancel_all(&mut self) {
         self.cancel_requested = true;
         for item in &mut self.items {
-            if matches!(item.status, DownloadStatus::Queued | DownloadStatus::Downloading) {
+            if matches!(
+                item.status,
+                DownloadStatus::Queued | DownloadStatus::Downloading
+            ) {
                 item.status = DownloadStatus::Failed;
             }
         }

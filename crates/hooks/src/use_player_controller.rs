@@ -56,6 +56,7 @@ pub struct PlayerController {
     pending_resume: Signal<Option<PendingResumeState>>,
     pub pending_crossfade_ui: Signal<Option<PendingCrossfadeUiState>>,
     pub radio_task: Signal<Option<dioxus_core::Task>>,
+    pub station_registry: Signal<radio::registry::StationRegistry>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -507,8 +508,17 @@ impl PlayerController {
 
                 if let Some((stream_url, cover_url)) = {
                     if is_radio_item {
-                        let stream_url = radio::stations::stream_url(&id, &stream_id);
-                        Some((stream_url.to_string(), String::new()))
+                        if let Some(stream_url) = self
+                            .station_registry
+                            .read()
+                            .get(&id)
+                            .and_then(|s| s.streams.iter().find(|str| str.id == stream_id))
+                            .map(|s| s.url.clone())
+                        {
+                            Some((stream_url, String::new()))
+                        } else {
+                            None
+                        }
                     } else {
                         let conf = self.config.read();
                         conf.server.as_ref().map(|server| match server.service {
@@ -590,6 +600,7 @@ impl PlayerController {
                     let mut current_song_artist = self.current_song_artist;
                     let mut current_song_album = self.current_song_album;
                     let mut current_song_cover_url = self.current_song_cover_url;
+                    let station_registry = self.station_registry;
 
                     if !use_crossfade {
                         self.hydrate_current_track_metadata(idx, 0);
@@ -685,33 +696,11 @@ impl PlayerController {
                                 }
 
                                 if is_radio_item {
+                                    if let Some(provider) =
+                                        station_registry.read().create_provider(&station_id)
                                     {
-                                        let provider: Box<dyn radio::RadioMetadataProvider> =
-                                            match station_id.as_str() {
-                                                "listen_moe" => {
-                                                    Box::new(radio::listen_moe::ListenMoeProvider)
-                                                }
-                                                "j1" => Box::new(radio::j1::J1Provider),
-                                                "doujinstyle" => Box::new(
-                                                    radio::doujinstyle::DoujinstyleProvider,
-                                                ),
-                                                "vocaloid" => {
-                                                    Box::new(radio::vocaloid::VocaloidProvider)
-                                                },
-                                                "asiadreamradio" => Box::new(radio::asiadreamradio::AsiaDreamRadioProvider),
-                                                _ => {
-                                                    tracing::warn!(
-                                                        "[radio] No metadata provider for station: {}",
-                                                        station_id
-                                                    );
-                                                    is_loading.set(false);
-                                                    is_playing.set(true);
-                                                    skip_in_progress.set(false);
-                                                    return;
-                                                }
-                                            };
-
                                         let task = spawn(async move {
+                                            use radio::provider::RadioMetadataProvider;
                                             let mut rx = provider.start(&stream_id);
                                             while let Some(meta) = rx.recv().await {
                                                 current_song_title.set(meta.title.clone());
@@ -723,6 +712,11 @@ impl PlayerController {
                                         });
 
                                         radio_task.set(Some(task));
+                                    } else {
+                                        tracing::warn!(
+                                            "[radio] No metadata provider for station: {}",
+                                            station_id
+                                        );
                                     }
                                 }
                                 // Don't scrobble if the track is a radio item
@@ -1720,21 +1714,75 @@ impl PlayerController {
         }
     }
 
-    pub fn move_queue_item(&mut self, from: usize, to: usize) {
-        self.move_physical_queue_item(from, to);
-    }
+    // Swaps two queue items, taking into account shuffle state and current queue index
+    pub fn swap_queue_item(&mut self, from: usize, to: usize) {
+        let shuffle = *self.shuffle.peek();
+        let len = if shuffle {
+            self.shuffle_order.len()
+        } else {
+            self.queue.peek().len()
+        };
 
-    fn move_physical_queue_item(&mut self, from: usize, to: usize) {
-        let len = self.queue.peek().len();
         if from >= len || to >= len || from == to {
             return;
         }
 
-        if *self.shuffle.peek() {
+        if shuffle {
             self.shuffle_order.with_mut(|so| so.swap(from, to));
+        } else {
+            self.queue.with_mut(|so| so.swap(from, to));
+        }
+
+        let current_idx = *self.current_queue_index.peek();
+        if current_idx == from {
+            self.current_queue_index.set(to);
+        } else if current_idx == to {
+            self.current_queue_index.set(from);
+        }
+
+        self.history.with_mut(|history| {
+            for idx in history.iter_mut() {
+                if *idx == from {
+                    *idx = to;
+                } else if *idx == to {
+                    *idx = from;
+                }
+            }
+        });
+    }
+
+    pub fn move_queue_item(&mut self, from: usize, to: usize) {
+        let shuffle = *self.shuffle.peek();
+        let len = if shuffle {
+            self.shuffle_order.len()
+        } else {
+            self.queue.peek().len()
+        };
+
+        if from >= len || to >= len || from == to {
             return;
         }
 
+        if shuffle {
+            let idx = self.shuffle_order.remove(from);
+            self.shuffle_order.insert(to, idx);
+
+            let current_idx = *self.current_queue_index.peek();
+            self.current_queue_index
+                .set(Self::remap_queue_index(current_idx, from, to));
+
+            self.history.with_mut(|history| {
+                for idx in history.iter_mut() {
+                    *idx = Self::remap_queue_index(*idx, from, to);
+                }
+            });
+        } else {
+            self.move_physical_queue_item(from, to);
+        }
+    }
+
+    /// Does not check bounds. use `move_queue_item` instead.
+    fn move_physical_queue_item(&mut self, from: usize, to: usize) {
         self.queue.with_mut(|queue| {
             let track = queue.remove(from);
             queue.insert(to, track);
@@ -1824,6 +1872,7 @@ pub fn use_player_controller(
     let pending_resume = use_signal(|| None::<PendingResumeState>);
     let pending_crossfade_ui = use_signal(|| None::<PendingCrossfadeUiState>);
     let radio_task = use_signal(|| None::<dioxus_core::Task>);
+    let station_registry = use_context::<Signal<radio::registry::StationRegistry>>();
 
     PlayerController {
         player,
@@ -1852,5 +1901,6 @@ pub fn use_player_controller(
         pending_resume,
         pending_crossfade_ui,
         radio_task,
+        station_registry,
     }
 }

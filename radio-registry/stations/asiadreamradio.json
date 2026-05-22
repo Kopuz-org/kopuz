@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0",
+  "id": "asiadreamradio",
+  "name": "Asia DREAM Radio",
+  "description": "radio_asiadreamradio_desc",
+  "icon": "fa-solid fa-radio",
+  "streams": [
+    { "id": "japan_hits", "name": "Japan Hits", "url": "https://quincy.torontocast.com:2020/;?type=http", "icon": "fa-solid fa-fire" },
+    { "id": "natsukashii", "name": "Natsukashii", "url": "https://quincy.torontocast.com:2070/;?type=http", "icon": "fa-solid fa-clock-rotate-left" },
+    { "id": "jpop_kawaii", "name": "J-Pop Kawaii", "url": "https://kathy.torontocast.com:3060/;?type=http", "icon": "fa-solid fa-heart" },
+    { "id": "jpop_power", "name": "J-Pop Power", "url": "https://kathy.torontocast.com:3560/;?type=http", "icon": "fa-solid fa-bolt" },
+    { "id": "jazz_sakura", "name": "Jazz Sakura", "url": "https://kathy.torontocast.com:3330/;?type=http", "icon": "fa-solid fa-leaf" },
+    { "id": "jrock", "name": "J-Rock", "url": "https://kathy.torontocast.com:3340/;?type=http", "icon": "fa-solid fa-guitar" },
+    { "id": "jclub_hiphop", "name": "J-Club / Hip Hop", "url": "https://kathy.torontocast.com:3350/;?type=http", "icon": "fa-solid fa-compact-disc" },
+    { "id": "bandstand_jazz", "name": "Bandstand Jazz", "url": "https://cast1.torontocast.com/bandstand", "icon": "fa-solid fa-music" }
+  ],
+  "metadata": {
+    "type": "rest",
+    "url": "https://quincy.torontocast.com:1970/api/v2/history/?limit=1&offset=0&server=1",
+    "stream_url_map": {
+      "japan_hits": "https://quincy.torontocast.com:1970/api/v2/history/?limit=1&offset=0&server=1",
+      "natsukashii": "https://quincy.torontocast.com:1970/api/v2/history/?limit=1&offset=0&server=3",
+      "jpop_kawaii": "https://kathy.torontocast.com:2650/api/v2/history/?limit=1&offset=0&server=2",
+      "jpop_power": "https://kathy.torontocast.com:2650/api/v2/history/?limit=1&offset=0&server=1",
+      "jazz_sakura": "https://kathy.torontocast.com:3310/api/v2/history/?limit=1&offset=0&server=1",
+      "jrock": "https://kathy.torontocast.com:3310/api/v2/history/?limit=1&offset=0&server=4",
+      "jclub_hiphop": "https://kathy.torontocast.com:3310/api/v2/history/?limit=1&offset=0&server=5",
+      "bandstand_jazz": "https://cast1.torontocast.com:2050/api/v2/history/?limit=1&offset=0&server=1"
+    },
+    "poll_interval_secs": 20,
+    "mapping": {
+      "title": "results.0.title",
+      "artist": "results.0.author",
+      "artwork_url": "results.0.img_large_url"
+    }
+  }
+}

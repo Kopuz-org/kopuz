@@ -31,3 +31,5 @@ pub mod stat_card;
 pub mod titlebar;
 pub mod track_list_view;
 pub mod track_row;
+pub mod queue_list_view;
+pub mod lyrics_view;

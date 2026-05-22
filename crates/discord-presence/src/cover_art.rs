@@ -68,10 +68,7 @@ async fn search_release_mbid(
         .await?;
 
     if !resp.status().is_success() {
-        tracing::warn!(
-            "MusicBrainz search returned HTTP {}",
-            resp.status()
-        );
+        tracing::warn!("MusicBrainz search returned HTTP {}", resp.status());
         return Ok(None);
     }
 
@@ -80,10 +77,7 @@ async fn search_release_mbid(
         if let Some(first) = releases.first() {
             let score = first.score.unwrap_or(0);
             if score >= 80 {
-                tracing::info!(
-                    "MusicBrainz match: release={} (score={})",
-                    first.id, score
-                );
+                tracing::info!("MusicBrainz match: release={} (score={})", first.id, score);
                 return Ok(Some(first.id.clone()));
             } else {
                 tracing::info!(
@@ -170,10 +164,9 @@ pub async fn resolve_cover_art_url(
                     tracing::info!("Resolved via embedded MBID -> {}", url);
                     return Some(url);
                 }
-                Ok(false) => tracing::warn!(
-                    "Embedded MBID {} has no front cover, falling back",
-                    id
-                ),
+                Ok(false) => {
+                    tracing::warn!("Embedded MBID {} has no front cover, falling back", id)
+                }
                 Err(e) => tracing::warn!("Error verifying MBID {}: {}", id, e),
             }
         }
@@ -191,7 +184,8 @@ pub async fn resolve_cover_art_url(
         },
         Ok(None) => tracing::info!(
             "No MusicBrainz match for artist=\"{}\" album=\"{}\"",
-            artist, album
+            artist,
+            album
         ),
         Err(e) => tracing::warn!("MusicBrainz search failed: {}", e),
     }
@@ -205,7 +199,8 @@ pub async fn resolve_cover_art_url(
 
     tracing::info!(
         "All sources exhausted for artist=\"{}\" album=\"{}\"",
-        artist, album
+        artist,
+        album
     );
     None
 }

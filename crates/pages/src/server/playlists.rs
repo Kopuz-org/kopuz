@@ -1,6 +1,6 @@
+use crate::server::download_manager::{DownloadQueue, DownloadStatus, queue_downloads};
 use ::server::jellyfin::JellyfinClient;
 use ::server::subsonic::SubsonicClient;
-use crate::server::download_manager::{DownloadQueue, DownloadStatus, queue_downloads};
 use config::{AppConfig, MusicService};
 use dioxus::prelude::*;
 use reader::{Library, PlaylistStore};
@@ -63,7 +63,9 @@ pub fn JellyfinPlaylists(
             let parts: Vec<&str> = k.splitn(5, '|').collect();
             if parts.len() >= 3 {
                 Some(format!("{}", &parts[..3].join("|")))
-            } else { None }
+            } else {
+                None
+            }
         });
 
         // Skip if same key (already fetched this exact state)
@@ -153,7 +155,8 @@ pub fn JellyfinPlaylists(
             let mut store_write = playlist_store.write();
             // Preserve any locally-set cover_path when replacing server data
             for p in &mut server_playlists {
-                if let Some(existing) = store_write.jellyfin_playlists.iter().find(|e| e.id == p.id) {
+                if let Some(existing) = store_write.jellyfin_playlists.iter().find(|e| e.id == p.id)
+                {
                     p.cover_path = existing.cover_path.clone();
                 }
             }
@@ -166,15 +169,21 @@ pub fn JellyfinPlaylists(
         let offline = *is_offline.read();
         let conf = config.read();
         if offline {
-            store_ref.jellyfin_playlists.iter().filter(|p| {
-                !p.tracks.is_empty() && p.tracks.iter().all(|tid| {
-                    if let Some(path_str) = conf.offline_tracks.get(tid) {
-                        std::path::Path::new(path_str).exists()
-                    } else {
-                        false
-                    }
+            store_ref
+                .jellyfin_playlists
+                .iter()
+                .filter(|p| {
+                    !p.tracks.is_empty()
+                        && p.tracks.iter().all(|tid| {
+                            if let Some(path_str) = conf.offline_tracks.get(tid) {
+                                std::path::Path::new(path_str).exists()
+                            } else {
+                                false
+                            }
+                        })
                 })
-            }).cloned().collect()
+                .cloned()
+                .collect()
         } else {
             store_ref.jellyfin_playlists.clone()
         }

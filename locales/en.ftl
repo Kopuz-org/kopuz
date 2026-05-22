@@ -179,6 +179,11 @@ playlist_name_placeholder = Playlist name
 playlist_name_input = Playlist Name
 add_media_server = Add Media Server
 media_server = Media Server
+media_servers = Media Servers
+saved_servers = Saved Servers
+switch_to_server = Switch
+active_server = Active
+no_saved_servers = No saved servers
 jellyfin = Jellyfin
 subsonic = Subsonic
 custom_manual = Custom (manual API)
@@ -373,3 +378,18 @@ radio_doujinstyle_desc = Doujin music, video game soundtracks, and more.
 radio_vocaloid_desc = Vocaloid Hits from Japan. We play it all!
 radio_asiadreamradio_desc = The Heart of J-Pop Music - J-Pop, J-Rock, J-HipHop, J-Jazz, Classics.
 radio_live_stream = Live Stream
+
+# Radio Registries
+radio_registry_url_placeholder = URL or local path to index.json
+add_radio_registry = Add Radio Registry
+radio_default_registry = Default Registry
+
+radio_registry_empty_path = Registry path cannot be empty
+radio_registry_exists = Registry already exists
+radio_registry_import_failed = Failed to import registry: { $error }
+radio_registry_enable_failed = Failed to enable registry: { $error }
+radio_registries_active = { $enabled_count }/{ $total } active
+radio_registries_empty = No registries configured
+offline_downloads = Offline Downloads
+download_quality = Download Quality
+saving = Saving...

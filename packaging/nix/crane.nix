@@ -34,22 +34,21 @@ let
   ]
   ++ lib.optionals stdenv.isLinux [ wrapGAppsHook3 ];
 
-  buildInputs =
-    lib.optionals stdenv.isLinux [
-      webkitgtk_4_1
-      gtk3
-      libsoup_3
-      glib-networking
-      alsa-lib
-      openssl
-      xdotool
-      wayland
-      dbus
-      libopus
-    ]
-    ++ lib.optionals stdenv.isDarwin [
-      libopus
-    ];
+  buildInputs = [
+    libopus
+  ]
+  ++ lib.optionals stdenv.isLinux [
+    webkitgtk_4_1
+    gtk3
+    libsoup_3
+    glib-networking
+    alsa-lib
+    openssl
+    xdotool
+    wayland
+    dbus
+    libopus
+  ];
 
   commonArgs = {
     inherit
@@ -154,7 +153,10 @@ craneLib.mkCargoDerivation (
       description = "Fast, modern music player with Jellyfin and local library support";
       homepage = "https://github.com/temidaradev/kopuz";
       license = lib.licenses.mit;
-      maintainers = with lib.maintainers; [ temidaradev ];
+      maintainers = with lib.maintainers; [
+        temidaradev
+        NotAShelf
+      ];
       platforms = lib.platforms.linux ++ lib.platforms.darwin;
       mainProgram = "kopuz";
     };

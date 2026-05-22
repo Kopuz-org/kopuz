@@ -113,6 +113,11 @@ playlist_name_placeholder = Çalma listesi adı
 playlist_name_input = Çalma Listesi Adı
 add_media_server = Medya Sunucusu Ekle
 media_server = Medya Sunucusu
+media_servers = Medya Sunucuları
+saved_servers = Kayıtlı Sunucular
+switch_to_server = Değiştir
+active_server = Aktif
+no_saved_servers = Kayıtlı sunucu yok
 jellyfin = Jellyfin
 subsonic = Subsonic
 custom_manual = Özel (manuel API)
@@ -383,3 +388,19 @@ update_banner_message = Kopuz { $version } kullanılabilir.
 view_release = Sürümü görüntüle
 
 volume_scroll_step = Ses kaydırma adımı
+
+# Radio Registries
+radio_registry_url_placeholder = index.json için URL veya yerel yol
+add_radio_registry = Radyo Kaydı Ekle
+radio_default_registry = Varsayılan Kayıt
+
+
+radio_registry_empty_path = Kayıt defteri yolu boş olamaz
+radio_registry_exists = Kayıt defteri zaten var
+radio_registry_import_failed = Kayıt defteri içe aktarılamadı: { $error }
+radio_registry_enable_failed = Kayıt defteri etkinleştirilemedi: { $error }
+radio_registries_active = { $enabled_count }/{ $total } aktif
+radio_registries_empty = Yapılandırılmış kayıt defteri yok
+offline_downloads = Çevrimdışı İndirmeler
+download_quality = İndirme Kalitesi
+saving = Kaydediliyor...

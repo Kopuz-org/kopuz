@@ -366,7 +366,11 @@ async fn fetch_local_lrc(_audio_path: &str) -> Option<Lyrics> {
 }
 
 async fn fetch_jellyfin_lyrics(item_id: &str, server_url: &str, token: &str) -> Option<Lyrics> {
-    let url = format!("{}/Items/{}/Lyrics", server_url.trim_end_matches('/'), item_id);
+    let url = format!(
+        "{}/Items/{}/Lyrics",
+        server_url.trim_end_matches('/'),
+        item_id
+    );
     let client = reqwest::Client::new();
     let resp = client
         .get(&url)
@@ -563,7 +567,12 @@ async fn subsonic_get_by_title(
     }
 }
 
-async fn fetch_from_lrclib(artist: &str, title: &str, album: &str, duration: u64) -> Option<Lyrics> {
+async fn fetch_from_lrclib(
+    artist: &str,
+    title: &str,
+    album: &str,
+    duration: u64,
+) -> Option<Lyrics> {
     let mut url = format!(
         "https://lrclib.net/api/get?artist_name={}&track_name={}",
         percent_encoding::utf8_percent_encode(artist, NON_ALPHANUMERIC),

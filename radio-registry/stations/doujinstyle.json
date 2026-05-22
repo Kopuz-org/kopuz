@@ -1,0 +1,20 @@
+{
+  "schema_version": "1.0",
+  "id": "doujinstyle",
+  "name": "Doujinstyle",
+  "description": "radio_doujinstyle_desc",
+  "icon": "fa-solid fa-radio",
+  "streams": [
+    { "id": "main", "name": "radio_live_stream", "url": "https://streams.radio.co/s5ff57669c/listen", "icon": "fa-solid fa-play" }
+  ],
+  "metadata": {
+    "type": "rest",
+    "url": "https://public.radio.co/api/v2/s5ff57669c/track/current",
+    "poll_interval_secs": 15,
+    "mapping": {
+      "title": "data.track_title",
+      "artist": "data.track_artist",
+      "artwork_url": "data.artwork_urls.large"
+    }
+  }
+}

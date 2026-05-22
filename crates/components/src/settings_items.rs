@@ -1,6 +1,6 @@
 use config::{
     AppConfig, BackBehavior, ChannelMode, EqPreset, EqualizerSettings as EqualizerConfig,
-    MusicServer,
+    MusicServer, SavedServer,
 };
 use dioxus::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
@@ -162,47 +162,86 @@ fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -
 
 #[component]
 pub fn ServerSettings(
-    server: Option<MusicServer>,
+    active: Option<MusicServer>,
+    servers: Vec<SavedServer>,
     on_add: EventHandler<()>,
-    on_delete: EventHandler<()>,
+    on_delete: EventHandler<String>,
+    on_switch: EventHandler<String>,
     on_login: EventHandler<()>,
 ) -> Element {
     let login_text = i18n::t("login");
     let delete_text = i18n::t("delete");
+    let switch_text = i18n::t("switch_to_server");
+    let active_text = i18n::t("active_server");
+    let active_id = active.as_ref().and_then(|s| s.id.clone());
 
     rsx! {
-        div { class: "flex flex-col gap-2",
-            if let Some(server) = server {
-                div { class: "flex items-center justify-between gap-4 bg-white/5 p-2 rounded w-full",
-                    div {
-                        p { class: "text-sm font-medium text-white", "{server.name}" }
-                        p { class: "text-xs text-white/60", "{i18n::t_with(\"service\", &[(\"name\", server.service.display_name().to_string())])}" }
-                        p { class: "text-xs text-white/60", "{server.url}" }
-                        if server.access_token.is_some() {
-                            p { class: "text-xs text-green-400 mt-1", "{i18n::t(\"connected\")}" }
-                        } else {
-                            div { class: "flex items-center gap-2 mt-1",
-                                p { class: "text-xs text-red-400", "{i18n::t(\"disconnected\")}" }
+        div { class: "flex flex-col gap-2 w-full",
+            if servers.is_empty() {
+                p { class: "text-xs text-white/50 italic", "{i18n::t(\"no_saved_servers\")}" }
+            }
+            for srv in servers.iter().cloned() {
+                {
+                    let id = srv.id.clone();
+                    let is_active = active_id.as_deref() == Some(srv.id.as_str());
+                    let connected = is_active
+                        && active
+                            .as_ref()
+                            .and_then(|s| s.access_token.clone())
+                            .is_some();
+                    let id_switch = id.clone();
+                    let id_delete = id.clone();
+                    rsx! {
+                        div { key: "{srv.id}",
+                            class: "flex items-center justify-between gap-4 bg-white/5 p-2 rounded w-full",
+                            div { class: "min-w-0 flex-1",
+                                div { class: "flex items-center gap-2",
+                                    p { class: "text-sm font-medium text-white truncate", "{srv.name}" }
+                                    if is_active {
+                                        span { class: "text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-indigo-500/30 text-indigo-200",
+                                            "{active_text}"
+                                        }
+                                    }
+                                }
+                                p { class: "text-xs text-white/60", "{i18n::t_with(\"service\", &[(\"name\", srv.service.display_name().to_string())])}" }
+                                p { class: "text-xs text-white/60 truncate", "{srv.url}" }
+                                if is_active {
+                                    if connected {
+                                        p { class: "text-xs text-green-400 mt-1", "{i18n::t(\"connected\")}" }
+                                    } else {
+                                        div { class: "flex items-center gap-2 mt-1",
+                                            p { class: "text-xs text-red-400", "{i18n::t(\"disconnected\")}" }
+                                            button {
+                                                onclick: move |_| on_login.call(()),
+                                                class: "text-xs bg-white/10 hover:bg-white/20 px-2 py-0.5 rounded text-white transition-colors",
+                                                "{login_text}"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            div { class: "flex items-center gap-2 shrink-0",
+                                if !is_active {
+                                    button {
+                                        onclick: move |_| on_switch.call(id_switch.clone()),
+                                        class: "text-xs bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-white transition-colors",
+                                        "{switch_text}"
+                                    }
+                                }
                                 button {
-                                    onclick: move |_| on_login.call(()),
-                                    class: "text-xs bg-white/10 hover:bg-white/20 px-2 py-0.5 rounded text-white transition-colors",
-                                    "{login_text}"
+                                    onclick: move |_| on_delete.call(id_delete.clone()),
+                                    class: "text-red-400 hover:text-red-300 text-sm px-2 py-1 transition-colors",
+                                    "{delete_text}"
                                 }
                             }
                         }
                     }
-                    button {
-                        onclick: move |_| on_delete.call(()),
-                        class: "text-red-400 hover:text-red-300 text-sm px-2 py-1 transition-colors",
-                        "{delete_text}"
-                    }
                 }
-            } else {
-                button {
-                    onclick: move |_| on_add.call(()),
-                    class: "bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start",
-                    "{i18n::t(\"add_server\")}"
-                }
+            }
+            button {
+                onclick: move |_| on_add.call(()),
+                class: "bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start",
+                "{i18n::t(\"add_server\")}"
             }
         }
     }
@@ -1014,6 +1053,99 @@ pub fn ChannelModeSelector(current: ChannelMode, on_change: EventHandler<Channel
                     value: mode.value_str(),
                     selected: *mode == current,
                     "{channel_mode_label(*mode)}"
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub fn RadioRegistryDropdown(
+    registries: Vec<config::RegistryEntry>,
+    on_toggle: EventHandler<usize>,
+    on_add: EventHandler<()>,
+    on_delete: EventHandler<usize>,
+    error: Signal<Option<String>>,
+) -> Element {
+    let mut expanded = use_signal(|| false);
+    let is_open = expanded();
+    let chevron = if is_open { "▾" } else { "▸" };
+    let add_text = i18n::t("add");
+    let delete_text = i18n::t("delete");
+    let default_registry = i18n::t("radio_default_registry");
+    rsx! {
+        div { class: "flex flex-col w-full",
+            button {
+                class: "flex items-center justify-between w-full py-2 cursor-pointer group",
+                onclick: move |_| expanded.set(!is_open),
+                div { class: "flex items-center gap-2",
+                    span { class: "text-white font-medium", "{i18n::t(\"radio\")}" }
+                    span {
+                        class: "text-xs text-slate-500",
+                        {
+                            let enabled_count = registries.iter().filter(|r| r.enabled).count();
+                            let total = registries.len();
+                            i18n::t_with("radio_registries_active", &[("enabled_count", enabled_count.to_string()), ("total", total.to_string())])
+                        }
+                    }
+                }
+                span {
+                    class: "text-white/60 group-hover:text-white transition-colors text-sm",
+                    "{chevron}"
+                }
+            }
+            // Expandable panel
+            if is_open {
+                div { class: "flex flex-col gap-2 pl-2 pb-2 border-l border-white/5 ml-1",
+                    if registries.is_empty() {
+                        p { class: "text-xs text-slate-500 italic py-1", "{i18n::t(\"radio_registries_empty\")}" }
+                    }
+                    if let Some(err) = error() {
+                        p { class: "text-xs text-red-400 py-1 mb-1", "{err}" }
+                    }
+                    for (i, entry) in registries.iter().enumerate() {
+                        {
+                            let url_display = if entry.is_default {
+                                default_registry.to_string()
+                            } else {
+                                entry.url.clone()
+                            };
+                            let row_key = format!("{i}-{}", entry.url);
+                            let is_default = entry.is_default;
+                            let is_enabled = entry.enabled;
+                            rsx! {
+                                div { key: "{row_key}",
+                                    class: "flex items-center gap-3 bg-white/5 p-2 rounded w-full",
+                                    input {
+                                        r#type: "checkbox",
+                                        checked: is_enabled,
+                                        onchange: move |_| on_toggle.call(i),
+                                        class: "accent-indigo-500 w-4 h-4 shrink-0 cursor-pointer",
+                                    }
+                                    span {
+                                        class: if is_enabled {
+                                            "text-xs text-slate-300 font-mono truncate flex-1"
+                                        } else {
+                                            "text-xs text-slate-600 font-mono truncate flex-1 line-through"
+                                        },
+                                        "{url_display}"
+                                    }
+                                    if !is_default {
+                                        button {
+                                            onclick: move |_| on_delete.call(i),
+                                            class: "text-red-400 hover:text-red-300 text-xs px-2 py-0.5 rounded transition-colors shrink-0",
+                                            "{delete_text}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    button {
+                        onclick: move |_| on_add.call(()),
+                        class: "bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start mt-1",
+                        "{add_text}"
+                    }
                 }
             }
         }

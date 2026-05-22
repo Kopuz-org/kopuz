@@ -247,7 +247,8 @@ pub fn use_player_task(ctrl: PlayerController) {
                     if let Some(path) = current_path {
                         if is_playing && last_recent_path.as_ref() != Some(&path) {
                             last_recent_path = Some(path.clone());
-                            let is_server = path.starts_with("jellyfin:") || path.starts_with("subsonic:");
+                            let is_server =
+                                path.starts_with("jellyfin:") || path.starts_with("subsonic:");
                             let id = if is_server {
                                 path.split(':').nth(1).unwrap_or(&path).to_string()
                             } else {
@@ -452,7 +453,11 @@ pub fn use_player_task(ctrl: PlayerController) {
                         let artist = ctrl.current_song_artist.read().clone();
                         let album = ctrl.current_song_album.read().clone();
                         let duration = *ctrl.current_song_duration.read();
-                        let progress = if duration == u64::MAX { 0 } else { pos.as_secs() };
+                        let progress = if duration == u64::MAX {
+                            0
+                        } else {
+                            pos.as_secs()
+                        };
                         let cover = ctrl.current_song_cover_url.read().clone();
 
                         let song_key = format!("{}|{}|{}", title, artist, album);
@@ -480,9 +485,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                                         &album_c,
                                     )
                                     .await;
-                                    if *discord_cover_resolving_for.peek()
-                                        == song_key_for_spawn
-                                    {
+                                    if *discord_cover_resolving_for.peek() == song_key_for_spawn {
                                         discord_cover_url.set(resolved);
                                     }
                                 });
@@ -502,7 +505,9 @@ pub fn use_player_task(ctrl: PlayerController) {
                                 let resolved = discord_cover_url.read().clone();
                                 let cover_ref = if let Some(ref url) = resolved {
                                     Some(url.as_str())
-                                } else if cover.starts_with("http") && !cover.contains("dioxus.localhost") {
+                                } else if cover.starts_with("http")
+                                    && !cover.contains("dioxus.localhost")
+                                {
                                     Some(cover.as_str())
                                 } else {
                                     None
