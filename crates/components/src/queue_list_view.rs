@@ -39,19 +39,34 @@ pub fn QueueRow(
     can_move_up: bool,
     can_move_down: bool,
     is_reorder_source: bool,
+    is_active: bool,
     on_play: Callback,
     on_row_mouse_down: EventHandler<MouseEvent>,
     on_row_mouse_move: EventHandler<MouseEvent>,
     on_move_up: EventHandler<MouseEvent>,
     on_move_down: EventHandler<MouseEvent>,
 ) -> Element {
+    let base_class = match layout {
+        LayoutMode::Fullscreen => {
+            "flex items-center gap-4 px-4 py-3 hover:bg-white/5 cursor-pointer rounded transition-colors group"
+        }
+        LayoutMode::Rightbar => rightbar_queue_row_class(is_reorder_source),
+    };
+    let row_class = if is_active {
+        format!("{base_class} {layout}__active-queue-item")
+    } else {
+        base_class.to_string()
+    };
+    let row_icon_class = if is_active {
+        "fa-solid fa-volume-high text-xs"
+    } else {
+        "fa-solid fa-play text-xs text-white/60"
+    };
+
     rsx! {
         div {
             id: "{layout}__queue-item-{queue_idx}",
-            class: match layout {
-               LayoutMode::Fullscreen=> "flex items-center gap-4 px-4 py-3 hover:bg-white/5 cursor-pointer rounded transition-colors group",
-               LayoutMode::Rightbar => rightbar_queue_row_class(is_reorder_source),
-            },
+            class: "{row_class}",
             style: match layout {
                 LayoutMode::Fullscreen => "",
                 LayoutMode::Rightbar => "content-visibility: auto; contain-intrinsic-size: 0 56px;",
@@ -70,7 +85,7 @@ pub fn QueueRow(
 
                 div {
                     class: "queue-item-icon hidden group-hover:flex items-center justify-center",
-                    i { class: "fa-solid fa-play text-xs text-white/60" }
+                    i { class: "{row_icon_class}" }
                 }
             }
 
@@ -470,6 +485,7 @@ pub fn QueueListView(
                         let can_move_down = queue_idx + 1 < queue_count;
                         let is_reorder_source = layout == LayoutMode::Rightbar
                             && *queue_reorder_from.read() == Some(queue_idx);
+                        let is_active = *current_queue_index.read() == queue_idx;
                         let is_drop_target = layout == LayoutMode::Rightbar
                             && *queue_drop_index.read() == Some(queue_idx)
                             && *queue_reorder_from.read() != Some(queue_idx);
@@ -564,6 +580,7 @@ pub fn QueueListView(
                                         can_move_up,
                                         can_move_down,
                                         is_reorder_source,
+                                        is_active,
                                         on_play: move |_| {
                                             if !*queue_reorder_did_move.read() {
                                                 play_song_at_index(queue_idx);
@@ -614,6 +631,7 @@ pub fn QueueListView(
                                     can_move_up,
                                     can_move_down,
                                     is_reorder_source: false,
+                                    is_active,
                                     on_play: move |_| play_song_at_index(queue_idx),
                                     on_row_mouse_down: move |_: MouseEvent| {},
                                     on_row_mouse_move: move |_: MouseEvent| {},
