@@ -7,8 +7,26 @@ use std::sync::{Mutex, OnceLock};
 
 pub const RIGHTBAR_DROPZONE_ID: &str = "rightbar-dropzone";
 pub const RIGHTBAR_QUEUE_DROP_TARGET_CLASS: &str = "rightbar-queue-drop-target";
-pub static DRAGGED_QUEUE_TRACK: OnceLock<Mutex<Option<Track>>> = OnceLock::new();
+pub static DRAGGED_QUEUE_TRACKS: OnceLock<Mutex<Vec<Track>>> = OnceLock::new();
 static QUEUE_DRAG_ENABLED: AtomicBool = AtomicBool::new(false);
+
+pub fn rightbar_reorder_move_target(
+    from: usize,
+    drop_index: usize,
+    queue_count: usize,
+) -> Option<usize> {
+    if from >= queue_count || drop_index > queue_count {
+        return None;
+    }
+
+    let to = if from < drop_index {
+        drop_index.saturating_sub(1)
+    } else {
+        drop_index
+    };
+
+    (to < queue_count && to != from).then_some(to)
+}
 
 pub fn set_queue_drag_enabled(enabled: bool) {
     QUEUE_DRAG_ENABLED.store(enabled, Ordering::Relaxed);
@@ -21,20 +39,27 @@ pub fn is_queue_drag_enabled() -> bool {
     QUEUE_DRAG_ENABLED.load(Ordering::Relaxed)
 }
 
-fn dragged_queue_track() -> &'static Mutex<Option<Track>> {
-    DRAGGED_QUEUE_TRACK.get_or_init(|| Mutex::new(None))
+fn dragged_queue_tracks() -> &'static Mutex<Vec<Track>> {
+    DRAGGED_QUEUE_TRACKS.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+pub fn take_dragged_queue_tracks() -> Vec<Track> {
+    let tracks = dragged_queue_tracks()
+        .lock()
+        .map(|mut guard| std::mem::take(&mut *guard))
+        .unwrap_or_default();
+    hide_queue_drag_preview();
+    tracks
 }
 
 pub fn take_dragged_queue_track() -> Option<Track> {
-    let track = dragged_queue_track().lock().ok()?.take();
-    hide_queue_drag_preview();
-    track
+    take_dragged_queue_tracks().into_iter().next()
 }
 
 pub fn has_dragged_queue_track() -> bool {
-    dragged_queue_track()
+    dragged_queue_tracks()
         .lock()
-        .map(|guard| guard.is_some())
+        .map(|guard| !guard.is_empty())
         .unwrap_or(false)
 }
 
@@ -50,10 +75,22 @@ pub fn set_dragged_queue_track(
 
     let title = track.title.clone();
     let artist = track.artist.clone();
-    if let Ok(mut guard) = dragged_queue_track().lock() {
-        *guard = Some(track);
+    if let Ok(mut guard) = dragged_queue_tracks().lock() {
+        *guard = vec![track];
     }
     show_queue_drag_preview(&title, &artist, cover_url.as_deref(), client_x, client_y);
+}
+
+pub fn set_dragged_queue_tracks(tracks: Vec<Track>, client_x: f64, client_y: f64) {
+    if !is_queue_drag_enabled() || tracks.is_empty() {
+        return;
+    }
+
+    let count = tracks.len();
+    if let Ok(mut guard) = dragged_queue_tracks().lock() {
+        *guard = tracks;
+    }
+    show_queue_drag_count_preview(count, client_x, client_y);
 }
 
 pub fn cancel_dragged_queue_track() {
@@ -61,8 +98,8 @@ pub fn cancel_dragged_queue_track() {
 }
 
 pub fn clear_dragged_queue_track() {
-    if let Ok(mut guard) = dragged_queue_track().lock() {
-        *guard = None;
+    if let Ok(mut guard) = dragged_queue_tracks().lock() {
+        guard.clear();
     }
     hide_queue_drag_preview();
 }
@@ -70,6 +107,17 @@ pub fn clear_dragged_queue_track() {
 pub fn move_queue_drag_preview(client_x: f64, client_y: f64) {
     let _ = eval(&format!(
         "if (window.__kopuzMoveQueueDragPreview) window.__kopuzMoveQueueDragPreview({client_x}, {client_y});"
+    ));
+}
+
+fn show_queue_drag_count_preview(count: usize, client_x: f64, client_y: f64) {
+    let payload = json!({
+        "count": count,
+        "clientX": client_x,
+        "clientY": client_y,
+    });
+    let _ = eval(&format!(
+        "if (window.__kopuzShowQueueDragCountPreview) window.__kopuzShowQueueDragCountPreview({payload});"
     ));
 }
 
@@ -138,10 +186,15 @@ pub fn install_native_artwork_drag_prevention() {
 }
 
 pub fn install_rightbar_drag_handlers() {
+    let track_count_singular = serde_json::to_string(&i18n::t("track_count_singular").to_string())
+        .unwrap_or_else(|_| "\"1 track\"".to_string());
+    let track_count_plural = serde_json::to_string(
+        &i18n::t_with("track_count", &[("count", "__COUNT__".to_string())]).to_string(),
+    )
+    .unwrap_or_else(|_| "\"__COUNT__ tracks\"".to_string());
     install_native_artwork_drag_prevention();
-    let _ = eval(
-        r#"
-        if (!document.__kopuzTrackDragInstalled) {
+    let script = r#"
+        if (!document.__kopuzTrackDragInstalled) {{
             document.__kopuzTrackDragInstalled = true;
 
             const isTrackRowDrag = (event) => {
@@ -215,6 +268,34 @@ pub fn install_rightbar_drag_handlers() {
             };
 
             window.__kopuzMoveQueueDragPreview = moveQueueDragPreview;
+            window.__kopuzShowQueueDragCountPreview = ({ count, clientX, clientY }) => {
+                const preview = ensureQueueDragPreview();
+                syncQueueDragPreviewTheme(preview);
+                const cover = preview.querySelector('[data-cover]');
+                const titleEl = preview.querySelector('[data-title]');
+                const artistEl = preview.querySelector('[data-artist]');
+
+                if (titleEl) {{
+                    titleEl.textContent =
+                        count === 1
+                            ? __TRACK_COUNT_SINGULAR__
+                            : __TRACK_COUNT_PLURAL__.replace("__COUNT__", count);
+                }}
+
+                if (artistEl) artistEl.textContent = '';
+                if (cover) {
+                    cover.textContent = '';
+                    cover.innerHTML = '';
+                    const icon = document.createElement('i');
+                    icon.className = 'fa-solid fa-list-ul';
+                    icon.style.cssText = 'font-size:14px;color:rgba(255,255,255,0.7);';
+                    cover.appendChild(icon);
+                }
+
+                preview.style.display = 'flex';
+                moveQueueDragPreview(clientX, clientY);
+            };
+
             window.__kopuzShowQueueDragPreview = ({ title, artist, coverUrl, clientX, clientY }) => {
                 const preview = ensureQueueDragPreview();
                 syncQueueDragPreviewTheme(preview);
@@ -335,8 +416,12 @@ pub fn install_rightbar_drag_handlers() {
             document.addEventListener('mouseup', window.__kopuzRightbarStopAutoScroll, true);
             document.addEventListener('dragend', window.__kopuzRightbarStopAutoScroll, true);
         }
-        "#,
-    );
+        "#
+    .replace("{{", "{")
+    .replace("}}", "}")
+    .replace("__TRACK_COUNT_SINGULAR__", &track_count_singular)
+    .replace("__TRACK_COUNT_PLURAL__", &track_count_plural);
+    let _ = eval(&script);
 }
 
 pub fn rightbar_auto_scroll(client_y: f64) {

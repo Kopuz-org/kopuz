@@ -10,8 +10,8 @@ use crate::queue_drag::{
     RIGHTBAR_DROPZONE_ID, RIGHTBAR_QUEUE_DROP_TARGET_CLASS, cancel_rightbar_drag,
     clear_rightbar_drop_target, has_dragged_queue_track, install_rightbar_drag_handlers,
     rightbar_auto_scroll, rightbar_queue_row_class, start_rightbar_reorder,
-    stop_rightbar_auto_scroll, take_dragged_queue_track, update_rightbar_drop_target,
-    update_rightbar_end_drop_target,
+    stop_rightbar_auto_scroll, take_dragged_queue_tracks, update_rightbar_drop_target,
+    update_rightbar_end_drop_target, rightbar_reorder_move_target
 };
 use crate::reorder_buttons::ReorderButtons;
 
@@ -201,24 +201,6 @@ pub fn QueueSummary(
             }
         }
     }
-}
-
-fn rightbar_reorder_move_target(
-    from: usize,
-    drop_index: usize,
-    queue_count: usize,
-) -> Option<usize> {
-    if from >= queue_count || drop_index > queue_count {
-        return None;
-    }
-
-    let to = if from < drop_index {
-        drop_index.saturating_sub(1)
-    } else {
-        drop_index
-    };
-
-    (to < queue_count && to != from).then_some(to)
 }
 
 #[component]
@@ -433,6 +415,22 @@ pub fn QueueListView(
         ctrl.move_queue_item(from, to);
     };
 
+    let mut insert_queue_tracks = move |insert_at: usize, tracks: Vec<reader::Track>| {
+        if tracks.is_empty() {
+            return;
+        }
+        if *ctrl.shuffle.peek() {
+            ctrl.add_to_queue(tracks);
+        } else {
+            let insert_at = insert_at.min(ctrl.queue.peek().len());
+            ctrl.queue.with_mut(|queue| {
+                for (offset, track) in tracks.into_iter().enumerate() {
+                    queue.insert(insert_at + offset, track);
+                }
+            });
+        }
+    };
+
     let queue_count = items.len();
     let queue_duration: u64 = items
         .iter()
@@ -545,14 +543,7 @@ pub fn QueueListView(
                                             queue_reorder_from.set(None);
                                             return;
                                         }
-                                        if let Some(track) = take_dragged_queue_track() {
-                                            if *ctrl.shuffle.peek() {
-                                                ctrl.add_to_queue(vec![track]);
-                                            } else {
-                                                let insert_at = drop_index.min(ctrl.queue.peek().len());
-                                                ctrl.queue.with_mut(|q| q.insert(insert_at, track));
-                                            }
-                                        }
+                                        insert_queue_tracks(drop_index, take_dragged_queue_tracks());
                                     },
                                     ondragenter: move |evt| {
                                         evt.prevent_default();
@@ -572,14 +563,7 @@ pub fn QueueListView(
                                         pending_queue_reorder.set(None);
                                         is_queue_drag_over.set(false);
                                         queue_drop_index.set(None);
-                                        if let Some(track) = take_dragged_queue_track() {
-                                            if *ctrl.shuffle.peek() {
-                                                ctrl.add_to_queue(vec![track]);
-                                            } else {
-                                                let insert_at = queue_idx.min(ctrl.queue.peek().len());
-                                                ctrl.queue.with_mut(|q| q.insert(insert_at, track));
-                                            }
-                                        }
+                                        insert_queue_tracks(queue_idx, take_dragged_queue_tracks());
                                     },
                                     if is_drop_target {
                                         div {
@@ -725,9 +709,7 @@ pub fn QueueListView(
                                         queue_reorder_from.set(None);
                                         return;
                                     }
-                                    if let Some(track) = take_dragged_queue_track() {
-                                        ctrl.add_to_queue(vec![track]);
-                                    }
+                                    insert_queue_tracks(end_drop_index, take_dragged_queue_tracks());
                                 },
                                 ondragenter: move |evt| {
                                     evt.prevent_default();
@@ -747,9 +729,7 @@ pub fn QueueListView(
                                     pending_queue_reorder.set(None);
                                     is_queue_drag_over.set(false);
                                     queue_drop_index.set(None);
-                                    if let Some(track) = take_dragged_queue_track() {
-                                        ctrl.add_to_queue(vec![track]);
-                                    }
+                                    insert_queue_tracks(end_drop_index, take_dragged_queue_tracks());
                                 },
                                 if is_end_drop_target {
                                     div {

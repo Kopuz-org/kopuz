@@ -3,6 +3,7 @@ use crate::constants::*;
 use crate::dots_menu::{DotsMenu, MenuAction};
 use crate::queue_drag::{
     clear_dragged_queue_track, handle_select_click, is_queue_drag_enabled, set_dragged_queue_track,
+    set_dragged_queue_tracks,
 };
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
@@ -30,6 +31,7 @@ pub fn TrackRow(
     #[props(default = false)] is_downloaded: bool,
     #[props(default = false)] is_downloading: bool,
     #[props(default = false)] is_currently_playing: bool,
+    #[props(default = Vec::new())] selected_queue_tracks: Vec<Track>,
     #[props(default = None)] row_num: Option<usize>,
 ) -> Element {
     let config = use_context::<Signal<AppConfig>>();
@@ -43,6 +45,8 @@ pub fn TrackRow(
     };
     let drag_track_mouse = track.clone();
     let drag_track_normal_mouse = track.clone();
+    let drag_selected_tracks_mouse = selected_queue_tracks.clone();
+    let drag_selected_tracks_normal_mouse = selected_queue_tracks.clone();
     let drag_cover_url = cover_url.as_ref().map(|url| url.as_ref().to_string());
     let drag_cover_url_normal = drag_cover_url.clone();
     let mut pending_queue_drag = use_signal(|| None::<(f64, f64)>);
@@ -170,7 +174,7 @@ pub fn TrackRow(
                 draggable: "false",
                 ondoubleclick: move |_| { if !is_selection_mode { on_play.call(()); } },
                 onmousedown: move |evt| {
-                    if !is_selection_mode && is_queue_drag_enabled() {
+                    if is_queue_drag_enabled() && (!is_selection_mode || is_selected) {
                         let coords = evt.client_coordinates();
                         pending_queue_drag.set(Some((coords.x, coords.y)));
                     }
@@ -178,18 +182,26 @@ pub fn TrackRow(
                 },
                 onmousemove: move |evt| {
                     let drag_start = *pending_queue_drag.read();
-                    if !is_selection_mode && let Some((start_x, start_y)) = drag_start {
+                    if let Some((start_x, start_y)) = drag_start {
                         let coords = evt.client_coordinates();
                         let dx = coords.x - start_x;
                         let dy = coords.y - start_y;
                         if dx.hypot(dy) >= QUEUE_DRAG_THRESHOLD_PX {
                             pending_queue_drag.set(None);
-                            set_dragged_queue_track(
-                                drag_track_mouse.clone(),
-                                drag_cover_url.clone(),
-                                coords.x,
-                                coords.y,
-                            );
+                            if is_selection_mode && !drag_selected_tracks_mouse.is_empty() {
+                                set_dragged_queue_tracks(
+                                    drag_selected_tracks_mouse.clone(),
+                                    coords.x,
+                                    coords.y,
+                                );
+                            } else {
+                                set_dragged_queue_track(
+                                    drag_track_mouse.clone(),
+                                    drag_cover_url.clone(),
+                                    coords.x,
+                                    coords.y,
+                                );
+                            }
                         }
                     }
                 },
@@ -397,7 +409,7 @@ pub fn TrackRow(
                 }
             },
             onmousedown: move |evt| {
-                if !is_selection_mode && is_queue_drag_enabled() {
+                if is_queue_drag_enabled() && (!is_selection_mode || is_selected) {
                     let coords = evt.client_coordinates();
                     pending_queue_drag_normal.set(Some((coords.x, coords.y)));
                 }
@@ -405,18 +417,26 @@ pub fn TrackRow(
             },
             onmousemove: move |evt| {
                 let drag_start = *pending_queue_drag_normal.read();
-                if !is_selection_mode && let Some((start_x, start_y)) = drag_start {
+                if let Some((start_x, start_y)) = drag_start {
                     let coords = evt.client_coordinates();
                     let dx = coords.x - start_x;
                     let dy = coords.y - start_y;
                     if dx.hypot(dy) >= QUEUE_DRAG_THRESHOLD_PX {
                         pending_queue_drag_normal.set(None);
-                        set_dragged_queue_track(
-                            drag_track_normal_mouse.clone(),
-                            drag_cover_url_normal.clone(),
-                            coords.x,
-                            coords.y,
-                        );
+                        if is_selection_mode && !drag_selected_tracks_normal_mouse.is_empty() {
+                            set_dragged_queue_tracks(
+                                drag_selected_tracks_normal_mouse.clone(),
+                                coords.x,
+                                coords.y,
+                            );
+                        } else {
+                            set_dragged_queue_track(
+                                drag_track_normal_mouse.clone(),
+                                drag_cover_url_normal.clone(),
+                                coords.x,
+                                coords.y,
+                            );
+                        }
                     }
                 }
             },
