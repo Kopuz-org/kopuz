@@ -9,9 +9,9 @@ use std::fmt;
 use crate::queue_drag::{
     RIGHTBAR_DROPZONE_ID, RIGHTBAR_QUEUE_DROP_TARGET_CLASS, cancel_rightbar_drag,
     clear_rightbar_drop_target, has_dragged_queue_track, install_rightbar_drag_handlers,
-    rightbar_auto_scroll, rightbar_queue_row_class, start_rightbar_reorder,
-    stop_rightbar_auto_scroll, take_dragged_queue_tracks, update_rightbar_drop_target,
-    update_rightbar_end_drop_target, rightbar_reorder_move_target
+    rightbar_auto_scroll, rightbar_queue_row_class, rightbar_reorder_move_target,
+    start_rightbar_reorder, stop_rightbar_auto_scroll, take_dragged_queue_tracks,
+    update_rightbar_drop_target, update_rightbar_end_drop_target,
 };
 use crate::reorder_buttons::ReorderButtons;
 
@@ -48,7 +48,11 @@ pub fn QueueRow(
 ) -> Element {
     let base_class = match layout {
         LayoutMode::Fullscreen => {
-            "flex items-center gap-4 px-4 py-3 hover:bg-white/5 cursor-pointer rounded transition-colors group"
+            if is_reorder_source {
+                "flex items-center gap-4 px-4 py-3 bg-white/10 cursor-grabbing rounded transition-colors group opacity-70"
+            } else {
+                "flex items-center gap-4 px-4 py-3 hover:bg-white/5 cursor-grab active:cursor-grabbing rounded transition-colors group"
+            }
         }
         LayoutMode::Rightbar => rightbar_queue_row_class(is_reorder_source),
     };
@@ -218,6 +222,7 @@ pub fn QueueListView(
     let mut queue_reorder_did_move = use_signal(|| false);
     let mut pending_queue_reorder = use_signal(|| None::<(usize, f64, f64)>);
     const QUEUE_REORDER_THRESHOLD_PX: f64 = 6.0;
+    const QUEUE_ROW_DROP_SPLIT_Y_PX: f64 = 28.0;
     let queue_list_id = match layout {
         LayoutMode::Rightbar => RIGHTBAR_DROPZONE_ID,
         LayoutMode::Fullscreen => "fullscreen-queue-list",
@@ -480,9 +485,9 @@ pub fn QueueListView(
                     LayoutMode::Rightbar => "flex-1 overflow-y-auto px-2 py-2 space-y-1 relative",
                 },
                 onmouseleave: move |_| {
+                    clear_rightbar_drop_target(is_queue_drag_over, queue_drop_index);
+                    pending_queue_reorder.set(None);
                     if layout == LayoutMode::Rightbar {
-                        clear_rightbar_drop_target(is_queue_drag_over, queue_drop_index);
-                        pending_queue_reorder.set(None);
                         stop_rightbar_auto_scroll();
                     }
                 },
@@ -499,29 +504,39 @@ pub fn QueueListView(
                         let cover_url = get_track_cover(&track);
                         let can_move_up = queue_idx > 0;
                         let can_move_down = queue_idx + 1 < queue_count;
-                        let is_reorder_source = layout == LayoutMode::Rightbar
-                            && *queue_reorder_from.read() == Some(queue_idx);
+                        let is_reorder_source = *queue_reorder_from.read() == Some(queue_idx);
                         let is_active = *current_queue_index.read() == queue_idx;
-                        let is_drop_target = layout == LayoutMode::Rightbar
-                            && *queue_drop_index.read() == Some(queue_idx);
+                        let is_drop_target = *queue_drop_index.read() == Some(queue_idx);
 
                         rsx! {
-                            if layout == LayoutMode::Rightbar {
+                            if matches!(layout, LayoutMode::Rightbar | LayoutMode::Fullscreen) {
                                 div {
                                     key: "{layout}-drop-target-{queue_idx}",
                                     class: RIGHTBAR_QUEUE_DROP_TARGET_CLASS,
-                                    onmouseenter: move |_| {
+                                    onmouseenter: move |evt: MouseEvent| {
+                                        let point = evt.element_coordinates();
+                                        let row_drop_index = if point.y >= QUEUE_ROW_DROP_SPLIT_Y_PX {
+                                            queue_idx + 1
+                                        } else {
+                                            queue_idx
+                                        };
                                         update_rightbar_drop_target(
-                                            queue_idx,
+                                            row_drop_index,
                                             queue_reorder_from,
                                             is_queue_drag_over,
                                             queue_drop_index,
                                             queue_reorder_did_move,
                                         );
                                     },
-                                    onmousemove: move |_| {
+                                    onmousemove: move |evt: MouseEvent| {
+                                        let point = evt.element_coordinates();
+                                        let row_drop_index = if point.y >= QUEUE_ROW_DROP_SPLIT_Y_PX {
+                                            queue_idx + 1
+                                        } else {
+                                            queue_idx
+                                        };
                                         update_rightbar_drop_target(
-                                            queue_idx,
+                                            row_drop_index,
                                             queue_reorder_from,
                                             is_queue_drag_over,
                                             queue_drop_index,
@@ -598,7 +613,7 @@ pub fn QueueListView(
                                         on_row_mouse_move: move |evt: MouseEvent| {
                                             evt.stop_propagation();
                                             let point = evt.element_coordinates();
-                                            let row_drop_index = if point.y >= 28.0 {
+                                            let row_drop_index = if point.y >= QUEUE_ROW_DROP_SPLIT_Y_PX {
                                                 queue_idx + 1
                                             } else {
                                                 queue_idx
@@ -667,7 +682,7 @@ pub fn QueueListView(
                     }
                 }
 
-                if layout == LayoutMode::Rightbar {
+                if matches!(layout, LayoutMode::Rightbar | LayoutMode::Fullscreen) {
                     {
                         let end_drop_index = queue_count;
                         let is_end_drop_target = *queue_drop_index.read() == Some(end_drop_index);
@@ -675,7 +690,10 @@ pub fn QueueListView(
                             div {
                                 key: "queue-drop-end-{end_drop_index}",
                                 class: "{RIGHTBAR_QUEUE_DROP_TARGET_CLASS} px-1 py-2",
-                                style: "min-height: 45vh;",
+                                style: match layout {
+                                    LayoutMode::Rightbar => "min-height: 45vh;",
+                                    LayoutMode::Fullscreen => "min-height: 8rem;",
+                                },
                                 onmouseenter: move |_| {
                                     update_rightbar_end_drop_target(
                                         end_drop_index,
