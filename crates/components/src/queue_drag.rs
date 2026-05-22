@@ -108,7 +108,37 @@ pub fn handle_select_click(
     }
 }
 
+// stop dragging from cover url
+pub fn install_native_artwork_drag_prevention() {
+    let _ = eval(
+        r#"
+        if (!document.__kopuzNativeArtworkDragPreventionInstalled) {
+            document.__kopuzNativeArtworkDragPreventionInstalled = true;
+
+            const style = document.createElement('style');
+            style.textContent = `
+                img, [style*="background-image"] {
+                    -webkit-user-drag: none;
+                    user-drag: none;
+                }
+            `;
+            document.head.appendChild(style);
+
+            document.addEventListener('dragstart', (event) => {
+                const target = event.target;
+                const isTrackRowDrag = !!(target && target.closest && target.closest('.track-row-draggable'));
+                if (!isTrackRowDrag) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+            }, true);
+        }
+        "#,
+    );
+}
+
 pub fn install_rightbar_drag_handlers() {
+    install_native_artwork_drag_prevention();
     let _ = eval(
         r#"
         if (!document.__kopuzTrackDragInstalled) {

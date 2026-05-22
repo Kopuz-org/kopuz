@@ -135,9 +135,12 @@ pub fn JellyfinAlbum(
                                         onclick: move |_| {
                                             album_id.set(id_for_nav.clone());
                                         },
-                                        div { class: "aspect-square rounded-lg bg-stone-800 mb-3 overflow-hidden relative",
+                                        div {
+                                            class: "aspect-square rounded-lg bg-stone-800 mb-3 overflow-hidden relative",
+                                            style: "-webkit-user-drag: none;",
+                                            ondragstart: move |evt| evt.prevent_default(),
                                             if let Some(url) = &cover_url {
-                                                img { src: "{url}", class: "w-full h-full object-cover", decoding: "async", loading: "lazy" }
+                                                img { src: "{url}", class: "w-full h-full object-cover", decoding: "async", loading: "lazy", draggable: "false", ondragstart: move |evt| evt.prevent_default() }
                                             } else {
                                                 div { class: "w-full h-full flex items-center justify-center",
                                                     i { class: "fa-solid fa-compact-disc text-4xl text-white/20" }
