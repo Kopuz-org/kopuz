@@ -52,6 +52,11 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     let current_song_album = ctrl.current_song_album.read().clone();
     let current_song_duration = *ctrl.current_song_duration.read();
     let tracks_for_play_all = sorted_tracks.clone();
+    let selected_queue_tracks: Vec<_> = sorted_tracks
+        .iter()
+        .filter(|track| props.selected_tracks.contains(&track.path))
+        .cloned()
+        .collect();
 
     let all_downloaded = !props.tracks.is_empty()
         && props.tracks.iter().all(|t| {
@@ -278,6 +283,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                              is_downloaded: is_downloaded,
                                              is_downloading: is_downloading,
                                              is_currently_playing,
+                                             selected_queue_tracks: selected_queue_tracks.clone(),
                                              row_num: Some(display_idx + 1 - last_disc_size),
                                              on_select: move |selected| {
                                                 if let Some(handler) = &props.on_select {
