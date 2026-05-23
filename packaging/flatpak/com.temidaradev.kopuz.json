@@ -65,28 +65,28 @@
             "sources": [
                 {
                     "type": "file",
-                    "path": "target/dx/kopuz/release/linux/app/kopuz"
+                    "path": "../../target/dx/kopuz/release/linux/app/kopuz"
                 },
                 {
                     "type": "dir",
-                    "path": "target/dx/kopuz/release/linux/app/assets",
+                    "path": "../../target/dx/kopuz/release/linux/app/assets",
                     "dest": "assets"
                 },
                 {
                     "type": "file",
-                    "path": "data/com.temidaradev.kopuz.desktop"
+                    "path": "../../data/com.temidaradev.kopuz.desktop"
                 },
                 {
                     "type": "file",
-                    "path": "data/com.temidaradev.kopuz.metainfo.xml"
+                    "path": "../../data/com.temidaradev.kopuz.metainfo.xml"
                 },
                 {
                     "type": "file",
-                    "path": "crates/kopuz/assets/logo-512.png"
+                    "path": "../../crates/kopuz/assets/logo-512.png"
                 },
                 {
                     "type": "file",
-                    "path": "crates/kopuz/assets/logo-128.png"
+                    "path": "../../crates/kopuz/assets/logo-128.png"
                 }
             ]
         }
