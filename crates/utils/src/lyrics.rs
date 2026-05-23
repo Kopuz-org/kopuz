@@ -644,8 +644,28 @@ fn extract_from_lrclib_response(data: &LrcLibResponse) -> Option<Lyrics> {
     None
 }
 
+fn append_translation(target: &mut String, text: &str) {
+    let text = text.trim();
+
+    if text.is_empty() {
+        return;
+    }
+
+    if !target.is_empty() {
+        target.push('\n');
+    }
+
+    if text.starts_with('(') && text.ends_with(')') {
+        target.push_str(text);
+    } else {
+        target.push('(');
+        target.push_str(text);
+        target.push(')');
+    }
+}
+
 fn parse_lrc(lrc_text: &str) -> Vec<LyricLine> {
-    let mut lines = Vec::new();
+    let mut lines: Vec<LyricLine> = Vec::new();
 
     for line in lrc_text.lines() {
         let mut current_pos = 0;
@@ -692,6 +712,14 @@ fn parse_lrc(lrc_text: &str) -> Vec<LyricLine> {
 
         let text: String = chars[text_start..].iter().collect();
         let text = text.trim().to_string();
+
+        if current_timestamps.is_empty() {
+            if let Some(last) = lines.last_mut() {
+                append_translation(&mut last.text, &text);
+            }
+            continue;
+        }
+
         for t in current_timestamps {
             lines.push(LyricLine {
                 start_time: t,
@@ -706,7 +734,20 @@ fn parse_lrc(lrc_text: &str) -> Vec<LyricLine> {
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    lines
+    let mut merged: Vec<LyricLine> = Vec::new();
+
+    for line in lines {
+        if let Some(last) = merged.last_mut() {
+            if last.start_time == line.start_time {
+                append_translation(&mut last.text, &line.text);
+                continue;
+            }
+        }
+
+        merged.push(line);
+    }
+
+    merged
 }
 
 fn parse_lrc_time(time_str: &str) -> Option<f64> {

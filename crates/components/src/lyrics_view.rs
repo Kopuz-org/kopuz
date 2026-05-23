@@ -37,12 +37,12 @@ pub fn LyricsView(
     use_hook(move || {
         let (inactive_class, active_class) = match layout {
             LayoutMode::Fullscreen => (
-                "text-white/40 transition-all duration-300 hover:text-white/60 cursor-pointer",
-                "text-white text-2xl font-bold transition-all duration-300",
+                "text-white/40 transition-all duration-300 hover:text-white/60 cursor-pointer whitespace-pre-wrap",
+                "text-white text-2xl font-bold transition-all duration-300 whitespace-pre-wrap",
             ),
             LayoutMode::Rightbar => (
-                "text-white/40 transition-all duration-300 hover:text-white/60 cursor-pointer",
-                "text-white text-lg font-bold transition-all duration-300",
+                "text-white/40 transition-all duration-300 hover:text-white/60 cursor-pointer whitespace-pre-wrap",
+                "text-white text-lg font-bold transition-all duration-300 whitespace-pre-wrap",
             ),
         };
 
@@ -97,7 +97,9 @@ pub fn LyricsView(
                                 n => Some(n - 1),
                             }
                     {
-                        let _ = eval(&format!("window.__{layout}_updateLyrics({current_line_index})"));
+                        let _ = eval(&format!(
+                            "window.__{layout}_updateLyrics({current_line_index})"
+                        ));
 
                         sleep_duration_ms = times
                             .get(current_line_index.saturating_add(1))
@@ -138,8 +140,7 @@ pub fn LyricsView(
                                 div {
                                     key: "{i}",
                                     id: "{layout}-lyrics-{i}",
-                                    class: "text-white/40 transition-all duration-300 hover:text-white/60 cursor-pointer",
-
+                                    class: "text-white/40 transition-all duration-300 hover:text-white/60 cursor-pointer whitespace-pre-wrap",
                                     onclick: {
                                         let st = line.start_time;
                                         move |_| {
