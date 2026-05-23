@@ -20,10 +20,6 @@ pub fn Rightbar(
     mut current_song_artist: Signal<String>,
     mut current_song_album: Signal<String>,
 ) -> Element {
-    if !*is_rightbar_open.read() {
-        return rsx! { div {} };
-    }
-
     let mut active_tab = use_signal(|| 0usize);
     let ctrl = use_context::<PlayerController>();
     let config = use_context::<Signal<AppConfig>>();
@@ -168,6 +164,10 @@ pub fn Rightbar(
                 .collect::<Vec<_>>()
         }
     };
+
+    if !*is_rightbar_open.read() {
+        return rsx! { div {} };
+    }
 
     rsx! {
         div {
