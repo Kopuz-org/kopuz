@@ -584,7 +584,7 @@ pub fn YtdlpPage(config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) -
     };
 
     rsx! {
-        div { class: "p-6 max-w-3xl mx-auto",
+        div { class: "p-6 w-full",
 
             div { class: "flex items-center justify-between mb-6",
                 div {

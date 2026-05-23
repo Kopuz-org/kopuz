@@ -188,7 +188,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     };
 
     rsx! {
-        div { class: "p-8 max-w-4xl",
+        div { class: "p-8 w-full",
             h1 { class: "text-3xl font-bold text-white mb-6", "{i18n::t(\"settings\")}" }
 
             div { class: "space-y-8",

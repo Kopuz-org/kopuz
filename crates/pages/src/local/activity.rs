@@ -142,7 +142,8 @@ pub fn LocalLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Element
                                     }
 
                                     div { class: "flex-1 min-w-0 pr-4 flex items-center",
-                                        div { class: "w-10 h-10 bg-white/5 rounded-md flex items-center justify-center mr-4 shrink-0 text-slate-500 group-hover:text-slate-300 transition-colors overflow-hidden",
+                                        div {
+                                            class: if is_modern { "w-8 h-8 bg-white/5 rounded-md flex items-center justify-center mr-4 shrink-0 text-slate-500 group-hover:text-slate-300 transition-colors overflow-hidden" } else { "w-10 h-10 bg-white/5 rounded-md flex items-center justify-center mr-4 shrink-0 text-slate-500 group-hover:text-slate-300 transition-colors overflow-hidden" },
                                             if let Some(url) = cover_url {
                                                 img { src: "{url.as_ref()}", class: "w-full h-full object-cover", decoding: "async", loading: "lazy" }
                                             } else {
@@ -150,14 +151,18 @@ pub fn LocalLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Element
                                             }
                                         }
                                         div { class: "flex-1 min-w-0",
-                                            div { class: "text-white font-medium truncate text-[15px] mb-0.5 flex items-center gap-2",
+                                            div {
+                                                class: if is_modern { "text-white font-medium truncate text-sm flex items-center gap-2" } else { "text-white font-medium truncate text-[15px] mb-0.5 flex items-center gap-2" },
                                                 "{track.title}"
                                                 i {
                                                     class: "fa-solid fa-hard-drive text-[10px] text-slate-500",
                                                     title: i18n::t("local").to_string()
                                                 }
                                             }
-                                            div { class: "text-slate-400 text-sm truncate group-hover:text-slate-300 transition-colors", "{track.artist}" }
+                                            div {
+                                                class: if is_modern { "text-slate-400 text-xs truncate group-hover:text-slate-300 transition-colors" } else { "text-slate-400 text-sm truncate group-hover:text-slate-300 transition-colors" },
+                                                "{track.artist}"
+                                            }
                                         }
                                     }
 
