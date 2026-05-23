@@ -512,6 +512,7 @@ fn main() {
                 "<style>html,body{background:#000;margin:0;padding:0}body{opacity:0}</style>"
                     .to_string(),
             )
+            .with_background_color((0, 0, 0, 255))
             .with_data_directory(webview_data_dir)
             .with_window(window)
             .with_asynchronous_custom_protocol(
