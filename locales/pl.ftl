@@ -3,7 +3,7 @@ is_rtl = false
 
 settings = Ustawienia
 theme_editor = Edytor Motywów
-appearance = Wygląd 
+appearance = Wygląd
 language = Język
 library = Biblioteka
 playlists = Playlisty
@@ -14,7 +14,7 @@ search = Szukaj
 favorites = Ulubione
 radio = Radio
 discover = Odkrywaj
-logs = Logi 
+logs = Logi
 activity = Aktywność
 general = Generalne
 music_directory = Biblioteka Muzyki
@@ -27,10 +27,8 @@ add = Dodaj
 add_folder = Dodaj Folder
 no_music_folders = Nie skonfigurowano folderów muzyki
 add_server = Dodaj Serwer
-# TODO: NEED LOCALIZATION
-connect_to_lastfm = Connect to Last.fm
-lastfm_connected = Last.fm Connected
-# TODO: NEED LOCALIZATION
+connect_to_lastfm = Połącz z Last.fm
+lastfm_connected = Połączono z Last.fm
 server_details = Dane Serwera
 server_name = Nazwa Serwera
 server_url = URL Serwera
@@ -61,7 +59,7 @@ add_to_queue = Dodaj do Kolejki
 add_to_playlist = Dodaj do Playlisty
 remove_from_playlist = Usuń z Playlisty
 delete = Usuń
-delete_song = Usuń Piosenkę 
+delete_song = Usuń Piosenkę
 delete_album = Usuń Album
 delete_playlist = Usuń Playlistę
 delete_folder = Usuń folder
@@ -72,7 +70,7 @@ add_all_to_playlist = Dodaj wszystkie do Playlisty
 select_all = Zaznacz wszystko
 select_all_tracks = Zaznacz wszystkie utwory
 remove_from_cache = Usuń z Pamięci Podręcznej
-create = Utwórz 
+create = Utwórz
 save = Zapisz
 enabled = WŁĄCZONE
 disabled = WYŁĄCZONE
@@ -89,7 +87,7 @@ top_artists = Najlepsi Artyści
 new_releases = Nowe Wydania
 
 # Navigation Buttons
-back_to_albums = Powrót do Albumów 
+back_to_albums = Powrót do Albumów
 back_to_artists = Powrót do Artystów
 back_to_playlists = Powrót do Playlist
 back_to_browse = Powrót do Przeglądania
@@ -124,17 +122,15 @@ custom_manual = Własne (ręczna konfiguracja API)
 server_name_optional = Nazwa serwera (opcjonalne)
 server_url_placeholder = http://localhost:6767
 change = Zmień
-heart_track_to_add = Polub utwór podczas odtwarzania, aby dodać go tutaj. 
-heart_track_to_add_server = Polub utwór podczas odtwarzania, aby dodać go tutaj i zsynchronizować go z serwerem. 
+heart_track_to_add = Polub utwór podczas odtwarzania, aby dodać go tutaj.
+heart_track_to_add_server = Polub utwór podczas odtwarzania, aby dodać go tutaj i zsynchronizować go z serwerem.
 
 # Search & Placeholders
 search_placeholder = Wyszukaj wykonawców, albumy lub utwory...
 no_results_found = Nie znaleziono wyników dla "{ $query }"
 listenbrainz_token_placeholder = Wpisz token ListenBrainz
-# TODO: NEED LOCALIZATION
-lastfm_api_key_placeholder = Enter your Last.fm API Key
-lastfm_api_secret_placeholder = Enter your Last.fm API Secret
-# TODO: NEED LOCALIZATION
+lastfm_api_key_placeholder = Wprowadź swój klucz do Last.fm API
+lastfm_api_secret_placeholder = Wprowadź swój secret do Last.fm API
 
 # Empty States
 album_not_found = Nie znaleziono albumów
@@ -160,10 +156,10 @@ login_failed = Logowanie nie powiodło się: { $error }
 error_server_not_configured = Serwer nie jest skonfigurowany lub brakuje danych logowania
 error_fetch_songs = Nie udało się pobrać utworów z albumu '{ $album_id }': { $error }
 unsupported_provider = { $service } jest skonfigurowane, ale ta strona nie jest jeszcze dostępna dla tego dostawcy
-unsupported_provider_desc = Obsługa przeglądania dla { $service } zostanie dodana w nowej warstwie serwera 
+unsupported_provider_desc = Obsługa przeglądania dla { $service } zostanie dodana w nowej warstwie serwera
 
 # Additional Keys
-no_genres_found = Nie znaleziono żadnych gatunków w twojej bibliotece 
+no_genres_found = Nie znaleziono żadnych gatunków w twojej bibliotece
 jump_back_in = Kontynuuj słuchanie
 by_artist = Przez
 by_artist_full = Przez: { $artist }
