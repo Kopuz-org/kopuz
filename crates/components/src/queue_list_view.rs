@@ -222,7 +222,7 @@ pub fn QueueListView(
     let mut queue_reorder_did_move = use_signal(|| false);
     let mut pending_queue_reorder = use_signal(|| None::<(usize, f64, f64)>);
     const QUEUE_REORDER_THRESHOLD_PX: f64 = 6.0;
-    const QUEUE_ROW_DROP_SPLIT_Y_PX: f64 = 28.0;
+    const QUEUE_ROW_DROP_SPLIT_Y_PX: f64 = 23.0;
     let queue_list_id = match layout {
         LayoutMode::Rightbar => RIGHTBAR_DROPZONE_ID,
         LayoutMode::Fullscreen => "fullscreen-queue-list",
@@ -563,22 +563,51 @@ pub fn QueueListView(
                                     ondragenter: move |evt| {
                                         evt.prevent_default();
                                         evt.stop_propagation();
-                                        is_queue_drag_over.set(true);
-                                        queue_drop_index.set(Some(queue_idx));
+                                        let point = evt.element_coordinates();
+                                        let row_drop_index = if point.y >= QUEUE_ROW_DROP_SPLIT_Y_PX {
+                                            queue_idx + 1
+                                        } else {
+                                            queue_idx
+                                        };
+                                        update_rightbar_drop_target(
+                                            row_drop_index,
+                                            queue_reorder_from,
+                                            is_queue_drag_over,
+                                            queue_drop_index,
+                                            queue_reorder_did_move,
+                                        );
                                     },
                                     ondragover: move |evt| {
                                         evt.prevent_default();
                                         evt.stop_propagation();
-                                        is_queue_drag_over.set(true);
-                                        queue_drop_index.set(Some(queue_idx));
+                                        let point = evt.element_coordinates();
+                                        let row_drop_index = if point.y >= QUEUE_ROW_DROP_SPLIT_Y_PX {
+                                            queue_idx + 1
+                                        } else {
+                                            queue_idx
+                                        };
+                                        update_rightbar_drop_target(
+                                            row_drop_index,
+                                            queue_reorder_from,
+                                            is_queue_drag_over,
+                                            queue_drop_index,
+                                            queue_reorder_did_move,
+                                        );
                                     },
                                     ondrop: move |evt| {
                                         evt.prevent_default();
                                         evt.stop_propagation();
                                         pending_queue_reorder.set(None);
                                         is_queue_drag_over.set(false);
+                                        let point = evt.element_coordinates();
+                                        let row_drop_index = if point.y >= QUEUE_ROW_DROP_SPLIT_Y_PX {
+                                            queue_idx + 1
+                                        } else {
+                                            queue_idx
+                                        };
+                                        let drop_index = queue_drop_index.peek().unwrap_or(row_drop_index);
                                         queue_drop_index.set(None);
-                                        insert_queue_tracks(queue_idx, take_dragged_queue_tracks());
+                                        insert_queue_tracks(drop_index, take_dragged_queue_tracks());
                                     },
                                     if is_drop_target {
                                         div {
