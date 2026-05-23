@@ -714,8 +714,12 @@ fn parse_lrc(lrc_text: &str) -> Vec<LyricLine> {
         let text = text.trim().to_string();
 
         if current_timestamps.is_empty() {
-            if let Some(last) = lines.last_mut() {
-                append_translation(&mut last.text, &text);
+            let is_metadata_tag =
+                text.starts_with('[') && text.ends_with(']') && text.contains(':');
+            if !is_metadata_tag {
+                if let Some(last) = lines.last_mut() {
+                    append_translation(&mut last.text, &text);
+                }
             }
             continue;
         }
