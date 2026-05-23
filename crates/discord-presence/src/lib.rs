@@ -54,6 +54,7 @@ impl Presence {
         let state = format!("by {artist}");
 
         let mut activity = activity::Activity::new()
+            .name(artist)
             .details(title)
             .state(&state)
             .timestamps(timestamps)
@@ -77,6 +78,7 @@ impl Presence {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let state = format!("by {artist} • Paused");
         let mut activity = activity::Activity::new()
+            .name(artist)
             .details(title)
             .state(&state)
             .activity_type(activity::ActivityType::Listening);
