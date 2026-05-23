@@ -12,7 +12,7 @@
 #   --uninstall            remove kopuz
 set -eu
 
-REPO="temidaradev/kopuz"
+REPO="Kopuz-org/kopuz"
 APP="kopuz"
 APP_ID="com.temidaradev.kopuz"
 
@@ -66,6 +66,34 @@ if ! curl -fSL "$url" -o "$tmp/$tarball"; then
 	echo "error: download failed: $url" >&2
 	exit 1
 fi
+
+sums_url="https://github.com/$REPO/releases/download/$VERSION/SHA256SUMS"
+if ! curl -fSL "$sums_url" -o "$tmp/SHA256SUMS"; then
+	echo "error: could not download checksums: $sums_url" >&2
+	exit 1
+fi
+
+if command -v sha256sum >/dev/null 2>&1; then
+	actual="$(sha256sum "$tmp/$tarball" | cut -d' ' -f1)"
+elif command -v shasum >/dev/null 2>&1; then
+	actual="$(shasum -a 256 "$tmp/$tarball" | cut -d' ' -f1)"
+else
+	echo "error: no sha256 tool (sha256sum/shasum) found to verify download." >&2
+	exit 1
+fi
+
+expected="$(awk -v f="$tarball" '$2 == f || $2 == "*" f {print $1; exit}' "$tmp/SHA256SUMS")"
+if [ -z "$expected" ]; then
+	echo "error: no checksum entry for $tarball in SHA256SUMS." >&2
+	exit 1
+fi
+if [ "$actual" != "$expected" ]; then
+	echo "error: checksum mismatch for $tarball — refusing to install." >&2
+	echo "  expected: $expected" >&2
+	echo "  actual:   $actual" >&2
+	exit 1
+fi
+echo "✓ checksum verified"
 
 rm -rf "$INSTALL_DIR"
 mkdir -p "$INSTALL_DIR"

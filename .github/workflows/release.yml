@@ -57,16 +57,22 @@ jobs:
           cp crates/kopuz/assets/logo-512.png "$STAGE/icon.png"
 
           tar -czf "${STAGE}.tar.gz" -C "$STAGE" .
+          sha256sum "${STAGE}.tar.gz" > SHA256SUMS
           echo "Built ${STAGE}.tar.gz"
+          cat SHA256SUMS
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: kopuz-linux-tarball-${{ github.ref_name }}
-          path: kopuz-*-x86_64-linux.tar.gz
+          path: |
+            kopuz-*-x86_64-linux.tar.gz
+            SHA256SUMS
 
       - name: Upload to release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: kopuz-*-x86_64-linux.tar.gz
+          files: |
+            kopuz-*-x86_64-linux.tar.gz
+            SHA256SUMS
