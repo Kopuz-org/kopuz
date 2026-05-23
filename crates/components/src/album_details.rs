@@ -12,7 +12,9 @@ pub fn AlbumDetails(
     let lib = library.read();
     let album = match lib.albums.iter().find(|a| a.id == album_id) {
         Some(a) => a,
-        None => return rsx! { div { "{i18n::t(\"album_not_found\")}" } },
+        None => return rsx! {
+            div { "{i18n::t(\"album_not_found\")}" }
+        },
     };
 
     let album_title = album.title.clone();
@@ -98,89 +100,116 @@ pub fn AlbumDetails(
     };
 
     rsx! {
-        crate::track_list_view::TrackListView {
-            name: album_title,
-            description: album_artist,
-            cover_url,
-            is_album: true,
-            back_label: i18n::t("back_to_albums").to_string(),
-            tracks,
-            library,
-            playlist_store,
-            on_close,
-            on_cover_click: move |_| {
-                let aid = aid.clone();
-                #[cfg(not(target_arch = "wasm32"))]
-                spawn(async move {
-                    let file = rfd::AsyncFileDialog::new()
-                        .add_filter("Images", &["jpg", "jpeg", "png", "webp"])
-                        .pick_file()
-                        .await;
-                    if let Some(file) = file {
-                        let path = file.path().to_path_buf();
-                        let data = match tokio::fs::read(&path).await {
-                            Ok(d) => d,
-                            Err(_) => return,
-                        };
-                        let cover_cache = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
-                            .map(|d| d.cache_dir().join("covers"))
-                            .unwrap_or_else(|| PathBuf::from("./cache/covers"));
-                        if let Ok(saved) = reader::utils::save_cover(&aid, &data, path.extension().and_then(|e| e.to_str()), &cover_cache) {
-                            let mut lib = library.write();
-                            let prev = if let Some(album) = lib.albums.iter_mut().find(|a| a.id == aid) {
-                                let old_cover = album.cover_path.clone();
-                                let old_manual = album.manual_cover;
-                                album.cover_path = Some(saved.clone());
-                                album.manual_cover = true;
-                                Some((old_cover, old_manual))
-                            } else {
-                                None
+        div { class: "absolute inset-0 flex flex-col overflow-hidden p-8",
+            crate::track_list_view::TrackListView {
+                name: album_title,
+                description: album_artist,
+                cover_url,
+                is_album: true,
+                back_label: i18n::t("back_to_albums").to_string(),
+                tracks,
+                library,
+                playlist_store,
+                on_close,
+                on_cover_click: move |_| {
+                    let aid = aid.clone();
+                    #[cfg(not(target_arch = "wasm32"))]
+                    spawn(async move {
+                        let file = rfd::AsyncFileDialog::new()
+                            .add_filter("Images", &["jpg", "jpeg", "png", "webp"])
+                            .pick_file()
+                            .await;
+                        if let Some(file) = file {
+                            let path = file.path().to_path_buf();
+                            let data = match tokio::fs::read(&path).await {
+                                Ok(d) => d,
+                                Err(_) => return,
                             };
-                            drop(lib);
-                            let lib_path = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
-                                .map(|d| d.config_dir().join("library.json"))
-                                .unwrap_or_else(|| PathBuf::from("./config/library.json"));
-                            if library.read().save(&lib_path).is_err() {
-                                if let Some((old_cover, old_manual)) = prev {
-                                    let mut lib = library.write();
-                                    if let Some(album) = lib.albums.iter_mut().find(|a| a.id == aid) {
-                                        album.cover_path = old_cover;
-                                        album.manual_cover = old_manual;
+                            let cover_cache = directories::ProjectDirs::from(
+                                    "com",
+                                    "temidaradev",
+                                    "kopuz",
+                                )
+                                .map(|d| d.cache_dir().join("covers"))
+                                .unwrap_or_else(|| PathBuf::from("./cache/covers"));
+                            if let Ok(saved) = reader::utils::save_cover(
+                                &aid,
+                                &data,
+                                path.extension().and_then(|e| e.to_str()),
+                                &cover_cache,
+                            ) {
+                                let mut lib = library.write();
+                                let prev = if let Some(album) = lib
+                                    .albums
+                                    .iter_mut()
+                                    .find(|a| a.id == aid)
+                                {
+                                    let old_cover = album.cover_path.clone();
+                                    let old_manual = album.manual_cover;
+                                    album.cover_path = Some(saved.clone());
+                                    album.manual_cover = true;
+                                    Some((old_cover, old_manual))
+                                } else {
+                                    None
+                                };
+                                drop(lib);
+                                let lib_path = directories::ProjectDirs::from(
+                                        "com",
+                                        "temidaradev",
+                                        "kopuz",
+                                    )
+                                    .map(|d| d.config_dir().join("library.json"))
+                                    .unwrap_or_else(|| PathBuf::from("./config/library.json"));
+                                if library.read().save(&lib_path).is_err() {
+                                    if let Some((old_cover, old_manual)) = prev {
+                                        let mut lib = library.write();
+                                        if let Some(album) = lib
+                                            .albums
+                                            .iter_mut()
+                                            .find(|a| a.id == aid)
+                                        {
+                                            album.cover_path = old_cover;
+                                            album.manual_cover = old_manual;
+                                        }
                                     }
+                                    let _ = tokio::fs::remove_file(&saved).await;
                                 }
-                                let _ = tokio::fs::remove_file(&saved).await;
                             }
                         }
+                    });
+                },
+                actions: cover_reset_action,
+                on_delete_track: move |idx: usize| {
+                    if let Some(t) = tracks_for_delete.get(idx) {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        if std::fs::remove_file(&t.path).is_ok() {
+                            library.write().remove_track(&t.path);
+                            let lib_path = directories::ProjectDirs::from(
+                                    "com",
+                                    "temidaradev",
+                                    "kopuz",
+                                )
+                                .map(|d| d.config_dir().join("library.json"))
+                                .unwrap_or_else(|| PathBuf::from("./config/library.json"));
+                            let _ = library.read().save(&lib_path);
+                        }
                     }
-                });
-            },
-            actions: cover_reset_action,
-            on_delete_track: move |idx: usize| {
-                if let Some(t) = tracks_for_delete.get(idx) {
+                },
+                on_selection_delete: move |paths: Vec<PathBuf>| {
                     #[cfg(not(target_arch = "wasm32"))]
-                    if std::fs::remove_file(&t.path).is_ok() {
-                        library.write().remove_track(&t.path);
+                    {
+                        for path in &paths {
+                            if std::fs::remove_file(path).is_ok() {
+                                library.write().remove_track(path);
+                            }
+                        }
                         let lib_path = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
                             .map(|d| d.config_dir().join("library.json"))
                             .unwrap_or_else(|| PathBuf::from("./config/library.json"));
                         let _ = library.read().save(&lib_path);
                     }
-                }
-            },
-            on_selection_delete: move |paths: Vec<PathBuf>| {
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    for path in &paths {
-                        if std::fs::remove_file(path).is_ok() {
-                            library.write().remove_track(path);
-                        }
-                    }
-                    let lib_path = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
-                        .map(|d| d.config_dir().join("library.json"))
-                        .unwrap_or_else(|| PathBuf::from("./config/library.json"));
-                    let _ = library.read().save(&lib_path);
-                }
-            },
+                },
+            }
         }
     }
 }

@@ -33,6 +33,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
         .iter()
         .map(|(track, _)| track.clone())
         .collect();
+    let sorted_tracks_arc = std::sync::Arc::new(sorted_tracks.clone());
 
     let has_multiple_discs = sorted_tracks
         .iter()
@@ -57,6 +58,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
         .filter(|track| props.selected_tracks.contains(&track.path))
         .cloned()
         .collect();
+    let selected_queue_tracks_arc = std::sync::Arc::new(selected_queue_tracks.clone());
 
     let all_downloaded = !props.tracks.is_empty()
         && props.tracks.iter().all(|t| {
@@ -75,11 +77,22 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
         COLUMNS_NORMAL
     };
 
+    let scroll_stat = use_signal(|| 0.0_f64);
+    let container_height = use_signal(|| 0.0_f64);
+    const ITEM_HEIGHT: f64 = 56.0;
+
+    let scroll_info = crate::virtual_scroll::use_virtual_scroll(
+        *scroll_stat.read(),
+        *container_height.read(),
+        sorted_track_pairs.len(),
+        ITEM_HEIGHT,
+    );
+
     rsx! {
          div {
-             class: "select-none",
+             class: "select-none flex-1 min-h-0 flex flex-col w-full",
              div {
-                 class: "flex flex-col md:flex-row items-end gap-8 mb-12",
+                 class: "flex flex-col md:flex-row items-end gap-8 mb-12 shrink-0",
                  div { class: "w-64 h-64 rounded-xl bg-stone-800 overflow-hidden relative flex-shrink-0",
                      if let Some(url) = &props.cover_url {
                          img { src: "{url.as_ref()}", class: "w-full h-full object-cover" }
@@ -170,24 +183,35 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                  }
              }
 
-             div { class: "space-y-1",
+             div { class: "flex-1 min-h-0 flex flex-col w-full",
                  if props.tracks.is_empty() {
                      div { class: "py-12 flex flex-col items-center justify-center text-slate-600",
                          i { class: "fa-regular fa-folder-open text-4xl mb-4" }
                          p { class: "text-lg", "{i18n::t(\"no_songs_here\")}" }
                      }
                  } else {
-                     Header {
-                         is_modern: false,
-                         is_album: props.is_album,
-                         is_selection_mode: props.is_selection_mode,
-                         on_select_all: props.on_select_all,
-                         all_selected: props.all_selected,
-                         sort_state: sort_state,
-                         is_reorderable: props.is_reorderable
+                     div { class: "shrink-0",
+                         Header {
+                             is_modern: false,
+                             is_album: props.is_album,
+                             is_selection_mode: props.is_selection_mode,
+                             on_select_all: props.on_select_all,
+                             all_selected: props.all_selected,
+                             sort_state: sort_state,
+                             is_reorderable: props.is_reorderable
+                         }
                      }
-
-                     for (display_idx, (track, idx)) in sorted_track_pairs.iter().enumerate() {
+                     div { class: "flex-1 relative min-h-0 w-full overflow-hidden",
+                     crate::virtual_scroll::VirtualScrollView {
+                         id: "normal-showcase-scroll".to_string(),
+                         class: "absolute inset-0 overflow-y-auto pb-20".to_string(),
+                         scroll_stat,
+                         container_height,
+                         item_height: ITEM_HEIGHT,
+                         saved_scroll: 0.0,
+                         top_pad: scroll_info.top_pad,
+                         bottom_pad: scroll_info.bottom_pad,
+                         for (display_idx, (track, idx)) in sorted_track_pairs.iter().enumerate().skip(scroll_info.start_index).take(scroll_info.items_to_render) {
                          {
                              let idx = *idx;
                              let cover_url = if is_server_source {
@@ -243,7 +267,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                  false
                              };
                              let is_downloading = false;
-                             let play_queue = sorted_tracks.clone();
+                             let play_queue = std::sync::Arc::clone(&sorted_tracks_arc);
 
                              let mut is_new_disc = false;
                              if track.disc_number != last_disc && sort_state.peek().is_none() && props.is_album {
@@ -283,7 +307,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                              is_downloaded: is_downloaded,
                                              is_downloading: is_downloading,
                                              is_currently_playing,
-                                             selected_queue_tracks: selected_queue_tracks.clone(),
+                                             selected_queue_tracks: (*selected_queue_tracks_arc).clone(),
                                              row_num: Some(display_idx + 1 - last_disc_size),
                                              on_select: move |selected| {
                                                 if let Some(handler) = &props.on_select {
@@ -331,7 +355,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                                  }
                                              },
                                              on_play: move |_| {
-                                                 ctrl.queue.set(play_queue.clone());
+                                                 ctrl.queue.set((*play_queue).clone());
                                                  ctrl.play_track(display_idx);
                                              }
                                          }
@@ -347,6 +371,8 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                  }
                              }
                          }
+                         }
+                     }
                      }
                  }
              }
