@@ -10,7 +10,6 @@ use config::{AppConfig, ArtistPhotoSource, FetchStrategy, MusicService, OfflineQ
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
-// Build/version info shown at the bottom of settings. All compile-time, no git.
 const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
 const BUILD_PROFILE: &str = if cfg!(debug_assertions) {
     "debug"
