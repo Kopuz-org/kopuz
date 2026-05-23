@@ -110,10 +110,10 @@ One command, no compiling — downloads the prebuilt binary and assets:
 curl -fsSL https://raw.githubusercontent.com/temidaradev/kopuz/master/install.sh | sh
 ```
 
-This installs to `~/.local/share/kopuz` and adds a launcher at `~/.local/bin/kopuz`
-plus a desktop entry. Requires `webkit2gtk-4.1`, `gtk3` and `libsoup3` present on
-the system. Pin a version with `KOPUZ_VERSION=v0.6.5`, or remove with
-`curl -fsSL .../install.sh | sh -s -- --uninstall`.
+This installs to `~/.local/share/kopuz` and adds a launcher at
+`~/.local/bin/kopuz` plus a desktop entry. Requires `webkit2gtk-4.1`, `gtk3` and
+`libsoup3` present on the system. Pin a version with `KOPUZ_VERSION=v0.6.5`, or
+remove with `curl -fsSL .../install.sh | sh -s -- --uninstall`.
 
 ### NixOS / Nix
 
