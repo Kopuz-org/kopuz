@@ -82,7 +82,7 @@ pub fn JellyfinSearch(
 
     rsx! {
         div {
-            class: if is_modern { "px-6 pt-6 pb-24" } else { "p-8" },
+            class: if is_modern { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "p-8 absolute inset-0 flex flex-col" },
 
             if *show_playlist_modal.read() {
                 PlaylistModal {

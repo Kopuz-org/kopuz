@@ -63,19 +63,23 @@ pub fn PlaylistDetail(
             if !*has_loaded_jellyfin_tracks.read() {
                 let pid_clone = pid.clone();
                 spawn(async move {
-                    let conf = config.peek();
-                    if let Some(server) = &conf.server {
-                        if let (Some(token), Some(user_id)) =
-                            (&server.access_token, &server.user_id)
-                        {
-                            match server.service {
-                                MusicService::Jellyfin => {
-                                    let remote = server::jellyfin::JellyfinClient::new(
-                                        &server.url,
-                                        Some(token),
-                                        &conf.device_id,
-                                        Some(user_id),
-                                    );
+                    let server_info = {
+                        let conf = config.peek();
+                        conf.server.as_ref().and_then(|server| {
+                            if let (Some(token), Some(user_id)) = (&server.access_token, &server.user_id) {
+                                Some((server.service.clone(), server.url.clone(), token.clone(), conf.device_id.clone(), user_id.clone()))
+                            } else { None }
+                        })
+                    };
+                    if let Some((service, url, token, device_id, user_id)) = server_info {
+                        match service {
+                            MusicService::Jellyfin => {
+                                let remote = server::jellyfin::JellyfinClient::new(
+                                    &url,
+                                    Some(&token),
+                                    &device_id,
+                                    Some(&user_id),
+                                );
                                     if let Ok(items) = remote.get_playlist_items(&pid_clone).await {
                                         let mut new_tracks = Vec::new();
                                         for item in items {
@@ -122,9 +126,9 @@ pub fn PlaylistDetail(
                                 }
                                 MusicService::Subsonic | MusicService::Custom => {
                                     let remote = server::subsonic::SubsonicClient::new(
-                                        &server.url,
-                                        user_id,
-                                        token,
+                                        &url,
+                                        &user_id,
+                                        &token,
                                     );
                                     if let Ok(items) = remote.get_playlist_entries(&pid_clone).await
                                     {
@@ -191,7 +195,6 @@ pub fn PlaylistDetail(
                                 }
                             }
                         }
-                    }
                 });
             }
         });

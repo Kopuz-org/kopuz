@@ -10,6 +10,7 @@ use server::jellyfin::JellyfinClient;
 use server::subsonic::SubsonicClient;
 use std::collections::HashSet;
 use std::path::PathBuf;
+use components::virtual_scroll::{use_virtual_scroll, VirtualScrollView};
 
 #[component]
 pub fn JellyfinAlbum(
@@ -242,6 +243,10 @@ pub fn JellyfinAlbumDetails(
         album_id_sig.set(album_jellyfin_id.clone());
     });
 
+    let scroll_stat = use_signal(|| 0.0_f64);
+    let container_height = use_signal(|| 0.0_f64);
+    const ITEM_HEIGHT: f64 = 60.0;
+
     let album_info = use_memo(move || {
         let lib = library.read();
         let id = album_id_sig.read();
@@ -356,9 +361,16 @@ pub fn JellyfinAlbumDetails(
 
     let is_modern = config.read().ui_style == UiStyle::Modern;
 
+    let scroll_info = use_virtual_scroll(
+        *scroll_stat.read(),
+        *container_height.read(),
+        album_tracks().len(),
+        ITEM_HEIGHT,
+    );
+
     rsx! {
         div {
-            class: "w-full max-w-[1600px] mx-auto",
+            class: "w-full max-w-[1600px] mx-auto select-none flex-1 min-h-0 flex flex-col",
 
             if *show_playlist_modal.read() {
                 PlaylistModal {
@@ -515,17 +527,19 @@ pub fn JellyfinAlbumDetails(
                 }
             }
 
-            div { class: "flex items-center justify-between mb-8",
-                button {
-                    class: "flex items-center gap-2 text-slate-400 hover:text-white transition-colors",
-                    onclick: move |_| on_close.call(()),
-                    i { class: "fa-solid fa-arrow-left" }
-                    "{i18n::t(\"back_to_albums\")}"
+            div { class: "shrink-0",
+                div { class: "flex items-center justify-between mb-8",
+                    button {
+                        class: "flex items-center gap-2 text-slate-400 hover:text-white transition-colors",
+                        onclick: move |_| on_close.call(()),
+                        i { class: "fa-solid fa-arrow-left" }
+                        "{i18n::t(\"back_to_albums\")}"
+                    }
                 }
             }
 
             if is_modern {
-                div { class: "flex items-end gap-6 mb-8",
+                div { class: "flex items-end gap-6 mb-8 shrink-0",
                     div {
                         class: "w-44 h-44 rounded-2xl overflow-hidden shrink-0 shadow-2xl bg-white/5",
                         style: "box-shadow: 0 20px 60px rgba(0,0,0,0.6);",
@@ -652,7 +666,7 @@ pub fn JellyfinAlbumDetails(
                 }
             } else {
                 div {
-                    class: "flex flex-col md:flex-row items-end gap-8 mb-12",
+                    class: "flex flex-col md:flex-row items-end gap-8 mb-12 shrink-0",
                     div { class: "w-64 h-64 rounded-xl bg-stone-800 overflow-hidden relative flex-shrink-0",
                         if let Some(url) = &cover_url {
                             img { src: "{url}", class: "w-full h-full object-cover" }
@@ -812,8 +826,19 @@ pub fn JellyfinAlbumDetails(
                             div { "{i18n::t(\"album\")}" }
                         }
                     }
-                    for (idx, (track, track_cover_url)) in album_tracks().into_iter().enumerate() {
-                        {
+                }
+                div { class: "flex-1 relative min-h-0 w-full overflow-hidden",
+                    VirtualScrollView {
+                        id: "server-album-scroll".to_string(),
+                        class: "absolute inset-0 overflow-y-auto pb-20".to_string(),
+                        scroll_stat,
+                        container_height,
+                        item_height: ITEM_HEIGHT,
+                        saved_scroll: 0.0,
+                        top_pad: scroll_info.top_pad,
+                        bottom_pad: scroll_info.bottom_pad,
+                        for (idx, (track, track_cover_url)) in album_tracks().into_iter().enumerate().skip(scroll_info.start_index).take(scroll_info.items_to_render) {
+                            {
                             let track_key = track.path.display().to_string();
                             let track_menu = track.clone();
                             let track_add  = track.clone();
@@ -904,6 +929,7 @@ pub fn JellyfinAlbumDetails(
                                         }
                                     },
                                 }
+                            }
                             }
                         }
                     }
