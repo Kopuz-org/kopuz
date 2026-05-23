@@ -129,8 +129,8 @@ heart_track_to_add_server = Polub utwór podczas odtwarzania, aby dodać go tuta
 search_placeholder = Wyszukaj wykonawców, albumy lub utwory...
 no_results_found = Nie znaleziono wyników dla "{ $query }"
 listenbrainz_token_placeholder = Wpisz token ListenBrainz
-lastfm_api_key_placeholder = Wprowadź swój klucz do Last.fm API
-lastfm_api_secret_placeholder = Wprowadź swój secret do Last.fm API
+lastfm_api_key_placeholder = Wprowadź swój klucz API Last.fm
+lastfm_api_secret_placeholder = Wprowadź swój sekret API Last.fm
 
 # Empty States
 album_not_found = Nie znaleziono albumów
