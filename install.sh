@@ -1,6 +1,6 @@
 #!/bin/sh
 # kopuz installer — downloads a prebuilt binary + assets, no compiling.
-#   curl -fsSL https://raw.githubusercontent.com/temidaradev/kopuz/master/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/Kopuz-org/kopuz/master/install.sh | sh
 #
 # The kopuz binary resolves its assets relative to its own location, so the
 # binary and the assets/ directory must always live in the same folder. This

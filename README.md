@@ -107,7 +107,7 @@ performance and desktop integration, utilizing the power of Rust.
 One command, no compiling — downloads the prebuilt binary and assets:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/temidaradev/kopuz/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Kopuz-org/kopuz/master/install.sh | sh
 ```
 
 This installs to `~/.local/share/kopuz` and adds a launcher at
