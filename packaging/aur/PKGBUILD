@@ -30,6 +30,15 @@ options=(!lto !debug)
 source=("$pkgname-$pkgver.tar.gz::https://github.com/temidaradev/kopuz/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('7c2fe94e34a7e7d0ca8a7e5d765c389f324bd37e8b6ccecd8f79ab30405db5eb')
 
+prepare() {
+    cd "$pkgname-$pkgver"
+
+    sed -i \
+        -e 's|"\./assets/app\.ico"|"crates/kopuz/assets/app.ico"|g' \
+        -e 's|"\./assets/logo\.png"|"crates/kopuz/assets/logo.png"|g' \
+        Dioxus.toml
+}
+
 build() {
     cd "$pkgname-$pkgver"
 
