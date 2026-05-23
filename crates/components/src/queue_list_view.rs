@@ -10,8 +10,8 @@ use crate::queue_drag::{
     RIGHTBAR_DROPZONE_ID, RIGHTBAR_QUEUE_DROP_TARGET_CLASS, cancel_rightbar_drag,
     clear_rightbar_drop_target, has_dragged_queue_track, install_rightbar_drag_handlers,
     rightbar_auto_scroll, rightbar_queue_row_class, rightbar_reorder_move_target,
-    start_rightbar_reorder, stop_rightbar_auto_scroll, take_dragged_queue_tracks,
-    update_rightbar_drop_target, update_rightbar_end_drop_target,
+    shift_indices_at_or_after, start_rightbar_reorder, stop_rightbar_auto_scroll,
+    take_dragged_queue_tracks, update_rightbar_drop_target, update_rightbar_end_drop_target,
 };
 use crate::reorder_buttons::ReorderButtons;
 
@@ -424,8 +424,35 @@ pub fn QueueListView(
         if tracks.is_empty() {
             return;
         }
+        let count = tracks.len();
+        let visual_insert = insert_at;
+        /* FCK SHUFFLE */
         if *ctrl.shuffle.peek() {
-            ctrl.add_to_queue(tracks);
+            let shuffle_order = ctrl.shuffle_order.peek().clone();
+            let physical_insert = shuffle_order
+                .get(visual_insert)
+                .copied()
+                .unwrap_or_else(|| ctrl.queue.peek().len());
+            ctrl.queue.with_mut(|queue| {
+                let insert_pos = physical_insert.min(queue.len());
+                for (offset, track) in tracks.into_iter().enumerate() {
+                    queue.insert(insert_pos + offset, track);
+                }
+            });
+            ctrl.shuffle_order.with_mut(|order| {
+                shift_indices_at_or_after(order, physical_insert, count);
+                let insert_pos = visual_insert.min(order.len());
+                for i in 0..count {
+                    order.insert(insert_pos + i, physical_insert + i);
+                }
+            });
+            let current_idx = *ctrl.current_queue_index.peek();
+            if visual_insert <= current_idx {
+                ctrl.current_queue_index.set(current_idx + count);
+            }
+            ctrl.history.with_mut(|history| {
+                shift_indices_at_or_after(history, physical_insert, count);
+            });
         } else {
             let insert_at = insert_at.min(ctrl.queue.peek().len());
             ctrl.queue.with_mut(|queue| {

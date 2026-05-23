@@ -10,6 +10,14 @@ pub const RIGHTBAR_QUEUE_DROP_TARGET_CLASS: &str = "rightbar-queue-drop-target";
 pub static DRAGGED_QUEUE_TRACKS: OnceLock<Mutex<Vec<Track>>> = OnceLock::new();
 static QUEUE_DRAG_ENABLED: AtomicBool = AtomicBool::new(false);
 
+pub fn shift_indices_at_or_after(indices: &mut [usize], at: usize, by: usize) {
+    for idx in indices {
+        if *idx >= at {
+            *idx += by;
+        }
+    }
+}
+
 pub fn rightbar_reorder_move_target(
     from: usize,
     drop_index: usize,
