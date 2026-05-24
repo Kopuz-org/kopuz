@@ -142,6 +142,8 @@ maximize = Maximize
 close = Close
 enabled = ENABLED
 disabled = DISABLED
+play = Play
+shuffle = Shuffle
 
 # Navigation & Headers
 tracks = Tracks
