@@ -452,9 +452,9 @@ pub fn LastFmSettings(
 
 const EQ_MIN_DB: f64 = -12.0;
 const EQ_MAX_DB: f64 = 12.0;
-const EQ_GRAPH_WIDTH: f64 = 760.0;
+const EQ_GRAPH_WIDTH: f64 = 1100.0;
 const EQ_GRAPH_HEIGHT: f64 = 280.0;
-const EQ_GRAPH_PAD_X: f64 = 36.0;
+const EQ_GRAPH_PAD_X: f64 = 40.0;
 const EQ_GRAPH_PAD_TOP: f64 = 22.0;
 const EQ_GRAPH_PAD_BOTTOM: f64 = 42.0;
 
@@ -513,7 +513,7 @@ fn eq_apply_drag(base: &EqualizerConfig, index: usize, y: f64) -> EqualizerConfi
     eq_apply_band_gain(base, index, eq_y_to_gain(y))
 }
 
-fn eq_interpolate_bands(from: [f32; 5], to: [f32; 5], progress: f32) -> [f32; 5] {
+fn eq_interpolate_bands(from: [f32; 10], to: [f32; 10], progress: f32) -> [f32; 10] {
     std::array::from_fn(|index| from[index] + (to[index] - from[index]) * progress)
 }
 
@@ -540,7 +540,10 @@ pub fn EqualizerPanel(
     on_preview: EventHandler<EqualizerConfig>,
     on_commit: EventHandler<EqualizerConfig>,
 ) -> Element {
-    const BAND_LABELS: [&str; 5] = ["60 Hz", "250 Hz", "1 kHz", "4 kHz", "12 kHz"];
+    const BAND_LABELS: [&str; 10] = [
+        "32 Hz", "64 Hz", "125 Hz", "250 Hz", "500 Hz", "1 kHz", "2 kHz", "4 kHz", "8 kHz",
+        "16 kHz",
+    ];
 
     let config = use_context::<Signal<AppConfig>>();
     let mut draft = use_signal(|| current.clone());
@@ -763,8 +766,8 @@ pub fn EqualizerPanel(
                 style: "background: color-mix(in oklab, var(--color-neutral-900) 78%, transparent); border-color: color-mix(in oklab, var(--color-white) 8%, transparent);",
                 svg {
                     class: "{graph_class}",
-                    style: "width: 760px; height: 280px; min-width: 760px;",
-                    view_box: "0 0 760 280",
+                    style: "width: 1100px; height: 280px; min-width: 1100px;",
+                    view_box: "0 0 1100 280",
                     onmousedown: move |evt: MouseEvent| {
                         let point = evt.element_coordinates();
                         let index = eq_nearest_band(point.x, BAND_LABELS.len());
