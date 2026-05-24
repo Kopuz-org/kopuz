@@ -98,7 +98,10 @@ pub async fn sync_server_library(
                                 .as_ref()
                                 .map(|g| g.join(", "))
                                 .unwrap_or_default(),
-                            year: album_item.production_year.unwrap_or(0),
+                            year: album_item
+                                .production_year
+                                .map(|y| u16::try_from(y).unwrap_or(u16::MAX))
+                                .unwrap_or(0),
                             cover_path,
                             manual_cover: false,
                         });
