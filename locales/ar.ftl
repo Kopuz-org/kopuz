@@ -76,6 +76,10 @@ create = إنشاء
 save = حفظ
 enabled = مفعّل
 disabled = مُعطّل
+# TODO: Translate lines below
+play = Play
+shuffle = Shuffle
+# ------
 
 # Navigation & Headers
 tracks = المقاطع
