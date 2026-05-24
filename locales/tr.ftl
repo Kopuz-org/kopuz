@@ -76,6 +76,10 @@ create = Oluştur
 save = Kaydet
 enabled = ETKİN
 disabled = DEVRE DIŞI
+# TODO: Translate lines below
+play = Play
+shuffle = Shuffle
+# ------
 
 # Navigation & Headers
 tracks = Parçalar

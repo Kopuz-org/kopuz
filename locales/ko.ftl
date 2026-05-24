@@ -76,6 +76,10 @@ create = 만들기
 save = 저장
 enabled = 켜짐
 disabled = 꺼짐
+# TODO: Translate lines below
+play = Play
+shuffle = Shuffle
+# ------
 
 # Navigation & Headers
 tracks = 트랙

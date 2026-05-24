@@ -131,6 +131,10 @@ maximize = Maximizar
 close = Fechar
 enabled = ATIVADO
 disabled = DESATIVADO
+# TODO: Translate lines below
+play = Play
+shuffle = Shuffle
+# ------
 
 # Navigation & Headers
 tracks = Faixas

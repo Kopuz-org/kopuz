@@ -76,6 +76,10 @@ create = o pali
 save = o kama jo
 enabled = LON
 disabled = LON ALA
+# TODO: Translate lines below
+play = Play
+shuffle = Shuffle
+# ------
 
 # Navigation & Headers
 tracks = kalama musi

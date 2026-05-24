@@ -76,6 +76,10 @@ create = 作成
 save = 保存
 enabled = 有効
 disabled = 無効
+# TODO: Translate lines below
+play = Play
+shuffle = Shuffle
+# ------
 
 # Navigation & Headers
 tracks = トラック

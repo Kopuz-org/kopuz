@@ -131,6 +131,10 @@ maximize = Maksimalkan
 close = Tutup
 enabled = AKTIF
 disabled = NONAKTIF
+# TODO: Translate lines below
+play = Play
+shuffle = Shuffle
+# ------
 
 # Navigation & Headers
 tracks = Lagu

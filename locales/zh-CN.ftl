@@ -76,6 +76,10 @@ create = 创建
 save = 保存
 enabled = 已启用
 disabled = 已禁用
+# TODO: Translate lines below
+play = Play
+shuffle = Shuffle
+# ------
 
 # Navigation & Headers
 tracks = 曲目

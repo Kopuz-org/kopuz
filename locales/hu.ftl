@@ -76,6 +76,10 @@ create = Létrehozás
 save = Mentés
 enabled = BE
 disabled = KI
+# TODO: Translate lines below
+play = Play
+shuffle = Shuffle
+# ------
 
 # Navigation & Headers
 tracks = Dalok

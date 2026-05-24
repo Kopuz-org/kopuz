@@ -72,6 +72,10 @@ create = 󱥄󱥉
 save = 󱥄󱤖󱤓
 enabled = 󱤬
 disabled = 󱤬󱤂
+# TODO: Translate lines below
+play = Play
+shuffle = Shuffle
+# ------
 
 # Navigation & Headers
 tracks = 󱤕󱤻

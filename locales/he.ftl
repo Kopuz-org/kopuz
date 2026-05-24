@@ -76,6 +76,10 @@ create = יצירה
 save = שמירה
 enabled = מופעל
 disabled = מושבת
+# TODO: Translate lines below
+play = Play
+shuffle = Shuffle
+# ------
 
 # Navigation & Headers
 tracks = שירים

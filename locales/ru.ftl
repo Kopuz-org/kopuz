@@ -76,6 +76,10 @@ create = Создать
 save = Сохранить
 enabled = АКТИВНО
 disabled = ОТКЛЮЧЕНО
+# TODO: Translate lines below
+play = Play
+shuffle = Shuffle
+# ------
 
 # Navigation & Headers
 tracks = Треки

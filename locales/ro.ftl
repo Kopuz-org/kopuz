@@ -76,6 +76,10 @@ create = Creează
 save = Salvează
 enabled = PORNIT
 disabled = OPRIT
+# TODO: Translate lines below
+play = Play
+shuffle = Shuffle
+# ------
 
 # Navigation & Headers
 tracks = Piese

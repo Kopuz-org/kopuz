@@ -76,6 +76,10 @@ create = Δημιουργία
 save = Αποθήκευση
 enabled = Ενεργό
 disabled = Ανενεργό
+# TODO: Translate lines below
+play = Play
+shuffle = Shuffle
+# ------
 
 # Navigation & Headers
 tracks = Κομμάτια

@@ -76,6 +76,10 @@ create = Erstellen
 save = Speichern
 enabled = AKTIVIERT
 disabled = DEAKTIVIERT
+# TODO: Translate lines below
+play = Play
+shuffle = Shuffle
+# ------
 
 # Navigation & Headers
 tracks = Titel
