@@ -17,8 +17,13 @@ depends=(
     'dbus'
     'cmake'
     'opus'
+)
+
+optdepends=(
+    'yt-dlp'
     'python-mutagen'
 )
+
 makedepends=(
     'rust'
     'cargo'
