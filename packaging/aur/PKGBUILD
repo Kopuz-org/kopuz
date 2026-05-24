@@ -17,7 +17,7 @@ depends=(
     'dbus'
     'cmake'
     'opus'
-    'extra/python-mutagen'
+    'python-mutagen'
 )
 makedepends=(
     'rust'
