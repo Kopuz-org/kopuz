@@ -1904,3 +1904,61 @@ pub fn use_player_controller(
         station_registry,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{LoopMode, PlayerController};
+
+    #[test]
+    fn loop_mode_cycles_through_all_states() {
+        assert_eq!(LoopMode::None.next(), LoopMode::Queue);
+        assert_eq!(LoopMode::Queue.next(), LoopMode::Track);
+        assert_eq!(LoopMode::Track.next(), LoopMode::None);
+    }
+
+    #[test]
+    fn test_remap_queue_index() {
+        // Move item at 1 to 3
+        assert_eq!(PlayerController::remap_queue_index(1, 1, 3), 3); // The item itself
+        assert_eq!(PlayerController::remap_queue_index(2, 1, 3), 1); // Item originally at 2 shifts left
+        assert_eq!(PlayerController::remap_queue_index(3, 1, 3), 2); // Item originally at 3 shifts left
+        assert_eq!(PlayerController::remap_queue_index(0, 1, 3), 0); // Item before unaffected
+        assert_eq!(PlayerController::remap_queue_index(4, 1, 3), 4); // Item after unaffected
+
+        // Move item at 3 to 1
+        assert_eq!(PlayerController::remap_queue_index(3, 3, 1), 1); // The item itself
+        assert_eq!(PlayerController::remap_queue_index(2, 3, 1), 3); // Item originally at 2 shifts right
+        assert_eq!(PlayerController::remap_queue_index(1, 3, 1), 2); // Item originally at 1 shifts right
+        assert_eq!(PlayerController::remap_queue_index(4, 3, 1), 4); // Item after unaffected
+        assert_eq!(PlayerController::remap_queue_index(0, 3, 1), 0); // Item before unaffected
+
+        // Move item to same place
+        assert_eq!(PlayerController::remap_queue_index(2, 2, 2), 2);
+        assert_eq!(PlayerController::remap_queue_index(1, 2, 2), 1);
+        assert_eq!(PlayerController::remap_queue_index(3, 2, 2), 3);
+
+        // Adjacent swap-like moves
+        assert_eq!(PlayerController::remap_queue_index(1, 1, 2), 2);
+        assert_eq!(PlayerController::remap_queue_index(2, 1, 2), 1);
+        assert_eq!(PlayerController::remap_queue_index(2, 2, 1), 1);
+        assert_eq!(PlayerController::remap_queue_index(1, 2, 1), 2);
+    }
+
+    #[test]
+    fn test_build_pending_crossfade_ui() {
+        let state = PlayerController::build_pending_crossfade_ui(5, 120, 110);
+        assert_eq!(state.next_idx, 5);
+        assert_eq!(state.switch_after_secs, 10);
+        assert_eq!(state.outgoing_duration_secs, 120);
+        assert_eq!(state.outgoing_progress_secs, 110);
+
+        // Edge case: progress exceeds duration
+        let state_over = PlayerController::build_pending_crossfade_ui(5, 120, 130);
+        assert_eq!(state_over.switch_after_secs, 0); // saturating_sub
+
+        // Edge case: exact boundary
+        let state_exact = PlayerController::build_pending_crossfade_ui(7, 95, 95);
+        assert_eq!(state_exact.next_idx, 7);
+        assert_eq!(state_exact.switch_after_secs, 0);
+    }
+}

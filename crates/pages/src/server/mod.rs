@@ -138,3 +138,21 @@ pub async fn download_tracks_batch(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn content_type_to_ext_maps_known_audio_types() {
+        assert_eq!(content_type_to_ext("audio/flac"), Some("flac"));
+        assert_eq!(
+            content_type_to_ext("audio/mpeg; charset=binary"),
+            Some("mp3")
+        );
+        assert_eq!(content_type_to_ext("audio/mp4"), Some("m4a"));
+        assert_eq!(content_type_to_ext("video/webm"), Some("webm"));
+        assert_eq!(content_type_to_ext("audio/x-aiff"), Some("aiff"));
+        assert_eq!(content_type_to_ext("application/octet-stream"), None);
+    }
+}

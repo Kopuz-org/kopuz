@@ -1048,3 +1048,303 @@ fn JobRow(props: JobRowProps) -> Element {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use config::YtdlpOptions;
+    use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_path(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("kopuz_pages_{name}_{unique}"))
+    }
+
+    #[test]
+    fn audio_format_parsing_and_args_match_expected_profiles() {
+        let cases = [
+            (
+                "MP3",
+                AudioFormat::Mp3,
+                vec!["-x", "--audio-format", "mp3", "--audio-quality", "0"],
+            ),
+            (
+                "FLAC",
+                AudioFormat::Flac,
+                vec!["-x", "--audio-format", "flac"],
+            ),
+            ("WAV", AudioFormat::Wav, vec!["-x", "--audio-format", "wav"]),
+            (
+                "Video (MP4)",
+                AudioFormat::Video,
+                vec!["-f", "bestvideo+bestaudio", "--merge-output-format", "mp4"],
+            ),
+            (
+                "unknown",
+                AudioFormat::BestAudio,
+                vec!["-x", "--audio-quality", "0"],
+            ),
+        ];
+
+        for (label, format, expected_args) in cases {
+            assert_eq!(AudioFormat::from_str(label), format);
+            assert_eq!(format.ytdlp_args(), expected_args);
+        }
+    }
+
+    #[test]
+    fn parse_line_extracts_progress_title_processing_and_errors() {
+        match parse_line("[download]  42.3% of 3.10MiB at 1.23MiB/s ETA 00:03") {
+            Some(LineInfo::Progress { pct, speed, eta }) => {
+                assert!((pct - 42.3).abs() < f64::EPSILON);
+                assert_eq!(speed, "1.23MiB/s");
+                assert_eq!(eta, "00:03");
+            }
+            _ => panic!("expected progress"),
+        }
+
+        match parse_line("[download] Destination: /tmp/Test Track.flac") {
+            Some(LineInfo::Title(title)) => assert_eq!(title, "Test Track.flac"),
+            _ => panic!("expected title"),
+        }
+
+        assert!(matches!(
+            parse_line("[ExtractAudio] foo"),
+            Some(LineInfo::Processing)
+        ));
+        assert!(matches!(
+            parse_line("[download] 100% of 3.10MiB"),
+            Some(LineInfo::Progress { pct, speed, eta }) if (pct - 100.0).abs() < f64::EPSILON && speed.is_empty() && eta.is_empty()
+        ));
+        assert!(matches!(
+            parse_line("ERROR: unsupported URL"),
+            Some(LineInfo::Error(err)) if err == "ERROR: unsupported URL"
+        ));
+        assert!(parse_line("plain unrelated output").is_none());
+    }
+
+    #[test]
+    fn build_command_includes_expected_optional_arguments() {
+        let opts = YtdlpOptions {
+            audio_quality: 5,
+            embed_metadata: true,
+            embed_thumbnail: true,
+            embed_chapters: true,
+            embed_subs: true,
+            embed_info_json: true,
+            write_thumbnail: true,
+            write_description: true,
+            write_info_json: true,
+            write_subs: true,
+            write_auto_subs: true,
+            write_comments: true,
+            sponsorblock: true,
+            sponsorblock_mark: true,
+            split_chapters: true,
+            postprocess_thumbnail_square: false,
+            convert_thumbnail: "jpg".to_string(),
+            no_playlist: true,
+            xattrs: true,
+            no_mtime: true,
+            rate_limit: "1M".to_string(),
+            cookies_from_browser: "firefox".to_string(),
+            js_runtimes: "deno".to_string(),
+        };
+
+        let cmd = build_command(
+            "https://example.com/watch?v=1",
+            "/tmp/out",
+            AudioFormat::Mp3,
+            &opts,
+        );
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+
+        assert!(args.windows(2).any(|w| w == ["--paths", "/tmp/out"]));
+        assert!(args.windows(2).any(|w| w == ["--audio-format", "mp3"]));
+        assert!(args.windows(2).any(|w| w == ["--audio-quality", "5"]));
+        assert!(args.contains(&"--embed-metadata".to_string()));
+        assert!(args.contains(&"--embed-thumbnail".to_string()));
+        assert!(args.contains(&"--embed-chapters".to_string()));
+        assert!(args.contains(&"--embed-subs".to_string()));
+        assert!(args.contains(&"--embed-info-json".to_string()));
+        assert!(args.contains(&"--write-thumbnail".to_string()));
+        assert!(args.contains(&"--write-description".to_string()));
+        assert!(args.contains(&"--write-info-json".to_string()));
+        assert!(args.contains(&"--write-subs".to_string()));
+        assert!(args.contains(&"--write-auto-subs".to_string()));
+        assert!(args.contains(&"--write-comments".to_string()));
+        assert!(
+            args.windows(2)
+                .any(|w| w == ["--convert-thumbnails", "jpg"])
+        );
+        assert!(args.windows(2).any(|w| w == ["--limit-rate", "1M"]));
+        assert!(
+            args.windows(2)
+                .any(|w| w == ["--cookies-from-browser", "firefox"])
+        );
+        assert!(args.windows(2).any(|w| w == ["--js-runtimes", "deno"]));
+        assert_eq!(
+            args.last().map(String::as_str),
+            Some("https://example.com/watch?v=1")
+        );
+    }
+
+    #[test]
+    fn build_command_prefers_square_thumbnail_postprocessor_over_convert_thumbnail() {
+        let opts = YtdlpOptions {
+            postprocess_thumbnail_square: true,
+            convert_thumbnail: "jpg".to_string(),
+            ..YtdlpOptions::default()
+        };
+
+        let cmd = build_command(
+            "https://example.com/watch?v=1",
+            "",
+            AudioFormat::Flac,
+            &opts,
+        );
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+
+        assert!(
+            args.windows(2)
+                .any(|w| w == ["--convert-thumbnails", "png"])
+        );
+        assert!(args.contains(&"--postprocessor-args".to_string()));
+        assert!(
+            !args
+                .windows(2)
+                .any(|w| w == ["--convert-thumbnails", "jpg"])
+        );
+    }
+
+    #[test]
+    fn build_command_omits_optional_arguments_when_values_are_blank() {
+        let opts = YtdlpOptions {
+            rate_limit: "   ".to_string(),
+            cookies_from_browser: String::new(),
+            js_runtimes: "   ".to_string(),
+            ..YtdlpOptions::default()
+        };
+
+        let cmd = build_command(
+            "https://example.com/watch?v=1",
+            "",
+            AudioFormat::BestAudio,
+            &opts,
+        );
+        let args: Vec<String> = cmd
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect();
+
+        assert!(!args.contains(&"--paths".to_string()));
+        assert!(!args.contains(&"--limit-rate".to_string()));
+        assert!(!args.contains(&"--cookies-from-browser".to_string()));
+        assert!(!args.contains(&"--js-runtimes".to_string()));
+    }
+
+    #[test]
+    fn run_preflight_checks_rejects_duplicate_active_jobs_before_binary_checks() {
+        let jobs = vec![
+            DownloadJob {
+                id: "1".to_string(),
+                url: "https://example.com/watch?v=1".to_string(),
+                title: "Track".to_string(),
+                format: AudioFormat::Mp3,
+                progress: 50.0,
+                status: JobStatus::Downloading,
+                speed: "1M".to_string(),
+                eta: "00:01".to_string(),
+            },
+            DownloadJob {
+                id: "2".to_string(),
+                url: "https://example.com/watch?v=2".to_string(),
+                title: "Done".to_string(),
+                format: AudioFormat::Mp3,
+                progress: 100.0,
+                status: JobStatus::Completed,
+                speed: String::new(),
+                eta: String::new(),
+            },
+        ];
+
+        let result = run_preflight_checks("https://example.com/watch?v=1", "", &jobs);
+
+        assert_eq!(result, Err(i18n::t("ytdlp_error_duplicate_active")));
+    }
+
+    #[test]
+    fn find_in_augmented_path_accepts_existing_absolute_paths() {
+        let file_path = temp_path("absolute_binary");
+        fs::write(&file_path, b"#!/bin/sh\n").unwrap();
+
+        let found = find_in_augmented_path(file_path.to_str().unwrap());
+
+        assert_eq!(found, Some(file_path.to_string_lossy().into_owned()));
+        let _ = fs::remove_file(file_path);
+    }
+
+    #[test]
+    fn parse_line_prefers_error_branch_over_progress_like_content() {
+        match parse_line("ERROR: [download]  50% of 3.10MiB at 1.23MiB/s ETA 00:03") {
+            Some(LineInfo::Error(message)) => assert!(message.starts_with("ERROR:")),
+            _ => panic!("expected error line to win"),
+        }
+    }
+
+    #[test]
+    fn parse_line_extracts_filename_from_nested_destination() {
+        match parse_line("[download] Destination: /tmp/some/nested/Test Track.flac") {
+            Some(LineInfo::Title(title)) => assert_eq!(title, "Test Track.flac"),
+            _ => panic!("expected nested destination title"),
+        }
+    }
+
+    #[test]
+    fn validate_output_directory_handles_empty_existing_file_and_creates_directories() {
+        assert!(validate_output_directory("   ").is_ok());
+
+        let file_path = temp_path("out_file");
+        fs::write(&file_path, b"not a dir").unwrap();
+        assert!(validate_output_directory(file_path.to_str().unwrap()).is_err());
+        let _ = fs::remove_file(&file_path);
+
+        let dir_path = temp_path("out_dir").join("nested");
+        assert!(validate_output_directory(dir_path.to_str().unwrap()).is_ok());
+        assert!(dir_path.exists());
+        let _ = fs::remove_dir_all(dir_path.parent().unwrap());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn validate_output_directory_rejects_unwritable_directories() {
+        let dir_path = temp_path("out_unwritable");
+        fs::create_dir_all(&dir_path).unwrap();
+
+        let original_mode = fs::metadata(&dir_path).unwrap().permissions().mode();
+        let mut permissions = fs::metadata(&dir_path).unwrap().permissions();
+        permissions.set_mode(0o555);
+        fs::set_permissions(&dir_path, permissions).unwrap();
+
+        let result = validate_output_directory(dir_path.to_str().unwrap());
+
+        let mut restore_permissions = fs::metadata(&dir_path).unwrap().permissions();
+        restore_permissions.set_mode(original_mode);
+        fs::set_permissions(&dir_path, restore_permissions).unwrap();
+
+        assert!(result.is_err());
+        let _ = fs::remove_dir_all(dir_path);
+    }
+}

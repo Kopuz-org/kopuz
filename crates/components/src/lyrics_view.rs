@@ -97,7 +97,9 @@ pub fn LyricsView(
                                 n => Some(n - 1),
                             }
                     {
-                        let _ = eval(&format!("window.__{layout}_updateLyrics({current_line_index})"));
+                        let _ = eval(&format!(
+                            "window.__{layout}_updateLyrics({current_line_index})"
+                        ));
 
                         sleep_duration_ms = times
                             .get(current_line_index.saturating_add(1))

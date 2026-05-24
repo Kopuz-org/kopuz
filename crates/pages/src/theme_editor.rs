@@ -93,6 +93,50 @@ fn sanitize_hex_input(value: &str) -> String {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_vars_map_contains_all_default_keys() {
+        let vars = default_vars_map();
+        assert_eq!(vars.len(), DEFAULT_VARS.len());
+        for (key, value) in DEFAULT_VARS {
+            assert_eq!(vars.get(*key).map(String::as_str), Some(*value));
+        }
+    }
+
+    #[test]
+    fn normalize_hex_color_accepts_short_and_long_forms() {
+        assert_eq!(normalize_hex_color("#abc"), Some("#aabbcc".to_string()));
+        assert_eq!(normalize_hex_color("A1B2C3"), Some("#a1b2c3".to_string()));
+        assert_eq!(
+            normalize_hex_color("  #Ff00Aa  "),
+            Some("#ff00aa".to_string())
+        );
+        assert_eq!(normalize_hex_color("#12"), None);
+        assert_eq!(normalize_hex_color("xyz"), None);
+    }
+
+    #[test]
+    fn sanitize_hex_input_filters_non_hex_and_limits_length() {
+        assert_eq!(sanitize_hex_input("#12gg34zz56"), "#123456");
+        assert_eq!(sanitize_hex_input("abcd1234"), "abcd12");
+        assert_eq!(sanitize_hex_input("  #0f0  "), "#0f0");
+    }
+
+    #[test]
+    fn get_color_label_returns_empty_for_unknown_key() {
+        assert_eq!(get_color_label("not-a-color"), "");
+    }
+
+    #[test]
+    fn normalize_hex_color_truncates_long_inputs_after_sanitization() {
+        assert_eq!(normalize_hex_color("#1234567"), Some("#123456".to_string()));
+        assert_eq!(normalize_hex_color("12345678"), Some("#123456".to_string()));
+    }
+}
+
 #[component]
 pub fn ThemeEditorPage(config: Signal<AppConfig>, #[props(default)] embedded: bool) -> Element {
     let mut selected_id: Signal<Option<String>> = use_signal(|| None);

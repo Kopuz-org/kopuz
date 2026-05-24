@@ -6,20 +6,32 @@ on:
   pull_request:
     branches: [main, master]
 
+permissions:
+  contents: read
+
 jobs:
-  locale-parity:
+  test-suite:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/nix-installer-action@v21
+      - uses: DeterminateSystems/magic-nix-cache-action@v13
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run workspace tests
+        run: nix develop --command just test-ci
 
       - name: Check locale parity against en.ftl
-        run: nix shell nixpkgs#nushell --command nu scripts/check_locales.nu
+        run: nix develop --command nu scripts/check_locales.nu
 
       - name: Check Rust i18n usage against en.ftl
-        run: nix shell nixpkgs#nushell --command nu scripts/check_i18n_usage.nu
+        run: nix develop --command nu scripts/check_i18n_usage.nu
 
   pr-build:
     if: github.event_name == 'pull_request'
@@ -32,11 +44,15 @@ jobs:
             system: aarch64-darwin
 
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/nix-installer-action@v21
+      - uses: DeterminateSystems/magic-nix-cache-action@v13
 
       - name: Run Nix checks
         run: nix build .#checks.${{ matrix.system }}.default
@@ -52,11 +68,15 @@ jobs:
             system: aarch64-darwin
 
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/nix-installer-action@v21
+      - uses: DeterminateSystems/magic-nix-cache-action@v13
 
       - uses: cachix/cachix-action@v14
         with:

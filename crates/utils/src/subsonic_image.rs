@@ -71,3 +71,37 @@ fn decode_embedded_cover_url(tag: &str) -> Option<String> {
 
     String::from_utf8(bytes).ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_subsonic_path_edge_cases() {
+        assert_eq!(
+            parse_subsonic_path("subsonic:1234:tag"),
+            Some(("1234", Some("tag")))
+        );
+        assert_eq!(parse_subsonic_path("subsonic:1234"), Some(("1234", None)));
+        assert_eq!(parse_subsonic_path("subsonic:   "), None); // Empty trimmed
+        assert_eq!(parse_subsonic_path("subsonic"), None);
+    }
+
+    #[test]
+    fn test_subsonic_image_url_with_none_tag() {
+        assert_eq!(
+            subsonic_image_url_from_path("id:123:none", "http://server", None, 800, 90),
+            None
+        );
+    }
+
+    #[test]
+    fn test_subsonic_image_url_with_embedded_urlhex() {
+        let tag = "urlhex_687474703a2f2f6578616d706c652e636f6d"; // http://example.com
+        let path = format!("id:123:{}", tag);
+        assert_eq!(
+            subsonic_image_url_from_path(&path, "http://server", None, 800, 90),
+            Some("http://example.com".to_string())
+        );
+    }
+}

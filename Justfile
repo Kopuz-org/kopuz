@@ -7,6 +7,14 @@ tailwind:
 serve: tailwind
     dx serve
 
+test:
+    cargo nextest run --workspace
+
+test-doc:
+    cargo test --workspace --doc
+
+test-ci: test test-doc
+
 build: tailwind
     dx build --package kopuz --release
     @echo ""

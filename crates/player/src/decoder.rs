@@ -115,3 +115,61 @@ pub fn from_stream_with_hint(
     hint.with_extension(extension);
     (source, hint)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Cursor, SeekFrom};
+    use symphonia::core::io::MediaSource;
+
+    #[test]
+    fn test_read_seek_source() {
+        let data = b"hello world".to_vec();
+        let cursor = Cursor::new(data.clone());
+        let mut source = ReadSeekSource::new(Box::new(cursor), Some(data.len() as u64));
+
+        assert_eq!(source.is_seekable(), true);
+        assert_eq!(source.byte_len(), Some(11));
+
+        let mut buf = [0u8; 5];
+        let bytes_read = source.read(&mut buf).unwrap();
+        assert_eq!(bytes_read, 5);
+        assert_eq!(&buf, b"hello");
+
+        let pos = source.seek(SeekFrom::Start(1)).unwrap();
+        assert_eq!(pos, 1);
+
+        let mut buf2 = [0u8; 4];
+        source.read(&mut buf2).unwrap();
+        assert_eq!(&buf2, b"ello");
+    }
+
+    #[test]
+    fn test_read_only_source_returns_unsupported_on_seek() {
+        struct DummyStream(Vec<u8>);
+        impl Read for DummyStream {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                let len = std::cmp::min(buf.len(), self.0.len());
+                buf[..len].copy_from_slice(&self.0[..len]);
+                self.0.drain(..len);
+                Ok(len)
+            }
+        }
+
+        let stream = DummyStream(b"radio_stream".to_vec());
+        let mut source = ReadOnlySource {
+            inner: Box::new(stream),
+        };
+
+        assert_eq!(source.is_seekable(), false);
+        assert_eq!(source.byte_len(), None);
+
+        let mut buf = [0u8; 5];
+        let bytes_read = source.read(&mut buf).unwrap();
+        assert_eq!(bytes_read, 5);
+        assert_eq!(&buf, b"radio");
+
+        let err = source.seek(SeekFrom::Start(0)).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::Unsupported);
+    }
+}

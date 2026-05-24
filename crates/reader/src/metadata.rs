@@ -393,3 +393,212 @@ fn read_with_symphonia(
     let _ = cover_cache;
     Some(track)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        extract_embedded_cover, extract_metadata, is_matroska_audio, make_album_id,
+        select_best_picture, slugify_album_key, symphonia_tag_to_string,
+    };
+    use lofty::file::{FileType, TaggedFile};
+    use lofty::picture::{MimeType, Picture, PictureType};
+    use lofty::prelude::Accessor;
+    use lofty::properties::FileProperties;
+    use lofty::tag::Tag;
+    use lofty::tag::{ItemKey, TagType};
+    use std::path::Path;
+    use std::time::Duration;
+    use symphonia::core::meta::{Tag as SymphoniaTag, Value as SymphoniaValue};
+
+    fn picture(pic_type: PictureType, data: &[u8]) -> Picture {
+        Picture::new_unchecked(pic_type, Some(MimeType::Png), None, data.to_vec())
+    }
+
+    fn sample_tag() -> Tag {
+        Tag::new(TagType::Id3v2)
+    }
+
+    #[test]
+    fn slugify_album_key_normalizes_whitespace_and_punctuation() {
+        assert_eq!(
+            slugify_album_key("Alohaii - Patchwork!"),
+            "alohaii__patchwork"
+        );
+        assert_eq!(slugify_album_key(""), "");
+        assert_eq!(slugify_album_key("!@#$%^&*()"), "");
+        assert_eq!(slugify_album_key("Tëst-Ïng"), "tëstïng");
+        assert_eq!(slugify_album_key("123 456"), "123_456");
+    }
+
+    #[test]
+    fn make_album_id_prefers_album_name_and_falls_back_to_grouping_key() {
+        assert_eq!(make_album_id("Patchwork", "ignored"), "alb_patchwork");
+        assert_eq!(
+            make_album_id("   ", "Alohalii / Local Library"),
+            "alb_unknown_alohalii__local_library"
+        );
+        assert_eq!(make_album_id("", "!!!"), "alb_unknown");
+        assert_eq!(make_album_id("", ""), "alb_unknown");
+    }
+
+    #[test]
+    fn select_best_picture_prefers_cover_front_and_falls_back_to_first() {
+        let other = picture(PictureType::Other, b"other");
+        let front = picture(PictureType::CoverFront, b"front");
+
+        let pictures = [other.clone(), front.clone()];
+        let selected = select_best_picture(&pictures).unwrap();
+        assert_eq!(selected.pic_type(), PictureType::CoverFront);
+
+        let selected = select_best_picture(std::slice::from_ref(&other)).unwrap();
+        assert_eq!(selected.pic_type(), PictureType::Other);
+
+        assert!(select_best_picture(&[]).is_none());
+    }
+
+    #[test]
+    fn extract_embedded_cover_prefers_cover_front_across_candidate_tags() {
+        let mut primary = sample_tag();
+        primary.push_picture(picture(PictureType::Other, b"first"));
+
+        let mut secondary = sample_tag();
+        secondary.push_picture(picture(PictureType::CoverFront, b"front"));
+
+        let tagged = TaggedFile::new(
+            FileType::Mpeg,
+            FileProperties::default(),
+            vec![secondary, primary.clone()],
+        );
+
+        let selected = extract_embedded_cover(&tagged, Some(&primary)).unwrap();
+        assert_eq!(selected.pic_type(), PictureType::CoverFront);
+    }
+
+    #[test]
+    fn extract_metadata_falls_back_to_filename_and_unknowns_without_tag() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("Safe Room.flac");
+        std::fs::write(&path, b"12345678").unwrap();
+
+        let properties = FileProperties::new(
+            Duration::from_millis(1500),
+            None,
+            None,
+            Some(44_100),
+            None,
+            None,
+            None,
+        );
+
+        let track = extract_metadata(None, &properties, &path);
+
+        assert_eq!(track.title, "Safe Room");
+        assert_eq!(track.artist, "Unknown Artist");
+        assert_eq!(track.artists, vec!["Unknown Artist"]);
+        assert_eq!(track.album, "Unknown Album");
+        assert_eq!(track.khz, 44_100);
+        assert_eq!(track.duration, 2);
+        assert!(track.album_id.starts_with("alb_unknown_tmp"));
+    }
+
+    #[test]
+    fn extract_metadata_uses_track_artists_and_album_artist_when_present() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("track.mp3");
+        std::fs::write(&path, vec![0_u8; 32_000]).unwrap();
+
+        let mut tag = sample_tag();
+        tag.set_artist(String::from("A; B"));
+        tag.set_title(String::from("Patchwork"));
+        tag.set_album(String::from("Album Name"));
+        tag.insert_text(ItemKey::TrackArtists, "A ; B ; C".to_string());
+        tag.insert_text(ItemKey::AlbumArtist, "Album Artist".to_string());
+        tag.insert_text(ItemKey::MusicBrainzReleaseId, "mbid-123".to_string());
+
+        let properties = FileProperties::new(
+            Duration::from_secs(2),
+            None,
+            None,
+            Some(48_000),
+            None,
+            None,
+            None,
+        );
+
+        let track = extract_metadata(Some(&tag), &properties, &path);
+
+        assert_eq!(track.title, "Patchwork");
+        assert_eq!(track.artist, "A; B");
+        assert_eq!(track.artists, vec!["A", "B", "C"]);
+        assert_eq!(track.album, "Album Name");
+        assert_eq!(track.album_id, "alb_album_name");
+        assert_eq!(track.musicbrainz_release_id.as_deref(), Some("mbid-123"));
+        assert_eq!(track.khz, 48_000);
+        assert_eq!(track.bitrate, 128);
+    }
+
+    #[test]
+    fn extract_metadata_splits_semicolon_artist_when_track_artists_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("track.mp3");
+        std::fs::write(&path, b"1234").unwrap();
+
+        let mut tag = sample_tag();
+        tag.set_artist(String::from("A; B"));
+
+        let track = extract_metadata(Some(&tag), &FileProperties::default(), &path);
+        assert_eq!(track.artists, vec!["A", "B"]);
+    }
+
+    #[test]
+    fn is_matroska_audio_matches_mka_case_insensitively() {
+        assert!(is_matroska_audio(Path::new("/music/test.mka")));
+        assert!(is_matroska_audio(Path::new("/music/test.MKA")));
+        assert!(!is_matroska_audio(Path::new("/music/test.mkv")));
+        assert!(!is_matroska_audio(Path::new("/music/test.flac")));
+        // Edge cases
+        assert!(!is_matroska_audio(Path::new("/music/mka")));
+        assert!(!is_matroska_audio(Path::new("")));
+        assert!(!is_matroska_audio(Path::new("/music/.mka")));
+    }
+
+    #[test]
+    fn test_symphonia_tag_to_string() {
+        let tag = SymphoniaTag::new(
+            Some(symphonia::core::meta::StandardTagKey::Artist),
+            "ARTIST",
+            SymphoniaValue::String(" Test Artist ".to_string()),
+        );
+        assert_eq!(
+            symphonia_tag_to_string(&tag),
+            Some("Test Artist".to_string())
+        );
+
+        let tag_empty = SymphoniaTag::new(
+            Some(symphonia::core::meta::StandardTagKey::Artist),
+            "ARTIST",
+            SymphoniaValue::String("   ".to_string()),
+        );
+        assert_eq!(symphonia_tag_to_string(&tag_empty), None);
+
+        let tag_int = SymphoniaTag::new(
+            Some(symphonia::core::meta::StandardTagKey::TrackNumber),
+            "TRACK",
+            SymphoniaValue::UnsignedInt(10),
+        );
+        assert_eq!(symphonia_tag_to_string(&tag_int), Some("10".to_string()));
+
+        let tag_float = SymphoniaTag::new(None, "BPM", SymphoniaValue::Float(120.5));
+        assert_eq!(
+            symphonia_tag_to_string(&tag_float),
+            Some("120.5".to_string())
+        );
+
+        let tag_bool = SymphoniaTag::new(None, "COMPILATION", SymphoniaValue::Boolean(true));
+        assert_eq!(symphonia_tag_to_string(&tag_bool), Some("true".to_string()));
+
+        let tag_binary =
+            SymphoniaTag::new(None, "BINARY", SymphoniaValue::Binary(vec![1, 2, 3].into()));
+        assert_eq!(symphonia_tag_to_string(&tag_binary), None);
+    }
+}

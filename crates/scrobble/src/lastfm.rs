@@ -246,3 +246,47 @@ pub fn make_playing_now<'a>(
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+
+    #[test]
+    fn auth_url_embeds_api_key_and_token() {
+        assert_eq!(
+            auth_url("api-key", "token-123"),
+            "https://www.last.fm/api/auth/?api_key=api-key&token=token-123"
+        );
+    }
+
+    #[test]
+    fn make_api_sig_sorts_params_before_hashing() {
+        let a = make_api_sig(&[("b", "2"), ("a", "1")], "secret");
+        let b = make_api_sig(&[("a", "1"), ("b", "2")], "secret");
+
+        assert_eq!(a, b);
+        assert_eq!(a.len(), 32);
+    }
+
+    #[test]
+    fn make_scrobble_sets_timestamp_and_filters_empty_release() {
+        let scrobble = make_scrobble("Artist", "Track", Some(""));
+        let serialized = serde_json::to_value(&scrobble).unwrap();
+
+        assert!(scrobble.timestamp > 0);
+        assert!(serialized.get("timestamp").is_some());
+        assert!(serialized["track_metadata"].get("release_name").is_none());
+    }
+
+    #[test]
+    fn make_playing_now_keeps_non_empty_release_name() {
+        let now_playing = make_playing_now("Artist", "Track", Some("Album"));
+        let serialized = serde_json::to_value(&now_playing).unwrap();
+
+        assert_eq!(
+            serialized["track_metadata"]["release_name"],
+            Value::String("Album".to_string())
+        );
+    }
+}

@@ -159,3 +159,56 @@ fn decode_embedded_cover_url(tag: &str) -> Option<String> {
 
     String::from_utf8(bytes).ok()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_jellyfin_image_url_with_none_tag() {
+        assert_eq!(
+            jellyfin_image_url_from_path("id:123:none", "http://server", None, 800, 90),
+            None
+        );
+    }
+
+    #[test]
+    fn test_jellyfin_image_url_with_embedded_urlhex() {
+        let tag = "urlhex_687474703a2f2f6578616d706c652e636f6d"; // http://example.com
+        let path = format!("id:123:{}", tag);
+        assert_eq!(
+            jellyfin_image_url_from_path(&path, "http://server", None, 800, 90),
+            Some("http://example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn test_jellyfin_image_url_construction() {
+        let url = jellyfin_image_url(
+            "http://server",
+            "abc",
+            Some("tag123"),
+            Some("token456"),
+            800,
+            90,
+        );
+        assert!(url.starts_with("http://server/Items/abc/Images/Primary?"));
+        assert!(url.contains("maxWidth=800"));
+        assert!(url.contains("quality=90"));
+        assert!(url.contains("tag=tag123"));
+        assert!(url.contains("api_key=token456"));
+    }
+
+    #[test]
+    fn test_parse_jellyfin_path_edge_cases() {
+        assert_eq!(
+            parse_jellyfin_path("jellyfin:item_123:tag"),
+            Some(("item_123", Some("tag")))
+        );
+        assert_eq!(
+            parse_jellyfin_path("jellyfin:item_123"),
+            Some(("item_123", None))
+        );
+        assert_eq!(parse_jellyfin_path("bad_format"), None);
+    }
+}

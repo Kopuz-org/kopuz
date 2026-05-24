@@ -479,3 +479,110 @@ impl SubsonicClient {
         Err("Subsonic request failed with unknown error".to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::collections::HashMap;
+
+    fn params_to_map(params: Vec<(String, String)>) -> HashMap<String, String> {
+        params.into_iter().collect()
+    }
+
+    #[test]
+    fn auth_params_include_required_fields_without_leaking_plaintext_password() {
+        let client = SubsonicClient::new("https://demo.example.com/", "alice", "secret");
+        let params = params_to_map(client.auth_params());
+
+        assert_eq!(params.get("u").map(String::as_str), Some("alice"));
+        assert_eq!(params.get("v").map(String::as_str), Some("1.16.1"));
+        assert_eq!(params.get("c").map(String::as_str), Some("kopuz"));
+        assert_eq!(params.get("f").map(String::as_str), Some("json"));
+        assert_eq!(params.get("s").map(|s| s.len()), Some(16));
+        assert_eq!(params.get("t").map(|s| s.len()), Some(32));
+        assert_ne!(params.get("t").map(String::as_str), Some("secret"));
+    }
+
+    #[test]
+    fn stream_url_with_bitrate_adds_format_only_for_positive_transcode_limit() {
+        let client = SubsonicClient::new("https://demo.example.com/", "alice", "secret");
+
+        let with_transcode =
+            reqwest::Url::parse(&client.stream_url_with_bitrate("song-1", Some(192)).unwrap())
+                .unwrap();
+        let zero_limit =
+            reqwest::Url::parse(&client.stream_url_with_bitrate("song-1", Some(0)).unwrap())
+                .unwrap();
+
+        let transcode_pairs: HashMap<_, _> = with_transcode.query_pairs().into_owned().collect();
+        let zero_pairs: HashMap<_, _> = zero_limit.query_pairs().into_owned().collect();
+
+        assert_eq!(
+            transcode_pairs.get("id").map(String::as_str),
+            Some("song-1")
+        );
+        assert_eq!(
+            transcode_pairs.get("maxBitRate").map(String::as_str),
+            Some("192")
+        );
+        assert_eq!(
+            transcode_pairs.get("format").map(String::as_str),
+            Some("mp3")
+        );
+        assert_eq!(zero_pairs.get("maxBitRate").map(String::as_str), Some("0"));
+        assert!(!zero_pairs.contains_key("format"));
+    }
+
+    #[test]
+    fn cover_art_url_includes_optional_size() {
+        let client = SubsonicClient::new("https://demo.example.com/", "alice", "secret");
+        let url =
+            reqwest::Url::parse(&client.cover_art_url("cover-7", Some(320)).unwrap()).unwrap();
+        let pairs: HashMap<_, _> = url.query_pairs().into_owned().collect();
+
+        assert_eq!(pairs.get("id").map(String::as_str), Some("cover-7"));
+        assert_eq!(pairs.get("size").map(String::as_str), Some("320"));
+    }
+
+    #[test]
+    fn subsonic_envelope_deserializes_ok_and_error_responses() {
+        let ok: SubsonicEnvelope<GetPlaylistData> = serde_json::from_value(json!({
+            "subsonic-response": {
+                "status": "ok",
+                "playlist": {
+                    "entry": [{"id": "song-1", "title": "Song"}]
+                }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(ok.response.status, "ok");
+        assert_eq!(
+            ok.response
+                .data
+                .playlist
+                .as_ref()
+                .map(|playlist| playlist.entry.len()),
+            Some(1)
+        );
+
+        let err: SubsonicEnvelope<EmptyData> = serde_json::from_value(json!({
+            "subsonic-response": {
+                "status": "failed",
+                "error": {
+                    "code": 40,
+                    "message": "Wrong username or password"
+                }
+            }
+        }))
+        .unwrap();
+
+        assert_eq!(err.response.status, "failed");
+        assert_eq!(err.response.error.as_ref().map(|e| e.code), Some(40));
+        assert_eq!(
+            err.response.error.as_ref().map(|e| e.message.as_str()),
+            Some("Wrong username or password")
+        );
+    }
+}

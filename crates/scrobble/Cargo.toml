@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 md5 = "0.7"
 tracing = "0.1"
-reqwest.workspace = true
+reqwest = { workspace = true, features = ["json"] }
 config.workspace = true
 serde.workspace = true
 serde_json.workspace = true

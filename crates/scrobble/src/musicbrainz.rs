@@ -109,3 +109,52 @@ pub fn make_playing_now<'a>(
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::Value;
+
+    #[test]
+    fn make_listen_sets_listened_at_and_filters_empty_release() {
+        let listen = make_listen("Artist", "Track", Some(""));
+        let serialized = serde_json::to_value(&listen).unwrap();
+
+        assert!(listen.listened_at.is_some());
+        assert!(serialized.get("listened_at").is_some());
+        assert!(serialized["track_metadata"].get("release_name").is_none());
+    }
+
+    #[test]
+    fn make_playing_now_omits_listened_at_and_keeps_release() {
+        let now_playing = make_playing_now("Artist", "Track", Some("Album"));
+        let serialized = serde_json::to_value(&now_playing).unwrap();
+
+        assert!(now_playing.listened_at.is_none());
+        assert_eq!(
+            serialized["track_metadata"]["release_name"],
+            Value::String("Album".to_string())
+        );
+        assert!(serialized.get("listened_at").is_none());
+    }
+
+    #[test]
+    fn submit_listens_body_serializes_expected_shape() {
+        let body = SubmitListens {
+            listen_type: "single",
+            payload: vec![make_listen("Artist", "Track", Some("Album"))],
+        };
+
+        let serialized = serde_json::to_value(&body).unwrap();
+
+        assert_eq!(
+            serialized["listen_type"],
+            Value::String("single".to_string())
+        );
+        assert_eq!(serialized["payload"].as_array().map(|a| a.len()), Some(1));
+        assert_eq!(
+            serialized["payload"][0]["track_metadata"]["track_name"],
+            Value::String("Track".to_string())
+        );
+    }
+}
