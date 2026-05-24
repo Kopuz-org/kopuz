@@ -58,6 +58,7 @@ ytdlp = 下载
 add_to_favorites = 添加到收藏
 remove_from_favorites = 从收藏中移除
 add_to_queue = 添加到播放队列
+play_next = 下一首播放
 add_to_playlist = 添加到播放列表
 remove_from_playlist = 从播放列表中移除
 delete = 删除

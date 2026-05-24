@@ -58,6 +58,7 @@ ytdlp = Завантаження
 add_to_favorites = Додати до улюблених
 remove_from_favorites = Видалити з улюблених
 add_to_queue = Додати до черги
+play_next = Відтворити наступною
 add_to_playlist = Додати до плейлиста
 remove_from_playlist = Видалити з плейлиста
 delete = Видалити

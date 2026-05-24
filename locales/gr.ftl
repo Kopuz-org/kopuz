@@ -58,6 +58,7 @@ ytdlp = Λήψεις
 add_to_favorites = Προσθήκη στα Αγαπημένα
 remove_from_favorites = Αφαίρεση από τα Αγαπημένα
 add_to_queue = Προσθήκη στην Ουρά
+play_next = Αναπαραγωγή στη συνέχεια
 add_to_playlist = Προσθήκη στη Λίστα Αναπαραγωγής
 remove_from_playlist = Αφαίρεση από τη Λίστα Αναπαραγωγής
 delete = Διαγραφή

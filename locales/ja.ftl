@@ -58,6 +58,7 @@ ytdlp = ダウンロード
 add_to_favorites = お気に入りに追加
 remove_from_favorites = お気に入りから削除
 add_to_queue = キューに追加
+play_next = 次に再生
 add_to_playlist = プレイリストに追加
 remove_from_playlist = プレイリストから削除
 delete = 削除

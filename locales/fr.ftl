@@ -58,6 +58,7 @@ ytdlp = Téléchargements
 add_to_favorites = Ajouter au Favoris
 remove_from_favorites = Supprimer Des Favoris
 add_to_queue = Ajouter à la file d'attente
+play_next = Lire ensuite
 add_to_playlist = Ajouter a la playlist
 remove_from_playlist = Supprimer De La Playlist
 delete = Supprimer

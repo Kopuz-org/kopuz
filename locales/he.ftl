@@ -58,6 +58,7 @@ ytdlp = הורדות
 add_to_favorites = הוספה למועדפים
 remove_from_favorites = הסרה מהמועדפים
 add_to_queue = הוספה לתור
+play_next = נגן הבא בתור
 add_to_playlist = הוספה לרשימת השמעה
 remove_from_playlist = הסרה מרשימת השמעה
 delete = מחיקה

@@ -78,6 +78,14 @@ impl PlayerController {
         track.path.to_string_lossy().to_string()
     }
 
+    fn shift_indices_at_or_after(indices: &mut [usize], at: usize, by: usize) {
+        for idx in indices {
+            if *idx >= at {
+                *idx += by;
+            }
+        }
+    }
+
     /// Retrieves the queue index for a given index, taking into account the shuffle state.
     pub fn get_queue_index(&self, idx: usize) -> Option<usize> {
         if *self.shuffle.peek() {
@@ -1608,6 +1616,44 @@ impl PlayerController {
             let start_idx = q_len - count;
             self.shuffle_order.with_mut(|so| {
                 (start_idx..q_len).for_each(|idx| so.push(idx));
+            });
+        }
+    }
+
+    pub fn queue_play_next(&mut self, tracks: impl IntoIterator<Item = Track>) {
+        let tracks: Vec<Track> = tracks.into_iter().collect();
+        let count = tracks.len();
+        if count == 0 {
+            return;
+        }
+
+        if *self.shuffle.peek() {
+            let insert_at = if self.shuffle_order.peek().is_empty() {
+                0
+            } else {
+                (*self.current_queue_index.peek() + 1).min(self.shuffle_order.peek().len())
+            };
+            let start_idx = self.queue.peek().len();
+            self.queue.with_mut(|queue| queue.extend(tracks));
+            self.shuffle_order.with_mut(|order| {
+                for offset in 0..count {
+                    order.insert(insert_at + offset, start_idx + offset);
+                }
+            });
+        } else {
+            let insert_at = if self.queue.peek().is_empty() {
+                0
+            } else {
+                (*self.current_queue_index.peek() + 1).min(self.queue.peek().len())
+            };
+            self.queue.with_mut(|queue| {
+                for (offset, track) in tracks.into_iter().enumerate() {
+                    queue.insert(insert_at + offset, track);
+                }
+            });
+
+            self.history.with_mut(|history| {
+                Self::shift_indices_at_or_after(history, insert_at, count);
             });
         }
     }

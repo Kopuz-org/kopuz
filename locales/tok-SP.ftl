@@ -58,6 +58,7 @@ ytdlp = 󱥖 󱤿
 add_to_favorites = 󱥄󱥌󱥩󱥅
 remove_from_favorites = 󱥄󱥶󱥧󱥅
 add_to_queue = 󱥄󱥌󱥩󱤾󱤕
+play_next = o kalama lon poka
 add_to_playlist = 󱥄󱥌󱥩󱤟󱤕
 remove_from_playlist = 󱥄󱥶󱥧󱤟󱤕
 delete = 󱥄󱥶

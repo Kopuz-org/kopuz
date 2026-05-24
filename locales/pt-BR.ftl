@@ -110,6 +110,7 @@ ytdlp_error_output_not_writable = Sem permissão de escrita na pasta de saída: 
 add_to_favorites = Adicionar aos favoritos
 remove_from_favorites = Remover dos favoritos
 add_to_queue = Adicionar à fila
+play_next = Tocar a seguir
 add_to_playlist = Adicionar à playlist
 remove_from_playlist = Remover da playlist
 delete = Excluir

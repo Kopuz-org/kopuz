@@ -58,6 +58,7 @@ ytdlp = kama jo
 add_to_favorites = o pana tawa olin
 remove_from_favorites = o weka tan olin
 add_to_queue = o pana tawa nasin kalama
+play_next = o kalama lon poka
 add_to_playlist = o pana tawa kulupu kalama
 remove_from_playlist = o weka tan kulupu kalama
 delete = o weka

@@ -58,6 +58,7 @@ ytdlp = التنزيلات
 add_to_favorites = إضافة إلى المفضلة
 remove_from_favorites = إزالة من المفضلة
 add_to_queue = إضافة إلى قائمة الانتظار
+play_next = تشغيل التالي
 add_to_playlist = إضافة إلى قائمة التشغيل
 remove_from_playlist = إزالة من قائمة التشغيل
 delete = حذف

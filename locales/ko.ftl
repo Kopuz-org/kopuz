@@ -58,6 +58,7 @@ ytdlp = 다운로드
 add_to_favorites = 즐겨찾기에 추가
 remove_from_favorites = 즐겨찾기에서 제거
 add_to_queue = 대기열에 추가
+play_next = 다음으로 재생
 add_to_playlist = 재생목록에 추가
 remove_from_playlist = 재생목록에서 제거
 delete = 삭제

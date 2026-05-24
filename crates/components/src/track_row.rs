@@ -7,6 +7,7 @@ use crate::queue_drag::{
 };
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
+use hooks::PlayerController;
 use reader::models::Track;
 
 #[component]
@@ -35,6 +36,7 @@ pub fn TrackRow(
     #[props(default = None)] row_num: Option<usize>,
 ) -> Element {
     let config = use_context::<Signal<AppConfig>>();
+    let mut ctrl = use_context::<PlayerController>();
     let nav_ctrl = use_context::<NavigationController>();
     let is_modern = config.read().ui_style == UiStyle::Modern;
     let show_selection_highlight = is_selection_mode && is_selected;
@@ -47,11 +49,14 @@ pub fn TrackRow(
     let drag_track_normal_mouse = track.clone();
     let drag_selected_tracks_mouse = selected_queue_tracks.clone();
     let drag_selected_tracks_normal_mouse = selected_queue_tracks.clone();
+    let play_next_track_mouse = track.clone();
+    let play_next_track_normal = track.clone();
     let drag_cover_url = cover_url.as_ref().map(|url| url.as_ref().to_string());
     let drag_cover_url_normal = drag_cover_url.clone();
     let mut pending_queue_drag = use_signal(|| None::<(f64, f64)>);
     let mut pending_queue_drag_normal = use_signal(|| None::<(f64, f64)>);
     const QUEUE_DRAG_THRESHOLD_PX: f64 = 6.0;
+    let play_next_text = i18n::t("play_next").to_string();
     let add_to_queue_text = i18n::t("add_to_queue").to_string();
     let add_to_playlist_text = i18n::t("add_to_playlist").to_string();
     let remove_from_playlist_text = i18n::t("remove_from_playlist").to_string();
@@ -61,6 +66,10 @@ pub fn TrackRow(
 
     let has_queue = on_queue.is_some();
     if has_queue {
+        actions.push(MenuAction::new(
+            play_next_text.as_str(),
+            "fa-solid fa-forward-step",
+        ));
         actions.push(MenuAction::new(
             add_to_queue_text.as_str(),
             "fa-solid fa-list-ul",
@@ -100,8 +109,9 @@ pub fn TrackRow(
         actions.push(MenuAction::new(delete_song_text.as_str(), "fa-solid fa-trash").destructive());
     }
 
-    let add_to_queue_idx = if has_queue { Some(0) } else { None };
-    let add_to_playlist_idx = if has_queue { 1 } else { 0 };
+    let play_next_idx = if has_queue { Some(0) } else { None };
+    let add_to_queue_idx = if has_queue { Some(1) } else { None };
+    let add_to_playlist_idx = if has_queue { 2 } else { 0 };
     let remove_action_idx = if has_remove {
         Some(add_to_playlist_idx + 1)
     } else {
@@ -355,6 +365,13 @@ pub fn TrackRow(
                             button_class: "w-6 h-6 flex items-center justify-center rounded transition-colors hover:bg-white/10".to_string(),
                             anchor: "right".to_string(),
                             on_action: move |idx: usize| {
+                                if let Some(play_next_idx) = play_next_idx
+                                    && idx == play_next_idx
+                                {
+                                    ctrl.queue_play_next(vec![play_next_track_mouse.clone()]);
+                                    on_close_menu.call(());
+                                    return;
+                                }
                                 if let Some(queue_idx) = add_to_queue_idx {
                                     if idx == queue_idx {
                                         if let Some(handler) = on_queue { handler.call(()); }
@@ -581,6 +598,13 @@ pub fn TrackRow(
                         button_class: "opacity-0 group-hover:opacity-100 focus:opacity-100".to_string(),
                         anchor: "right".to_string(),
                         on_action: move |idx: usize| {
+                            if let Some(play_next_idx) = play_next_idx
+                                && idx == play_next_idx
+                            {
+                                ctrl.queue_play_next(vec![play_next_track_normal.clone()]);
+                                on_close_menu.call(());
+                                return;
+                            }
                             if let Some(queue_idx) = add_to_queue_idx {
                                 if idx == queue_idx {
                                     if let Some(handler) = on_queue {

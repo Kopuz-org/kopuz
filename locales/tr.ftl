@@ -58,6 +58,7 @@ ytdlp = İndirmeler
 add_to_favorites = Favorilere Ekle
 remove_from_favorites = Favorilerden Kaldır
 add_to_queue = Sıraya Ekle
+play_next = Sonraki çal
 add_to_playlist = Çalma Listesine Ekle
 remove_from_playlist = Çalma Listesinden Kaldır
 delete = Sil

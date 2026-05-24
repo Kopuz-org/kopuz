@@ -121,6 +121,7 @@ view_release = View release
 add_to_favorites = Add to Favorites
 remove_from_favorites = Remove from Favorites
 add_to_queue = Add to Queue
+play_next = Play Next
 add_to_playlist = Add to Playlist
 remove_from_playlist = Remove from Playlist
 delete = Delete
