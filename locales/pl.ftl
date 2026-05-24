@@ -74,6 +74,8 @@ create = Utwórz
 save = Zapisz
 enabled = WŁĄCZONE
 disabled = WYŁĄCZONE
+shuffle = Odtwarzaj losowo
+play = Odtwórz
 
 # Navigation & Headers
 tracks = Ścieżki
