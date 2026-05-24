@@ -100,7 +100,7 @@ pub async fn sync_server_library(
                                 .unwrap_or_default(),
                             year: album_item
                                 .production_year
-                                .map(|y| if y > u16::MAX as u32 { 0 } else { y as u16 })
+                                .map(|y| u16::try_from(y).unwrap_or(u16::MAX))
                                 .unwrap_or(0),
                             cover_path,
                             manual_cover: false,
