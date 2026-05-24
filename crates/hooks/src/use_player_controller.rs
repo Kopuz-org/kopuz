@@ -1640,6 +1640,9 @@ impl PlayerController {
                     order.insert(insert_at + offset, start_idx + offset);
                 }
             });
+            self.history.with_mut(|history| {
+                Self::shift_indices_at_or_after(history, insert_at, count);
+            });
         } else {
             let insert_at = if self.queue.peek().is_empty() {
                 0
