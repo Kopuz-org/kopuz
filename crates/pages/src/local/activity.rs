@@ -66,6 +66,16 @@ pub fn LocalLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Element
             .collect::<Vec<(Track, u64, String, Option<CoverUrl>)>>()
     });
 
+    let queue_tracks = use_memo(move || {
+        std::sync::Arc::new(
+            track_data
+                .read()
+                .iter()
+                .map(|(t, _, _, _)| t.clone())
+                .collect::<Vec<_>>(),
+        )
+    });
+
     let is_modern = config.read().ui_style == UiStyle::Modern;
     let mut scroll_positions = use_context::<Signal<std::collections::HashMap<Route, f64>>>();
     let saved_scroll = scroll_positions
@@ -85,6 +95,17 @@ pub fn LocalLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Element
         track_data_len,
         ITEM_HEIGHT,
     );
+
+    let visible_tracks: Vec<(usize, Track, u64, String, Option<CoverUrl>)> = track_data
+        .read()
+        .iter()
+        .enumerate()
+        .skip(scroll_info.start_index)
+        .take(scroll_info.items_to_render)
+        .map(|(idx, (track, plays, genre, cover_url))| {
+            (idx, track.clone(), *plays, genre.clone(), cover_url.clone())
+        })
+        .collect();
 
     rsx! {
         div { class: if is_modern { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
@@ -143,87 +164,69 @@ pub fn LocalLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Element
                             p { "{i18n::t(\"no_tracks_in_library\")}" }
                         }
                     } else {
-                        {
+                        for (idx, track, plays, genre, cover_url) in visible_tracks {
                             {
-                                let queue_tracks_arc = std::sync::Arc::new(
-                                    track_data.read().iter().map(|(t, _, _, _)| t.clone()).collect::<Vec<_>>(),
-                                );
+                                let track_id = track.path.to_string_lossy().to_string();
+                                let queue = std::sync::Arc::clone(&*queue_tracks.read());
                                 rsx! {
-                                    for (idx, (track, plays, genre, cover_url)) in track_data
-                                        .read()
-                                        .clone()
-                                        .into_iter()
-                                        .enumerate()
-                                        .skip(scroll_info.start_index)
-                                        .take(scroll_info.items_to_render)
-                                    {
-                                        {
-                                            {
-                                                let track_id = track.path.to_string_lossy().to_string();
-                                                let queue_tracks = std::sync::Arc::clone(&queue_tracks_arc);
-                                                rsx! {
-                                                    div { key: "{track_id}", style: "height: {ITEM_HEIGHT}px;",
-                                                        div {
-                                                            class: "flex items-center h-full px-4 hover:bg-white/5 rounded-xl cursor-pointer transition-colors group",
-                                                            onclick: move |_| {
-                                                                ctrl.queue.set((*queue_tracks).clone());
-                                                                ctrl.play_track(idx);
-                                                            },
-                                                            div { class: "w-12 shrink-0 flex items-center justify-center tabular-nums text-white/50 font-medium group-hover:text-white transition-colors relative",
-                                                                span { class: "group-hover:opacity-0 transition-opacity", "{idx + 1}" }
-                                                                i { class: "fa-solid fa-play absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity" }
-                                                            }
+                                    div { key: "{track_id}", style: "height: {ITEM_HEIGHT}px;",
+                                        div {
+                                            class: "flex items-center h-full px-4 hover:bg-white/5 rounded-xl cursor-pointer transition-colors group",
+                                            onclick: move |_| {
+                                                ctrl.queue.set((*queue).clone());
+                                                ctrl.play_track(idx);
+                                            },
+                                            div { class: "w-12 shrink-0 flex items-center justify-center tabular-nums text-white/50 font-medium group-hover:text-white transition-colors relative",
+                                                span { class: "group-hover:opacity-0 transition-opacity", "{idx + 1}" }
+                                                i { class: "fa-solid fa-play absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity" }
+                                            }
 
-                                                            div { class: "flex-1 min-w-0 pr-4 flex items-center",
-                                                                div {
-                                                                    class: if is_modern { "w-8 h-8 bg-white/5 rounded-md flex items-center justify-center mr-4 shrink-0 text-slate-500 group-hover:text-slate-300 transition-colors overflow-hidden" } else { "w-10 h-10 bg-white/5 rounded-md flex items-center justify-center mr-4 shrink-0 text-slate-500 group-hover:text-slate-300 transition-colors overflow-hidden" },
-                                                                    if let Some(url) = cover_url {
-                                                                        img { src: "{url.as_ref()}", class: "w-full h-full object-cover", decoding: "async", loading: "lazy" }
-                                                                    } else {
-                                                                        i { class: "fa-solid fa-music text-xs" }
-                                                                    }
-                                                                }
-                                                                div { class: "flex-1 min-w-0",
-                                                                    div {
-                                                                        class: if is_modern { "text-white font-medium truncate text-sm flex items-center gap-2" } else { "text-white font-medium truncate text-[15px] mb-0.5 flex items-center gap-2" },
-                                                                        "{track.title}"
-                                                                        i {
-                                                                            class: "fa-solid fa-hard-drive text-[10px] text-slate-500",
-                                                                            title: i18n::t("local").to_string(),
-                                                                        }
-                                                                    }
-                                                                    div {
-                                                                        class: if is_modern { "text-slate-400 text-xs truncate group-hover:text-slate-300 transition-colors" } else { "text-slate-400 text-sm truncate group-hover:text-slate-300 transition-colors" },
-                                                                        "{track.artist}"
-                                                                    }
-                                                                }
-                                                            }
-
-                                                            div { class: "w-48 lg:w-64 shrink-0 hidden md:block text-slate-400 text-sm truncate pr-4 group-hover:text-slate-300 transition-colors",
-                                                                "{track.album}"
-                                                            }
-
-                                                            div { class: "w-24 shrink-0 hidden lg:block text-slate-400 text-sm truncate pr-4 group-hover:text-slate-300 transition-colors",
-                                                                if genre.is_empty() {
-                                                                    "-"
-                                                                } else {
-                                                                    "{genre}"
-                                                                }
-                                                            }
-
-                                                            div { class: "w-24 shrink-0 text-right text-slate-400 text-sm tabular-nums group-hover:text-slate-300 transition-colors",
-                                                                "{format_duration(track.duration)}"
-                                                            }
-
-                                                            div { class: "w-24 shrink-0 text-right text-slate-400 text-sm tabular-nums group-hover:text-slate-300 transition-colors flex items-center justify-end gap-2",
-                                                                if plays > 0 {
-                                                                    i { class: "fa-solid fa-fire text-orange-500/80 text-[10px]" }
-                                                                }
-                                                                span { class: if plays > 0 { "text-white font-medium" } else { "" }, "{plays}" }
-                                                            }
-                                                        }
+                                            div { class: "flex-1 min-w-0 pr-4 flex items-center",
+                                                div {
+                                                    class: if is_modern { "w-8 h-8 bg-white/5 rounded-md flex items-center justify-center mr-4 shrink-0 text-slate-500 group-hover:text-slate-300 transition-colors overflow-hidden" } else { "w-10 h-10 bg-white/5 rounded-md flex items-center justify-center mr-4 shrink-0 text-slate-500 group-hover:text-slate-300 transition-colors overflow-hidden" },
+                                                    if let Some(url) = cover_url {
+                                                        img { src: "{url.as_ref()}", class: "w-full h-full object-cover", decoding: "async", loading: "lazy" }
+                                                    } else {
+                                                        i { class: "fa-solid fa-music text-xs" }
                                                     }
                                                 }
+                                                div { class: "flex-1 min-w-0",
+                                                    div {
+                                                        class: if is_modern { "text-white font-medium truncate text-sm flex items-center gap-2" } else { "text-white font-medium truncate text-[15px] mb-0.5 flex items-center gap-2" },
+                                                        "{track.title}"
+                                                        i {
+                                                            class: "fa-solid fa-hard-drive text-[10px] text-slate-500",
+                                                            title: i18n::t("local").to_string(),
+                                                        }
+                                                    }
+                                                    div {
+                                                        class: if is_modern { "text-slate-400 text-xs truncate group-hover:text-slate-300 transition-colors" } else { "text-slate-400 text-sm truncate group-hover:text-slate-300 transition-colors" },
+                                                        "{track.artist}"
+                                                    }
+                                                }
+                                            }
+
+                                            div { class: "w-48 lg:w-64 shrink-0 hidden md:block text-slate-400 text-sm truncate pr-4 group-hover:text-slate-300 transition-colors",
+                                                "{track.album}"
+                                            }
+
+                                            div { class: "w-24 shrink-0 hidden lg:block text-slate-400 text-sm truncate pr-4 group-hover:text-slate-300 transition-colors",
+                                                if genre.is_empty() {
+                                                    "-"
+                                                } else {
+                                                    "{genre}"
+                                                }
+                                            }
+
+                                            div { class: "w-24 shrink-0 text-right text-slate-400 text-sm tabular-nums group-hover:text-slate-300 transition-colors",
+                                                "{format_duration(track.duration)}"
+                                            }
+
+                                            div { class: "w-24 shrink-0 text-right text-slate-400 text-sm tabular-nums group-hover:text-slate-300 transition-colors flex items-center justify-end gap-2",
+                                                if plays > 0 {
+                                                    i { class: "fa-solid fa-fire text-orange-500/80 text-[10px]" }
+                                                }
+                                                span { class: if plays > 0 { "text-white font-medium" } else { "" }, "{plays}" }
                                             }
                                         }
                                     }

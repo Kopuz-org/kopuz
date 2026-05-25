@@ -131,31 +131,35 @@ pub fn JellyfinLibrary(
     });
 
     let queue_tracks = use_memo(move || {
-        displayed_tracks()
+        displayed_tracks
+            .read()
             .iter()
             .map(|(t, _)| t.clone())
             .collect::<Vec<_>>()
     });
 
-    let all_tracks = displayed_tracks();
-    let is_empty = all_tracks.is_empty();
-    let queue_source = std::sync::Arc::new(queue_tracks());
-    let mut container_height = use_signal(|| 0.0_f64);
+    let queue_source = use_memo(move || {
+        std::sync::Arc::new(queue_tracks.read().clone())
+    });
+
+    let container_height = use_signal(|| 0.0_f64);
     let scroll_top = *scroll_stat.read();
-    let row_height = ITEM_HEIGHT;
+
+    let all_tracks = displayed_tracks.read();
+    let is_empty = all_tracks.is_empty();
     let total_tracks = all_tracks.len();
 
     let scroll_info = use_virtual_scroll(
         scroll_top,
         *container_height.read(),
         total_tracks,
-        row_height,
+        ITEM_HEIGHT,
     );
 
     let currently_playing_idx: Option<usize> = {
         let queue = ctrl.queue.read();
         let q_idx = *ctrl.current_queue_index.read();
-        let qt = queue_tracks();
+        let qt = queue_tracks.read();
         if queue.len() == qt.len() && queue.iter().zip(qt.iter()).all(|(q, t)| q.path == t.path) {
             Some(q_idx)
         } else {
@@ -164,7 +168,7 @@ pub fn JellyfinLibrary(
     };
 
     let tracks_nodes = all_tracks
-        .into_iter()
+        .iter()
         .enumerate()
         .skip(scroll_info.start_index)
         .take(scroll_info.items_to_render)
@@ -175,7 +179,7 @@ pub fn JellyfinLibrary(
             let track_path = track.path.clone();
             let is_currently_playing = currently_playing_idx == Some(idx);
             let track_select = track.path.clone();
-            let queue_arc = std::sync::Arc::clone(&queue_source);
+            let queue_arc = queue_source.read().clone();
             let track_key = format!("{}-{}", track.path.display(), idx);
             let is_menu_open = active_menu_track.read().as_ref() == Some(&track.path);
             let is_selected = selected_tracks.read().contains(&track_path);
@@ -518,7 +522,8 @@ pub fn JellyfinLibrary(
                 div { class: "flex items-center gap-3",
                     button {
                         class: if !is_empty
-                            && displayed_tracks()
+                            && displayed_tracks
+                                .read()
                                 .iter()
                                 .all(|(track, _)| selected_tracks.read().contains(&track.path))
                         {
@@ -529,7 +534,7 @@ pub fn JellyfinLibrary(
                         aria_label: "Select all tracks",
                         disabled: is_empty,
                         onclick: move |_| {
-                            let tracks = displayed_tracks();
+                            let tracks = displayed_tracks.read();
                             let all_selected = !tracks.is_empty()
                                 && tracks
                                     .iter()
@@ -539,12 +544,13 @@ pub fn JellyfinLibrary(
                                 is_selection_mode.set(false);
                             } else {
                                 selected_tracks
-                                    .set(tracks.into_iter().map(|(track, _)| track.path).collect());
+                                    .set(tracks.iter().map(|(track, _)| track.path.clone()).collect());
                                 is_selection_mode.set(true);
                             }
                         },
                         if !is_empty
-                            && displayed_tracks()
+                            && displayed_tracks
+                                .read()
                                 .iter()
                                 .all(|(track, _)| selected_tracks.read().contains(&track.path))
                         {

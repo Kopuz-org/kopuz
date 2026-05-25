@@ -647,9 +647,10 @@ pub fn QueueListView(
                         rightbar_auto_scroll(evt.client_coordinates().y);
                     }
                 },
-                for (i, track) in items.iter().cloned().enumerate().skip(start_index).take(items_to_render) {
+                for (i, track) in items.iter().enumerate().skip(start_index).take(items_to_render) {
                     {
                         let queue_idx = i;
+                        let track = track.clone();
                         let cover_url = get_track_cover(&track);
                         let can_move_up = queue_idx > 0;
                         let can_move_down = queue_idx + 1 < queue_count;
