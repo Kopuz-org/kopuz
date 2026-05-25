@@ -27,3 +27,6 @@ server = { workspace = true }
 tokio = { workspace = true, features = ["time", "fs"] }
 serde_json = { workspace = true }
 i18n = { workspace = true }
+
+[dev-dependencies]
+dioxus-ssr = "0.7.5"

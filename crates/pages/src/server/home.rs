@@ -38,7 +38,7 @@ fn server_track_id(path: &str) -> Option<String> {
     let mut parts = path.split(':');
     let prefix = parts.next()?;
     let id = parts.next()?;
-    if prefix == "jellyfin" || prefix == "subsonic" {
+    if prefix == "jellyfin" || prefix == "subsonic" || prefix == "custom" {
         Some(id.to_string())
     } else {
         None
@@ -68,6 +68,26 @@ fn track_cover_url(conf: &AppConfig, track: &Track) -> Option<String> {
         384,
         80,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn server_track_id_accepts_supported_prefixes_only() {
+        assert_eq!(
+            server_track_id("jellyfin:abc123"),
+            Some("abc123".to_string())
+        );
+        assert_eq!(
+            server_track_id("subsonic:def456"),
+            Some("def456".to_string())
+        );
+        assert_eq!(server_track_id("custom:xyz"), Some("xyz".to_string()));
+        assert_eq!(server_track_id("local:/tmp/song.mp3"), None);
+        assert_eq!(server_track_id("jellyfin"), None);
+    }
 }
 
 #[component]

@@ -14,3 +14,6 @@ lofty = { workspace = true }
 symphonia = { workspace = true }
 tokio = { workspace = true, features = ["fs"] }
 reqwest = { workspace = true, features = ["json"] }
+
+[dev-dependencies]
+tempfile = "3.23"

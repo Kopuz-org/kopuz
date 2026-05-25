@@ -1,9 +1,11 @@
 {
   self,
+  pkgs,
   lib,
   mkShell,
   stdenv,
   just,
+  nushell,
   flatpak,
   flatpak-builder,
   appstream,
@@ -23,6 +25,8 @@ mkShell {
   nativeBuildInputs = [
     # Dev
     just
+    nushell
+    pkgs.cargo-nextest
 
     # Packaging
     flatpak

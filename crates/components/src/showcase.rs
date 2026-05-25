@@ -142,3 +142,117 @@ pub fn Showcase(props: ShowcaseProps) -> Element {
         },
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        SortDirection, SortField, SortState, next_sort_state, sort_icon, sorted_track_indices,
+    };
+    use reader::Track;
+    use std::path::PathBuf;
+
+    fn track(title: &str, artist: &str, album: &str, duration: u64) -> Track {
+        Track {
+            path: PathBuf::from(format!("/music/{title}.flac")),
+            album_id: format!("album-{album}"),
+            title: title.to_string(),
+            artist: artist.to_string(),
+            album: album.to_string(),
+            duration,
+            khz: 44_100,
+            bitrate: 320,
+            track_number: Some(1),
+            disc_number: Some(1),
+            musicbrainz_release_id: None,
+            playlist_item_id: None,
+            artists: vec![artist.to_string()],
+        }
+    }
+
+    #[test]
+    fn sort_state_cycles_asc_desc_none() {
+        let state0: SortState = None;
+        let state1 = next_sort_state(state0, SortField::Title);
+        let state2 = next_sort_state(state1, SortField::Title);
+        let state3 = next_sort_state(state2, SortField::Title);
+
+        assert_eq!(state1, Some((SortField::Title, SortDirection::Asc)));
+        assert_eq!(state2, Some((SortField::Title, SortDirection::Desc)));
+        assert_eq!(state3, None);
+    }
+
+    #[test]
+    fn sort_state_switches_fields_back_to_ascending() {
+        let state = Some((SortField::Title, SortDirection::Desc));
+        let next = next_sort_state(state, SortField::Artist);
+
+        assert_eq!(next, Some((SortField::Artist, SortDirection::Asc)));
+    }
+
+    #[test]
+    fn sort_icon_matches_state() {
+        assert_eq!(
+            sort_icon(
+                Some((SortField::Album, SortDirection::Asc)),
+                SortField::Album
+            ),
+            "fa-solid fa-sort-up"
+        );
+        assert_eq!(
+            sort_icon(
+                Some((SortField::Album, SortDirection::Desc)),
+                SortField::Album
+            ),
+            "fa-solid fa-sort-down"
+        );
+        assert_eq!(sort_icon(None, SortField::Album), "fa-solid fa-sort");
+    }
+
+    #[test]
+    fn sorted_track_indices_are_case_insensitive_and_stable() {
+        let tracks = vec![
+            track("beta", "Zulu", "Two", 200),
+            track("Alpha", "alpha", "One", 180),
+            track("alpha", "Bravo", "Three", 240),
+        ];
+
+        let sorted = sorted_track_indices(&tracks, Some((SortField::Title, SortDirection::Asc)));
+
+        assert_eq!(sorted, vec![1, 2, 0]);
+    }
+
+    #[test]
+    fn sorted_track_indices_support_duration_descending() {
+        let tracks = vec![
+            track("a", "a", "a", 120),
+            track("b", "b", "b", 360),
+            track("c", "c", "c", 240),
+        ];
+
+        let sorted =
+            sorted_track_indices(&tracks, Some((SortField::Duration, SortDirection::Desc)));
+
+        assert_eq!(sorted, vec![1, 2, 0]);
+    }
+
+    #[test]
+    fn sorted_track_pairs_maintains_pairing() {
+        use super::sorted_track_pairs;
+
+        let pairs = vec![
+            (track("Z", "a", "a", 120), "z-meta"),
+            (track("A", "b", "b", 360), "a-meta"),
+            (track("M", "c", "c", 240), "m-meta"),
+        ];
+
+        let sorted = sorted_track_pairs(&pairs, Some((SortField::Title, SortDirection::Asc)));
+
+        assert_eq!(sorted.len(), 3);
+        assert_eq!(sorted[0].0.title, "A");
+        assert_eq!(sorted[0].1, "a-meta");
+        assert_eq!(sorted[1].0.title, "M");
+        assert_eq!(sorted[1].1, "m-meta");
+        assert_eq!(sorted[2].0.title, "Z");
+        assert_eq!(sorted[2].1, "z-meta");
+    }
+}

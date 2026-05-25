@@ -136,11 +136,50 @@ impl Library {
 
 #[cfg(test)]
 mod tests {
-    use super::Library;
-    use std::path::PathBuf;
+    use super::{
+        Album, FavoritesStore, JellyfinPlaylist, Library, Playlist, PlaylistFolder, PlaylistStore,
+        Track,
+    };
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_file(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("kopuz_reader_{name}_{unique}.json"))
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("kopuz_reader_{name}_{unique}"));
+        fs::create_dir(&dir).unwrap();
+        dir
+    }
 
     #[test]
-    fn library_deserializes_legacy_root_path() {
+    fn library_deserializes_modern_root_paths() {
+        let json = r#"{
+            "root_paths": ["/music1", "/music2"],
+            "tracks": [],
+            "albums": []
+        }"#;
+
+        let library: Library = serde_json::from_str(json).unwrap();
+
+        assert_eq!(
+            library.root_paths,
+            vec![PathBuf::from("/music1"), PathBuf::from("/music2")]
+        );
+    }
+
+    #[test]
+    fn library_deserializes_legacy_single_root_path_alias() {
         let json = r#"{
             "root_path": "/music",
             "tracks": [],
@@ -150,6 +189,306 @@ mod tests {
         let library: Library = serde_json::from_str(json).unwrap();
 
         assert_eq!(library.root_paths, vec![PathBuf::from("/music")]);
+    }
+
+    #[test]
+    fn sample_track_has_expected_defaults() {
+        let track = sample_track("/music/track.flac", "alb_one", "Title");
+        assert_eq!(track.path, PathBuf::from("/music/track.flac"));
+        assert_eq!(track.album_id, "alb_one");
+    }
+
+    #[test]
+    fn library_load_non_existent_file_returns_default() {
+        let dir = temp_dir("library_missing");
+        let path = dir.join("library.json");
+        let library = Library::load(&path).unwrap();
+        assert!(library.root_paths.is_empty());
+        assert!(library.tracks.is_empty());
+        let _ = fs::remove_dir(dir);
+    }
+
+    #[test]
+    fn library_load_invalid_json_returns_error() {
+        let path = temp_file("library_invalid");
+        fs::write(&path, "{not valid json").unwrap();
+
+        let result = Library::load(&path);
+
+        assert!(result.is_err());
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn library_add_track_handles_empty() {
+        let mut library = Library::default();
+        let track = sample_track("/music/track.flac", "alb_one", "Old Title");
+        library.add_track(track.clone());
+        assert_eq!(library.tracks.len(), 1);
+        assert_eq!(library.tracks[0], track);
+    }
+
+    #[test]
+    fn library_remove_track_removes_by_path() {
+        let mut library = Library::default();
+        library.add_track(sample_track("/music/one.flac", "alb_one", "One"));
+        library.add_track(sample_track("/music/two.flac", "alb_two", "Two"));
+
+        library.remove_track(Path::new("/music/one.flac"));
+
+        assert_eq!(library.tracks.len(), 1);
+        assert_eq!(library.tracks[0].path, PathBuf::from("/music/two.flac"));
+
+        // Remove non existent
+        library.remove_track(Path::new("/music/three.flac"));
+        assert_eq!(library.tracks.len(), 1);
+    }
+
+    fn sample_track(path: &str, album_id: &str, title: &str) -> Track {
+        Track {
+            path: PathBuf::from(path),
+            album_id: album_id.to_string(),
+            title: title.to_string(),
+            artist: "Artist".to_string(),
+            album: "Album".to_string(),
+            duration: 180,
+            khz: 44_100,
+            bitrate: 320,
+            track_number: Some(1),
+            disc_number: Some(1),
+            musicbrainz_release_id: None,
+            playlist_item_id: None,
+            artists: vec!["Artist".to_string()],
+        }
+    }
+
+    #[test]
+    fn add_track_replaces_existing_track_by_path() {
+        let mut library = Library::default();
+        library.add_track(sample_track("/music/track.flac", "alb_one", "Old Title"));
+        library.add_track(sample_track("/music/track.flac", "alb_two", "New Title"));
+
+        assert_eq!(library.tracks.len(), 1);
+        assert_eq!(library.tracks[0].album_id, "alb_two");
+        assert_eq!(library.tracks[0].title, "New Title");
+    }
+
+    #[test]
+    fn library_save_and_load_round_trip_preserves_artist_images_and_tracks() {
+        let path = temp_file("library_round_trip");
+        let mut library = Library::new(vec![PathBuf::from("/music")]);
+        library
+            .local_artist_images
+            .insert("alohaii".to_string(), PathBuf::from("/covers/alohaii.jpg"));
+        library.server_artist_images.insert(
+            "alohaii".to_string(),
+            "https://example.com/alohaii.jpg".to_string(),
+        );
+        library.add_album(Album {
+            id: "alb_patchwork".to_string(),
+            title: "Patchwork".to_string(),
+            artist: "Alohalii".to_string(),
+            genre: "Pop".to_string(),
+            year: 2025,
+            cover_path: Some(PathBuf::from("/covers/patchwork.png")),
+            manual_cover: false,
+        });
+        library.add_track(sample_track(
+            "/music/track.flac",
+            "alb_patchwork",
+            "Safe Room",
+        ));
+
+        library.save(&path).unwrap();
+        let loaded = Library::load(&path).unwrap();
+
+        assert_eq!(loaded.root_paths, vec![PathBuf::from("/music")]);
+        assert_eq!(
+            loaded.local_artist_images.get("alohaii"),
+            Some(&PathBuf::from("/covers/alohaii.jpg"))
+        );
+        assert_eq!(
+            loaded.server_artist_images.get("alohaii"),
+            Some(&"https://example.com/alohaii.jpg".to_string())
+        );
+        assert_eq!(loaded.tracks.len(), 1);
+        assert_eq!(loaded.albums.len(), 1);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn add_album_preserves_existing_cover_when_new_cover_is_missing() {
+        let mut library = Library::default();
+        library.add_album(Album {
+            id: "alb_patchwork".to_string(),
+            title: "Patchwork".to_string(),
+            artist: "Alohalii".to_string(),
+            genre: "Pop".to_string(),
+            year: 2025,
+            cover_path: Some(PathBuf::from("/covers/patchwork.png")),
+            manual_cover: false,
+        });
+
+        library.add_album(Album {
+            id: "alb_patchwork".to_string(),
+            title: "Patchwork".to_string(),
+            artist: "Alohalii".to_string(),
+            genre: "Dream Pop".to_string(),
+            year: 2026,
+            cover_path: None,
+            manual_cover: false,
+        });
+
+        assert_eq!(library.albums.len(), 1);
+        assert_eq!(
+            library.albums[0].cover_path,
+            Some(PathBuf::from("/covers/patchwork.png"))
+        );
+        assert_eq!(library.albums[0].genre, "Dream Pop");
+        assert_eq!(library.albums[0].year, 2026);
+    }
+
+    #[test]
+    fn add_album_replaces_existing_cover_when_new_cover_is_provided() {
+        let mut library = Library::default();
+        library.add_album(Album {
+            id: "alb_patchwork".to_string(),
+            title: "Patchwork".to_string(),
+            artist: "Alohalii".to_string(),
+            genre: "Pop".to_string(),
+            year: 2025,
+            cover_path: Some(PathBuf::from("/covers/old.png")),
+            manual_cover: false,
+        });
+
+        library.add_album(Album {
+            id: "alb_patchwork".to_string(),
+            title: "Patchwork".to_string(),
+            artist: "Alohalii".to_string(),
+            genre: "Dream Pop".to_string(),
+            year: 2026,
+            cover_path: Some(PathBuf::from("/covers/new.png")),
+            manual_cover: false,
+        });
+
+        assert_eq!(library.albums.len(), 1);
+        assert_eq!(
+            library.albums[0].cover_path,
+            Some(PathBuf::from("/covers/new.png"))
+        );
+    }
+
+    #[test]
+    fn remove_album_removes_album_and_associated_tracks() {
+        let mut library = Library::default();
+        library.add_album(Album {
+            id: "alb_one".to_string(),
+            title: "One".to_string(),
+            artist: "Artist".to_string(),
+            genre: "Rock".to_string(),
+            year: 2024,
+            cover_path: None,
+            manual_cover: false,
+        });
+        library.add_album(Album {
+            id: "alb_two".to_string(),
+            title: "Two".to_string(),
+            artist: "Artist".to_string(),
+            genre: "Rock".to_string(),
+            year: 2025,
+            cover_path: None,
+            manual_cover: false,
+        });
+        library.add_track(sample_track("/music/one.flac", "alb_one", "One"));
+        library.add_track(sample_track("/music/two.flac", "alb_two", "Two"));
+
+        library.remove_album("alb_one");
+
+        assert_eq!(library.albums.len(), 1);
+        assert_eq!(library.albums[0].id, "alb_two");
+        assert_eq!(library.tracks.len(), 1);
+        assert_eq!(library.tracks[0].album_id, "alb_two");
+    }
+
+    #[test]
+    fn playlist_store_load_missing_file_returns_default() {
+        let store = PlaylistStore::load(Path::new("not_a_real_playlist_store.json")).unwrap();
+        assert!(store.playlists.is_empty());
+        assert!(store.jellyfin_playlists.is_empty());
+        assert!(store.folders.is_empty());
+    }
+
+    #[test]
+    fn playlist_store_round_trips_playlists_folders_and_server_playlists() {
+        let path = temp_file("playlist_store_round_trip");
+        let store = PlaylistStore {
+            playlists: vec![Playlist {
+                id: "local-1".to_string(),
+                name: "Morning".to_string(),
+                tracks: vec![PathBuf::from("/music/song.flac")],
+                cover_path: Some(PathBuf::from("/covers/morning.png")),
+            }],
+            jellyfin_playlists: vec![JellyfinPlaylist {
+                id: "srv-1".to_string(),
+                name: "Server Mix".to_string(),
+                tracks: vec!["track-a".to_string(), "track-b".to_string()],
+                image_tag: Some("abc123".to_string()),
+                cover_path: Some(PathBuf::from("/covers/server.png")),
+            }],
+            folders: vec![PlaylistFolder {
+                id: "folder-1".to_string(),
+                name: "Favorites".to_string(),
+                playlist_ids: vec!["local-1".to_string(), "srv-1".to_string()],
+            }],
+        };
+
+        store.save(&path).unwrap();
+        let loaded = PlaylistStore::load(&path).unwrap();
+
+        assert_eq!(loaded, store);
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn toggle_local_adds_then_removes_same_path() {
+        let mut favorites = FavoritesStore::default();
+        let path = PathBuf::from("/music/song.flac");
+
+        assert!(favorites.toggle_local(path.clone()));
+        assert!(favorites.is_local_favorite(&path));
+        assert!(!favorites.toggle_local(path.clone()));
+        assert!(!favorites.is_local_favorite(&path));
+    }
+
+    #[test]
+    fn set_jellyfin_adds_once_and_removes_cleanly() {
+        let mut favorites = FavoritesStore::default();
+
+        favorites.set_jellyfin("track-1".to_string(), true);
+        favorites.set_jellyfin("track-1".to_string(), true);
+
+        assert_eq!(favorites.jellyfin_favorites, vec!["track-1".to_string()]);
+        assert!(favorites.is_jellyfin_favorite("track-1"));
+
+        favorites.set_jellyfin("track-1".to_string(), false);
+
+        assert!(!favorites.is_jellyfin_favorite("track-1"));
+        assert!(favorites.jellyfin_favorites.is_empty());
+    }
+
+    #[test]
+    fn favorites_store_round_trips_local_and_server_favorites() {
+        let path = temp_file("favorites_store_round_trip");
+        let store = FavoritesStore {
+            local_favorites: vec![PathBuf::from("/music/song.flac")],
+            jellyfin_favorites: vec!["track-1".to_string(), "track-2".to_string()],
+        };
+
+        store.save(&path).unwrap();
+        let loaded = FavoritesStore::load(&path).unwrap();
+
+        assert_eq!(loaded, store);
+        let _ = fs::remove_file(path);
     }
 }
 

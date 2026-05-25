@@ -1482,3 +1482,43 @@ impl Default for Player {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use config::ChannelMode;
+
+    #[test]
+    fn test_apply_channel_mode_to_frame() {
+        let mut frame = [0.5, 0.5];
+        apply_channel_mode_to_frame(&mut frame, ChannelMode::LeftOnly);
+        assert_eq!(frame, [0.5, 0.0]);
+
+        frame = [1.0, 0.5];
+        apply_channel_mode_to_frame(&mut frame, ChannelMode::Mono);
+        assert_eq!(frame, [0.75, 0.75]);
+
+        frame = [1.0, 0.5];
+        apply_channel_mode_to_frame(&mut frame, ChannelMode::SwapLeftRight);
+        assert_eq!(frame, [0.5, 1.0]);
+
+        frame = [1.0, 0.5];
+        apply_channel_mode_to_frame(&mut frame, ChannelMode::RightOnly);
+        assert_eq!(frame, [0.0, 0.5]);
+
+        frame = [1.0, 0.5];
+        apply_channel_mode_to_frame(&mut frame, ChannelMode::Stereo);
+        assert_eq!(frame, [1.0, 0.5]);
+    }
+
+    #[test]
+    fn test_apply_channel_mode_in_place_multi_channel() {
+        let mut samples = vec![1.0, 0.5, 0.2, 0.1, 0.7, 0.3, 0.4, 0.6];
+        apply_channel_mode_in_place(&mut samples, 4, ChannelMode::LeftOnly);
+        assert_eq!(samples, vec![1.0, 0.0, 0.0, 0.0, 0.7, 0.0, 0.0, 0.0]);
+
+        let mut mono_samples = vec![1.0, 0.5, 0.8, 0.9, 0.6, 0.2, 0.4, 0.3];
+        apply_channel_mode_in_place(&mut mono_samples, 4, ChannelMode::Mono);
+        assert_eq!(mono_samples, vec![0.75, 0.75, 0.0, 0.0, 0.4, 0.4, 0.0, 0.0]);
+    }
+}

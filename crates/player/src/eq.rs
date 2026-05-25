@@ -258,4 +258,50 @@ mod tests {
 
         assert_ne!(samples, original);
     }
+
+    #[test]
+    fn process_clamps_large_values() {
+        let mut equalizer = Equalizer::new(48_000, 1);
+        equalizer.set_settings(EqualizerSettings {
+            enabled: true,
+            preamp_db: 50.0, // huge gain
+            ..Default::default()
+        });
+
+        let mut samples = vec![10.0, -10.0];
+        equalizer.process_in_place(&mut samples);
+
+        assert_eq!(samples[0], 1.0);
+        assert_eq!(samples[1], -1.0);
+    }
+
+    #[test]
+    fn process_handles_nan_gracefully() {
+        let mut equalizer = Equalizer::new(48_000, 1);
+        equalizer.set_settings(EqualizerSettings {
+            enabled: true,
+            ..Default::default()
+        });
+
+        let mut samples = vec![f32::NAN];
+        equalizer.process_in_place(&mut samples);
+
+        assert_eq!(samples[0], 0.0);
+    }
+
+    #[test]
+    fn peaking_coefficients_handles_zero_sample_rate() {
+        use super::peaking_coefficients;
+        let c = peaking_coefficients(0, 1000.0, 1.0, 10.0);
+        assert_eq!(c.b0, 1.0); // Should return identity
+        assert_eq!(c.b1, 0.0);
+    }
+
+    #[test]
+    fn dynamic_band_channel_resizing() {
+        let mut equalizer = Equalizer::new(48_000, 1);
+        equalizer.update_output_format(48_000, 4); // update to 4 channels
+        assert_eq!(equalizer.channels, 4);
+        assert_eq!(equalizer.bands[0].filters.len(), 4);
+    }
 }

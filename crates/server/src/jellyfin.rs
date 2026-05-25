@@ -840,3 +840,128 @@ impl JellyfinClient {
         Ok(items_resp.items)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::{Value, json};
+
+    #[test]
+    fn build_url_handles_leading_and_non_leading_slashes() {
+        let client = JellyfinClient::new(
+            "https://example.com/root/",
+            Some("token"),
+            "dev-1",
+            Some("user-1"),
+        );
+
+        assert_eq!(
+            client.build_url("/Users/user-1/Items"),
+            "https://example.com/root/Users/user-1/Items"
+        );
+        assert_eq!(
+            client.build_url("Users/user-1/Items"),
+            "https://example.com/root/Users/user-1/Items"
+        );
+    }
+
+    #[test]
+    fn auth_header_includes_device_version_and_token() {
+        let client = JellyfinClient::new(
+            "https://example.com",
+            Some("secret-token"),
+            "dev-42",
+            Some("user-1"),
+        );
+        let header = client.auth_header().unwrap();
+
+        assert!(header.contains("Client=\"Kopuz\""));
+        assert!(header.contains("DeviceId=\"dev-42\""));
+        assert!(header.contains(&format!("Version=\"{}\"", env!("CARGO_PKG_VERSION"))));
+        assert!(header.contains("Token=\"secret-token\""));
+    }
+
+    #[test]
+    fn auth_header_errors_when_token_missing() {
+        let client = JellyfinClient::new("https://example.com", None, "dev-42", Some("user-1"));
+        assert_eq!(
+            client.auth_header(),
+            Err("No access token available".to_string())
+        );
+    }
+
+    #[test]
+    fn playback_progress_request_serialization_omits_none_fields() {
+        let body = PlaybackProgressRequest {
+            item_id: "item-1",
+            position_ticks: Some(12_345),
+            is_paused: None,
+            can_seek: Some(true),
+        };
+
+        let serialized = serde_json::to_value(&body).unwrap();
+
+        assert_eq!(serialized["ItemId"], Value::String("item-1".to_string()));
+        assert_eq!(
+            serialized["PositionTicks"],
+            Value::Number(12_345_u64.into())
+        );
+        assert!(serialized.get("IsPaused").is_none());
+        assert_eq!(serialized["CanSeek"], Value::Bool(true));
+    }
+
+    #[test]
+    fn create_playlist_request_uses_pascal_case_and_omits_empty_ids() {
+        let body = CreatePlaylistRequest {
+            name: "Mix",
+            user_id: "user-1",
+            media_type: "Audio",
+            is_public: true,
+            ids: vec![],
+        };
+
+        let serialized = serde_json::to_value(&body).unwrap();
+
+        assert_eq!(serialized["Name"], Value::String("Mix".to_string()));
+        assert_eq!(serialized["UserId"], Value::String("user-1".to_string()));
+        assert_eq!(serialized["MediaType"], Value::String("Audio".to_string()));
+        assert_eq!(serialized["IsPublic"], Value::Bool(true));
+        assert!(serialized.get("Ids").is_none());
+    }
+
+    #[test]
+    fn item_deserialization_handles_optional_fields_and_playlist_item_id() {
+        let item: Item = serde_json::from_value(json!({
+            "Name": "Song",
+            "Id": "item-1",
+            "PlaylistItemId": "entry-7",
+            "Type": "Audio",
+            "RunTimeTicks": 12345,
+            "Album": "Album",
+            "AlbumId": "album-1",
+            "Artists": ["Artist A", "Artist B"],
+            "AlbumArtist": "Artist A",
+            "ImageTags": {"Primary": "tag-1"},
+            "IndexNumber": 3,
+            "ParentIndexNumber": 1,
+            "ProductionYear": 2025,
+            "Genres": ["Pop"],
+            "Container": "flac",
+            "Bitrate": 320000,
+            "SampleRate": 44100
+        }))
+        .unwrap();
+
+        assert_eq!(item.id, "item-1");
+        assert_eq!(item.playlist_item_id.as_deref(), Some("entry-7"));
+        assert_eq!(item.album_id.as_deref(), Some("album-1"));
+        assert_eq!(item.artists.as_ref().map(|v| v.len()), Some(2));
+        assert_eq!(
+            item.image_tags
+                .as_ref()
+                .and_then(|m| m.get("Primary"))
+                .map(String::as_str),
+            Some("tag-1")
+        );
+    }
+}

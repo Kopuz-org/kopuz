@@ -681,8 +681,6 @@ fn default_auto_check_updates() -> bool {
     true
 }
 
-
-
 pub fn default_sidebar_order() -> Vec<String> {
     vec![
         "home".to_string(),
@@ -960,7 +958,7 @@ impl AppConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::AppConfig;
+    use super::{AppConfig, MusicServer, MusicService, MusicSource};
     use std::path::PathBuf;
 
     #[test]
@@ -986,5 +984,55 @@ mod tests {
             config.music_directory,
             vec![PathBuf::from("/music"), PathBuf::from("/archive")]
         );
+    }
+
+    #[test]
+    fn active_service_is_none_for_local_source_even_with_server_config() {
+        let mut config = AppConfig::default();
+        config.server = Some(MusicServer {
+            service: MusicService::Subsonic,
+            ..MusicServer::default()
+        });
+
+        assert_eq!(config.active_service(), None);
+        assert!(!config.uses_jellyfin_server());
+    }
+
+    #[test]
+    fn active_service_uses_server_service_when_server_source_is_selected() {
+        let mut config = AppConfig::default();
+        config.active_source = MusicSource::Server;
+        config.server = Some(MusicServer {
+            service: MusicService::Subsonic,
+            ..MusicServer::default()
+        });
+
+        assert_eq!(config.active_service(), Some(MusicService::Subsonic));
+        assert!(!config.uses_jellyfin_server());
+    }
+
+    #[test]
+    fn push_recent_moves_existing_entry_to_front_without_duplicates() {
+        let mut config = AppConfig::default();
+        config.push_recent("one".to_string(), false);
+        config.push_recent("two".to_string(), false);
+        config.push_recent("one".to_string(), false);
+
+        assert_eq!(
+            config.recently_played,
+            vec!["one".to_string(), "two".to_string()]
+        );
+    }
+
+    #[test]
+    fn push_recent_truncates_to_default_limit() {
+        let mut config = AppConfig::default();
+        for idx in 0..60 {
+            config.push_recent(format!("track-{idx}"), true);
+        }
+
+        assert_eq!(config.recently_played_server.len(), 50);
+        assert_eq!(config.recently_played_server.first().unwrap(), "track-59");
+        assert_eq!(config.recently_played_server.last().unwrap(), "track-10");
     }
 }

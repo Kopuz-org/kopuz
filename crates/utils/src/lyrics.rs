@@ -726,3 +726,209 @@ fn parse_lrc_time(time_str: &str) -> Option<f64> {
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_path(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("kopuz_lyrics_{name}_{unique}"))
+    }
+
+    #[test]
+    fn test_parse_lrc_time() {
+        assert_eq!(parse_lrc_time("01:23.45"), Some(83.45));
+        assert_eq!(parse_lrc_time("00:00.00"), Some(0.0));
+        assert_eq!(parse_lrc_time("1:2"), Some(62.0));
+        assert_eq!(parse_lrc_time("not:time"), None);
+        assert_eq!(parse_lrc_time("01:23:45"), Some(83.45)); // Parts: min=01, sec=23, ms=45
+        assert_eq!(parse_lrc_time("01:23.456"), Some(83.456));
+    }
+
+    #[test]
+    fn test_parse_lrc() {
+        let lrc = "[00:10.00]Line 1
+[00:20.00]Line 2";
+        let lines = parse_lrc(lrc);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].text, "Line 1");
+        assert_eq!(lines[0].start_time, 10.0);
+        assert_eq!(lines[1].text, "Line 2");
+        assert_eq!(lines[1].start_time, 20.0);
+
+        let lrc_multi = "[00:10.00][00:30.00]Multi Line";
+        let lines = parse_lrc(lrc_multi);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].text, "Multi Line");
+        assert_eq!(lines[0].start_time, 10.0);
+        assert_eq!(lines[1].text, "Multi Line");
+        assert_eq!(lines[1].start_time, 30.0);
+
+        let lrc_tags = "[ar:Artist]
+[ti:Title]
+[00:15.00]Text";
+        let lines = parse_lrc(lrc_tags);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].text, "Text");
+        assert_eq!(lines[0].start_time, 15.0);
+
+        let plain = "Just plain lyrics
+No timestamps";
+        let lines = parse_lrc(plain);
+        assert!(lines.is_empty());
+    }
+
+    #[test]
+    fn test_extract_from_lrclib_response() {
+        let empty = LrcLibResponse {
+            plain_lyrics: None,
+            synced_lyrics: None,
+        };
+        assert_eq!(extract_from_lrclib_response(&empty), None);
+
+        let plain = LrcLibResponse {
+            plain_lyrics: Some("Plain text".to_string()),
+            synced_lyrics: Some("  ".to_string()), // blank synced
+        };
+        assert_eq!(
+            extract_from_lrclib_response(&plain),
+            Some(Lyrics::Plain("Plain text".to_string()))
+        );
+
+        let synced = LrcLibResponse {
+            synced_lyrics: Some("[00:10.00]Synced text".to_string()),
+            plain_lyrics: None,
+        };
+        if let Some(Lyrics::Synced(lines)) = extract_from_lrclib_response(&synced) {
+            assert_eq!(lines.len(), 1);
+            assert_eq!(lines[0].text, "Synced text");
+        } else {
+            panic!("Expected synced lyrics");
+        }
+    }
+
+    #[test]
+    fn lyrics_cache_evicts_least_recently_used_entry() {
+        let mut cache = LyricsCache::new(2);
+        cache.put("a".to_string(), Some(Lyrics::Plain("A".to_string())));
+        cache.put("b".to_string(), Some(Lyrics::Plain("B".to_string())));
+
+        assert!(cache.get_cloned("a").is_some());
+
+        cache.put("c".to_string(), Some(Lyrics::Plain("C".to_string())));
+
+        assert!(cache.get_cloned("a").is_some());
+        assert!(cache.get_cloned("c").is_some());
+        assert!(cache.get_cloned("b").is_none());
+    }
+
+    #[test]
+    fn lyrics_cache_updates_existing_entry_without_growing_order() {
+        let mut cache = LyricsCache::new(3);
+        cache.put("same".to_string(), Some(Lyrics::Plain("old".to_string())));
+        cache.put("same".to_string(), Some(Lyrics::Plain("new".to_string())));
+
+        assert_eq!(cache.entries.len(), 1);
+        assert_eq!(cache.order.len(), 1);
+        assert_eq!(
+            cache.get_cloned("same"),
+            Some(Some(Lyrics::Plain("new".to_string())))
+        );
+    }
+
+    #[test]
+    fn lyrics_cache_key_prefers_track_path_and_otherwise_normalizes_metadata() {
+        assert_eq!(
+            lyrics_cache_key(" Artist ", " Title ", " Album ", 123, " /music/song.flac "),
+            "/music/song.flac"
+        );
+        assert_eq!(
+            lyrics_cache_key(" Artist ", " Title ", " Album ", 123, ""),
+            "artist|title|album|123"
+        );
+    }
+
+    #[test]
+    fn extract_server_id_uses_first_segment_after_prefix_and_rejects_empty() {
+        assert_eq!(
+            extract_server_id("jellyfin:item123:stream456", "jellyfin:"),
+            Some("item123".to_string())
+        );
+        assert_eq!(
+            extract_server_id("subsonic:song42", "subsonic:"),
+            Some("song42".to_string())
+        );
+        assert_eq!(extract_server_id("jellyfin::stream456", "jellyfin:"), None);
+        assert_eq!(
+            extract_server_id("local:/music/song.flac", "jellyfin:"),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn fetch_local_lrc_returns_synced_lines_when_timestamps_exist() {
+        let audio_path = temp_path("synced.flac");
+        let lrc_path = audio_path.with_extension("lrc");
+        fs::write(&lrc_path, "[00:01.00]Hello\n[00:02.50]World").unwrap();
+
+        let lyrics = fetch_local_lrc(audio_path.to_str().unwrap()).await;
+
+        match lyrics {
+            Some(Lyrics::Synced(lines)) => {
+                assert_eq!(lines.len(), 2);
+                assert_eq!(lines[0].text, "Hello");
+                assert_eq!(lines[1].start_time, 2.5);
+            }
+            _ => panic!("expected synced lyrics"),
+        }
+
+        let _ = fs::remove_file(lrc_path);
+    }
+
+    #[tokio::test]
+    async fn fetch_local_lrc_returns_plain_text_when_no_timestamps_exist() {
+        let audio_path = temp_path("plain.mp3");
+        let lrc_path = audio_path.with_extension("lrc");
+        fs::write(&lrc_path, "Just plain lyrics\nNo timestamps").unwrap();
+
+        let lyrics = fetch_local_lrc(audio_path.to_str().unwrap()).await;
+
+        assert_eq!(
+            lyrics,
+            Some(Lyrics::Plain(
+                "Just plain lyrics\nNo timestamps".to_string()
+            ))
+        );
+
+        let _ = fs::remove_file(lrc_path);
+    }
+
+    #[tokio::test]
+    async fn fetch_local_lrc_returns_none_for_missing_or_empty_files() {
+        let missing_audio_path = temp_path("missing.ogg");
+        assert!(
+            fetch_local_lrc(missing_audio_path.to_str().unwrap())
+                .await
+                .is_none()
+        );
+
+        let audio_path = temp_path("empty.ogg");
+        let lrc_path = audio_path.with_extension("lrc");
+        fs::write(&lrc_path, "   \n").unwrap();
+
+        assert!(
+            fetch_local_lrc(audio_path.to_str().unwrap())
+                .await
+                .is_none()
+        );
+
+        let _ = fs::remove_file(lrc_path);
+    }
+}

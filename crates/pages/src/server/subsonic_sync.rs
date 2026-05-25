@@ -11,7 +11,9 @@ use utils;
 
 fn normalize_album_id(id: &str) -> String {
     let parts: Vec<&str> = id.split(':').collect();
-    if parts.len() >= 2 && (parts[0] == "subsonic" || parts[0] == "custom" || parts[0] == "jellyfin") {
+    if parts.len() >= 2
+        && (parts[0] == "subsonic" || parts[0] == "custom" || parts[0] == "jellyfin")
+    {
         format!("{}:{}", parts[0], parts[1])
     } else {
         id.to_string()
@@ -201,7 +203,10 @@ pub async fn sync_server_library(
                 info!("Cleared old jellyfin library data.");
                 for album in out_albums {
                     let mut merged = album;
-                    if let Some(old) = old_albums.iter().find(|a| normalize_album_id(&a.id) == normalize_album_id(&merged.id)) {
+                    if let Some(old) = old_albums
+                        .iter()
+                        .find(|a| normalize_album_id(&a.id) == normalize_album_id(&merged.id))
+                    {
                         if merged.cover_path.is_none() || old.manual_cover {
                             merged.cover_path = old.cover_path.clone();
                         }
@@ -213,7 +218,11 @@ pub async fn sync_server_library(
                 }
             } else {
                 for album in out_albums {
-                    if let Some(index) = lib_write.jellyfin_albums.iter().position(|a| normalize_album_id(&a.id) == normalize_album_id(&album.id)) {
+                    if let Some(index) = lib_write
+                        .jellyfin_albums
+                        .iter()
+                        .position(|a| normalize_album_id(&a.id) == normalize_album_id(&album.id))
+                    {
                         let mut new_album = album;
                         let existing = &lib_write.jellyfin_albums[index];
                         if new_album.cover_path.is_none() || existing.manual_cover {
@@ -270,7 +279,10 @@ pub async fn sync_server_library(
                 info!("Cleared old subsonic/custom library data.");
                 for album in albums {
                     let mut merged = album;
-                    if let Some(old) = old_albums.iter().find(|a| normalize_album_id(&a.id) == normalize_album_id(&merged.id)) {
+                    if let Some(old) = old_albums
+                        .iter()
+                        .find(|a| normalize_album_id(&a.id) == normalize_album_id(&merged.id))
+                    {
                         if merged.cover_path.is_none() || old.manual_cover {
                             merged.cover_path = old.cover_path.clone();
                         }
@@ -282,7 +294,11 @@ pub async fn sync_server_library(
                 }
             } else {
                 for album in albums {
-                    if let Some(index) = lib_write.jellyfin_albums.iter().position(|a| normalize_album_id(&a.id) == normalize_album_id(&album.id)) {
+                    if let Some(index) = lib_write
+                        .jellyfin_albums
+                        .iter()
+                        .position(|a| normalize_album_id(&a.id) == normalize_album_id(&album.id))
+                    {
                         let mut new_album = album;
                         let existing = &lib_write.jellyfin_albums[index];
                         if new_album.cover_path.is_none() || existing.manual_cover {
@@ -304,9 +320,13 @@ pub async fn sync_server_library(
                 }
                 lib_write.server_artist_images.extend(artist_images);
             }
-            
+
             for track in tracks {
-                if !lib_write.jellyfin_tracks.iter().any(|t| t.path == track.path) {
+                if !lib_write
+                    .jellyfin_tracks
+                    .iter()
+                    .any(|t| t.path == track.path)
+                {
                     lib_write.jellyfin_tracks.push(track);
                 }
             }
@@ -359,7 +379,11 @@ pub async fn fetch_subsonic_library(
         }
 
         let count = albums.len();
-        info!("Processing {} Subsonic/Custom albums (total {} so far)...", count, offset + count);
+        info!(
+            "Processing {} Subsonic/Custom albums (total {} so far)...",
+            count,
+            offset + count
+        );
 
         for album in albums {
             let album_cover_tag = album
@@ -467,4 +491,17 @@ fn encode_cover_url_tag(url: &str) -> String {
         hex.push_str(&format!("{:02x}", b));
     }
     format!("urlhex_{}", hex)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encode_cover_url_tag_hex_encodes_full_url() {
+        assert_eq!(
+            encode_cover_url_tag("https://example.com/cover art.png"),
+            "urlhex_68747470733a2f2f6578616d706c652e636f6d2f636f766572206172742e706e67"
+        );
+    }
 }

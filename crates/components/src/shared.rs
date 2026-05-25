@@ -113,3 +113,19 @@ pub fn toggle_favorite(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_fmt_time() {
+        use super::fmt_time;
+        assert_eq!(fmt_time(0), "0:00");
+        assert_eq!(fmt_time(59), "0:59");
+        assert_eq!(fmt_time(60), "1:00");
+        assert_eq!(fmt_time(61), "1:01");
+        assert_eq!(fmt_time(3599), "59:59");
+        assert_eq!(fmt_time(3600), "60:00");
+        assert_eq!(fmt_time(3665), "61:05");
+        assert_eq!(fmt_time(u64::MAX), "--:--");
+    }
+}

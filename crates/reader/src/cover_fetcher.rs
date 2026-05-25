@@ -32,11 +32,21 @@ impl CoverFetcher {
             .map(|key| key.trim().to_string())
             .filter(|key| !key.is_empty());
         let client = reqwest::Client::builder()
-            .user_agent(concat!("Kopuz/", env!("CARGO_PKG_VERSION"), " (music-player)"))
+            .user_agent(concat!(
+                "Kopuz/",
+                env!("CARGO_PKG_VERSION"),
+                " (music-player)"
+            ))
             .timeout(Duration::from_secs(15))
             .build()
             .unwrap_or_default();
-        Self { client, cache_dir, strategy, lastfm_api_key, on_progress }
+        Self {
+            client,
+            cache_dir,
+            strategy,
+            lastfm_api_key,
+            on_progress,
+        }
     }
 
     pub async fn fetch_missing_covers(&self, library: &mut Library) -> FetchReport {
@@ -46,16 +56,17 @@ impl CoverFetcher {
             .iter()
             .enumerate()
             .filter(|(_, a)| {
-                a.cover_path.is_none()
-                    && a.title != "Unknown Album"
-                    && !a.manual_cover
+                a.cover_path.is_none() && a.title != "Unknown Album" && !a.manual_cover
             })
             .map(|(i, _)| i)
             .collect();
 
         for &idx in &missing {
             let album = &library.albums[idx];
-            (self.on_progress)(format!("Fetching cover: {} — {}", album.artist, album.title));
+            (self.on_progress)(format!(
+                "Fetching cover: {} — {}",
+                album.artist, album.title
+            ));
 
             let release_id = library
                 .tracks
@@ -63,7 +74,9 @@ impl CoverFetcher {
                 .filter(|t| t.album_id == album.id)
                 .find_map(|t| t.musicbrainz_release_id.as_deref());
 
-            let result = self.fetch_cover(release_id, &album.title, &album.artist).await;
+            let result = self
+                .fetch_cover(release_id, &album.title, &album.artist)
+                .await;
 
             match result {
                 Some(img_data) => {
@@ -81,7 +94,12 @@ impl CoverFetcher {
         report
     }
 
-    async fn fetch_cover(&self, release_id: Option<&str>, album: &str, artist: &str) -> Option<Vec<u8>> {
+    async fn fetch_cover(
+        &self,
+        release_id: Option<&str>,
+        album: &str,
+        artist: &str,
+    ) -> Option<Vec<u8>> {
         match self.strategy {
             FetchStrategy::MusicBrainzFirst => {
                 let result = self.try_musicbrainz(release_id, album, artist).await;
@@ -100,9 +118,7 @@ impl CoverFetcher {
                 }
                 self.try_musicbrainz(release_id, album, artist).await
             }
-            FetchStrategy::MusicBrainzOnly => {
-                self.try_musicbrainz(release_id, album, artist).await
-            }
+            FetchStrategy::MusicBrainzOnly => self.try_musicbrainz(release_id, album, artist).await,
             FetchStrategy::LastFmOnly => {
                 let key = self.lastfm_api_key.as_deref().filter(|k| !k.is_empty())?;
                 self.try_lastfm(album, artist, key).await
