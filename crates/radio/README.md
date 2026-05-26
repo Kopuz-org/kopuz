@@ -287,7 +287,7 @@ Example paths: `"song.title"`, `"song.artists.0.name"`, `"results.0.img_large_ur
 
 | Field | Result |
 |---|---|
-| `title` | `Parallel Hearts` |
+| `title` | `Cielo Azul` |
 | `artist` | `ABSOLUTE CASTAWAY & 中恵光城` |
 | `artwork` | `https://i.example.com/a91f3c/400x400.jpg` |
 
