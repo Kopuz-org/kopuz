@@ -179,6 +179,9 @@ pub fn TrackRow(
                     }
                     if is_selection_mode {
                         handle_select_click(is_selected, is_selection_mode, on_select);
+                    } else if cfg!(target_os = "android") {
+                        // Mobile: a single tap plays (no double-click).
+                        on_play.call(());
                     }
                 },
                 draggable: "false",
@@ -294,7 +297,13 @@ pub fn TrackRow(
                             move |evt: MouseEvent| {
                                 evt.stop_propagation();
                                 if !is_selection_mode {
-                                    nav_ctrl.navigate_to_album(album_id.clone());
+                                    // Mobile: tapping the title plays the track instead of
+                                    // navigating to the album.
+                                    if cfg!(target_os = "android") {
+                                        on_play.call(());
+                                    } else {
+                                        nav_ctrl.navigate_to_album(album_id.clone());
+                                    }
                                 }
                             }
                         },
@@ -417,7 +426,12 @@ pub fn TrackRow(
                     long_press_occurred.set(false);
                     return;
                 }
-                handle_select_click(is_selected, is_selection_mode, on_select);
+                if !is_selection_mode && cfg!(target_os = "android") {
+                    // Mobile: a single tap plays (no double-click).
+                    on_play.call(());
+                } else {
+                    handle_select_click(is_selected, is_selection_mode, on_select);
+                }
             },
             ondoubleclick: move |evt| {
                 evt.stop_propagation();
@@ -537,7 +551,13 @@ pub fn TrackRow(
                         move |evt: MouseEvent| {
                             evt.stop_propagation();
                             if !is_selection_mode {
-                                nav_ctrl.navigate_to_album(album_id.clone());
+                                // Mobile: tapping the title plays the track instead of
+                                // navigating to the album.
+                                if cfg!(target_os = "android") {
+                                    on_play.call(());
+                                } else {
+                                    nav_ctrl.navigate_to_album(album_id.clone());
+                                }
                             }
                         }
                     },

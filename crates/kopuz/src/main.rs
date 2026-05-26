@@ -767,9 +767,7 @@ fn main() {
                     .unwrap()
             });
 
-        dioxus::LaunchBuilder::mobile()
-            .with_cfg(config)
-            .launch(App);
+        dioxus::LaunchBuilder::mobile().with_cfg(config).launch(App);
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -1594,6 +1592,12 @@ fn App() -> Element {
         selected_album_id,
     });
 
+    // Sidebar collapse state. On Android the sidebar is an overlay drawer that
+    // starts collapsed and is toggled by the mobile header hamburger; the
+    // Sidebar component reads this from context.
+    let mut is_sidebar_collapsed = use_signal(|| cfg!(target_os = "android"));
+    use_context_provider(|| components::sidebar::SidebarCollapsed(is_sidebar_collapsed));
+
     hooks::use_player_task(ctrl);
 
     // Inject CSS for all custom themes reactively
@@ -1664,9 +1668,10 @@ fn App() -> Element {
         }
 
         div {
-            class: "flex flex-col h-screen text-white select-none {theme_class}",
+            class: "flex flex-col h-screen text-white select-none overflow-x-hidden {theme_class}",
             style: "{background_style}",
             dir: "{dir}",
+            "data-platform": if cfg!(target_os = "android") { "android" } else { "desktop" },
             "data-reduce-animations": "{reduce_animations}",
             tabindex: "0",
             autofocus: true,
@@ -1832,6 +1837,60 @@ fn App() -> Element {
                         let pos = evt.scroll_top();
                         scroll_positions.write().insert(*current_route.peek(), pos);
                     },
+
+                    if cfg!(target_os = "android") {
+                        {
+                            let is_details = match *current_route.read() {
+                                Route::Album => !selected_album_id.read().is_empty(),
+                                Route::Artist => !selected_artist_name.read().is_empty(),
+                                Route::Playlists => selected_playlist_id.read().is_some(),
+                                _ => false,
+                            };
+                            let page_title = match *current_route.read() {
+                                Route::Home => i18n::t("home"),
+                                Route::Search => i18n::t("search"),
+                                Route::Library => i18n::t("library"),
+                                Route::Album => if is_details { i18n::t("album") } else { i18n::t("albums") },
+                                Route::Artist => if is_details { i18n::t("artist") } else { i18n::t("artists") },
+                                Route::Playlists => i18n::t("playlists"),
+                                Route::Favorites => i18n::t("favorites"),
+                                Route::Settings => i18n::t("settings"),
+                                _ => i18n::t("home"),
+                            };
+                            rsx! {
+                                div { class: "sticky top-0 z-[60] bg-black/60 backdrop-blur-2xl border-b border-white/5 pt-[env(safe-area-inset-top)] flex items-center h-[calc(env(safe-area-inset-top)_+_2.75rem)] px-3 shadow-xl",
+                                    if is_details {
+                                        button {
+                                            class: "w-10 h-10 flex items-center justify-center rounded-xl bg-white/5 text-white active:scale-95 transition-all border border-white/10",
+                                            onclick: move |_| {
+                                                match *current_route.peek() {
+                                                    Route::Album => selected_album_id.set(String::new()),
+                                                    Route::Artist => selected_artist_name.set(String::new()),
+                                                    Route::Playlists => selected_playlist_id.set(None),
+                                                    _ => {}
+                                                }
+                                            },
+                                            i { class: "fa-solid fa-arrow-left text-lg" }
+                                        }
+                                    } else {
+                                        button {
+                                            class: "w-10 h-10 flex items-center justify-center rounded-xl bg-white/5 text-white active:scale-95 transition-all border border-white/10",
+                                            onclick: move |_| is_sidebar_collapsed.toggle(),
+                                            i { class: "fa-solid fa-bars text-lg" }
+                                        }
+                                    }
+                                    div { class: "flex-1 flex justify-center pr-10",
+                                        h2 {
+                                            class: "text-[13px] font-black tracking-[0.2em] text-white/90 uppercase",
+                                            style: "font-family: 'JetBrains Mono', monospace;",
+                                            "{page_title}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     match *current_route.read() {
                         Route::Home => rsx! {
                             pages::home::Home {

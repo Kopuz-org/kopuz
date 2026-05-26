@@ -44,10 +44,14 @@ pub fn Album(
     });
 
     rsx! {
-        div { class: "p-8 pb-24 absolute inset-0 flex flex-col",
+        div {
+            class: if cfg!(target_os = "android") { "px-4 pt-2 pb-28 absolute inset-0 flex flex-col" } else { "p-8 pb-24 absolute inset-0 flex flex-col" },
+
             if album_id.read().is_empty() {
                 div {
-                    h1 { class: "text-3xl font-bold text-white mb-6", "{i18n::t(\"all_albums\")}" }
+                    if !cfg!(target_os = "android") {
+                        h1 { class: "text-3xl font-bold text-white mb-6", "{i18n::t(\"all_albums\")}" }
+                    }
 
                     if is_server {
                         ServerAlbum {

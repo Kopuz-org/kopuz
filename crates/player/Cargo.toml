@@ -62,3 +62,4 @@ reqwest = { workspace = true, features = ["blocking"] }
 jni = "0.21"
 ndk-context = "0.1"
 tokio = { workspace = true, features = ["full"] }
+base64 = "0.22"

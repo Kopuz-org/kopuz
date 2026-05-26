@@ -85,7 +85,6 @@ const TOOL_ITEMS: &[NavItem] = &[
     },
 ];
 
-// Web + Android have no yt-dlp downloader.
 #[cfg(any(target_arch = "wasm32", target_os = "android"))]
 const TOOL_ITEMS: &[NavItem] = &[NavItem {
     key: "settings",
@@ -99,6 +98,12 @@ pub fn SidebarModern(props: SidebarProps) -> Element {
     let mut width = use_signal(|| 200i32);
     let mut is_collapsed = use_signal(|| false);
     let mut is_resizing = use_signal(|| false);
+
+    let is_android = cfg!(target_os = "android");
+    let fallback_collapse = use_signal(|| true);
+    let mut mobile_collapsed = try_consume_context::<crate::sidebar::SidebarCollapsed>()
+        .map(|c| c.0)
+        .unwrap_or(fallback_collapse);
 
     let current_width = if *is_collapsed.read() {
         56
@@ -124,8 +129,27 @@ pub fn SidebarModern(props: SidebarProps) -> Element {
     let onmouseup = move |_| is_resizing.set(false);
 
     let is_server = config.read().active_source == MusicSource::Server;
-    let collapsed = *is_collapsed.read();
+    let collapsed = if is_android {
+        false
+    } else {
+        *is_collapsed.read()
+    };
     let current_route = *props.current_route.read();
+
+    let root_class = if is_android {
+        "h-full flex flex-col shrink-0 select-none relative border-r border-white/10 overflow-hidden transition-all duration-300 ease-out"
+    } else {
+        "h-full flex flex-col shrink-0 select-none relative border-r border-white/5"
+    };
+    let root_style = if is_android {
+        if *mobile_collapsed.read() {
+            "position: fixed; left: 0; top: 0; z-index: 100; height: 100%; width: 0px; background: rgba(10,10,10,0.97);".to_string()
+        } else {
+            "position: fixed; left: 0; top: 0; z-index: 100; height: 100%; width: 280px; background: rgba(10,10,10,0.97);".to_string()
+        }
+    } else {
+        format!("width: {current_width}px; background: rgba(0,0,0,0.5);")
+    };
 
     rsx! {
         if *is_resizing.read() {
@@ -135,10 +159,33 @@ pub fn SidebarModern(props: SidebarProps) -> Element {
                 onmouseup,
             }
         }
+        if is_android && !*mobile_collapsed.read() {
+            div {
+                class: "fixed inset-0 bg-black/80 backdrop-blur-[2px] z-[90]",
+                onclick: move |_| mobile_collapsed.set(true),
+            }
+        }
 
         div {
-            class: "h-full flex flex-col shrink-0 select-none relative border-r border-white/5",
-            style: "width: {current_width}px; background: rgba(0,0,0,0.5);",
+            class: "{root_class}",
+            style: "{root_style}",
+
+            if is_android {
+                div {
+                    class: "flex items-center justify-between px-5 border-b border-white/5 bg-white/5 shrink-0",
+                    style: "padding-top: max(env(safe-area-inset-top), 16px); padding-bottom: 16px;",
+                    h2 {
+                        class: "text-base font-bold tracking-widest text-white/90 uppercase",
+                        style: "font-family: 'JetBrains Mono', monospace;",
+                        "KOPUZ"
+                    }
+                    button {
+                        class: "p-2 rounded-xl bg-white/10 text-white active:scale-95 transition-all flex items-center justify-center border border-white/10 w-9 h-9",
+                        onclick: move |_| mobile_collapsed.set(true),
+                        i { class: "fa-solid fa-xmark text-base" }
+                    }
+                }
+            }
 
             if cfg!(all(not(target_arch = "wasm32"), target_os = "macos")) {
                 div {
@@ -204,7 +251,10 @@ pub fn SidebarModern(props: SidebarProps) -> Element {
                                 item: item.clone(),
                                 active: current_route == item.route,
                                 collapsed,
-                                onclick: move |_| props.on_navigate.call(item.route),
+                                onclick: move |_| {
+                                    props.on_navigate.call(item.route);
+                                    if is_android { mobile_collapsed.set(true); }
+                                },
                             }
                         }
                     }
@@ -217,7 +267,10 @@ pub fn SidebarModern(props: SidebarProps) -> Element {
                         item: item.clone(),
                         active: current_route == item.route,
                         collapsed,
-                        onclick: move |_| props.on_navigate.call(item.route),
+                        onclick: move |_| {
+                            props.on_navigate.call(item.route);
+                            if is_android { mobile_collapsed.set(true); }
+                        },
                     }
                 }
             }

@@ -472,6 +472,75 @@ pub fn Fullscreen(
         }
     };
 
+    let mut active_tab = use_signal(|| 0usize);
+    if cfg!(target_os = "android") {
+        let tab = *active_tab.read();
+        let tab_btn = |idx: usize, icon: &'static str| {
+            let cls = if tab == idx {
+                "flex-1 h-10 flex items-center justify-center text-white border-b-2 border-white"
+            } else {
+                "flex-1 h-10 flex items-center justify-center text-white/40 border-b-2 border-transparent"
+            };
+            rsx! {
+                button { class: "{cls}", onclick: move |_| active_tab.set(idx),
+                    i { class: "{icon} text-base" }
+                }
+            }
+        };
+        return rsx! {
+            div {
+                class: "fixed inset-0 z-50 flex flex-col text-white select-none",
+                style: "{background_style.read()}",
+
+                div {
+                    class: "flex items-center gap-2 px-3 pt-[env(safe-area-inset-top)] pb-1 shrink-0",
+                    button {
+                        class: "w-10 h-10 flex items-center justify-center text-white/60 active:scale-95 transition-all shrink-0",
+                        onclick: move |_| is_fullscreen.set(false),
+                        i { class: "fa-solid fa-chevron-down text-xl" }
+                    }
+                    div { class: "flex flex-1 items-center",
+                        {tab_btn(0, "fa-solid fa-compact-disc")}
+                        {tab_btn(1, "fa-solid fa-list")}
+                        {tab_btn(2, "fa-solid fa-align-left")}
+                    }
+                }
+
+                if tab == 0 {
+                    div {
+                        class: "flex-1 overflow-y-auto flex flex-col items-center justify-center px-6 pb-[calc(env(safe-area-inset-bottom)_+_1.5rem)]",
+                        TrackMetadata {
+                            current_song_cover_url,
+                            current_song_title,
+                            current_song_artist,
+                            current_song_album,
+                            current_song_khz,
+                            current_song_bitrate,
+                        }
+                        ProgressBarControl { player, current_song_duration, current_song_progress }
+                        PlaybackControl { is_playing }
+                        VolumeControl { player, config, volume, persisted_volume }
+                    }
+                } else if tab == 1 {
+                    QueueListView {
+                        items,
+                        library,
+                        config,
+                        current_queue_index,
+                        layout: crate::queue_list_view::LayoutMode::Fullscreen,
+                    }
+                } else {
+                    LyricsView {
+                        lyrics,
+                        current_song_progress,
+                        config,
+                        layout: crate::lyrics_view::LayoutMode::Fullscreen,
+                    }
+                }
+            }
+        };
+    }
+
     rsx! {
         div {
             class: "fixed inset-0 z-50 flex flex-col text-white select-none",

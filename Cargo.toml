@@ -41,7 +41,7 @@ cpal = "0.17"
 symphonia = { version = "0.5", features = ["all"] }
 rb = "0.4"
 jellyfin-sdk-rust = "0.1.2"
-reqwest = "0.12"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "http2", "charset"] }
 rand = "0.8"
 web-time = "1.1"
 gloo-timers = { version = "0.3", features = ["futures"] }

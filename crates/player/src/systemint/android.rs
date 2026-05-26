@@ -225,6 +225,89 @@ fn normalize_artwork(url: &str) -> Option<String> {
     Some(path)
 }
 
+/// Cache of the last decoded `data:` artwork: (content hash, written file path).
+/// The player re-sends the same artwork every position tick (~1s); without this
+/// we'd base64-decode and rewrite the file each tick.
+static LAST_DATA_ART: Mutex<Option<(u64, String)>> = Mutex::new(None);
+
+/// Resolve an artwork URL to something `MediaSessionHelper` can load: an http(s)
+/// URL, a local file path, or — for the base64 `data:` URLs the Android UI uses —
+/// a file decoded into app storage (the notification can't render a data URL).
+fn resolve_artwork(url: &str) -> Option<String> {
+    let resolved = if url.starts_with("data:") {
+        data_url_to_file(url)
+    } else if let Some(stripped) = url.strip_prefix("file://") {
+        Some(stripped.to_string())
+    } else if url.starts_with('/') {
+        // Bare absolute path (e.g. a downloaded server cover in the temp dir).
+        Some(url.to_string())
+    } else {
+        normalize_artwork(url)
+    };
+    eprintln!(
+        "[android] resolve_artwork in={} -> {:?}",
+        &url[..url.len().min(48)],
+        resolved
+    );
+    resolved
+}
+
+/// Decode a `data:<mime>;base64,<payload>` URL to a file under the app's files dir
+/// and return its path. Cached by content hash so repeated identical updates reuse
+/// the same file instead of rewriting it.
+fn data_url_to_file(url: &str) -> Option<String> {
+    use base64::{Engine as _, engine::general_purpose};
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let meta = url.strip_prefix("data:")?;
+    let comma = meta.find(',')?;
+    let header = &meta[..comma];
+    let payload = &meta[comma + 1..];
+    if !header.contains("base64") {
+        return None;
+    }
+    let ext = if header.contains("image/png") {
+        "png"
+    } else if header.contains("image/webp") {
+        "webp"
+    } else if header.contains("image/gif") {
+        "gif"
+    } else {
+        "jpg"
+    };
+
+    let mut hasher = DefaultHasher::new();
+    payload.hash(&mut hasher);
+    let hash = hasher.finish();
+
+    // Hash is part of the filename so a new track yields a new path — the Kotlin
+    // side caches its decoded bitmap by path and would otherwise keep showing the
+    // previous track's art when the filename stayed constant.
+    if let Ok(guard) = LAST_DATA_ART.lock() {
+        if let Some((last_hash, path)) = guard.as_ref() {
+            if *last_hash == hash && std::path::Path::new(path).exists() {
+                return Some(path.clone());
+            }
+        }
+    }
+
+    let files_dir = get_files_dir()?;
+    let path = format!("{files_dir}/np_art_{hash}.{ext}");
+    let bytes = general_purpose::STANDARD.decode(payload).ok()?;
+    std::fs::write(&path, &bytes).ok()?;
+    if let Ok(mut guard) = LAST_DATA_ART.lock() {
+        // Remove the previously written art file so they don't accumulate.
+        if let Some((_, old_path)) = guard.as_ref() {
+            if old_path != &path {
+                let _ = std::fs::remove_file(old_path);
+            }
+        }
+        *guard = Some((hash, path.clone()));
+    }
+    Some(path)
+}
+
 fn percent_decode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.bytes().peekable();
@@ -273,7 +356,7 @@ pub fn update_now_playing(
     let activity = unsafe { JObject::from_raw(ctx.context().cast()) };
     let duration_ms = (duration * 1000.0) as i64;
     let position_ms = (position * 1000.0) as i64;
-    let resolved_art = artwork_path.and_then(normalize_artwork);
+    let resolved_art = artwork_path.and_then(resolve_artwork);
     let result: Result<(), jni::errors::Error> = (|| {
         let class = find_app_class(&mut env, "com/temidaradev/kopuz/MediaSessionHelper")?;
         let j_title = env.new_string(title)?;

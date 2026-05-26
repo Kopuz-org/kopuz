@@ -2,8 +2,6 @@
 use crate::theme_editor::ThemeEditorPage;
 use ::server::provider::ProviderClient;
 
-// Theme editor is removed from the mobile (Android) UI. rsx rejects `#[cfg]` on a child
-// element, so the section is factored into a platform-gated helper instead.
 #[cfg(not(target_os = "android"))]
 fn theme_editor_section(config: Signal<AppConfig>) -> Element {
     rsx! {
@@ -209,8 +207,10 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     };
 
     rsx! {
-        div { class: "p-8 w-full",
-            h1 { class: "text-3xl font-bold text-white mb-6", "{i18n::t(\"settings\")}" }
+        div { class: if cfg!(target_os = "android") { "px-4 pt-2 pb-28 w-full" } else { "p-8 w-full" },
+            if !cfg!(target_os = "android") {
+                h1 { class: "text-3xl font-bold text-white mb-6", "{i18n::t(\"settings\")}" }
+            }
 
             div { class: "space-y-8",
                 section {

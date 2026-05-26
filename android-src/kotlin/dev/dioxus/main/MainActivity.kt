@@ -34,6 +34,12 @@ class MainActivity : WryActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.statusBarColor = Color.TRANSPARENT
         window.navigationBarColor = Color.TRANSPARENT
+        // Stop the system painting a translucent gray contrast scrim behind the bars,
+        // so the dark UI runs truly edge-to-edge and merges with the in-app header.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isStatusBarContrastEnforced = false
+            window.isNavigationBarContrastEnforced = false
+        }
         WindowCompat.getInsetsController(window, window.decorView).apply {
             // Dark UI → light (white) status/nav icons.
             isAppearanceLightStatusBars = false

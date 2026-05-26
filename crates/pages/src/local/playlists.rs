@@ -159,13 +159,15 @@ pub fn LocalPlaylists(
             if let Some(ref folder) = open_folder {
                 div {
                     div { class: "flex items-center gap-3 mb-8",
-                        button {
-                            class: "flex items-center gap-2 text-slate-400 hover:text-white transition-colors",
-                            onclick: move |_| open_folder_id.set(None),
-                            i { class: "fa-solid fa-arrow-left" }
-                            "{i18n::t(\"back_to_playlists\")}"
+                        if !cfg!(target_os = "android") {
+                            button {
+                                class: "flex items-center gap-2 text-slate-400 hover:text-white transition-colors",
+                                onclick: move |_| open_folder_id.set(None),
+                                i { class: "fa-solid fa-arrow-left" }
+                                "{i18n::t(\"back_to_playlists\")}"
+                            }
+                            span { class: "text-white/30", "/" }
                         }
-                        span { class: "text-white/30", "/" }
                         span { class: "text-white font-semibold", "{folder.name}" }
                     }
 

@@ -7,6 +7,9 @@ pub struct SidebarProps {
     pub on_navigate: EventHandler<Route>,
 }
 
+#[derive(Clone, Copy)]
+pub struct SidebarCollapsed(pub Signal<bool>);
+
 #[component]
 pub fn Sidebar(props: SidebarProps) -> Element {
     let config = use_context::<Signal<config::AppConfig>>();
