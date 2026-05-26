@@ -9,15 +9,15 @@ use components::{
     bottombar::Bottombar, download_overlay::DownloadOverlay, fullscreen::Fullscreen,
     rightbar::Rightbar, sidebar::Sidebar, titlebar::Titlebar,
 };
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use dioxus::desktop::RequestAsyncResponder;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use dioxus::desktop::tao::dpi::LogicalSize;
 #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
 use dioxus::desktop::tao::platform::macos::WindowBuilderExtMacOS;
 #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
 use dioxus::desktop::tao::platform::windows::WindowExtWindows;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use dioxus::desktop::tao::window::Icon;
 use dioxus::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
@@ -31,7 +31,7 @@ use reader::FavoritesStore;
 use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
 use windows::Win32::Foundation::HWND;
@@ -85,7 +85,7 @@ const QUEUE_STATE_PROGRESS_STEP_SECS: u64 = 5;
 #[cfg(not(target_arch = "wasm32"))]
 static PRESENCE: std::sync::OnceLock<Option<Arc<Presence>>> = std::sync::OnceLock::new();
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 fn build_window_icon() -> Option<Icon> {
     let image = image::load_from_memory(include_bytes!("../assets/logo-512.png")).ok()?;
     let image = image.into_rgba8();
@@ -437,7 +437,7 @@ fn make_hq_image(raw: &[u8], cache_path: &std::path::Path) -> Option<Vec<u8>> {
 }
 
 fn main() {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
     {
         let log_dir = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
             .map(|dirs| dirs.cache_dir().join("logs"))
@@ -706,6 +706,72 @@ fn main() {
             .launch(App);
     }
 
+    #[cfg(target_os = "android")]
+    {
+        // JNI media session + classloader cache. Player::new() also calls this (idempotent
+        // OnceLock), but doing it up front means the session exists before first playback.
+        player::systemint::init();
+
+        let config = dioxus::mobile::Config::new()
+            .with_background_color((0, 0, 0, 255))
+            // artwork://local?p=<percent-encoded-absolute-path> — the Android WebView mostly
+            // receives base64 data URLs from utils, but keep a synchronous handler for any
+            // code path that still emits artwork:// URLs.
+            .with_custom_protocol("artwork".to_string(), |_headers, request| {
+                let query = request.uri().query().unwrap_or("");
+                let raw_p = query
+                    .split('&')
+                    .find_map(|kv| {
+                        let mut parts = kv.splitn(2, '=');
+                        if parts.next() == Some("p") {
+                            parts.next()
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or("");
+                let decoded = percent_encoding::percent_decode_str(raw_p).decode_utf8_lossy();
+
+                let mime = if decoded.ends_with(".png") {
+                    "image/png"
+                } else {
+                    "image/jpeg"
+                };
+
+                let mut decoded_path = decoded.to_string();
+                if decoded_path.starts_with("/~") {
+                    if let Ok(home) = std::env::var("HOME") {
+                        decoded_path = decoded_path.replacen("/~", &home, 1);
+                    }
+                } else if decoded_path.starts_with('~') {
+                    if let Ok(home) = std::env::var("HOME") {
+                        decoded_path = decoded_path.replacen('~', &home, 1);
+                    }
+                }
+
+                let content = std::fs::read(std::path::Path::new(&decoded_path))
+                    .or_else(|_| {
+                        if decoded_path.strip_prefix('/').is_some() {
+                            std::fs::read(std::path::Path::new(&decoded_path[1..]))
+                        } else {
+                            Err(std::io::Error::from(std::io::ErrorKind::NotFound))
+                        }
+                    })
+                    .map(std::borrow::Cow::from)
+                    .unwrap_or_else(|_| std::borrow::Cow::from(Vec::new()));
+
+                http::Response::builder()
+                    .header("Content-Type", mime)
+                    .header("Access-Control-Allow-Origin", "*")
+                    .body(content)
+                    .unwrap()
+            });
+
+        dioxus::LaunchBuilder::mobile()
+            .with_cfg(config)
+            .launch(App);
+    }
+
     #[cfg(target_arch = "wasm32")]
     {
         dioxus::launch(App);
@@ -719,7 +785,21 @@ fn App() -> Element {
     let mut scroll_positions: Signal<std::collections::HashMap<Route, f64>> =
         use_signal(std::collections::HashMap::new);
     let cache_dir = use_memo(move || {
-        #[cfg(not(target_arch = "wasm32"))]
+        // Android: external/ProjectDirs paths aren't writable; use the app-internal files
+        // dir (getFilesDir via JNI) so saves don't fail with EACCES.
+        #[cfg(target_os = "android")]
+        {
+            let mut path = player::systemint::get_files_dir()
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join("cache");
+            if std::fs::create_dir_all(&path).is_err() {
+                path = std::path::PathBuf::from("./cache");
+                let _ = std::fs::create_dir_all(&path);
+            }
+            path
+        }
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
         {
             let path = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
                 .map(|dirs| dirs.cache_dir().to_path_buf())
@@ -731,7 +811,19 @@ fn App() -> Element {
         std::path::PathBuf::from("./cache")
     });
     let config_dir = use_memo(move || {
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(target_os = "android")]
+        {
+            let mut path = player::systemint::get_files_dir()
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join("config");
+            if std::fs::create_dir_all(&path).is_err() {
+                path = std::path::PathBuf::from("./config");
+                let _ = std::fs::create_dir_all(&path);
+            }
+            path
+        }
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
         {
             let path = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
                 .map(|dirs| dirs.config_dir().to_path_buf())
@@ -1679,9 +1771,12 @@ fn App() -> Element {
                                 onclick: {
                                     let release_url = update.release_url.clone();
                                     move |_| {
+                                        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
                                         if let Err(e) = webbrowser::open(&release_url) {
                                             tracing::error!("Failed to open release page: {}", e);
                                         }
+                                        #[cfg(target_os = "android")]
+                                        let _ = &release_url;
                                     }
                                 },
                                 "{i18n::t(\"view_release\")}"
@@ -1891,11 +1986,12 @@ fn App() -> Element {
                                 config: config,
                             }
                         },
-                        #[cfg(not(target_arch = "wasm32"))]
+                        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
                         Route::Ytdlp => rsx! { pages::ytdlp::YtdlpPage { config, trigger_rescan } },
                         #[cfg(target_arch = "wasm32")]
                         Route::Ytdlp => rsx! { pages::settings::Settings { config } },
                         Route::Settings => rsx! { pages::settings::Settings { config } },
+                        #[cfg(not(target_os = "android"))]
                         Route::ThemeEditor => rsx! { pages::theme_editor::ThemeEditorPage { config } },
                     }
                 }

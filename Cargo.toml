@@ -83,3 +83,12 @@ inherits = "dev"
 
 [profile.android-dev]
 inherits = "dev"
+opt-level = 1
+
+# Release profile for shipping .aab / .apk. Thin LTO keeps link time sane on CI.
+[profile.android-release]
+inherits = "release"
+strip = "symbols"
+lto = "thin"
+codegen-units = 1
+panic = "abort"

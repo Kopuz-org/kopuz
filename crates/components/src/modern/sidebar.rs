@@ -71,7 +71,7 @@ const SECTIONS: &[(&str, &[NavItem])] = &[
     ),
 ];
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 const TOOL_ITEMS: &[NavItem] = &[
     NavItem {
         key: "ytdlp",
@@ -85,7 +85,8 @@ const TOOL_ITEMS: &[NavItem] = &[
     },
 ];
 
-#[cfg(target_arch = "wasm32")]
+// Web + Android have no yt-dlp downloader.
+#[cfg(any(target_arch = "wasm32", target_os = "android"))]
 const TOOL_ITEMS: &[NavItem] = &[NavItem {
     key: "settings",
     route: Route::Settings,

@@ -152,6 +152,13 @@ impl Player {
         let mut stream_config = supported_config.config();
         stream_config.buffer_size = match supported_config.buffer_size() {
             cpal::SupportedBufferSize::Range { min, max } => {
+                // Android: larger buffer for stability under thermal throttling and when the
+                // UI thread is busy (scroll, layout, image decode). ~46ms at 44.1kHz is the
+                // sweet spot — low enough latency for media controls, big enough that the OS
+                // scheduler doesn't drop frames.
+                #[cfg(target_os = "android")]
+                let target = 2048u32.clamp(*min, *max);
+                #[cfg(not(target_os = "android"))]
                 let target = 512u32.clamp(*min, *max);
                 cpal::BufferSize::Fixed(target)
             }
@@ -173,6 +180,11 @@ impl Player {
     }
 
     pub fn new() -> Self {
+        // Android initialises the JNI media session + classloader cache here; the desktop
+        // platforms set up their system integration from the app entry point instead.
+        #[cfg(target_os = "android")]
+        systemint::init();
+
         let host = cpal::default_host();
         let device = host
             .default_output_device()
@@ -428,7 +440,15 @@ impl Player {
         let channels = self.stream_config.channels as usize;
         let device_sample_rate = self.stream_config.sample_rate;
 
-        let ring_buf_size = device_sample_rate as usize * channels * 2;
+        // Ring buffer between the decoder thread and the audio callback.
+        // - Desktop: 2s — plenty of headroom for big seeks and metadata stalls.
+        // - Android: 1s — smaller heap footprint matters on phones with 2-3GB RAM,
+        //   and a smaller buffer recovers from underruns faster.
+        #[cfg(target_os = "android")]
+        let ring_buf_seconds = 1usize;
+        #[cfg(not(target_os = "android"))]
+        let ring_buf_seconds = 2usize;
+        let ring_buf_size = device_sample_rate as usize * channels * ring_buf_seconds;
         let ring_buf = SpscRb::new(ring_buf_size);
         let (producer, consumer) = (ring_buf.producer(), ring_buf.consumer());
         let consumer = Arc::new(Mutex::new(consumer));
@@ -517,7 +537,15 @@ impl Player {
 
         let channels = self.stream_config.channels as usize;
         let device_sample_rate = self.stream_config.sample_rate;
-        let ring_buf_size = device_sample_rate as usize * channels * 2;
+        // Ring buffer between the decoder thread and the audio callback.
+        // - Desktop: 2s — plenty of headroom for big seeks and metadata stalls.
+        // - Android: 1s — smaller heap footprint matters on phones with 2-3GB RAM,
+        //   and a smaller buffer recovers from underruns faster.
+        #[cfg(target_os = "android")]
+        let ring_buf_seconds = 1usize;
+        #[cfg(not(target_os = "android"))]
+        let ring_buf_seconds = 2usize;
+        let ring_buf_size = device_sample_rate as usize * channels * ring_buf_seconds;
         let ring_buf = SpscRb::new(ring_buf_size);
         let (producer, consumer) = (ring_buf.producer(), ring_buf.consumer());
         let consumer = Arc::new(Mutex::new(consumer));
@@ -675,6 +703,14 @@ impl Player {
             state.lock().unwrap_or_else(|e| e.into_inner()).finished = true;
             if let Some(cb) = &finish_cb {
                 cb();
+            }
+            // Android: wake the background player loop immediately so auto-advance fires
+            // without waiting for the next poll tick — this lets the loop sleep on a long
+            // idle interval instead of busy-polling while the app is backgrounded.
+            #[cfg(target_os = "android")]
+            {
+                systemint::bg_wake();
+                systemint::wake_run_loop();
             }
         };
 
@@ -1123,6 +1159,10 @@ impl Player {
     pub fn stop(&mut self) {
         self.stop_internal();
         self.now_playing = None;
+        // Tear down the Android foreground service + media notification so the OS can
+        // reclaim the process; otherwise the dismissed-notification state lingers.
+        #[cfg(target_os = "android")]
+        systemint::stop_session();
     }
 
     pub fn stop_for_transition(&mut self) {
@@ -1209,6 +1249,19 @@ impl Player {
         }
 
         #[cfg(target_os = "windows")]
+        if let Some(meta) = &self.now_playing {
+            systemint::update_now_playing(
+                &meta.title,
+                &meta.artist,
+                &meta.album,
+                meta.duration.as_secs_f64(),
+                self.get_position().as_secs_f64(),
+                !self.is_paused(),
+                meta.artwork.as_deref(),
+            );
+        }
+
+        #[cfg(target_os = "android")]
         if let Some(meta) = &self.now_playing {
             systemint::update_now_playing(
                 &meta.title,

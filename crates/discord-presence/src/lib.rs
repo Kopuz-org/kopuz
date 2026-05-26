@@ -1,22 +1,22 @@
 pub mod cover_art;
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use discord_rich_presence::{
     DiscordIpc, DiscordIpcClient,
     activity::{self, Assets, Timestamps},
 };
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use std::sync::Mutex;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 #[derive(Debug)]
 pub struct Presence {
     client: Mutex<DiscordIpcClient>,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 impl Presence {
     pub fn new(client_id: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let mut client = DiscordIpcClient::new(client_id);
@@ -98,9 +98,53 @@ impl Presence {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 impl Drop for Presence {
     fn drop(&mut self) {
         let _ = self.disconnect();
+    }
+}
+
+// Android has no Discord IPC; this no-op stub keeps the `Presence` API surface so the
+// shared player-task code compiles unchanged. The app never constructs it on Android
+// (`Presence::new` errors), so the context stays `None` and every call site is skipped.
+#[cfg(target_os = "android")]
+#[derive(Debug)]
+pub struct Presence;
+
+#[cfg(target_os = "android")]
+impl Presence {
+    pub fn new(_client_id: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        Err("Discord presence is not available on Android".into())
+    }
+
+    pub fn disconnect(&self) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
+
+    pub fn set_now_playing(
+        &self,
+        _title: &str,
+        _artist: &str,
+        _album: &str,
+        _elapsed_secs: u64,
+        _duration_secs: u64,
+        _cover_url: Option<&str>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
+
+    pub fn set_paused(
+        &self,
+        _title: &str,
+        _artist: &str,
+        _album: &str,
+        _cover_url: Option<&str>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
+    }
+
+    pub fn clear_activity(&self) -> Result<(), Box<dyn std::error::Error>> {
+        Ok(())
     }
 }

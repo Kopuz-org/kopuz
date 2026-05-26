@@ -1,7 +1,7 @@
 use config::MusicService;
 use dioxus::prelude::*;
 use reader::{Library, PlaylistStore};
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use rfd::AsyncFileDialog;
 use std::path::PathBuf;
 
@@ -263,7 +263,7 @@ pub fn PlaylistDetail(
             on_close,
             on_cover_click: move |_| {
                 let _ = &pid_for_cover;
-                #[cfg(not(target_arch = "wasm32"))]
+                #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
                 {
                     let pid = pid_for_cover.clone();
                     spawn(async move {

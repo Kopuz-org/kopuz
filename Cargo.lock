@@ -4745,7 +4745,9 @@ dependencies = [
  "block2",
  "config",
  "cpal",
+ "jni 0.21.1",
  "mpris-server",
+ "ndk-context",
  "objc2",
  "objc2-app-kit",
  "objc2-av-foundation",
@@ -7104,6 +7106,7 @@ checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
 name = "utils"
 version = "0.6.5"
 dependencies = [
+ "base64 0.22.1",
  "color-thief",
  "gloo-timers",
  "image",

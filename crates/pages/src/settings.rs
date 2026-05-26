@@ -1,5 +1,26 @@
+#[cfg(not(target_os = "android"))]
 use crate::theme_editor::ThemeEditorPage;
 use ::server::provider::ProviderClient;
+
+// Theme editor is removed from the mobile (Android) UI. rsx rejects `#[cfg]` on a child
+// element, so the section is factored into a platform-gated helper instead.
+#[cfg(not(target_os = "android"))]
+fn theme_editor_section(config: Signal<AppConfig>) -> Element {
+    rsx! {
+        section {
+            h2 {
+                class: "text-lg font-semibold text-white/80 mb-4 border-b border-white/5 pb-2",
+                "{i18n::t(\"theme_editor\")}"
+            }
+            ThemeEditorPage { config, embedded: true }
+        }
+    }
+}
+
+#[cfg(target_os = "android")]
+fn theme_editor_section(_config: Signal<AppConfig>) -> Element {
+    rsx! {}
+}
 use components::settings_items::{
     BackBehaviorSelector, ChannelModeSelector, DiscordPresenceSettings, EqualizerPanel,
     LanguageSelector, LastFmSettings, MultiDirectoryPicker, MusicBrainzSettings,
@@ -313,7 +334,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
-                        if !cfg!(target_arch = "wasm32") {
+                        if !cfg!(target_arch = "wasm32") && !cfg!(target_os = "android") {
                             SettingItem {
                                 title: i18n::t("discord_presence").to_string(),
                                     control: rsx! {
@@ -698,13 +719,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     }
                 }
 
-                section {
-                    h2 {
-                        class: "text-lg font-semibold text-white/80 mb-4 border-b border-white/5 pb-2",
-                        "{i18n::t(\"theme_editor\")}"
-                    }
-                    ThemeEditorPage { config, embedded: true }
-                }
+                {theme_editor_section(config)}
 
 
 
