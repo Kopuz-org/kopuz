@@ -588,19 +588,15 @@ pub fn use_player_task(ctrl: PlayerController) {
                     }
                 } else {
                     #[cfg(not(target_arch = "wasm32"))]
-                    if !discord_paused_enabled {
-                        if let Some(ref p) = presence {
-                            let _ = p.clear_activity();
-                        }
-                    } else if *was_playing.peek() {
+                    if *was_playing.peek() {
                         if let Some(ref p) = presence {
                             let title = ctrl.current_song_title.read().clone();
                             let artist = ctrl.current_song_artist.read().clone();
                             let album = ctrl.current_song_album.read().clone();
-                            if discord_enabled {
+                            if discord_enabled && discord_paused_enabled {
                                 let resolved = discord_cover_url.read().clone();
                                 let _ = p.set_paused(&title, &artist, &album, resolved.as_deref());
-                            } else if last_discord_enabled {
+                            } else if last_discord_enabled || !discord_paused_enabled {
                                 let _ = p.clear_activity();
                             }
                         }
