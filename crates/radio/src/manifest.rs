@@ -135,7 +135,7 @@ impl StaticSourceDef {
             (
                 ov.title.as_str(),
                 ov.artist.as_str(),
-                ov.cover_url.as_deref(),
+                ov.cover_url.as_deref().or(self.cover_url.as_deref()),
             )
         } else {
             (
