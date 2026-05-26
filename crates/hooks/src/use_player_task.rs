@@ -300,6 +300,7 @@ pub fn use_player_task(ctrl: PlayerController) {
 
                 #[cfg(not(target_arch = "wasm32"))]
                 let discord_enabled = config.read().discord_presence.unwrap_or(true);
+                let discord_paused_enabled = config.read().discord_presence_paused.unwrap_or(true);
                 let pos = ctrl.player.read().get_position();
                 let mut defer_player_progress = false;
 
@@ -587,7 +588,11 @@ pub fn use_player_task(ctrl: PlayerController) {
                     }
                 } else {
                     #[cfg(not(target_arch = "wasm32"))]
-                    if *was_playing.peek() {
+                    if !discord_paused_enabled {
+                        if let Some(ref p) = presence {
+                            let _ = p.clear_activity();
+                        }
+                    } else if *was_playing.peek() {
                         if let Some(ref p) = presence {
                             let title = ctrl.current_song_title.read().clone();
                             let artist = ctrl.current_song_artist.read().clone();

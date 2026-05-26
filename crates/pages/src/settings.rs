@@ -1,9 +1,10 @@
 use crate::theme_editor::ThemeEditorPage;
 use ::server::provider::ProviderClient;
 use components::settings_items::{
-    BackBehaviorSelector, ChannelModeSelector, DiscordPresenceSettings, EqualizerPanel,
-    LanguageSelector, LastFmSettings, MultiDirectoryPicker, MusicBrainzSettings,
-    RadioRegistryDropdown, ServerSettings, SettingItem, ThemeSelector, ToggleSetting,
+    BackBehaviorSelector, ChannelModeSelector, DiscordPresencePausedSettings,
+    DiscordPresenceSettings, EqualizerPanel, LanguageSelector, LastFmSettings,
+    MultiDirectoryPicker, MusicBrainzSettings, RadioRegistryDropdown, ServerSettings, SettingItem,
+    ThemeSelector, ToggleSetting,
 };
 use components::settings_popups::{AddRegistryPopup, AddServerPopup, LoginPopup};
 use config::{AppConfig, ArtistPhotoSource, FetchStrategy, MusicService, OfflineQuality};
@@ -313,17 +314,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
-                        if !cfg!(target_arch = "wasm32") {
-                            SettingItem {
-                                title: i18n::t("discord_presence").to_string(),
-                                    control: rsx! {
-                                    DiscordPresenceSettings {
-                                        enabled: config.read().discord_presence.unwrap_or(true),
-                                        on_change: move |val| config.write().discord_presence = Some(val),
-                                    }
-                                }
-                            }
-                        }
                         SettingItem {
                             title: i18n::t("reduce_animations").to_string(),
                             control: rsx! {
@@ -459,36 +449,65 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
-                        SettingItem {
-                            title: i18n::t("listenbrainz").to_string(),
-                            control: rsx! {
-                                MusicBrainzSettings {
-                                    current: config.read().musicbrainz_token.clone(),
-                                    on_save: move |token: String| {
-                                        config.write().musicbrainz_token = token;
-                                    },
+                        if !cfg!(target_arch = "wasm32") {
+                            section {
+                                h2 {
+                                    class: "text-lg font-semibold text-white/80 mb-4 border-b border-white/5 pb-2",
+                                    "{i18n::t(\"connectivity\")}"
                                 }
-                            }
-                        }
-                        SettingItem {
-                            title: i18n::t("lastfm").to_string(),
-                            control: rsx! {
-                                LastFmSettings {
-                                    api_key: config.read().lastfm_api_key.clone(),
-                                    api_secret: config.read().lastfm_api_secret.clone(),
-                                    session_key: config.read().lastfm_session_key.clone(),
+                                div {
+                                    class: "space-y-4",
+                                    SettingItem {
+                                        title: i18n::t("discord_presence").to_string(),
+                                        control: rsx! {
+                                            DiscordPresenceSettings {
+                                                enabled: config.read().discord_presence.unwrap_or(true),
+                                                on_change: move |val| config.write().discord_presence = Some(val),
+                                            }
+                                        }
+                                    }
+                                    SettingItem {
+                                        title: i18n::t("discord_presence_paused").to_string(),
+                                        control: rsx! {
+                                            DiscordPresencePausedSettings {
+                                                enabled: config.read().discord_presence_paused.unwrap_or(true),
+                                                on_change: move |val| config.write().discord_presence_paused = Some(val),
+                                            }
+                                        }
+                                    }
+                                    SettingItem {
+                                        title: i18n::t("listenbrainz").to_string(),
+                                        control: rsx! {
+                                            MusicBrainzSettings {
+                                                current: config.read().musicbrainz_token.clone(),
+                                                on_save: move |token: String| {
+                                                    config.write().musicbrainz_token = token;
+                                                },
+                                            }
+                                        }
+                                    }
+                                    SettingItem {
+                                        title: i18n::t("lastfm").to_string(),
+                                        control: rsx! {
+                                            LastFmSettings {
+                                                api_key: config.read().lastfm_api_key.clone(),
+                                                api_secret: config.read().lastfm_api_secret.clone(),
+                                                session_key: config.read().lastfm_session_key.clone(),
 
-                                    on_api_key_save: move |value: String| {
-                                        config.write().lastfm_api_key = value;
-                                    },
+                                                on_api_key_save: move |value: String| {
+                                                    config.write().lastfm_api_key = value;
+                                                },
 
-                                    on_api_secret_save: move |value: String| {
-                                        config.write().lastfm_api_secret = value;
-                                    },
+                                                on_api_secret_save: move |value: String| {
+                                                    config.write().lastfm_api_secret = value;
+                                                },
 
-                                    on_session_key_save: move |value: String| {
-                                        config.write().lastfm_session_key = value;
-                                    },
+                                                on_session_key_save: move |value: String| {
+                                                    config.write().lastfm_session_key = value;
+                                                },
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
