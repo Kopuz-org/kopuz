@@ -56,6 +56,16 @@ impl RadioMetadataProvider for DynamicProvider {
                         start_ws_metadata(ws_def, stream_id, station_name, tx).await;
                     });
                 }
+                MetadataSourceDef::Static(static_def) => {
+                    let (title, artist, cover_url) = static_def.resolve(&stream_id);
+                    let metadata = RadioMetadata {
+                        station: station_name,
+                        title: title.to_string(),
+                        artist: artist.to_string(),
+                        cover_url: cover_url.map(|s| s.to_string()),
+                    };
+                    let _ = tx.send(metadata);
+                }
             }
         }
 
