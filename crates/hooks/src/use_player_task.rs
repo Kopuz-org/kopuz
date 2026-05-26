@@ -300,6 +300,7 @@ pub fn use_player_task(ctrl: PlayerController) {
 
                 #[cfg(not(target_arch = "wasm32"))]
                 let discord_enabled = config.read().discord_presence.unwrap_or(true);
+                #[cfg(not(target_arch = "wasm32"))]
                 let discord_paused_enabled = config.read().discord_presence_paused.unwrap_or(true);
                 let pos = ctrl.player.read().get_position();
                 let mut defer_player_progress = false;
