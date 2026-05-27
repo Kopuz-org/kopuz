@@ -153,10 +153,10 @@ pub fn JellyfinLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Elem
                 }
             }
 
-            div { class: "max-w-[1600px] mx-auto w-full flex-1 relative min-h-0",
+            div { class: "max-w-[1600px] mx-auto w-full flex-1 min-h-0 flex flex-col",
                 components::virtual_scroll::VirtualScrollView {
                     id: "activity-scroll".to_string(),
-                    class: "absolute inset-0 overflow-y-auto pb-32".to_string(),
+                    class: "flex-1 min-h-0 overflow-y-auto pb-32".to_string(),
                     scroll_stat,
                     container_height,
                     item_height: ITEM_HEIGHT,

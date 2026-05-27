@@ -202,10 +202,10 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                              is_reorderable: props.is_reorderable
                          }
                      }
-                     div { class: "flex-1 relative min-h-0 w-full overflow-hidden",
+                     div { class: "flex-1 min-h-0 w-full flex flex-col overflow-hidden",
                      crate::virtual_scroll::VirtualScrollView {
                          id: "normal-showcase-scroll".to_string(),
-                         class: "absolute inset-0 overflow-y-auto pb-20".to_string(),
+                         class: "flex-1 min-h-0 overflow-y-auto pb-20".to_string(),
                          scroll_stat,
                          container_height,
                          item_height: ITEM_HEIGHT,

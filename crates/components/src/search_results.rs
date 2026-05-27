@@ -69,10 +69,10 @@ pub fn SearchResults(
                         sort_state: sort_state
                     }
                 }
-                div { class: "flex-1 relative min-h-0 w-full overflow-hidden",
+                div { class: "flex-1 min-h-0 w-full flex flex-col overflow-hidden",
                     VirtualScrollView {
                         id: "search-tracks-scroll".to_string(),
-                        class: "absolute inset-0 overflow-y-auto pb-20".to_string(),
+                        class: "flex-1 min-h-0 overflow-y-auto pb-20".to_string(),
                         scroll_stat,
                         container_height,
                         item_height: ITEM_HEIGHT,
