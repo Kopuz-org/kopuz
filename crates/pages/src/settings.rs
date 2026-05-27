@@ -335,17 +335,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
-                        if !cfg!(target_arch = "wasm32") && !cfg!(target_os = "android") {
-                            SettingItem {
-                                title: i18n::t("discord_presence").to_string(),
-                                    control: rsx! {
-                                    DiscordPresenceSettings {
-                                        enabled: config.read().discord_presence.unwrap_or(true),
-                                        on_change: move |val| config.write().discord_presence = Some(val),
-                                    }
-                                }
-                            }
-                        }
                         SettingItem {
                             title: i18n::t("reduce_animations").to_string(),
                             control: rsx! {
@@ -489,21 +478,23 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                                 div {
                                     class: "space-y-4",
-                                    SettingItem {
-                                        title: i18n::t("discord_presence").to_string(),
-                                        control: rsx! {
-                                            DiscordPresenceSettings {
-                                                enabled: config.read().discord_presence.unwrap_or(true),
-                                                on_change: move |val| config.write().discord_presence = Some(val),
+                                    if !cfg!(target_os = "android") {
+                                        SettingItem {
+                                            title: i18n::t("discord_presence").to_string(),
+                                            control: rsx! {
+                                                DiscordPresenceSettings {
+                                                    enabled: config.read().discord_presence.unwrap_or(true),
+                                                    on_change: move |val| config.write().discord_presence = Some(val),
+                                                }
                                             }
                                         }
-                                    }
-                                    SettingItem {
-                                        title: i18n::t("discord_presence_paused").to_string(),
-                                        control: rsx! {
-                                            DiscordPresencePausedSettings {
-                                                enabled: config.read().discord_presence_paused.unwrap_or(true),
-                                                on_change: move |val| config.write().discord_presence_paused = Some(val),
+                                        SettingItem {
+                                            title: i18n::t("discord_presence_paused").to_string(),
+                                            control: rsx! {
+                                                DiscordPresencePausedSettings {
+                                                    enabled: config.read().discord_presence_paused.unwrap_or(true),
+                                                    on_change: move |val| config.write().discord_presence_paused = Some(val),
+                                                }
                                             }
                                         }
                                     }
