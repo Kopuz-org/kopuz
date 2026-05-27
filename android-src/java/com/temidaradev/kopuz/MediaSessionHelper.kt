@@ -132,7 +132,11 @@ object MediaSessionHelper {
                 conn.connectTimeout = 5_000
                 conn.readTimeout = 5_000
                 conn.connect()
-                BitmapFactory.decodeStream(conn.inputStream).also { conn.disconnect() }
+                try {
+                    conn.inputStream.use { BitmapFactory.decodeStream(it) }
+                } finally {
+                    conn.disconnect()
+                }
             } else {
                 BitmapFactory.decodeFile(path)
             }
@@ -337,9 +341,16 @@ object MediaSessionHelper {
                 }
             }
         }
-        context.applicationContext.registerReceiver(
-            receiver, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
-        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.applicationContext.registerReceiver(
+                receiver, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY),
+                Context.RECEIVER_NOT_EXPORTED
+            )
+        } else {
+            context.applicationContext.registerReceiver(
+                receiver, IntentFilter(AudioManager.ACTION_AUDIO_BECOMING_NOISY)
+            )
+        }
         noisyReceiver = receiver
     }
 

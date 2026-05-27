@@ -416,6 +416,15 @@ impl Player {
         self.finish_callback = Some(Arc::new(f));
     }
 
+    /// Ring buffer length between the decoder thread and the audio callback.
+    /// - Desktop: 2s — plenty of headroom for big seeks and metadata stalls.
+    /// - Android: 1s — smaller heap footprint matters on phones with 2-3GB RAM,
+    ///   and a smaller buffer recovers from underruns faster.
+    #[cfg(target_os = "android")]
+    const RING_BUF_SECONDS: usize = 1;
+    #[cfg(not(target_os = "android"))]
+    const RING_BUF_SECONDS: usize = 2;
+
     pub fn play(
         &mut self,
         source: Box<dyn symphonia::core::io::MediaSource>,
@@ -440,15 +449,8 @@ impl Player {
         let channels = self.stream_config.channels as usize;
         let device_sample_rate = self.stream_config.sample_rate;
 
-        // Ring buffer between the decoder thread and the audio callback.
-        // - Desktop: 2s — plenty of headroom for big seeks and metadata stalls.
-        // - Android: 1s — smaller heap footprint matters on phones with 2-3GB RAM,
-        //   and a smaller buffer recovers from underruns faster.
-        #[cfg(target_os = "android")]
-        let ring_buf_seconds = 1usize;
-        #[cfg(not(target_os = "android"))]
-        let ring_buf_seconds = 2usize;
-        let ring_buf_size = device_sample_rate as usize * channels * ring_buf_seconds;
+        // Ring buffer between the decoder thread and the audio callback (see RING_BUF_SECONDS).
+        let ring_buf_size = device_sample_rate as usize * channels * Self::RING_BUF_SECONDS;
         let ring_buf = SpscRb::new(ring_buf_size);
         let (producer, consumer) = (ring_buf.producer(), ring_buf.consumer());
         let consumer = Arc::new(Mutex::new(consumer));
@@ -537,15 +539,8 @@ impl Player {
 
         let channels = self.stream_config.channels as usize;
         let device_sample_rate = self.stream_config.sample_rate;
-        // Ring buffer between the decoder thread and the audio callback.
-        // - Desktop: 2s — plenty of headroom for big seeks and metadata stalls.
-        // - Android: 1s — smaller heap footprint matters on phones with 2-3GB RAM,
-        //   and a smaller buffer recovers from underruns faster.
-        #[cfg(target_os = "android")]
-        let ring_buf_seconds = 1usize;
-        #[cfg(not(target_os = "android"))]
-        let ring_buf_seconds = 2usize;
-        let ring_buf_size = device_sample_rate as usize * channels * ring_buf_seconds;
+        // Ring buffer between the decoder thread and the audio callback (see RING_BUF_SECONDS).
+        let ring_buf_size = device_sample_rate as usize * channels * Self::RING_BUF_SECONDS;
         let ring_buf = SpscRb::new(ring_buf_size);
         let (producer, consumer) = (ring_buf.producer(), ring_buf.consumer());
         let consumer = Arc::new(Mutex::new(consumer));

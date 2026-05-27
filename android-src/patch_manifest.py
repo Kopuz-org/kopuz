@@ -113,6 +113,7 @@ def generate_icons(logo_path, res_dir):
 
     # Update adaptive icon XML to reference webp foreground
     anydpi_dir = os.path.join(res_dir, 'mipmap-anydpi-v26')
+    os.makedirs(anydpi_dir, exist_ok=True)
     xml_path = os.path.join(anydpi_dir, 'ic_launcher.xml')
     xml = ('<?xml version="1.0" encoding="utf-8"?>\n'
            '<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">\n'

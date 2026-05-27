@@ -101,7 +101,11 @@ impl Presence {
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 impl Drop for Presence {
     fn drop(&mut self) {
-        let _ = self.disconnect();
+        let mut client = match self.client.lock() {
+            Ok(c) => c,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let _ = client.close();
     }
 }
 

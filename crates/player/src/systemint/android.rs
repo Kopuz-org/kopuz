@@ -79,7 +79,14 @@ fn cache_classloader() {
         Err(_) => return,
     };
     let ctx = ndk_context::android_context();
-    let activity = unsafe { JObject::from_raw(ctx.context().cast()) };
+    let raw = ctx.context();
+    if raw.is_null() {
+        eprintln!("[android] null activity context; skipping classloader cache");
+        return;
+    }
+    // Transient local only — we immediately turn the resolved classloader into a
+    // GlobalRef below and never retain this raw activity pointer.
+    let activity = unsafe { JObject::from_raw(raw.cast()) };
     let result: Result<(), jni::errors::Error> = (|| {
         let cl = env
             .call_method(&activity, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])?

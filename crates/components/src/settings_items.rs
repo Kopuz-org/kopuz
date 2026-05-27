@@ -158,7 +158,6 @@ fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -
 #[cfg(target_os = "android")]
 #[component]
 fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -> Element {
-    let _ = add_text;
     rsx! {
         button {
             onclick: move |_| {
@@ -180,7 +179,7 @@ fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -
                 }
             },
             class: "bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start",
-            "Auto Detect"
+            "{add_text}"
         }
     }
 }

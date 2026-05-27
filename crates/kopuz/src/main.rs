@@ -749,22 +749,34 @@ fn main() {
                     }
                 }
 
-                let content = std::fs::read(std::path::Path::new(&decoded_path))
-                    .or_else(|_| {
+                let read_result =
+                    std::fs::read(std::path::Path::new(&decoded_path)).or_else(|_| {
                         if decoded_path.strip_prefix('/').is_some() {
                             std::fs::read(std::path::Path::new(&decoded_path[1..]))
                         } else {
                             Err(std::io::Error::from(std::io::ErrorKind::NotFound))
                         }
-                    })
-                    .map(std::borrow::Cow::from)
-                    .unwrap_or_else(|_| std::borrow::Cow::from(Vec::new()));
+                    });
 
-                http::Response::builder()
-                    .header("Content-Type", mime)
-                    .header("Access-Control-Allow-Origin", "*")
-                    .body(content)
-                    .unwrap()
+                match read_result {
+                    Ok(bytes) => http::Response::builder()
+                        .header("Content-Type", mime)
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(std::borrow::Cow::from(bytes))
+                        .unwrap(),
+                    Err(e) => {
+                        let status = if e.kind() == std::io::ErrorKind::NotFound {
+                            404
+                        } else {
+                            500
+                        };
+                        http::Response::builder()
+                            .status(status)
+                            .header("Access-Control-Allow-Origin", "*")
+                            .body(std::borrow::Cow::from(Vec::new()))
+                            .unwrap()
+                    }
+                }
             });
 
         dioxus::LaunchBuilder::mobile().with_cfg(config).launch(App);
@@ -1771,20 +1783,22 @@ fn App() -> Element {
                             i { class: "fa-solid fa-download text-xs" }
                             span { class: "font-medium", "{i18n::t(\"update_available\")} - " }
                             span { "{i18n::t_with(\"update_banner_message\", &[(\"version\", update.version.clone())])}" }
-                            button {
-                                class: "ml-2 text-xs underline opacity-80 hover:opacity-100 transition-opacity",
-                                onclick: {
-                                    let release_url = update.release_url.clone();
-                                    move |_| {
-                                        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-                                        if let Err(e) = webbrowser::open(&release_url) {
-                                            tracing::error!("Failed to open release page: {}", e);
+                            if !cfg!(target_os = "android") {
+                                button {
+                                    class: "ml-2 text-xs underline opacity-80 hover:opacity-100 transition-opacity",
+                                    onclick: {
+                                        let release_url = update.release_url.clone();
+                                        move |_| {
+                                            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+                                            if let Err(e) = webbrowser::open(&release_url) {
+                                                tracing::error!("Failed to open release page: {}", e);
+                                            }
+                                            #[cfg(target_os = "android")]
+                                            let _ = &release_url;
                                         }
-                                        #[cfg(target_os = "android")]
-                                        let _ = &release_url;
-                                    }
-                                },
-                                "{i18n::t(\"view_release\")}"
+                                    },
+                                    "{i18n::t(\"view_release\")}"
+                                }
                             }
                         }
                         button {

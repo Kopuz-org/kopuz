@@ -87,7 +87,7 @@ ios-ipa-sideloadly: ios-build-device ios-fix-plist
     echo "Sideloadly IPA created at {{ios_ipa_dir}}/Kopuz-sideloadly.ipa"
 
 # Signed IPA. Pass APPLE_SIGN_IDENTITY + IOS_MOBILEPROVISION (and optional IOS_ENTITLEMENTS) as env vars.
-ios-ipa-signed: ios-fix-plist ios-build-device
+ios-ipa-signed: ios-build-device ios-fix-plist
     #!/usr/bin/env bash
     set -euo pipefail
     : "${APPLE_SIGN_IDENTITY:?APPLE_SIGN_IDENTITY is required (e.g. 'Apple Development: Name (TEAMID)')}"
