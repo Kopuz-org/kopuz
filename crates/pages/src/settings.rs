@@ -1,5 +1,24 @@
+#[cfg(not(target_os = "android"))]
 use crate::theme_editor::ThemeEditorPage;
 use ::server::provider::ProviderClient;
+
+#[cfg(not(target_os = "android"))]
+fn theme_editor_section(config: Signal<AppConfig>) -> Element {
+    rsx! {
+        section {
+            h2 {
+                class: "text-lg font-semibold text-white/80 mb-4 border-b border-white/5 pb-2",
+                "{i18n::t(\"theme_editor\")}"
+            }
+            ThemeEditorPage { config, embedded: true }
+        }
+    }
+}
+
+#[cfg(target_os = "android")]
+fn theme_editor_section(_config: Signal<AppConfig>) -> Element {
+    rsx! {}
+}
 use components::settings_items::{
     BackBehaviorSelector, ChannelModeSelector, DiscordPresencePausedSettings,
     DiscordPresenceSettings, EqualizerPanel, LanguageSelector, LastFmSettings,
@@ -189,8 +208,10 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     };
 
     rsx! {
-        div { class: "p-8 w-full",
-            h1 { class: "text-3xl font-bold text-white mb-6", "{i18n::t(\"settings\")}" }
+        div { class: if cfg!(target_os = "android") { "px-4 pt-2 pb-28 w-full" } else { "p-8 w-full" },
+            if !cfg!(target_os = "android") {
+                h1 { class: "text-3xl font-bold text-white mb-6", "{i18n::t(\"settings\")}" }
+            }
 
             div { class: "space-y-8",
                 section {
@@ -311,6 +332,17 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     on_delete: handle_delete_saved,
                                     on_switch: handle_switch_server,
                                     on_login: move |_| show_login.set(true),
+                                }
+                            }
+                        }
+                        if !cfg!(target_arch = "wasm32") && !cfg!(target_os = "android") {
+                            SettingItem {
+                                title: i18n::t("discord_presence").to_string(),
+                                    control: rsx! {
+                                    DiscordPresenceSettings {
+                                        enabled: config.read().discord_presence.unwrap_or(true),
+                                        on_change: move |val| config.write().discord_presence = Some(val),
+                                    }
                                 }
                             }
                         }
@@ -717,13 +749,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     }
                 }
 
-                section {
-                    h2 {
-                        class: "text-lg font-semibold text-white/80 mb-4 border-b border-white/5 pb-2",
-                        "{i18n::t(\"theme_editor\")}"
-                    }
-                    ThemeEditorPage { config, embedded: true }
-                }
+                {theme_editor_section(config)}
 
 
 

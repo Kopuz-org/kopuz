@@ -22,7 +22,9 @@ pub fn Home(
 
     rsx! {
         div {
-            class: if is_modern {
+            class: if cfg!(target_os = "android") {
+                "px-4 pt-2 pb-28 space-y-8 w-full max-w-[1600px] mx-auto"
+            } else if is_modern {
                 "px-6 pt-4 pb-24 w-full max-w-[1600px] mx-auto"
             } else {
                 "p-8 space-y-12 pb-32 animate-fade-in w-full max-w-[1600px] mx-auto"

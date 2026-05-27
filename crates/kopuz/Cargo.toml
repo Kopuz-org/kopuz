@@ -11,14 +11,21 @@ category = "public.app-category.music"
 [package.metadata.bundle.macos]
 info_plist_path = "Info.plist"
 
+# Shared by desktop + android (native, non-web).
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-dioxus = { workspace = true, features = ["desktop"] }
 directories = { workspace = true }
 discord-presence = { workspace = true }
+
+# Desktop only. Android uses the mobile renderer, logs to logcat, and has no Discord IPC.
+[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))'.dependencies]
+dioxus = { workspace = true, features = ["desktop"] }
 discord-rich-presence = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
 webbrowser = "1.2.1"
+
+[target.'cfg(target_os = "android")'.dependencies]
+dioxus = { workspace = true, features = ["mobile"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true, features = ["web"] }
@@ -81,6 +88,10 @@ windows = { version = "0.62", features = [
 
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winres = "0.1"
+
+# Used by build.rs to generate Android launcher icons from assets/logo.png.
+[build-dependencies]
+image = { workspace = true }
 
 [features]
 default = []

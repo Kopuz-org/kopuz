@@ -57,13 +57,15 @@ pub fn TrackListView(mut props: TrackListViewProps) -> Element {
     let tracks_sel_queue = props.tracks.clone();
 
     rsx! {
-        div { class: "w-full max-w-[1600px] mx-auto select-none",
-            div { class: "flex items-center mb-8",
-                button {
-                    class: "flex items-center gap-2 text-slate-400 hover:text-white transition-colors",
-                    onclick: move |_| props.on_close.call(()),
-                    i { class: "fa-solid fa-arrow-left" }
-                    "{props.back_label}"
+        div { class: "w-full max-w-[1600px] mx-auto select-none flex-1 min-h-0 flex flex-col",
+            if !cfg!(target_os = "android") {
+                div { class: "flex items-center mb-8 shrink-0",
+                    button {
+                        class: "flex items-center gap-2 text-slate-400 hover:text-white transition-colors",
+                        onclick: move |_| props.on_close.call(()),
+                        i { class: "fa-solid fa-arrow-left" }
+                        "{props.back_label}"
+                    }
                 }
             }
 
@@ -82,9 +84,11 @@ pub fn TrackListView(mut props: TrackListViewProps) -> Element {
                 actions: props.actions,
                 on_select_all: move |selected: bool| {
                     if selected {
-                        selected_tracks.set(tracks_select_all.iter().map(|t| t.path.clone()).collect());
+                        selected_tracks
+                            .set(tracks_select_all.iter().map(|t| t.path.clone()).collect());
                         is_selection_mode.set(true);
-                    } else {
+                    }
+                    else {
                         selected_tracks.write().clear();
                         is_selection_mode.set(false);
                     }
@@ -177,7 +181,8 @@ pub fn TrackListView(mut props: TrackListViewProps) -> Element {
                     },
                     on_add_to_playlist: move |_| show_playlist_modal.set(true),
                     on_delete: move |_| {
-                        let paths: Vec<PathBuf> = tracks_sel_delete.iter()
+                        let paths: Vec<PathBuf> = tracks_sel_delete
+                            .iter()
                             .filter(|t| selected_tracks.read().contains(&t.path))
                             .map(|t| t.path.clone())
                             .collect();
@@ -235,12 +240,14 @@ pub fn TrackListView(mut props: TrackListViewProps) -> Element {
                         }
                         if !paths.is_empty() {
                             let mut store = props.playlist_store.write();
-                            store.playlists.push(reader::models::Playlist {
-                                id: uuid::Uuid::new_v4().to_string(),
-                                name,
-                                tracks: paths,
-                                cover_path: None,
-                            });
+                            store
+                                .playlists
+                                .push(reader::models::Playlist {
+                                    id: uuid::Uuid::new_v4().to_string(),
+                                    name,
+                                    tracks: paths,
+                                    cover_path: None,
+                                });
                         }
                         show_playlist_modal.set(false);
                         is_selection_mode.set(false);

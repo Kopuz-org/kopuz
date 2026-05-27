@@ -9,7 +9,10 @@ pub enum Route {
     Favorites,
     Activity,
     Radio,
+    // yt-dlp downloads + the custom theme editor are desktop/web only — excluded on Android.
+    #[cfg(not(target_os = "android"))]
     Ytdlp,
     Settings,
+    #[cfg(not(target_os = "android"))]
     ThemeEditor,
 }
