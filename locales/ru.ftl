@@ -28,8 +28,8 @@ add_folder = Добавить папку
 no_music_folders = Музыкальные папки не настроены
 add_server = Добавить сервер
 # TODO: NEED LOCALIZATION
-connect_to_lastfm = Connect to Last.fm
-lastfm_connected = Last.fm Connected
+connect_to_lastfm = Подключиться к Last.fm
+lastfm_connected = Подключено к Last.fm 
 # TODO: NEED LOCALIZATION
 server_details = Данные сервера
 server_name = Имя сервера
