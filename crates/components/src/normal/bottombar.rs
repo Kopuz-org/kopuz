@@ -55,6 +55,47 @@ pub fn BottombarNormal(
     let mut ctrl = use_context::<PlayerController>();
     let nav_ctrl = use_context::<NavigationController>();
 
+    if cfg!(target_os = "android") {
+        let progress_percent = if *current_song_duration.read() > 0 {
+            (*current_song_progress.read() as f64 / *current_song_duration.read() as f64) * 100.0
+        } else {
+            0.0
+        };
+        let cover = current_song_cover_url.read().clone();
+        return rsx! {
+            div {
+                class: "shrink-0 mx-2 mb-[env(safe-area-inset-bottom)] h-[68px] bg-[#121212]/95 backdrop-blur-3xl border border-white/10 rounded-[24px] flex items-center px-3 gap-3 relative overflow-hidden shadow-[0_12px_40px_rgba(0,0,0,0.8)]",
+                onclick: move |_| is_fullscreen.set(true),
+                div { class: "absolute top-0 left-0 h-[2px] bg-white/10 w-full",
+                    div { class: "h-full bg-white transition-all duration-300", style: "width: {progress_percent}%" }
+                }
+                div { class: "w-11 h-11 bg-white/5 rounded-xl shrink-0 overflow-hidden flex items-center justify-center",
+                    if cover.is_empty() {
+                        i { class: "fa-solid fa-music text-white/20" }
+                    } else {
+                        img { src: "{cover}", class: "w-full h-full object-cover" }
+                    }
+                }
+                div { class: "flex-1 min-w-0 flex flex-col justify-center gap-0.5",
+                    span { class: "text-[13px] font-bold text-white truncate leading-tight", "{current_song_title}" }
+                    span { class: "text-[11px] font-medium text-white/60 truncate leading-tight", "{current_song_artist}" }
+                }
+                div { class: "flex items-center gap-1 pr-1",
+                    button {
+                        class: "w-12 h-12 flex items-center justify-center text-white text-xl active:scale-90 transition-transform",
+                        onclick: move |evt| { evt.stop_propagation(); ctrl.toggle(); },
+                        i { class: if *is_playing.read() { "fa-solid fa-pause" } else { "fa-solid fa-play ml-1" } }
+                    }
+                    button {
+                        class: "w-12 h-12 flex items-center justify-center text-white text-lg active:scale-90 transition-transform",
+                        onclick: move |evt| { evt.stop_propagation(); ctrl.play_next(); },
+                        i { class: "fa-solid fa-forward-step" }
+                    }
+                }
+            }
+        };
+    }
+
     let current_track_snapshot = ctrl.current_track_snapshot.read().clone();
     let is_favorite = get_favorite(current_track_snapshot.as_ref(), &favorites_store);
     let heart_class = if is_favorite {

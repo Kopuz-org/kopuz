@@ -8,7 +8,7 @@ base_path = "crates/kopuz/assets"
 [bundle]
 identifier = "com.temidaradev.kopuz"
 publisher = "temidaradev"
-icon = ["crates/kopuz/assets/app.ico", "crates/kopuz/assets/logo.png"]
+icon = ["assets/app.ico", "assets/logo.png"]
 category = "public.app-category.music"
 targets = ["macos", "dmg", "nsis", "msi"]
 

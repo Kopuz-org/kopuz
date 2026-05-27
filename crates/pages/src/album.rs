@@ -45,11 +45,13 @@ pub fn Album(
 
     rsx! {
         div {
-            class: "p-8 pb-24",
+            class: if cfg!(target_os = "android") { "px-4 pt-2 pb-28 absolute inset-0 flex flex-col" } else { "p-8 pb-24 absolute inset-0 flex flex-col" },
 
             if album_id.read().is_empty() {
                 div {
-                    h1 { class: "text-3xl font-bold text-white mb-6", "{i18n::t(\"all_albums\")}" }
+                    if !cfg!(target_os = "android") {
+                        h1 { class: "text-3xl font-bold text-white mb-6", "{i18n::t(\"all_albums\")}" }
+                    }
 
                     if is_server {
                         ServerAlbum {
@@ -84,16 +86,20 @@ pub fn Album(
                                     let tracks: Vec<_> = {
                                         let lib = library.read();
                                         if is_server {
-                                            lib.jellyfin_tracks.iter()
+                                            lib.jellyfin_tracks
+                                                .iter()
                                                 .filter(|t| t.album_id == aid)
                                                 .map(|t| t.path.clone())
                                                 .collect()
                                         } else {
-                                            let album_title = lib.albums.iter()
+                                            let album_title = lib
+                                                .albums
+                                                .iter()
                                                 .find(|a| a.id == aid)
                                                 .map(|a| a.title.clone());
                                             if let Some(title) = album_title {
-                                                lib.tracks.iter()
+                                                lib.tracks
+                                                    .iter()
                                                     .filter(|t| t.album == title)
                                                     .map(|t| t.path.clone())
                                                     .collect()
@@ -107,24 +113,47 @@ pub fn Album(
                                         let paths = tracks.clone();
                                         let server_vals = {
                                             let conf = config.peek();
-                                            conf.server.as_ref().and_then(|s| {
-                                                if let (Some(tok), Some(uid)) = (&s.access_token, &s.user_id) {
-                                                    Some((s.service, s.url.clone(), tok.clone(), uid.clone(), conf.device_id.clone()))
-                                                } else { None }
-                                            })
+                                            conf.server
+                                                .as_ref()
+                                                .and_then(|s| {
+                                                    if let (Some(tok), Some(uid)) = (
+                                                        &s.access_token,
+                                                        &s.user_id,
+                                                    ) {
+                                                        Some((
+                                                            s.service,
+                                                            s.url.clone(),
+                                                            tok.clone(),
+                                                            uid.clone(),
+                                                            conf.device_id.clone(),
+                                                        ))
+                                                    } else {
+                                                        None
+                                                    }
+                                                })
                                         };
                                         if let Some((service, url, token, user_id, device_id)) = server_vals {
                                             spawn(async move {
-                                                let item_ids: Vec<String> = paths.iter()
+                                                let item_ids: Vec<String> = paths
+                                                    .iter()
                                                     .filter_map(|p| {
                                                         let parts: Vec<&str> = p.to_str()?.split(':').collect();
-                                                        if parts.len() >= 2 { Some(parts[1].to_string()) } else { None }
+                                                        if parts.len() >= 2 {
+                                                            Some(parts[1].to_string())
+                                                        } else {
+                                                            None
+                                                        }
                                                     })
                                                     .collect();
                                                 let mut added = Vec::new();
                                                 match service {
                                                     MusicService::Jellyfin => {
-                                                        let remote = JellyfinClient::new(&url, Some(&token), &device_id, Some(&user_id));
+                                                        let remote = JellyfinClient::new(
+                                                            &url,
+                                                            Some(&token),
+                                                            &device_id,
+                                                            Some(&user_id),
+                                                        );
                                                         for id in &item_ids {
                                                             if remote.add_to_playlist(&pid, id).await.is_ok() {
                                                                 added.push(id.clone());
@@ -142,7 +171,11 @@ pub fn Album(
                                                 }
                                                 if !added.is_empty() {
                                                     let mut store = playlist_store.write();
-                                                    if let Some(pl) = store.jellyfin_playlists.iter_mut().find(|p| p.id == pid) {
+                                                    if let Some(pl) = store
+                                                        .jellyfin_playlists
+                                                        .iter_mut()
+                                                        .find(|p| p.id == pid)
+                                                    {
                                                         for id in added {
                                                             if !pl.tracks.contains(&id) {
                                                                 pl.tracks.push(id);
@@ -154,7 +187,11 @@ pub fn Album(
                                         }
                                     } else {
                                         let mut store = playlist_store.write();
-                                        if let Some(playlist) = store.playlists.iter_mut().find(|p| p.id == playlist_id) {
+                                        if let Some(playlist) = store
+                                            .playlists
+                                            .iter_mut()
+                                            .find(|p| p.id == playlist_id)
+                                        {
                                             for path in tracks {
                                                 if !playlist.tracks.contains(&path) {
                                                     playlist.tracks.push(path);
@@ -170,16 +207,20 @@ pub fn Album(
                                     let tracks: Vec<_> = {
                                         let lib = library.read();
                                         if is_server {
-                                            lib.jellyfin_tracks.iter()
+                                            lib.jellyfin_tracks
+                                                .iter()
                                                 .filter(|t| t.album_id == aid)
                                                 .map(|t| t.path.clone())
                                                 .collect()
                                         } else {
-                                            let album_title = lib.albums.iter()
+                                            let album_title = lib
+                                                .albums
+                                                .iter()
                                                 .find(|a| a.id == aid)
                                                 .map(|a| a.title.clone());
                                             if let Some(title) = album_title {
-                                                lib.tracks.iter()
+                                                lib.tracks
+                                                    .iter()
                                                     .filter(|t| t.album == title)
                                                     .map(|t| t.path.clone())
                                                     .collect()
@@ -193,24 +234,50 @@ pub fn Album(
                                         let paths = tracks.clone();
                                         let server_vals = {
                                             let conf = config.peek();
-                                            conf.server.as_ref().and_then(|s| {
-                                                if let (Some(tok), Some(uid)) = (&s.access_token, &s.user_id) {
-                                                    Some((s.service, s.url.clone(), tok.clone(), uid.clone(), conf.device_id.clone()))
-                                                } else { None }
-                                            })
+                                            conf.server
+                                                .as_ref()
+                                                .and_then(|s| {
+                                                    if let (Some(tok), Some(uid)) = (
+                                                        &s.access_token,
+                                                        &s.user_id,
+                                                    ) {
+                                                        Some((
+                                                            s.service,
+                                                            s.url.clone(),
+                                                            tok.clone(),
+                                                            uid.clone(),
+                                                            conf.device_id.clone(),
+                                                        ))
+                                                    } else {
+                                                        None
+                                                    }
+                                                })
                                         };
                                         if let Some((service, url, token, user_id, device_id)) = server_vals {
                                             spawn(async move {
-                                                let item_ids: Vec<String> = paths.iter()
+                                                let item_ids: Vec<String> = paths
+                                                    .iter()
                                                     .filter_map(|p| {
                                                         let parts: Vec<&str> = p.to_str()?.split(':').collect();
-                                                        if parts.len() >= 2 { Some(parts[1].to_string()) } else { None }
+                                                        if parts.len() >= 2 {
+                                                            Some(parts[1].to_string())
+                                                        } else {
+                                                            None
+                                                        }
                                                     })
                                                     .collect();
-                                                let id_refs: Vec<&str> = item_ids.iter().map(|s| s.as_str()).collect();
+                                                let id_refs: Vec<&str> = item_ids
+                                                    .iter()
+                                                    .map(|s| s.as_str())
+                                                    .collect();
                                                 let result = match service {
                                                     MusicService::Jellyfin => {
-                                                        let remote = JellyfinClient::new(&url, Some(&token), &device_id, Some(&user_id));
+                                                        let remote = JellyfinClient::new(
+                                                            &url,
+                                                            Some(&token),
+                                                            &device_id,
+                                                            Some(&user_id),
+                                                        );
                                                         remote.create_playlist(&playlist_name, &id_refs).await
                                                     }
                                                     MusicService::Subsonic | MusicService::Custom => {
@@ -220,24 +287,28 @@ pub fn Album(
                                                 };
                                                 if let Ok(new_id) = result {
                                                     let mut store = playlist_store.write();
-                                                    store.jellyfin_playlists.push(reader::models::JellyfinPlaylist {
-                                                        id: new_id,
-                                                        name: playlist_name,
-                                                        tracks: item_ids,
-                                                        image_tag: None,
-                                                        cover_path: None,
-                                                    });
+                                                    store
+                                                        .jellyfin_playlists
+                                                        .push(reader::models::JellyfinPlaylist {
+                                                            id: new_id,
+                                                            name: playlist_name,
+                                                            tracks: item_ids,
+                                                            image_tag: None,
+                                                            cover_path: None,
+                                                        });
                                                 }
                                             });
                                         }
                                     } else {
                                         let mut store = playlist_store.write();
-                                        store.playlists.push(reader::models::Playlist {
-                                            id: uuid::Uuid::new_v4().to_string(),
-                                            name,
-                                            tracks,
-                                            cover_path: None,
-                                        });
+                                        store
+                                            .playlists
+                                            .push(reader::models::Playlist {
+                                                id: uuid::Uuid::new_v4().to_string(),
+                                                name,
+                                                tracks,
+                                                cover_path: None,
+                                            });
                                     }
                                 }
                                 show_album_playlist_modal.set(false);

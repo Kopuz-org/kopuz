@@ -20,10 +20,14 @@ reader = { workspace = true }
 utils = { workspace = true }
 kopuz_route = { workspace = true }
 config = { workspace = true }
-rfd = { workspace = true }
 hooks = { workspace = true }
 rand = { workspace = true }
 server = { workspace = true }
 tokio = { workspace = true, features = ["time", "fs"] }
 serde_json = { workspace = true }
 i18n = { workspace = true }
+
+# Native file dialogs (folder/cover pickers). Not used on web, and rfd doesn't work on
+# Android (which auto-detects the music dir via JNI instead).
+[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))'.dependencies]
+rfd = { workspace = true }

@@ -9,15 +9,15 @@ use components::{
     bottombar::Bottombar, download_overlay::DownloadOverlay, fullscreen::Fullscreen,
     rightbar::Rightbar, sidebar::Sidebar, titlebar::Titlebar,
 };
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use dioxus::desktop::RequestAsyncResponder;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use dioxus::desktop::tao::dpi::LogicalSize;
 #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
 use dioxus::desktop::tao::platform::macos::WindowBuilderExtMacOS;
 #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
 use dioxus::desktop::tao::platform::windows::WindowExtWindows;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use dioxus::desktop::tao::window::Icon;
 use dioxus::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
@@ -31,7 +31,7 @@ use reader::FavoritesStore;
 use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
 use windows::Win32::Foundation::HWND;
@@ -85,7 +85,7 @@ const QUEUE_STATE_PROGRESS_STEP_SECS: u64 = 5;
 #[cfg(not(target_arch = "wasm32"))]
 static PRESENCE: std::sync::OnceLock<Option<Arc<Presence>>> = std::sync::OnceLock::new();
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 fn build_window_icon() -> Option<Icon> {
     let image = image::load_from_memory(include_bytes!("../assets/logo-512.png")).ok()?;
     let image = image.into_rgba8();
@@ -437,7 +437,7 @@ fn make_hq_image(raw: &[u8], cache_path: &std::path::Path) -> Option<Vec<u8>> {
 }
 
 fn main() {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
     {
         let log_dir = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
             .map(|dirs| dirs.cache_dir().join("logs"))
@@ -706,6 +706,82 @@ fn main() {
             .launch(App);
     }
 
+    #[cfg(target_os = "android")]
+    {
+        // JNI media session + classloader cache. Player::new() also calls this (idempotent
+        // OnceLock), but doing it up front means the session exists before first playback.
+        player::systemint::init();
+
+        let config = dioxus::mobile::Config::new()
+            .with_background_color((0, 0, 0, 255))
+            // artwork://local?p=<percent-encoded-absolute-path> — the Android WebView mostly
+            // receives base64 data URLs from utils, but keep a synchronous handler for any
+            // code path that still emits artwork:// URLs.
+            .with_custom_protocol("artwork".to_string(), |_headers, request| {
+                let query = request.uri().query().unwrap_or("");
+                let raw_p = query
+                    .split('&')
+                    .find_map(|kv| {
+                        let mut parts = kv.splitn(2, '=');
+                        if parts.next() == Some("p") {
+                            parts.next()
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or("");
+                let decoded = percent_encoding::percent_decode_str(raw_p).decode_utf8_lossy();
+
+                let mime = if decoded.ends_with(".png") {
+                    "image/png"
+                } else {
+                    "image/jpeg"
+                };
+
+                let mut decoded_path = decoded.to_string();
+                if decoded_path.starts_with("/~") {
+                    if let Ok(home) = std::env::var("HOME") {
+                        decoded_path = decoded_path.replacen("/~", &home, 1);
+                    }
+                } else if decoded_path.starts_with('~') {
+                    if let Ok(home) = std::env::var("HOME") {
+                        decoded_path = decoded_path.replacen('~', &home, 1);
+                    }
+                }
+
+                let read_result =
+                    std::fs::read(std::path::Path::new(&decoded_path)).or_else(|_| {
+                        if decoded_path.strip_prefix('/').is_some() {
+                            std::fs::read(std::path::Path::new(&decoded_path[1..]))
+                        } else {
+                            Err(std::io::Error::from(std::io::ErrorKind::NotFound))
+                        }
+                    });
+
+                match read_result {
+                    Ok(bytes) => http::Response::builder()
+                        .header("Content-Type", mime)
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(std::borrow::Cow::from(bytes))
+                        .unwrap(),
+                    Err(e) => {
+                        let status = if e.kind() == std::io::ErrorKind::NotFound {
+                            404
+                        } else {
+                            500
+                        };
+                        http::Response::builder()
+                            .status(status)
+                            .header("Access-Control-Allow-Origin", "*")
+                            .body(std::borrow::Cow::from(Vec::new()))
+                            .unwrap()
+                    }
+                }
+            });
+
+        dioxus::LaunchBuilder::mobile().with_cfg(config).launch(App);
+    }
+
     #[cfg(target_arch = "wasm32")]
     {
         dioxus::launch(App);
@@ -719,7 +795,21 @@ fn App() -> Element {
     let mut scroll_positions: Signal<std::collections::HashMap<Route, f64>> =
         use_signal(std::collections::HashMap::new);
     let cache_dir = use_memo(move || {
-        #[cfg(not(target_arch = "wasm32"))]
+        // Android: external/ProjectDirs paths aren't writable; use the app-internal files
+        // dir (getFilesDir via JNI) so saves don't fail with EACCES.
+        #[cfg(target_os = "android")]
+        {
+            let mut path = player::systemint::get_files_dir()
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join("cache");
+            if std::fs::create_dir_all(&path).is_err() {
+                path = std::path::PathBuf::from("./cache");
+                let _ = std::fs::create_dir_all(&path);
+            }
+            path
+        }
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
         {
             let path = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
                 .map(|dirs| dirs.cache_dir().to_path_buf())
@@ -731,7 +821,19 @@ fn App() -> Element {
         std::path::PathBuf::from("./cache")
     });
     let config_dir = use_memo(move || {
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(target_os = "android")]
+        {
+            let mut path = player::systemint::get_files_dir()
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join("config");
+            if std::fs::create_dir_all(&path).is_err() {
+                path = std::path::PathBuf::from("./config");
+                let _ = std::fs::create_dir_all(&path);
+            }
+            path
+        }
+        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
         {
             let path = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
                 .map(|dirs| dirs.config_dir().to_path_buf())
@@ -1502,6 +1604,12 @@ fn App() -> Element {
         selected_album_id,
     });
 
+    // Sidebar collapse state. On Android the sidebar is an overlay drawer that
+    // starts collapsed and is toggled by the mobile header hamburger; the
+    // Sidebar component reads this from context.
+    let mut is_sidebar_collapsed = use_signal(|| cfg!(target_os = "android"));
+    use_context_provider(|| components::sidebar::SidebarCollapsed(is_sidebar_collapsed));
+
     hooks::use_player_task(ctrl);
 
     // Inject CSS for all custom themes reactively
@@ -1572,9 +1680,10 @@ fn App() -> Element {
         }
 
         div {
-            class: "flex flex-col h-screen text-white select-none {theme_class}",
+            class: "flex flex-col h-screen text-white select-none overflow-x-hidden {theme_class}",
             style: "{background_style}",
             dir: "{dir}",
+            "data-platform": if cfg!(target_os = "android") { "android" } else { "desktop" },
             "data-reduce-animations": "{reduce_animations}",
             tabindex: "0",
             autofocus: true,
@@ -1674,17 +1783,22 @@ fn App() -> Element {
                             i { class: "fa-solid fa-download text-xs" }
                             span { class: "font-medium", "{i18n::t(\"update_available\")} - " }
                             span { "{i18n::t_with(\"update_banner_message\", &[(\"version\", update.version.clone())])}" }
-                            button {
-                                class: "ml-2 text-xs underline opacity-80 hover:opacity-100 transition-opacity",
-                                onclick: {
-                                    let release_url = update.release_url.clone();
-                                    move |_| {
-                                        if let Err(e) = webbrowser::open(&release_url) {
-                                            tracing::error!("Failed to open release page: {}", e);
+                            if !cfg!(target_os = "android") {
+                                button {
+                                    class: "ml-2 text-xs underline opacity-80 hover:opacity-100 transition-opacity",
+                                    onclick: {
+                                        let release_url = update.release_url.clone();
+                                        move |_| {
+                                            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+                                            if let Err(e) = webbrowser::open(&release_url) {
+                                                tracing::error!("Failed to open release page: {}", e);
+                                            }
+                                            #[cfg(target_os = "android")]
+                                            let _ = &release_url;
                                         }
-                                    }
-                                },
-                                "{i18n::t(\"view_release\")}"
+                                    },
+                                    "{i18n::t(\"view_release\")}"
+                                }
                             }
                         }
                         button {
@@ -1732,11 +1846,66 @@ fn App() -> Element {
                 }
                 div {
                     id: "main-scroll-area",
-                    class: "flex-1 overflow-y-auto",
+                    class: if cfg!(target_os = "android") { "flex-1 min-h-0 flex flex-col overflow-hidden relative" } else { "flex-1 overflow-y-auto" },
                     onscroll: move |evt| {
                         let pos = evt.scroll_top();
                         scroll_positions.write().insert(*current_route.peek(), pos);
                     },
+
+                    if cfg!(target_os = "android") {
+                        {
+                            let is_details = match *current_route.read() {
+                                Route::Album => !selected_album_id.read().is_empty(),
+                                Route::Artist => !selected_artist_name.read().is_empty(),
+                                Route::Playlists => selected_playlist_id.read().is_some(),
+                                _ => false,
+                            };
+                            let page_title = match *current_route.read() {
+                                Route::Home => i18n::t("home"),
+                                Route::Search => i18n::t("search"),
+                                Route::Library => i18n::t("library"),
+                                Route::Album => if is_details { i18n::t("album") } else { i18n::t("albums") },
+                                Route::Artist => if is_details { i18n::t("artist") } else { i18n::t("artists") },
+                                Route::Playlists => i18n::t("playlists"),
+                                Route::Favorites => i18n::t("favorites"),
+                                Route::Settings => i18n::t("settings"),
+                                _ => i18n::t("home"),
+                            };
+                            rsx! {
+                                div { class: "shrink-0 z-[60] bg-black/60 backdrop-blur-2xl border-b border-white/5 pt-[env(safe-area-inset-top)] flex items-center h-[calc(env(safe-area-inset-top)_+_2.75rem)] px-3 shadow-xl",
+                                    if is_details {
+                                        button {
+                                            class: "w-10 h-10 flex items-center justify-center rounded-xl bg-white/5 text-white active:scale-95 transition-all border border-white/10",
+                                            onclick: move |_| {
+                                                match *current_route.peek() {
+                                                    Route::Album => selected_album_id.set(String::new()),
+                                                    Route::Artist => selected_artist_name.set(String::new()),
+                                                    Route::Playlists => selected_playlist_id.set(None),
+                                                    _ => {}
+                                                }
+                                            },
+                                            i { class: "fa-solid fa-arrow-left text-lg" }
+                                        }
+                                    } else {
+                                        button {
+                                            class: "w-10 h-10 flex items-center justify-center rounded-xl bg-white/5 text-white active:scale-95 transition-all border border-white/10",
+                                            onclick: move |_| is_sidebar_collapsed.toggle(),
+                                            i { class: "fa-solid fa-bars text-lg" }
+                                        }
+                                    }
+                                    div { class: "flex-1 flex justify-center pr-10",
+                                        h2 {
+                                            class: "text-[13px] font-black tracking-[0.2em] text-white/90 uppercase",
+                                            style: "font-family: 'JetBrains Mono', monospace;",
+                                            "{page_title}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    div { class: if cfg!(target_os = "android") { "relative flex-1 min-h-0 overflow-y-auto" } else { "contents" },
                     match *current_route.read() {
                         Route::Home => rsx! {
                             pages::home::Home {
@@ -1891,12 +2060,14 @@ fn App() -> Element {
                                 config: config,
                             }
                         },
-                        #[cfg(not(target_arch = "wasm32"))]
+                        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
                         Route::Ytdlp => rsx! { pages::ytdlp::YtdlpPage { config, trigger_rescan } },
                         #[cfg(target_arch = "wasm32")]
                         Route::Ytdlp => rsx! { pages::settings::Settings { config } },
                         Route::Settings => rsx! { pages::settings::Settings { config } },
+                        #[cfg(not(target_os = "android"))]
                         Route::ThemeEditor => rsx! { pages::theme_editor::ThemeEditorPage { config } },
+                    }
                     }
                 }
                 Rightbar {

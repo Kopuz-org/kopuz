@@ -6,6 +6,8 @@ use reader::Library;
 use serde_json::Value;
 use std::fmt;
 
+use crate::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
+
 use crate::queue_drag::{
     RIGHTBAR_DROPZONE_ID, RIGHTBAR_QUEUE_DROP_TARGET_CLASS, cancel_rightbar_drag,
     clear_rightbar_drop_target, has_dragged_queue_track, install_rightbar_drag_handlers,
@@ -73,22 +75,21 @@ pub fn QueueRow(
             class: "{row_class}",
             style: match layout {
                 LayoutMode::Fullscreen => "",
-                LayoutMode::Rightbar => "content-visibility: auto; contain-intrinsic-size: 0 56px;",
+                LayoutMode::Rightbar => {
+                    "content-visibility: auto; contain-intrinsic-size: 0 56px;"
+                }
             },
             onmousedown: move |evt| on_row_mouse_down.call(evt),
             onmousemove: move |evt| on_row_mouse_move.call(evt),
             ondoubleclick: move |_| on_play.call(()),
 
-            div {
-                class: "w-4 flex justify-center items-end shrink-0",
+            div { class: "w-4 flex justify-center items-end shrink-0",
 
-                span {
-                    class: "queue-item-number text-xs group-hover:hidden text-white/60",
-                        "{queue_idx + 1}"
-                    }
+                span { class: "queue-item-number text-xs group-hover:hidden text-white/60",
+                    "{queue_idx + 1}"
+                }
 
-                div {
-                    class: "queue-item-icon hidden group-hover:flex items-center justify-center",
+                div { class: "queue-item-icon hidden group-hover:flex items-center justify-center",
                     i { class: "{row_icon_class}" }
                 }
             }
@@ -97,14 +98,16 @@ pub fn QueueRow(
                 class: "rounded-md overflow-hidden bg-black/30 flex-shrink-0 shadow-sm",
                 style: match layout {
                     LayoutMode::Fullscreen => "width: 48px; height: 48px;",
-                    LayoutMode::Rightbar => "width: 40px; height: 40px;"
+                    LayoutMode::Rightbar => "width: 40px; height: 40px;",
                 },
 
                 if let Some(ref url) = cover_url {
-                    img { src: "{url.as_ref()}", class: "w-full h-full object-cover" }
+                    img {
+                        src: "{url.as_ref()}",
+                        class: "w-full h-full object-cover",
+                    }
                 } else {
-                    div {
-                        class: "w-full h-full flex items-center justify-center",
+                    div { class: "w-full h-full flex items-center justify-center",
                         i {
                             class: "fa-solid fa-music text-white/20",
                             style: match layout {
@@ -116,27 +119,31 @@ pub fn QueueRow(
                 }
             }
 
-            div {
-                class: "flex-1 min-w-0 flex flex-col justify-center gap-0.5",
+            div { class: "flex-1 min-w-0 flex flex-col justify-center gap-0.5",
                 div {
                     class: match layout {
-                       LayoutMode::Fullscreen => "queue-item-title text-base text-white truncate font-medium",
-                       LayoutMode::Rightbar => "queue-item-title text-sm text-white truncate",
+                        LayoutMode::Fullscreen => {
+                            "queue-item-title text-base text-white truncate font-medium"
+                        }
+                        LayoutMode::Rightbar => "queue-item-title text-sm text-white truncate",
                     },
                     "{track.title}"
-                },
+                }
 
                 div {
                     class: match layout {
-                        LayoutMode::Fullscreen => "text-sm text-white/50 truncate group-hover:text-white/70",
-                        LayoutMode::Rightbar => "text-xs text-white/50 truncate group-hover:text-white/70"
+                        LayoutMode::Fullscreen => {
+                            "text-sm text-white/50 truncate group-hover:text-white/70"
+                        }
+                        LayoutMode::Rightbar => {
+                            "text-xs text-white/50 truncate group-hover:text-white/70"
+                        }
                     },
                     "{track.artist}"
                 }
             }
 
-            div {
-                onmousedown: move |evt| evt.stop_propagation(),
+            div { onmousedown: move |evt| evt.stop_propagation(),
                 ReorderButtons {
                     class: "flex flex-col pr-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity",
                     can_move_up,
@@ -189,23 +196,29 @@ pub fn QueueSummary(
     rsx! {
         div {
             class: match layout {
-                LayoutMode::Fullscreen => "pt-2 px-4 pb-3 flex gap-2 justify-between uppercase tracking-[0.18em] text-xs",
-                LayoutMode::Rightbar => "pt-1 px-2 pb-2 flex gap-2 justify-between uppercase tracking-[0.18em] text-[11px]",
+                LayoutMode::Fullscreen => {
+                    "pt-2 px-4 pb-3 flex gap-2 justify-between uppercase tracking-[0.18em] text-xs"
+                }
+                LayoutMode::Rightbar => {
+                    "pt-1 px-2 pb-2 flex gap-2 justify-between uppercase tracking-[0.18em] text-[11px]"
+                }
             },
 
-            span {
-                class: "text-white/45",
-                "{queue_summary}"
-            }
+            span { class: "text-white/45", "{queue_summary}" }
 
             button {
                 class: "text-white/60 cursor-pointer",
-                onclick: move |_| { eval(&format!("window.__{layout}_scrollIntoView(null)")); },
+                onclick: move |_| {
+                    eval(&format!("window.__{layout}_scrollIntoView(null)"));
+                },
                 "{*current_queue_index.read() + 1}/{queue_count}"
             }
         }
     }
 }
+
+const RIGHTBAR_ITEM_HEIGHT: f64 = 60.0;
+const FULLSCREEN_ITEM_HEIGHT: f64 = 76.0;
 
 #[component]
 pub fn QueueListView(
@@ -227,6 +240,13 @@ pub fn QueueListView(
         LayoutMode::Rightbar => RIGHTBAR_DROPZONE_ID,
         LayoutMode::Fullscreen => "fullscreen-queue-list",
     };
+
+    let item_height = match layout {
+        LayoutMode::Rightbar => RIGHTBAR_ITEM_HEIGHT,
+        LayoutMode::Fullscreen => FULLSCREEN_ITEM_HEIGHT,
+    };
+    let scroll_stat = use_signal(|| 0.0_f64);
+    let container_height = use_signal(|| 0.0_f64);
 
     use_effect(move || {
         if layout == LayoutMode::Rightbar {
@@ -469,6 +489,101 @@ pub fn QueueListView(
         .filter_map(|t| (t.duration != u64::MAX).then_some(t.duration))
         .fold(0, |acc, d| acc.saturating_add(d));
 
+    let scroll_info = use_virtual_scroll(
+        *scroll_stat.read(),
+        *container_height.read(),
+        queue_count,
+        item_height,
+    );
+    let start_index = scroll_info.start_index;
+    let items_to_render = scroll_info.items_to_render;
+    let top_pad = scroll_info.top_pad;
+    let bottom_pad = scroll_info.bottom_pad;
+
+    let end_drop_target = if matches!(layout, LayoutMode::Rightbar | LayoutMode::Fullscreen) {
+        let end_drop_index = queue_count;
+        let is_end_drop_target = *queue_drop_index.read() == Some(end_drop_index);
+        Some(rsx! {
+            div {
+                key: "queue-drop-end-{end_drop_index}",
+                class: "{RIGHTBAR_QUEUE_DROP_TARGET_CLASS} px-1 py-2",
+                style: match layout {
+                    LayoutMode::Rightbar => "min-height: 45vh;",
+                    LayoutMode::Fullscreen => "min-height: 8rem;",
+                },
+                onmouseenter: move |_| {
+                    update_rightbar_end_drop_target(
+                        end_drop_index,
+                        queue_reorder_from,
+                        is_queue_drag_over,
+                        queue_drop_index,
+                        queue_reorder_did_move,
+                    );
+                },
+                onmousemove: move |_| {
+                    update_rightbar_end_drop_target(
+                        end_drop_index,
+                        queue_reorder_from,
+                        is_queue_drag_over,
+                        queue_drop_index,
+                        queue_reorder_did_move,
+                    );
+                },
+                onmouseup: move |evt| {
+                    evt.stop_propagation();
+                    pending_queue_reorder.set(None);
+                    is_queue_drag_over.set(false);
+                    let drop_index = queue_drop_index.peek().unwrap_or(end_drop_index);
+                    queue_drop_index.set(None);
+                    let reorder_from = *queue_reorder_from.read();
+                    if let Some(from) = reorder_from {
+                        if let Some(to) = rightbar_reorder_move_target(
+                            from,
+                            drop_index,
+                            queue_count,
+                        ) {
+                            queue_reorder_did_move.set(true);
+                            move_queue_item(from, to);
+                        }
+                        queue_reorder_from.set(None);
+                        return;
+                    }
+                    insert_queue_tracks(end_drop_index, take_dragged_queue_tracks());
+                },
+                ondragenter: move |evt| {
+                    evt.prevent_default();
+                    evt.stop_propagation();
+                    is_queue_drag_over.set(true);
+                    queue_drop_index.set(Some(end_drop_index));
+                },
+                ondragover: move |evt| {
+                    evt.prevent_default();
+                    evt.stop_propagation();
+                    is_queue_drag_over.set(true);
+                    queue_drop_index.set(Some(end_drop_index));
+                },
+                ondrop: move |evt| {
+                    evt.prevent_default();
+                    evt.stop_propagation();
+                    pending_queue_reorder.set(None);
+                    is_queue_drag_over.set(false);
+                    queue_drop_index.set(None);
+                    insert_queue_tracks(end_drop_index, take_dragged_queue_tracks());
+                },
+                if is_end_drop_target {
+                    div { class: "pointer-events-none",
+                        div {
+                            class: "w-full rounded-full",
+                            style: "height: 3px; background: var(--color-indigo-500); box-shadow: 0 0 10px rgba(129, 140, 248, 0.8);",
+                        }
+                    }
+                }
+            }
+        })
+    } else {
+        None
+    };
+
     rsx! {
         style {
             "
@@ -492,7 +607,7 @@ pub fn QueueListView(
                 color: var(--color-indigo-500) !important;
             }}
             "
-        },
+        }
 
         if items.is_empty() {
             div { class: "text-white/30 text-center py-10 text-sm", "{i18n::t(\"no_more_songs\")}" }
@@ -505,29 +620,37 @@ pub fn QueueListView(
                 layout: layout.clone(),
             }
 
-            div {
-                id: "{queue_list_id}",
+            VirtualScrollView {
+                id: queue_list_id.to_string(),
                 class: match layout {
-                    LayoutMode::Fullscreen => "flex-1 overflow-y-auto px-4 py-2 space-y-1",
-                    LayoutMode::Rightbar => "flex-1 overflow-y-auto px-2 py-2 space-y-1 relative",
+                    LayoutMode::Fullscreen => "flex-1 overflow-y-auto px-4 py-2".to_string(),
+                    LayoutMode::Rightbar => "flex-1 overflow-y-auto px-2 py-2 relative".to_string(),
                 },
-                onmouseleave: move |_| {
+                scroll_stat,
+                container_height,
+                item_height,
+                saved_scroll: 0.0,
+                top_pad,
+                bottom_pad,
+                bottom_content: end_drop_target,
+                on_mouse_leave: move |_| {
                     clear_rightbar_drop_target(is_queue_drag_over, queue_drop_index);
                     pending_queue_reorder.set(None);
                     if layout == LayoutMode::Rightbar {
                         stop_rightbar_auto_scroll();
                     }
                 },
-                onmousemove: move |evt| {
+                on_mouse_move: move |evt: MouseEvent| {
                     if layout == LayoutMode::Rightbar
                         && (has_dragged_queue_track() || queue_reorder_from.read().is_some())
                     {
                         rightbar_auto_scroll(evt.client_coordinates().y);
                     }
                 },
-
-                for (queue_idx, track) in items.into_iter().enumerate() {
+                for (i, track) in items.iter().enumerate().skip(start_index).take(items_to_render) {
                     {
+                        let queue_idx = i;
+                        let track = track.clone();
                         let cover_url = get_track_cover(&track);
                         let can_move_up = queue_idx > 0;
                         let can_move_down = queue_idx + 1 < queue_count;
@@ -538,6 +661,7 @@ pub fn QueueListView(
                         rsx! {
                             if matches!(layout, LayoutMode::Rightbar | LayoutMode::Fullscreen) {
                                 div {
+                                    style: "height: {item_height}px; box-sizing: border-box;",
                                     key: "{layout}-drop-target-{queue_idx}",
                                     class: RIGHTBAR_QUEUE_DROP_TARGET_CLASS,
                                     onmouseenter: move |evt: MouseEvent| {
@@ -578,7 +702,11 @@ pub fn QueueListView(
                                         queue_drop_index.set(None);
                                         let reorder_from = *queue_reorder_from.read();
                                         if let Some(from) = reorder_from {
-                                            if let Some(to) = rightbar_reorder_move_target(from, drop_index, queue_count) {
+                                            if let Some(to) = rightbar_reorder_move_target(
+                                                from,
+                                                drop_index,
+                                                queue_count,
+                                            ) {
                                                 queue_reorder_did_move.set(true);
                                                 move_queue_item(from, to);
                                             }
@@ -637,11 +765,10 @@ pub fn QueueListView(
                                         insert_queue_tracks(drop_index, take_dragged_queue_tracks());
                                     },
                                     if is_drop_target {
-                                        div {
-                                            class: "px-1 py-2 pointer-events-none",
+                                        div { class: "px-1 py-2 pointer-events-none",
                                             div {
                                                 class: "w-full rounded-full",
-                                                style: "height: 3px; background: var(--color-indigo-500); box-shadow: 0 0 10px rgba(129, 140, 248, 0.8);"
+                                                style: "height: 3px; background: var(--color-indigo-500); box-shadow: 0 0 10px rgba(129, 140, 248, 0.8);",
                                             }
                                         }
                                     }
@@ -679,13 +806,14 @@ pub fn QueueListView(
                                                 is_queue_drag_over.set(true);
                                                 queue_drop_index.set(Some(row_drop_index));
                                                 if let Some(from) = *queue_reorder_from.read() {
-                                                    if rightbar_reorder_move_target(from, row_drop_index, queue_count).is_some() {
+                                                    if rightbar_reorder_move_target(from, row_drop_index, queue_count)
+                                                        .is_some()
+                                                    {
                                                         queue_reorder_did_move.set(true);
                                                     }
                                                 }
                                                 return;
                                             }
-
                                             let pending = *pending_queue_reorder.read();
                                             if let Some((from_idx, start_x, start_y)) = pending {
                                                 if from_idx == queue_idx {
@@ -701,7 +829,13 @@ pub fn QueueListView(
                                                             queue_reorder_did_move,
                                                         );
                                                         queue_drop_index.set(Some(row_drop_index));
-                                                        if rightbar_reorder_move_target(queue_idx, row_drop_index, queue_count).is_some() {
+                                                        if rightbar_reorder_move_target(
+                                                                queue_idx,
+                                                                row_drop_index,
+                                                                queue_count,
+                                                            )
+                                                            .is_some()
+                                                        {
                                                             queue_reorder_did_move.set(true);
                                                         }
                                                     }
@@ -732,87 +866,6 @@ pub fn QueueListView(
                                     on_row_mouse_move: move |_: MouseEvent| {},
                                     on_move_up: move |_| move_queue_item(queue_idx, queue_idx - 1),
                                     on_move_down: move |_| move_queue_item(queue_idx, queue_idx + 1),
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if matches!(layout, LayoutMode::Rightbar | LayoutMode::Fullscreen) {
-                    {
-                        let end_drop_index = queue_count;
-                        let is_end_drop_target = *queue_drop_index.read() == Some(end_drop_index);
-                        rsx! {
-                            div {
-                                key: "queue-drop-end-{end_drop_index}",
-                                class: "{RIGHTBAR_QUEUE_DROP_TARGET_CLASS} px-1 py-2",
-                                style: match layout {
-                                    LayoutMode::Rightbar => "min-height: 45vh;",
-                                    LayoutMode::Fullscreen => "min-height: 8rem;",
-                                },
-                                onmouseenter: move |_| {
-                                    update_rightbar_end_drop_target(
-                                        end_drop_index,
-                                        queue_reorder_from,
-                                        is_queue_drag_over,
-                                        queue_drop_index,
-                                        queue_reorder_did_move,
-                                    );
-                                },
-                                onmousemove: move |_| {
-                                    update_rightbar_end_drop_target(
-                                        end_drop_index,
-                                        queue_reorder_from,
-                                        is_queue_drag_over,
-                                        queue_drop_index,
-                                        queue_reorder_did_move,
-                                    );
-                                },
-                                onmouseup: move |evt| {
-                                    evt.stop_propagation();
-                                    pending_queue_reorder.set(None);
-                                    is_queue_drag_over.set(false);
-                                    let drop_index = queue_drop_index.peek().unwrap_or(end_drop_index);
-                                    queue_drop_index.set(None);
-                                    let reorder_from = *queue_reorder_from.read();
-                                    if let Some(from) = reorder_from {
-                                        if let Some(to) = rightbar_reorder_move_target(from, drop_index, queue_count) {
-                                            queue_reorder_did_move.set(true);
-                                            move_queue_item(from, to);
-                                        }
-                                        queue_reorder_from.set(None);
-                                        return;
-                                    }
-                                    insert_queue_tracks(end_drop_index, take_dragged_queue_tracks());
-                                },
-                                ondragenter: move |evt| {
-                                    evt.prevent_default();
-                                    evt.stop_propagation();
-                                    is_queue_drag_over.set(true);
-                                    queue_drop_index.set(Some(end_drop_index));
-                                },
-                                ondragover: move |evt| {
-                                    evt.prevent_default();
-                                    evt.stop_propagation();
-                                    is_queue_drag_over.set(true);
-                                    queue_drop_index.set(Some(end_drop_index));
-                                },
-                                ondrop: move |evt| {
-                                    evt.prevent_default();
-                                    evt.stop_propagation();
-                                    pending_queue_reorder.set(None);
-                                    is_queue_drag_over.set(false);
-                                    queue_drop_index.set(None);
-                                    insert_queue_tracks(end_drop_index, take_dragged_queue_tracks());
-                                },
-                                if is_end_drop_target {
-                                    div {
-                                        class: "pointer-events-none",
-                                        div {
-                                            class: "w-full rounded-full",
-                                            style: "height: 3px; background: var(--color-indigo-500); box-shadow: 0 0 10px rgba(129, 140, 248, 0.8);"
-                                        }
-                                    }
                                 }
                             }
                         }

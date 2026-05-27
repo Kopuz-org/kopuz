@@ -52,6 +52,29 @@ fn format_artwork_url_impl(path: Option<&impl AsRef<Path>>, size: Option<u32>) -
             abs_str
         };
 
+        // Android WebView is unreliable with custom URL schemes (artwork://) and the
+        // http localhost shim, so inline the cover as a base64 data URL instead.
+        #[cfg(target_os = "android")]
+        {
+            use base64::{Engine as _, engine::general_purpose};
+            return match std::fs::read(&*abs_str) {
+                Ok(bytes) => {
+                    let mime = if abs_str.ends_with(".png") {
+                        "image/png"
+                    } else if abs_str.ends_with(".gif") {
+                        "image/gif"
+                    } else if abs_str.ends_with(".webp") {
+                        "image/webp"
+                    } else {
+                        "image/jpeg"
+                    };
+                    let b64 = general_purpose::STANDARD.encode(&bytes);
+                    Some(cover_url_from_string(format!("data:{mime};base64,{b64}")))
+                }
+                Err(_) => None,
+            };
+        }
+
         const QUERY_VAL: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
             .add(b' ')
             .add(b'"')
