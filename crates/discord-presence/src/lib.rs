@@ -54,6 +54,7 @@ impl Presence {
         let state = format!("{artist}");
 
         let mut activity = activity::Activity::new()
+            .name(artist)
             .details(title)
             .state(&state)
             .status_display_type(activity::StatusDisplayType::State)
@@ -78,6 +79,7 @@ impl Presence {
     ) -> Result<(), Box<dyn std::error::Error>> {
         let state = format!("{artist} • Paused");
         let mut activity = activity::Activity::new()
+            .name(artist)
             .details(title)
             .state(&state)
             .status_display_type(activity::StatusDisplayType::State)
