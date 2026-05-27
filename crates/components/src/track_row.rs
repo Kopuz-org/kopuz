@@ -9,6 +9,7 @@ use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::PlayerController;
 use reader::models::Track;
+use config::MusicSource;
 
 #[component]
 pub fn TrackRow(
@@ -90,13 +91,20 @@ pub fn TrackRow(
     }
 
     let has_download = on_download.is_some();
+    let is_server = config.read().active_source == MusicSource::Server;
+
     if has_download {
         let (dl_label, dl_icon) = if is_downloading {
             ("Downloading...", "fa-solid fa-spinner fa-spin")
         } else if is_downloaded {
             ("Remove Download", "fa-solid fa-trash-can")
-        } else {
+        } else if is_server {
             ("Download Offline", "fa-solid fa-download")
+        } else {
+            // TODO: Please tell me what should I put here
+            // because the compiler won't stop crying to put an `else` block here
+            // for god knows why??????
+            ("", "")
         };
         let mut action = MenuAction::new(dl_label, dl_icon);
         if is_downloaded {
