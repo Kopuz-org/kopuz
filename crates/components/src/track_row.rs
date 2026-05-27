@@ -372,9 +372,11 @@ pub fn TrackRow(
                                     on_close_menu.call(());
                                     return;
                                 }
-                                if let Some(queue_idx) = add_to_queue_idx {
-                                    if idx == queue_idx {
-                                        if let Some(handler) = on_queue { handler.call(()); }
+                                if let Some(queue_idx) = add_to_queue_idx
+                                    && idx == queue_idx
+                                {
+                                    if let Some(handler) = on_queue {
+                                        handler.call(());
                                         return;
                                     }
                                 }

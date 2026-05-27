@@ -33,7 +33,7 @@ pub async fn sleep(duration: std::time::Duration) {
 fn format_artwork_url_impl(path: Option<&impl AsRef<Path>>, size: Option<u32>) -> Option<CoverUrl> {
     let p = match path {
         Some(p) => p.as_ref(),
-        None => return Some(default_cover_url()),
+        None => return None,
     };
     let p_str = p.to_string_lossy();
 

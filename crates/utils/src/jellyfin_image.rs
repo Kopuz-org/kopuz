@@ -100,18 +100,16 @@ pub fn track_cover_url_with_album_fallback(
             return Some(url);
         }
 
-        if !can_build_remote {
-            return None;
+        if can_build_remote {
+            return Some(jellyfin_image_url(
+                server_url,
+                id,
+                Some(tag),
+                access_token,
+                max_width,
+                quality,
+            ));
         }
-
-        return Some(jellyfin_image_url(
-            server_url,
-            id,
-            Some(tag),
-            access_token,
-            max_width,
-            quality,
-        ));
     }
 
     if !album_id_str.is_empty()
@@ -127,18 +125,16 @@ pub fn track_cover_url_with_album_fallback(
             return Some(url);
         }
 
-        if !can_build_remote {
-            return None;
+        if can_build_remote {
+            return Some(jellyfin_image_url(
+                server_url,
+                album_item_id,
+                album_tag,
+                access_token,
+                max_width,
+                quality,
+            ));
         }
-
-        return Some(jellyfin_image_url(
-            server_url,
-            album_item_id,
-            album_tag,
-            access_token,
-            max_width,
-            quality,
-        ));
     }
 
     if let Some((id, _)) = parse_jellyfin_path(track_path_str) {
