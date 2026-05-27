@@ -136,7 +136,7 @@ search_placeholder = Поиск артистов, альбомов или тре
 no_results_found = По запросу "{ $query }" ничего не найдено
 listenbrainz_token_placeholder = Введите ваш токен ListenBrainz
 lastfm_api_key_placeholder = Введите ваш API-ключ Last.fm
-lastfm_api_secret_placeholder = Введите ваш секретный API-ключ Last.fm
+lastfm_api_secret_placeholder = Введите ваш API-секрет Last.fm
 
 # Empty States
 album_not_found = Альбом не найден
