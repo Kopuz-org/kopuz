@@ -409,15 +409,16 @@ pub fn TrackRow(
     } else {
         COLUMNS_NORMAL
     };
+    let column_gap = if cfg!(target_os = "android") { "0.5rem" } else { "1.5rem" };
 
     // normal UI
     return rsx! {
         div {
             class: "track-row-draggable grid items-center h-14 p-2 rounded-lg hover:bg-white/5 group transition-colors relative select-none cursor-grab active:cursor-grabbing",
             style: if is_currently_playing {
-                format!("grid-template-columns: {columns_normal}; column-gap: 1.5rem; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent); box-shadow: {selection_shadow};")
+                format!("grid-template-columns: {columns_normal}; column-gap: {column_gap}; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent); box-shadow: {selection_shadow};")
             } else {
-                format!("grid-template-columns: {columns_normal}; column-gap: 1.5rem; box-shadow: {selection_shadow};")
+                format!("grid-template-columns: {columns_normal}; column-gap: {column_gap}; box-shadow: {selection_shadow};")
             },
             draggable: "false",
             onclick: move |evt| {

@@ -118,7 +118,7 @@ pub fn Header(
         rsx! {
             div { class: "flex items-center mb-2",
                   div {
-                      class: "grid flex-1 gap-6 px-2 py-2 border-b border-white/10 text-sm font-medium text-white/50 uppercase tracking-wider items-center",
+                      class: if cfg!(target_os = "android") { "grid flex-1 gap-2 px-2 py-2 border-b border-white/10 text-sm font-medium text-white/50 uppercase tracking-wider items-center" } else { "grid flex-1 gap-6 px-2 py-2 border-b border-white/10 text-sm font-medium text-white/50 uppercase tracking-wider items-center" },
                       style: "grid-template-columns: {columns_normal};",
                       div { class: "flex justify-center items-center h-6 shrink-0",
                             if is_selection_mode {

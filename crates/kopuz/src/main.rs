@@ -1832,7 +1832,7 @@ fn App() -> Element {
                 }
                 div {
                     id: "main-scroll-area",
-                    class: "flex-1 overflow-y-auto",
+                    class: if cfg!(target_os = "android") { "flex-1 min-h-0 flex flex-col overflow-hidden relative" } else { "flex-1 overflow-y-auto" },
                     onscroll: move |evt| {
                         let pos = evt.scroll_top();
                         scroll_positions.write().insert(*current_route.peek(), pos);
@@ -1858,7 +1858,7 @@ fn App() -> Element {
                                 _ => i18n::t("home"),
                             };
                             rsx! {
-                                div { class: "sticky top-0 z-[60] bg-black/60 backdrop-blur-2xl border-b border-white/5 pt-[env(safe-area-inset-top)] flex items-center h-[calc(env(safe-area-inset-top)_+_2.75rem)] px-3 shadow-xl",
+                                div { class: "shrink-0 z-[60] bg-black/60 backdrop-blur-2xl border-b border-white/5 pt-[env(safe-area-inset-top)] flex items-center h-[calc(env(safe-area-inset-top)_+_2.75rem)] px-3 shadow-xl",
                                     if is_details {
                                         button {
                                             class: "w-10 h-10 flex items-center justify-center rounded-xl bg-white/5 text-white active:scale-95 transition-all border border-white/10",
@@ -1891,6 +1891,7 @@ fn App() -> Element {
                         }
                     }
 
+                    div { class: if cfg!(target_os = "android") { "relative flex-1 min-h-0 overflow-y-auto" } else { "contents" },
                     match *current_route.read() {
                         Route::Home => rsx! {
                             pages::home::Home {
@@ -2052,6 +2053,7 @@ fn App() -> Element {
                         Route::Settings => rsx! { pages::settings::Settings { config } },
                         #[cfg(not(target_os = "android"))]
                         Route::ThemeEditor => rsx! { pages::theme_editor::ThemeEditorPage { config } },
+                    }
                     }
                 }
                 Rightbar {

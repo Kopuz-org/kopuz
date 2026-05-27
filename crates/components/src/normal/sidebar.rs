@@ -67,7 +67,6 @@ const TOP_MENU: &[SidebarItem] = &[
     },
 ];
 
-// Android: same menu as desktop minus the yt-dlp downloader (no Route::Ytdlp there).
 #[cfg(target_os = "android")]
 const TOP_MENU: &[SidebarItem] = &[
     SidebarItem {
@@ -291,7 +290,6 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
             class: "{root_class}",
             style: "{root_style}",
 
-            // Mobile drawer header (clears the status bar via safe-area inset).
             if is_android {
                 div {
                     class: "flex items-center justify-between px-5 border-b border-white/5 bg-white/5 shrink-0",

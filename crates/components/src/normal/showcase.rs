@@ -76,6 +76,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     } else {
         COLUMNS_NORMAL
     };
+    let column_gap = if cfg!(target_os = "android") { "0.5rem" } else { "1.5rem" };
 
     let scroll_stat = use_signal(|| 0.0_f64);
     let container_height = use_signal(|| 0.0_f64);
@@ -285,7 +286,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                              class: "flex-1 min-w-0",
                                              div {
                                                  class: "grid items-center p-2 rounded-lg hover:bg-white/5 group transition-colors relative select-none",
-                                                 style: format!("grid-template-columns: {columns}; column-gap: 1.5rem;"),
+                                                 style: format!("grid-template-columns: {columns}; column-gap: {column_gap};"),
                                                  i { class: "fa-solid fa-compact-disc text-center" }
                                                  p { "Disc {track.disc_number.unwrap_or(1)}" }
                                              }
