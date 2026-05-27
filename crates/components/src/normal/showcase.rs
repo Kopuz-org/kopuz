@@ -76,6 +76,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     } else {
         COLUMNS_NORMAL
     };
+    let column_gap = if cfg!(target_os = "android") { "0.5rem" } else { "1.5rem" };
 
     let scroll_stat = use_signal(|| 0.0_f64);
     let container_height = use_signal(|| 0.0_f64);
@@ -92,8 +93,8 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
          div {
              class: "select-none flex-1 min-h-0 flex flex-col w-full",
              div {
-                 class: "flex flex-col md:flex-row items-end gap-8 mb-12 shrink-0",
-                 div { class: "w-64 h-64 rounded-xl bg-stone-800 overflow-hidden relative flex-shrink-0",
+                 class: if cfg!(target_os = "android") { "flex flex-col items-center text-center gap-4 mb-6 shrink-0" } else { "flex flex-col md:flex-row items-end gap-8 mb-12 shrink-0" },
+                 div { class: if cfg!(target_os = "android") { "w-44 h-44 rounded-xl bg-stone-800 overflow-hidden relative flex-shrink-0" } else { "w-64 h-64 rounded-xl bg-stone-800 overflow-hidden relative flex-shrink-0" },
                      if let Some(url) = &props.cover_url {
                          img { src: "{url.as_ref()}", class: "w-full h-full object-cover" }
                      } else {
@@ -117,8 +118,8 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                      if !props.description.is_empty() {
                          h5 { class: "text-sm font-bold tracking-widest text-white/60 uppercase mb-2", "{props.description}" }
                      }
-                     h1 { class: "text-5xl md:text-7xl font-bold text-white mb-6", "{props.name}" }
-                     div { class: "flex items-center gap-6 text-slate-400",
+                     h1 { class: if cfg!(target_os = "android") { "text-3xl font-bold text-white mb-3" } else { "text-5xl md:text-7xl font-bold text-white mb-6" }, "{props.name}" }
+                     div { class: if cfg!(target_os = "android") { "flex items-center justify-center gap-4 text-slate-400" } else { "flex items-center gap-6 text-slate-400" },
                          {
                             let count = props.tracks.len();
                             let song_text = i18n::t_with("showcase_song_count", &[("count", count.to_string())]);
@@ -285,7 +286,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                              class: "flex-1 min-w-0",
                                              div {
                                                  class: "grid items-center p-2 rounded-lg hover:bg-white/5 group transition-colors relative select-none",
-                                                 style: format!("grid-template-columns: {columns}; column-gap: 1.5rem;"),
+                                                 style: format!("grid-template-columns: {columns}; column-gap: {column_gap};"),
                                                  i { class: "fa-solid fa-compact-disc text-center" }
                                                  p { "Disc {track.disc_number.unwrap_or(1)}" }
                                              }

@@ -527,13 +527,15 @@ pub fn JellyfinAlbumDetails(
                 }
             }
 
-            div { class: "shrink-0",
-                div { class: "flex items-center justify-between mb-8",
-                    button {
-                        class: "flex items-center gap-2 text-slate-400 hover:text-white transition-colors",
-                        onclick: move |_| on_close.call(()),
-                        i { class: "fa-solid fa-arrow-left" }
-                        "{i18n::t(\"back_to_albums\")}"
+            if !cfg!(target_os = "android") {
+                div { class: "shrink-0",
+                    div { class: "flex items-center justify-between mb-8",
+                        button {
+                            class: "flex items-center gap-2 text-slate-400 hover:text-white transition-colors",
+                            onclick: move |_| on_close.call(()),
+                            i { class: "fa-solid fa-arrow-left" }
+                            "{i18n::t(\"back_to_albums\")}"
+                        }
                     }
                 }
             }

@@ -57,3 +57,9 @@ windows = { version = "0.62", features = [
 ] }
 tokio = { workspace = true, features = ["full"] }
 reqwest = { workspace = true, features = ["blocking"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+jni = "0.21"
+ndk-context = "0.1"
+tokio = { workspace = true, features = ["full"] }
+base64 = "0.22"

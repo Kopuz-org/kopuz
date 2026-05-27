@@ -165,7 +165,7 @@ pub fn LocalLibrary(
     let is_modern = config.read().ui_style == UiStyle::Modern;
     rsx! {
         div {
-            class: if is_modern { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
+            class: if cfg!(target_os = "android") { "px-3 pt-3 absolute inset-0 flex flex-col overflow-x-hidden" } else if is_modern { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
             if *show_playlist_modal.read() {
                 PlaylistModal {
                     playlist_store,
@@ -278,7 +278,7 @@ pub fn LocalLibrary(
                 }
             }
             div {
-                class: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-12",
+                class: if cfg!(target_os = "android") { "grid grid-cols-4 gap-2 mb-4" } else { "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-12" },
                 {
                     let lib = library.read();
                     let album_count = lib
@@ -361,7 +361,7 @@ pub fn LocalLibrary(
             Header { is_modern: is_modern, is_album: false }
             VirtualScrollView {
                 id: "library-scroll".to_string(),
-                class: "flex-1 overflow-y-auto pb-20".to_string(),
+                class: if cfg!(target_os = "android") { "flex-1 overflow-y-auto overflow-x-hidden pb-20".to_string() } else { "flex-1 overflow-y-auto pb-20".to_string() },
                 scroll_stat,
                 container_height,
                 item_height: ITEM_HEIGHT,

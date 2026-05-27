@@ -159,6 +159,9 @@ pub fn LocalPlaylists(
             if let Some(ref folder) = open_folder {
                 div {
                     div { class: "flex items-center gap-3 mb-8",
+                        // Rendered on all platforms: the folder view is component-local
+                        // state the Android top-header back button doesn't reach, so
+                        // without this control there'd be no way out of an open folder.
                         button {
                             class: "flex items-center gap-2 text-slate-400 hover:text-white transition-colors",
                             onclick: move |_| open_folder_id.set(None),

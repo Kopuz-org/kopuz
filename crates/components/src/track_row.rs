@@ -179,6 +179,9 @@ pub fn TrackRow(
                     }
                     if is_selection_mode {
                         handle_select_click(is_selected, is_selection_mode, on_select);
+                    } else if cfg!(target_os = "android") {
+                        // Mobile: a single tap plays (no double-click).
+                        on_play.call(());
                     }
                 },
                 draggable: "false",
@@ -294,7 +297,13 @@ pub fn TrackRow(
                             move |evt: MouseEvent| {
                                 evt.stop_propagation();
                                 if !is_selection_mode {
-                                    nav_ctrl.navigate_to_album(album_id.clone());
+                                    // Mobile: tapping the title plays the track instead of
+                                    // navigating to the album.
+                                    if cfg!(target_os = "android") {
+                                        on_play.call(());
+                                    } else {
+                                        nav_ctrl.navigate_to_album(album_id.clone());
+                                    }
                                 }
                             }
                         },
@@ -400,15 +409,16 @@ pub fn TrackRow(
     } else {
         COLUMNS_NORMAL
     };
+    let column_gap = if cfg!(target_os = "android") { "0.5rem" } else { "1.5rem" };
 
     // normal UI
     return rsx! {
         div {
             class: "track-row-draggable grid items-center h-14 p-2 rounded-lg hover:bg-white/5 group transition-colors relative select-none cursor-grab active:cursor-grabbing",
             style: if is_currently_playing {
-                format!("grid-template-columns: {columns_normal}; column-gap: 1.5rem; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent); box-shadow: {selection_shadow};")
+                format!("grid-template-columns: {columns_normal}; column-gap: {column_gap}; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent); box-shadow: {selection_shadow};")
             } else {
-                format!("grid-template-columns: {columns_normal}; column-gap: 1.5rem; box-shadow: {selection_shadow};")
+                format!("grid-template-columns: {columns_normal}; column-gap: {column_gap}; box-shadow: {selection_shadow};")
             },
             draggable: "false",
             onclick: move |evt| {
@@ -417,7 +427,12 @@ pub fn TrackRow(
                     long_press_occurred.set(false);
                     return;
                 }
-                handle_select_click(is_selected, is_selection_mode, on_select);
+                if !is_selection_mode && cfg!(target_os = "android") {
+                    // Mobile: a single tap plays (no double-click).
+                    on_play.call(());
+                } else {
+                    handle_select_click(is_selected, is_selection_mode, on_select);
+                }
             },
             ondoubleclick: move |evt| {
                 evt.stop_propagation();
@@ -537,7 +552,13 @@ pub fn TrackRow(
                         move |evt: MouseEvent| {
                             evt.stop_propagation();
                             if !is_selection_mode {
-                                nav_ctrl.navigate_to_album(album_id.clone());
+                                // Mobile: tapping the title plays the track instead of
+                                // navigating to the album.
+                                if cfg!(target_os = "android") {
+                                    on_play.call(());
+                                } else {
+                                    nav_ctrl.navigate_to_album(album_id.clone());
+                                }
                             }
                         }
                     },

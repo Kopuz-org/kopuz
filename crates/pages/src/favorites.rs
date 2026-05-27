@@ -27,7 +27,7 @@ pub fn FavoritesPage(
 
     rsx! {
         div {
-            class: if is_modern { "px-6 pt-6 pb-24 min-h-full" } else { "p-8 min-h-full" },
+            class: if cfg!(target_os = "android") { "px-4 pt-2 pb-28 min-h-full" } else if is_modern { "px-6 pt-6 pb-24 min-h-full" } else { "p-8 min-h-full" },
 
             if is_modern {
                 div { class: "mb-6",
