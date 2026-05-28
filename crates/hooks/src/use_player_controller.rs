@@ -736,7 +736,7 @@ impl PlayerController {
                                     let scrobble_cfg = cfg_signal;
                                     let scrobble_id = id.clone();
                                     let duration_secs = scrobble_track.duration;
-                                    let threshold_secs = std::cmp::min(240, (duration_secs / 2));
+                                    let threshold_secs = std::cmp::min(240, duration_secs / 2);
 
                                     spawn(async move {
                                         // track must be longer than 30 seconds
@@ -1341,7 +1341,7 @@ impl PlayerController {
                             let scrobble_track = track.clone();
 
                             let duration_secs = scrobble_track.duration;
-                            let threshold_secs = std::cmp::min(240, (duration_secs / 2));
+                            let threshold_secs = std::cmp::min(240, duration_secs / 2);
 
                             spawn(async move {
                                 // track must be longer than 30 seconds

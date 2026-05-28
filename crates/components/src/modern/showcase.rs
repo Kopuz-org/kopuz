@@ -5,7 +5,7 @@ use hooks::use_player_controller::PlayerController;
 use crate::NavigationController;
 use crate::constants::{COLUMNS_MODERN, COLUMNS_MODERN_ALBUM};
 use crate::header::Header;
-use crate::showcase::{self, ShowcaseProps, SortField};
+use crate::showcase::{self, ShowcaseProps};
 use crate::track_row::TrackRow;
 use std::collections::HashSet;
 
@@ -13,13 +13,13 @@ use std::collections::HashSet;
 pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
     let mut ctrl = use_context::<PlayerController>();
     let config = use_context::<Signal<AppConfig>>();
-    let nav_ctrl = use_context::<NavigationController>();
+    let _nav_ctrl = use_context::<NavigationController>();
 
     let total_seconds: u64 = props.tracks.iter().map(|t| t.duration).sum();
     let duration_min = total_seconds / 60;
 
     let offline_tracks = config.read().offline_tracks.clone();
-    let fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
+    let _fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
     let sort_state = use_signal(|| None);
     let indexed_tracks: Vec<_> = props
         .tracks

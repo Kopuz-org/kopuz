@@ -17,6 +17,7 @@ use player::systemint::set_background_handler;
 use player::systemint::set_tokio_waker;
 
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 enum BgCmd {
     Play,
     Pause,
@@ -48,6 +49,7 @@ fn init_bg_channel() {
     BG_NOTIFY.get_or_init(tokio::sync::Notify::new);
 }
 
+#[allow(dead_code)]
 fn send_bg_cmd(cmd: BgCmd) {
     if let Some(lock) = BG_CMD_TX.get()
         && let Ok(tx) = lock.lock()
