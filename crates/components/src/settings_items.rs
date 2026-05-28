@@ -4,6 +4,7 @@ use config::{
 };
 use dioxus::prelude::*;
 #[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use rfd::AsyncFileDialog;
 use scrobble::lastfm;
 
@@ -134,7 +135,7 @@ pub fn MultiDirectoryPicker(
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 #[component]
 fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -> Element {
     rsx! {
@@ -145,6 +146,37 @@ fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -
                         on_add.call(handle.path().to_path_buf());
                     }
                 });
+            },
+            class: "bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start",
+            "{add_text}"
+        }
+    }
+}
+
+// Android has no native folder dialog (rfd doesn't work), so request storage permission
+// and auto-detect the system Music directory via JNI, falling back to common paths.
+#[cfg(target_os = "android")]
+#[component]
+fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -> Element {
+    rsx! {
+        button {
+            onclick: move |_| {
+                player::systemint::request_permissions();
+                let mut paths = Vec::new();
+                if let Some(android_music) = player::systemint::get_android_music_dir() {
+                    paths.push(std::path::PathBuf::from(android_music));
+                }
+                paths.push(std::path::PathBuf::from("/storage/emulated/0/Music"));
+                paths.push(std::path::PathBuf::from("/sdcard/Music"));
+                if let Ok(home) = std::env::var("HOME") {
+                    paths.push(std::path::PathBuf::from(home).join("Music"));
+                }
+                for path in paths {
+                    if path.exists() {
+                        on_add.call(path);
+                        break;
+                    }
+                }
             },
             class: "bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start",
             "{add_text}"
@@ -249,6 +281,47 @@ pub fn ServerSettings(
 
 #[component]
 pub fn DiscordPresenceSettings(enabled: bool, on_change: EventHandler<bool>) -> Element {
+    let slider_style = if enabled {
+        "inset-inline-start: 4px; width: calc(50% - 4px);"
+    } else {
+        "inset-inline-start: calc(50% + 2px); width: calc(50% - 4px);"
+    };
+
+    let enable_class = if enabled {
+        "text-white"
+    } else {
+        "text-slate-500 hover:text-slate-300"
+    };
+
+    let disable_class = if !enabled {
+        "text-white"
+    } else {
+        "text-slate-500 hover:text-slate-300"
+    };
+
+    rsx! {
+        div {
+            class: "bg-white/5 p-1 rounded-xl flex relative h-10 items-center border border-white/5 w-48",
+            div {
+                class: "absolute h-8 bg-white/10 rounded-lg transition-all duration-300 ease-out",
+                style: "{slider_style}"
+            }
+            button {
+                class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 cursor-pointer {enable_class}",
+                onclick: move |_| on_change.call(true),
+                "{i18n::t(\"enabled\")}"
+            }
+            button {
+                class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 cursor-pointer {disable_class}",
+                onclick: move |_| on_change.call(false),
+                "{i18n::t(\"disabled\")}"
+            }
+        }
+    }
+}
+
+#[component]
+pub fn DiscordPresencePausedSettings(enabled: bool, on_change: EventHandler<bool>) -> Element {
     let slider_style = if enabled {
         "inset-inline-start: 4px; width: calc(50% - 4px);"
     } else {

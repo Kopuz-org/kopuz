@@ -55,6 +55,10 @@ pub struct Library {
     pub server_artist_images: std::collections::HashMap<String, String>,
     #[serde(default)]
     pub local_artist_images: std::collections::HashMap<String, PathBuf>,
+    /// User-set custom artist photos, keyed by normalized (trim+lowercase) artist name.
+    /// Overrides both local_artist_images and server_artist_images when present.
+    #[serde(default)]
+    pub custom_artist_images: std::collections::HashMap<String, PathBuf>,
 }
 
 fn deserialize_root_paths<'de, D>(deserializer: D) -> Result<Vec<PathBuf>, D::Error>

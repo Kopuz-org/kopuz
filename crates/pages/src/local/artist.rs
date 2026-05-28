@@ -74,6 +74,15 @@ pub fn LocalArtist(
                 artist_map.insert(normalized, (display_name, Some(image_path.clone())));
             }
         }
+        // Custom artist photos override both album cover and local_artist_images.
+        for (artist, image_path) in &lib.custom_artist_images {
+            let normalized = normalize_artist_key(artist);
+            let display_name = artist_map
+                .get(&normalized)
+                .map(|(display_name, _)| display_name.clone())
+                .unwrap_or_else(|| artist.clone());
+            artist_map.insert(normalized, (display_name, Some(image_path.clone())));
+        }
         let mut artists: Vec<_> = artist_map.into_values().collect();
         artists.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
         artists
@@ -110,6 +119,15 @@ pub fn LocalArtist(
             return None;
         }
         let artist_lc = artist.to_lowercase();
+        // Custom artist photo overrides every other source, regardless of config.
+        if let Some(url) = lib
+            .custom_artist_images
+            .iter()
+            .find(|(name, _)| name.to_lowercase() == artist_lc)
+            .and_then(|(_, path)| utils::format_artwork_url(Some(path)))
+        {
+            return Some(url);
+        }
         if use_artist_photo {
             lib.local_artist_images
                 .iter()
@@ -479,6 +497,26 @@ pub fn LocalArtist(
                                 cover_url: artist_cover(),
                                 tracks: artist_tracks(),
                                 library,
+                                on_cover_click: move |_| {
+                                    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+                                    {
+                                        let artist = artist_name.peek().clone();
+                                        if artist.is_empty() {
+                                            return;
+                                        }
+                                        spawn(async move {
+                                            let file = rfd::AsyncFileDialog::new()
+                                                .add_filter("Images", &["jpg", "jpeg", "png", "webp"])
+                                                .pick_file()
+                                                .await;
+                                            if let Some(file) = file {
+                                                let path = file.path().to_path_buf();
+                                                let key = normalize_artist_key(&artist);
+                                                library.write().custom_artist_images.insert(key, path);
+                                            }
+                                        });
+                                    }
+                                },
                                 active_track: active_menu_track.read().clone(),
                                 is_selection_mode: is_selection_mode(),
                                 selected_tracks: selected_tracks.read().clone(),

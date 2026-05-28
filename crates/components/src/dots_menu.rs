@@ -29,10 +29,8 @@ pub struct DotsMenuProps {
     pub is_open: bool,
     pub on_open: EventHandler<()>,
     pub on_close: EventHandler<()>,
-    /// Extra classes on the trigger button (e.g. opacity control)
     #[props(default)]
     pub button_class: String,
-    /// Where to anchor the dropdown: "right" (default) or "left"
     #[props(default = "right".to_string())]
     pub anchor: String,
 }
@@ -68,7 +66,6 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
             }
 
             if props.is_open {
-                // Backdrop to close on outside click
                 div {
                     class: "fixed inset-0 dots-menu-backdrop",
                     onclick: move |evt| {
@@ -77,7 +74,6 @@ pub fn DotsMenu(props: DotsMenuProps) -> Element {
                     }
                 }
 
-                // Dropdown panel
                 div {
                     class: "absolute {dropdown_align} top-full mt-1 w-auto bg-neutral-900 border border-white/10 rounded-lg dots-menu-panel py-1 shadow-xl",
                     onclick: move |evt| evt.stop_propagation(),

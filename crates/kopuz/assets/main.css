@@ -24,8 +24,12 @@
 }
 
 @keyframes scan-slide {
-    0% { transform: translateX(-100%); }
-    100% { transform: translateX(400%); }
+    0% {
+        transform: translateX(-100%);
+    }
+    100% {
+        transform: translateX(400%);
+    }
 }
 
 .animate-scan {
@@ -75,11 +79,11 @@ body {
     background-color: #000000;
     color: #ffffff;
     font-family:
-        "JetBrains Mono", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif, "nasin-nanpa";
+        "JetBrains Mono", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif,
+        "nasin-nanpa";
     margin: 0;
     overflow: hidden;
 }
-
 
 #hero {
     margin: 0;
@@ -176,8 +180,10 @@ body {
     font-family: inherit;
     transition-property: border-color, background-color;
     transition-duration: var(--default-transition-duration, 150ms);
-    transition-timing-function: var(--default-transition-timing-function,
-            cubic-bezier(0.4, 0, 0.2, 1));
+    transition-timing-function: var(
+        --default-transition-timing-function,
+        cubic-bezier(0.4, 0, 0.2, 1)
+    );
 }
 
 .popup input:focus {
@@ -216,8 +222,10 @@ body {
     cursor: pointer;
     transition-property: background-color, transform, color;
     transition-duration: var(--default-transition-duration, 150ms);
-    transition-timing-function: var(--default-transition-timing-function,
-            cubic-bezier(0.4, 0, 0.2, 1));
+    transition-timing-function: var(
+        --default-transition-timing-function,
+        cubic-bezier(0.4, 0, 0.2, 1)
+    );
     border: none;
 }
 
@@ -243,4 +251,30 @@ body {
 
 .popup .actions button:active {
     transform: scale(0.95);
+}
+
+html,
+body {
+    overflow-x: hidden;
+    max-width: 100vw;
+}
+
+[data-platform="android"],
+[data-platform="android"] * {
+    -webkit-user-select: none !important;
+    user-select: none !important;
+    -webkit-touch-callout: none !important;
+    -webkit-tap-highlight-color: transparent !important;
+}
+
+[data-platform="android"] input,
+[data-platform="android"] textarea,
+[data-platform="android"] [contenteditable="true"] {
+    -webkit-user-select: text !important;
+    user-select: text !important;
+}
+
+[data-platform="android"] {
+    overflow-x: hidden;
+    overscroll-behavior-x: none;
 }

@@ -154,6 +154,15 @@ pub fn JellyfinArtist(
                 }
             }
         }
+        // Custom artist photos override album cover and server-fetched images.
+        for name in artist_map.keys().cloned().collect::<Vec<_>>() {
+            let norm = name.trim().to_lowercase();
+            if let Some(path) = lib.custom_artist_images.get(&norm) {
+                if let Some(url) = utils::format_artwork_url(Some(path)) {
+                    artist_map.insert(name, Some(PathBuf::from(format!("directurl:{}", url))));
+                }
+            }
+        }
         let offline = *is_offline.read();
         let conf = config.read();
         let mut artists: Vec<_> = artist_map
@@ -213,6 +222,12 @@ pub fn JellyfinArtist(
         let artist = artist_name.read();
         if artist.is_empty() {
             return None;
+        }
+        // Custom artist photo overrides every other source, regardless of config.
+        if let Some(path) = lib.custom_artist_images.get(&artist.trim().to_lowercase()) {
+            if let Some(url) = utils::format_artwork_url(Some(path)) {
+                return Some(url);
+            }
         }
         if conf.artist_photo_source == ArtistPhotoSource::ArtistPhoto {
             let fetched = fetched_artist_images.read();
@@ -784,6 +799,26 @@ pub fn JellyfinArtist(
                                 cover_url: artist_cover(),
                                 tracks: artist_tracks(),
                                 library,
+                                on_cover_click: move |_| {
+                                    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+                                    {
+                                        let artist = artist_name.peek().clone();
+                                        if artist.is_empty() {
+                                            return;
+                                        }
+                                        spawn(async move {
+                                            let file = rfd::AsyncFileDialog::new()
+                                                .add_filter("Images", &["jpg", "jpeg", "png", "webp"])
+                                                .pick_file()
+                                                .await;
+                                            if let Some(file) = file {
+                                                let path = file.path().to_path_buf();
+                                                let key = artist.trim().to_lowercase();
+                                                library.write().custom_artist_images.insert(key, path);
+                                            }
+                                        });
+                                    }
+                                },
                                 active_track: active_menu_track.read().clone(),
                                 is_selection_mode: is_selection_mode(),
                                 selected_tracks: selected_tracks.read().clone(),

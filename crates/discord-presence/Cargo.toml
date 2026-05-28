@@ -11,5 +11,8 @@ serde_json.workspace = true
 tracing.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-discord-rich-presence.workspace = true
 reader.workspace = true
+
+# Discord IPC has no meaning on Android, so the real client is desktop-only.
+[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))'.dependencies]
+discord-rich-presence.workspace = true

@@ -13,7 +13,7 @@ struct SidebarItem {
     icon: &'static str,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 const TOP_MENU: &[SidebarItem] = &[
     SidebarItem {
         key: "home",
@@ -64,6 +64,55 @@ const TOP_MENU: &[SidebarItem] = &[
         key: "ytdlp",
         route: Route::Ytdlp,
         icon: "fa-solid fa-download",
+    },
+];
+
+#[cfg(target_os = "android")]
+const TOP_MENU: &[SidebarItem] = &[
+    SidebarItem {
+        key: "home",
+        route: Route::Home,
+        icon: "fa-solid fa-house",
+    },
+    SidebarItem {
+        key: "search",
+        route: Route::Search,
+        icon: "fa-solid fa-magnifying-glass",
+    },
+    SidebarItem {
+        key: "library",
+        route: Route::Library,
+        icon: "fa-solid fa-book",
+    },
+    SidebarItem {
+        key: "albums",
+        route: Route::Album,
+        icon: "fa-solid fa-music",
+    },
+    SidebarItem {
+        key: "artists",
+        route: Route::Artist,
+        icon: "fa-solid fa-user",
+    },
+    SidebarItem {
+        key: "playlists",
+        route: Route::Playlists,
+        icon: "fa-solid fa-list",
+    },
+    SidebarItem {
+        key: "favorites",
+        route: Route::Favorites,
+        icon: "fa-solid fa-heart",
+    },
+    SidebarItem {
+        key: "radio",
+        route: Route::Radio,
+        icon: "fa-solid fa-radio",
+    },
+    SidebarItem {
+        key: "activity",
+        route: Route::Activity,
+        icon: "fa-solid fa-chart-simple",
     },
 ];
 
@@ -128,6 +177,12 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
     let mut width = use_signal(|| 240);
     let mut is_collapsed = use_signal(|| false);
     let mut is_resizing = use_signal(|| false);
+
+    let is_android = cfg!(target_os = "android");
+    let fallback_collapse = use_signal(|| true);
+    let mut mobile_collapsed = try_consume_context::<crate::sidebar::SidebarCollapsed>()
+        .map(|c| c.0)
+        .unwrap_or(fallback_collapse);
 
     let current_width = if *is_collapsed.read() {
         72
@@ -197,6 +252,24 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
     let _item_count = ordered_items.len();
     let order_len = config.read().sidebar_order.len();
 
+    let root_class = if is_android {
+        "h-full bg-[#0a0a0a]/97 text-slate-400 flex flex-col flex-shrink-0 select-none relative border-r border-white/10 overflow-hidden transition-all duration-300 ease-out".to_string()
+    } else {
+        format!(
+            "h-full bg-black/40 text-slate-400 flex flex-col flex-shrink-0 select-none relative {border_side} border-white/5 {extra_padding}"
+        )
+    };
+    let root_style = if is_android {
+        if *mobile_collapsed.read() {
+            "position: fixed; left: 0; top: 0; z-index: 100; height: 100%; width: 0px;".to_string()
+        } else {
+            "position: fixed; left: 0; top: 0; z-index: 100; height: 100%; width: 280px;"
+                .to_string()
+        }
+    } else {
+        format!("width: {current_width}px")
+    };
+
     rsx! {
         if *is_resizing.read() {
             div {
@@ -206,9 +279,33 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
             }
         }
 
+        if is_android && !*mobile_collapsed.read() {
+            div {
+                class: "fixed inset-0 bg-black/80 backdrop-blur-[2px] z-[90]",
+                onclick: move |_| mobile_collapsed.set(true),
+            }
+        }
+
         div {
-            class: "h-full bg-black/40 text-slate-400 flex flex-col flex-shrink-0 select-none relative {border_side} border-white/5 {extra_padding}",
-            style: "width: {current_width}px",
+            class: "{root_class}",
+            style: "{root_style}",
+
+            if is_android {
+                div {
+                    class: "flex items-center justify-between px-5 border-b border-white/5 bg-white/5 shrink-0",
+                    style: "padding-top: max(env(safe-area-inset-top), 16px); padding-bottom: 16px;",
+                    h2 {
+                        class: "text-base font-bold tracking-widest text-white/90 uppercase",
+                        style: "font-family: 'JetBrains Mono', monospace;",
+                        "KOPUZ"
+                    }
+                    button {
+                        class: "p-2 rounded-xl bg-white/10 text-white active:scale-95 transition-all flex items-center justify-center border border-white/10 w-9 h-9",
+                        onclick: move |_| mobile_collapsed.set(true),
+                        i { class: "fa-solid fa-xmark text-base" }
+                    }
+                }
+            }
 
             if cfg!(all(not(target_arch = "wasm32"), target_os = "macos")) {
                 div {
@@ -265,7 +362,10 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
                             is_rtl,
                             can_move_up: idx > 0 && idx < order_len,
                             can_move_down: idx + 1 < order_len,
-                            onclick: move |_| props.on_navigate.call(item.route),
+                            onclick: move |_| {
+                                props.on_navigate.call(item.route);
+                                if is_android { mobile_collapsed.set(true); }
+                            },
                             on_move_up: move |_| {
                                 let mut order = config.peek().sidebar_order.clone();
                                 if idx > 0 {
@@ -291,7 +391,10 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
                             is_rtl,
                             can_move_up: false,
                             can_move_down: false,
-                            onclick: move |_| props.on_navigate.call(item.route),
+                            onclick: move |_| {
+                                props.on_navigate.call(item.route);
+                                if is_android { mobile_collapsed.set(true); }
+                            },
                             on_move_up: move |_| {},
                             on_move_down: move |_| {},
                         }

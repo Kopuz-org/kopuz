@@ -37,7 +37,7 @@ pub struct StreamDef {
     pub icon: Option<String>,
 }
 
-/// WebSocket OR REST
+/// WebSocket, REST, or Static metadata source
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum MetadataSourceDef {
@@ -45,6 +45,8 @@ pub enum MetadataSourceDef {
     WebSocket(WebSocketSourceDef),
     #[serde(rename = "rest")]
     Rest(RestSourceDef),
+    #[serde(rename = "static")]
+    Static(StaticSourceDef),
 }
 
 // Keep in minds that this wrote entirely for listen.moe, haven't tested with other providers that use websocket.
@@ -100,6 +102,51 @@ pub struct RestSourceDef {
     pub mapping: FieldMapping,
 }
 
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StaticSourceDef {
+    /// Fallback title shown for all streams that have no override.
+    pub title: String,
+    /// Fallback artist shown for all streams that have no override.
+    pub artist: String,
+    /// Optional fallback cover art URL (must be https://).
+    #[serde(default)]
+    pub cover_url: Option<String>,
+    /// Per-stream metadata overrides keyed by stream id.
+    #[serde(default)]
+    pub stream_overrides: HashMap<String, StaticStreamMeta>,
+}
+
+/// Per-stream static metadata override.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StaticStreamMeta {
+    pub title: String,
+    pub artist: String,
+    #[serde(default)]
+    pub cover_url: Option<String>,
+}
+
+impl StaticSourceDef {
+    /// Resolve the effective metadata for a given stream_id.
+    /// Returns the stream-specific override if present, otherwise falls back
+    /// to the top-level fields.
+    pub fn resolve(&self, stream_id: &str) -> (&str, &str, Option<&str>) {
+        if let Some(ov) = self.stream_overrides.get(stream_id) {
+            (
+                ov.title.as_str(),
+                ov.artist.as_str(),
+                ov.cover_url.as_deref().or(self.cover_url.as_deref()),
+            )
+        } else {
+            (
+                self.title.as_str(),
+                self.artist.as_str(),
+                self.cover_url.as_deref(),
+            )
+        }
+    }
+}
+
 /// User-defined paths to extract metadata from JSON responses
 /// Uses dot-notation: "song.title", "song.artists.0.name"
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,6 +181,12 @@ pub enum ManifestError {
     EmptyStreamId,
     #[error("Duplicate stream ID: {0}")]
     DuplicateStreamId(String),
+    #[error("Static metadata title cannot be empty")]
+    EmptyStaticTitle,
+    #[error("Static metadata artist cannot be empty")]
+    EmptyStaticArtist,
+    #[error("Static metadata cover_url must use https://. Invalid URL: {0}")]
+    InsecureStaticCoverUrl(String),
 }
 
 impl StationManifest {
@@ -198,6 +251,32 @@ impl StationManifest {
                     for url in rest.stream_url_map.values() {
                         if !url.starts_with("https://") {
                             return Err(ManifestError::InsecureUrl(url.clone()));
+                        }
+                    }
+                }
+                MetadataSourceDef::Static(static_def) => {
+                    if static_def.title.trim().is_empty() {
+                        return Err(ManifestError::EmptyStaticTitle);
+                    }
+                    if static_def.artist.trim().is_empty() {
+                        return Err(ManifestError::EmptyStaticArtist);
+                    }
+                    if let Some(url) = &static_def.cover_url {
+                        if !url.starts_with("https://") {
+                            return Err(ManifestError::InsecureStaticCoverUrl(url.clone()));
+                        }
+                    }
+                    for ov in static_def.stream_overrides.values() {
+                        if ov.title.trim().is_empty() {
+                            return Err(ManifestError::EmptyStaticTitle);
+                        }
+                        if ov.artist.trim().is_empty() {
+                            return Err(ManifestError::EmptyStaticArtist);
+                        }
+                        if let Some(url) = &ov.cover_url {
+                            if !url.starts_with("https://") {
+                                return Err(ManifestError::InsecureStaticCoverUrl(url.clone()));
+                            }
                         }
                     }
                 }
@@ -438,5 +517,139 @@ mod tests {
             }
             _ => panic!("expected Rest"),
         }
+    }
+
+    #[test]
+    fn test_static_simple() {
+        let json = r#"{
+            "schema_version": "1.0",
+            "id": "lofi_station",
+            "name": "Lo-Fi Chill",
+            "description": "24/7 lo-fi beats",
+            "streams": [
+                { "id": "main", "name": "Main", "url": "https://example.com/stream" }
+            ],
+            "metadata": {
+                "type": "static",
+                "title": "Lo-Fi Beats 24/7",
+                "artist": "Various Artists",
+                "cover_url": "https://example.com/cover.jpg"
+            }
+        }"#;
+
+        let manifest: StationManifest = serde_json::from_str(json).unwrap();
+        assert!(manifest.validate().is_ok());
+
+        match manifest.metadata.unwrap() {
+            MetadataSourceDef::Static(s) => {
+                assert_eq!(s.title, "Lo-Fi Beats 24/7");
+                assert_eq!(s.artist, "Various Artists");
+                assert_eq!(s.cover_url.as_deref(), Some("https://example.com/cover.jpg"));
+                assert!(s.stream_overrides.is_empty());
+
+                // resolve falls back to top-level for unknown stream
+                let (title, artist, cover) = s.resolve("main");
+                assert_eq!(title, "Lo-Fi Beats 24/7");
+                assert_eq!(artist, "Various Artists");
+                assert_eq!(cover, Some("https://example.com/cover.jpg"));
+            }
+            _ => panic!("expected Static"),
+        }
+    }
+
+    #[test]
+    fn test_static_with_stream_overrides() {
+        let json = r#"{
+            "schema_version": "1.0",
+            "id": "multi_lofi",
+            "name": "Multi Lo-Fi",
+            "description": "Several lo-fi streams",
+            "streams": [
+                { "id": "beats", "name": "Beats", "url": "https://example.com/beats" },
+                { "id": "jazz",  "name": "Jazz",  "url": "https://example.com/jazz"  }
+            ],
+            "metadata": {
+                "type": "static",
+                "title": "Lo-Fi Radio",
+                "artist": "Various Artists",
+                "stream_overrides": {
+                    "beats": {
+                        "title": "Lo-Fi Hip-Hop Beats",
+                        "artist": "Beats Collective",
+                        "cover_url": "https://example.com/beats-cover.jpg"
+                    },
+                    "jazz": {
+                        "title": "Jazz & Bossa Nova",
+                        "artist": "Jazz Ensemble"
+                    }
+                }
+            }
+        }"#;
+
+        let manifest: StationManifest = serde_json::from_str(json).unwrap();
+        assert!(manifest.validate().is_ok());
+
+        match manifest.metadata.unwrap() {
+            MetadataSourceDef::Static(s) => {
+                let (title, artist, cover) = s.resolve("beats");
+                assert_eq!(title, "Lo-Fi Hip-Hop Beats");
+                assert_eq!(artist, "Beats Collective");
+                assert_eq!(cover, Some("https://example.com/beats-cover.jpg"));
+
+                let (title, artist, cover) = s.resolve("jazz");
+                assert_eq!(title, "Jazz & Bossa Nova");
+                assert_eq!(artist, "Jazz Ensemble");
+                assert_eq!(cover, None);
+
+                // unknown stream falls back to top-level
+                let (title, artist, _) = s.resolve("unknown");
+                assert_eq!(title, "Lo-Fi Radio");
+                assert_eq!(artist, "Various Artists");
+            }
+            _ => panic!("expected Static"),
+        }
+    }
+
+    #[test]
+    fn test_static_validation_empty_title() {
+        let json = r#"{
+            "schema_version": "1.0",
+            "id": "bad",
+            "name": "Bad Station",
+            "description": "desc",
+            "streams": [{ "id": "main", "name": "Main", "url": "https://example.com/s" }],
+            "metadata": {
+                "type": "static",
+                "title": "   ",
+                "artist": "Someone"
+            }
+        }"#;
+        let manifest: StationManifest = serde_json::from_str(json).unwrap();
+        assert!(matches!(
+            manifest.validate(),
+            Err(ManifestError::EmptyStaticTitle)
+        ));
+    }
+
+    #[test]
+    fn test_static_validation_insecure_cover_url() {
+        let json = r#"{
+            "schema_version": "1.0",
+            "id": "bad",
+            "name": "Bad Station",
+            "description": "desc",
+            "streams": [{ "id": "main", "name": "Main", "url": "https://example.com/s" }],
+            "metadata": {
+                "type": "static",
+                "title": "Title",
+                "artist": "Artist",
+                "cover_url": "http://example.com/cover.jpg"
+            }
+        }"#;
+        let manifest: StationManifest = serde_json::from_str(json).unwrap();
+        assert!(matches!(
+            manifest.validate(),
+            Err(ManifestError::InsecureStaticCoverUrl(_))
+        ));
     }
 }

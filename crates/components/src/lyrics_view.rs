@@ -87,15 +87,16 @@ pub fn LyricsView(
 
                 loop {
                     let current_time = ctrl.displayed_progress_secs_f64();
+                    // Binary search to find the active line.
+                    // `partition_point(|t| t <= current_time)` returns the index of the first
+                    // timestamp greater than `current_time`.
+                    // Therefore `n - 1` is the last timestamp less than or equal to it.
+                    // If the result is 0, we are before the first line.
                     if let Some(current_line_index) =
-                        // Binary search to find the next line to display
-                        // `partition_point` returns the index of the first element that is greater or equal than `current_time`
-                        // so we subtract 1 to get the index of the last element that is less than to `current_time`.
-                        // 0 means that the first element is greater or equal than `current_time`, so we are before the first line.
-                        match times.partition_point(|&t| t < current_time) {
-                                0 => None,
-                                n => Some(n - 1),
-                            }
+                        match times.partition_point(|&t| t <= current_time) {
+                            0 => None,
+                            n => Some(n - 1),
+                        }
                     {
                         let _ = eval(&format!(
                             "window.__{layout}_updateLyrics({current_line_index})"

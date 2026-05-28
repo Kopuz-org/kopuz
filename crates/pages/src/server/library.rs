@@ -12,8 +12,10 @@ use kopuz_route::Route;
 use reader::Library;
 use std::collections::HashSet;
 use std::path::PathBuf;
+use components::virtual_scroll::{use_virtual_scroll, VirtualScrollView};
 
 const ITEM_HEIGHT: f64 = 60.0;
+
 #[component]
 pub fn JellyfinLibrary(
     mut library: Signal<Library>,
@@ -44,7 +46,6 @@ pub fn JellyfinLibrary(
     let mut show_playlist_modal = use_signal(|| false);
     let mut selected_track_for_playlist = use_signal(|| None::<PathBuf>);
 
-    // Multi-selection state
     let mut is_selection_mode = use_signal(|| false);
     let mut selected_tracks = use_signal(|| HashSet::<PathBuf>::new());
     let download_queue = use_context::<Signal<DownloadQueue>>();
@@ -130,61 +131,35 @@ pub fn JellyfinLibrary(
     });
 
     let queue_tracks = use_memo(move || {
-        displayed_tracks()
+        displayed_tracks
+            .read()
             .iter()
             .map(|(t, _)| t.clone())
             .collect::<Vec<_>>()
     });
 
-    let all_tracks = displayed_tracks();
-    let is_empty = all_tracks.is_empty();
-    let queue_source = std::sync::Arc::new(queue_tracks());
-    let mut container_height = use_signal(|| f64::NAN);
+    let queue_source = use_memo(move || {
+        std::sync::Arc::new(queue_tracks.read().clone())
+    });
+
+    let container_height = use_signal(|| 0.0_f64);
     let scroll_top = *scroll_stat.read();
-    let row_height = ITEM_HEIGHT;
-    let container_h = *container_height.read();
-    let window_size = if container_h.is_nan() {
-        0
-    } else {
-        (container_h / row_height).ceil() as usize
-    };
-    let buffer_size = 10000;
+
+    let all_tracks = displayed_tracks.read();
+    let is_empty = all_tracks.is_empty();
     let total_tracks = all_tracks.len();
 
-    let start_index = {
-        let max_start = total_tracks.saturating_sub(1);
-        let calc = (scroll_top - (buffer_size as f64) * row_height) / row_height;
-        (calc.floor().max(0.0) as usize).min(max_start)
-    };
-
-    let end_index = {
-        let last_index = start_index + 2 * buffer_size + window_size;
-        let last_index_inclusive = last_index.saturating_sub(1);
-        if total_tracks == 0 {
-            0
-        } else {
-            last_index_inclusive.min(total_tracks - 1)
-        }
-    };
-
-    let items_to_render = if total_tracks == 0 {
-        0
-    } else {
-        (end_index + 1).saturating_sub(start_index)
-    };
-
-    let top_pad = (start_index as f64) * row_height;
-
-    let bottom_pad = {
-        let total_height = (total_tracks as f64) * row_height;
-        let rendered_height = (items_to_render as f64) * row_height;
-        (total_height - rendered_height - top_pad).max(0.0)
-    };
+    let scroll_info = use_virtual_scroll(
+        scroll_top,
+        *container_height.read(),
+        total_tracks,
+        ITEM_HEIGHT,
+    );
 
     let currently_playing_idx: Option<usize> = {
         let queue = ctrl.queue.read();
         let q_idx = *ctrl.current_queue_index.read();
-        let qt = queue_tracks();
+        let qt = queue_tracks.read();
         if queue.len() == qt.len() && queue.iter().zip(qt.iter()).all(|(q, t)| q.path == t.path) {
             Some(q_idx)
         } else {
@@ -193,10 +168,10 @@ pub fn JellyfinLibrary(
     };
 
     let tracks_nodes = all_tracks
-        .into_iter()
+        .iter()
         .enumerate()
-        .skip(start_index)
-        .take(items_to_render)
+        .skip(scroll_info.start_index)
+        .take(scroll_info.items_to_render)
         .map(|(idx, (track, cover_url))| {
             let track_menu = track.clone();
             let track_add = track.clone();
@@ -204,88 +179,97 @@ pub fn JellyfinLibrary(
             let track_path = track.path.clone();
             let is_currently_playing = currently_playing_idx == Some(idx);
             let track_select = track.path.clone();
-            let queue_arc = std::sync::Arc::clone(&queue_source);
+            let queue_arc = queue_source.read().clone();
             let track_key = format!("{}-{}", track.path.display(), idx);
             let is_menu_open = active_menu_track.read().as_ref() == Some(&track.path);
             let is_selected = selected_tracks.read().contains(&track_path);
 
             let path_str = track.path.to_string_lossy().to_string();
             let item_id: String = path_str.split(':').nth(1).unwrap_or("").to_string();
-            let is_downloaded = if let Some(path_str) = config.read().offline_tracks.get(&item_id) {
-                std::path::Path::new(path_str).exists()
-            } else {
-                false
-            };
-            let is_downloading = download_queue.read().items.iter().any(|i| i.id == item_id && matches!(i.status, DownloadStatus::Queued | DownloadStatus::Downloading));
+            let is_downloaded =
+                if let Some(path_str) = config.read().offline_tracks.get(&item_id) {
+                    std::path::Path::new(path_str).exists()
+                } else {
+                    false
+                };
+            let is_downloading = download_queue.read().items.iter().any(|i| {
+                i.id == item_id
+                    && matches!(
+                        i.status,
+                        DownloadStatus::Queued | DownloadStatus::Downloading
+                    )
+            });
             let item_id_dl = item_id.clone();
             let track_title = track.title.clone();
             let track_artist = track.artist.clone();
 
             rsx! {
-                div {
-                    key: "{track_key}",
-                    style: "height: {ITEM_HEIGHT}px;",
-                TrackRow {
-                    track: track.clone(),
-                    cover_url: cover_url.clone(),
-                    row_num: Some(idx + 1),
-                    is_menu_open,
-                    is_album: false,
-                    is_currently_playing,
-                    is_selection_mode: is_selection_mode(),
-                    is_selected,
-                    is_downloaded,
-                    is_downloading,
-                    on_long_press: move |_| {
-                        is_selection_mode.set(true);
-                        selected_tracks.write().insert(track_path.clone());
-                    },
-                    on_select: move |selected| {
-                        if selected {
+                div { key: "{track_key}", style: "height: {ITEM_HEIGHT}px;",
+                    TrackRow {
+                        track: track.clone(),
+                        cover_url: cover_url.clone(),
+                        row_num: Some(idx + 1),
+                        is_menu_open,
+                        is_album: false,
+                        is_currently_playing,
+                        is_selection_mode: is_selection_mode(),
+                        is_selected,
+                        is_downloaded,
+                        is_downloading,
+                        on_long_press: move |_| {
                             is_selection_mode.set(true);
-                            selected_tracks.write().insert(track_select.clone());
-                        } else {
-                            selected_tracks.write().remove(&track_select);
-                            if selected_tracks.read().is_empty() {
-                                is_selection_mode.set(false);
+                            selected_tracks.write().insert(track_path.clone());
+                        },
+                        on_select: move |selected| {
+                            if selected {
+                                is_selection_mode.set(true);
+                                selected_tracks.write().insert(track_select.clone());
+                            } else {
+                                selected_tracks.write().remove(&track_select);
+                                if selected_tracks.read().is_empty() {
+                                    is_selection_mode.set(false);
+                                }
                             }
-                        }
-                    },
-                    on_click_menu: move |_| {
-                        if active_menu_track.read().as_ref() == Some(&track_menu.path) {
+                        },
+                        on_click_menu: move |_| {
+                            if active_menu_track.read().as_ref() == Some(&track_menu.path) {
+                                active_menu_track.set(None);
+                            } else {
+                                active_menu_track.set(Some(track_menu.path.clone()));
+                            }
+                        },
+                        on_add_to_playlist: move |_| {
+                            selected_track_for_playlist.set(Some(track_add.path.clone()));
+                            show_playlist_modal.set(true);
                             active_menu_track.set(None);
-                        } else {
-                            active_menu_track.set(Some(track_menu.path.clone()));
-                        }
-                    },
-                    on_add_to_playlist: move |_| {
-                        selected_track_for_playlist.set(Some(track_add.path.clone()));
-                        show_playlist_modal.set(true);
-                        active_menu_track.set(None);
-                    },
-                    on_queue: move |_| {
-                        ctrl.add_to_queue(vec![track_queue.clone()]);
-                        active_menu_track.set(None);
-                    },
-                    on_close_menu: move |_| active_menu_track.set(None),
-                    on_delete: move |_| active_menu_track.set(None),
-                    hide_delete: true,
-                    on_download: move |_| {
-                        if !is_downloaded {
+                        },
+                        on_queue: move |_| {
+                            ctrl.add_to_queue(vec![track_queue.clone()]);
                             active_menu_track.set(None);
-                            queue_downloads(
-                                vec![(item_id_dl.clone(), track_title.clone(), track_artist.clone())],
-                                config,
-                                download_queue,
-                            );
-                        }
-                    },
-                    on_play: move |_| {
-                        queue.set((*queue_arc).clone());
-                        ctrl.play_track(idx);
-                    },
+                        },
+                        on_close_menu: move |_| active_menu_track.set(None),
+                        on_delete: move |_| active_menu_track.set(None),
+                        hide_delete: true,
+                        on_download: move |_| {
+                            if !is_downloaded {
+                                active_menu_track.set(None);
+                                queue_downloads(
+                                    vec![(
+                                        item_id_dl.clone(),
+                                        track_title.clone(),
+                                        track_artist.clone(),
+                                    )],
+                                    config,
+                                    download_queue,
+                                );
+                            }
+                        },
+                        on_play: move |_| {
+                            queue.set((*queue_arc).clone());
+                            ctrl.play_track(idx);
+                        },
+                    }
                 }
-            }
             }
         });
 
@@ -293,8 +277,7 @@ pub fn JellyfinLibrary(
 
     rsx! {
         div {
-            class: if is_modern { "px-6 pt-6 pb-24 relative min-h-full flex flex-col" } else { "p-8 relative min-h-full flex flex-col" },
-
+            class: if cfg!(target_os = "android") { "px-3 pt-3 absolute inset-0 flex flex-col overflow-x-hidden" } else if is_modern { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
             if *show_playlist_modal.read() {
                 PlaylistModal {
                     playlist_store,
@@ -338,13 +321,17 @@ pub fn JellyfinLibrary(
                                                         .collect();
                                                     if parts.len() >= 2 {
                                                         let item_id = parts[1];
-                                                        let _ = remote.add_to_playlist(&pid, item_id).await;
+                                                        let _ =
+                                                            remote.add_to_playlist(&pid, item_id).await;
                                                     }
                                                 }
                                             }
                                             MusicService::Subsonic | MusicService::Custom => {
-                                                let remote =
-                                                    SubsonicClient::new(&server.url, user_id, token);
+                                                let remote = SubsonicClient::new(
+                                                    &server.url,
+                                                    user_id,
+                                                    token,
+                                                );
                                                 for path in selected_paths {
                                                     let parts: Vec<&str> = path
                                                         .to_str()
@@ -353,7 +340,8 @@ pub fn JellyfinLibrary(
                                                         .collect();
                                                     if parts.len() >= 2 {
                                                         let item_id = parts[1];
-                                                        let _ = remote.add_to_playlist(&pid, item_id).await;
+                                                        let _ =
+                                                            remote.add_to_playlist(&pid, item_id).await;
                                                     }
                                                 }
                                             }
@@ -386,7 +374,8 @@ pub fn JellyfinLibrary(
                                         let item_ids: Vec<String> = selected_paths
                                             .iter()
                                             .filter_map(|p| {
-                                                let parts: Vec<&str> = p.to_str()?.split(':').collect();
+                                                let parts: Vec<&str> =
+                                                    p.to_str()?.split(':').collect();
                                                 if parts.len() >= 2 {
                                                     Some(parts[1].to_string())
                                                 } else {
@@ -394,9 +383,9 @@ pub fn JellyfinLibrary(
                                                 }
                                             })
                                             .collect();
-
                                         if !item_ids.is_empty() {
-                                            let item_id_refs: Vec<&str> = item_ids.iter().map(|s| s.as_str()).collect();
+                                            let item_id_refs: Vec<&str> =
+                                                item_ids.iter().map(|s| s.as_str()).collect();
                                             match server.service {
                                                 MusicService::Jellyfin => {
                                                     let remote = JellyfinClient::new(
@@ -410,8 +399,11 @@ pub fn JellyfinLibrary(
                                                         .await;
                                                 }
                                                 MusicService::Subsonic | MusicService::Custom => {
-                                                    let remote =
-                                                        SubsonicClient::new(&server.url, user_id, token);
+                                                    let remote = SubsonicClient::new(
+                                                        &server.url,
+                                                        user_id,
+                                                        token,
+                                                    );
                                                     let _ = remote
                                                         .create_playlist(&playlist_name, &item_id_refs)
                                                         .await;
@@ -439,7 +431,8 @@ pub fn JellyfinLibrary(
                         if selected.is_empty() {
                             return;
                         }
-                        let tracks: Vec<_> = displayed_tracks.read()
+                        let tracks: Vec<_> = displayed_tracks
+                            .read()
                             .iter()
                             .filter(|(t, _)| selected.contains(&t.path))
                             .map(|(track, _)| track.clone())
@@ -460,12 +453,11 @@ pub fn JellyfinLibrary(
                     on_cancel: move |_| {
                         is_selection_mode.set(false);
                         selected_tracks.write().clear();
-                    }
+                    },
                 }
             }
 
-            div {
-                class: "flex items-center justify-between mb-6",
+            div { class: "flex items-center justify-between mb-6",
                 if is_modern {
                     div {
                         p {
@@ -486,8 +478,7 @@ pub fn JellyfinLibrary(
                 }
             }
 
-            div {
-                class: "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-12",
+            div { class: if cfg!(target_os = "android") { "grid grid-cols-4 gap-2 mb-4" } else { "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-12" },
                 {
                     let lib = library.read();
                     let (artist_count, album_count) = {
@@ -497,23 +488,45 @@ pub fn JellyfinLibrary(
                             artists.insert(&album.artist);
                             album_titles.insert(album.title.to_lowercase());
                         }
-                        for track in &lib.jellyfin_tracks { artists.insert(&track.artist); }
+                        for track in &lib.jellyfin_tracks {
+                            artists.insert(&track.artist);
+                        }
                         (artists.len(), album_titles.len())
                     };
                     rsx! {
-                        StatCard { label: i18n::t("tracks").to_string(),    value: "{lib.jellyfin_tracks.len()}",  icon: "fa-music" }
-                        StatCard { label: i18n::t("albums").to_string(),    value: "{album_count}",                icon: "fa-compact-disc" }
-                        StatCard { label: i18n::t("artists").to_string(),   value: "{artist_count}",               icon: "fa-user" }
-                        StatCard { label: i18n::t("playlists").to_string(), value: "{playlist_store.read().jellyfin_playlists.len()}", icon: "fa-list" }
+                        StatCard {
+                            label: i18n::t("tracks").to_string(),
+                            value: "{lib.jellyfin_tracks.len()}",
+                            icon: "fa-music",
+                        }
+                        StatCard {
+                            label: i18n::t("albums").to_string(),
+                            value: "{album_count}",
+                            icon: "fa-compact-disc",
+                        }
+                        StatCard {
+                            label: i18n::t("artists").to_string(),
+                            value: "{artist_count}",
+                            icon: "fa-user",
+                        }
+                        StatCard {
+                            label: i18n::t("playlists").to_string(),
+                            value: "{playlist_store.read().jellyfin_playlists.len()}",
+                            icon: "fa-list",
+                        }
                     }
                 }
             }
 
-            div {
-                class: "flex items-center justify-between mb-4",
+            div { class: "flex items-center justify-between mb-4",
                 div { class: "flex items-center gap-3",
                     button {
-                        class: if !is_empty && displayed_tracks().iter().all(|(track, _)| selected_tracks.read().contains(&track.path)) {
+                        class: if !is_empty
+                            && displayed_tracks
+                                .read()
+                                .iter()
+                                .all(|(track, _)| selected_tracks.read().contains(&track.path))
+                        {
                             "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
                         } else {
                             "w-4 h-4 rounded border border-white/20 bg-white/5 hover:border-white/50 transition-colors"
@@ -521,24 +534,32 @@ pub fn JellyfinLibrary(
                         aria_label: "Select all tracks",
                         disabled: is_empty,
                         onclick: move |_| {
-                            let tracks = displayed_tracks();
-                            let all_selected = !tracks.is_empty() && tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.path));
+                            let tracks = displayed_tracks.read();
+                            let all_selected = !tracks.is_empty()
+                                && tracks
+                                    .iter()
+                                    .all(|(track, _)| selected_tracks.read().contains(&track.path));
                             if all_selected {
                                 selected_tracks.write().clear();
                                 is_selection_mode.set(false);
                             } else {
-                                selected_tracks.set(tracks.into_iter().map(|(track, _)| track.path).collect());
+                                selected_tracks
+                                    .set(tracks.iter().map(|(track, _)| track.path.clone()).collect());
                                 is_selection_mode.set(true);
                             }
                         },
-                        if !is_empty && displayed_tracks().iter().all(|(track, _)| selected_tracks.read().contains(&track.path)) {
+                        if !is_empty
+                            && displayed_tracks
+                                .read()
+                                .iter()
+                                .all(|(track, _)| selected_tracks.read().contains(&track.path))
+                        {
                             i { class: "fa-solid fa-check", style: "font-size: 9px;" }
                         }
                     }
                     h2 { class: "text-xl font-semibold text-white/80", "{i18n::t(\"tracks\")}" }
                 }
-                div {
-                    class: "flex space-x-1 bg-white/5 border border-white/5 p-1 rounded-lg",
+                div { class: "flex space-x-1 bg-white/5 border border-white/5 p-1 rounded-lg",
                     button {
                         class: if *sort_order.read() == config::SortOrder::Title {
                             "px-3 py-1 text-xs rounded-md bg-white/10 text-white font-medium transition-all"
@@ -576,45 +597,31 @@ pub fn JellyfinLibrary(
                     "grid gap-6 px-2 py-2 border-b border-white/5 text-sm font-medium text-slate-500 mb-2 uppercase tracking-wider"
                 },
                 style: if is_modern {
-                    "grid-template-columns: 40px 1fr 180px 180px 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);"
+                    "grid-template-columns: 40px minmax(200px, 2fr) minmax(150px, 1fr) minmax(150px, 1fr) 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);"
                 } else {
-                    "grid-template-columns: 40px minmax(0, 1fr) 200px 200px 64px 40px; align-items: center;"
+                    "grid-template-columns: 40px minmax(200px, 2fr) minmax(150px, 1fr) minmax(150px, 1fr) 64px 40px; align-items: center;"
                 },
                 div {}
                 div { "{i18n::t(\"title\")}" }
                 div { "{i18n::t(\"artist\")}" }
                 div { "{i18n::t(\"album\")}" }
-                div { class: "text-right pr-2", i { class: "fa-regular fa-clock" } }
+                div { class: "text-right pr-2",
+                    i { class: "fa-regular fa-clock" }
+                }
                 div {}
             }
 
-            div {
-                id: "library-scroll",
-                class: "flex-1 overflow-y-auto pb-20",
-                onmounted: move |event| {
-                    spawn(async move {
-                        if let Ok(window) = event.get_client_rect().await {
-                            container_height.set(window.height());
-                        }
-                    });
-                    if saved_scroll > 0.0 {
-                        let _ = dioxus::document::eval(&format!(
-                            "let el = document.getElementById('library-scroll'); if (el) el.scrollTop = {saved_scroll};"
-                        ));
-                    }
-                },
-                onscroll: move |event| {
-                    let new_scroll = event.scroll_top();
-                    let old_row = (*scroll_stat.peek() / ITEM_HEIGHT).floor() as i64;
-                    let new_row = (new_scroll / ITEM_HEIGHT).floor() as i64;
-                    if new_row != old_row {
-                        scroll_stat.set(new_scroll);
-                    }
-                    scroll_positions.write().insert(Route::Library, new_scroll);
-                    let height = event.client_height() as f64;
-                    if (height - *container_height.peek()).abs() > 1.0 {
-                        container_height.set(height);
-                    }
+            VirtualScrollView {
+                id: "server-library-scroll".to_string(),
+                class: if cfg!(target_os = "android") { "flex-1 overflow-y-auto overflow-x-hidden pb-20".to_string() } else { "flex-1 overflow-y-auto pb-20".to_string() },
+                scroll_stat,
+                container_height,
+                item_height: ITEM_HEIGHT,
+                saved_scroll,
+                top_pad: scroll_info.top_pad,
+                bottom_pad: scroll_info.bottom_pad,
+                onscroll: move |scroll| {
+                    scroll_positions.write().insert(Route::Library, scroll);
                 },
                 if is_empty {
                     if *is_loading.read() {
@@ -625,9 +632,7 @@ pub fn JellyfinLibrary(
                         p { class: "text-slate-500 italic", "{i18n::t(\"no_tracks_found\")}" }
                     }
                 } else {
-                    div { style: "height: {top_pad}px; flex-shrink: 0;" }
-                    {tracks_nodes}
-                    div { style: "height: {bottom_pad}px; flex-shrink: 0;" }
+                    {tracks_nodes.into_iter()}
                     if *is_loading.read() {
                         div { class: "flex items-center justify-center py-4",
                             i { class: "fa-solid fa-spinner fa-spin text-xl text-white/20" }

@@ -191,6 +191,35 @@ pub fn use_player_task(ctrl: PlayerController) {
         }
     });
 
+    // Android routes media-notification button taps through a JNI callback (no event
+    // queue), so we register a background handler like macOS and let the shared loop
+    // drain the resulting BgCmds. Track finishing also wakes the loop for auto-advance.
+    #[cfg(target_os = "android")]
+    use_hook(move || {
+        let mut ctrl = ctrl;
+        init_bg_channel();
+
+        player::systemint::set_background_handler(move |event| {
+            use player::systemint::SystemEvent;
+            let cmd = match event {
+                SystemEvent::Play => BgCmd::Play,
+                SystemEvent::Pause => BgCmd::Pause,
+                SystemEvent::Toggle => BgCmd::Toggle,
+                SystemEvent::Next => BgCmd::Next,
+                SystemEvent::Prev => BgCmd::Prev,
+                SystemEvent::Stop => BgCmd::Pause,
+            };
+            send_bg_cmd(cmd);
+        });
+
+        ctrl.player.write().set_finish_callback(|| {
+            if let Some(notify) = BG_NOTIFY.get() {
+                notify.notify_one();
+            }
+            player::systemint::wake_run_loop();
+        });
+    });
+
     use_future(move || {
         let mut ctrl = ctrl;
         #[cfg(not(target_arch = "wasm32"))]
@@ -299,8 +328,14 @@ pub fn use_player_task(ctrl: PlayerController) {
                     }
                 }
 
-                #[cfg(not(target_arch = "wasm32"))]
+                // Android has no Discord; force-disable so the cover-art resolution and
+                // presence updates below are all skipped (the Presence context is None too).
+                #[cfg(target_os = "android")]
+                let discord_enabled = false;
+                #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
                 let discord_enabled = config.read().discord_presence.unwrap_or(true);
+                #[cfg(not(target_arch = "wasm32"))]
+                let discord_paused_enabled = config.read().discord_presence_paused.unwrap_or(true);
                 let pos = ctrl.player.read().get_position();
                 let mut defer_player_progress = false;
 
@@ -589,10 +624,10 @@ pub fn use_player_task(ctrl: PlayerController) {
                             let title = ctrl.current_song_title.read().clone();
                             let artist = ctrl.current_song_artist.read().clone();
                             let album = ctrl.current_song_album.read().clone();
-                            if discord_enabled {
+                            if discord_enabled && discord_paused_enabled {
                                 let resolved = discord_cover_url.read().clone();
                                 let _ = p.set_paused(&title, &artist, &album, resolved.as_deref());
-                            } else if last_discord_enabled {
+                            } else if last_discord_enabled || !discord_paused_enabled {
                                 let _ = p.clear_activity();
                             }
                         }

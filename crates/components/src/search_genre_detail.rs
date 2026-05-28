@@ -7,6 +7,7 @@ use hooks::use_player_controller::PlayerController;
 use player::player;
 use reader::Library;
 use reader::models::Track;
+use crate::virtual_scroll::{use_virtual_scroll, VirtualScrollView};
 
 #[component]
 pub fn SearchGenreDetail(
@@ -46,18 +47,32 @@ pub fn SearchGenreDetail(
     let current_song_album = ctrl.current_song_album.read().clone();
     let current_song_duration = *ctrl.current_song_duration.read();
 
+    let scroll_stat = use_signal(|| 0.0_f64);
+    let container_height = use_signal(|| 0.0_f64);
+    const ITEM_HEIGHT: f64 = 60.0;
+
+    let scroll_info = use_virtual_scroll(
+        *scroll_stat.read(),
+        *container_height.read(),
+        sorted_genre_tracks.len(),
+        ITEM_HEIGHT,
+    );
+
     rsx! {
         div {
-            class: "space-y-6",
-            button {
-                class: "mb-4 flex items-center gap-2 text-slate-400 hover:text-white transition-colors",
-                 onclick: move |_| on_back.call(()),
-                 i { class: "fa-solid fa-arrow-left" }
-                 "{i18n::t(\"back_to_browse\")}"
+            class: "flex-1 min-h-0 flex flex-col w-full max-w-[1600px] mx-auto select-none",
+            div { class: "shrink-0 mb-6",
+            if !cfg!(target_os = "android") {
+                button {
+                    class: "mb-4 flex items-center gap-2 text-slate-400 hover:text-white transition-colors",
+                     onclick: move |_| on_back.call(()),
+                     i { class: "fa-solid fa-arrow-left" }
+                     "{i18n::t(\"back_to_browse\")}"
+                }
             }
 
             if is_modern {
-                div { class: "flex items-end gap-6 mb-8",
+                div { class: "flex items-end gap-6 mb-8 shrink-0",
                     div {
                         class: "w-44 h-44 rounded-2xl overflow-hidden shrink-0 shadow-2xl bg-white/5",
                         style: "box-shadow: 0 20px 60px rgba(0,0,0,0.6);",
@@ -128,7 +143,7 @@ pub fn SearchGenreDetail(
                     }
                 }
             } else {
-                div { class: "flex items-end gap-6 mb-8",
+                div { class: "flex items-end gap-6 mb-8 shrink-0",
                      if let Some((_, Some(url))) = genres.iter().find(|(g, _)| g == &genre) {
                          img { src: "{url.as_ref()}", class: "w-48 h-48 rounded-lg object-cover" }
                      } else {
@@ -152,13 +167,25 @@ pub fn SearchGenreDetail(
                      }
                 }
             }
-            Header{
-                is_modern: is_modern,
-                is_album: false,
-                sort_state: sort_state
             }
-            div { class: if is_modern { "pb-20" } else { "space-y-1 pb-20" },
-                 for (idx, (track, cover_url)) in sorted_genre_tracks.iter().enumerate() {
+            div { class: "shrink-0 mb-4",
+                Header{
+                    is_modern: is_modern,
+                    is_album: false,
+                    sort_state: sort_state
+                }
+            }
+            div { class: "flex-1 min-h-0 w-full flex flex-col overflow-hidden",
+                 VirtualScrollView {
+                     id: "genre-tracks-scroll".to_string(),
+                     class: "flex-1 min-h-0 overflow-y-auto pb-20".to_string(),
+                     scroll_stat,
+                     container_height,
+                     item_height: ITEM_HEIGHT,
+                     saved_scroll: 0.0,
+                     top_pad: scroll_info.top_pad,
+                     bottom_pad: scroll_info.bottom_pad,
+                     for (idx, (track, cover_url)) in sorted_genre_tracks.iter().enumerate().skip(scroll_info.start_index).take(scroll_info.items_to_render) {
                      {
                          let track = track.clone();
                          let track_key = track.path.display().to_string();
@@ -237,7 +264,8 @@ pub fn SearchGenreDetail(
                          }
                      }
                  }
-            }
+             }
         }
     }
+}
 }

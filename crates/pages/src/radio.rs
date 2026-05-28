@@ -52,7 +52,9 @@ pub fn Radio(props: RadioProps) -> Element {
 
     rsx! {
         div {
-            class: if is_modern {
+            class: if cfg!(target_os = "android") {
+                "px-4 pt-2 pb-28 w-full h-full overflow-y-auto"
+            } else if is_modern {
                 "px-6 pt-6 pb-24 w-full h-full overflow-y-auto"
             } else {
                 "p-8 w-full h-full overflow-y-auto"

@@ -31,63 +31,85 @@ pub async fn sleep(duration: std::time::Duration) {
 }
 
 fn format_artwork_url_impl(path: Option<&impl AsRef<Path>>, size: Option<u32>) -> Option<CoverUrl> {
-    let p = match path {
-        Some(p) => p.as_ref(),
-        None => return None,
-    };
-    let p_str = p.to_string_lossy();
+    path.and_then(|p| {
+        let p = p.as_ref();
+        let p_str = p.to_string_lossy();
 
-    let abs_path = if let Some(stripped) = p_str.strip_prefix("./") {
-        std::env::current_dir().unwrap_or_default().join(stripped)
-    } else {
-        p.to_path_buf()
-    };
+        let abs_path = if let Some(stripped) = p_str.strip_prefix("./") {
+            std::env::current_dir().unwrap_or_default().join(stripped)
+        } else {
+            p.to_path_buf()
+        };
 
-    let abs_str = abs_path.to_string_lossy();
-    let abs_str = if abs_str.starts_with('~') {
-        if let Ok(home) = std::env::var("HOME") {
-            std::borrow::Cow::Owned(abs_str.replacen('~', &home, 1))
+        let abs_str = abs_path.to_string_lossy();
+        let abs_str = if abs_str.starts_with('~') {
+            if let Ok(home) = std::env::var("HOME") {
+                std::borrow::Cow::Owned(abs_str.replacen('~', &home, 1))
+            } else {
+                abs_str
+            }
         } else {
             abs_str
-        }
-    } else {
-        abs_str
-    };
+        };
 
-    const QUERY_VAL: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
-        .add(b' ')
-        .add(b'"')
-        .add(b'#')
-        .add(b'%')
-        .add(b'&')
-        .add(b'+')
-        .add(b'=')
-        .add(b'?')
-        .add(b'<')
-        .add(b'>')
-        .add(b'`')
-        .add(b'\\')
-        .add(b':');
+        // Android WebView is unreliable with custom URL schemes (artwork://) and the
+        // http localhost shim, so inline the cover as a base64 data URL instead.
+        #[cfg(target_os = "android")]
+        {
+            use base64::{Engine as _, engine::general_purpose};
+            return match std::fs::read(&*abs_str) {
+                Ok(bytes) => {
+                    let mime = if abs_str.ends_with(".png") {
+                        "image/png"
+                    } else if abs_str.ends_with(".gif") {
+                        "image/gif"
+                    } else if abs_str.ends_with(".webp") {
+                        "image/webp"
+                    } else {
+                        "image/jpeg"
+                    };
+                    let b64 = general_purpose::STANDARD.encode(&bytes);
+                    Some(cover_url_from_string(format!("data:{mime};base64,{b64}")))
+                }
+                Err(_) => None,
+            };
+        }
 
-    if cfg!(target_os = "windows") {
-        let mut url = format!(
-            "http://artwork.dioxus.localhost/local?p={}",
-            percent_encoding::utf8_percent_encode(&abs_str, QUERY_VAL)
-        );
-        if let Some(size) = size {
-            url.push_str(&format!("&s={size}"));
+        const QUERY_VAL: &percent_encoding::AsciiSet = &percent_encoding::CONTROLS
+            .add(b' ')
+            .add(b'"')
+            .add(b'#')
+            .add(b'%')
+            .add(b'&')
+            .add(b'+')
+            .add(b'=')
+            .add(b'?')
+            .add(b'<')
+            .add(b'>')
+            .add(b'`')
+            .add(b'\\')
+            .add(b':');
+
+        if cfg!(target_os = "windows") {
+            let mut url = format!(
+                "http://artwork.dioxus.localhost/local?p={}",
+                percent_encoding::utf8_percent_encode(&abs_str, QUERY_VAL)
+            );
+            if let Some(size) = size {
+                url.push_str(&format!("&s={size}"));
+            }
+            Some(cover_url_from_string(url))
+        } else {
+            let mut url = format!(
+                "artwork://local?p={}",
+                percent_encoding::utf8_percent_encode(&abs_str, QUERY_VAL)
+            );
+            if let Some(size) = size {
+                url.push_str(&format!("&s={size}"));
+            }
+            Some(cover_url_from_string(url))
         }
-        Some(cover_url_from_string(url))
-    } else {
-        let mut url = format!(
-            "artwork://local?p={}",
-            percent_encoding::utf8_percent_encode(&abs_str, QUERY_VAL)
-        );
-        if let Some(size) = size {
-            url.push_str(&format!("&s={size}"));
-        }
-        Some(cover_url_from_string(url))
-    }
+    })
 }
 
 pub fn format_artwork_url(path: Option<&impl AsRef<Path>>) -> Option<CoverUrl> {
