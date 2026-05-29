@@ -72,7 +72,7 @@ pub fn extract_metadata(
     let artists: Vec<String> = tag
         .map(|t| {
             let from_tag: Vec<String> = t
-                .get_strings(&ItemKey::TrackArtists)
+                .get_strings(ItemKey::TrackArtists)
                 .flat_map(|s| s.split(';').map(|a| a.trim().to_string()))
                 .filter(|s| !s.is_empty())
                 .collect();
@@ -93,7 +93,7 @@ pub fn extract_metadata(
     let album_title = tag.and_then(|t| t.album().map(|a| a.to_string()));
 
     let album_artist = tag
-        .and_then(|t| t.get_string(&ItemKey::AlbumArtist))
+        .and_then(|t| t.get_string(ItemKey::AlbumArtist))
         .map(|s| s.to_string());
 
     let parent_path = track_path.parent().map(|p| p.to_string_lossy());
@@ -112,7 +112,7 @@ pub fn extract_metadata(
         .unwrap_or_else(|| "Unknown Title".to_string());
 
     let musicbrainz_release_id = tag
-        .and_then(|t| t.get_string(&ItemKey::MusicBrainzReleaseId))
+        .and_then(|t| t.get_string(ItemKey::MusicBrainzReleaseId))
         .map(|s| s.to_string());
 
     let sample_rate = properties.sample_rate().unwrap_or(0);
@@ -159,7 +159,7 @@ pub fn read(track_path: &Path, cover_cache: &Path, library: &mut Library) -> Opt
     let album_id = track.album_id.clone();
 
     let album_artist = tag
-        .and_then(|t| t.get_string(&ItemKey::AlbumArtist))
+        .and_then(|t| t.get_string(ItemKey::AlbumArtist))
         .map(|s| s.to_string())
         .unwrap_or_else(|| track.artist.clone());
 
@@ -182,7 +182,10 @@ pub fn read(track_path: &Path, cover_cache: &Path, library: &mut Library) -> Opt
             .and_then(|t| t.genre().map(|g| g.to_string()))
             .unwrap_or_else(|| "Unknown".to_string());
 
-        let year = tag.and_then(|t| t.year()).unwrap_or(0) as u16;
+        let year = tag
+            .and_then(|t| t.get_string(ItemKey::Year))
+            .and_then(|s| s.get(..4).unwrap_or(s).parse::<u16>().ok())
+            .unwrap_or(0);
 
         library.add_album(Album {
             id: album_id.clone(),
