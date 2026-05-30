@@ -72,7 +72,11 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
 
     let mut last_disc = None;
     let mut last_disc_size = 0;
-    for (display_idx, (track, _)) in sorted_track_pairs.iter().enumerate().take(scroll_info.start_index) {
+    for (display_idx, (track, _)) in sorted_track_pairs
+        .iter()
+        .enumerate()
+        .take(scroll_info.start_index)
+    {
         if track.disc_number != last_disc && sort_state.peek().is_none() && props.is_album {
             last_disc = track.disc_number;
             last_disc_size = display_idx;

@@ -12,9 +12,11 @@ pub fn AlbumDetails(
     let lib = library.read();
     let album = match lib.albums.iter().find(|a| a.id == album_id) {
         Some(a) => a,
-        None => return rsx! {
-            div { "{i18n::t(\"album_not_found\")}" }
-        },
+        None => {
+            return rsx! {
+                div { "{i18n::t(\"album_not_found\")}" }
+            };
+        }
     };
 
     let album_title = album.title.clone();

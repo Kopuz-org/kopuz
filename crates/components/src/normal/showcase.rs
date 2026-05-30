@@ -76,7 +76,11 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     } else {
         COLUMNS_NORMAL
     };
-    let column_gap = if cfg!(target_os = "android") { "0.5rem" } else { "1.5rem" };
+    let column_gap = if cfg!(target_os = "android") {
+        "0.5rem"
+    } else {
+        "1.5rem"
+    };
 
     let scroll_stat = use_signal(|| 0.0_f64);
     let container_height = use_signal(|| 0.0_f64);

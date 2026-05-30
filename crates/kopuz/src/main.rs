@@ -1599,8 +1599,34 @@ fn App() -> Element {
                             report.missing,
                             report.errors,
                         );
-                        let _ = lib.save(&lib_path());
-                        library.set(lib);
+                        let merged_lib = {
+                            let mut current = library.write();
+                            let mut changed = false;
+
+                            for fetched_album in lib.albums.iter() {
+                                let Some(fetched_cover) = fetched_album.cover_path.clone() else {
+                                    continue;
+                                };
+
+                                let Some(current_album) =
+                                    current.albums.iter_mut().find(|a| a.id == fetched_album.id)
+                                else {
+                                    continue;
+                                };
+
+                                if current_album.cover_path.is_none() && !current_album.manual_cover
+                                {
+                                    current_album.cover_path = Some(fetched_cover);
+                                    changed = true;
+                                }
+                            }
+
+                            changed.then(|| current.clone())
+                        };
+
+                        if let Some(merged_lib) = merged_lib {
+                            let _ = merged_lib.save(&lib_path());
+                        }
                     });
                 } else {
                     // No cover fetching — drop the callback so the progress bar closes.

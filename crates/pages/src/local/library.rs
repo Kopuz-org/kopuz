@@ -3,6 +3,7 @@ use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
 use components::stat_card::StatCard;
 use components::track_row::TrackRow;
+use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_library_items::use_library_items;
@@ -11,7 +12,6 @@ use kopuz_route::Route;
 use reader::Library;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use components::virtual_scroll::{use_virtual_scroll, VirtualScrollView};
 
 const ITEM_HEIGHT: f64 = 60.0; // 60px: p-2 padding (16px*2=32) + content height (~28px)
 

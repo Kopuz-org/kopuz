@@ -1,13 +1,13 @@
 use crate::header::Header;
 use crate::showcase::{self};
 use crate::track_row::TrackRow;
+use crate::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 use player::player;
 use reader::Library;
 use reader::models::{Album, Track};
-use crate::virtual_scroll::{use_virtual_scroll, VirtualScrollView};
 
 #[component]
 pub fn SearchResults(

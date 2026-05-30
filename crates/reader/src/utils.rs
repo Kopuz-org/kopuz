@@ -41,6 +41,7 @@ pub fn find_folder_cover(dir: &Path) -> Option<PathBuf> {
 
     let entries = std::fs::read_dir(dir).ok()?;
     let mut fallback_image = None;
+    let mut has_multiple_fallbacks = false;
     let mut best_idx: Option<usize> = None;
     let mut best_path = None;
 
@@ -62,12 +63,33 @@ pub fn find_folder_cover(dir: &Path) -> Option<PathBuf> {
                     best_idx = Some(pos);
                     best_path = Some(path);
                 }
-            } else if fallback_image.is_none() {
-                fallback_image = Some(path);
+            } else if is_safe_fallback_cover(stem) {
+                if fallback_image.is_some() {
+                    has_multiple_fallbacks = true;
+                    fallback_image = None;
+                } else if !has_multiple_fallbacks {
+                    fallback_image = Some(path);
+                }
             }
         }
     }
     best_path.or(fallback_image)
+}
+
+fn is_safe_fallback_cover(stem: &str) -> bool {
+    !matches!(
+        stem.to_ascii_lowercase().as_str(),
+        "artist"
+            | "background"
+            | "back"
+            | "banner"
+            | "booklet"
+            | "cd"
+            | "disc"
+            | "label"
+            | "logo"
+            | "spine"
+    )
 }
 
 pub fn is_artist_image_file(path: &Path) -> bool {
@@ -137,6 +159,12 @@ mod tests {
         let hq_image = dir_path.join("hqdefault.webp");
         File::create(&hq_image).unwrap();
         assert_eq!(find_folder_cover(&dir_path), Some(hq_image));
+
+        // 6. Ambiguous generic images should not be chosen arbitrarily
+        std::fs::remove_file(dir_path.join("hqdefault.webp")).unwrap();
+        File::create(dir_path.join("random_picture.jpg")).unwrap();
+        File::create(dir_path.join("other_picture.png")).unwrap();
+        assert!(find_folder_cover(&dir_path).is_none());
 
         // Clean up
         let _ = std::fs::remove_dir_all(&dir_path);
