@@ -300,16 +300,18 @@ pub fn use_player_task(ctrl: PlayerController) {
                     let next_track_key = next_track.path.to_string_lossy().to_string();
                     if last_lyrics_prefetch_track.as_ref() != Some(&next_track_key) {
                         last_lyrics_prefetch_track = Some(next_track_key);
-                        let (server_url, server_token, server_user_id) = {
+                        let (server_url, server_token, server_user_id, prefer_local) = {
                             let conf = config.read();
+                            let prefer_local = conf.prefer_local_lyrics;
                             if let Some(server) = &conf.server {
                                 (
                                     Some(server.url.clone()),
                                     server.access_token.clone(),
                                     server.user_id.clone(),
+                                    prefer_local,
                                 )
                             } else {
-                                (None, None, None)
+                                (None, None, None, prefer_local)
                             }
                         };
 
@@ -324,6 +326,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                                 server_url.as_deref(),
                                 server_token.as_deref(),
                                 server_user_id.as_deref(),
+                                prefer_local,
                             )
                             .await;
                         });

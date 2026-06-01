@@ -2,7 +2,7 @@ use config::{AppConfig, YtdlpOptions};
 use dioxus::prelude::*;
 use std::fs::{self, OpenOptions};
 use std::io::BufRead;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DownloadJob {
@@ -80,71 +80,59 @@ impl AudioFormat {
     }
 }
 
-fn find_ytdlp() -> String {
-    let static_candidates: &[&str] = &[
-        "/opt/homebrew/bin/yt-dlp",
-        "/usr/local/bin/yt-dlp",
-        "/usr/bin/yt-dlp",
-        "/snap/bin/yt-dlp",
-        "/usr/local/sbin/yt-dlp",
-    ];
+fn search_dirs() -> &'static [PathBuf] {
+    static DIRS: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
+    DIRS.get_or_init(|| {
+        let mut dirs: Vec<PathBuf> =
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
 
-    for path in static_candidates {
-        if std::path::Path::new(path).exists() {
-            return path.to_string();
-        }
-    }
-
-    if let Some(home) = std::env::var_os("HOME") {
-        let p = std::path::PathBuf::from(&home).join(".local/bin/yt-dlp");
-        if p.exists() {
-            return p.to_string_lossy().into_owned();
-        }
-        for ver in &["3.13", "3.12", "3.11", "3.10", "3.9"] {
-            let p =
-                std::path::PathBuf::from(&home).join(format!("Library/Python/{}/bin/yt-dlp", ver));
-            if p.exists() {
-                return p.to_string_lossy().into_owned();
+        if let Some(shell) = std::env::var_os("SHELL") {
+            if let Ok(out) = std::process::Command::new(shell)
+                .arg("-lc")
+                .arg("printf %s \"$PATH\"")
+                .output()
+            {
+                if out.status.success() {
+                    let path = String::from_utf8_lossy(&out.stdout);
+                    for dir in std::env::split_paths(path.trim()) {
+                        if !dirs.contains(&dir) {
+                            dirs.push(dir);
+                        }
+                    }
+                }
             }
         }
-    }
 
-    if let Some(found) = find_in_augmented_path("yt-dlp") {
-        return found;
-    }
-
-    "yt-dlp".to_string()
+        dirs
+    })
 }
 
-fn augmented_path() -> String {
-    format!(
-        "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:{}",
-        std::env::var("PATH").unwrap_or_default()
-    )
+fn augmented_path() -> std::ffi::OsString {
+    std::env::join_paths(search_dirs()).unwrap_or_default()
 }
 
-fn find_in_augmented_path(binary: &str) -> Option<String> {
-    let binary_path = Path::new(binary);
-    if binary_path.is_absolute() && binary_path.exists() {
-        return Some(binary.to_string());
-    }
+fn find_binary(name: &str) -> Option<String> {
+    let exe = if cfg!(target_os = "windows") && !name.ends_with(".exe") {
+        format!("{name}.exe")
+    } else {
+        name.to_string()
+    };
 
-    let mut candidates = vec![binary.to_string()];
-    #[cfg(target_os = "windows")]
-    if !binary.ends_with(".exe") {
-        candidates.push(format!("{binary}.exe"));
-    }
-
-    for dir in std::env::split_paths(&augmented_path()) {
-        for candidate in &candidates {
-            let path = dir.join(candidate);
-            if path.exists() {
-                return Some(path.to_string_lossy().into_owned());
-            }
+    for dir in search_dirs() {
+        let candidate = dir.join(&exe);
+        if candidate.is_file() {
+            return Some(candidate.to_string_lossy().into_owned());
         }
     }
-
     None
+}
+
+fn find_ytdlp() -> String {
+    find_binary("yt-dlp").unwrap_or_else(|| "yt-dlp".to_string())
+}
+
+fn find_ffmpeg() -> Option<String> {
+    find_binary("ffmpeg")
 }
 
 fn validate_output_directory(out_dir: &str) -> Result<(), String> {
@@ -195,11 +183,11 @@ fn run_preflight_checks(url: &str, out_dir: &str, jobs: &[DownloadJob]) -> Resul
         return Err(i18n::t("ytdlp_error_duplicate_active"));
     }
 
-    if find_in_augmented_path(&find_ytdlp()).is_none() {
+    if find_binary("yt-dlp").is_none() {
         return Err(i18n::t("ytdlp_error_not_found"));
     }
 
-    if find_in_augmented_path("ffmpeg").is_none() {
+    if find_ffmpeg().is_none() {
         return Err(i18n::t("ytdlp_error_ffmpeg_not_found"));
     }
 
@@ -215,6 +203,21 @@ fn build_command(
     let binary = find_ytdlp();
     let mut cmd = std::process::Command::new(&binary);
     cmd.env("PATH", augmented_path());
+
+    let work_dir = if !out.is_empty() {
+        PathBuf::from(out)
+    } else if let Some(home) = std::env::var_os("HOME") {
+        PathBuf::from(home)
+    } else {
+        PathBuf::from(".")
+    };
+    if work_dir.is_dir() {
+        cmd.current_dir(&work_dir);
+    }
+
+    if let Some(ffmpeg) = find_ffmpeg() {
+        cmd.arg("--ffmpeg-location").arg(ffmpeg);
+    }
 
     cmd.arg("--newline")
         .arg("--no-warnings")

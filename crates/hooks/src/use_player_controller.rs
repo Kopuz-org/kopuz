@@ -5,6 +5,7 @@ use dioxus::{logger::tracing, prelude::*};
 use player::player::{NowPlayingMeta, Player};
 use reader::{Library, Track};
 use scrobble;
+use std::collections::HashMap;
 use std::time::Duration;
 use utils;
 
@@ -828,6 +829,7 @@ impl PlayerController {
                                                     &scrobble_track.artist,
                                                     &scrobble_track.title,
                                                     Some(&scrobble_track.album),
+                                                    None,
                                                 );
                                             if let Err(e) = scrobble::musicbrainz::submit_listens(
                                                 &auth,
@@ -938,6 +940,7 @@ impl PlayerController {
                                                 &scrobble_track.artist,
                                                 &scrobble_track.title,
                                                 Some(&scrobble_track.album),
+                                                None,
                                             );
                                             match scrobble::musicbrainz::submit_listens(
                                                 &auth,
@@ -1129,6 +1132,7 @@ impl PlayerController {
                                                     &scrobble_track.artist,
                                                     &scrobble_track.title,
                                                     Some(&scrobble_track.album),
+                                                    None,
                                                 );
                                             if let Err(e) = scrobble::musicbrainz::submit_listens(
                                                 &auth,
@@ -1235,6 +1239,7 @@ impl PlayerController {
                                                 &scrobble_track.artist,
                                                 &scrobble_track.title,
                                                 Some(&scrobble_track.album),
+                                                None,
                                             );
                                             match scrobble::musicbrainz::submit_listens(
                                                 &auth,
@@ -1349,6 +1354,17 @@ impl PlayerController {
                                     return;
                                 }
 
+                                let mut map: HashMap<&str, &str> = HashMap::new();
+                                if let Some(ref mbid) = scrobble_track.musicbrainz_release_id {
+                                    map.insert("release_mbid", mbid.as_str());
+                                }
+                                if let Some(ref mbid) = scrobble_track.musicbrainz_recording_id {
+                                    map.insert("recording_mbid", mbid.as_str());
+                                }
+                                if let Some(ref mbid) = scrobble_track.musicbrainz_track_id {
+                                    map.insert("track_mbid", mbid.as_str());
+                                }
+
                                 // Last.fm now-playing
                                 let lastfm_api_key = cfg_signal.read().lastfm_api_key.clone();
                                 let lastfm_api_secret = cfg_signal.read().lastfm_api_secret.clone();
@@ -1387,6 +1403,7 @@ impl PlayerController {
                                         &scrobble_track.artist,
                                         &scrobble_track.title,
                                         Some(&scrobble_track.album),
+                                        Some(map.clone()),
                                     );
                                     if let Err(e) = scrobble::musicbrainz::submit_listens(
                                         &auth,
@@ -1442,6 +1459,7 @@ impl PlayerController {
                                         &scrobble_track.artist,
                                         &scrobble_track.title,
                                         Some(&scrobble_track.album),
+                                        Some(map.clone()),
                                     );
                                     match scrobble::musicbrainz::submit_listens(
                                         &auth,
@@ -1699,6 +1717,8 @@ impl PlayerController {
             track_number: None,
             disc_number: None,
             musicbrainz_release_id: None,
+            musicbrainz_recording_id: None,
+            musicbrainz_track_id: None,
             playlist_item_id: None,
             artists: vec![],
         };

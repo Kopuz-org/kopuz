@@ -115,6 +115,14 @@ pub fn extract_metadata(
         .and_then(|t| t.get_string(&ItemKey::MusicBrainzReleaseId))
         .map(|s| s.to_string());
 
+    let musicbrainz_recording_id = tag
+        .and_then(|t| t.get_string(&ItemKey::MusicBrainzRecordingId))
+        .map(|s| s.to_string());
+
+    let musicbrainz_track_id = tag
+        .and_then(|t| t.get_string(&ItemKey::MusicBrainzTrackId))
+        .map(|s| s.to_string());
+
     let sample_rate = properties.sample_rate().unwrap_or(0);
     let file_size = std::fs::metadata(track_path)
         .ok()
@@ -138,6 +146,8 @@ pub fn extract_metadata(
         track_number: tag.and_then(|t| t.track()),
         disc_number: tag.and_then(|t| t.disk()),
         musicbrainz_release_id,
+        musicbrainz_recording_id,
+        musicbrainz_track_id,
         playlist_item_id: None,
     }
 }
@@ -366,6 +376,18 @@ fn read_with_symphonia(
             &tags,
             StandardTagKey::MusicBrainzAlbumId,
             &["MUSICBRAINZ_ALBUMID"],
+        )
+        .and_then(symphonia_tag_to_string),
+        musicbrainz_recording_id: find_symphonia_tag(
+            &tags,
+            StandardTagKey::MusicBrainzRecordingId,
+            &["MUSICBRAINZ_TRACKID"],
+        )
+        .and_then(symphonia_tag_to_string),
+        musicbrainz_track_id: find_symphonia_tag(
+            &tags,
+            StandardTagKey::MusicBrainzTrackId,
+            &["MUSICBRAINZ_RELEASETRACKID"],
         )
         .and_then(symphonia_tag_to_string),
         playlist_item_id: None,

@@ -376,6 +376,7 @@ artist_photo_source = nasin sitelen jan pali
 artist_photo = sitelen jan pali
 album_cover = sitelen kulupu pi kalama sama
 auto_fetch_covers = o kama e sitelen kulupu pi kalama sama
+prefer_local_lyrics = o wile e nimi kalama lon ilo (.lrc / lon insa, ala lon linja)
 cover_fetch_strategy = nasin kama sitelen
 musicbrainz_first = MusicBrainz nanpa wan
 lastfm_first = Last.fm nanpa wan

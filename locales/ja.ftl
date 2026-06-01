@@ -382,6 +382,7 @@ artist_photo_source = アーティスト写真のソース
 artist_photo = アーティスト写真
 album_cover = アルバムカバー
 auto_fetch_covers = アルバムカバーを自動取得
+prefer_local_lyrics = ローカル歌詞を優先（.lrc / 埋め込み、オンラインフォールバックなし）
 cover_fetch_strategy = カバー取得戦略
 musicbrainz_first = MusicBrainz優先
 lastfm_first = Last.fm優先

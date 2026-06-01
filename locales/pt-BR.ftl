@@ -375,6 +375,7 @@ artist_photo_source = Fonte da foto do artista
 artist_photo = Foto do artista
 album_cover = Capa do álbum
 auto_fetch_covers = Buscar capas de álbum automaticamente
+prefer_local_lyrics = Preferir letras locais (.lrc / incorporadas, sem recurso online)
 cover_fetch_strategy = Estratégia de busca de capas
 musicbrainz_first = MusicBrainz primeiro
 lastfm_first = Last.fm primeiro

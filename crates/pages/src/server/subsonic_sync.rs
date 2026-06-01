@@ -158,6 +158,8 @@ pub async fn sync_server_library(
                             track_number: item.index_number,
                             disc_number: item.parent_index_number,
                             musicbrainz_release_id: None,
+                            musicbrainz_recording_id: None,
+                            musicbrainz_track_id: None,
                             playlist_item_id: None,
                             artists: item
                                 .artists
@@ -459,6 +461,8 @@ pub async fn fetch_subsonic_library(
                     track_number: song.track,
                     disc_number: song.disc_number,
                     musicbrainz_release_id: None,
+                    musicbrainz_recording_id: None,
+                    musicbrainz_track_id: None,
                     playlist_item_id: None,
                     artists: vec![song.artist.unwrap_or_else(|| album_artist.clone())],
                 });

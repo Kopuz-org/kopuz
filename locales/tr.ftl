@@ -376,6 +376,7 @@ artist_photo_source = Sanatçı fotoğraf kaynağı
 artist_photo = Sanatçı fotoğrafı
 album_cover = Albüm kapağı
 auto_fetch_covers = Albüm kapaklarını otomatik getir
+prefer_local_lyrics = Yerel şarkı sözlerini tercih et (.lrc / gömülü, çevrimiçi yedek yok)
 cover_fetch_strategy = Kapak getirme stratejisi
 musicbrainz_first = Önce MusicBrainz
 lastfm_first = Önce Last.fm

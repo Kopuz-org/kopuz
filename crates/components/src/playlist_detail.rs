@@ -123,6 +123,8 @@ pub fn PlaylistDetail(
                                             track_number: item.index_number,
                                             disc_number: item.parent_index_number,
                                             musicbrainz_release_id: None,
+                                            musicbrainz_recording_id: None,
+                                            musicbrainz_track_id: None,
                                             playlist_item_id: item.playlist_item_id,
                                             artists: item.artists.unwrap_or_default(),
                                         });
@@ -179,6 +181,8 @@ pub fn PlaylistDetail(
                                             track_number: item.track,
                                             disc_number: item.disc_number,
                                             musicbrainz_release_id: None,
+                                            musicbrainz_recording_id: None,
+                                            musicbrainz_track_id: None,
                                             playlist_item_id: None,
                                             artists: vec![item.artist.unwrap_or_default()],
                                         });
