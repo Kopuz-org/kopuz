@@ -495,7 +495,6 @@ pub fn use_player_task(ctrl: PlayerController) {
                         } else {
                             pos.as_secs()
                         };
-                        let cover = ctrl.current_song_cover_url.read().clone();
 
                         let song_key = format!("{}|{}|{}", title, artist, album);
 
@@ -504,29 +503,26 @@ pub fn use_player_task(ctrl: PlayerController) {
                             discord_cover_url.set(None);
                             discord_cover_sent.set(false);
 
-                            if cover.starts_with("http") && !cover.contains("dioxus.localhost") {
-                                discord_cover_url.set(Some(cover.clone()));
-                            } else {
-                                let mbid = {
-                                    let idx = *ctrl.current_queue_index.read();
-                                    ctrl.get_track_at(idx)
-                                        .and_then(|t| t.musicbrainz_release_id.clone())
-                                };
-                                let artist_c = artist.clone();
-                                let album_c = album.clone();
-                                let song_key_for_spawn = song_key.clone();
-                                spawn(async move {
-                                    let resolved = cover_art::resolve_cover_art_url(
-                                        mbid.as_deref(),
-                                        &artist_c,
-                                        &album_c,
-                                    )
-                                    .await;
-                                    if *discord_cover_resolving_for.peek() == song_key_for_spawn {
-                                        discord_cover_url.set(resolved);
-                                    }
-                                });
-                            }
+                            let mbid = {
+                                let idx = *ctrl.current_queue_index.read();
+                                ctrl.get_track_at(idx)
+                                    .and_then(|t| t.musicbrainz_release_id.clone())
+                            };
+                            let artist_c = artist.clone();
+                            let album_c = album.clone();
+                            let song_key_for_spawn = song_key.clone();
+                            spawn(async move {
+                                let resolved = cover_art::resolve_cover_art_url(
+                                    mbid.as_deref(),
+                                    &artist_c,
+                                    &album_c,
+                                )
+                                .await;
+                                dbg!(&resolved);
+                                if *discord_cover_resolving_for.peek() == song_key_for_spawn {
+                                    discord_cover_url.set(resolved);
+                                }
+                            });
                         }
 
                         if discord_enabled {
@@ -542,10 +538,6 @@ pub fn use_player_task(ctrl: PlayerController) {
                                 let resolved = discord_cover_url.read().clone();
                                 let cover_ref = if let Some(ref url) = resolved {
                                     Some(url.as_str())
-                                } else if cover.starts_with("http")
-                                    && !cover.contains("dioxus.localhost")
-                                {
-                                    Some(cover.as_str())
                                 } else {
                                     None
                                 };
