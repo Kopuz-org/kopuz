@@ -6,6 +6,9 @@ on:
       - "v*"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   appimage:
     runs-on: ubuntu-22.04
@@ -57,6 +60,7 @@ jobs:
           mkdir -p AppDir/usr/share/icons/hicolor/256x256/apps
 
           cp target/dx/kopuz/release/linux/app/kopuz AppDir/usr/bin/kopuz
+          cp -r target/dx/kopuz/release/linux/app/assets AppDir/usr/bin/assets
           cp data/com.temidaradev.kopuz.desktop AppDir/usr/share/applications/
           cp crates/kopuz/assets/logo.png AppDir/usr/share/icons/hicolor/256x256/apps/com.temidaradev.kopuz.png
 

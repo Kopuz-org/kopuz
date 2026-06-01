@@ -30,6 +30,13 @@ use config::{AppConfig, ArtistPhotoSource, FetchStrategy, MusicService, OfflineQ
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
+const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
+const BUILD_PROFILE: &str = if cfg!(debug_assertions) {
+    "debug"
+} else {
+    "release"
+};
+
 #[component]
 pub fn Settings(config: Signal<AppConfig>) -> Element {
     let mut ctrl = use_context::<PlayerController>();
@@ -751,7 +758,10 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
 
                 {theme_editor_section(config)}
 
-
+                footer { class: "pt-6 pb-2 text-center text-xs text-white/30 leading-relaxed select-text",
+                    p { class: "font-medium text-white/40", "kopuz v{APP_VERSION}" }
+                    p { "{BUILD_PROFILE} · {std::env::consts::OS}/{std::env::consts::ARCH}" }
+                }
 
                 if show_add_server() {
                     AddServerPopup {
