@@ -67,9 +67,11 @@ fn apply_channel_mode_in_place(samples: &mut [f32], channels: usize, mode: Chann
 }
 
 #[cfg(target_arch = "wasm32")]
-const WEB_EQ_BAND_FREQUENCIES: [f32; 5] = [60.0, 250.0, 1_000.0, 4_000.0, 12_000.0];
+const WEB_EQ_BAND_FREQUENCIES: [f32; 10] = [
+    32.0, 64.0, 125.0, 250.0, 500.0, 1_000.0, 2_000.0, 4_000.0, 8_000.0, 16_000.0,
+];
 #[cfg(target_arch = "wasm32")]
-const WEB_EQ_BAND_Q: [f32; 5] = [0.9, 1.0, 1.0, 0.9, 0.8];
+const WEB_EQ_BAND_Q: [f32; 10] = [0.8, 0.9, 1.0, 1.2, 1.4, 1.4, 1.4, 1.2, 1.0, 0.8];
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::eq::Equalizer;
@@ -1308,7 +1310,7 @@ pub struct Player {
     audio_context: web_sys::AudioContext,
     _source_node: web_sys::MediaElementAudioSourceNode,
     preamp_node: web_sys::GainNode,
-    eq_filters: [web_sys::BiquadFilterNode; 5],
+    eq_filters: [web_sys::BiquadFilterNode; 10],
     _channel_splitter: web_sys::ChannelSplitterNode,
     _channel_merger: web_sys::ChannelMergerNode,
     routing_gains: [[web_sys::GainNode; 2]; 2],
@@ -1464,7 +1466,7 @@ impl Player {
         let resolved_bands = if settings.enabled {
             settings.resolved_bands()
         } else {
-            [0.0; 5]
+            [0.0; 10]
         };
         let max_boost = resolved_bands
             .iter()

@@ -291,13 +291,13 @@ impl EqPreset {
         }
     }
 
-    pub const fn gains(self) -> [f32; 5] {
+    pub const fn gains(self) -> [f32; 10] {
         match self {
-            Self::Flat | Self::Custom => [0.0, 0.0, 0.0, 0.0, 0.0],
-            Self::BassBoost => [6.0, 4.5, 2.0, -0.5, -1.5],
-            Self::TrebleBoost => [-1.5, -0.5, 0.5, 4.0, 6.0],
-            Self::VocalBoost => [-2.0, 0.5, 3.5, 2.5, -0.5],
-            Self::Loudness => [4.0, 2.0, 0.5, 2.5, 4.0],
+            Self::Flat | Self::Custom => [0.0; 10],
+            Self::BassBoost => [7.0, 6.5, 5.0, 3.5, 1.0, -0.5, -1.0, -1.5, -1.5, -1.5],
+            Self::TrebleBoost => [-1.5, -1.5, -1.0, -0.5, 0.0, 0.5, 2.0, 4.0, 6.0, 6.5],
+            Self::VocalBoost => [-2.5, -2.0, -1.5, 0.0, 2.5, 3.5, 3.0, 2.5, 0.5, -0.5],
+            Self::Loudness => [5.0, 4.5, 3.0, 1.5, 0.5, 0.0, 1.0, 2.5, 4.0, 4.5],
         }
     }
 
@@ -313,8 +313,20 @@ impl EqPreset {
     }
 }
 
-fn default_eq_bands() -> [f32; 5] {
-    [0.0, 0.0, 0.0, 0.0, 0.0]
+fn default_eq_bands() -> [f32; 10] {
+    [0.0; 10]
+}
+
+fn deserialize_eq_bands<'de, D>(deserializer: D) -> Result<[f32; 10], D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let values: Vec<f32> = Vec::deserialize(deserializer)?;
+    let mut out = [0.0_f32; 10];
+    for (slot, value) in out.iter_mut().zip(values.iter().copied()) {
+        *slot = value;
+    }
+    Ok(out)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -323,14 +335,14 @@ pub struct EqualizerSettings {
     pub enabled: bool,
     #[serde(default)]
     pub preset: EqPreset,
-    #[serde(default = "default_eq_bands")]
-    pub bands: [f32; 5],
+    #[serde(default = "default_eq_bands", deserialize_with = "deserialize_eq_bands")]
+    pub bands: [f32; 10],
     #[serde(default)]
     pub preamp_db: f32,
 }
 
 impl EqualizerSettings {
-    pub fn resolved_bands(&self) -> [f32; 5] {
+    pub fn resolved_bands(&self) -> [f32; 10] {
         if self.preset == EqPreset::Custom {
             self.bands
         } else {

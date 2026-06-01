@@ -1,7 +1,9 @@
 use config::EqualizerSettings;
 
-const BAND_FREQUENCIES: [f32; 5] = [60.0, 250.0, 1_000.0, 4_000.0, 12_000.0];
-const BAND_Q: [f32; 5] = [0.9, 1.0, 1.0, 0.9, 0.8];
+const BAND_FREQUENCIES: [f32; 10] = [
+    32.0, 64.0, 125.0, 250.0, 500.0, 1_000.0, 2_000.0, 4_000.0, 8_000.0, 16_000.0,
+];
+const BAND_Q: [f32; 10] = [0.8, 0.9, 1.0, 1.2, 1.4, 1.4, 1.4, 1.2, 1.0, 0.8];
 
 #[derive(Clone, Copy)]
 struct Coefficients {
@@ -121,7 +123,7 @@ pub struct Equalizer {
     settings: EqualizerSettings,
     sample_rate: u32,
     channels: usize,
-    bands: [Band; 5],
+    bands: [Band; 10],
     output_gain: f32,
 }
 
