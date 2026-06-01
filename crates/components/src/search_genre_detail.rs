@@ -1,13 +1,13 @@
 use crate::header::Header;
-use crate::showcase::{self, SortField};
+use crate::showcase::{self};
 use crate::track_row::TrackRow;
+use crate::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 use player::player;
 use reader::Library;
 use reader::models::Track;
-use crate::virtual_scroll::{use_virtual_scroll, VirtualScrollView};
 
 #[component]
 pub fn SearchGenreDetail(
@@ -59,213 +59,213 @@ pub fn SearchGenreDetail(
     );
 
     rsx! {
-        div {
-            class: "flex-1 min-h-0 flex flex-col w-full max-w-[1600px] mx-auto select-none",
-            div { class: "shrink-0 mb-6",
-            if !cfg!(target_os = "android") {
-                button {
-                    class: "mb-4 flex items-center gap-2 text-slate-400 hover:text-white transition-colors",
-                     onclick: move |_| on_back.call(()),
-                     i { class: "fa-solid fa-arrow-left" }
-                     "{i18n::t(\"back_to_browse\")}"
-                }
-            }
-
-            if is_modern {
-                div { class: "flex items-end gap-6 mb-8 shrink-0",
-                    div {
-                        class: "w-44 h-44 rounded-2xl overflow-hidden shrink-0 shadow-2xl bg-white/5",
-                        style: "box-shadow: 0 20px 60px rgba(0,0,0,0.6);",
-                        if let Some((_, Some(url))) = genres.iter().find(|(g, _)| g == &genre) {
-                            img { src: "{url.as_ref()}", class: "w-full h-full object-cover" }
-                        } else {
-                            div { class: "w-full h-full flex items-center justify-center",
-                                i { class: "fa-solid fa-music text-4xl", style: "color: rgba(255,255,255,0.15);" }
-                            }
-                        }
+            div {
+                class: "flex-1 min-h-0 flex flex-col w-full max-w-[1600px] mx-auto select-none",
+                div { class: "shrink-0 mb-6",
+                if !cfg!(target_os = "android") {
+                    button {
+                        class: "mb-4 flex items-center gap-2 text-slate-400 hover:text-white transition-colors",
+                         onclick: move |_| on_back.call(()),
+                         i { class: "fa-solid fa-arrow-left" }
+                         "{i18n::t(\"back_to_browse\")}"
                     }
-                    div { class: "flex flex-col gap-1 pb-1 min-w-0",
-                        p {
-                            class: "text-xs font-bold tracking-widest uppercase mb-1",
-                            style: "color: rgba(255,255,255,0.35);",
-                            "{i18n::t(\"genre\")}"
-                        }
-                        h1 { class: "text-4xl font-bold text-white truncate mb-1", "{genre}" }
-                        p {
-                            class: "text-sm mb-3",
-                            style: "color: rgba(255,255,255,0.45);",
-                            {
-                                if genre_tracks.len() == 1 {
-                                    i18n::t("track_count_singular").to_string()
-                                } else {
-                                    i18n::t_with("track_count", &[("count", genre_tracks.len().to_string())])
+                }
+
+                if is_modern {
+                    div { class: "flex items-end gap-6 mb-8 shrink-0",
+                        div {
+                            class: "w-44 h-44 rounded-2xl overflow-hidden shrink-0 shadow-2xl bg-white/5",
+                            style: "box-shadow: 0 20px 60px rgba(0,0,0,0.6);",
+                            if let Some((_, Some(url))) = genres.iter().find(|(g, _)| g == &genre) {
+                                img { src: "{url.as_ref()}", class: "w-full h-full object-cover" }
+                            } else {
+                                div { class: "w-full h-full flex items-center justify-center",
+                                    i { class: "fa-solid fa-music text-4xl", style: "color: rgba(255,255,255,0.15);" }
                                 }
                             }
                         }
-                        div { class: "flex items-center gap-2 flex-wrap",
-                            if !genre_tracks.is_empty() {
-                                button {
-                                    class: "inline-flex items-center justify-center gap-2 h-9 px-5 rounded-full text-sm font-semibold text-white transition-opacity hover:opacity-90 active:scale-95",
-                                    style: "background: var(--color-indigo-500);",
-                                    onclick: {
-                                        let tracks_play = genre_tracks_list.clone();
-                                        move |_| {
-                                            let is_shuffle = *ctrl.shuffle.peek();
-                                            if is_shuffle {
-                                                ctrl.play_queue_shuffled(tracks_play.clone());
-                                            } else {
-                                                ctrl.play_queue_linear(tracks_play.clone());
-                                            }
-                                        }
-                                    },
-                                    i { class: "fa-solid fa-play text-xs" }
-                                    "{i18n::t(\"play\")}"
-                                }
-                                button {
-                                    class: "inline-flex items-center justify-center gap-2 h-9 px-5 rounded-full text-sm font-semibold text-white transition-opacity hover:opacity-90 active:scale-95",
-                                    style: if *ctrl.shuffle.read() {
-                                        "background: var(--color-indigo-500);"
+                        div { class: "flex flex-col gap-1 pb-1 min-w-0",
+                            p {
+                                class: "text-xs font-bold tracking-widest uppercase mb-1",
+                                style: "color: rgba(255,255,255,0.35);",
+                                "{i18n::t(\"genre\")}"
+                            }
+                            h1 { class: "text-4xl font-bold text-white truncate mb-1", "{genre}" }
+                            p {
+                                class: "text-sm mb-3",
+                                style: "color: rgba(255,255,255,0.45);",
+                                {
+                                    if genre_tracks.len() == 1 {
+                                        i18n::t("track_count_singular").to_string()
                                     } else {
-                                        "background: color-mix(in oklab, var(--color-indigo-500) 25%, transparent); border: 1px solid color-mix(in oklab, var(--color-indigo-500) 40%, transparent);"
-                                    },
-                                    onclick: {
-                                        let tracks_shuffle = genre_tracks_list.clone();
-                                        move |_| {
-                                            ctrl.toggle_shuffle();
-                                            ctrl.play_queue_shuffled(tracks_shuffle.clone());
-                                        }
-                                    },
-                                    i { class: "fa-solid fa-shuffle text-xs" }
-                                    "{i18n::t(\"shuffle\")}"
+                                        i18n::t_with("track_count", &[("count", genre_tracks.len().to_string())])
+                                    }
+                                }
+                            }
+                            div { class: "flex items-center gap-2 flex-wrap",
+                                if !genre_tracks.is_empty() {
+                                    button {
+                                        class: "inline-flex items-center justify-center gap-2 h-9 px-5 rounded-full text-sm font-semibold text-white transition-opacity hover:opacity-90 active:scale-95",
+                                        style: "background: var(--color-indigo-500);",
+                                        onclick: {
+                                            let tracks_play = genre_tracks_list.clone();
+                                            move |_| {
+                                                let is_shuffle = *ctrl.shuffle.peek();
+                                                if is_shuffle {
+                                                    ctrl.play_queue_shuffled(tracks_play.clone());
+                                                } else {
+                                                    ctrl.play_queue_linear(tracks_play.clone());
+                                                }
+                                            }
+                                        },
+                                        i { class: "fa-solid fa-play text-xs" }
+                                        "{i18n::t(\"play\")}"
+                                    }
+                                    button {
+                                        class: "inline-flex items-center justify-center gap-2 h-9 px-5 rounded-full text-sm font-semibold text-white transition-opacity hover:opacity-90 active:scale-95",
+                                        style: if *ctrl.shuffle.read() {
+                                            "background: var(--color-indigo-500);"
+                                        } else {
+                                            "background: color-mix(in oklab, var(--color-indigo-500) 25%, transparent); border: 1px solid color-mix(in oklab, var(--color-indigo-500) 40%, transparent);"
+                                        },
+                                        onclick: {
+                                            let tracks_shuffle = genre_tracks_list.clone();
+                                            move |_| {
+                                                ctrl.toggle_shuffle();
+                                                ctrl.play_queue_shuffled(tracks_shuffle.clone());
+                                            }
+                                        },
+                                        i { class: "fa-solid fa-shuffle text-xs" }
+                                        "{i18n::t(\"shuffle\")}"
+                                    }
                                 }
                             }
                         }
                     }
-                }
-            } else {
-                div { class: "flex items-end gap-6 mb-8 shrink-0",
-                     if let Some((_, Some(url))) = genres.iter().find(|(g, _)| g == &genre) {
-                         img { src: "{url.as_ref()}", class: "w-48 h-48 rounded-lg object-cover" }
-                     } else {
-                         div { class: "w-48 h-48 rounded-lg bg-gradient-to-br flex items-center justify-center",
-                             i { class: "fa-solid fa-music text-6xl text-white/20" }
+                } else {
+                    div { class: "flex items-end gap-6 mb-8 shrink-0",
+                         if let Some((_, Some(url))) = genres.iter().find(|(g, _)| g == &genre) {
+                             img { src: "{url.as_ref()}", class: "w-48 h-48 rounded-lg object-cover" }
+                         } else {
+                             div { class: "w-48 h-48 rounded-lg bg-gradient-to-br flex items-center justify-center",
+                                 i { class: "fa-solid fa-music text-6xl text-white/20" }
+                             }
                          }
-                     }
 
-                     div {
-                         h2 { class: "text-sm font-bold text-white/60 uppercase tracking-widest mb-2", "{i18n::t(\"genre\")}" }
-                         h1 { class: "text-5xl font-bold text-white mb-4", "{genre}" }
-                         p { class: "text-slate-400",
-                             {
-                                 if genre_tracks.len() == 1 {
-                                     i18n::t("track_count_singular").to_string()
-                                 } else {
-                                     i18n::t_with("track_count", &[("count", genre_tracks.len().to_string())])
+                         div {
+                             h2 { class: "text-sm font-bold text-white/60 uppercase tracking-widest mb-2", "{i18n::t(\"genre\")}" }
+                             h1 { class: "text-5xl font-bold text-white mb-4", "{genre}" }
+                             p { class: "text-slate-400",
+                                 {
+                                     if genre_tracks.len() == 1 {
+                                         i18n::t("track_count_singular").to_string()
+                                     } else {
+                                         i18n::t_with("track_count", &[("count", genre_tracks.len().to_string())])
+                                     }
                                  }
                              }
                          }
-                     }
+                    }
                 }
-            }
-            }
-            div { class: "shrink-0 mb-4",
-                Header{
-                    is_modern: is_modern,
-                    is_album: false,
-                    sort_state: sort_state
                 }
-            }
-            div { class: "flex-1 min-h-0 w-full flex flex-col overflow-hidden",
-                 VirtualScrollView {
-                     id: "genre-tracks-scroll".to_string(),
-                     class: "flex-1 min-h-0 overflow-y-auto pb-20".to_string(),
-                     scroll_stat,
-                     container_height,
-                     item_height: ITEM_HEIGHT,
-                     saved_scroll: 0.0,
-                     top_pad: scroll_info.top_pad,
-                     bottom_pad: scroll_info.bottom_pad,
-                     for (idx, (track, cover_url)) in sorted_genre_tracks.iter().enumerate().skip(scroll_info.start_index).take(scroll_info.items_to_render) {
-                     {
-                         let track = track.clone();
-                         let track_key = track.path.display().to_string();
-                         let track_menu = track.clone();
-                         let track_add = track.clone();
-                         let track_queue = track.clone();
-                         let track_delete = track.clone();
-                         let queue_source = genre_tracks_list.clone();
-                         let matches_current_path = currently_playing_path.as_ref() == Some(&track.path);
-                         let matches_current_metadata = currently_playing_path.is_none()
-                             && !current_song_title.is_empty()
-                             && track.title == current_song_title
-                             && track.artist == current_song_artist
-                             && track.album == current_song_album
-                             && track.duration == current_song_duration;
-                         let is_currently_playing: bool = matches_current_path || matches_current_metadata;
-                         let is_menu_open = active_menu_track.read().as_ref() == Some(&track.path);
-                         let item_id: Option<String> = {
-                             let s = track.path.to_string_lossy();
-                             if s.starts_with("jellyfin:") {
-                                 s.split(':').nth(1).map(|id| id.to_string())
-                             } else { None }
-                         };
-                         let is_downloaded = item_id
-                             .as_ref()
-                             .map_or(false, |id| {
-                                 if let Some(path_str) = offline_tracks.get(id) {
-                                     std::path::Path::new(path_str).exists()
-                                 } else {
-                                     false
-                                 }
-                             });
-
-                         rsx! {
-                             TrackRow {
-                                 key: "{track_key}",
-                                 track: track.clone(),
-                                 cover_url: cover_url.clone(),
-                                 row_num: Some(idx + 1),
-                                 is_menu_open: is_menu_open,
-                                 is_album: false,
-                                 is_downloaded: is_downloaded,
-                                 is_currently_playing,
-                                 on_click_menu: move |_| {
-                                     if active_menu_track.read().as_ref() == Some(&track_menu.path) {
-                                         active_menu_track.set(None);
+                div { class: "shrink-0 mb-4",
+                    Header{
+                        is_modern: is_modern,
+                        is_album: false,
+                        sort_state: sort_state
+                    }
+                }
+                div { class: "flex-1 min-h-0 w-full flex flex-col overflow-hidden",
+                     VirtualScrollView {
+                         id: "genre-tracks-scroll".to_string(),
+                         class: "flex-1 min-h-0 overflow-y-auto pb-20".to_string(),
+                         scroll_stat,
+                         container_height,
+                         item_height: ITEM_HEIGHT,
+                         saved_scroll: 0.0,
+                         top_pad: scroll_info.top_pad,
+                         bottom_pad: scroll_info.bottom_pad,
+                         for (idx, (track, cover_url)) in sorted_genre_tracks.iter().enumerate().skip(scroll_info.start_index).take(scroll_info.items_to_render) {
+                         {
+                             let track = track.clone();
+                             let track_key = track.path.display().to_string();
+                             let track_menu = track.clone();
+                             let track_add = track.clone();
+                             let track_queue = track.clone();
+                             let track_delete = track.clone();
+                             let queue_source = genre_tracks_list.clone();
+                             let matches_current_path = currently_playing_path.as_ref() == Some(&track.path);
+                             let matches_current_metadata = currently_playing_path.is_none()
+                                 && !current_song_title.is_empty()
+                                 && track.title == current_song_title
+                                 && track.artist == current_song_artist
+                                 && track.album == current_song_album
+                                 && track.duration == current_song_duration;
+                             let is_currently_playing: bool = matches_current_path || matches_current_metadata;
+                             let is_menu_open = active_menu_track.read().as_ref() == Some(&track.path);
+                             let item_id: Option<String> = {
+                                 let s = track.path.to_string_lossy();
+                                 if s.starts_with("jellyfin:") {
+                                     s.split(':').nth(1).map(|id| id.to_string())
+                                 } else { None }
+                             };
+                             let is_downloaded = item_id
+                                 .as_ref()
+                                 .is_some_and(|id| {
+                                     if let Some(path_str) = offline_tracks.get(id) {
+                                         std::path::Path::new(path_str).exists()
                                      } else {
-                                         active_menu_track.set(Some(track_menu.path.clone()));
+                                         false
                                      }
-                                 },
-                                 on_add_to_playlist: move |_| {
-                                     selected_track_for_playlist.set(Some(track_add.path.clone()));
-                                     show_playlist_modal.set(true);
-                                     active_menu_track.set(None);
-                                 },
-                                 on_queue: move |_| {
-                                     ctrl.add_to_queue(vec![track_queue.clone()]);
-                                     active_menu_track.set(None);
-                                 },
-                                 on_close_menu: move |_| active_menu_track.set(None),
-                                 on_delete: move |_| {
-                                     active_menu_track.set(None);
-                                     if std::fs::remove_file(&track_delete.path).is_ok() {
-                                         library.write().remove_track(&track_delete.path);
-                                         let lib_path = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
-                                             .map(|d| d.config_dir().join("library.json"))
-                                             .unwrap_or_else(|| std::path::PathBuf::from("./config/library.json"));
-                                         let _ = library.read().save(&lib_path);
+                                 });
+
+                             rsx! {
+                                 TrackRow {
+                                     key: "{track_key}",
+                                     track: track.clone(),
+                                     cover_url: cover_url.clone(),
+                                     row_num: Some(idx + 1),
+                                     is_menu_open: is_menu_open,
+                                     is_album: false,
+                                     is_downloaded: is_downloaded,
+                                     is_currently_playing,
+                                     on_click_menu: move |_| {
+                                         if active_menu_track.read().as_ref() == Some(&track_menu.path) {
+                                             active_menu_track.set(None);
+                                         } else {
+                                             active_menu_track.set(Some(track_menu.path.clone()));
+                                         }
+                                     },
+                                     on_add_to_playlist: move |_| {
+                                         selected_track_for_playlist.set(Some(track_add.path.clone()));
+                                         show_playlist_modal.set(true);
+                                         active_menu_track.set(None);
+                                     },
+                                     on_queue: move |_| {
+                                         ctrl.add_to_queue(vec![track_queue.clone()]);
+                                         active_menu_track.set(None);
+                                     },
+                                     on_close_menu: move |_| active_menu_track.set(None),
+                                     on_delete: move |_| {
+                                         active_menu_track.set(None);
+                                         if std::fs::remove_file(&track_delete.path).is_ok() {
+                                             library.write().remove_track(&track_delete.path);
+                                             let lib_path = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
+                                                 .map(|d| d.config_dir().join("library.json"))
+                                                 .unwrap_or_else(|| std::path::PathBuf::from("./config/library.json"));
+                                             let _ = library.read().save(&lib_path);
+                                         }
+                                     },
+                                     on_play: move |_| {
+                                         queue.set(queue_source.clone());
+                                         ctrl.play_track(idx);
                                      }
-                                 },
-                                 on_play: move |_| {
-                                     queue.set(queue_source.clone());
-                                     ctrl.play_track(idx);
                                  }
                              }
                          }
                      }
                  }
-             }
+            }
         }
     }
-}
 }

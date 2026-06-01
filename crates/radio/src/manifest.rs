@@ -102,7 +102,6 @@ pub struct RestSourceDef {
     pub mapping: FieldMapping,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StaticSourceDef {
     /// Fallback title shown for all streams that have no override.
@@ -544,7 +543,10 @@ mod tests {
             MetadataSourceDef::Static(s) => {
                 assert_eq!(s.title, "Lo-Fi Beats 24/7");
                 assert_eq!(s.artist, "Various Artists");
-                assert_eq!(s.cover_url.as_deref(), Some("https://example.com/cover.jpg"));
+                assert_eq!(
+                    s.cover_url.as_deref(),
+                    Some("https://example.com/cover.jpg")
+                );
                 assert!(s.stream_overrides.is_empty());
 
                 // resolve falls back to top-level for unknown stream

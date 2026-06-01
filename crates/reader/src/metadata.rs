@@ -34,7 +34,7 @@ pub fn make_album_id(album: &str, grouping_key: &str) -> String {
     }
 }
 
-fn select_best_picture<'a>(pictures: &'a [Picture]) -> Option<&'a Picture> {
+fn select_best_picture(pictures: &[Picture]) -> Option<&Picture> {
     pictures
         .iter()
         .find(|picture| picture.pic_type() == PictureType::CoverFront)
@@ -182,7 +182,19 @@ pub fn read(track_path: &Path, cover_cache: &Path, library: &mut Library) -> Opt
         if let Some(picture) = extract_embedded_cover(&tagged_file, tag) {
             let extension = picture.mime_type().and_then(|mime_type| mime_type.ext());
             cover = save_cover(&album_id, picture.data(), extension, cover_cache).ok();
-        } else if let Some(folder_cover) = track_path.parent().and_then(find_folder_cover) {
+        } else if let Some(folder_cover) = track_path.parent().and_then(|parent| {
+            let stem = track_path.file_stem().and_then(|s| s.to_str());
+            let extensions = ["jpg", "jpeg", "png", "webp"];
+            if let Some(stem) = stem {
+                for ext in &extensions {
+                    let candidate = parent.join(stem).with_extension(ext);
+                    if candidate.is_file() {
+                        return Some(candidate);
+                    }
+                }
+            }
+            find_folder_cover(parent)
+        }) {
             cover = Some(folder_cover);
         }
     }
@@ -273,8 +285,8 @@ fn read_with_symphonia(
         if let Some(mut metadata) = probed.metadata.get() {
             let revision = metadata
                 .skip_to_latest()
-                .map(|revision| revision.clone())
-                .or_else(|| metadata.current().map(|revision| revision.clone()));
+                .cloned()
+                .or_else(|| metadata.current().cloned());
             if let Some(revision) = revision {
                 tags.extend(revision.tags().iter().cloned());
             }
@@ -285,8 +297,8 @@ fn read_with_symphonia(
             let mut metadata = format.metadata();
             let revision = metadata
                 .skip_to_latest()
-                .map(|revision| revision.clone())
-                .or_else(|| metadata.current().map(|revision| revision.clone()));
+                .cloned()
+                .or_else(|| metadata.current().cloned());
             if let Some(revision) = revision {
                 tags.extend(revision.tags().iter().cloned());
             }
@@ -386,7 +398,19 @@ fn read_with_symphonia(
     let album_exists = album.is_some();
     let needs_cover = album.and_then(|album| album.cover_path.as_ref()).is_none();
     let cover = if needs_cover {
-        track_path.parent().and_then(find_folder_cover)
+        track_path.parent().and_then(|parent| {
+            let stem = track_path.file_stem().and_then(|s| s.to_str());
+            let extensions = ["jpg", "jpeg", "png", "webp"];
+            if let Some(stem) = stem {
+                for ext in &extensions {
+                    let candidate = parent.join(stem).with_extension(ext);
+                    if candidate.is_file() {
+                        return Some(candidate);
+                    }
+                }
+            }
+            find_folder_cover(parent)
+        })
     } else {
         None
     };

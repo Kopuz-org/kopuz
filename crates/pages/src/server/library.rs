@@ -5,6 +5,7 @@ use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
 use components::stat_card::StatCard;
 use components::track_row::TrackRow;
+use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use config::{AppConfig, MusicService, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
@@ -12,7 +13,6 @@ use kopuz_route::Route;
 use reader::Library;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use components::virtual_scroll::{use_virtual_scroll, VirtualScrollView};
 
 const ITEM_HEIGHT: f64 = 60.0;
 
@@ -138,9 +138,7 @@ pub fn JellyfinLibrary(
             .collect::<Vec<_>>()
     });
 
-    let queue_source = use_memo(move || {
-        std::sync::Arc::new(queue_tracks.read().clone())
-    });
+    let queue_source = use_memo(move || std::sync::Arc::new(queue_tracks.read().clone()));
 
     let container_height = use_signal(|| 0.0_f64);
     let scroll_top = *scroll_stat.read();
@@ -186,12 +184,11 @@ pub fn JellyfinLibrary(
 
             let path_str = track.path.to_string_lossy().to_string();
             let item_id: String = path_str.split(':').nth(1).unwrap_or("").to_string();
-            let is_downloaded =
-                if let Some(path_str) = config.read().offline_tracks.get(&item_id) {
-                    std::path::Path::new(path_str).exists()
-                } else {
-                    false
-                };
+            let is_downloaded = if let Some(path_str) = config.read().offline_tracks.get(&item_id) {
+                std::path::Path::new(path_str).exists()
+            } else {
+                false
+            };
             let is_downloading = download_queue.read().items.iter().any(|i| {
                 i.id == item_id
                     && matches!(

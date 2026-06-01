@@ -231,7 +231,7 @@ impl Read for StreamBuffer {
             let state = lock.blocking_lock();
 
             if let Some(err) = &state.error {
-                return Err(IoError::new(ErrorKind::Other, err.clone()));
+                return Err(IoError::other(err.clone()));
             }
 
             let current_len = state.buffer.len() as u64;
@@ -248,7 +248,7 @@ impl Read for StreamBuffer {
 
             if state.done {
                 if let Some(err) = &state.error {
-                    return Err(IoError::new(ErrorKind::Other, err.clone()));
+                    return Err(IoError::other(err.clone()));
                 }
                 return Ok(0);
             }

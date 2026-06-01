@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use reader::{PlaylistFolder, PlaylistStore};
+use reader::PlaylistStore;
 
 #[component]
 pub fn FolderPickerModal(
@@ -7,7 +7,7 @@ pub fn FolderPickerModal(
     playlist_id: String,
     on_close: EventHandler<()>,
 ) -> Element {
-    let mut new_folder_name = use_signal(|| String::new());
+    let mut new_folder_name = use_signal(String::new);
     let mut show_create = use_signal(|| false);
 
     let store = playlist_store.read();
@@ -47,11 +47,10 @@ pub fn FolderPickerModal(
                                             for f in &mut store.folders {
                                                 f.playlist_ids.retain(|id| id != &pid2);
                                             }
-                                            if let Some(f) = store.folders.iter_mut().find(|f| f.id == fid) {
-                                                if !f.playlist_ids.contains(&pid2) {
+                                            if let Some(f) = store.folders.iter_mut().find(|f| f.id == fid)
+                                                && !f.playlist_ids.contains(&pid2) {
                                                     f.playlist_ids.push(pid2.clone());
                                                 }
-                                            }
                                             on_close.call(());
                                         },
                                         i { class: "fa-solid fa-folder text-amber-400 text-xs" }

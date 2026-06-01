@@ -10,7 +10,7 @@ pub fn AddServerPopup(
     on_close: EventHandler<()>,
     on_save: EventHandler<()>,
 ) -> Element {
-    let service_value = match server_service() {
+    let _service_value = match server_service() {
         MusicService::Jellyfin => "jellyfin",
         MusicService::Subsonic => "subsonic",
         MusicService::Custom => "custom",

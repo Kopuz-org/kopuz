@@ -202,7 +202,7 @@ pub fn use_search_data(
         if active_source == MusicSource::Server {
             let mut genre_items = std::collections::HashMap::new();
             for album in &lib.jellyfin_albums {
-                for g in album.genre.split(|c| c == '/' || c == ';' || c == ',') {
+                for g in album.genre.split(['/', ';', ',']) {
                     let g = g.trim();
                     if !g.is_empty() && !genre_items.contains_key(g) {
                         let cover_url = if let Some(server) = &server {

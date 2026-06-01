@@ -559,18 +559,18 @@ fn main() {
 
                         if high_quality {
                             let hq_path = hq_cache_path(&file_path);
-                            if hq_path.exists() {
-                                if let Ok(b) = tokio::fs::read(&hq_path).await {
-                                    responder.respond(
-                                        http::Response::builder()
-                                            .header("Content-Type", "image/jpeg")
-                                            .header("Access-Control-Allow-Origin", "*")
-                                            .header("Cache-Control", "public, max-age=31536000")
-                                            .body(std::borrow::Cow::from(b))
-                                            .unwrap(),
-                                    );
-                                    return;
-                                }
+                            if hq_path.exists()
+                                && let Ok(b) = tokio::fs::read(&hq_path).await
+                            {
+                                responder.respond(
+                                    http::Response::builder()
+                                        .header("Content-Type", "image/jpeg")
+                                        .header("Access-Control-Allow-Origin", "*")
+                                        .header("Cache-Control", "public, max-age=31536000")
+                                        .body(std::borrow::Cow::from(b))
+                                        .unwrap(),
+                                );
+                                return;
                             }
                             match tokio::fs::read(&file_path).await {
                                 Ok(raw) => {
@@ -861,6 +861,7 @@ fn App() -> Element {
     let _ = std::fs::create_dir_all(cover_cache());
     let download_queue = use_signal(DownloadQueue::default);
     let mut trigger_rescan = use_signal(|| 0);
+    let mut last_scan_key = use_signal(|| None::<String>);
     let mut scan_current_file = use_signal(|| Option::<String>::None);
     let current_playing = use_signal(|| 0);
     let mut player = use_signal(Player::new);
@@ -919,6 +920,18 @@ fn App() -> Element {
     });
 
     use_effect(move || {
+        let _ = dioxus::document::eval(
+            r#"document.addEventListener('error',function(e){
+                var t=e.target;
+                if(t.tagName==='IMG'&&!t.dataset.fallback&&t.src){
+                    t.dataset.fallback='1';
+                    t.src='data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27400%27 height=%27400%27 viewBox=%270 0 400 400%27%3E%3Crect width=%27400%27 height=%27400%27 fill=%27%231e1b2e%27/%3E%3Ccircle cx=%27200%27 cy=%27180%27 r=%2770%27 fill=%27none%27 stroke=%27%233d3466%27 stroke-width=%276%27/%3E%3Cpath d=%27M155 280 Q200 240 245 280%27 fill=%27none%27 stroke=%27%233d3466%27 stroke-width=%276%27 stroke-linecap=%27round%27/%3E%3C/svg%3E';
+                }
+            },true);"#,
+        );
+    });
+
+    use_effect(move || {
         let url = current_song_cover_url.read().clone();
         if !url.is_empty() {
             spawn(async move {
@@ -943,8 +956,10 @@ fn App() -> Element {
     #[cfg(not(target_arch = "wasm32"))]
     provide_context(presence.clone());
 
-    let mut station_registry = use_signal(|| radio::registry::StationRegistry::new());
+    let mut station_registry = use_signal(radio::registry::StationRegistry::new);
     provide_context(station_registry);
+
+    let mut last_radio_registry_key = use_signal(|| None::<String>);
 
     use_effect(move || {
         if !*initial_load_done.read() {
@@ -958,6 +973,12 @@ fn App() -> Element {
             .filter(|r| r.enabled)
             .map(|r| r.url.clone())
             .collect();
+
+        let key = registry_paths.join(",");
+        if *last_radio_registry_key.peek() == Some(key.clone()) {
+            return;
+        }
+        last_radio_registry_key.set(Some(key));
 
         spawn(async move {
             let mut new_registry = radio::registry::StationRegistry::new();
@@ -1370,16 +1391,16 @@ fn App() -> Element {
                     }
                 }
 
-                if let Ok(Ok(loaded_queue_state)) = queue_res {
-                    if let Some(queue_state) = sanitize_queue_state(loaded_queue_state) {
-                        ctrl.restore_queue_state(
-                            queue_state.queue,
-                            queue_state.current_queue_index,
-                            queue_state.progress_secs,
-                            queue_state.shuffle_order,
-                            queue_state.shuffle_enabled,
-                        );
-                    }
+                if let Ok(Ok(loaded_queue_state)) = queue_res
+                    && let Some(queue_state) = sanitize_queue_state(loaded_queue_state)
+                {
+                    ctrl.restore_queue_state(
+                        queue_state.queue,
+                        queue_state.current_queue_index,
+                        queue_state.progress_secs,
+                        queue_state.shuffle_order,
+                        queue_state.shuffle_enabled,
+                    );
                 }
 
                 initial_load_done.set(true);
@@ -1446,10 +1467,6 @@ fn App() -> Element {
     });
 
     use_effect(move || {
-        if !*initial_load_done.read() {
-            return;
-        }
-
         #[cfg(target_arch = "wasm32")]
         {
             let route = *current_route.read();
@@ -1473,7 +1490,7 @@ fn App() -> Element {
             return;
         }
         let configured_dirs = configured_music_dirs.read().clone();
-        let _ = trigger_rescan.read();
+        let trigger = *trigger_rescan.read();
         let fetch_covers = config.peek().auto_fetch_covers;
         let fetch_strategy = config.peek().cover_fetch_strategy;
         let lastfm_key = {
@@ -1481,8 +1498,23 @@ fn App() -> Element {
             (!key.is_empty()).then_some(key)
         };
 
+        let scan_key = format!(
+            "{}|{}",
+            configured_dirs
+                .iter()
+                .map(|d| d.to_string_lossy())
+                .collect::<Vec<_>>()
+                .join(","),
+            trigger,
+        );
+        if *last_scan_key.peek() == Some(scan_key.clone()) {
+            return;
+        }
+        last_scan_key.set(Some(scan_key));
+
         #[cfg(not(target_arch = "wasm32"))]
         spawn(async move {
+            let configured_dirs = configured_dirs;
             let scannable_dirs: Vec<PathBuf> = configured_dirs
                 .iter()
                 .filter(|d| d.exists())
@@ -1567,8 +1599,34 @@ fn App() -> Element {
                             report.missing,
                             report.errors,
                         );
-                        let _ = lib.save(&lib_path());
-                        library.set(lib);
+                        let merged_lib = {
+                            let mut current = library.write();
+                            let mut changed = false;
+
+                            for fetched_album in lib.albums.iter() {
+                                let Some(fetched_cover) = fetched_album.cover_path.clone() else {
+                                    continue;
+                                };
+
+                                let Some(current_album) =
+                                    current.albums.iter_mut().find(|a| a.id == fetched_album.id)
+                                else {
+                                    continue;
+                                };
+
+                                if current_album.cover_path.is_none() && !current_album.manual_cover
+                                {
+                                    current_album.cover_path = Some(fetched_cover);
+                                    changed = true;
+                                }
+                            }
+
+                            changed.then(|| current.clone())
+                        };
+
+                        if let Some(merged_lib) = merged_lib {
+                            let _ = merged_lib.save(&lib_path());
+                        }
                     });
                 } else {
                     // No cover fetching — drop the callback so the progress bar closes.

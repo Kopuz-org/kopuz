@@ -121,7 +121,7 @@ impl PlayerController {
             .unwrap_or_default()
             .to_ascii_lowercase();
 
-        match scheme.as_str() {
+        let url = match scheme.as_str() {
             "jellyfin" => self
                 .config
                 .read()
@@ -161,6 +161,12 @@ impl PlayerController {
                 .and_then(|album| utils::format_artwork_url(album.cover_path.as_ref()))
                 .map(|url| url.as_ref().to_string())
                 .unwrap_or_default(),
+        };
+
+        if url.is_empty() {
+            utils::default_cover_url().as_ref().to_string()
+        } else {
+            url
         }
     }
 
@@ -380,7 +386,7 @@ impl PlayerController {
                 self.pending_resume_seek(&track);
             let use_crossfade = allow_crossfade
                 && self.should_crossfade()
-                && restore_seek_secs.map_or(true, |secs| secs == 0);
+                && restore_seek_secs.is_none_or(|secs| secs == 0);
             let outgoing_duration_secs = *self.current_song_duration.peek();
             let outgoing_progress_secs =
                 (*self.current_song_progress.peek()).min(outgoing_duration_secs);
@@ -432,102 +438,97 @@ impl PlayerController {
                     } else {
                         None
                     };
-                    if let Some(local_path) = offline_path {
-                        if let Ok((source, hint)) = decoder::open_file(&local_path) {
-                            if !use_crossfade {
-                                self.current_queue_index.set(idx);
-                                self.player.write().stop_for_transition();
-                                self.is_playing.set(false);
-                            }
+                    if let Some(local_path) = offline_path
+                        && let Ok((source, hint)) = decoder::open_file(&local_path)
+                    {
+                        if !use_crossfade {
+                            self.current_queue_index.set(idx);
+                            self.player.write().stop_for_transition();
+                            self.is_playing.set(false);
+                        }
 
-                            let cover_url = self.cover_url_for_track(&track);
-                            if !use_crossfade {
-                                self.hydrate_current_track_metadata(idx, 0);
-                                self.current_song_cover_url.set(cover_url.clone());
-                            }
-                            self.is_loading.set(true);
+                        let cover_url = self.cover_url_for_track(&track);
+                        if !use_crossfade {
+                            self.hydrate_current_track_metadata(idx, 0);
+                            self.current_song_cover_url.set(cover_url.clone());
+                        }
+                        self.is_loading.set(true);
 
-                            let mut player = self.player;
-                            let mut is_playing = self.is_playing;
-                            let mut is_loading = self.is_loading;
-                            let mut skip_in_progress = self.skip_in_progress;
-                            let play_generation = self.play_generation;
-                            let volume = self.volume;
-                            let mut current_song_progress = self.current_song_progress;
-                            let mut pending_crossfade_ui = self.pending_crossfade_ui;
-                            let mut pending_resume = self.pending_resume;
-                            let cfg_signal = self.config;
+                        let mut player = self.player;
+                        let mut is_playing = self.is_playing;
+                        let mut is_loading = self.is_loading;
+                        let mut skip_in_progress = self.skip_in_progress;
+                        let play_generation = self.play_generation;
+                        let volume = self.volume;
+                        let mut current_song_progress = self.current_song_progress;
+                        let mut pending_crossfade_ui = self.pending_crossfade_ui;
+                        let mut pending_resume = self.pending_resume;
+                        let cfg_signal = self.config;
 
-                            spawn(async move {
-                                if *play_generation.read() == current_gen {
-                                    let meta = NowPlayingMeta {
-                                        title: track.title.clone(),
-                                        artist: track.artist.clone(),
-                                        album: track.album.clone(),
-                                        duration: std::time::Duration::from_secs(track.duration),
-                                        artwork: Some(cover_url),
-                                    };
-                                    let result = if use_crossfade {
-                                        player.write().crossfade_to(
-                                            source,
-                                            meta,
-                                            hint,
-                                            crossfade_duration,
-                                        )
-                                    } else {
-                                        player.write().play(source, meta, hint)
-                                    };
-                                    if let Err(e) = result {
-                                        eprintln!("Offline playback error: {e}");
-                                        is_loading.set(false);
-                                        skip_in_progress.set(false);
-                                        return;
-                                    }
-                                    player.write().set_volume(*volume.peek());
-                                    if let Some(seek_secs) = restore_seek_secs {
-                                        if seek_secs > 0 {
-                                            player.write().seek(Duration::from_secs(seek_secs));
-                                        }
-                                    }
-                                    if use_crossfade {
-                                        pending_crossfade_ui.set(Some(
-                                            PlayerController::build_pending_crossfade_ui(
-                                                idx,
-                                                outgoing_duration_secs,
-                                                outgoing_progress_secs,
-                                            ),
-                                        ));
-                                    } else {
-                                        current_song_progress.set(0);
-                                    }
-                                    is_playing.set(true);
+                        spawn(async move {
+                            if *play_generation.read() == current_gen {
+                                let meta = NowPlayingMeta {
+                                    title: track.title.clone(),
+                                    artist: track.artist.clone(),
+                                    album: track.album.clone(),
+                                    duration: std::time::Duration::from_secs(track.duration),
+                                    artwork: Some(cover_url),
+                                };
+                                let result = if use_crossfade {
+                                    player.write().crossfade_to(
+                                        source,
+                                        meta,
+                                        hint,
+                                        crossfade_duration,
+                                    )
+                                } else {
+                                    player.write().play(source, meta, hint)
+                                };
+                                if let Err(e) = result {
+                                    eprintln!("Offline playback error: {e}");
                                     is_loading.set(false);
                                     skip_in_progress.set(false);
-
-                                    if clear_pending_resume_on_success {
-                                        pending_resume.set(None);
-                                    }
-                                    let _ = cfg_signal;
+                                    return;
                                 }
-                            });
-                            return;
-                        }
+                                player.write().set_volume(*volume.peek());
+                                if let Some(seek_secs) = restore_seek_secs
+                                    && seek_secs > 0
+                                {
+                                    player.write().seek(Duration::from_secs(seek_secs));
+                                }
+                                if use_crossfade {
+                                    pending_crossfade_ui.set(Some(
+                                        PlayerController::build_pending_crossfade_ui(
+                                            idx,
+                                            outgoing_duration_secs,
+                                            outgoing_progress_secs,
+                                        ),
+                                    ));
+                                } else {
+                                    current_song_progress.set(0);
+                                }
+                                is_playing.set(true);
+                                is_loading.set(false);
+                                skip_in_progress.set(false);
+
+                                if clear_pending_resume_on_success {
+                                    pending_resume.set(None);
+                                }
+                                let _ = cfg_signal;
+                            }
+                        });
+                        return;
                     }
                 }
 
                 if let Some((stream_url, cover_url)) = {
                     if is_radio_item {
-                        if let Some(stream_url) = self
-                            .station_registry
+                        self.station_registry
                             .read()
                             .get(&id)
                             .and_then(|s| s.streams.iter().find(|str| str.id == stream_id))
                             .map(|s| s.url.clone())
-                        {
-                            Some((stream_url, String::new()))
-                        } else {
-                            None
-                        }
+                            .map(|stream_url| (stream_url, String::new()))
                     } else {
                         let conf = self.config.read();
                         conf.server.as_ref().map(|server| match server.service {
@@ -663,11 +664,11 @@ impl PlayerController {
                                     return;
                                 }
                                 player.write().set_volume(*volume.peek());
-                                if let Some(seek_secs) = restore_seek_secs {
-                                    if seek_secs > 0 {
-                                        player.write().seek(Duration::from_secs(seek_secs));
-                                        current_song_progress.set(seek_secs);
-                                    }
+                                if let Some(seek_secs) = restore_seek_secs
+                                    && seek_secs > 0
+                                {
+                                    player.write().seek(Duration::from_secs(seek_secs));
+                                    current_song_progress.set(seek_secs);
                                 }
                                 if use_crossfade {
                                     pending_crossfade_ui.set(Some(
@@ -736,8 +737,7 @@ impl PlayerController {
                                     let scrobble_cfg = cfg_signal;
                                     let scrobble_id = id.clone();
                                     let duration_secs = scrobble_track.duration;
-                                    let threshold_secs =
-                                        std::cmp::min(240, (duration_secs / 2) as u64);
+                                    let threshold_secs = std::cmp::min(240, duration_secs / 2);
 
                                     spawn(async move {
                                         // track must be longer than 30 seconds
@@ -970,31 +970,29 @@ impl PlayerController {
                                     let play_generation = play_generation;
 
                                     spawn(async move {
-                                        if let Ok(response) = reqwest::get(&cover_url).await {
-                                            if let Ok(bytes) = response.bytes().await {
-                                                let temp_dir = std::env::temp_dir();
-                                                let random_id: u64 = rand::random();
-                                                let file_path = temp_dir
-                                                    .join(format!("kopuz_cover_{}.jpg", random_id));
+                                        if let Ok(response) = reqwest::get(&cover_url).await
+                                            && let Ok(bytes) = response.bytes().await
+                                        {
+                                            let temp_dir = std::env::temp_dir();
+                                            let random_id: u64 = rand::random();
+                                            let file_path = temp_dir
+                                                .join(format!("kopuz_cover_{}.jpg", random_id));
 
-                                                if tokio::fs::write(&file_path, bytes).await.is_ok()
-                                                {
-                                                    if *play_generation.read() == current_gen {
-                                                        let path_str =
-                                                            file_path.to_string_lossy().to_string();
-                                                        let new_meta = NowPlayingMeta {
-                                                            title: track.title,
-                                                            artist: track.artist,
-                                                            album: track.album,
-                                                            duration:
-                                                                std::time::Duration::from_secs(
-                                                                    track.duration,
-                                                                ),
-                                                            artwork: Some(path_str),
-                                                        };
-                                                        player.write().update_metadata(new_meta);
-                                                    }
-                                                }
+                                            if tokio::fs::write(&file_path, bytes).await.is_ok()
+                                                && *play_generation.read() == current_gen
+                                            {
+                                                let path_str =
+                                                    file_path.to_string_lossy().to_string();
+                                                let new_meta = NowPlayingMeta {
+                                                    title: track.title,
+                                                    artist: track.artist,
+                                                    album: track.album,
+                                                    duration: std::time::Duration::from_secs(
+                                                        track.duration,
+                                                    ),
+                                                    artwork: Some(path_str),
+                                                };
+                                                player.write().update_metadata(new_meta);
                                             }
                                         }
                                     });
@@ -1333,10 +1331,10 @@ impl PlayerController {
 
                         self.is_playing.set(true);
 
-                        if let Some(seek_secs) = restore_seek_secs {
-                            if seek_secs > 0 {
-                                self.apply_restore_seek(seek_secs);
-                            }
+                        if let Some(seek_secs) = restore_seek_secs
+                            && seek_secs > 0
+                        {
+                            self.apply_restore_seek(seek_secs);
                         }
                         if clear_pending_resume_on_success {
                             self.clear_pending_resume();
@@ -1348,7 +1346,7 @@ impl PlayerController {
                             let scrobble_track = track.clone();
 
                             let duration_secs = scrobble_track.duration;
-                            let threshold_secs = std::cmp::min(240, (duration_secs / 2) as u64);
+                            let threshold_secs = std::cmp::min(240, duration_secs / 2);
 
                             spawn(async move {
                                 // track must be longer than 30 seconds
@@ -1744,7 +1742,7 @@ impl PlayerController {
         let idx = *self.current_queue_index.peek();
         let is_radio = self
             .get_track_at(idx)
-            .map_or(false, |t| t.path.to_string_lossy().starts_with("radio:"));
+            .is_some_and(|t| t.path.to_string_lossy().starts_with("radio:"));
 
         if is_radio {
             self.player.write().stop_for_transition();
@@ -1758,7 +1756,7 @@ impl PlayerController {
         let idx = *self.current_queue_index.peek();
         let is_radio = self
             .get_track_at(idx)
-            .map_or(false, |t| t.path.to_string_lossy().starts_with("radio:"));
+            .is_some_and(|t| t.path.to_string_lossy().starts_with("radio:"));
 
         if is_radio || !self.player.peek().can_resume() {
             if let Some(track) = self.get_track_at(idx) {
@@ -1934,9 +1932,9 @@ pub fn use_player_controller(
     let play_generation = use_signal(|| 0);
     let is_loading = use_signal(|| false);
     let skip_in_progress = use_signal(|| false);
-    let history = use_signal(|| Vec::new());
+    let history = use_signal(Vec::new);
     let shuffle = use_signal(|| false);
-    let shuffle_order = use_signal(|| Vec::<usize>::new());
+    let shuffle_order = use_signal(Vec::<usize>::new);
     let loop_mode = use_signal(|| LoopMode::None);
     let pending_resume = use_signal(|| None::<PendingResumeState>);
     let pending_crossfade_ui = use_signal(|| None::<PendingCrossfadeUiState>);

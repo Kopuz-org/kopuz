@@ -89,7 +89,12 @@ fn cache_classloader() {
     let activity = unsafe { JObject::from_raw(raw.cast()) };
     let result: Result<(), jni::errors::Error> = (|| {
         let cl = env
-            .call_method(&activity, "getClassLoader", "()Ljava/lang/ClassLoader;", &[])?
+            .call_method(
+                &activity,
+                "getClassLoader",
+                "()Ljava/lang/ClassLoader;",
+                &[],
+            )?
             .l()?;
         let global = env.new_global_ref(&cl)?;
         let _ = CLASSLOADER.set(global);
@@ -156,7 +161,9 @@ fn dir_via_jni(method: &str) -> Option<String> {
     let ctx = ndk_context::android_context();
     let activity = unsafe { JObject::from_raw(ctx.context().cast()) };
     let r: Result<String, jni::errors::Error> = (|| {
-        let file = env.call_method(&activity, method, "()Ljava/io/File;", &[])?.l()?;
+        let file = env
+            .call_method(&activity, method, "()Ljava/io/File;", &[])?
+            .l()?;
         let path = env
             .call_method(&file, "getAbsolutePath", "()Ljava/lang/String;", &[])?
             .l()?;
@@ -190,13 +197,17 @@ pub fn get_android_music_dir() -> Option<String> {
     let result: Result<String, jni::errors::Error> = (|env: &mut JNIEnv| {
         let env_class = env.find_class("android/os/Environment")?;
         let dir_type = env.new_string("Music")?;
-        let file = env.call_static_method(
-            env_class,
-            "getExternalStoragePublicDirectory",
-            "(Ljava/lang/String;)Ljava/io/File;",
-            &[JValue::Object(&dir_type)],
-        )?.l()?;
-        let path = env.call_method(&file, "getAbsolutePath", "()Ljava/lang/String;", &[])?.l()?;
+        let file = env
+            .call_static_method(
+                env_class,
+                "getExternalStoragePublicDirectory",
+                "(Ljava/lang/String;)Ljava/io/File;",
+                &[JValue::Object(&dir_type)],
+            )?
+            .l()?;
+        let path = env
+            .call_method(&file, "getAbsolutePath", "()Ljava/lang/String;", &[])?
+            .l()?;
         Ok(env.get_string(&JString::from(path))?.into())
     })(&mut env);
     if let Err(e) = result {
@@ -219,13 +230,23 @@ fn normalize_artwork(url: &str) -> Option<String> {
     let query = url.strip_prefix("artwork://local?")?;
     let encoded = query.split('&').find_map(|kv| {
         let mut parts = kv.splitn(2, '=');
-        if parts.next() == Some("p") { parts.next() } else { None }
+        if parts.next() == Some("p") {
+            parts.next()
+        } else {
+            None
+        }
     })?;
     let decoded = percent_decode(encoded);
     let path = if decoded.starts_with("/~") {
-        std::env::var("HOME").ok().map(|h| decoded.replacen("/~", &h, 1)).unwrap_or(decoded)
+        std::env::var("HOME")
+            .ok()
+            .map(|h| decoded.replacen("/~", &h, 1))
+            .unwrap_or(decoded)
     } else if decoded.starts_with('~') {
-        std::env::var("HOME").ok().map(|h| decoded.replacen('~', &h, 1)).unwrap_or(decoded)
+        std::env::var("HOME")
+            .ok()
+            .map(|h| decoded.replacen('~', &h, 1))
+            .unwrap_or(decoded)
     } else {
         decoded
     };
@@ -396,7 +417,10 @@ pub fn update_now_playing(
         Ok(())
     })();
     if let Err(e) = result {
-        eprintln!("[android] MediaSessionHelper.updateNowPlaying failed: {}", e);
+        eprintln!(
+            "[android] MediaSessionHelper.updateNowPlaying failed: {}",
+            e
+        );
         clear_jni_exception(&mut env);
     }
 }
@@ -412,7 +436,8 @@ pub fn wake_run_loop() {
     };
     let result: Result<(), jni::errors::Error> = (|| {
         let class = find_app_class(&mut env, "com/temidaradev/kopuz/MediaSessionHelper")?;
-        env.call_static_method(&class, "wakeMainThread", "()V", &[])?.v()?;
+        env.call_static_method(&class, "wakeMainThread", "()V", &[])?
+            .v()?;
         Ok(())
     })();
     if let Err(_) = result {
@@ -472,7 +497,10 @@ pub fn request_permissions() {
         Ok(())
     })(&mut env);
     if let Err(e) = result {
-        eprintln!("[android] MediaSessionHelper.requestPermissions failed: {}", e);
+        eprintln!(
+            "[android] MediaSessionHelper.requestPermissions failed: {}",
+            e
+        );
         clear_jni_exception(&mut env);
     }
 }
@@ -524,7 +552,8 @@ pub fn move_task_to_back() {
     };
     let result: Result<(), jni::errors::Error> = (|| {
         let class = find_app_class(&mut env, "dev/dioxus/main/MainActivity")?;
-        env.call_static_method(&class, "moveToBack", "()V", &[])?.v()?;
+        env.call_static_method(&class, "moveToBack", "()V", &[])?
+            .v()?;
         Ok(())
     })();
     if let Err(e) = result {

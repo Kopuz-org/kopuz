@@ -87,7 +87,7 @@ async fn fetch_content(
 ) -> Result<(String, String), RegistryError> {
     let is_http = |s: &str| s.starts_with("http://") || s.starts_with("https://");
 
-    if is_http(url_or_path) || base_url_or_dir.map_or(false, is_http) {
+    if is_http(url_or_path) || base_url_or_dir.is_some_and(is_http) {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let url = if is_http(url_or_path) {

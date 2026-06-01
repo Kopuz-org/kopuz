@@ -28,10 +28,10 @@ pub fn subsonic_image_url_from_path(
         return None;
     }
 
-    if let Some(tag) = tag {
-        if let Some(url) = decode_embedded_cover_url(tag) {
-            return Some(url);
-        }
+    if let Some(tag) = tag
+        && let Some(url) = decode_embedded_cover_url(tag)
+    {
+        return Some(url);
     }
 
     let mut url = reqwest::Url::parse(&format!(
