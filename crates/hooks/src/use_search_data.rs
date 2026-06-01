@@ -84,8 +84,9 @@ fn search_server(
                 let path_str = t.path.to_string_lossy();
                 let url = match active_service {
                     Some(MusicService::Jellyfin) => {
-                        utils::jellyfin_image::jellyfin_image_url_from_path(
+                        utils::jellyfin_image::track_cover_url_with_album_fallback(
                             &path_str,
+                            &t.album_id,
                             &srv.url,
                             srv.access_token.as_deref(),
                             80,

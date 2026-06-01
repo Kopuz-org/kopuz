@@ -230,8 +230,9 @@ pub fn PlaylistDetail(
         } else {
             tracks_val.first().and_then(|t| {
                 let path_str = t.path.to_string_lossy();
-                utils::jellyfin_image::jellyfin_image_url_from_path(
+                utils::jellyfin_image::track_cover_url_with_album_fallback(
                     &path_str,
+                    &t.album_id,
                     &server.url,
                     server.access_token.as_deref(),
                     512,
