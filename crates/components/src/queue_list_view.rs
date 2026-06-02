@@ -393,8 +393,9 @@ pub fn QueueListView(
                 let path_str = track.path.to_string_lossy();
                 let url = match server.service {
                     config::MusicService::Jellyfin => {
-                        utils::jellyfin_image::jellyfin_image_url_from_path(
+                        utils::jellyfin_image::track_cover_url_with_album_fallback(
                             &path_str,
+                            &track.album_id,
                             &server.url,
                             server.access_token.as_deref(),
                             cover_max_width,
