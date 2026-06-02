@@ -88,7 +88,10 @@ const QUEUE_STATE_PROGRESS_STEP_SECS: u64 = 5;
 #[component]
 fn WindowsToolbarIconAssets() -> Element {
     rsx! {
-        document::Link { rel: "preload", href: TOOLBAR_ICONS }
+        div {
+            hidden: true,
+            "data-toolbar-icons": "{TOOLBAR_ICONS}",
+        }
     }
 }
 
