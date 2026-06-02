@@ -518,7 +518,6 @@ pub fn use_player_task(ctrl: PlayerController) {
                                     &album_c,
                                 )
                                 .await;
-                                dbg!(&resolved);
                                 if *discord_cover_resolving_for.peek() == song_key_for_spawn {
                                     discord_cover_url.set(resolved);
                                 }
