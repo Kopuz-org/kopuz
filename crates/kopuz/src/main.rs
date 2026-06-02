@@ -79,8 +79,27 @@ const MAIN_CSS: Asset = asset!("../assets/main.css");
 const THEME_CSS: Asset = asset!("../assets/themes.css");
 const TAILWIND_CSS: Asset = asset!("../assets/tailwind.css");
 const REDUCED_ANIMATIONS_CSS: Asset = asset!("../assets/reduced-animations.css");
+#[cfg(target_os = "windows")]
+const TOOLBAR_ICONS: Asset = asset!("../assets/toolbar_icons", AssetOptions::folder());
 const QUEUE_STATE_SAVE_DEBOUNCE_MS: u64 = 1200;
 const QUEUE_STATE_PROGRESS_STEP_SECS: u64 = 5;
+
+#[cfg(target_os = "windows")]
+#[component]
+fn WindowsToolbarIconAssets() -> Element {
+    rsx! {
+        div {
+            hidden: true,
+            "data-toolbar-icons": "{TOOLBAR_ICONS}",
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+#[component]
+fn WindowsToolbarIconAssets() -> Element {
+    rsx! {}
+}
 
 #[cfg(not(target_arch = "wasm32"))]
 static PRESENCE: std::sync::OnceLock<Option<Arc<Presence>>> = std::sync::OnceLock::new();
@@ -1725,6 +1744,7 @@ fn App() -> Element {
         document::Link { rel: "stylesheet", href: THEME_CSS }
         document::Link { rel: "stylesheet", href: TAILWIND_CSS }
         document::Link { rel: "stylesheet", href: REDUCED_ANIMATIONS_CSS }
+        WindowsToolbarIconAssets {}
         document::Script {
             "(function(){{
                 ['https://fonts.bunny.net/css?family=jetbrains-mono:400,500,700,800&display=swap',
