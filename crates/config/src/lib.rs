@@ -31,7 +31,6 @@ pub fn default_radio_registries() -> Vec<RegistryEntry> {
         is_default: true,
     }]
 }
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct YtdlpOptions {
     #[serde(default = "default_true")]
@@ -592,6 +591,8 @@ pub struct AppConfig {
     pub cover_fetch_strategy: FetchStrategy,
     #[serde(default = "default_radio_registries")]
     pub radio_registries: Vec<RegistryEntry>,
+    #[serde(default)]
+    pub prefer_local_lyrics: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -646,10 +647,10 @@ impl SavedServer {
     }
 
     pub fn matches(&self, server: &MusicServer) -> bool {
-        if let Some(sid) = server.id.as_ref() {
-            if sid == &self.id {
-                return true;
-            }
+        if let Some(sid) = server.id.as_ref()
+            && sid == &self.id
+        {
+            return true;
         }
         self.url == server.url && self.service == server.service
     }
@@ -785,6 +786,7 @@ impl Default for AppConfig {
             auto_fetch_covers: false,
             cover_fetch_strategy: FetchStrategy::default(),
             radio_registries: default_radio_registries(),
+            prefer_local_lyrics: false,
         }
     }
 }
@@ -810,10 +812,10 @@ impl AppConfig {
     }
 
     pub fn migrate_servers(&mut self) {
-        if let Some(server) = self.server.as_mut() {
-            if server.id.is_none() {
-                server.id = Some(uuid::Uuid::new_v4().to_string());
-            }
+        if let Some(server) = self.server.as_mut()
+            && server.id.is_none()
+        {
+            server.id = Some(uuid::Uuid::new_v4().to_string());
         }
         if let Some(server) = self.server.clone() {
             let already = self.servers.iter().any(|s| s.matches(&server));
@@ -840,10 +842,10 @@ impl AppConfig {
 
     pub fn remove_saved_server(&mut self, id: &str) {
         self.servers.retain(|s| s.id != id);
-        if let Some(active) = &self.server {
-            if active.id.as_deref() == Some(id) {
-                self.server = None;
-            }
+        if let Some(active) = &self.server
+            && active.id.as_deref() == Some(id)
+        {
+            self.server = None;
         }
     }
 
@@ -942,17 +944,17 @@ impl AppConfig {
     }
 
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        if let Some(parent) = path.parent() {
-            if let Err(e) = fs::create_dir_all(parent) {
-                eprintln!("Failed to create config directory {:?}: {}", parent, e);
-                return Err(e);
-            }
+        if let Some(parent) = path.parent()
+            && let Err(e) = fs::create_dir_all(parent)
+        {
+            eprintln!("Failed to create config directory {:?}: {}", parent, e);
+            return Err(e);
         }
         let data = match serde_json::to_string_pretty(self) {
             Ok(d) => d,
             Err(e) => {
                 eprintln!("Failed to serialize config: {}", e);
-                return Err(std::io::Error::new(std::io::ErrorKind::Other, e));
+                return Err(std::io::Error::other(e));
             }
         };
         if let Err(e) = fs::write(path, data) {

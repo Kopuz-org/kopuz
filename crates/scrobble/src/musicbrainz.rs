@@ -77,7 +77,12 @@ pub async fn submit_listens(
     Ok(resp)
 }
 
-pub fn make_listen<'a>(artist: &'a str, track: &'a str, release: Option<&'a str>) -> Listen<'a> {
+pub fn make_listen<'a>(
+    artist: &'a str,
+    track: &'a str,
+    release: Option<&'a str>,
+    additional_info: Option<HashMap<&'a str, &'a str>>,
+) -> Listen<'a> {
     let now_unix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
@@ -89,7 +94,7 @@ pub fn make_listen<'a>(artist: &'a str, track: &'a str, release: Option<&'a str>
             artist_name: artist,
             track_name: track,
             release_name: release.filter(|s| !s.is_empty()),
-            additional_info: None,
+            additional_info: additional_info,
         },
     }
 }
@@ -98,6 +103,7 @@ pub fn make_playing_now<'a>(
     artist: &'a str,
     track: &'a str,
     release: Option<&'a str>,
+    additional_info: Option<HashMap<&'a str, &'a str>>,
 ) -> Listen<'a> {
     Listen {
         listened_at: None,
@@ -105,7 +111,7 @@ pub fn make_playing_now<'a>(
             artist_name: artist,
             track_name: track,
             release_name: release.filter(|s| !s.is_empty()),
-            additional_info: None,
+            additional_info: additional_info,
         },
     }
 }

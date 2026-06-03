@@ -1,6 +1,5 @@
 use crate::lyrics_view::LyricsView;
 use crate::queue_list_view::QueueListView;
-use crate::reorder_buttons::ReorderButtons;
 use crate::shared::fmt_time;
 use crate::titlebar::Titlebar;
 use config::AppConfig;
@@ -389,16 +388,18 @@ pub fn Fullscreen(
             return;
         }
         last_key.set(new_key);
-        let (server_url, server_token, server_user_id) = {
+        let (server_url, server_token, server_user_id, prefer_local) = {
             let conf = config.peek();
+            let prefer_local = conf.prefer_local_lyrics;
             if let Some(server) = &conf.server {
                 (
                     Some(server.url.clone()),
                     server.access_token.clone(),
                     server.user_id.clone(),
+                    prefer_local,
                 )
             } else {
-                (None, None, None)
+                (None, None, None, prefer_local)
             }
         };
 
@@ -434,6 +435,7 @@ pub fn Fullscreen(
                 server_url.as_deref(),
                 server_token.as_deref(),
                 server_user_id.as_deref(),
+                prefer_local,
             )
             .await;
             if *fetch_gen.peek() == fetch_id {

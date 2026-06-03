@@ -476,7 +476,7 @@ pub fn LastFmSettings(
                 onclick: move |_| {
                     let api_key = api_key_input();
                     let api_secret = api_secret_input();
-                    let on_session_key_save = on_session_key_save.clone();
+                    let on_session_key_save = on_session_key_save;
 
                     spawn(async move {
                         match lastfm::get_auth_token(&api_key).await {

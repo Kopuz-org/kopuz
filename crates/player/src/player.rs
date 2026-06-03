@@ -254,7 +254,7 @@ impl Player {
                         .ok()
                         .and_then(|consumer| consumer.clone());
 
-                    let (active_read, read, fade_completed) = if fading_consumer.is_none() {
+                    let (_active_read, read, fade_completed) = if fading_consumer.is_none() {
                         let active_read = if let Some(consumer) = active_consumer {
                             let cons = consumer.lock().unwrap_or_else(|e| e.into_inner());
                             cons.read(data).unwrap_or(0)
@@ -348,12 +348,12 @@ impl Player {
                         if let Ok(mut fade) = stream_crossfade_state.lock() {
                             *fade = None;
                         }
-                        if let Ok(fading_state_guard) = stream_fading_session_state.lock() {
-                            if let Some(fading_state) = fading_state_guard.as_ref() {
-                                let mut st = fading_state.lock().unwrap_or_else(|e| e.into_inner());
-                                st.stopped = true;
-                                st.finished = true;
-                            }
+                        if let Ok(fading_state_guard) = stream_fading_session_state.lock()
+                            && let Some(fading_state) = fading_state_guard.as_ref()
+                        {
+                            let mut st = fading_state.lock().unwrap_or_else(|e| e.into_inner());
+                            st.stopped = true;
+                            st.finished = true;
                         }
                     }
 
@@ -513,10 +513,10 @@ impl Player {
         let old_ring_buf = self.ring_buf.take();
         let old_decoder_handle = self.decoder_handle.take();
 
-        if let Some(old_consumer) = old_consumer {
-            if let Ok(mut fading_consumer) = self.fading_consumer.lock() {
-                *fading_consumer = Some(old_consumer);
-            }
+        if let Some(old_consumer) = old_consumer
+            && let Ok(mut fading_consumer) = self.fading_consumer.lock()
+        {
+            *fading_consumer = Some(old_consumer);
         }
         if let Ok(mut fading_state) = self.fading_session_state.lock() {
             *fading_state = Some(old_state);
@@ -662,12 +662,12 @@ impl Player {
     }
 
     fn stop_fading_session(&mut self) {
-        if let Ok(fading_state) = self.fading_session_state.lock() {
-            if let Some(state) = fading_state.as_ref() {
-                let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
-                st.stopped = true;
-                st.finished = true;
-            }
+        if let Ok(fading_state) = self.fading_session_state.lock()
+            && let Some(state) = fading_state.as_ref()
+        {
+            let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
+            st.stopped = true;
+            st.finished = true;
         }
         if let Ok(mut fade) = self.crossfade_state.lock() {
             *fade = None;
@@ -965,7 +965,7 @@ impl Player {
                 for frame in 0..frames {
                     for ch in 0..src_chans {
                         if ch < b.spec().channels.count() {
-                            let val: u32 = b.chan(ch)[frame].0.into();
+                            let val: u32 = b.chan(ch)[frame].0;
                             interleaved.push((val as f32 - 8388608.0) / 8388608.0);
                         } else {
                             interleaved.push(0.0);
@@ -1114,11 +1114,11 @@ impl Player {
             self.position_micros
                 .store(time.as_micros() as u64, Ordering::Relaxed);
 
-            if let Some(cons) = &self.ring_buf_consumer {
-                if let Ok(cons) = cons.lock() {
-                    let mut dummy = [0.0f32; 2048];
-                    while cons.read(&mut dummy).unwrap_or(0) > 0 {}
-                }
+            if let Some(cons) = &self.ring_buf_consumer
+                && let Ok(cons) = cons.lock()
+            {
+                let mut dummy = [0.0f32; 2048];
+                while cons.read(&mut dummy).unwrap_or(0) > 0 {}
             }
         }
 
@@ -1273,10 +1273,11 @@ impl Player {
     pub fn get_position(&self) -> Duration {
         let raw = Duration::from_micros(self.position_micros.load(Ordering::Relaxed));
 
-        if let Some(meta) = &self.now_playing {
-            if meta.duration > Duration::ZERO && raw > meta.duration {
-                return meta.duration;
-            }
+        if let Some(meta) = &self.now_playing
+            && meta.duration > Duration::ZERO
+            && raw > meta.duration
+        {
+            return meta.duration;
         }
         raw
     }

@@ -195,14 +195,13 @@ fn process_ws_message(
 }
 
 fn check_heartbeat(json: &Value, def: &WebSocketSourceDef, current_interval: u64) -> Option<u64> {
-    if let Some(hb) = &def.heartbeat {
-        if let Some(val) = extract_value(json, &hb.interval_field) {
-            if let Some(ms) = val.as_u64() {
-                if ms > 0 && ms != current_interval {
-                    return Some(ms);
-                }
-            }
-        }
+    if let Some(hb) = &def.heartbeat
+        && let Some(val) = extract_value(json, &hb.interval_field)
+        && let Some(ms) = val.as_u64()
+        && ms > 0
+        && ms != current_interval
+    {
+        return Some(ms);
     }
     None
 }
@@ -251,7 +250,6 @@ async fn start_ws_metadata(
                                     tracing::warn!("WebSocket heartbeat failed: {}", e);
                                     break;
                                 }
-                            }
                         }
                         msg = ws_stream.next() => {
                             match msg {
@@ -263,11 +261,10 @@ async fn start_ws_metadata(
                                             heartbeat_timer.tick().await;
                                         }
 
-                                        if let Some(meta) = process_ws_message(&json, &def, &station_name) {
-                                            if tx.send(meta).is_err() {
+                                        if let Some(meta) = process_ws_message(&json, &def, &station_name)
+                                            && tx.send(meta).is_err() {
                                                 return;
                                             }
-                                        }
                                     }
                                 }
                                 Some(Ok(_)) => {}

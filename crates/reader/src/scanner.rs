@@ -46,7 +46,7 @@ pub async fn scan_directory(
                     if let Some(name) = path.file_name() {
                         pr(name.to_string_lossy().into_owned());
                     }
-                    read(&path, &cc, &mut *lib);
+                    read(&path, &cc, &mut lib);
                 }
             })
         })
@@ -82,13 +82,13 @@ pub async fn scan_directory(
             .flatten()
             .collect();
 
-        if artists.len() == 1 {
-            if let Some(artist) = artists.iter().next() {
-                library
-                    .local_artist_images
-                    .entry(artist.clone())
-                    .or_insert(img_path);
-            }
+        if artists.len() == 1
+            && let Some(artist) = artists.iter().next()
+        {
+            library
+                .local_artist_images
+                .entry(artist.clone())
+                .or_insert(img_path);
         }
     }
 

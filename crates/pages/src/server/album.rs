@@ -3,6 +3,7 @@ use components::dots_menu::{DotsMenu, MenuAction};
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
 use components::track_row::TrackRow;
+use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use config::{AppConfig, MusicService, UiStyle};
 use dioxus::prelude::*;
 use reader::{Library, PlaylistStore};
@@ -10,7 +11,6 @@ use server::jellyfin::JellyfinClient;
 use server::subsonic::SubsonicClient;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use components::virtual_scroll::{use_virtual_scroll, VirtualScrollView};
 
 #[component]
 pub fn JellyfinAlbum(

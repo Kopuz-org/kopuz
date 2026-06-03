@@ -17,6 +17,7 @@ use player::systemint::set_background_handler;
 use player::systemint::set_tokio_waker;
 
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 enum BgCmd {
     Play,
     Pause,
@@ -48,11 +49,12 @@ fn init_bg_channel() {
     BG_NOTIFY.get_or_init(tokio::sync::Notify::new);
 }
 
+#[allow(dead_code)]
 fn send_bg_cmd(cmd: BgCmd) {
-    if let Some(lock) = BG_CMD_TX.get() {
-        if let Ok(tx) = lock.lock() {
-            let _ = tx.send(cmd);
-        }
+    if let Some(lock) = BG_CMD_TX.get()
+        && let Ok(tx) = lock.lock()
+    {
+        let _ = tx.send(cmd);
     }
     // Instantly wake the tokio task so it processes the command
     // without waiting for the next 250ms poll tick.
@@ -63,11 +65,11 @@ fn send_bg_cmd(cmd: BgCmd) {
 
 fn drain_bg_cmds() -> Vec<BgCmd> {
     let mut cmds = Vec::new();
-    if let Some(lock) = BG_CMD_RX.get() {
-        if let Ok(rx) = lock.try_lock() {
-            while let Ok(cmd) = rx.try_recv() {
-                cmds.push(cmd);
-            }
+    if let Some(lock) = BG_CMD_RX.get()
+        && let Ok(rx) = lock.try_lock()
+    {
+        while let Ok(cmd) = rx.try_recv() {
+            cmds.push(cmd);
         }
     }
     cmds
@@ -273,18 +275,19 @@ pub fn use_player_task(ctrl: PlayerController) {
                         ctrl.get_track_at(idx)
                             .map(|t| t.path.to_string_lossy().to_string())
                     };
-                    if let Some(path) = current_path {
-                        if is_playing && last_recent_path.as_ref() != Some(&path) {
-                            last_recent_path = Some(path.clone());
-                            let is_server =
-                                path.starts_with("jellyfin:") || path.starts_with("subsonic:");
-                            let id = if is_server {
-                                path.split(':').nth(1).unwrap_or(&path).to_string()
-                            } else {
-                                path.clone()
-                            };
-                            config.write().push_recent(id, is_server);
-                        }
+                    if let Some(path) = current_path
+                        && is_playing
+                        && last_recent_path.as_ref() != Some(&path)
+                    {
+                        last_recent_path = Some(path.clone());
+                        let is_server =
+                            path.starts_with("jellyfin:") || path.starts_with("subsonic:");
+                        let id = if is_server {
+                            path.split(':').nth(1).unwrap_or(&path).to_string()
+                        } else {
+                            path.clone()
+                        };
+                        config.write().push_recent(id, is_server);
                     }
                 }
 
@@ -297,16 +300,18 @@ pub fn use_player_task(ctrl: PlayerController) {
                     let next_track_key = next_track.path.to_string_lossy().to_string();
                     if last_lyrics_prefetch_track.as_ref() != Some(&next_track_key) {
                         last_lyrics_prefetch_track = Some(next_track_key);
-                        let (server_url, server_token, server_user_id) = {
+                        let (server_url, server_token, server_user_id, prefer_local) = {
                             let conf = config.read();
+                            let prefer_local = conf.prefer_local_lyrics;
                             if let Some(server) = &conf.server {
                                 (
                                     Some(server.url.clone()),
                                     server.access_token.clone(),
                                     server.user_id.clone(),
+                                    prefer_local,
                                 )
                             } else {
-                                (None, None, None)
+                                (None, None, None, prefer_local)
                             }
                         };
 
@@ -321,6 +326,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                                 server_url.as_deref(),
                                 server_token.as_deref(),
                                 server_user_id.as_deref(),
+                                prefer_local,
                             )
                             .await;
                         });
@@ -360,101 +366,90 @@ pub fn use_player_task(ctrl: PlayerController) {
                     conf.server.clone().map(|s| (s, conf.device_id.clone()))
                 };
 
-                if let Some((server, device_id)) = jellyfin_info {
-                    if server.service == MusicService::Jellyfin {
-                        let key = JellyfinCacheKey {
-                            url: server.url.clone(),
-                            access_token: server.access_token,
-                            device_id: device_id.clone(),
-                            user_id: server.user_id,
-                        };
+                if let Some((server, device_id)) = jellyfin_info
+                    && server.service == MusicService::Jellyfin
+                {
+                    let key = JellyfinCacheKey {
+                        url: server.url.clone(),
+                        access_token: server.access_token,
+                        device_id: device_id.clone(),
+                        user_id: server.user_id,
+                    };
 
-                        let remote = match &jellyfin_client_cache {
-                            Some((cached_key, cached_client)) if cached_key == &key => {
-                                cached_client.clone()
-                            }
-                            _ => {
-                                let client = Arc::new(JellyfinClient::new(
-                                    &key.url,
-                                    key.access_token.as_deref(),
-                                    &key.device_id,
-                                    key.user_id.as_deref(),
-                                ));
-                                jellyfin_client_cache = Some((key, client.clone()));
-                                client
-                            }
-                        };
-
-                        if last_ping.elapsed().as_secs() >= 30 {
-                            let remote = remote.clone();
-                            spawn(async move {
-                                let _ = remote.ping().await;
-                            });
-                            last_ping = web_time::Instant::now();
+                    let remote = match &jellyfin_client_cache {
+                        Some((cached_key, cached_client)) if cached_key == &key => {
+                            cached_client.clone()
                         }
+                        _ => {
+                            let client = Arc::new(JellyfinClient::new(
+                                &key.url,
+                                key.access_token.as_deref(),
+                                &key.device_id,
+                                key.user_id.as_deref(),
+                            ));
+                            jellyfin_client_cache = Some((key, client.clone()));
+                            client
+                        }
+                    };
 
-                        let track = {
-                            let current_idx = *ctrl.current_queue_index.read();
-                            ctrl.get_track_at(current_idx)
-                        };
+                    if last_ping.elapsed().as_secs() >= 30 {
+                        let remote = remote.clone();
+                        spawn(async move {
+                            let _ = remote.ping().await;
+                        });
+                        last_ping = web_time::Instant::now();
+                    }
 
-                        if let Some(track) = track {
-                            let path_str = track.path.to_string_lossy();
-                            if path_str.starts_with("jellyfin:") {
-                                let parts: Vec<&str> = path_str.split(':').collect();
-                                if let Some(id) = parts.get(1) {
-                                    let current_id = id.to_string();
+                    let track = {
+                        let current_idx = *ctrl.current_queue_index.read();
+                        ctrl.get_track_at(current_idx)
+                    };
 
-                                    if last_jellyfin_id.as_ref() != Some(&current_id) {
-                                        if let Some(old_id) = last_jellyfin_id {
-                                            let remote = remote.clone();
-                                            spawn(async move {
-                                                let _ = remote
-                                                    .report_playback_stopped(
-                                                        &old_id,
-                                                        pos.as_micros() as u64 * 10,
-                                                    )
-                                                    .await;
-                                            });
-                                        }
+                    if let Some(track) = track {
+                        let path_str = track.path.to_string_lossy();
+                        if path_str.starts_with("jellyfin:") {
+                            let parts: Vec<&str> = path_str.split(':').collect();
+                            if let Some(id) = parts.get(1) {
+                                let current_id = id.to_string();
+
+                                if last_jellyfin_id.as_ref() != Some(&current_id) {
+                                    if let Some(old_id) = last_jellyfin_id {
                                         let remote = remote.clone();
-                                        let current_id_clone = current_id.clone();
                                         spawn(async move {
                                             let _ = remote
-                                                .report_playback_start(&current_id_clone)
-                                                .await;
-                                        });
-                                        last_jellyfin_id = Some(current_id.clone());
-                                    }
-
-                                    if last_progress_report.elapsed().as_secs() >= 5
-                                        || is_playing != prev_playing
-                                    {
-                                        let ticks = pos.as_micros() as u64 * 10;
-                                        let remote = remote.clone();
-                                        let current_id_clone = current_id.clone();
-                                        spawn(async move {
-                                            let _ = remote
-                                                .report_playback_progress(
-                                                    &current_id_clone,
-                                                    ticks,
-                                                    !is_playing,
+                                                .report_playback_stopped(
+                                                    &old_id,
+                                                    pos.as_micros() as u64 * 10,
                                                 )
                                                 .await;
                                         });
-                                        last_progress_report = web_time::Instant::now();
                                     }
+                                    let remote = remote.clone();
+                                    let current_id_clone = current_id.clone();
+                                    spawn(async move {
+                                        let _ =
+                                            remote.report_playback_start(&current_id_clone).await;
+                                    });
+                                    last_jellyfin_id = Some(current_id.clone());
                                 }
-                            } else if let Some(old_id) = last_jellyfin_id.take() {
-                                let remote = remote.clone();
-                                spawn(async move {
-                                    let _ = remote
-                                        .report_playback_stopped(
-                                            &old_id,
-                                            pos.as_micros() as u64 * 10,
-                                        )
-                                        .await;
-                                });
+
+                                if last_progress_report.elapsed().as_secs() >= 5
+                                    || is_playing != prev_playing
+                                {
+                                    let ticks = pos.as_micros() as u64 * 10;
+                                    let remote = remote.clone();
+                                    let current_id_clone = current_id.clone();
+                                    spawn(async move {
+                                        let _ = remote
+                                            .report_playback_progress(
+                                                &current_id_clone,
+                                                ticks,
+                                                !is_playing,
+                                            )
+                                            .await;
+                                    });
+                                    last_progress_report = web_time::Instant::now();
+                                }
                             }
                         } else if let Some(old_id) = last_jellyfin_id.take() {
                             let remote = remote.clone();
@@ -464,6 +459,13 @@ pub fn use_player_task(ctrl: PlayerController) {
                                     .await;
                             });
                         }
+                    } else if let Some(old_id) = last_jellyfin_id.take() {
+                        let remote = remote.clone();
+                        spawn(async move {
+                            let _ = remote
+                                .report_playback_stopped(&old_id, pos.as_micros() as u64 * 10)
+                                .await;
+                        });
                     }
                 }
 
@@ -493,7 +495,6 @@ pub fn use_player_task(ctrl: PlayerController) {
                         } else {
                             pos.as_secs()
                         };
-                        let cover = ctrl.current_song_cover_url.read().clone();
 
                         let song_key = format!("{}|{}|{}", title, artist, album);
 
@@ -502,29 +503,25 @@ pub fn use_player_task(ctrl: PlayerController) {
                             discord_cover_url.set(None);
                             discord_cover_sent.set(false);
 
-                            if cover.starts_with("http") && !cover.contains("dioxus.localhost") {
-                                discord_cover_url.set(Some(cover.clone()));
-                            } else {
-                                let mbid = {
-                                    let idx = *ctrl.current_queue_index.read();
-                                    ctrl.get_track_at(idx)
-                                        .and_then(|t| t.musicbrainz_release_id.clone())
-                                };
-                                let artist_c = artist.clone();
-                                let album_c = album.clone();
-                                let song_key_for_spawn = song_key.clone();
-                                spawn(async move {
-                                    let resolved = cover_art::resolve_cover_art_url(
-                                        mbid.as_deref(),
-                                        &artist_c,
-                                        &album_c,
-                                    )
-                                    .await;
-                                    if *discord_cover_resolving_for.peek() == song_key_for_spawn {
-                                        discord_cover_url.set(resolved);
-                                    }
-                                });
-                            }
+                            let mbid = {
+                                let idx = *ctrl.current_queue_index.read();
+                                ctrl.get_track_at(idx)
+                                    .and_then(|t| t.musicbrainz_release_id.clone())
+                            };
+                            let artist_c = artist.clone();
+                            let album_c = album.clone();
+                            let song_key_for_spawn = song_key.clone();
+                            spawn(async move {
+                                let resolved = cover_art::resolve_cover_art_url(
+                                    mbid.as_deref(),
+                                    &artist_c,
+                                    &album_c,
+                                )
+                                .await;
+                                if *discord_cover_resolving_for.peek() == song_key_for_spawn {
+                                    discord_cover_url.set(resolved);
+                                }
+                            });
                         }
 
                         if discord_enabled {
@@ -540,10 +537,6 @@ pub fn use_player_task(ctrl: PlayerController) {
                                 let resolved = discord_cover_url.read().clone();
                                 let cover_ref = if let Some(ref url) = resolved {
                                     Some(url.as_str())
-                                } else if cover.starts_with("http")
-                                    && !cover.contains("dioxus.localhost")
-                                {
-                                    Some(cover.as_str())
                                 } else {
                                     None
                                 };
@@ -610,7 +603,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                         }
                         {
                             let mut config_write = config.write();
-                            let q = ctrl.queue.peek();
+                            let _q = ctrl.queue.peek();
                             let idx = *ctrl.current_queue_index.peek();
                             if let Some(track) = ctrl.get_track_at(idx) {
                                 let track_id = track.path.to_string_lossy().to_string();

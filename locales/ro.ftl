@@ -376,6 +376,7 @@ artist_photo_source = Sursă fotografie artist
 artist_photo = Fotografie artist
 album_cover = Copertă album
 auto_fetch_covers = Preia automat coperțile albumelor
+prefer_local_lyrics = Preferă versurile locale (.lrc / încorporate, fără rezervă online)
 cover_fetch_strategy = Strategie de preluare coperți
 musicbrainz_first = MusicBrainz mai întâi
 lastfm_first = Last.fm mai întâi

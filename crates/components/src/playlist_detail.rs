@@ -66,9 +66,19 @@ pub fn PlaylistDetail(
                     let server_info = {
                         let conf = config.peek();
                         conf.server.as_ref().and_then(|server| {
-                            if let (Some(token), Some(user_id)) = (&server.access_token, &server.user_id) {
-                                Some((server.service.clone(), server.url.clone(), token.clone(), conf.device_id.clone(), user_id.clone()))
-                            } else { None }
+                            if let (Some(token), Some(user_id)) =
+                                (&server.access_token, &server.user_id)
+                            {
+                                Some((
+                                    server.service.clone(),
+                                    server.url.clone(),
+                                    token.clone(),
+                                    conf.device_id.clone(),
+                                    user_id.clone(),
+                                ))
+                            } else {
+                                None
+                            }
                         })
                     };
                     if let Some((service, url, token, device_id, user_id)) = server_info {
@@ -80,121 +90,109 @@ pub fn PlaylistDetail(
                                     &device_id,
                                     Some(&user_id),
                                 );
-                                    if let Ok(items) = remote.get_playlist_items(&pid_clone).await {
-                                        let mut new_tracks = Vec::new();
-                                        for item in items {
-                                            let duration_secs =
-                                                item.run_time_ticks.unwrap_or(0) / 10_000_000;
-                                            let mut path_str = format!("jellyfin:{}", item.id);
-                                            if let Some(tags) = &item.image_tags {
-                                                if let Some(tag) = tags.get("Primary") {
-                                                    path_str.push_str(&format!(":{}", tag));
-                                                }
+                                if let Ok(items) = remote.get_playlist_items(&pid_clone).await {
+                                    let mut new_tracks = Vec::new();
+                                    for item in items {
+                                        let duration_secs =
+                                            item.run_time_ticks.unwrap_or(0) / 10_000_000;
+                                        let mut path_str = format!("jellyfin:{}", item.id);
+                                        if let Some(tags) = &item.image_tags {
+                                            if let Some(tag) = tags.get("Primary") {
+                                                path_str.push_str(&format!(":{}", tag));
                                             }
-                                            let bitrate_kbps = item.bitrate.unwrap_or(0) / 1000;
-                                            let bitrate_u16 =
-                                                bitrate_kbps.min(u16::MAX as u32) as u16;
-                                            let artist_str = item
-                                                .album_artist
-                                                .clone()
-                                                .or_else(|| {
-                                                    item.artists.as_ref().map(|a| a.join(", "))
-                                                })
-                                                .unwrap_or_default();
-                                            new_tracks.push(reader::models::Track {
-                                                path: PathBuf::from(path_str),
-                                                album_id: item
-                                                    .album_id
-                                                    .map(|id| format!("jellyfin:{}", id))
-                                                    .unwrap_or_default(),
-                                                title: item.name,
-                                                artist: artist_str,
-                                                album: item.album.unwrap_or_default(),
-                                                duration: duration_secs,
-                                                khz: item.sample_rate.unwrap_or(0),
-                                                bitrate: bitrate_u16,
-                                                track_number: item.index_number,
-                                                disc_number: item.parent_index_number,
-                                                musicbrainz_release_id: None,
-                                                playlist_item_id: item.playlist_item_id,
-                                                artists: item.artists.unwrap_or_default(),
-                                            });
                                         }
-                                        tracks.set(new_tracks);
-                                        has_loaded_jellyfin_tracks.set(true);
-                                    }
-                                }
-                                MusicService::Subsonic | MusicService::Custom => {
-                                    let remote = server::subsonic::SubsonicClient::new(
-                                        &url,
-                                        &user_id,
-                                        &token,
-                                    );
-                                    if let Ok(items) = remote.get_playlist_entries(&pid_clone).await
-                                    {
-                                        let mut new_tracks = Vec::new();
-                                        for item in items {
-                                            let cover_tag = item
-                                                .cover_art
-                                                .as_ref()
-                                                .and_then(|id| {
-                                                    remote.cover_art_url(id, Some(512)).ok()
-                                                })
-                                                .map(|url| {
-                                                    let mut hex =
-                                                        String::with_capacity(url.len() * 2);
-                                                    for b in url.as_bytes() {
-                                                        hex.push_str(&format!("{:02x}", b));
-                                                    }
-                                                    format!("urlhex_{}", hex)
-                                                });
-                                            let path = if let Some(tag) = &cover_tag {
-                                                PathBuf::from(format!(
-                                                    "jellyfin:{}:{}",
-                                                    item.id, tag
-                                                ))
-                                            } else {
-                                                PathBuf::from(format!("jellyfin:{}", item.id))
-                                            };
-                                            let album_id = item
+                                        let bitrate_kbps = item.bitrate.unwrap_or(0) / 1000;
+                                        let bitrate_u16 = bitrate_kbps.min(u16::MAX as u32) as u16;
+                                        let artist_str = item
+                                            .album_artist
+                                            .clone()
+                                            .or_else(|| item.artists.as_ref().map(|a| a.join(", ")))
+                                            .unwrap_or_default();
+                                        new_tracks.push(reader::models::Track {
+                                            path: PathBuf::from(path_str),
+                                            album_id: item
                                                 .album_id
-                                                .as_ref()
-                                                .map(|id| {
-                                                    if let Some(tag) = &cover_tag {
-                                                        format!("jellyfin:{}:{}", id, tag)
-                                                    } else {
-                                                        format!("jellyfin:{}:none", id)
-                                                    }
-                                                })
-                                                .unwrap_or_else(|| {
-                                                    format!("jellyfin:{}:none", item.id)
-                                                });
-                                            new_tracks.push(reader::models::Track {
-                                                path,
-                                                album_id,
-                                                title: item.title,
-                                                artist: item.artist.clone().unwrap_or_default(),
-                                                album: item.album.unwrap_or_default(),
-                                                duration: item.duration.unwrap_or(0),
-                                                khz: item.sampling_rate.unwrap_or(0),
-                                                bitrate: item
-                                                    .bit_rate
-                                                    .unwrap_or(0)
-                                                    .min(u16::MAX as u32)
-                                                    as u16,
-                                                track_number: item.track,
-                                                disc_number: item.disc_number,
-                                                musicbrainz_release_id: None,
-                                                playlist_item_id: None,
-                                                artists: vec![item.artist.unwrap_or_default()],
-                                            });
-                                        }
-                                        tracks.set(new_tracks);
-                                        has_loaded_jellyfin_tracks.set(true);
+                                                .map(|id| format!("jellyfin:{}", id))
+                                                .unwrap_or_default(),
+                                            title: item.name,
+                                            artist: artist_str,
+                                            album: item.album.unwrap_or_default(),
+                                            duration: duration_secs,
+                                            khz: item.sample_rate.unwrap_or(0),
+                                            bitrate: bitrate_u16,
+                                            track_number: item.index_number,
+                                            disc_number: item.parent_index_number,
+                                            musicbrainz_release_id: None,
+                                            musicbrainz_recording_id: None,
+                                            musicbrainz_track_id: None,
+                                            playlist_item_id: item.playlist_item_id,
+                                            artists: item.artists.unwrap_or_default(),
+                                        });
                                     }
+                                    tracks.set(new_tracks);
+                                    has_loaded_jellyfin_tracks.set(true);
+                                }
+                            }
+                            MusicService::Subsonic | MusicService::Custom => {
+                                let remote =
+                                    server::subsonic::SubsonicClient::new(&url, &user_id, &token);
+                                if let Ok(items) = remote.get_playlist_entries(&pid_clone).await {
+                                    let mut new_tracks = Vec::new();
+                                    for item in items {
+                                        let cover_tag = item
+                                            .cover_art
+                                            .as_ref()
+                                            .and_then(|id| remote.cover_art_url(id, Some(512)).ok())
+                                            .map(|url| {
+                                                let mut hex = String::with_capacity(url.len() * 2);
+                                                for b in url.as_bytes() {
+                                                    hex.push_str(&format!("{:02x}", b));
+                                                }
+                                                format!("urlhex_{}", hex)
+                                            });
+                                        let path = if let Some(tag) = &cover_tag {
+                                            PathBuf::from(format!("jellyfin:{}:{}", item.id, tag))
+                                        } else {
+                                            PathBuf::from(format!("jellyfin:{}", item.id))
+                                        };
+                                        let album_id = item
+                                            .album_id
+                                            .as_ref()
+                                            .map(|id| {
+                                                if let Some(tag) = &cover_tag {
+                                                    format!("jellyfin:{}:{}", id, tag)
+                                                } else {
+                                                    format!("jellyfin:{}:none", id)
+                                                }
+                                            })
+                                            .unwrap_or_else(|| {
+                                                format!("jellyfin:{}:none", item.id)
+                                            });
+                                        new_tracks.push(reader::models::Track {
+                                            path,
+                                            album_id,
+                                            title: item.title,
+                                            artist: item.artist.clone().unwrap_or_default(),
+                                            album: item.album.unwrap_or_default(),
+                                            duration: item.duration.unwrap_or(0),
+                                            khz: item.sampling_rate.unwrap_or(0),
+                                            bitrate: item.bit_rate.unwrap_or(0).min(u16::MAX as u32)
+                                                as u16,
+                                            track_number: item.track,
+                                            disc_number: item.disc_number,
+                                            musicbrainz_release_id: None,
+                                            musicbrainz_recording_id: None,
+                                            musicbrainz_track_id: None,
+                                            playlist_item_id: None,
+                                            artists: vec![item.artist.unwrap_or_default()],
+                                        });
+                                    }
+                                    tracks.set(new_tracks);
+                                    has_loaded_jellyfin_tracks.set(true);
                                 }
                             }
                         }
+                    }
                 });
             }
         });
@@ -232,8 +230,9 @@ pub fn PlaylistDetail(
         } else {
             tracks_val.first().and_then(|t| {
                 let path_str = t.path.to_string_lossy();
-                utils::jellyfin_image::jellyfin_image_url_from_path(
+                utils::jellyfin_image::track_cover_url_with_album_fallback(
                     &path_str,
+                    &t.album_id,
                     &server.url,
                     server.access_token.as_deref(),
                     512,

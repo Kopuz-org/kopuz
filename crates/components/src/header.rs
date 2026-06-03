@@ -8,10 +8,7 @@ fn icon_class(
     field: SortField,
 ) -> String {
     if sort_state.is_some() {
-        format!(
-            "{}",
-            showcase::sort_icon(*sort_state.unwrap().read(), field)
-        )
+        showcase::sort_icon(*sort_state.unwrap().read(), field).to_string()
     } else {
         "".to_string()
     }

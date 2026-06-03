@@ -376,6 +376,7 @@ artist_photo_source = Előadó fotójának forrása
 artist_photo = Előadó fotója
 album_cover = Albumborító
 auto_fetch_covers = Album borítók automatikus letöltése
+prefer_local_lyrics = Helyi dalszöveg előnyben (.lrc / beágyazott, nincs online tartalék)
 cover_fetch_strategy = Borító letöltési stratégia
 musicbrainz_first = MusicBrainz először
 lastfm_first = Last.fm először

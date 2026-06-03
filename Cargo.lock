@@ -7181,6 +7181,7 @@ dependencies = [
  "color-thief",
  "gloo-timers 0.4.0",
  "image",
+ "lofty",
  "md5",
  "percent-encoding",
  "reqwest 0.13.4",

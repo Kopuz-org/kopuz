@@ -30,6 +30,10 @@ pub struct Track {
     #[serde(default)]
     pub musicbrainz_release_id: Option<String>,
     #[serde(default)]
+    pub musicbrainz_recording_id: Option<String>,
+    #[serde(default)]
+    pub musicbrainz_track_id: Option<String>,
+    #[serde(default)]
     pub playlist_item_id: Option<String>,
     #[serde(default)]
     pub artists: Vec<String>,

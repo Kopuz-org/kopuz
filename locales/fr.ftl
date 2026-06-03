@@ -374,6 +374,7 @@ position_top = Haut
 
 metadata = Métadonnées
 auto_fetch_covers = Récupérer automatiquement les pochettes
+prefer_local_lyrics = Préférer les paroles locales (.lrc / intégrées, sans repli en ligne)
 cover_fetch_strategy = Stratégie de récupération des pochettes
 musicbrainz_first = MusicBrainz en premier
 lastfm_first = Last.fm en premier

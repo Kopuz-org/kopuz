@@ -376,6 +376,7 @@ artist_photo_source = מקור תמונת אמן
 artist_photo = תמונת אמן
 album_cover = עטיפת אלבום
 auto_fetch_covers = הבאה אוטומטית של עטיפות אלבומים
+prefer_local_lyrics = העדפת מילים מקומיות (.lrc / מוטמעות, ללא חלופה מקוונת)
 cover_fetch_strategy = אסטרטגיית הבאת עטיפות
 musicbrainz_first = MusicBrainz תחילה
 lastfm_first = Last.fm תחילה

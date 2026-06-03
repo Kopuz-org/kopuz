@@ -5,7 +5,7 @@ use hooks::use_player_controller::PlayerController;
 use crate::NavigationController;
 use crate::constants::{COLUMNS_MODERN, COLUMNS_MODERN_ALBUM};
 use crate::header::Header;
-use crate::showcase::{self, ShowcaseProps, SortField};
+use crate::showcase::{self, ShowcaseProps};
 use crate::track_row::TrackRow;
 use std::collections::HashSet;
 
@@ -13,13 +13,13 @@ use std::collections::HashSet;
 pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
     let mut ctrl = use_context::<PlayerController>();
     let config = use_context::<Signal<AppConfig>>();
-    let nav_ctrl = use_context::<NavigationController>();
+    let _nav_ctrl = use_context::<NavigationController>();
 
     let total_seconds: u64 = props.tracks.iter().map(|t| t.duration).sum();
     let duration_min = total_seconds / 60;
 
     let offline_tracks = config.read().offline_tracks.clone();
-    let fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
+    let _fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
     let sort_state = use_signal(|| None);
     let indexed_tracks: Vec<_> = props
         .tracks
@@ -72,7 +72,11 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
 
     let mut last_disc = None;
     let mut last_disc_size = 0;
-    for (display_idx, (track, _)) in sorted_track_pairs.iter().enumerate().take(scroll_info.start_index) {
+    for (display_idx, (track, _)) in sorted_track_pairs
+        .iter()
+        .enumerate()
+        .take(scroll_info.start_index)
+    {
         if track.disc_number != last_disc && sort_state.peek().is_none() && props.is_album {
             last_disc = track.disc_number;
             last_disc_size = display_idx;
@@ -253,7 +257,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                     let path_str = track.path.to_string_lossy();
                                     if path_str.starts_with("jellyfin:") {
                                         let conf = config.read();
-                                        conf.server
+                                        let url = conf.server
                                             .as_ref()
                                             .and_then(|s| {
                                                 utils::jellyfin_image::track_cover_url_with_album_fallback(
@@ -264,14 +268,15 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                                         64,
                                                         90,
                                                     )
-                                                    .map(|u| std::sync::Arc::from(u.as_str()))
-                                            })
+                                            });
+                                        Some(url.map_or_else(utils::default_cover_url, |u| std::sync::Arc::from(u.as_str())))
                                     } else {
                                         let lib = props.library.read();
                                         lib.albums
                                             .iter()
                                             .find(|a| a.id == track.album_id)
                                             .and_then(|a| utils::format_artwork_url(a.cover_path.as_ref()))
+                                            .or_else(|| Some(utils::default_cover_url()))
                                     }
                                 };
                                 let mut is_new_disc = false;

@@ -203,18 +203,20 @@ fn setup() {
                 .block_on(async {
                     if let Ok(srv) = Server::new("kopuz", P(st.clone(), tx())).await {
                         while let Some(seeked) = nrx.recv().await {
-                            if let Ok(s) = st.lock() {
-                                if seeked {
-                                    srv.properties_changed([
-                                        Property::Metadata(s.0.clone()),
-                                        Property::PlaybackStatus(s.1),
-                                    ])
+                            if seeked {
+                                let (metadata, status, position) = match st.lock() {
+                                    Ok(s) => (s.0.clone(), s.1, s.2),
+                                    Err(_) => continue,
+                                };
+                                srv.properties_changed([
+                                    Property::Metadata(metadata),
+                                    Property::PlaybackStatus(status),
+                                ])
+                                .await
+                                .ok();
+                                srv.emit(mpris_server::Signal::Seeked { position })
                                     .await
                                     .ok();
-                                    srv.emit(mpris_server::Signal::Seeked { position: s.2 })
-                                        .await
-                                        .ok();
-                                }
                             }
                         }
                     }

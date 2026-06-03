@@ -43,7 +43,7 @@ pub fn TrackListView(mut props: TrackListViewProps) -> Element {
     let mut show_playlist_modal = use_signal(|| false);
     let mut selected_track_for_playlist = use_signal(|| None::<PathBuf>);
     let mut is_selection_mode = use_signal(|| false);
-    let mut selected_tracks = use_signal(|| HashSet::<PathBuf>::new());
+    let mut selected_tracks = use_signal(HashSet::<PathBuf>::new);
 
     let tracks_select_all = props.tracks.clone();
     let tracks_long_press = props.tracks.clone();

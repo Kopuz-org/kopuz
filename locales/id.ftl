@@ -375,6 +375,7 @@ artist_photo_source = Sumber foto artis
 artist_photo = Foto artis
 album_cover = Sampul album
 auto_fetch_covers = Ambil sampul album otomatis
+prefer_local_lyrics = Utamakan lirik lokal (.lrc / tertanam, tanpa cadangan online)
 cover_fetch_strategy = Strategi pengambilan sampul
 musicbrainz_first = MusicBrainz dahulu
 lastfm_first = Last.fm dahulu

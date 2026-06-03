@@ -164,7 +164,7 @@ pub async fn submit_scrobble(
         .send()
         .await?
         .error_for_status()?;
-    Ok(resp.text().await?)
+    resp.text().await
 }
 
 pub async fn submit_now_playing(
@@ -208,7 +208,7 @@ pub async fn submit_now_playing(
         .send()
         .await?
         .error_for_status()?;
-    Ok(resp.text().await?)
+    resp.text().await
 }
 
 pub fn make_scrobble<'a>(

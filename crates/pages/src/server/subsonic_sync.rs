@@ -11,7 +11,9 @@ use utils;
 
 fn normalize_album_id(id: &str) -> String {
     let parts: Vec<&str> = id.split(':').collect();
-    if parts.len() >= 2 && (parts[0] == "subsonic" || parts[0] == "custom" || parts[0] == "jellyfin") {
+    if parts.len() >= 2
+        && (parts[0] == "subsonic" || parts[0] == "custom" || parts[0] == "jellyfin")
+    {
         format!("{}:{}", parts[0], parts[1])
     } else {
         id.to_string()
@@ -156,6 +158,8 @@ pub async fn sync_server_library(
                             track_number: item.index_number,
                             disc_number: item.parent_index_number,
                             musicbrainz_release_id: None,
+                            musicbrainz_recording_id: None,
+                            musicbrainz_track_id: None,
                             playlist_item_id: None,
                             artists: item
                                 .artists
@@ -201,7 +205,10 @@ pub async fn sync_server_library(
                 info!("Cleared old jellyfin library data.");
                 for album in out_albums {
                     let mut merged = album;
-                    if let Some(old) = old_albums.iter().find(|a| normalize_album_id(&a.id) == normalize_album_id(&merged.id)) {
+                    if let Some(old) = old_albums
+                        .iter()
+                        .find(|a| normalize_album_id(&a.id) == normalize_album_id(&merged.id))
+                    {
                         if merged.cover_path.is_none() || old.manual_cover {
                             merged.cover_path = old.cover_path.clone();
                         }
@@ -213,7 +220,11 @@ pub async fn sync_server_library(
                 }
             } else {
                 for album in out_albums {
-                    if let Some(index) = lib_write.jellyfin_albums.iter().position(|a| normalize_album_id(&a.id) == normalize_album_id(&album.id)) {
+                    if let Some(index) = lib_write
+                        .jellyfin_albums
+                        .iter()
+                        .position(|a| normalize_album_id(&a.id) == normalize_album_id(&album.id))
+                    {
                         let mut new_album = album;
                         let existing = &lib_write.jellyfin_albums[index];
                         if new_album.cover_path.is_none() || existing.manual_cover {
@@ -270,7 +281,10 @@ pub async fn sync_server_library(
                 info!("Cleared old subsonic/custom library data.");
                 for album in albums {
                     let mut merged = album;
-                    if let Some(old) = old_albums.iter().find(|a| normalize_album_id(&a.id) == normalize_album_id(&merged.id)) {
+                    if let Some(old) = old_albums
+                        .iter()
+                        .find(|a| normalize_album_id(&a.id) == normalize_album_id(&merged.id))
+                    {
                         if merged.cover_path.is_none() || old.manual_cover {
                             merged.cover_path = old.cover_path.clone();
                         }
@@ -282,7 +296,11 @@ pub async fn sync_server_library(
                 }
             } else {
                 for album in albums {
-                    if let Some(index) = lib_write.jellyfin_albums.iter().position(|a| normalize_album_id(&a.id) == normalize_album_id(&album.id)) {
+                    if let Some(index) = lib_write
+                        .jellyfin_albums
+                        .iter()
+                        .position(|a| normalize_album_id(&a.id) == normalize_album_id(&album.id))
+                    {
                         let mut new_album = album;
                         let existing = &lib_write.jellyfin_albums[index];
                         if new_album.cover_path.is_none() || existing.manual_cover {
@@ -304,9 +322,13 @@ pub async fn sync_server_library(
                 }
                 lib_write.server_artist_images.extend(artist_images);
             }
-            
+
             for track in tracks {
-                if !lib_write.jellyfin_tracks.iter().any(|t| t.path == track.path) {
+                if !lib_write
+                    .jellyfin_tracks
+                    .iter()
+                    .any(|t| t.path == track.path)
+                {
                     lib_write.jellyfin_tracks.push(track);
                 }
             }
@@ -359,7 +381,11 @@ pub async fn fetch_subsonic_library(
         }
 
         let count = albums.len();
-        info!("Processing {} Subsonic/Custom albums (total {} so far)...", count, offset + count);
+        info!(
+            "Processing {} Subsonic/Custom albums (total {} so far)...",
+            count,
+            offset + count
+        );
 
         for album in albums {
             let album_cover_tag = album
@@ -435,6 +461,8 @@ pub async fn fetch_subsonic_library(
                     track_number: song.track,
                     disc_number: song.disc_number,
                     musicbrainz_release_id: None,
+                    musicbrainz_recording_id: None,
+                    musicbrainz_track_id: None,
                     playlist_item_id: None,
                     artists: vec![song.artist.unwrap_or_else(|| album_artist.clone())],
                 });

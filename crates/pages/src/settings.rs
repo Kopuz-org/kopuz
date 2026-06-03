@@ -582,6 +582,15 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             }
                         }
                         SettingItem {
+                            title: i18n::t("prefer_local_lyrics").to_string(),
+                            control: rsx! {
+                                ToggleSetting {
+                                    enabled: config.read().prefer_local_lyrics,
+                                    on_change: move |val| config.write().prefer_local_lyrics = val,
+                                }
+                            }
+                        }
+                        SettingItem {
                             title: i18n::t("cover_fetch_strategy").to_string(),
                             control: rsx! {
                                 {

@@ -1,14 +1,13 @@
-use crate::constants::{COLUMNS_MODERN, COLUMNS_NORMAL};
 use crate::header::Header;
-use crate::showcase::{self, SortField};
+use crate::showcase::{self};
 use crate::track_row::TrackRow;
+use crate::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 use player::player;
 use reader::Library;
 use reader::models::{Album, Track};
-use crate::virtual_scroll::{use_virtual_scroll, VirtualScrollView};
 
 #[component]
 pub fn SearchResults(
@@ -142,7 +141,7 @@ pub fn SearchResults(
                                 };
                                 let is_downloaded = item_id
                                     .as_ref()
-                                    .map_or(false, |id| {
+                                    .is_some_and(|id| {
                                         if let Some(path_str) = offline_tracks.get(id) {
                                             std::path::Path::new(path_str).exists()
                                         } else {

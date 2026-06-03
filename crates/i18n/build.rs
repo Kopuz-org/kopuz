@@ -9,7 +9,7 @@ fn main() {
     for entry in fs::read_dir(&locales_dir).expect("locales directory not found") {
         let entry = entry.unwrap();
         let path = entry.path();
-        if path.extension().map_or(false, |e| e == "ftl") {
+        if path.extension().is_some_and(|e| e == "ftl") {
             println!("cargo:rerun-if-changed={}", path.display());
             let code = path.file_stem().unwrap().to_str().unwrap().to_string();
             let content = fs::read_to_string(&path).unwrap();

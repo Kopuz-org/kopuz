@@ -49,41 +49,41 @@ pub async fn get_palette_from_url(url: &str) -> Option<Vec<Color>> {
 }
 
 pub fn get_background_style(colors: Option<&[Color]>) -> String {
-    if let Some(colors) = colors {
-        if !colors.is_empty() {
-            let bg_color = &colors[0];
-            let mut bg_image_parts = Vec::new();
-            let positions = [
-                "0% 0%",
-                "100% 0%",
-                "100% 100%",
-                "0% 100%",
-                "50% 50%",
-                "25% 0%",
-                "75% 100%",
-            ];
-            for (i, c) in colors.iter().skip(1).enumerate().take(positions.len()) {
-                let pos = positions[i];
-                bg_image_parts.push(format!(
-                    "radial-gradient(circle at {}, rgba({}, {}, {}, 0.8) 0%, transparent 80%)",
-                    pos, c.r, c.g, c.b
-                ));
-            }
+    if let Some(colors) = colors
+        && !colors.is_empty()
+    {
+        let bg_color = &colors[0];
+        let mut bg_image_parts = Vec::new();
+        let positions = [
+            "0% 0%",
+            "100% 0%",
+            "100% 100%",
+            "0% 100%",
+            "50% 50%",
+            "25% 0%",
+            "75% 100%",
+        ];
+        for (i, c) in colors.iter().skip(1).enumerate().take(positions.len()) {
+            let pos = positions[i];
+            bg_image_parts.push(format!(
+                "radial-gradient(circle at {}, rgba({}, {}, {}, 0.8) 0%, transparent 80%)",
+                pos, c.r, c.g, c.b
+            ));
+        }
 
-            if bg_image_parts.is_empty() {
-                return format!(
-                    "background-color: rgb({}, {}, {}); background-image: none;",
-                    bg_color.r, bg_color.g, bg_color.b
-                );
-            } else {
-                return format!(
-                    "background-color: rgb({}, {}, {}); background-image: {};",
-                    bg_color.r,
-                    bg_color.g,
-                    bg_color.b,
-                    bg_image_parts.join(", ")
-                );
-            }
+        if bg_image_parts.is_empty() {
+            return format!(
+                "background-color: rgb({}, {}, {}); background-image: none;",
+                bg_color.r, bg_color.g, bg_color.b
+            );
+        } else {
+            return format!(
+                "background-color: rgb({}, {}, {}); background-image: {};",
+                bg_color.r,
+                bg_color.g,
+                bg_color.b,
+                bg_image_parts.join(", ")
+            );
         }
     }
     "background-color: var(--color-black); background-image: none;".to_string()

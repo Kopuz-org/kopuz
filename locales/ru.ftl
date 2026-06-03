@@ -371,6 +371,7 @@ artist_photo_source = Источник фото исполнителя
 artist_photo = Фото исполнителя
 album_cover = Обложка альбома
 auto_fetch_covers = Автоматически загружать обложки альбомов
+prefer_local_lyrics = Предпочитать локальные тексты (.lrc / встроенные, без онлайн-резерва)
 cover_fetch_strategy = Стратегия загрузки обложек
 musicbrainz_first = MusicBrainz сначала
 lastfm_first = Last.fm сначала

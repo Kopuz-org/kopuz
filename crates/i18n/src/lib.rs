@@ -30,10 +30,10 @@ impl I18nState {
         if let Some(result) = format_message(&self.bundle, key, args) {
             return result;
         }
-        if let Some(fb) = &self.fallback {
-            if let Some(result) = format_message(fb, key, args) {
-                return result;
-            }
+        if let Some(fb) = &self.fallback
+            && let Some(result) = format_message(fb, key, args)
+        {
+            return result;
         }
         key.to_string()
     }
