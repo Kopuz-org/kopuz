@@ -1,7 +1,7 @@
 use config::{AppConfig, ArtistPhotoSource, ListenNowStyle, UiStyle};
 use dioxus::prelude::*;
+use rand::rng;
 use rand::seq::SliceRandom;
-use rand::thread_rng;
 use reader::{Album, FavoritesStore, Library, PlaylistStore, Track};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -163,7 +163,7 @@ pub fn LocalHome(
         if unique_albums.is_empty() {
             return Vec::new();
         }
-        let mut rng = thread_rng();
+        let mut rng = rng();
         unique_albums.shuffle(&mut rng);
         unique_albums
     });
@@ -267,7 +267,7 @@ pub fn LocalHome(
             })
             .cloned()
             .collect();
-        let mut rng = thread_rng();
+        let mut rng = rng();
         albums.shuffle(&mut rng);
         albums.truncate(12);
         (top_genre, albums)

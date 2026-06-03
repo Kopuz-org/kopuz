@@ -1562,7 +1562,7 @@ impl PlayerController {
 
         // Tracks that come after the current position (play these first).
         let mut ahead: Vec<usize> = (current_idx..queue_len).collect();
-        ahead.shuffle(&mut rand::thread_rng());
+        ahead.shuffle(&mut rand::rng());
         // move current played track to the front
         let pos = ahead
             .iter()
@@ -1572,7 +1572,7 @@ impl PlayerController {
 
         // Tracks that wrap around from the beginning (play after the ahead group).
         let mut wrapped: Vec<usize> = (0..current_idx).collect();
-        wrapped.shuffle(&mut rand::thread_rng());
+        wrapped.shuffle(&mut rand::rng());
 
         ahead.extend(wrapped);
         // reset current queue index to match the currently played track (now moved at pos 0)
@@ -1582,14 +1582,14 @@ impl PlayerController {
     }
 
     pub fn play_queue_shuffled(&mut self, tracks: Vec<Track>) {
-        use rand::Rng;
+        use rand::RngExt;
         let queue_len = tracks.len();
         if queue_len == 0 {
             return;
         }
 
         self.queue.set(tracks);
-        let start = rand::thread_rng().gen_range(0..queue_len);
+        let start = rand::rng().random_range(0..queue_len);
         self.play_track(start);
     }
 
