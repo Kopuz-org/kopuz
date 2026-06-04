@@ -167,6 +167,7 @@ async fn run_search(
     tokio::task::spawn_blocking(move || match active_source {
         MusicSource::Local => search_local(&query, tracks, albums),
         MusicSource::Server => search_server(&query, tracks, albums, active_service, server),
+        MusicSource::Spotify => None,
     })
     .await
     .ok()
@@ -185,6 +186,7 @@ async fn run_search(
     match active_source {
         MusicSource::Local => search_local(&query, tracks, albums),
         MusicSource::Server => search_server(&query, tracks, albums, active_service, server),
+        MusicSource::Spotify => None,
     }
 }
 
@@ -294,6 +296,7 @@ pub fn use_search_data(
             match &active_source {
                 MusicSource::Local => (lib.tracks.clone(), lib.albums.clone()),
                 MusicSource::Server => (lib.jellyfin_tracks.clone(), lib.jellyfin_albums.clone()),
+                MusicSource::Spotify => (Vec::new(), Vec::new()),
             }
         };
 

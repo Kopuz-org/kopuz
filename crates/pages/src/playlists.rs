@@ -10,6 +10,8 @@ use reader::{Library, PlaylistStore};
 use crate::local::playlists::LocalPlaylists;
 use crate::server::download_manager::{DownloadQueue, DownloadStatus, queue_downloads};
 use crate::server::playlists::ServerPlaylists;
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+use crate::spotify_page::{SpotifyPage, SpotifyView};
 
 #[component]
 pub fn PlaylistsPage(
@@ -18,7 +20,9 @@ pub fn PlaylistsPage(
     config: Signal<AppConfig>,
     mut selected_playlist_id: Signal<Option<String>>,
 ) -> Element {
-    let is_server = config.read().active_source == MusicSource::Server;
+    let active_source = config.read().active_source;
+    let is_server = active_source == MusicSource::Server;
+    let is_spotify = active_source == MusicSource::Spotify;
 
     let mut selected_folder = use_signal(|| Option::<String>::None);
     let mut show_add_playlist = use_signal(|| false);
@@ -104,7 +108,9 @@ pub fn PlaylistsPage(
 
     rsx! {
         div { class: if cfg!(target_os = "android") { "px-4 pt-2 pb-28 absolute inset-0 flex flex-col" } else if is_modern { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
-            if let Some(folder_path) = selected_folder.read().clone() {
+            if is_spotify {
+                {spotify_playlists(library, playlist_store, config)}
+            } else if let Some(folder_path) = selected_folder.read().clone() {
                 FolderDetail {
                     folder_path,
                     library,
@@ -359,4 +365,22 @@ pub fn PlaylistsPage(
             }
         }
     }
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+fn spotify_playlists(
+    library: Signal<Library>,
+    playlist_store: Signal<PlaylistStore>,
+    config: Signal<AppConfig>,
+) -> Element {
+    rsx! { SpotifyPage { library, playlist_store, config, view: SpotifyView::Playlists } }
+}
+
+#[cfg(any(target_arch = "wasm32", target_os = "android"))]
+fn spotify_playlists(
+    _library: Signal<Library>,
+    _playlist_store: Signal<PlaylistStore>,
+    _config: Signal<AppConfig>,
+) -> Element {
+    rsx! {}
 }

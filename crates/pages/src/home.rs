@@ -4,6 +4,8 @@ use reader::{FavoritesStore, Library, PlaylistStore};
 
 use crate::local::home::LocalHome;
 use crate::server::home::ServerHome;
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+use crate::spotify_page::{SpotifyPage, SpotifyView};
 
 #[component]
 pub fn Home(
@@ -16,9 +18,15 @@ pub fn Home(
     on_search_artist: EventHandler<String>,
 ) -> Element {
     let mut config = use_context::<Signal<AppConfig>>();
-    let is_server = config.read().active_source == MusicSource::Server;
+    let active_source = config.read().active_source;
+    let is_server = active_source == MusicSource::Server;
+    let is_spotify = active_source == MusicSource::Spotify;
     let is_modern = config.read().ui_style == UiStyle::Modern;
     let mut edit_mode = use_signal(|| false);
+
+    if is_spotify {
+        return rsx! { {spotify_home(library, playlist_store, config)} };
+    }
 
     rsx! {
         div {
@@ -88,4 +96,22 @@ pub fn Home(
             }
         }
     }
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+fn spotify_home(
+    library: Signal<Library>,
+    playlist_store: Signal<PlaylistStore>,
+    config: Signal<AppConfig>,
+) -> Element {
+    rsx! { SpotifyPage { library, playlist_store, config, view: SpotifyView::Home } }
+}
+
+#[cfg(any(target_arch = "wasm32", target_os = "android"))]
+fn spotify_home(
+    _library: Signal<Library>,
+    _playlist_store: Signal<PlaylistStore>,
+    _config: Signal<AppConfig>,
+) -> Element {
+    rsx! {}
 }

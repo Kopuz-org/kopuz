@@ -4,6 +4,8 @@ use reader::{FavoritesStore, Library, PlaylistStore};
 
 use crate::local::favorites::LocalFavorites;
 use crate::server::favorites::ServerFavorites;
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+use crate::spotify_page::{SpotifyPage, SpotifyView};
 
 #[component]
 pub fn FavoritesPage(
@@ -22,7 +24,9 @@ pub fn FavoritesPage(
     mut queue: Signal<Vec<reader::models::Track>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
-    let is_server = config.read().active_source == MusicSource::Server;
+    let active_source = config.read().active_source;
+    let is_server = active_source == MusicSource::Server;
+    let is_spotify = active_source == MusicSource::Spotify;
     let is_modern = config.read().ui_style == UiStyle::Modern;
 
     rsx! {
@@ -49,7 +53,9 @@ pub fn FavoritesPage(
                 }
             }
 
-            if is_server {
+            if is_spotify {
+                {spotify_favorites(library, playlist_store, config)}
+            } else if is_server {
                 ServerFavorites {
                     favorites_store,
                     library,
@@ -68,4 +74,22 @@ pub fn FavoritesPage(
             }
         }
     }
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+fn spotify_favorites(
+    library: Signal<Library>,
+    playlist_store: Signal<PlaylistStore>,
+    config: Signal<AppConfig>,
+) -> Element {
+    rsx! { SpotifyPage { library, playlist_store, config, view: SpotifyView::Favorites } }
+}
+
+#[cfg(any(target_arch = "wasm32", target_os = "android"))]
+fn spotify_favorites(
+    _library: Signal<Library>,
+    _playlist_store: Signal<PlaylistStore>,
+    _config: Signal<AppConfig>,
+) -> Element {
+    rsx! {}
 }

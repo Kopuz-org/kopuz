@@ -217,8 +217,11 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
     let is_rtl = i18n::is_rtl();
     let border_side = if is_rtl { "border-l" } else { "border-r" };
 
-    let is_server = config.read().active_source == MusicSource::Server;
-    let local_class = if !is_server {
+    let active_source = config.read().active_source;
+    let is_server = active_source == MusicSource::Server;
+    let is_spotify = active_source == MusicSource::Spotify;
+    let spotify_enabled = config.read().spotify.enabled;
+    let local_class = if !is_server && !is_spotify {
         "text-white"
     } else {
         "text-slate-500 hover:text-slate-300"
@@ -228,11 +231,25 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
     } else {
         "text-slate-500 hover:text-slate-300"
     };
-    let slider_style = match (is_rtl, is_server) {
-        (false, false) => "left: 4px; width: calc(50% - 4px);",
-        (false, true) => "left: calc(50% + 2px); width: calc(50% - 4px);",
-        (true, false) => "right: 4px; width: calc(50% - 4px);",
-        (true, true) => "right: calc(50% + 2px); width: calc(50% - 4px);",
+    let spotify_class = if is_spotify {
+        "text-white"
+    } else {
+        "text-slate-500 hover:text-slate-300"
+    };
+    let source_count = if spotify_enabled { 3.0 } else { 2.0 };
+    let active_source_idx = if is_spotify {
+        2.0
+    } else if is_server {
+        1.0
+    } else {
+        0.0
+    };
+    let slider_offset = active_source_idx * (100.0 / source_count);
+    let slider_width = 100.0 / source_count;
+    let slider_style = if is_rtl {
+        format!("right: calc({slider_offset}% + 4px); width: calc({slider_width}% - 4px);")
+    } else {
+        format!("left: calc({slider_offset}% + 4px); width: calc({slider_width}% - 4px);")
     };
 
     let ordered_items: Vec<SidebarItem> = {
@@ -346,6 +363,17 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
                                     cfg.source_explicitly_set = true;
                                 },
                                 "{i18n::t(\"server\").to_uppercase()}"
+                            }
+                            if spotify_enabled {
+                                button {
+                                    class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 {spotify_class}",
+                                    onclick: move |_| {
+                                        let mut cfg = config.write();
+                                        cfg.active_source = MusicSource::Spotify;
+                                        cfg.source_explicitly_set = true;
+                                    },
+                                    "SPOTIFY"
+                                }
                             }
                         }
                     }

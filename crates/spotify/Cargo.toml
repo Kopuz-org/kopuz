@@ -1,0 +1,36 @@
+[package]
+name = "spotify"
+version.workspace = true
+edition = "2024"
+
+[features]
+default = ["spotify"]
+# Common Spotify auth, Web API, types, and Connect control backend.
+spotify = []
+# Embedded Web Playback SDK backend. Requires a WebView capable host.
+spotify-web-playback = ["spotify"]
+# Development only. Allows plaintext on-disk token cache as a fallback when
+# no secure credential storage is available. Never enable in shipped builds.
+insecure-token-cache = []
+
+[dependencies]
+config = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "time", "macros", "net", "io-util"] }
+tracing = { workspace = true }
+async-trait = "0.1"
+base64 = "0.22"
+sha2 = "0.10"
+rand = { workspace = true }
+url = "2.5"
+thiserror = "1"
+percent-encoding = { workspace = true }
+web-time = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "sync-secret-service", "vendored"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full"] }

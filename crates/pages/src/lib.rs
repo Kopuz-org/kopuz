@@ -16,3 +16,11 @@ pub mod settings;
 pub mod theme_editor;
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 pub mod ytdlp;
+// Spotify settings UI. Desktop only: requires loopback OAuth listener,
+// keyring, and a system browser to drive PKCE.
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+pub mod spotify_page;
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+pub mod spotify_search;
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+pub mod spotify_settings;

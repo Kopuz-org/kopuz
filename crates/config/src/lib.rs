@@ -141,6 +141,7 @@ pub enum MusicSource {
     Local,
     #[serde(alias = "Jellyfin")]
     Server,
+    Spotify,
 }
 
 impl MusicSource {
@@ -593,6 +594,62 @@ pub struct AppConfig {
     pub radio_registries: Vec<RegistryEntry>,
     #[serde(default)]
     pub prefer_local_lyrics: bool,
+    #[serde(default)]
+    pub spotify: SpotifyConfig,
+}
+
+// Spotify integration configuration. Mirrors `spotify::SpotifyConfig` but is
+// defined here so the `config` crate stays the single source of truth for the
+// serialized AppConfig schema. The `spotify` crate parses these same fields.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SpotifyConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub client_id: String,
+    #[serde(default = "default_spotify_redirect_uri")]
+    pub redirect_uri: String,
+    #[serde(default)]
+    pub backend: SpotifyBackendKind,
+    #[serde(default = "default_spotify_device_name")]
+    pub device_name: String,
+    #[serde(default)]
+    pub default_device_id: String,
+    #[serde(default)]
+    pub market: String,
+}
+
+impl Default for SpotifyConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            client_id: String::new(),
+            redirect_uri: default_spotify_redirect_uri(),
+            backend: SpotifyBackendKind::default(),
+            device_name: default_spotify_device_name(),
+            default_device_id: String::new(),
+            market: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum SpotifyBackendKind {
+    #[default]
+    #[serde(rename = "connect")]
+    Connect,
+    #[serde(rename = "web-playback", alias = "web_playback")]
+    WebPlayback,
+}
+
+fn default_spotify_redirect_uri() -> String {
+    // Must match exactly what is registered in the Spotify Dashboard.
+    // Spotify accepts loopback IP literals with explicit ports for PKCE.
+    "http://127.0.0.1:8898/callback".to_string()
+}
+
+fn default_spotify_device_name() -> String {
+    "Rust Music Player".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -787,6 +844,7 @@ impl Default for AppConfig {
             cover_fetch_strategy: FetchStrategy::default(),
             radio_registries: default_radio_registries(),
             prefer_local_lyrics: false,
+            spotify: SpotifyConfig::default(),
         }
     }
 }

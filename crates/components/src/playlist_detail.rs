@@ -206,6 +206,15 @@ pub fn PlaylistDetail(
             .and_then(|p| utils::format_artwork_url(Some(p)))
             .or_else(|| {
                 tracks_val.first().and_then(|t| {
+                    if t.path.to_string_lossy().starts_with("spotify:") {
+                        t.playlist_item_id.clone().map(std::sync::Arc::from)
+                    } else {
+                        None
+                    }
+                })
+            })
+            .or_else(|| {
+                tracks_val.first().and_then(|t| {
                     lib.albums
                         .iter()
                         .find(|a| a.id == t.album_id)

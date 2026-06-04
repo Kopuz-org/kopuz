@@ -22,3 +22,4 @@ tokio = { workspace = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 discord-presence = { workspace = true }
 tokio = { workspace = true, features = ["fs"] }
+spotify = { workspace = true }

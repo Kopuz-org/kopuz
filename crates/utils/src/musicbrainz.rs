@@ -1,4 +1,4 @@
-use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+use percent_encoding::{NON_ALPHANUMERIC, utf8_percent_encode};
 use std::time::Duration;
 
 pub async fn track_page_url(release_id: Option<&str>, artist: &str, title: &str) -> Option<String> {

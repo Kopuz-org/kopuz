@@ -5,6 +5,8 @@ use reader::Library;
 
 use crate::local::search::LocalSearch;
 use crate::server::search::ServerSearch;
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+use crate::spotify_page::{SpotifyPage, SpotifyView};
 
 #[component]
 pub fn Search(
@@ -24,10 +26,14 @@ pub fn Search(
     current_queue_index: Signal<usize>,
     on_select_album: EventHandler<String>,
 ) -> Element {
-    let is_server = config.read().active_source == MusicSource::Server;
+    let active_source = config.read().active_source;
+    let is_server = active_source == MusicSource::Server;
+    let is_spotify = active_source == MusicSource::Spotify;
 
     rsx! {
-        if is_server {
+        if is_spotify {
+            {spotify_section(library, playlist_store, config)}
+        } else if is_server {
             ServerSearch {
                 library,
                 config,
@@ -64,5 +70,24 @@ pub fn Search(
                 on_select_album,
             }
         }
+
     }
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+fn spotify_section(
+    library: Signal<Library>,
+    playlist_store: Signal<reader::PlaylistStore>,
+    config: Signal<AppConfig>,
+) -> Element {
+    rsx! { SpotifyPage { library, playlist_store, config, view: SpotifyView::Search } }
+}
+
+#[cfg(any(target_arch = "wasm32", target_os = "android"))]
+fn spotify_section(
+    _library: Signal<Library>,
+    _playlist_store: Signal<reader::PlaylistStore>,
+    _config: Signal<AppConfig>,
+) -> Element {
+    rsx! {}
 }

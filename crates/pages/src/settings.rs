@@ -19,6 +19,18 @@ fn theme_editor_section(config: Signal<AppConfig>) -> Element {
 fn theme_editor_section(_config: Signal<AppConfig>) -> Element {
     rsx! {}
 }
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+fn spotify_section(config: Signal<AppConfig>) -> Element {
+    rsx! {
+        crate::spotify_settings::SpotifySettings { config }
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", target_os = "android"))]
+fn spotify_section(_config: Signal<AppConfig>) -> Element {
+    rsx! {}
+}
 use components::settings_items::{
     BackBehaviorSelector, ChannelModeSelector, DiscordPresencePausedSettings,
     DiscordPresenceSettings, EqualizerPanel, LanguageSelector, LastFmSettings,
@@ -748,6 +760,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         }
                     }
                 }
+
+                {spotify_section(config)}
 
                 {theme_editor_section(config)}
 

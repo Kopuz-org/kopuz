@@ -181,9 +181,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                     Some(SystemEvent::Next) => ctrl.play_next(),
                     Some(SystemEvent::Prev) => ctrl.play_prev(),
                     Some(SystemEvent::Seek(secs)) => {
-                        ctrl.player
-                            .write()
-                            .seek(std::time::Duration::from_secs_f64(secs));
+                        ctrl.seek(secs.max(0.0) as u64);
                     }
                     None => {
                         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -228,6 +226,7 @@ pub fn use_player_task(ctrl: PlayerController) {
         let presence = presence.clone();
         let mut last_ping = web_time::Instant::now();
         let mut last_progress_report = web_time::Instant::now();
+        let mut last_spotify_state_refresh = web_time::Instant::now();
         #[cfg(not(target_arch = "wasm32"))]
         let mut last_discord_enabled = false;
         #[cfg(not(target_arch = "wasm32"))]
@@ -268,6 +267,12 @@ pub fn use_player_task(ctrl: PlayerController) {
                 }
 
                 let is_playing = *ctrl.is_playing.read();
+                let is_spotify = ctrl.current_track_is_spotify();
+
+                if is_spotify && last_spotify_state_refresh.elapsed().as_secs() >= 1 {
+                    ctrl.refresh_spotify_playback_state();
+                    last_spotify_state_refresh = web_time::Instant::now();
+                }
 
                 {
                     let current_path: Option<String> = {
@@ -479,7 +484,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                     let duration = *ctrl.current_song_duration.read();
                     let pos_secs = pos.as_secs().min(duration);
                     let current_gen = *ctrl.play_generation.read();
-                    if !defer_player_progress && pos_secs != last_progress_secs {
+                    if !is_spotify && !defer_player_progress && pos_secs != last_progress_secs {
                         last_progress_secs = pos_secs;
                         ctrl.current_song_progress.set(pos_secs);
                     }
@@ -492,6 +497,8 @@ pub fn use_player_task(ctrl: PlayerController) {
                         let duration = *ctrl.current_song_duration.read();
                         let progress = if duration == u64::MAX {
                             0
+                        } else if is_spotify {
+                            *ctrl.current_song_progress.read()
                         } else {
                             pos.as_secs()
                         };
@@ -555,7 +562,8 @@ pub fn use_player_task(ctrl: PlayerController) {
                     }
 
                     let remaining_secs = duration.saturating_sub(pos_secs);
-                    let should_crossfade = duration > 0
+                    let should_crossfade = !is_spotify
+                        && duration > 0
                         && pos_secs < duration
                         && ctrl.should_crossfade()
                         && ctrl.has_next_track()
@@ -589,6 +597,8 @@ pub fn use_player_task(ctrl: PlayerController) {
 
                     let is_radio = duration == u64::MAX;
                     let should_skip = if is_radio {
+                        false
+                    } else if is_spotify {
                         false
                     } else {
                         ctrl.player.read().is_playback_complete()

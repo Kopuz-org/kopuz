@@ -14,6 +14,11 @@ dioxus = { workspace = true, features = ["web"] }
 [target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))'.dependencies]
 rfd = { workspace = true }
 
+# Spotify integration is desktop-only (loopback OAuth listener, keyring, reqwest).
+[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))'.dependencies.spotify]
+workspace = true
+features = ["spotify-web-playback"]
+
 [dependencies]
 uuid = { workspace = true }
 player = { workspace = true }

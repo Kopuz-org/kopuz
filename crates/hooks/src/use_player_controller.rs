@@ -12,6 +12,9 @@ use utils;
 #[cfg(not(target_arch = "wasm32"))]
 use player::decoder;
 
+#[cfg(not(target_arch = "wasm32"))]
+use spotify::provider::StreamingProvider;
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum LoopMode {
     None,
@@ -78,6 +81,116 @@ impl PlayerController {
     fn track_key(track: &Track) -> String {
         track.path.to_string_lossy().to_string()
     }
+
+    fn track_scheme(track: &Track) -> String {
+        Self::track_key(track)
+            .split(':')
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+    }
+
+    fn is_spotify_track(track: &Track) -> bool {
+        Self::track_scheme(track) == "spotify"
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn spotify_backend_from_config(
+        conf: &AppConfig,
+    ) -> Option<
+        spotify::backends::connect::SpotifyConnectBackend<spotify::token_store::KeyringTokenStore>,
+    > {
+        if !conf.spotify.enabled || conf.spotify.client_id.trim().is_empty() {
+            return None;
+        }
+
+        let backend = match conf.spotify.backend {
+            config::SpotifyBackendKind::Connect => spotify::types::SpotifyBackendKind::Connect,
+            config::SpotifyBackendKind::WebPlayback => {
+                spotify::types::SpotifyBackendKind::WebPlayback
+            }
+        };
+        let sp_cfg = spotify::types::SpotifyConfig {
+            enabled: conf.spotify.enabled,
+            client_id: conf.spotify.client_id.clone(),
+            redirect_uri: conf.spotify.redirect_uri.clone(),
+            backend,
+            device_name: conf.spotify.device_name.clone(),
+            default_device_id: conf.spotify.default_device_id.clone(),
+            market: conf.spotify.market.clone(),
+        };
+        let store = std::sync::Arc::new(spotify::token_store::KeyringTokenStore::new());
+        let http = reqwest::Client::new();
+        let auth = std::sync::Arc::new(spotify::auth::AuthCore::new(
+            http,
+            sp_cfg.client_id.clone(),
+            store,
+        ));
+        let mut backend = spotify::backends::connect::SpotifyConnectBackend::new(sp_cfg, auth);
+        backend.needs_streaming_scope = matches!(
+            conf.spotify.backend,
+            config::SpotifyBackendKind::WebPlayback
+        );
+        Some(backend)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn spotify_backend(
+        &self,
+    ) -> Option<
+        spotify::backends::connect::SpotifyConnectBackend<spotify::token_store::KeyringTokenStore>,
+    > {
+        Self::spotify_backend_from_config(&self.config.read())
+    }
+
+    pub fn current_track_is_spotify(&self) -> bool {
+        self.current_track()
+            .as_ref()
+            .is_some_and(Self::is_spotify_track)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn refresh_spotify_playback_state(&mut self) {
+        if !self.current_track_is_spotify() {
+            return;
+        }
+        let Some(backend) = self.spotify_backend() else {
+            return;
+        };
+        let mut is_playing = self.is_playing;
+        let mut current_song_title = self.current_song_title;
+        let mut current_song_artist = self.current_song_artist;
+        let mut current_song_album = self.current_song_album;
+        let mut current_song_duration = self.current_song_duration;
+        let mut current_song_progress = self.current_song_progress;
+        let mut current_song_cover_url = self.current_song_cover_url;
+        spawn(async move {
+            match backend.current_state().await {
+                Ok(Some(state)) => {
+                    is_playing.set(state.is_playing);
+                    if let Some(progress_ms) = state.progress_ms {
+                        current_song_progress.set(progress_ms / 1000);
+                    }
+                    if let Some(track) = state.track {
+                        current_song_title.set(track.title);
+                        current_song_artist.set(track.artists.join(", "));
+                        current_song_album.set(track.album);
+                        current_song_duration.set(track.duration_ms / 1000);
+                        if let Some(artwork) = track.artwork_url {
+                            current_song_cover_url.set(artwork);
+                        }
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!(target: "spotify::player", "Spotify state refresh failed: {e}")
+                }
+            }
+        });
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn refresh_spotify_playback_state(&mut self) {}
 
     fn shift_indices_at_or_after(indices: &mut [usize], at: usize, by: usize) {
         for idx in indices {
@@ -153,6 +266,7 @@ impl PlayerController {
                     )
                 })
                 .unwrap_or_default(),
+            "spotify" => track.playlist_item_id.clone().unwrap_or_default(),
             _ => self
                 .library
                 .read()
@@ -403,6 +517,49 @@ impl PlayerController {
                 .to_ascii_lowercase();
             let is_radio_item = scheme.as_str() == "radio";
             let is_server_item = matches!(scheme.as_str(), "jellyfin" | "subsonic" | "custom");
+
+            #[cfg(not(target_arch = "wasm32"))]
+            if scheme.as_str() == "spotify" {
+                self.player.write().stop_for_transition();
+                self.is_playing.set(false);
+                self.is_loading.set(true);
+                self.skip_in_progress.set(false);
+                self.hydrate_current_track_metadata(idx, 0);
+                self.current_song_cover_url
+                    .set(self.cover_url_for_track(&track));
+
+                let uri = path_str.clone();
+                let backend = self.spotify_backend();
+                let mut is_playing = self.is_playing;
+                let mut is_loading = self.is_loading;
+                let mut skip_in_progress = self.skip_in_progress;
+                let mut current_song_artist = self.current_song_artist;
+                let volume = (*self.volume.peek()).clamp(0.0, 1.0);
+                spawn(async move {
+                    let Some(backend) = backend else {
+                        tracing::warn!(target: "spotify::player", "spotify track queued but Spotify is not configured");
+                        is_loading.set(false);
+                        skip_in_progress.set(false);
+                        return;
+                    };
+                    if let Err(e) = backend.set_volume((volume * 100.0).round() as u8).await {
+                        tracing::warn!(target: "spotify::player", "setting Spotify volume failed: {e}");
+                    }
+                    match backend.play_uri(&uri).await {
+                        Ok(()) => {
+                            is_playing.set(true);
+                        }
+                        Err(e) => {
+                            tracing::warn!(target: "spotify::player", "Spotify play failed: {e}");
+                            current_song_artist.set(format!("Spotify playback failed: {e}"));
+                            is_playing.set(false);
+                        }
+                    }
+                    is_loading.set(false);
+                    skip_in_progress.set(false);
+                });
+                return;
+            }
 
             if is_server_item || is_radio_item {
                 let parts: Vec<&str> = path_str.split(':').collect();
@@ -1518,8 +1675,7 @@ impl PlayerController {
             _ => {
                 if idx + 1 >= queue_len && loop_mode == LoopMode::None {
                     self.skip_in_progress.set(false);
-                    self.player.write().pause();
-                    self.is_playing.set(false);
+                    self.pause();
                     return;
                 }
                 let next_idx = if idx + 1 < queue_len { idx + 1 } else { 0 };
@@ -1543,8 +1699,7 @@ impl PlayerController {
         let back_behavior = self.config.peek().back_behavior;
 
         if back_behavior == BackBehavior::RewindThenPrev && progress > 3 {
-            self.player.write().seek(std::time::Duration::ZERO);
-            self.current_song_progress.set(0);
+            self.seek(0);
             return;
         }
 
@@ -1742,9 +1897,23 @@ impl PlayerController {
 
     pub fn pause(&mut self) {
         let idx = *self.current_queue_index.peek();
-        let is_radio = self
-            .get_track_at(idx)
+        let current = self.get_track_at(idx);
+        let is_radio = current
+            .as_ref()
             .is_some_and(|t| t.path.to_string_lossy().starts_with("radio:"));
+
+        #[cfg(not(target_arch = "wasm32"))]
+        if current.as_ref().is_some_and(Self::is_spotify_track) {
+            if let Some(backend) = self.spotify_backend() {
+                spawn(async move {
+                    if let Err(e) = backend.pause().await {
+                        tracing::warn!(target: "spotify::player", "Spotify pause failed: {e}");
+                    }
+                });
+            }
+            self.is_playing.set(false);
+            return;
+        }
 
         if is_radio {
             self.player.write().stop_for_transition();
@@ -1756,9 +1925,26 @@ impl PlayerController {
 
     pub fn resume(&mut self) {
         let idx = *self.current_queue_index.peek();
-        let is_radio = self
-            .get_track_at(idx)
+        let current = self.get_track_at(idx);
+        let is_radio = current
+            .as_ref()
             .is_some_and(|t| t.path.to_string_lossy().starts_with("radio:"));
+
+        #[cfg(not(target_arch = "wasm32"))]
+        if current.as_ref().is_some_and(Self::is_spotify_track) {
+            if let Some(backend) = self.spotify_backend() {
+                let mut is_playing = self.is_playing;
+                spawn(async move {
+                    match backend.resume().await {
+                        Ok(()) => is_playing.set(true),
+                        Err(e) => {
+                            tracing::warn!(target: "spotify::player", "Spotify resume failed: {e}")
+                        }
+                    }
+                });
+            }
+            return;
+        }
 
         if is_radio || !self.player.peek().can_resume() {
             if let Some(track) = self.get_track_at(idx) {
@@ -1773,6 +1959,42 @@ impl PlayerController {
 
         self.player.write().play_resume();
         self.is_playing.set(true);
+    }
+
+    pub fn seek(&mut self, seconds: u64) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.current_track_is_spotify() {
+            if let Some(backend) = self.spotify_backend() {
+                spawn(async move {
+                    if let Err(e) = backend.seek(seconds.saturating_mul(1000)).await {
+                        tracing::warn!(target: "spotify::player", "Spotify seek failed: {e}");
+                    }
+                });
+            }
+            self.current_song_progress.set(seconds);
+            return;
+        }
+
+        self.player
+            .write()
+            .seek(std::time::Duration::from_secs(seconds));
+        self.current_song_progress.set(seconds);
+    }
+
+    pub fn set_volume(&mut self, volume: f32) {
+        let volume = volume.clamp(0.0, 1.0);
+        self.player.write().set_volume(volume);
+
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.current_track_is_spotify() {
+            if let Some(backend) = self.spotify_backend() {
+                spawn(async move {
+                    if let Err(e) = backend.set_volume((volume * 100.0).round() as u8).await {
+                        tracing::warn!(target: "spotify::player", "Spotify volume failed: {e}");
+                    }
+                });
+            }
+        }
     }
 
     pub fn toggle(&mut self) {

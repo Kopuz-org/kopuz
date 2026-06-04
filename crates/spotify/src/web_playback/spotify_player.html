@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self' 'unsafe-inline' https://sdk.scdn.co; connect-src 'self' https://api.spotify.com https://accounts.spotify.com; media-src https: blob:; img-src https: data:; style-src 'self' 'unsafe-inline';">
+  <title>Kopuz · Spotify Web Playback</title>
+  <style>
+    html, body { background:#111; color:#eee; font-family: system-ui, sans-serif; margin: 0; padding: 1.5rem; }
+    button { padding: .6rem 1.2rem; font-size: 1rem; border: 0; border-radius: 4px; cursor: pointer; }
+    .primary { background:#1db954; color:white; }
+    .primary:hover { background:#1ed760; }
+    #status { margin-top: 1rem; white-space: pre-wrap; font-family: ui-monospace, monospace; font-size: .9rem; color: #bbb; }
+    .ok { color: #1db954; }
+    .err { color: #e22134; }
+  </style>
+</head>
+<body>
+  <h2>Spotify Web Playback</h2>
+  <p>This page hosts Spotify's official Web Playback SDK. Click the button below
+  (a real user gesture is required by browser autoplay policies) and then use
+  Kopuz to send tracks here.</p>
+
+  <button id="enable" class="primary">Enable Spotify playback</button>
+  <div id="status">Loading SDK...</div>
+
+  <script src="https://sdk.scdn.co/spotify-player.js"></script>
+  <script>
+  (function () {
+    const statusEl = document.getElementById('status');
+    const enableBtn = document.getElementById('enable');
+    function setStatus(msg, cls) {
+      statusEl.textContent = msg;
+      statusEl.className = cls || '';
+    }
+    async function emit(name, payload) {
+      try {
+        await fetch('/event', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name, payload: payload || {} }),
+        });
+      } catch (e) {
+        // Local server gone; surface to user.
+        setStatus('Lost connection to Kopuz. Close this tab.', 'err');
+      }
+    }
+    async function fetchToken() {
+      const r = await fetch('/token', { cache: 'no-store' });
+      if (!r.ok) throw new Error('token fetch failed: ' + r.status);
+      const j = await r.json();
+      if (!j.access_token) throw new Error('missing access_token');
+      return j.access_token;
+    }
+    async function fetchDeviceName() {
+      try {
+        const r = await fetch('/device-name');
+        const j = await r.json();
+        return j.name || 'Kopuz';
+      } catch (_) {
+        return 'Kopuz';
+      }
+    }
+
+    let player = null;
+    let readyDeviceId = null;
+
+    window.onSpotifyWebPlaybackSDKReady = async () => {
+      setStatus('SDK ready, creating player...');
+      const name = await fetchDeviceName();
+      player = new Spotify.Player({
+        name: name,
+        getOAuthToken: (cb) => {
+          fetchToken().then(cb).catch((e) => {
+            emit('authentication_error', { message: String(e) });
+          });
+        },
+        volume: 0.7,
+        enableMediaSession: true,
+      });
+
+      player.addListener('ready', ({ device_id }) => {
+        readyDeviceId = device_id;
+        setStatus('Ready. device_id=' + device_id, 'ok');
+        emit('ready', { device_id });
+      });
+      player.addListener('not_ready', ({ device_id }) => {
+        emit('not_ready', { device_id });
+      });
+      player.addListener('player_state_changed', (state) => {
+        emit('player_state_changed', state || {});
+      });
+      player.addListener('autoplay_failed', () => {
+        emit('autoplay_failed', {});
+        setStatus('Autoplay was blocked. Click "Enable Spotify playback".', 'err');
+      });
+      player.addListener('initialization_error', ({ message }) => {
+        setStatus('Initialization error: ' + message, 'err');
+        emit('initialization_error', { message });
+      });
+      player.addListener('authentication_error', ({ message }) => {
+        setStatus('Authentication error: ' + message, 'err');
+        emit('authentication_error', { message });
+      });
+      player.addListener('account_error', ({ message }) => {
+        setStatus('Account error (Premium required): ' + message, 'err');
+        emit('account_error', { message });
+      });
+      player.addListener('playback_error', ({ message }) => {
+        setStatus('Playback error: ' + message, 'err');
+        emit('playback_error', { message });
+      });
+
+      const ok = await player.connect();
+      if (!ok) {
+        setStatus('connect() returned false', 'err');
+        emit('initialization_error', { message: 'connect() returned false' });
+      }
+    };
+
+    enableBtn.addEventListener('click', async () => {
+      // activateElement must be called from a real user gesture to satisfy
+      // autoplay policies in modern browsers.
+      if (player && typeof player.activateElement === 'function') {
+        try {
+          await player.activateElement();
+          setStatus('Audio activated. Send a track from Kopuz to start.', 'ok');
+          emit('activated', { device_id: readyDeviceId });
+        } catch (e) {
+          setStatus('activateElement failed: ' + String(e), 'err');
+          emit('playback_error', { message: 'activateElement failed: ' + String(e) });
+        }
+      } else {
+        setStatus('Player not initialized yet. Try again in a moment.');
+      }
+    });
+  })();
+  </script>
+</body>
+</html>

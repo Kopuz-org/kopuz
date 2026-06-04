@@ -128,7 +128,10 @@ pub fn SidebarModern(props: SidebarProps) -> Element {
     };
     let onmouseup = move |_| is_resizing.set(false);
 
-    let is_server = config.read().active_source == MusicSource::Server;
+    let active_source = config.read().active_source;
+    let is_server = active_source == MusicSource::Server;
+    let is_spotify = active_source == MusicSource::Spotify;
+    let spotify_enabled = config.read().spotify.enabled;
     let collapsed = if is_android {
         false
     } else {
@@ -201,8 +204,8 @@ pub fn SidebarModern(props: SidebarProps) -> Element {
                 if collapsed {
                     div { class: "flex flex-col items-center gap-1 py-3 border-b border-white/5",
                         button {
-                            class: if !is_server { "text-[10px] font-bold py-1" } else { "text-[10px] font-bold py-1 opacity-30" },
-                            style: if !is_server { "color: var(--color-indigo-500);" } else { "" },
+                            class: if !is_server && !is_spotify { "text-[10px] font-bold py-1" } else { "text-[10px] font-bold py-1 opacity-30" },
+                            style: if !is_server && !is_spotify { "color: var(--color-indigo-500);" } else { "" },
                             onclick: move |_| { config.write().active_source = MusicSource::Local; config.write().source_explicitly_set = true; },
                             i { class: "fa-solid fa-hard-drive text-xs" }
                         }
@@ -212,13 +215,21 @@ pub fn SidebarModern(props: SidebarProps) -> Element {
                             onclick: move |_| { config.write().active_source = MusicSource::Server; config.write().source_explicitly_set = true; },
                             i { class: "fa-solid fa-server text-xs" }
                         }
+                        if spotify_enabled {
+                            button {
+                                class: if is_spotify { "text-[10px] font-bold py-1" } else { "text-[10px] font-bold py-1 opacity-30" },
+                                style: if is_spotify { "color: var(--color-indigo-500);" } else { "" },
+                                onclick: move |_| { config.write().active_source = MusicSource::Spotify; config.write().source_explicitly_set = true; },
+                                i { class: "fa-brands fa-spotify text-xs" }
+                            }
+                        }
                     }
                 } else {
                     div { class: "px-3 pt-3 pb-2 border-b border-white/5",
                         div { class: "flex rounded-lg overflow-hidden border border-white/10 text-[11px] font-bold",
                             button {
                                 class: "flex-1 py-1.5 transition-colors",
-                                style: if !is_server { "background: color-mix(in oklab, var(--color-indigo-500) 20%, transparent); color: var(--color-indigo-500);" } else { "color: rgba(255,255,255,0.3);" },
+                                style: if !is_server && !is_spotify { "background: color-mix(in oklab, var(--color-indigo-500) 20%, transparent); color: var(--color-indigo-500);" } else { "color: rgba(255,255,255,0.3);" },
                                 onclick: move |_| { config.write().active_source = MusicSource::Local; config.write().source_explicitly_set = true; },
                                 "{i18n::t(\"local\").to_uppercase()}"
                             }
@@ -227,6 +238,14 @@ pub fn SidebarModern(props: SidebarProps) -> Element {
                                 style: if is_server { "background: color-mix(in oklab, var(--color-indigo-500) 20%, transparent); color: var(--color-indigo-500);" } else { "color: rgba(255,255,255,0.3);" },
                                 onclick: move |_| { config.write().active_source = MusicSource::Server; config.write().source_explicitly_set = true; },
                                 "{i18n::t(\"server\").to_uppercase()}"
+                            }
+                            if spotify_enabled {
+                                button {
+                                    class: "flex-1 py-1.5 transition-colors",
+                                    style: if is_spotify { "background: color-mix(in oklab, var(--color-indigo-500) 20%, transparent); color: var(--color-indigo-500);" } else { "color: rgba(255,255,255,0.3);" },
+                                    onclick: move |_| { config.write().active_source = MusicSource::Spotify; config.write().source_explicitly_set = true; },
+                                    "SPOTIFY"
+                                }
                             }
                         }
                     }

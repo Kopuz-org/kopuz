@@ -1,15 +1,15 @@
+use crate::NavigationController;
 use crate::constants::*;
 use crate::dots_menu::{DotsMenu, MenuAction};
 use crate::queue_drag::{
     clear_dragged_queue_track, handle_select_click, is_queue_drag_enabled, set_dragged_queue_track,
     set_dragged_queue_tracks,
 };
-use crate::NavigationController;
+use config::MusicSource;
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::PlayerController;
 use reader::models::Track;
-use config::MusicSource;
 
 pub(crate) fn copy_to_clipboard(text: &str) {
     let value = serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_string());
