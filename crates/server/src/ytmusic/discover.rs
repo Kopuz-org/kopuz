@@ -66,12 +66,47 @@ pub async fn fetch_home(cookies: &str) -> Result<DiscoverHome, String> {
     Ok(parse_initial(&resp))
 }
 
-/// Album browse (`/browse?browseId=MPRE...`) returns a header with the
-/// album title/artist and a single `musicShelfRenderer` whose
-/// `musicResponsiveListItemRenderer` rows are the tracks. Track rows
-/// don't carry their own thumbnail — the cover lives on the header — so
-/// we pull the best header thumbnail once and stamp every track with it.
+/// Verified against /tmp/yt-album-MPREb_*.json via yttools/album-probe.
+///
+/// YT InnerTube returns polymorphic arrays where each entry is keyed by
+/// which renderer it is (e.g. `{musicResponsiveHeaderRenderer: {...}}`
+/// vs `{musicShelfRenderer: {...}}`). Positional indexing into those
+/// arrays breaks the moment YT reorders, so every lookup here iterates
+/// and dispatches on the renderer key.
+///
+/// Album browse shape:
+///   /contents/twoColumnBrowseResultsRenderer/tabs[i]/tabRenderer
+///     /content/sectionListRenderer/contents[j]/musicResponsiveHeaderRenderer
+///   …holds title, straplineTextOne (artist + UC… browseEndpoint),
+///   subtitle (kind + year), thumbnail, and buttons[] containing a
+///   musicPlayButtonRenderer with the album's OLAK5uy_… audio playlist.
+///
+///   /contents/singleColumnBrowseResultsRenderer/tabs[i]/tabRenderer
+///     /content/sectionListRenderer/contents[j]/musicShelfRenderer/contents
+///   …each entry is a `musicResponsiveListItemRenderer` with flexColumns:
+///     [0] title + watchEndpoint{videoId, playlistId}
+///     [1] empty (text: {}) for single-artist albums — fall back to the
+///         strapline artist; the per-row column doesn't exist
+///     [2] play-count label, never artist
+///   plus fixedColumns[0] = "mm:ss" duration and index.runs[0] = track #.
+///
+/// Track rows carry no thumbnail of their own, so we stamp the header
+/// cover onto every track for jellyfin_image to pick up.
+pub struct YtAlbum {
+    pub browse_id: String,
+    pub title: String,
+    pub artist: Option<String>,
+    pub year: Option<String>,
+    pub thumbnail: Option<String>,
+    pub audio_playlist_id: Option<String>,
+    pub tracks: Vec<Track>,
+}
+
 pub async fn fetch_album_tracks(browse_id: &str, cookies: &str) -> Result<Vec<Track>, String> {
+    fetch_album(browse_id, cookies).await.map(|a| a.tracks)
+}
+
+pub async fn fetch_album(browse_id: &str, cookies: &str) -> Result<YtAlbum, String> {
     let body = build_browse_body(Some(browse_id));
     let resp = post(
         &format!("{ORIGIN_YOUTUBE_MUSIC}/youtubei/v1/browse?prettyPrint=false"),
@@ -79,59 +114,197 @@ pub async fn fetch_album_tracks(browse_id: &str, cookies: &str) -> Result<Vec<Tr
         cookies,
     )
     .await?;
-    Ok(parse_album(&resp))
+    Ok(parse_album(browse_id, &resp))
 }
 
-fn parse_album(resp: &Value) -> Vec<Track> {
-    let album_title = resp
-        .pointer("/header/musicDetailHeaderRenderer/title/runs/0/text")
-        .or_else(|| resp.pointer("/contents/twoColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents/0/musicResponsiveHeaderRenderer/title/runs/0/text"))
+fn parse_album(browse_id: &str, resp: &Value) -> YtAlbum {
+    let sections = album_section_contents(resp);
+    let header = find_album_header(resp, &sections);
+
+    let title = header
+        .and_then(|h| h.pointer("/title/runs/0/text"))
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
 
-    let album_artist = album_primary_artist(resp);
-    let album_thumbnail = best_album_thumbnail(resp).map(normalize_yt_thumbnail);
+    let artist = pick_album_artist(header);
+    let year = pick_album_year(header);
+    let thumbnail = best_album_thumbnail(header).map(normalize_yt_thumbnail);
+    let audio_playlist_id_header = header.and_then(find_audio_playlist_id);
 
-    let shelves = resp
-        .pointer("/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents")
-        .or_else(|| resp.pointer("/contents/twoColumnBrowseResultsRenderer/secondaryContents/sectionListRenderer/contents"))
-        .and_then(|v| v.as_array());
-
-    let Some(shelves) = shelves else {
-        return Vec::new();
-    };
-
-    let mut out = Vec::new();
-    for shelf in shelves {
-        let Some(items) = shelf
-            .pointer("/musicShelfRenderer/contents")
+    let mut tracks = Vec::new();
+    let mut audio_pid_from_rows: Option<String> = None;
+    for section in &sections {
+        let Some(items) = section
+            .get("musicShelfRenderer")
+            .and_then(|s| s.get("contents"))
             .and_then(|v| v.as_array())
         else {
             continue;
         };
         for item in items {
-            if let Some(track) = parse_album_row(
-                item,
-                &album_title,
-                album_artist.as_deref(),
-                album_thumbnail.as_deref(),
-            ) {
-                out.push(track);
+            let Some(row) = item.get("musicResponsiveListItemRenderer") else {
+                continue;
+            };
+            if audio_pid_from_rows.is_none()
+                && let Some(pid) = row
+                    .pointer("/flexColumns/0/musicResponsiveListItemFlexColumnRenderer/text/runs/0/navigationEndpoint/watchEndpoint/playlistId")
+                    .and_then(|v| v.as_str())
+            {
+                audio_pid_from_rows = Some(pid.to_string());
+            }
+            if let Some(track) =
+                parse_album_row(row, &title, artist.as_deref(), thumbnail.as_deref())
+            {
+                tracks.push(track);
             }
         }
+    }
+
+    YtAlbum {
+        browse_id: browse_id.to_string(),
+        title,
+        artist,
+        year,
+        thumbnail,
+        audio_playlist_id: audio_playlist_id_header.or(audio_pid_from_rows),
+        tracks,
+    }
+}
+
+/// Every `sectionListRenderer.contents` array reachable from the album
+/// response — iterates `tabs[]` looking for `tabRenderer` rather than
+/// indexing positionally, and merges in `secondaryContents` (where the
+/// track shelf actually lives in the new two-column layout).
+fn album_section_contents(resp: &Value) -> Vec<&Value> {
+    let mut out = Vec::new();
+    for tab_root in [
+        resp.pointer("/contents/twoColumnBrowseResultsRenderer/tabs"),
+        resp.pointer("/contents/singleColumnBrowseResultsRenderer/tabs"),
+    ]
+    .into_iter()
+    .flatten()
+    .filter_map(|v| v.as_array())
+    {
+        for tab in tab_root {
+            let Some(contents) = tab
+                .get("tabRenderer")
+                .and_then(|t| t.get("content"))
+                .and_then(|c| c.get("sectionListRenderer"))
+                .and_then(|s| s.get("contents"))
+                .and_then(|v| v.as_array())
+            else {
+                continue;
+            };
+            out.extend(contents.iter());
+        }
+    }
+    if let Some(sec) = resp
+        .pointer("/contents/twoColumnBrowseResultsRenderer/secondaryContents/sectionListRenderer/contents")
+        .and_then(|v| v.as_array())
+    {
+        out.extend(sec.iter());
     }
     out
 }
 
-fn best_album_thumbnail(resp: &Value) -> Option<String> {
-    let pointers = [
-        "/header/musicDetailHeaderRenderer/thumbnail/croppedSquareThumbnailRenderer/thumbnail/thumbnails",
-        "/header/musicDetailHeaderRenderer/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails",
-        "/contents/twoColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents/0/musicResponsiveHeaderRenderer/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails",
-    ];
-    for p in pointers {
-        if let Some(arr) = resp.pointer(p).and_then(|v| v.as_array()) {
+fn find_album_header<'a>(resp: &'a Value, sections: &[&'a Value]) -> Option<&'a Value> {
+    for section in sections {
+        if let Some(h) = section.get("musicResponsiveHeaderRenderer") {
+            return Some(h);
+        }
+        if let Some(h) = section.get("musicDetailHeaderRenderer") {
+            return Some(h);
+        }
+    }
+    // Legacy layout puts the header object at the response root.
+    if let Some(header_obj) = resp.pointer("/header").and_then(|v| v.as_object()) {
+        for (key, value) in header_obj {
+            if key.ends_with("HeaderRenderer") {
+                return Some(value);
+            }
+        }
+    }
+    None
+}
+
+fn pick_album_artist(header: Option<&Value>) -> Option<String> {
+    let header = header?;
+    // New layout splits these: straplineTextOne is the artist (with a
+    // UC… browseEndpoint), subtitle is "<Kind> • <Year>" with no artist.
+    let from_strapline = header
+        .pointer("/straplineTextOne/runs")
+        .and_then(|v| v.as_array())
+        .and_then(|arr| {
+            arr.iter()
+                .filter_map(|r| r.get("text").and_then(|t| t.as_str()))
+                .map(|s| s.trim())
+                .find(|s| !s.is_empty() && *s != "•")
+                .map(|s| s.to_string())
+        });
+    if from_strapline.is_some() {
+        return from_strapline;
+    }
+    // Legacy layout crammed "<Kind> • <Artist> • <Year>" into subtitle.
+    let arr = header.pointer("/subtitle/runs").and_then(|v| v.as_array())?;
+    for r in arr {
+        let text = r.get("text").and_then(|v| v.as_str())?;
+        let t = text.trim();
+        if t.is_empty() || t == "•" {
+            continue;
+        }
+        if t.len() == 4 && t.chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        if matches!(
+            t,
+            "Album" | "Single" | "EP" | "Song" | "Video" | "Audio" | "Playlist"
+        ) {
+            continue;
+        }
+        return Some(t.to_string());
+    }
+    None
+}
+
+fn pick_album_year(header: Option<&Value>) -> Option<String> {
+    let header = header?;
+    for ptr in ["/subtitle/runs", "/secondSubtitle/runs"] {
+        if let Some(arr) = header.pointer(ptr).and_then(|v| v.as_array()) {
+            for r in arr {
+                if let Some(t) = r.get("text").and_then(|v| v.as_str()) {
+                    let t = t.trim();
+                    if t.len() == 4 && t.chars().all(|c| c.is_ascii_digit()) {
+                        return Some(t.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+fn find_audio_playlist_id(header: &Value) -> Option<String> {
+    let buttons = header.get("buttons").and_then(|v| v.as_array())?;
+    for button in buttons {
+        if let Some(pid) = button
+            .get("musicPlayButtonRenderer")
+            .and_then(|p| p.pointer("/playNavigationEndpoint/watchEndpoint/playlistId"))
+            .and_then(|v| v.as_str())
+        {
+            return Some(pid.to_string());
+        }
+    }
+    None
+}
+
+fn best_album_thumbnail(header: Option<&Value>) -> Option<String> {
+    let header = header?;
+    for ptr in [
+        "/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails",
+        "/thumbnail/croppedSquareThumbnailRenderer/thumbnail/thumbnails",
+    ] {
+        if let Some(arr) = header.pointer(ptr).and_then(|v| v.as_array()) {
             let best = arr
                 .iter()
                 .max_by_key(|t| t.get("width").and_then(|v| v.as_u64()).unwrap_or(0))
@@ -146,12 +319,11 @@ fn best_album_thumbnail(resp: &Value) -> Option<String> {
 }
 
 fn parse_album_row(
-    item: &Value,
+    row: &Value,
     album_title: &str,
     album_artist: Option<&str>,
     album_thumbnail: Option<&str>,
 ) -> Option<Track> {
-    let row = item.get("musicResponsiveListItemRenderer")?;
     let video_id = row
         .pointer("/playlistItemData/videoId")
         .and_then(|v| v.as_str())?
@@ -164,20 +336,18 @@ fn parse_album_row(
     if title.is_empty() {
         return None;
     }
-    // YT sometimes emits the kind label ("Song"/"Video"/"Audio") in the
-    // artist slot when the row has no per-track artist, instead of just
-    // leaving it blank. Detect those and fall back to the album header's
-    // primary artist so the row reads as "<album artist>" not "Song".
+    // flexColumns[1] is empty (`text: {}` — no runs at all) for
+    // single-artist album rows in the new layout. For multi-artist or
+    // features-credited tracks it does carry runs. Prefer it when set,
+    // otherwise fall back to the header artist.
     let row_artist = row
         .pointer("/flexColumns/1/musicResponsiveListItemFlexColumnRenderer/text/runs/0/text")
         .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let primary_artist = if is_kind_label(&row_artist) || row_artist.is_empty() {
-        album_artist.unwrap_or("").to_string()
-    } else {
-        row_artist
-    };
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let primary_artist = row_artist
+        .or_else(|| album_artist.map(|s| s.to_string()))
+        .unwrap_or_default();
     let duration = row
         .pointer("/fixedColumns/0/musicResponsiveListItemFixedColumnRenderer/text/runs/0/text")
         .and_then(|v| v.as_str())
@@ -218,36 +388,6 @@ fn parse_album_row(
         playlist_item_id: None,
         artists,
     })
-}
-
-fn is_kind_label(s: &str) -> bool {
-    matches!(s, "Song" | "Video" | "Audio" | "Single")
-}
-
-fn album_primary_artist(resp: &Value) -> Option<String> {
-    let subtitle_runs = resp
-        .pointer("/header/musicDetailHeaderRenderer/subtitle/runs")
-        .or_else(|| {
-            resp.pointer(
-                "/contents/twoColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents/0/musicResponsiveHeaderRenderer/straplineTextOne/runs",
-            )
-        })
-        .and_then(|v| v.as_array())?;
-    // Header subtitle is "<Kind> • <Artist> • <Year>". Skip the kind label
-    // and any " • " separator runs, then take the first non-empty piece —
-    // its navigationEndpoint links to the artist channel, but we only need
-    // the text.
-    for run in subtitle_runs {
-        let Some(text) = run.get("text").and_then(|v| v.as_str()) else {
-            continue;
-        };
-        let trimmed = text.trim();
-        if trimmed.is_empty() || trimmed == "•" || is_kind_label(trimmed) {
-            continue;
-        }
-        return Some(trimmed.to_string());
-    }
-    None
 }
 
 fn parse_mm_ss(s: &str) -> Option<u64> {
