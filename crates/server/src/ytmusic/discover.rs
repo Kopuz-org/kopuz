@@ -346,9 +346,17 @@ fn best_thumbnail(r: &Value) -> Option<String> {
 }
 
 fn normalize_yt_thumbnail(url: String) -> String {
-    let base = match url.rfind('=') {
-        Some(idx) if url[idx + 1..].starts_with('w') => &url[..idx],
-        _ => url.as_str(),
-    };
-    format!("{base}=w544-h544-l90-rj")
+    // Photo-CDN URLs end with =wNNN-hNNN-... and accept rewriting to a
+    // bigger size. Mix-art URLs (music.youtube.com/image/mixart?r=…)
+    // and any other token-style URL can't take that suffix; appending
+    // it breaks the request.
+    if let Some(idx) = url.rfind("=w")
+        && url[idx + 2..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit())
+    {
+        return format!("{}=w544-h544-l90-rj", &url[..idx]);
+    }
+    url
 }
