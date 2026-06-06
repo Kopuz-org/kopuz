@@ -400,6 +400,9 @@ impl PlayerController {
     fn play_track_no_history_with_transition(&mut self, idx: usize, allow_crossfade: bool) {
         self.play_generation.with_mut(|g| *g += 1);
         let current_gen = *self.play_generation.peek();
+        // Starting a new track clears the previous track's error banner —
+        // otherwise a 403 from a skipped YT track lingers on screen.
+        self.playback_error.set(None);
         self.cancel_radio_task();
 
         if let Some(track) = self.get_track_at(idx) {

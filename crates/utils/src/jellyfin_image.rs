@@ -178,12 +178,7 @@ pub fn track_cover_url_or_default(
 /// it) understand. The result is a single tag string — wrap it in a
 /// path / album_id / image_tag yourself per call-site convention.
 pub fn encode_cover_url(url: &str) -> String {
-    let mut hex = String::with_capacity(url.len() * 2 + "urlhex_".len());
-    hex.push_str("urlhex_");
-    for byte in url.bytes() {
-        hex.push_str(&format!("{:02x}", byte));
-    }
-    hex
+    format!("urlhex_{}", hex::encode(url.as_bytes()))
 }
 
 fn decode_embedded_cover_url(tag: &str) -> Option<String> {

@@ -7216,6 +7216,7 @@ dependencies = [
  "base64 0.22.1",
  "color-thief",
  "gloo-timers",
+ "hex",
  "image",
  "lofty",
  "md5",

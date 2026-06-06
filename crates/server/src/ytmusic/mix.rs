@@ -32,7 +32,7 @@ pub async fn start_mix(seed_video_id: &str, cookies: &str) -> Result<Vec<Track>,
     });
 
     let auth = sapisid_hash(cookies, ORIGIN).ok_or_else(|| "SAPISID missing".to_string())?;
-    let resp: Value = reqwest::Client::new()
+    let resp: Value = super::innertube::http_client().clone()
         .post(format!("{ORIGIN}/youtubei/v1/next?prettyPrint=false"))
         .header("Content-Type", "application/json")
         .header("X-YouTube-Client-Name", client.client_id)

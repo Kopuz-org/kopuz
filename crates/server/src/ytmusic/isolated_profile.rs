@@ -71,6 +71,11 @@ pub async fn launch_signin_and_extract(
                 signin_timeout.as_secs()
             ));
         }
+        if let Ok(Some(status)) = child.try_wait() {
+            break Err(format!(
+                "Browser exited before sign-in completed (status {status}) — try again"
+            ));
+        }
         let Ok(cookies) = super::cookies::extract_from(browser, &profile).await else {
             continue;
         };

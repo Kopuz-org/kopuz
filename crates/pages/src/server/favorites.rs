@@ -39,11 +39,8 @@ pub fn JellyfinFavorites(
     let mut selected_track_for_playlist = use_signal(|| None::<PathBuf>);
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
-    let yt_cookies_ready = use_context::<crate::YtCookiesReady>().0;
-
     use_effect(move || {
         let nonce = *refresh_nonce.read();
-        let _ = yt_cookies_ready;
 
         let token = match config.peek().server.as_ref().and_then(|s| s.access_token.clone()) {
             Some(t) => t,

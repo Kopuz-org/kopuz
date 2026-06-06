@@ -1,12 +1,21 @@
 //! Raw InnerTube HTTP transport — one function per endpoint, returns
 //! parsed JSON.
 
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{Value, json};
 use sha1::{Digest, Sha1};
 
 use super::clients::{ORIGIN_YOUTUBE_MUSIC, YouTubeClient};
+
+/// Shared HTTP client for all InnerTube + keepalive calls. Keeps the
+/// TLS session and connection pool warm across the dozens of
+/// /youtubei/v1 hits a typical library sync makes.
+pub(super) fn http_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(reqwest::Client::new)
+}
 
 /// Builds the `Authorization: SAPISIDHASH <ts>_<sha1(ts " " SAPISID " " origin)>` header.
 pub fn sapisid_hash(cookies: &str, origin: &str) -> Option<String> {
@@ -113,7 +122,7 @@ pub async fn player(
     };
     let url = format!("{host}/youtubei/v1/player?prettyPrint=false");
 
-    let mut req = reqwest::Client::new()
+    let mut req = http_client()
         .post(&url)
         .header("User-Agent", client.user_agent)
         .header("Content-Type", "application/json")
@@ -141,10 +150,8 @@ pub async fn player(
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(format!(
-            "player HTTP {status}: {}",
-            &text[..text.len().min(300)]
-        ));
+        let snippet: String = text.chars().take(300).collect();
+        return Err(format!("player HTTP {status}: {snippet}"));
     }
     resp.json::<Value>()
         .await
@@ -165,7 +172,7 @@ pub async fn browse(
     });
     let auth =
         sapisid_hash(cookies, ORIGIN_YOUTUBE_MUSIC).ok_or_else(|| "SAPISID missing".to_string())?;
-    let resp = reqwest::Client::new()
+    let resp = http_client()
         .post(format!("{ORIGIN_YOUTUBE_MUSIC}/youtubei/v1/browse?prettyPrint=false"))
         .header("User-Agent", client.user_agent)
         .header("Content-Type", "application/json")
@@ -211,7 +218,7 @@ pub async fn browse_continuation(
     });
     let auth =
         sapisid_hash(cookies, ORIGIN_YOUTUBE_MUSIC).ok_or_else(|| "SAPISID missing".to_string())?;
-    let resp = reqwest::Client::new()
+    let resp = http_client()
         .post(format!(
             "{ORIGIN_YOUTUBE_MUSIC}/youtubei/v1/browse?ctoken={continuation}&continuation={continuation}&prettyPrint=false"
         ))
@@ -242,7 +249,7 @@ pub async fn visitor_id(cookies: Option<&str>) -> Result<String, String> {
     let client = super::clients::WEB_REMIX;
     let context = build_context(client);
     let body = json!({ "context": { "client": context } });
-    let mut req = reqwest::Client::new()
+    let mut req = http_client()
         .post(format!(
             "{ORIGIN_YOUTUBE_MUSIC}/youtubei/v1/visitor_id?prettyPrint=false"
         ))

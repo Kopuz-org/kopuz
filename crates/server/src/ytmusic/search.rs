@@ -53,7 +53,7 @@ pub async fn music_search_tracks(
     query: &str,
     cookies: Option<&str>,
 ) -> Result<Vec<Track>, String> {
-    let http = reqwest::Client::new();
+    let http = super::innertube::http_client();
     let (top, songs, videos) = tokio::join!(
         do_search(&http, query, None, cookies),
         do_search(&http, query, Some(SONGS_FILTER), cookies),
@@ -570,12 +570,7 @@ fn normalize_yt_thumbnail(url: &str) -> String {
 }
 
 pub(crate) fn encode_url_tag(url: &str) -> String {
-    let mut out = String::with_capacity(url.len() * 2 + "urlhex_".len());
-    out.push_str("urlhex_");
-    for byte in url.bytes() {
-        out.push_str(&format!("{:02x}", byte));
-    }
-    out
+    format!("urlhex_{}", hex::encode(url.as_bytes()))
 }
 
 pub(crate) fn synthesize_album_id(album: &str, artist: &str) -> String {
@@ -587,11 +582,7 @@ pub(crate) fn synthesize_album_id(album: &str, artist: &str) -> String {
         key.push('|');
         key.push_str(&artist.to_lowercase());
     }
-    let mut hex = String::with_capacity(key.len() * 2);
-    for byte in key.bytes() {
-        hex.push_str(&format!("{:02x}", byte));
-    }
-    format!("{SOURCE_PREFIX}:album:{hex}")
+    format!("{SOURCE_PREFIX}:album:{}", hex::encode(key.as_bytes()))
 }
 
 fn parse_mm_ss(s: &str) -> Option<u64> {

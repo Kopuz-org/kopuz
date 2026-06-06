@@ -55,9 +55,6 @@ pub fn queue_downloads(
     let cancel_flag: Arc<AtomicBool>;
     {
         let mut q = queue.write();
-        q.cancel_requested = false;
-        q.cancel_flag.store(false, Ordering::Relaxed);
-        cancel_flag = q.cancel_flag.clone();
         let conf = config.peek();
         let queued_ids: std::collections::HashSet<String> =
             q.items.iter().map(|i| i.id.clone()).collect();
@@ -83,6 +80,14 @@ pub fn queue_downloads(
         if !added || q.is_running {
             return;
         }
+        // Reset cancel flags only once we're sure we're actually starting
+        // a fresh worker session. Replacing the Arc gives any still-living
+        // worker from a prior cancelled session its own (still-set) flag
+        // so it terminates instead of resuming on the new session's reset
+        // signal.
+        q.cancel_requested = false;
+        q.cancel_flag = Arc::new(AtomicBool::new(false));
+        cancel_flag = q.cancel_flag.clone();
         q.is_running = true;
     }
 

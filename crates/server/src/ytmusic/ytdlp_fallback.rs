@@ -98,7 +98,11 @@ fn default_web_safari_ua() -> &'static str {
 
 fn write_netscape_cookies(cookie_header: &str) -> std::io::Result<PathBuf> {
     let mut path = std::env::temp_dir();
-    path.push(format!("kopuz-yt-ytdlp-cookies-{}.txt", std::process::id()));
+    path.push(format!(
+        "kopuz-yt-ytdlp-cookies-{}-{}.txt",
+        std::process::id(),
+        uuid::Uuid::new_v4()
+    ));
     let mut f = std::fs::File::create(&path)?;
     writeln!(f, "# Netscape HTTP Cookie File")?;
     const FAR_FUTURE: u64 = 2_147_483_647;

@@ -14,7 +14,6 @@ pub fn JellyfinPlaylists(
     #[props(default)] refresh_trigger: Signal<u64>,
 ) -> Element {
     let is_offline = use_context::<Signal<bool>>();
-    let yt_cookies_ready = use_context::<crate::YtCookiesReady>().0;
     let mut last_fetch_key = use_signal(|| None::<String>);
     let mut fetch_request_id = use_signal(|| 0u64);
     let mut yt_refresh_nonce: Signal<u64> = use_signal(|| 0);
@@ -25,7 +24,6 @@ pub fn JellyfinPlaylists(
     use_effect(move || {
         let yt_nonce = *yt_refresh_nonce.read();
         let trigger = *refresh_trigger.read();
-        let _ = yt_cookies_ready;
 
         let fetch_context = {
             let conf = config.peek();
@@ -171,6 +169,9 @@ pub fn JellyfinPlaylists(
                     let yt =
                         ::server::ytmusic::YouTubeMusicClient::with_cookies(token.clone());
                     let list_result = yt.list_playlists().await;
+                    if *fetch_request_id.read() != request_id {
+                        return;
+                    }
                     eprintln!(
                         "[yt-playlists] list_playlists → {}",
                         list_result
@@ -223,6 +224,9 @@ pub fn JellyfinPlaylists(
                     let mut seen_paths: std::collections::HashSet<std::path::PathBuf> =
                         std::collections::HashSet::new();
                     for (i, summary) in summaries.into_iter().enumerate() {
+                        if *fetch_request_id.read() != request_id {
+                            return;
+                        }
                         yt_synced_so_far.set(i + 1);
                         let tracks = match yt.get_playlist_entries(&summary.id).await {
                             Ok(t) => t,
@@ -258,6 +262,9 @@ pub fn JellyfinPlaylists(
                         }
                     }
 
+                    if *fetch_request_id.read() != request_id {
+                        return;
+                    }
                     let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .map(|d| d.as_secs())

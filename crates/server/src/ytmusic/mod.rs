@@ -18,6 +18,20 @@ pub use player::YtStreamInfo;
 
 pub const SOURCE_PREFIX: &str = "ytmusic";
 
+/// Stable per-Google-account id derived from the SAPISID cookie. Used
+/// as the server-identity cache-bust key so switching YT accounts
+/// invalidates synced library/favorites state. Never logged.
+pub fn derive_user_id(cookies: &str) -> Option<String> {
+    use sha1::{Digest, Sha1};
+    let sapisid = cookies.split(';').find_map(|p| {
+        let (k, v) = p.trim().split_once('=')?;
+        (k == "SAPISID" || k == "__Secure-3PAPISID").then(|| v.to_string())
+    })?;
+    let mut h = Sha1::new();
+    h.update(sapisid.as_bytes());
+    Some(format!("yt-{}", hex::encode(&h.finalize()[..6])))
+}
+
 pub struct YouTubeMusicClient {
     cookies: Option<String>,
 }
@@ -160,12 +174,14 @@ impl YouTubeMusicClient {
             let page = innertube::browse_continuation(&token, cookies).await?;
             let (more, next_token) = search::walk_playlist_continuation(&page);
             let more = dedup(more, &mut seen);
-            if more.is_empty() && next_token.is_none() {
+            // An empty page after dedup means YT either gave us only
+            // duplicates of already-seen tracks or no new content. Even
+            // if it returned a continuation token, looping again would
+            // hammer the same endpoint without progress, so stop.
+            if more.is_empty() {
                 break;
             }
-            if !more.is_empty() {
-                on_page(more);
-            }
+            on_page(more);
             next = next_token;
         }
         Ok(())

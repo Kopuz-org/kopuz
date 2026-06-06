@@ -10,7 +10,7 @@ async fn post(endpoint: &str, body: Value, cookies: &str) -> Result<Value, Strin
     let client = WEB_REMIX;
     let auth =
         sapisid_hash(cookies, ORIGIN_YOUTUBE_MUSIC).ok_or_else(|| "SAPISID missing".to_string())?;
-    let resp = reqwest::Client::new()
+    let resp = super::innertube::http_client().clone()
         .post(format!(
             "{ORIGIN_YOUTUBE_MUSIC}/youtubei/v1/{endpoint}?prettyPrint=false"
         ))

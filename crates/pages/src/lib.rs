@@ -1,6 +1,3 @@
-#[derive(Clone, Copy)]
-pub struct YtCookiesReady(pub dioxus::prelude::Signal<bool>);
-
 pub mod activity;
 pub mod album;
 pub mod artist;

@@ -26,10 +26,7 @@ pub struct YtPlaylistSummary {
 /// [`get_playlist_entries`] to fetch each one's tracks lazily.
 pub async fn list_playlists(cookies: &str) -> Result<Vec<YtPlaylistSummary>, String> {
     let resp: Value = innertube::browse("FEmusic_liked_playlists", cookies).await?;
-    if serde_json::to_string(&resp)
-        .unwrap_or_default()
-        .contains("\"signInEndpoint\"")
-    {
+    if has_sign_in_endpoint(&resp) {
         return Err("Sign-in prompt returned — cookies expired".to_string());
     }
 
@@ -122,13 +119,30 @@ pub async fn get_playlist_entries(
             .into_iter()
             .filter(|t| keep_unique(t, &mut seen))
             .collect();
-        if unique.is_empty() && next_token.is_none() {
+        // An empty page after dedup means we've stopped making progress;
+        // looping further on a continuation token YT keeps echoing back
+        // would hammer the endpoint indefinitely.
+        if unique.is_empty() {
             break;
         }
         tracks.extend(unique);
         next = next_token;
     }
     Ok(tracks)
+}
+
+/// Recursively look for a `signInEndpoint` object key in the response.
+/// Cheaper and structurally correct vs. serialising the whole tree and
+/// substring-searching the JSON.
+fn has_sign_in_endpoint(v: &Value) -> bool {
+    match v {
+        Value::Object(map) => {
+            map.contains_key("signInEndpoint")
+                || map.values().any(has_sign_in_endpoint)
+        }
+        Value::Array(items) => items.iter().any(has_sign_in_endpoint),
+        _ => false,
+    }
 }
 
 fn keep_unique(t: &Track, seen: &mut std::collections::HashSet<String>) -> bool {

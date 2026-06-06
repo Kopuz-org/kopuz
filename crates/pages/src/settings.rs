@@ -30,6 +30,7 @@ use config::{AppConfig, ArtistPhotoSource, FetchStrategy, MusicService, OfflineQ
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
+
 #[component]
 pub fn Settings(config: Signal<AppConfig>) -> Element {
     let mut ctrl = use_context::<PlayerController>();
@@ -127,15 +128,16 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                 error.set(Some(format!("YT Music sign-in check failed: {e}")));
                 return;
             }
+            // Pages everywhere gate on (access_token, user_id) both being
+            // Some — YT has no real user_id concept, but the SAPISID cookie
+            // is stable per Google account, so a short hash of it gives us
+            // an opaque-but-account-distinct id so switching accounts
+            // invalidates per-server caches without exposing the cookie.
+            let yt_user_id =
+                ::server::ytmusic::derive_user_id(&cookies).unwrap_or_else(|| "me".to_string());
             if let Some(srv) = config.write().server.as_mut() {
                 srv.access_token = Some(cookies);
-                // YT has no separate user-id concept — auth is purely
-                // cookie-based. Pages everywhere gate on
-                // `(token, user_id)` both being Some, so seed a placeholder
-                // so the dispatch can actually reach the YT branches.
-                if srv.user_id.is_none() {
-                    srv.user_id = Some("me".to_string());
-                }
+                srv.user_id = Some(yt_user_id);
                 srv.yt_browser = Some(browser);
             }
             error.set(None);

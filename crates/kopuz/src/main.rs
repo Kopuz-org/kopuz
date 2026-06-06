@@ -1116,6 +1116,9 @@ fn App() -> Element {
             last_server_playlist_key.set(current_server_key);
             selected_playlist_id.set(None);
             playlist_store.write().jellyfin_playlists.clear();
+            // Drop any pending playback-error banner from the previous
+            // server so it doesn't reappear when the user comes back.
+            ctrl.playback_error.set(None);
         }
     });
 
@@ -1166,19 +1169,17 @@ fn App() -> Element {
     });
 
     #[cfg(not(target_arch = "wasm32"))]
-    let mut yt_cookies_refreshed = use_signal(|| false);
-    let mut yt_cookies_ready = use_signal(|| true);
-    use_context_provider(|| pages::YtCookiesReady(yt_cookies_ready));
+    let mut yt_keepalive_running = use_signal(|| false);
     #[cfg(not(target_arch = "wasm32"))]
     use_effect(move || {
         if !*initial_load_done.read() {
             return;
         }
-        if *yt_cookies_refreshed.peek() {
-            return;
-        }
+        // Subscribe to config so adding/changing the YT server after boot
+        // re-runs this effect and starts the loop. peek() would have
+        // pinned us to the boot snapshot.
         let has_ytmusic_auth = config
-            .peek()
+            .read()
             .server
             .as_ref()
             .map(|s| s.service == config::MusicService::YtMusic
@@ -1187,11 +1188,12 @@ fn App() -> Element {
         if !has_ytmusic_auth {
             return;
         }
-        yt_cookies_refreshed.set(true);
-        yt_cookies_ready.set(false);
+        if *yt_keepalive_running.peek() {
+            return;
+        }
+        yt_keepalive_running.set(true);
         spawn(async move {
             run_rotation(config).await;
-            yt_cookies_ready.set(true);
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(300)).await;
                 run_rotation(config).await;
