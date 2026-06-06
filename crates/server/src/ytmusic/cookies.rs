@@ -17,18 +17,6 @@ use sha1::Sha1;
 
 type Aes128CbcDec = cbc::Decryptor<Aes128>;
 
-/// Per-browser layout knowledge: where its profile lives under `$HOME`
-/// and what application name libsecret stores its OSCrypt key under.
-fn profile_subdir(b: Browser) -> &'static str {
-    match b {
-        Browser::Chrome => ".config/google-chrome",
-        Browser::Chromium => ".config/chromium",
-        Browser::Brave => ".config/BraveSoftware/Brave-Browser",
-        Browser::Edge => ".config/microsoft-edge",
-        Browser::Vivaldi => ".config/vivaldi",
-    }
-}
-
 fn secret_app(b: Browser) -> &'static str {
     match b {
         Browser::Chrome => "chrome",
@@ -39,68 +27,8 @@ fn secret_app(b: Browser) -> &'static str {
     }
 }
 
-/// Browser candidates that have both a profile directory AND a libsecret
-/// OSCrypt key — i.e. browsers the user has actually used at least once.
-/// Caller still has to verify each one has YT auth cookies (`find_signed_in`).
-pub fn candidate_browsers() -> Vec<Browser> {
-    let Some(home) = std::env::var_os("HOME") else {
-        return Vec::new();
-    };
-    let home = PathBuf::from(home);
-    Browser::ALL
-        .iter()
-        .copied()
-        .filter(|b| home.join(profile_subdir(*b)).is_dir() && secret_tool_has(secret_app(*b)))
-        .collect()
-}
-
-/// Tries each candidate browser in order, returning the first one whose
-/// profile actually contains YouTube auth cookies.
-pub async fn find_signed_in() -> Result<(Browser, String), String> {
-    let candidates = candidate_browsers();
-    if candidates.is_empty() {
-        return Err(
-            "no Chromium-family browser detected on this system".to_string(),
-        );
-    }
-    let mut last_err: Option<String> = None;
-    let mut tried: Vec<Browser> = Vec::new();
-    for browser in candidates {
-        tried.push(browser);
-        match extract(browser).await {
-            Ok(cookies) => return Ok((browser, cookies)),
-            Err(e) => {
-                eprintln!("[yt-cookies] {}: {e}", browser.id());
-                last_err = Some(e);
-            }
-        }
-    }
-    let tried_labels: Vec<&'static str> = tried.iter().map(|b| b.label()).collect();
-    Err(format!(
-        "no signed-in YouTube Music browser among {tried_labels:?} — sign in to YouTube Music in one of them, then retry. last error: {}",
-        last_err.as_deref().unwrap_or("(none)")
-    ))
-}
-
-fn secret_tool_has(application: &str) -> bool {
-    Command::new("secret-tool")
-        .args(["lookup", "application", application])
-        .output()
-        .ok()
-        .map(|o| o.status.success() && !o.stdout.is_empty())
-        .unwrap_or(false)
-}
-
-/// Extracts and decrypts cookies for `.youtube.com` from the browser's
-/// default profile. Returns a single `Cookie:` header string.
-pub async fn extract(browser: Browser) -> Result<String, String> {
-    let home = std::env::var("HOME").map_err(|_| "HOME not set".to_string())?;
-    let profile_root = PathBuf::from(home).join(profile_subdir(browser));
-    extract_from(browser, &profile_root).await
-}
-
-/// Like [`extract`] but with an explicit profile root — used by the
-/// keepalive loop which runs against an isolated profile we own.
+/// Extract and decrypt the YouTube cookies in `profile_root`'s default
+/// profile. Returns a `Cookie:` header value.
 pub async fn extract_from(browser: Browser, profile_root: &Path) -> Result<String, String> {
     let db_path = pick_cookies_path(profile_root).ok_or_else(|| {
         format!(
@@ -135,7 +63,13 @@ pub async fn extract_from(browser: Browser, profile_root: &Path) -> Result<Strin
     let _ = tokio::fs::remove_file(&snapshot_for_cleanup).await;
 
     let header = header?;
-    if !header.contains("SAPISID=") && !header.contains("__Secure-3PAPISID=") {
+    let has_auth = header.split(';').any(|p| {
+        let Some((k, _)) = p.trim().split_once('=') else {
+            return false;
+        };
+        k == "SAPISID" || k == "__Secure-3PAPISID"
+    });
+    if !has_auth {
         return Err(format!(
             "no auth cookies found in {} profile — sign in to YouTube Music there first",
             browser.label()
@@ -186,7 +120,7 @@ fn decrypt_chromium(encrypted: &[u8], key: &[u8; 16]) -> Option<Vec<u8>> {
         return None;
     }
     let body = &encrypted[3..];
-    if body.is_empty() || body.len() % 16 != 0 {
+    if body.is_empty() || !body.len().is_multiple_of(16) {
         return None;
     }
     let iv = [0x20u8; 16];

@@ -22,7 +22,7 @@ pub async fn resolve(video_id: &str, cookies: &str) -> Result<YtStreamInfo, Stri
     result
 }
 
-async fn run_resolve(video_id: &str, cookies_path: &PathBuf) -> Result<YtStreamInfo, String> {
+async fn run_resolve(video_id: &str, cookies_path: &std::path::Path) -> Result<YtStreamInfo, String> {
     let url = format!("https://music.youtube.com/watch?v={video_id}");
     let cookies_str = cookies_path.to_string_lossy().into_owned();
 

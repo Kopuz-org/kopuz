@@ -151,16 +151,15 @@ fn parse_total_size(resp: &reqwest::blocking::Response) -> Option<u64> {
     // total. Fall back to Content-Length only if Range wasn't honoured (in
     // which case the server gave us the whole body, and Content-Length is
     // the full file size).
-    if let Some(v) = resp.headers().get("content-range") {
-        if let Ok(s) = v.to_str() {
-            if let Some(slash) = s.rfind('/') {
-                let tail = &s[slash + 1..];
-                if tail != "*" {
-                    if let Ok(n) = tail.parse() {
-                        return Some(n);
-                    }
-                }
-            }
+    if let Some(v) = resp.headers().get("content-range")
+        && let Ok(s) = v.to_str()
+        && let Some(slash) = s.rfind('/')
+    {
+        let tail = &s[slash + 1..];
+        if tail != "*"
+            && let Ok(n) = tail.parse()
+        {
+            return Some(n);
         }
     }
     resp.content_length()

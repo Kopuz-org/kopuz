@@ -21,16 +21,16 @@ fn binary_path() -> PathBuf {
     if let Some(p) = std::env::var_os("RUSTYPIPE_BOTGUARD_BIN") {
         return PathBuf::from(p);
     }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let next_to_exe = dir.join("rustypipe-botguard");
-            if next_to_exe.is_file() {
-                return next_to_exe;
-            }
-            let in_bin = dir.join("bin").join("rustypipe-botguard");
-            if in_bin.is_file() {
-                return in_bin;
-            }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        let next_to_exe = dir.join("rustypipe-botguard");
+        if next_to_exe.is_file() {
+            return next_to_exe;
+        }
+        let in_bin = dir.join("bin").join("rustypipe-botguard");
+        if in_bin.is_file() {
+            return in_bin;
         }
     }
     if let Ok(mut p) = std::env::current_dir() {
@@ -68,9 +68,9 @@ pub async fn check_available() -> Result<(), String> {
                 bin.display(),
                 s
             )),
-            Err(_) => Err(format!(
-                "rustypipe-botguard not found — install with: cargo install rustypipe-botguard --version 0.1.2"
-            )),
+            Err(_) => Err(
+                "rustypipe-botguard not found — install with: cargo install rustypipe-botguard --version 0.1.2".to_string()
+            ),
         }
     })
     .await

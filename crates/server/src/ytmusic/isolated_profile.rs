@@ -1,20 +1,22 @@
 //! Manages kopuz's isolated browser profile at
-//! ~/.config/kopuz/yt-profile/, used only for the one-time YouTube
+//! `~/.config/kopuz/yt-profile/`, used only for the one-time YouTube
 //! Music sign-in. The user's real browser profile is never touched.
 //!
-//! Flow: wipe → spawn `<browser> --user-data-dir=<isolated>
-//! https://music.youtube.com/` so the user can sign in interactively →
-//! poll the isolated profile's cookie SQLite until the auth cookies
-//! appear (SAPISID + SID) → kill the browser → return the decrypted
-//! cookie jar for kopuz to store. From there
+//! Flow: wipe the profile dir → spawn `<browser>
+//! --user-data-dir=<isolated>` pointed at Google ServiceLogin → poll
+//! the profile's cookie SQLite until the 1P auth cookies appear →
+//! kill the browser → return the decrypted cookie header. From there
 //! [`super::verify_session_keepalive`] keeps the session alive over
-//! HTTP without ever touching the browser again.
+//! HTTP without re-launching the browser.
 
 use std::path::PathBuf;
-use std::process::Command;
 use std::time::{Duration, Instant};
 
 use config::Browser;
+use tokio::process::Command;
+
+const SIGNIN_URL: &str =
+    "https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fmusic.youtube.com%2F";
 
 pub fn profile_dir() -> PathBuf {
     directories::ProjectDirs::from("com", "temidaradev", "kopuz")
@@ -32,11 +34,10 @@ fn browser_binary(browser: Browser) -> &'static str {
     }
 }
 
-/// Wipe the isolated profile, launch the chosen browser pointed at
-/// music.youtube.com so the user can sign in, then poll the cookie
-/// SQLite until the auth cookies appear. Once both SAPISID and SID are
-/// present the browser is killed and the decrypted cookie header is
-/// returned. Times out after `signin_timeout`.
+/// Wipe the isolated profile, launch the chosen browser at the Google
+/// sign-in page, and poll the cookie SQLite until both SAPISID and SID
+/// land. Returns the decrypted cookie header. The browser is always
+/// killed before returning, success or timeout.
 pub async fn launch_signin_and_extract(
     browser: Browser,
     signin_timeout: Duration,
@@ -50,23 +51,22 @@ pub async fn launch_signin_and_extract(
         .map_err(|e| format!("mkdir yt-profile: {e}"))?;
 
     let bin = browser_binary(browser);
-    let child = Command::new(bin)
+    let mut child = Command::new(bin)
         .arg("--no-first-run")
         .arg("--no-default-browser-check")
         .arg(format!("--user-data-dir={}", profile.display()))
-        .arg("https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fmusic.youtube.com%2F")
+        .arg(SIGNIN_URL)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
         .spawn()
         .map_err(|e| format!("spawn {bin}: {e}"))?;
-    let pid = child.id();
 
     let deadline = Instant::now() + signin_timeout;
-    let cookies = loop {
+    let outcome = loop {
         tokio::time::sleep(Duration::from_secs(2)).await;
         if Instant::now() > deadline {
-            kill_pid(pid);
-            return Err(format!(
+            break Err(format!(
                 "Sign-in not detected within {}s — close the browser and try again",
                 signin_timeout.as_secs()
             ));
@@ -74,18 +74,17 @@ pub async fn launch_signin_and_extract(
         let Ok(cookies) = super::cookies::extract_from(browser, &profile).await else {
             continue;
         };
-        if cookies.contains("SAPISID=") && cookies.contains("SID=") {
-            break cookies;
+        if has_cookie(&cookies, "SAPISID") && has_cookie(&cookies, "SID") {
+            break Ok(cookies);
         }
     };
 
-    kill_pid(pid);
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    Ok(cookies)
+    let _ = child.kill().await;
+    outcome
 }
 
-fn kill_pid(pid: u32) {
-    let _ = Command::new("kill").args(["-TERM", &pid.to_string()]).status();
-    std::thread::sleep(Duration::from_millis(1500));
-    let _ = Command::new("kill").args(["-KILL", &pid.to_string()]).status();
+fn has_cookie(header: &str, name: &str) -> bool {
+    header
+        .split(';')
+        .any(|p| p.trim().split_once('=').is_some_and(|(k, _)| k == name))
 }

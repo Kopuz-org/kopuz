@@ -82,10 +82,10 @@ pub async fn player(
     extras: PlayerExtras<'_>,
 ) -> Result<Value, String> {
     let mut context_client = build_context(client);
-    if let Some(vd) = extras.visitor_data {
-        if let Value::Object(ref mut m) = context_client {
-            m.insert("visitorData".into(), Value::String(vd.to_string()));
-        }
+    if let Some(vd) = extras.visitor_data
+        && let Value::Object(ref mut m) = context_client
+    {
+        m.insert("visitorData".into(), Value::String(vd.to_string()));
     }
 
     let mut body = json!({
@@ -125,12 +125,12 @@ pub async fn player(
             .header("X-Origin", ORIGIN_YOUTUBE_MUSIC)
             .header("Referer", format!("{ORIGIN_YOUTUBE_MUSIC}/"));
     }
-    if client.login_supported {
-        if let Some(c) = cookies {
-            let auth = sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC)
-                .ok_or_else(|| "SAPISID missing".to_string())?;
-            req = req.header("Cookie", c).header("Authorization", auth);
-        }
+    if client.login_supported
+        && let Some(c) = cookies
+    {
+        let auth = sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC)
+            .ok_or_else(|| "SAPISID missing".to_string())?;
+        req = req.header("Cookie", c).header("Authorization", auth);
     }
 
     let resp = req

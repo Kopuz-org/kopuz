@@ -5933,6 +5933,7 @@ dependencies = [
  "directories",
  "hex",
  "hmac",
+ "httpdate",
  "jellyfin-sdk-rust",
  "md5",
  "pbkdf2",

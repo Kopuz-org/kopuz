@@ -105,9 +105,9 @@ pub async fn resolve(video_id: &str, cookies: &str) -> Result<YtStreamInfo, Stri
             // that plays for 5 s then dies. Better to surface the real
             // problem immediately.
             if e.contains("not found") || e.contains("No such file") {
-                return Err(format!(
-                    "rustypipe-botguard not installed — run:\n  cargo install rustypipe-botguard --version 0.1.2"
-                ));
+                return Err(
+                    "rustypipe-botguard not installed — run:\n  cargo install rustypipe-botguard --version 0.1.2".to_string()
+                );
             }
             Some(format!("PO mint failed: {e}"))
         }
@@ -123,10 +123,10 @@ pub async fn resolve(video_id: &str, cookies: &str) -> Result<YtStreamInfo, Stri
     let main =
         innertube::player(MAIN_CLIENT, video_id, Some(cookies), PlayerExtras::default()).await;
     if let Ok(json) = &main {
-        if PlayabilityStatus::from_response(json) == PlayabilityStatus::Ok {
-            if let Some(info) = pick_plain_format(json, MAIN_CLIENT) {
-                return Ok(info);
-            }
+        if PlayabilityStatus::from_response(json) == PlayabilityStatus::Ok
+            && let Some(info) = pick_plain_format(json, MAIN_CLIENT)
+        {
+            return Ok(info);
         }
     } else if let Err(e) = main {
         primary_err = Some(format!("{}: {e}", MAIN_CLIENT.client_name));
