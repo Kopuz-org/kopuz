@@ -69,6 +69,48 @@ fn macos_app_paths(browser: Browser) -> &'static [&'static str] {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn windows_install_paths(browser: Browser) -> Vec<PathBuf> {
+    let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
+    let pf = env("ProgramFiles");
+    let pf86 = env("ProgramFiles(x86)");
+    let local = env("LOCALAPPDATA");
+    let mut out = Vec::new();
+    let mut add = |opt: &Option<PathBuf>, suffix: &str| {
+        if let Some(base) = opt {
+            out.push(base.join(suffix));
+        }
+    };
+    match browser {
+        Browser::Brave => {
+            add(&pf, r"BraveSoftware\Brave-Browser\Application\brave.exe");
+            add(&pf86, r"BraveSoftware\Brave-Browser\Application\brave.exe");
+            add(&local, r"BraveSoftware\Brave-Browser\Application\brave.exe");
+        }
+        Browser::Chrome => {
+            add(&pf, r"Google\Chrome\Application\chrome.exe");
+            add(&pf86, r"Google\Chrome\Application\chrome.exe");
+            add(&local, r"Google\Chrome\Application\chrome.exe");
+        }
+        Browser::Chromium => {
+            add(&pf, r"Chromium\Application\chrome.exe");
+            add(&pf86, r"Chromium\Application\chrome.exe");
+            add(&local, r"Chromium\Application\chrome.exe");
+        }
+        Browser::Edge => {
+            add(&pf, r"Microsoft\Edge\Application\msedge.exe");
+            add(&pf86, r"Microsoft\Edge\Application\msedge.exe");
+            add(&local, r"Microsoft\Edge\Application\msedge.exe");
+        }
+        Browser::Vivaldi => {
+            add(&pf, r"Vivaldi\Application\vivaldi.exe");
+            add(&pf86, r"Vivaldi\Application\vivaldi.exe");
+            add(&local, r"Vivaldi\Application\vivaldi.exe");
+        }
+    }
+    out
+}
+
 fn find_browser_bin(browser: Browser) -> Option<String> {
     let env_key = format!("KOPUZ_{}_BIN", browser.id().to_uppercase().replace('-', "_"));
     if let Some(v) = std::env::var_os(&env_key)
@@ -90,6 +132,12 @@ fn find_browser_bin(browser: Browser) -> Option<String> {
     for path in macos_app_paths(browser) {
         if std::path::Path::new(path).is_file() {
             return Some((*path).to_string());
+        }
+    }
+    #[cfg(target_os = "windows")]
+    for path in windows_install_paths(browser) {
+        if path.is_file() {
+            return Some(path.to_string_lossy().into_owned());
         }
     }
     None
