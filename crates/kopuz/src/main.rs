@@ -1116,6 +1116,18 @@ fn App() -> Element {
             last_server_playlist_key.set(current_server_key);
             selected_playlist_id.set(None);
             playlist_store.write().jellyfin_playlists.clear();
+            // Library is shared across providers — jellyfin_tracks /
+            // jellyfin_albums hold whichever server last synced into it.
+            // Without this clear, switching Jellyfin → YT → Jellyfin
+            // leaves YT tracks in the Jellyfin library view, and any
+            // attempt to play them goes through the YT player path
+            // against the wrong active session. Each provider's sync
+            // refills from scratch.
+            {
+                let mut lib = library.write();
+                lib.jellyfin_tracks.clear();
+                lib.jellyfin_albums.clear();
+            }
             // Drop any pending playback-error banner from the previous
             // server so it doesn't reappear when the user comes back.
             ctrl.playback_error.set(None);
