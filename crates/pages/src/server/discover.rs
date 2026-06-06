@@ -205,7 +205,8 @@ fn ShelfRow(
             }
             div {
                 id: "{scroll_id}",
-                class: "flex overflow-x-auto gap-5 pb-3 pt-1 scrollbar-hide scroll-smooth -mx-2 px-2",
+                class: "flex items-start gap-5 pb-3 pt-1 scrollbar-hide scroll-smooth -mx-2 px-2",
+                style: "overflow-x: auto; overflow-y: hidden;",
                 for (idx, item) in shelf.items.iter().enumerate() {
                     DiscoverTile {
                         key: "{idx}",
@@ -310,9 +311,10 @@ fn Card(
                     div { class: "{placeholder_class}" }
                 }
             }
-            div { class: "h-10 flex items-center",
+            div { class: "h-10 flex items-center overflow-hidden",
                 p {
-                    class: "text-sm font-semibold text-white line-clamp-2 break-words",
+                    class: "text-sm font-semibold text-white break-words",
+                    style: "display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis;",
                     "{title}"
                 }
             }
@@ -358,9 +360,10 @@ fn SongCard(track: Track, on_play: EventHandler<Track>) -> Element {
                     i { class: "fa-solid fa-play text-white text-2xl" }
                 }
             }
-            div { class: "h-10 flex items-center",
+            div { class: "h-10 flex items-center overflow-hidden",
                 p {
-                    class: "text-sm font-semibold text-white line-clamp-2 break-words",
+                    class: "text-sm font-semibold text-white break-words",
+                    style: "display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis;",
                     "{title}"
                 }
             }
