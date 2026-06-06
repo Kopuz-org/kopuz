@@ -1,5 +1,30 @@
-use ::server::{DownloadQueue, DownloadStatus};
+use ::server::{DownloadItem, DownloadProgress, DownloadQueue, DownloadStatus};
 use dioxus::prelude::*;
+
+fn compute_eta(
+    in_flight: &[DownloadItem],
+    bytes_done_session: u64,
+    session_elapsed_secs: f64,
+) -> Option<u64> {
+    if session_elapsed_secs < 0.5 || bytes_done_session == 0 {
+        return None;
+    }
+    let bps = bytes_done_session as f64 / session_elapsed_secs;
+    if bps <= 0.0 {
+        return None;
+    }
+    let remaining: u64 = in_flight
+        .iter()
+        .map(|i| {
+            if i.bytes_total > 0 {
+                i.bytes_total.saturating_sub(i.bytes_done)
+            } else {
+                8_000_000
+            }
+        })
+        .sum();
+    Some((remaining as f64 / bps) as u64)
+}
 
 fn fmt_eta(secs: u64) -> String {
     if secs < 60 {
@@ -21,6 +46,7 @@ fn fmt_bytes(b: u64) -> String {
 
 #[component]
 pub fn DownloadOverlay(mut queue: Signal<DownloadQueue>) -> Element {
+    let progress = use_context::<Signal<DownloadProgress>>();
     let mut collapsed = use_signal(|| false);
 
     let q = queue.read();
@@ -33,8 +59,12 @@ pub fn DownloadOverlay(mut queue: Signal<DownloadQueue>) -> Element {
     let is_active = q.is_active();
     let done = q.done_count();
     let total = q.total_non_failed();
-    let current = q.current().cloned();
-    let eta = q.eta_secs();
+    let in_flight_skeletons: Vec<DownloadItem> = q
+        .items
+        .iter()
+        .filter(|i| matches!(i.status, DownloadStatus::Downloading))
+        .cloned()
+        .collect();
     let failed_count = q
         .items
         .iter()
@@ -42,8 +72,24 @@ pub fn DownloadOverlay(mut queue: Signal<DownloadQueue>) -> Element {
         .count();
     drop(q);
 
+    let prog = progress.read();
+    let in_flight: Vec<DownloadItem> = in_flight_skeletons
+        .into_iter()
+        .map(|mut item| {
+            if let Some(&bytes) = prog.per_item.get(&item.id) {
+                item.bytes_done = bytes;
+            }
+            item
+        })
+        .collect();
+    let bytes_done_session = prog.bytes_done_session;
+    let session_elapsed_secs = prog.session_elapsed_secs;
+    drop(prog);
+
+    let eta = compute_eta(&in_flight, bytes_done_session, session_elapsed_secs);
+
     let title_text = if is_active {
-        format!("Downloading {} / {}", done + 1, total)
+        format!("Downloading {} / {}", done, total)
     } else {
         format!("Done — {} downloaded", done)
     };
@@ -97,30 +143,36 @@ pub fn DownloadOverlay(mut queue: Signal<DownloadQueue>) -> Element {
             if !*collapsed.read() {
                 div { class: "px-4 py-3 space-y-3",
 
-                    if let Some(ref item) = current {
-                        div { class: "space-y-1.5",
-                            div { class: "flex items-center justify-between",
-                                div { class: "min-w-0 flex-1",
-                                    p { class: "text-sm font-medium text-white truncate", "{item.title}" }
-                                    p { class: "text-xs text-slate-400 truncate", "{item.artist}" }
-                                }
-                                if item.bytes_total > 0 {
-                                    span { class: "text-xs text-slate-500 ml-2 shrink-0",
-                                        "{fmt_bytes(item.bytes_done)} / {fmt_bytes(item.bytes_total)}"
-                                    }
-                                } else {
-                                    span { class: "text-xs text-slate-500 ml-2 shrink-0",
-                                        "{fmt_bytes(item.bytes_done)}"
-                                    }
-                                }
-                            }
-                            div { class: "w-full h-1.5 bg-white/10 rounded-full overflow-hidden",
+                    if !in_flight.is_empty() {
+                        div { class: "space-y-2.5",
+                            for item in in_flight.iter().cloned() {
                                 div {
-                                    class: "h-full bg-indigo-500 rounded-full transition-all duration-300",
-                                    style: if item.bytes_total > 0 {
-                                        format!("width: {:.1}%", item.bytes_done as f64 / item.bytes_total as f64 * 100.0)
-                                    } else {
-                                        format!("width: {:.1}%", (item.bytes_done as f64 / 8_000_000.0 * 100.0).max(5.0).min(95.0))
+                                    key: "{item.id}",
+                                    class: "space-y-1.5",
+                                    div { class: "flex items-center justify-between",
+                                        div { class: "min-w-0 flex-1",
+                                            p { class: "text-sm font-medium text-white truncate", "{item.title}" }
+                                            p { class: "text-xs text-slate-400 truncate", "{item.artist}" }
+                                        }
+                                        if item.bytes_total > 0 {
+                                            span { class: "text-xs text-slate-500 ml-2 shrink-0",
+                                                "{fmt_bytes(item.bytes_done)} / {fmt_bytes(item.bytes_total)}"
+                                            }
+                                        } else {
+                                            span { class: "text-xs text-slate-500 ml-2 shrink-0",
+                                                "{fmt_bytes(item.bytes_done)}"
+                                            }
+                                        }
+                                    }
+                                    div { class: "w-full h-1.5 bg-white/10 rounded-full overflow-hidden",
+                                        div {
+                                            class: "h-full bg-indigo-500 rounded-full transition-all duration-300",
+                                            style: if item.bytes_total > 0 {
+                                                format!("width: {:.1}%", item.bytes_done as f64 / item.bytes_total as f64 * 100.0)
+                                            } else {
+                                                format!("width: {:.1}%", (item.bytes_done as f64 / 8_000_000.0 * 100.0).max(5.0).min(95.0))
+                                            }
+                                        }
                                     }
                                 }
                             }
