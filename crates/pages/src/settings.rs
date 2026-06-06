@@ -103,7 +103,25 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     };
 
     let ytmusic_auto_login = move || {
-        let browser = *yt_browser.peek();
+        // Prefer the browser already saved on the active server entry
+        // (set during a previous successful sign-in); fall back to the
+        // settings popup's selector for first-time setup.
+        let browser = config
+            .peek()
+            .server
+            .as_ref()
+            .and_then(|s| s.yt_browser)
+            .unwrap_or(*yt_browser.peek());
+        // Route YT sign-in failures through PlayerController.playback_error
+        // so the existing YT-banner in main.rs surfaces them after the
+        // popup auto-closes — without this channel the error signal is
+        // tied to the popup component and disappears as soon as the
+        // popup unmounts, leaving "switch to YT did nothing" as the
+        // user's only signal.
+        let mut report = move |msg: String| {
+            error.set(Some(msg.clone()));
+            ctrl.playback_error.set(Some(msg));
+        };
         spawn(async move {
             let cookies = match server::ytmusic::isolated_profile::launch_signin_and_extract(
                 browser,
@@ -113,19 +131,19 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             {
                 Ok(c) => c,
                 Err(e) => {
-                    error.set(Some(format!("YT Music sign-in failed: {e}")));
+                    report(format!("YT Music sign-in failed ({browser}): {e}"));
                     return;
                 }
             };
             let client = server::ytmusic::YouTubeMusicClient::with_cookies(cookies.clone());
             if let Err(e) = client.check_botguard_available().await {
-                error.set(Some(format!(
+                report(format!(
                     "YouTube Music needs the rustypipe-botguard helper. {e}"
-                )));
+                ));
                 return;
             }
             if let Err(e) = client.validate_cookies().await {
-                error.set(Some(format!("YT Music sign-in check failed: {e}")));
+                report(format!("YT Music sign-in check failed: {e}"));
                 return;
             }
             // Pages everywhere gate on (access_token, user_id) both being
@@ -135,10 +153,19 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             // invalidates per-server caches without exposing the cookie.
             let yt_user_id =
                 ::server::ytmusic::derive_user_id(&cookies).unwrap_or_else(|| "me".to_string());
-            if let Some(srv) = config.write().server.as_mut() {
-                srv.access_token = Some(cookies);
-                srv.user_id = Some(yt_user_id);
-                srv.yt_browser = Some(browser);
+            {
+                let mut cfg = config.write();
+                let saved_id = cfg.server.as_ref().and_then(|s| s.id.clone());
+                if let Some(srv) = cfg.server.as_mut() {
+                    srv.access_token = Some(cookies);
+                    srv.user_id = Some(yt_user_id);
+                    srv.yt_browser = Some(browser);
+                }
+                if let Some(id) = saved_id
+                    && let Some(saved) = cfg.servers.iter_mut().find(|s| s.id == id)
+                {
+                    saved.yt_browser = Some(browser);
+                }
             }
             error.set(None);
         });
@@ -199,6 +226,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                 name: new_server.name.clone(),
                 url: new_server.url.clone(),
                 service: new_server.service,
+                yt_browser: is_ytmusic.then(|| *yt_browser.peek()),
             };
             {
                 let mut cfg = config.write();
@@ -234,7 +262,10 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                 access_token: None,
                 user_id: None,
                 id: Some(saved.id),
-                yt_browser: None,
+                // Carry the saved browser choice over so the sign-in
+                // launch hits the binary the user picked, not whatever
+                // the popup's default selector happens to be.
+                yt_browser: saved.yt_browser,
             };
             config.write().server = Some(active);
             if is_ytmusic {

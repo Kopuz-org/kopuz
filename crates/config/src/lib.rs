@@ -699,6 +699,12 @@ pub struct SavedServer {
     pub url: String,
     #[serde(default)]
     pub service: MusicService,
+    /// Persisted browser choice for YT Music servers — without this, a
+    /// "switch to YT" click re-runs the sign-in flow against whatever
+    /// the popup's default browser was (Chrome) instead of the one the
+    /// user actually has installed.
+    #[serde(default)]
+    pub yt_browser: Option<Browser>,
 }
 
 impl SavedServer {
@@ -708,6 +714,7 @@ impl SavedServer {
             name,
             url: url.trim_end_matches('/').to_string(),
             service,
+            yt_browser: None,
         }
     }
 
@@ -894,6 +901,7 @@ impl AppConfig {
                     name: server.name.clone(),
                     url: server.url.clone(),
                     service: server.service,
+                    yt_browser: server.yt_browser,
                 });
             }
         }

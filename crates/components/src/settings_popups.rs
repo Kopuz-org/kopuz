@@ -232,7 +232,7 @@ fn ServerServiceFields(
     match server_service() {
         MusicService::YtMusic => rsx! {
             p { class: "text-xs text-white/60",
-                "Pick the browser you're signed in to YouTube Music on. Kopuz reads cookies directly from its profile — no separate login."
+                "Pick which browser kopuz should use for the YouTube Music sign-in window. It opens in an isolated profile (a fresh, separate session) — your normal browsing is untouched. Make sure the browser is installed."
             }
             select {
                 onchange: move |e| {
