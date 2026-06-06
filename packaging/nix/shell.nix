@@ -27,7 +27,7 @@ mkShell {
     nodejs_22
     yt-dlp
   ]
-  ++ lib.optionals stdenv.hostPlatform.isLinux 
+  ++ lib.optionals stdenv.hostPlatform.isLinux [
     flatpak
     flatpak-builder
     appstream
