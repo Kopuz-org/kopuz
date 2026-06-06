@@ -2,6 +2,7 @@ use config::MusicService;
 
 use crate::jellyfin::JellyfinClient;
 use crate::subsonic::SubsonicClient;
+use crate::ytmusic::YouTubeMusicClient;
 
 pub fn resolve_subsonic_secret(password: &str) -> Option<String> {
     if password.is_empty() {
@@ -53,6 +54,10 @@ impl ProviderClient {
                     user_id: username.to_string(),
                 })
             }
+            MusicService::YtMusic => Err(
+                "YouTube Music uses OAuth device flow; call login_ytmusic_device() instead"
+                    .to_string(),
+            ),
         }
     }
 
@@ -67,6 +72,10 @@ impl ProviderClient {
 
     pub fn make_subsonic_client(&self, username: &str, password: &str) -> SubsonicClient {
         SubsonicClient::new(&self.server_url, username, password)
+    }
+
+    pub fn make_ytmusic_client(&self, cookies: &str) -> YouTubeMusicClient {
+        YouTubeMusicClient::with_cookies(cookies.to_string())
     }
 
     pub fn service(&self) -> MusicService {
