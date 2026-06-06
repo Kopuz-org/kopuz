@@ -146,21 +146,16 @@ fn parse_artist(channel_id: &str, resp: &Value) -> YtArtist {
     let header = find_artist_header(resp);
 
     let name = header
-        .and_then(|h| h.pointer("/title/runs/0/text"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let subscribers = header
-        .and_then(|h| {
-            h.pointer("/subscriptionButton/subscribeButtonRenderer/longSubscriberCountText/runs/0/text")
-                .or_else(|| h.pointer("/subscriberCountText/runs/0/text"))
-        })
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-    let description = header
-        .and_then(|h| h.pointer("/description/runs/0/text"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
+        .and_then(|h| runs_text(h, "/title/runs"))
+        .unwrap_or_default();
+    let subscribers = header.and_then(|h| {
+        runs_text(
+            h,
+            "/subscriptionButton/subscribeButtonRenderer/longSubscriberCountText/runs",
+        )
+        .or_else(|| runs_text(h, "/subscriberCountText/runs"))
+    });
+    let description = header.and_then(|h| runs_text(h, "/description/runs"));
     let banner_thumbnail = header.and_then(best_artist_banner);
     let shuffle_playlist_id = header
         .and_then(|h| h.get("buttons").and_then(|v| v.as_array()))
@@ -228,19 +223,11 @@ fn best_artist_banner(header: &Value) -> Option<String> {
 fn parse_artist_carousel(section: &Value) -> Option<DiscoverShelf> {
     let shelf = section.get("musicCarouselShelfRenderer")?;
     let header = shelf.pointer("/header/musicCarouselShelfBasicHeaderRenderer");
-    let title = header
-        .and_then(|h| h.pointer("/title/runs/0/text"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    let title = header.and_then(|h| runs_text(h, "/title/runs")).unwrap_or_default();
     if title.is_empty() {
         return None;
     }
-    let strapline = header
-        .and_then(|h| h.pointer("/strapline/runs/0/text"))
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string());
+    let strapline = header.and_then(|h| runs_text(h, "/strapline/runs"));
     let more_browse_id = header
         .and_then(|h| {
             h.pointer(
@@ -272,11 +259,7 @@ fn parse_artist_carousel(section: &Value) -> Option<DiscoverShelf> {
 /// same `ShelfRow` component renders it as a row of song tiles.
 fn parse_artist_song_list(section: &Value) -> Option<DiscoverShelf> {
     let shelf = section.get("musicShelfRenderer")?;
-    let title = shelf
-        .pointer("/title/runs/0/text")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    let title = runs_text(shelf, "/title/runs").unwrap_or_default();
     if title.is_empty() {
         return None;
     }
@@ -308,30 +291,47 @@ fn parse_artist_song_list(section: &Value) -> Option<DiscoverShelf> {
 }
 
 fn parse_artist_song_row(row: &Value) -> Option<Track> {
-    let video_id = row
-        .pointer("/playlistItemData/videoId")
-        .and_then(|v| v.as_str())?
-        .to_string();
-    let title = row
-        .pointer("/flexColumns/0/musicResponsiveListItemFlexColumnRenderer/text/runs/0/text")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    // Classify every flex column by what it actually carries — the
+    // artist Top Songs shelf has 4 columns in order title/artist/
+    // play-count/album, NOT the title/artist/album layout my old
+    // positional parser assumed. We pick out each role by tag, so
+    // future re-orderings or extra columns just work.
+    let cols = classify_flex_columns(row);
+    let mut video_id: Option<String> = None;
+    let mut title = String::new();
+    let mut artist = String::new();
+    let mut album = String::new();
+    let mut flex_duration: Option<u64> = None;
+    for c in &cols {
+        match c {
+            RowColumn::Title { text, video_id: vid, .. } => {
+                if title.is_empty() {
+                    title = text.clone();
+                }
+                if video_id.is_none()
+                    && let Some(v) = vid
+                {
+                    video_id = Some(v.clone());
+                }
+            }
+            RowColumn::Artist { text } if artist.is_empty() => artist = text.clone(),
+            RowColumn::Album { text } if album.is_empty() => album = text.clone(),
+            RowColumn::Duration { secs } if flex_duration.is_none() => {
+                flex_duration = Some(*secs);
+            }
+            _ => {}
+        }
+    }
+    let video_id = video_id.or_else(|| {
+        row.pointer("/playlistItemData/videoId")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    })?;
     if title.is_empty() {
         return None;
     }
-    let artist = row
-        .pointer("/flexColumns/1/musicResponsiveListItemFlexColumnRenderer/text/runs/0/text")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_default();
-    let album = row
-        .pointer("/flexColumns/2/musicResponsiveListItemFlexColumnRenderer/text/runs/0/text")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_default();
+    let duration = fixed_columns_duration(row).or(flex_duration).unwrap_or(0);
+
     let thumbnail = row
         .pointer("/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails")
         .and_then(|v| v.as_array())
@@ -360,7 +360,7 @@ fn parse_artist_song_row(row: &Value) -> Option<Track> {
         title,
         artist,
         album,
-        duration: 0,
+        duration,
         khz: 0,
         bitrate: 0,
         track_number: None,
@@ -389,10 +389,8 @@ fn parse_album(browse_id: &str, resp: &Value) -> YtAlbum {
     let header = find_album_header(resp, &sections);
 
     let title = header
-        .and_then(|h| h.pointer("/title/runs/0/text"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+        .and_then(|h| runs_text(h, "/title/runs"))
+        .unwrap_or_default();
 
     let artist = pick_album_artist(header);
     let year = pick_album_year(header);
@@ -413,12 +411,16 @@ fn parse_album(browse_id: &str, resp: &Value) -> YtAlbum {
             let Some(row) = item.get("musicResponsiveListItemRenderer") else {
                 continue;
             };
-            if audio_pid_from_rows.is_none()
-                && let Some(pid) = row
-                    .pointer("/flexColumns/0/musicResponsiveListItemFlexColumnRenderer/text/runs/0/navigationEndpoint/watchEndpoint/playlistId")
-                    .and_then(|v| v.as_str())
-            {
-                audio_pid_from_rows = Some(pid.to_string());
+            // OLAK… playlist id lives on the Title column's watch
+            // endpoint — `classify_flex_columns` pulls it out by name,
+            // no /flexColumns/N positional dive.
+            if audio_pid_from_rows.is_none() {
+                for c in classify_flex_columns(row) {
+                    if let RowColumn::Title { playlist_id: Some(pid), .. } = c {
+                        audio_pid_from_rows = Some(pid);
+                        break;
+                    }
+                }
             }
             if let Some(track) =
                 parse_album_row(row, &title, artist.as_deref(), thumbnail.as_deref())
@@ -591,39 +593,45 @@ fn parse_album_row(
     album_artist: Option<&str>,
     album_thumbnail: Option<&str>,
 ) -> Option<Track> {
-    let video_id = row
-        .pointer("/playlistItemData/videoId")
-        .and_then(|v| v.as_str())?
-        .to_string();
-    let title = row
-        .pointer("/flexColumns/0/musicResponsiveListItemFlexColumnRenderer/text/runs/0/text")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    let cols = classify_flex_columns(row);
+    let mut video_id: Option<String> = None;
+    let mut title = String::new();
+    let mut row_artist: Option<String> = None;
+    let mut flex_duration: Option<u64> = None;
+    for c in &cols {
+        match c {
+            RowColumn::Title { text, video_id: vid, .. } => {
+                if title.is_empty() {
+                    title = text.clone();
+                }
+                if video_id.is_none()
+                    && let Some(v) = vid
+                {
+                    video_id = Some(v.clone());
+                }
+            }
+            RowColumn::Artist { text } if row_artist.is_none() => {
+                row_artist = Some(text.clone());
+            }
+            RowColumn::Duration { secs } if flex_duration.is_none() => {
+                flex_duration = Some(*secs);
+            }
+            _ => {}
+        }
+    }
+    let video_id = video_id.or_else(|| {
+        row.pointer("/playlistItemData/videoId")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    })?;
     if title.is_empty() {
         return None;
     }
-    // flexColumns[1] is empty (`text: {}` — no runs at all) for
-    // single-artist album rows in the new layout. For multi-artist or
-    // features-credited tracks it does carry runs. Prefer it when set,
-    // otherwise fall back to the header artist.
-    let row_artist = row
-        .pointer("/flexColumns/1/musicResponsiveListItemFlexColumnRenderer/text/runs/0/text")
-        .and_then(|v| v.as_str())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
     let primary_artist = row_artist
         .or_else(|| album_artist.map(|s| s.to_string()))
         .unwrap_or_default();
-    let duration = row
-        .pointer("/fixedColumns/0/musicResponsiveListItemFixedColumnRenderer/text/runs/0/text")
-        .and_then(|v| v.as_str())
-        .and_then(parse_mm_ss)
-        .unwrap_or(0);
-    let track_number = row
-        .pointer("/index/runs/0/text")
-        .and_then(|v| v.as_str())
-        .and_then(|s| s.parse::<u32>().ok());
+    let duration = fixed_columns_duration(row).or(flex_duration).unwrap_or(0);
+    let track_number = row_index_text(row).and_then(|s| s.parse::<u32>().ok());
 
     let artists = if primary_artist.is_empty() {
         Vec::new()
@@ -721,21 +729,21 @@ async fn post(url: &str, body: &Value, cookies: &str) -> Result<Value, String> {
 }
 
 fn parse_initial(resp: &Value) -> DiscoverHome {
-    let contents = resp
-        .pointer(
-            "/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents",
-        )
-        .and_then(|v| v.as_array());
+    let sections =
+        tab_section_contents(resp, "/contents/singleColumnBrowseResultsRenderer/tabs");
     let continuation = resp
-        .pointer(
-            "/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/continuations/0/nextContinuationData/continuation",
-        )
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
+        .pointer("/contents/singleColumnBrowseResultsRenderer/tabs")
+        .and_then(|v| v.as_array())
+        .and_then(|tabs| {
+            tabs.iter().find_map(|tab| {
+                first_continuation(
+                    tab,
+                    "/tabRenderer/content/sectionListRenderer/continuations",
+                )
+            })
+        });
     DiscoverHome {
-        shelves: contents
-            .map(|arr| arr.iter().filter_map(parse_shelf).collect())
-            .unwrap_or_default(),
+        shelves: sections.iter().filter_map(|s| parse_shelf(s)).collect(),
         continuation,
     }
 }
@@ -744,12 +752,10 @@ fn parse_continuation(resp: &Value) -> DiscoverHome {
     let contents = resp
         .pointer("/continuationContents/sectionListContinuation/contents")
         .and_then(|v| v.as_array());
-    let continuation = resp
-        .pointer(
-            "/continuationContents/sectionListContinuation/continuations/0/nextContinuationData/continuation",
-        )
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
+    let continuation = first_continuation(
+        resp,
+        "/continuationContents/sectionListContinuation/continuations",
+    );
     DiscoverHome {
         shelves: contents
             .map(|arr| arr.iter().filter_map(parse_shelf).collect())
@@ -761,19 +767,11 @@ fn parse_continuation(resp: &Value) -> DiscoverHome {
 fn parse_shelf(section: &Value) -> Option<DiscoverShelf> {
     let shelf = section.get("musicCarouselShelfRenderer")?;
     let header = shelf.pointer("/header/musicCarouselShelfBasicHeaderRenderer");
-    let title = header
-        .and_then(|h| h.pointer("/title/runs/0/text"))
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    let title = header.and_then(|h| runs_text(h, "/title/runs")).unwrap_or_default();
     if title.is_empty() {
         return None;
     }
-    let strapline = header
-        .and_then(|h| h.pointer("/strapline/runs/0/text"))
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string());
+    let strapline = header.and_then(|h| runs_text(h, "/strapline/runs"));
     let more_browse_id = header
         .and_then(|h| {
             h.pointer(
@@ -804,24 +802,11 @@ fn parse_shelf(section: &Value) -> Option<DiscoverShelf> {
 
 fn parse_tile(item: &Value) -> Option<DiscoverItem> {
     let r = item.get("musicTwoRowItemRenderer")?;
-    let title = r
-        .pointer("/title/runs/0/text")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    let title = runs_text(r, "/title/runs").unwrap_or_default();
     if title.is_empty() {
         return None;
     }
-    let subtitle = r
-        .pointer("/subtitle/runs")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|r| r.get("text").and_then(|t| t.as_str()))
-                .collect::<Vec<_>>()
-                .join("")
-        })
-        .unwrap_or_default();
+    let subtitle = runs_text(r, "/subtitle/runs").unwrap_or_default();
     let thumbnail = best_thumbnail(r).map(normalize_yt_thumbnail);
 
     if let Some(video_id) = r
@@ -943,6 +928,183 @@ fn best_thumbnail(r: &Value) -> Option<String> {
         })
         .and_then(|t| t.get("url").and_then(|u| u.as_str()))
         .map(|s| s.to_string())
+}
+
+// ============================================================
+//  Iterate-by-name helpers. Every positional /N/ pointer in this
+//  module goes through one of these so the parser doesn't break the
+//  moment YT reorders a column, a tab, or a run. Verified end-to-end
+//  via yttools/parser_v2_probe against live home/album/artist
+//  responses before porting.
+// ============================================================
+
+/// Join every `text` fragment in a runs array. Replaces
+/// `.pointer("…/runs/0/text")` reads that silently drop multi-run text.
+fn runs_text(v: &Value, pointer: &str) -> Option<String> {
+    let arr = v.pointer(pointer).and_then(|x| x.as_array())?;
+    let joined: String = arr
+        .iter()
+        .filter_map(|r| r.get("text").and_then(|t| t.as_str()))
+        .collect();
+    (!joined.is_empty()).then_some(joined)
+}
+
+/// Scan a continuations array for any `nextContinuationData.continuation`
+/// token. Replaces `…/continuations/0/nextContinuationData/continuation`.
+fn first_continuation(v: &Value, pointer: &str) -> Option<String> {
+    let arr = v.pointer(pointer).and_then(|x| x.as_array())?;
+    for c in arr {
+        if let Some(t) = c
+            .pointer("/nextContinuationData/continuation")
+            .and_then(|v| v.as_str())
+        {
+            return Some(t.to_string());
+        }
+    }
+    None
+}
+
+/// Iterate every `tabs[].tabRenderer.content.sectionListRenderer.contents`
+/// reachable from a tabs root. Replaces `tabs/0/tabRenderer/…`.
+fn tab_section_contents<'a>(resp: &'a Value, tabs_pointer: &str) -> Vec<&'a Value> {
+    let mut out = Vec::new();
+    let Some(tabs) = resp.pointer(tabs_pointer).and_then(|v| v.as_array()) else {
+        return out;
+    };
+    for tab in tabs {
+        let Some(contents) = tab
+            .get("tabRenderer")
+            .and_then(|t| t.get("content"))
+            .and_then(|c| c.get("sectionListRenderer"))
+            .and_then(|s| s.get("contents"))
+            .and_then(|v| v.as_array())
+        else {
+            continue;
+        };
+        out.extend(contents.iter());
+    }
+    out
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum RowColumn {
+    Title {
+        text: String,
+        video_id: Option<String>,
+        playlist_id: Option<String>,
+    },
+    Artist {
+        text: String,
+    },
+    Album {
+        text: String,
+    },
+    Duration {
+        secs: u64,
+    },
+    PlayCount,
+    Other,
+    Empty,
+}
+
+/// Classify each flex column on a `musicResponsiveListItemRenderer` by
+/// what it actually carries, identifying columns by endpoint type or
+/// text shape — NOT by position. Critical for artist Top Songs rows
+/// where the column order is title/artist/play-count/album, not the
+/// usual title/artist/album.
+fn classify_flex_columns(row: &Value) -> Vec<RowColumn> {
+    let mut out = Vec::new();
+    let Some(cols) = row.get("flexColumns").and_then(|v| v.as_array()) else {
+        return out;
+    };
+    for col in cols {
+        let Some(runs) = col
+            .pointer("/musicResponsiveListItemFlexColumnRenderer/text/runs")
+            .and_then(|v| v.as_array())
+        else {
+            out.push(RowColumn::Empty);
+            continue;
+        };
+        if runs.is_empty() {
+            out.push(RowColumn::Empty);
+            continue;
+        }
+        let text: String = runs
+            .iter()
+            .filter_map(|r| r.get("text").and_then(|t| t.as_str()))
+            .collect();
+        if text.trim().is_empty() {
+            out.push(RowColumn::Empty);
+            continue;
+        }
+        let nav = runs.iter().find_map(|r| r.get("navigationEndpoint"));
+        if let Some(nav) = nav {
+            if let Some(vid) = nav
+                .pointer("/watchEndpoint/videoId")
+                .and_then(|v| v.as_str())
+            {
+                let pid = nav
+                    .pointer("/watchEndpoint/playlistId")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                out.push(RowColumn::Title {
+                    text,
+                    video_id: Some(vid.to_string()),
+                    playlist_id: pid,
+                });
+                continue;
+            }
+            if let Some(bid) = nav
+                .pointer("/browseEndpoint/browseId")
+                .and_then(|v| v.as_str())
+            {
+                if bid.starts_with("UC") {
+                    out.push(RowColumn::Artist { text });
+                } else if bid.starts_with("MPRE") {
+                    out.push(RowColumn::Album { text });
+                } else {
+                    out.push(RowColumn::Other);
+                }
+                continue;
+            }
+        }
+        if let Some(secs) = parse_mm_ss(text.trim()) {
+            out.push(RowColumn::Duration { secs });
+        } else if is_play_count_text(&text) {
+            out.push(RowColumn::PlayCount);
+        } else {
+            out.push(RowColumn::Other);
+        }
+    }
+    out
+}
+
+fn is_play_count_text(s: &str) -> bool {
+    let lower = s.to_lowercase();
+    lower.contains("play") || lower.contains("view") || lower.contains("listener")
+}
+
+/// Scan fixedColumns for an mm:ss text. Replaces
+/// `/fixedColumns/0/musicResponsiveListItemFixedColumnRenderer/text/runs/0/text`.
+fn fixed_columns_duration(row: &Value) -> Option<u64> {
+    let cols = row.get("fixedColumns").and_then(|v| v.as_array())?;
+    for col in cols {
+        let text = runs_text(
+            col,
+            "/musicResponsiveListItemFixedColumnRenderer/text/runs",
+        )?;
+        if let Some(secs) = parse_mm_ss(text.trim()) {
+            return Some(secs);
+        }
+    }
+    None
+}
+
+/// Index-shelf row number (e.g. "1") — `index.runs[0].text` is a single
+/// run by design; helper exists so future-us doesn't have to remember
+/// that and re-introduce a /0 by hand.
+fn row_index_text(row: &Value) -> Option<String> {
+    runs_text(row, "/index/runs").map(|s| s.trim().to_string())
 }
 
 fn normalize_yt_thumbnail(url: String) -> String {
