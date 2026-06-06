@@ -182,7 +182,7 @@ fn ShelfRow(
                 }
                 div { class: "flex gap-2 shrink-0",
                     button {
-                        class: "w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-all hover:scale-105",
+                        class: "w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-all hover:scale-105 cursor-pointer",
                         onclick: move |_| {
                             let _ = document::eval(&format!(
                                 "document.getElementById('{}').scrollBy({{ left: -800, behavior: 'smooth' }})",
@@ -192,7 +192,7 @@ fn ShelfRow(
                         i { class: "fa-solid fa-chevron-left text-xs" }
                     }
                     button {
-                        class: "w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-all hover:scale-105",
+                        class: "w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-all hover:scale-105 cursor-pointer",
                         onclick: move |_| {
                             let _ = document::eval(&format!(
                                 "document.getElementById('{}').scrollBy({{ left: 800, behavior: 'smooth' }})",
@@ -285,9 +285,9 @@ fn Card(
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
     let img_class = if rounded_full {
-        "w-44 h-44 object-cover rounded-full bg-white/5 transition-transform duration-200 group-hover:scale-[1.04]"
+        "w-44 h-44 object-cover rounded-full bg-white/5"
     } else {
-        "w-44 h-44 object-cover rounded-lg bg-white/5 transition-transform duration-200 group-hover:scale-[1.04]"
+        "w-44 h-44 object-cover rounded-lg bg-white/5"
     };
     let placeholder_class = if rounded_full {
         "w-44 h-44 rounded-full bg-white/5"
@@ -296,7 +296,7 @@ fn Card(
     };
     rsx! {
         button {
-            class: "shrink-0 w-44 text-left group cursor-pointer",
+            class: "shrink-0 w-44 text-left cursor-pointer transition-transform duration-200 ease-out hover:scale-[1.03] hover:-translate-y-0.5",
             onclick: move |e| onclick.call(e),
             div { class: "relative w-44 h-44 mb-3 overflow-hidden rounded-lg",
                 if let Some(url) = thumbnail {
@@ -311,12 +311,11 @@ fn Card(
                 }
             }
             p {
-                class: "text-sm font-semibold text-white line-clamp-2 break-words group-hover:text-indigo-200 transition-colors",
-                style: "min-height: 2.5rem;",
+                class: "text-sm font-semibold text-white line-clamp-2 break-words h-10 overflow-hidden",
                 "{title}"
             }
             p {
-                class: "text-xs text-white/50 truncate mt-1",
+                class: "text-xs text-white/50 truncate h-4 mt-1",
                 "{subtitle}"
             }
         }
@@ -337,7 +336,7 @@ fn SongCard(track: Track, on_play: EventHandler<Track>) -> Element {
     let artist = track.artist.clone();
     rsx! {
         button {
-            class: "shrink-0 w-44 text-left group cursor-pointer",
+            class: "shrink-0 w-44 text-left cursor-pointer transition-transform duration-200 ease-out hover:scale-[1.03] hover:-translate-y-0.5 group",
             onclick: {
                 let track = track.clone();
                 move |_| on_play.call(track.clone())
@@ -346,7 +345,7 @@ fn SongCard(track: Track, on_play: EventHandler<Track>) -> Element {
                 if let Some(url) = thumbnail {
                     img {
                         src: "{url}",
-                        class: "w-44 h-44 object-cover bg-white/5 transition-transform duration-200 group-hover:scale-[1.04]",
+                        class: "w-44 h-44 object-cover bg-white/5",
                         loading: "lazy",
                         decoding: "async",
                     }
@@ -358,11 +357,13 @@ fn SongCard(track: Track, on_play: EventHandler<Track>) -> Element {
                 }
             }
             p {
-                class: "text-sm font-semibold text-white line-clamp-2 break-words group-hover:text-indigo-200 transition-colors",
-                style: "min-height: 2.5rem;",
+                class: "text-sm font-semibold text-white line-clamp-2 break-words h-10 overflow-hidden",
                 "{title}"
             }
-            p { class: "text-xs text-white/50 truncate mt-1", "{artist}" }
+            p {
+                class: "text-xs text-white/50 truncate h-4 mt-1",
+                "{artist}"
+            }
         }
     }
 }
