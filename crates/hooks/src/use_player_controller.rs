@@ -1849,6 +1849,20 @@ impl PlayerController {
         self.loop_mode.with_mut(|l| *l = l.next());
     }
 
+    /// Hard reset: stop playback, drop the queue/history/current track,
+    /// clear any pending playback error. Called when the active server
+    /// changes — without it, a queued `ytmusic:` track would be replayed
+    /// through whichever backend's stream-builder is now active.
+    pub fn reset_for_backend_switch(&mut self) {
+        self.player.write().stop_for_transition();
+        self.is_playing.set(false);
+        self.queue.write().clear();
+        self.history.write().clear();
+        self.current_queue_index.set(0);
+        self.clear_current_track_metadata();
+        self.playback_error.set(None);
+    }
+
     pub fn pause(&mut self) {
         let idx = *self.current_queue_index.peek();
         let is_radio = self

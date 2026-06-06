@@ -96,42 +96,41 @@ pub fn JellyfinSearch(
                             spawn(async move {
                                 let conf = config.peek();
                                 if let Some(server) = &conf.server {
-                                    if let (Some(token), Some(user_id)) =
-                                        (&server.access_token, &server.user_id)
-                                    {
-                                        let parts: Vec<&str> = path_clone
-                                            .to_str()
-                                            .unwrap_or_default()
-                                            .split(':')
-                                            .collect();
-                                        if parts.len() >= 2 {
-                                            let item_id = parts[1];
-                                            match server.service {
-                                                MusicService::Jellyfin => {
-                                                    let remote = server::jellyfin::JellyfinClient::new(
-                                                        &server.url,
-                                                        Some(token),
-                                                        &conf.device_id,
-                                                        Some(user_id),
-                                                    );
-                                                    let _ = remote.add_to_playlist(&pid, item_id).await;
-                                                }
-                                                MusicService::Subsonic | MusicService::Custom => {
-                                                    let remote = server::subsonic::SubsonicClient::new(
-                                                        &server.url,
-                                                        user_id,
-                                                        token,
-                                                    );
-                                                    let _ = remote.add_to_playlist(&pid, item_id).await;
-                                                }
-                                                MusicService::YtMusic => {
-                                                    let yt = server::ytmusic::YouTubeMusicClient::with_cookies(
-                                                        token.clone(),
-                                                    );
-                                                    let _ = yt
-                                                        .add_to_playlist(&pid, item_id)
-                                                        .await;
-                                                }
+                                    let Some(token) = server.access_token.as_ref() else { return; };
+                                    let parts: Vec<&str> = path_clone
+                                        .to_str()
+                                        .unwrap_or_default()
+                                        .split(':')
+                                        .collect();
+                                    if parts.len() >= 2 {
+                                        let item_id = parts[1];
+                                        match server.service {
+                                            MusicService::Jellyfin => {
+                                                let Some(user_id) = server.user_id.as_ref() else { return; };
+                                                let remote = server::jellyfin::JellyfinClient::new(
+                                                    &server.url,
+                                                    Some(token),
+                                                    &conf.device_id,
+                                                    Some(user_id),
+                                                );
+                                                let _ = remote.add_to_playlist(&pid, item_id).await;
+                                            }
+                                            MusicService::Subsonic | MusicService::Custom => {
+                                                let Some(user_id) = server.user_id.as_ref() else { return; };
+                                                let remote = server::subsonic::SubsonicClient::new(
+                                                    &server.url,
+                                                    user_id,
+                                                    token,
+                                                );
+                                                let _ = remote.add_to_playlist(&pid, item_id).await;
+                                            }
+                                            MusicService::YtMusic => {
+                                                let yt = server::ytmusic::YouTubeMusicClient::with_cookies(
+                                                    token.clone(),
+                                                );
+                                                let _ = yt
+                                                    .add_to_playlist(&pid, item_id)
+                                                    .await;
                                             }
                                         }
                                     }
@@ -148,48 +147,47 @@ pub fn JellyfinSearch(
                             spawn(async move {
                                 let conf = config.peek();
                                 if let Some(server) = &conf.server {
-                                    if let (Some(token), Some(user_id)) =
-                                        (&server.access_token, &server.user_id)
-                                    {
-                                        let parts: Vec<&str> = path_clone
-                                            .to_str()
-                                            .unwrap_or_default()
-                                            .split(':')
-                                            .collect();
-                                        if parts.len() >= 2 {
-                                            let item_id = parts[1];
-                                            match server.service {
-                                                MusicService::Jellyfin => {
-                                                    let remote = server::jellyfin::JellyfinClient::new(
-                                                        &server.url,
-                                                        Some(token),
-                                                        &conf.device_id,
-                                                        Some(user_id),
-                                                    );
-                                                    let _ = remote
-                                                        .create_playlist(&playlist_name, &[item_id])
-                                                        .await;
-                                                }
-                                                MusicService::Subsonic | MusicService::Custom => {
-                                                    let remote = server::subsonic::SubsonicClient::new(
-                                                        &server.url,
-                                                        user_id,
-                                                        token,
-                                                    );
-                                                    let _ = remote.create_playlist(&playlist_name, &[item_id]).await;
-                                                }
-                                                MusicService::YtMusic => {
-                                                    let yt = server::ytmusic::YouTubeMusicClient::with_cookies(
-                                                        token.clone(),
-                                                    );
-                                                    let _ = yt
-                                                        .create_playlist(
-                                                            &playlist_name,
-                                                            "",
-                                                            &[item_id],
-                                                        )
-                                                        .await;
-                                                }
+                                    let Some(token) = server.access_token.as_ref() else { return; };
+                                    let parts: Vec<&str> = path_clone
+                                        .to_str()
+                                        .unwrap_or_default()
+                                        .split(':')
+                                        .collect();
+                                    if parts.len() >= 2 {
+                                        let item_id = parts[1];
+                                        match server.service {
+                                            MusicService::Jellyfin => {
+                                                let Some(user_id) = server.user_id.as_ref() else { return; };
+                                                let remote = server::jellyfin::JellyfinClient::new(
+                                                    &server.url,
+                                                    Some(token),
+                                                    &conf.device_id,
+                                                    Some(user_id),
+                                                );
+                                                let _ = remote
+                                                    .create_playlist(&playlist_name, &[item_id])
+                                                    .await;
+                                            }
+                                            MusicService::Subsonic | MusicService::Custom => {
+                                                let Some(user_id) = server.user_id.as_ref() else { return; };
+                                                let remote = server::subsonic::SubsonicClient::new(
+                                                    &server.url,
+                                                    user_id,
+                                                    token,
+                                                );
+                                                let _ = remote.create_playlist(&playlist_name, &[item_id]).await;
+                                            }
+                                            MusicService::YtMusic => {
+                                                let yt = server::ytmusic::YouTubeMusicClient::with_cookies(
+                                                    token.clone(),
+                                                );
+                                                let _ = yt
+                                                    .create_playlist(
+                                                        &playlist_name,
+                                                        "",
+                                                        &[item_id],
+                                                    )
+                                                    .await;
                                             }
                                         }
                                     }
