@@ -17,6 +17,7 @@ md5 = "0.8"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 lofty = { workspace = true }
+reqwest = { workspace = true, features = ["blocking", "json"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-timers = { workspace = true }

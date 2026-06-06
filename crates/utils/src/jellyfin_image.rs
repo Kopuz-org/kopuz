@@ -173,6 +173,19 @@ pub fn track_cover_url_or_default(
     .unwrap_or_else(|| crate::default_cover_url().as_ref().to_string())
 }
 
+/// Encode a remote cover URL into the `urlhex_HEX` tag form that
+/// `decode_embedded_cover_url` (and the cover-URL resolvers that call
+/// it) understand. The result is a single tag string — wrap it in a
+/// path / album_id / image_tag yourself per call-site convention.
+pub fn encode_cover_url(url: &str) -> String {
+    let mut hex = String::with_capacity(url.len() * 2 + "urlhex_".len());
+    hex.push_str("urlhex_");
+    for byte in url.bytes() {
+        hex.push_str(&format!("{:02x}", byte));
+    }
+    hex
+}
+
 fn decode_embedded_cover_url(tag: &str) -> Option<String> {
     let hex = tag.strip_prefix("urlhex_")?;
     if hex.len() % 2 != 0 {
