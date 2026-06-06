@@ -18,10 +18,19 @@ use tokio::process::Command;
 const SIGNIN_URL: &str =
     "https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fmusic.youtube.com%2F";
 
-pub fn profile_dir() -> PathBuf {
+pub fn profile_dir(server_id: &str) -> PathBuf {
+    let safe: String = server_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+        .collect();
+    let leaf = if safe.is_empty() {
+        "yt-profile".to_string()
+    } else {
+        format!("yt-profile-{safe}")
+    };
     directories::ProjectDirs::from("com", "temidaradev", "kopuz")
-        .map(|d| d.config_dir().join("yt-profile"))
-        .unwrap_or_else(|| PathBuf::from("./yt-profile"))
+        .map(|d| d.config_dir().join(&leaf))
+        .unwrap_or_else(|| PathBuf::from(format!("./{leaf}")))
 }
 
 fn browser_binary(browser: Browser) -> &'static str {
@@ -40,9 +49,10 @@ fn browser_binary(browser: Browser) -> &'static str {
 /// killed before returning, success or timeout.
 pub async fn launch_signin_and_extract(
     browser: Browser,
+    server_id: &str,
     signin_timeout: Duration,
 ) -> Result<String, String> {
-    let profile = profile_dir();
+    let profile = profile_dir(server_id);
     if profile.exists() {
         std::fs::remove_dir_all(&profile)
             .map_err(|e| format!("wipe yt-profile: {e}"))?;
@@ -107,4 +117,13 @@ fn has_cookie(header: &str, name: &str) -> bool {
     header
         .split(';')
         .any(|p| p.trim().split_once('=').is_some_and(|(k, _)| k == name))
+}
+
+pub fn delete_profile(server_id: &str) -> std::io::Result<()> {
+    let path = profile_dir(server_id);
+    match std::fs::remove_dir_all(&path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
 }

@@ -56,12 +56,13 @@ async fn try_resume(seed: Option<String>) -> Option<String> {
 async fn ensure_signed_in(
     config_cookies: Option<String>,
     browser: Browser,
+    server_id: &str,
 ) -> Result<String, String> {
     if let Some(c) = try_resume(config_cookies).await {
         return Ok(c);
     }
 
-    let profile = ::server::ytmusic::isolated_profile::profile_dir();
+    let profile = ::server::ytmusic::isolated_profile::profile_dir(server_id);
     if profile.is_dir() {
         let from_profile = ::server::ytmusic::cookies::extract_from(browser, &profile)
             .await
@@ -73,6 +74,7 @@ async fn ensure_signed_in(
 
     let cookies = ::server::ytmusic::isolated_profile::launch_signin_and_extract(
         browser,
+        server_id,
         std::time::Duration::from_secs(300),
     )
     .await?;
@@ -157,18 +159,15 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         // Prefer the browser already saved on the active server entry
         // (set during a previous successful sign-in); fall back to the
         // settings popup's selector for first-time setup.
-        let browser = config
-            .peek()
-            .server
-            .as_ref()
-            .and_then(|s| s.yt_browser)
-            .unwrap_or(*yt_browser.peek());
-        let existing = config
-            .peek()
-            .server
-            .as_ref()
-            .and_then(|s| s.access_token.clone())
-            .filter(|t| !t.is_empty());
+        let (browser, existing, server_id) = {
+            let cfg = config.peek();
+            let srv = cfg.server.as_ref();
+            (
+                srv.and_then(|s| s.yt_browser).unwrap_or(*yt_browser.peek()),
+                srv.and_then(|s| s.access_token.clone()).filter(|t| !t.is_empty()),
+                srv.and_then(|s| s.id.clone()).unwrap_or_default(),
+            )
+        };
         let mut report = move |msg: String| {
             error.set(Some(msg.clone()));
             ctrl.playback_error.set(Some(msg));
@@ -183,7 +182,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                 return;
             }
 
-            let cookies = match ensure_signed_in(existing, browser).await {
+            let cookies = match ensure_signed_in(existing, browser, &server_id).await {
                 Ok(c) => c,
                 Err(e) => {
                     report(format!("YT Music sign-in failed ({browser}): {e}"));
@@ -317,7 +316,15 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     };
 
     let handle_delete_saved = move |id: String| {
+        let was_ytmusic = config
+            .peek()
+            .find_saved_server(&id)
+            .map(|s| s.service == MusicService::YtMusic)
+            .unwrap_or(false);
         config.write().remove_saved_server(&id);
+        if was_ytmusic {
+            let _ = ::server::ytmusic::isolated_profile::delete_profile(&id);
+        }
     };
 
     let handle_login = move |_| {
