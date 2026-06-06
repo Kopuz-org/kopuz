@@ -50,7 +50,19 @@ pub async fn launch_signin_and_extract(
     std::fs::create_dir_all(&profile)
         .map_err(|e| format!("mkdir yt-profile: {e}"))?;
 
+    // A leftover SingletonLock from a previous run (kopuz killed, the
+    // browser already wiped, but the symlink lingered) makes Chromium-
+    // family browsers exit immediately because they think another
+    // instance owns this profile. Wipe the locks before relaunching.
+    for name in ["SingletonLock", "SingletonCookie", "SingletonSocket"] {
+        let _ = std::fs::remove_file(profile.join(name));
+    }
+
     let bin = browser_binary(browser);
+    eprintln!(
+        "[yt-signin] launching {bin} against {} (sign-in URL: {SIGNIN_URL})",
+        profile.display()
+    );
     let mut child = Command::new(bin)
         .arg("--no-first-run")
         .arg("--no-default-browser-check")
@@ -60,7 +72,8 @@ pub async fn launch_signin_and_extract(
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|e| format!("spawn {bin}: {e}"))?;
+        .map_err(|e| format!("spawn {bin}: {e} (is `{bin}` installed and in PATH?)"))?;
+    eprintln!("[yt-signin] {bin} pid={:?} — waiting for sign-in", child.id());
 
     let deadline = Instant::now() + signin_timeout;
     let outcome = loop {
@@ -72,14 +85,16 @@ pub async fn launch_signin_and_extract(
             ));
         }
         if let Ok(Some(status)) = child.try_wait() {
+            eprintln!("[yt-signin] {bin} exited early: {status}");
             break Err(format!(
-                "Browser exited before sign-in completed (status {status}) — try again"
+                "Browser ({bin}) exited before sign-in completed (status {status}) — try again, or pick a different browser in settings"
             ));
         }
         let Ok(cookies) = super::cookies::extract_from(browser, &profile).await else {
             continue;
         };
         if has_cookie(&cookies, "SAPISID") && has_cookie(&cookies, "SID") {
+            eprintln!("[yt-signin] cookies detected — closing {bin}");
             break Ok(cookies);
         }
     };
