@@ -66,6 +66,11 @@ pub async fn launch_signin_and_extract(
     let mut child = Command::new(bin)
         .arg("--no-first-run")
         .arg("--no-default-browser-check")
+        // Give the sign-in window a unique WM class so it's
+        // distinguishable from regular browsing windows (greppable in
+        // wmctrl, targetable in Hyprland/i3 windowrules) and doesn't
+        // get caught by a user's default `class:brave-browser` rules.
+        .arg("--class=kopuz-yt-signin")
         .arg(format!("--user-data-dir={}", profile.display()))
         .arg(SIGNIN_URL)
         .stdout(std::process::Stdio::null())
