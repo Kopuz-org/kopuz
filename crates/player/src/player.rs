@@ -9,6 +9,16 @@ pub struct NowPlayingMeta {
     pub artwork: Option<String>,
 }
 
+/// Read the channel count out of an OpusHead block (RFC 7845 §5.1).
+/// `extra_data` from a WebM/Matroska Opus track is exactly the OpusHead.
+fn parse_opushead_channels(extra: &[u8]) -> Option<u8> {
+    if extra.len() >= 10 && &extra[..8] == b"OpusHead" {
+        Some(extra[9])
+    } else {
+        None
+    }
+}
+
 #[cfg(target_arch = "wasm32")]
 fn db_to_linear(db: f32) -> f32 {
     10.0_f32.powf(db / 20.0)
@@ -739,15 +749,37 @@ impl Player {
         };
 
         let track_id = track.id;
-        let audio_params = track.codec_params.as_ref().and_then(|p| p.audio()).unwrap();
+        // YouTube Music WebM/Opus streams reach the codec layer with
+        // channels empty — symphonia's matroska demuxer doesn't always
+        // propagate it, and both the built-in Opus decoder and the
+        // libopus adapter then bail with "channels required." Parse
+        // OpusHead from extra_data, or fall back to stereo at 48 kHz.
+        let mut audio_params = track
+            .codec_params
+            .as_ref()
+            .and_then(|p| p.audio())
+            .cloned()
+            .unwrap();
+        if audio_params.channels.is_none() {
+            let ch = audio_params
+                .extra_data
+                .as_deref()
+                .and_then(parse_opushead_channels)
+                .unwrap_or(2);
+            audio_params.channels =
+                Some(symphonia::core::audio::Channels::Discrete(ch as u16));
+            if audio_params.sample_rate.is_none() {
+                audio_params.sample_rate = Some(48_000);
+            }
+        }
         let source_sample_rate = audio_params.sample_rate.unwrap_or(target_sample_rate);
 
         let mut decoder: Box<dyn AudioDecoder> = match symphonia::default::get_codecs()
-            .make_audio_decoder(audio_params, &AudioDecoderOptions::default())
+            .make_audio_decoder(&audio_params, &AudioDecoderOptions::default())
         {
             Ok(d) => d,
             Err(_) => match symphonia_adapter_libopus::OpusDecoder::try_registry_new(
-                audio_params,
+                &audio_params,
                 &AudioDecoderOptions::default(),
             ) {
                 Ok(d) => d,
