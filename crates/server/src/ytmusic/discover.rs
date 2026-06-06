@@ -106,6 +106,266 @@ pub async fn fetch_album_tracks(browse_id: &str, cookies: &str) -> Result<Vec<Tr
     fetch_album(browse_id, cookies).await.map(|a| a.tracks)
 }
 
+/// Verified against /tmp/yt-artist-UC*.json via yttools/artist_probe.
+///
+/// `/browse?browseId=UC…` returns a `musicImmersiveHeaderRenderer` at
+/// /header (with banner + subscribers + a shuffle play button) and a
+/// section list whose entries are either `musicShelfRenderer` (the
+/// "Top songs" list) or `musicCarouselShelfRenderer` (Albums / Singles
+/// & EPs / Videos / Playlists / From your library / Fans might also
+/// like). Carousel tiles are the same `musicTwoRowItemRenderer` shape
+/// used in Discover home, so we reuse the existing tile classifier.
+#[derive(Debug, Clone, PartialEq)]
+pub struct YtArtist {
+    pub channel_id: String,
+    pub name: String,
+    pub subscribers: Option<String>,
+    pub description: Option<String>,
+    pub banner_thumbnail: Option<String>,
+    pub shuffle_playlist_id: Option<String>,
+    pub sections: Vec<DiscoverShelf>,
+}
+
+pub async fn fetch_artist(channel_id: &str, cookies: &str) -> Result<YtArtist, String> {
+    let body = build_browse_body(Some(channel_id));
+    let resp = post(
+        &format!("{ORIGIN_YOUTUBE_MUSIC}/youtubei/v1/browse?prettyPrint=false"),
+        &body,
+        cookies,
+    )
+    .await?;
+    Ok(parse_artist(channel_id, &resp))
+}
+
+fn parse_artist(channel_id: &str, resp: &Value) -> YtArtist {
+    let header = find_artist_header(resp);
+
+    let name = header
+        .and_then(|h| h.pointer("/title/runs/0/text"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let subscribers = header
+        .and_then(|h| {
+            h.pointer("/subscriptionButton/subscribeButtonRenderer/longSubscriberCountText/runs/0/text")
+                .or_else(|| h.pointer("/subscriberCountText/runs/0/text"))
+        })
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let description = header
+        .and_then(|h| h.pointer("/description/runs/0/text"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let banner_thumbnail = header.and_then(best_artist_banner);
+    let shuffle_playlist_id = header
+        .and_then(|h| h.get("buttons").and_then(|v| v.as_array()))
+        .and_then(|btns| {
+            btns.iter().find_map(|b| {
+                b.get("musicPlayButtonRenderer")
+                    .and_then(|p| p.pointer("/playNavigationEndpoint/watchEndpoint/playlistId"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+            })
+        });
+
+    let mut sections = Vec::new();
+    for section in album_section_contents(resp) {
+        if let Some(shelf) = parse_artist_carousel(section) {
+            sections.push(shelf);
+        } else if let Some(shelf) = parse_artist_song_list(section) {
+            sections.push(shelf);
+        }
+    }
+
+    YtArtist {
+        channel_id: channel_id.to_string(),
+        name,
+        subscribers,
+        description,
+        banner_thumbnail,
+        shuffle_playlist_id,
+        sections,
+    }
+}
+
+fn find_artist_header(resp: &Value) -> Option<&Value> {
+    // The immersive header sits at the root, not in the section list.
+    if let Some(h) = resp.pointer("/header/musicImmersiveHeaderRenderer") {
+        return Some(h);
+    }
+    if let Some(h) = resp.pointer("/header/musicVisualHeaderRenderer") {
+        return Some(h);
+    }
+    None
+}
+
+fn best_artist_banner(header: &Value) -> Option<String> {
+    for ptr in [
+        "/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails",
+        "/foregroundThumbnail/musicThumbnailRenderer/thumbnail/thumbnails",
+    ] {
+        if let Some(arr) = header.pointer(ptr).and_then(|v| v.as_array()) {
+            let best = arr
+                .iter()
+                .max_by_key(|t| t.get("width").and_then(|v| v.as_u64()).unwrap_or(0))
+                .and_then(|t| t.get("url").and_then(|u| u.as_str()))
+                .map(|s| normalize_yt_thumbnail(s.to_string()));
+            if best.is_some() {
+                return best;
+            }
+        }
+    }
+    None
+}
+
+/// Carousel shelf — same tile shape (musicTwoRowItemRenderer) as the
+/// Discover home parser, so we hand each tile back to `parse_tile`.
+fn parse_artist_carousel(section: &Value) -> Option<DiscoverShelf> {
+    let shelf = section.get("musicCarouselShelfRenderer")?;
+    let header = shelf.pointer("/header/musicCarouselShelfBasicHeaderRenderer");
+    let title = header
+        .and_then(|h| h.pointer("/title/runs/0/text"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if title.is_empty() {
+        return None;
+    }
+    let strapline = header
+        .and_then(|h| h.pointer("/strapline/runs/0/text"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    let more_browse_id = header
+        .and_then(|h| {
+            h.pointer(
+                "/moreContentButton/buttonRenderer/navigationEndpoint/browseEndpoint/browseId",
+            )
+        })
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let items: Vec<DiscoverItem> = shelf
+        .get("contents")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(parse_tile).collect())
+        .unwrap_or_default();
+    if items.is_empty() {
+        return None;
+    }
+    Some(DiscoverShelf {
+        title,
+        strapline,
+        more_browse_id,
+        items,
+    })
+}
+
+/// "Top songs" comes back as a list shelf (musicShelfRenderer), not a
+/// carousel — rows are `musicResponsiveListItemRenderer` like album
+/// tracks. We turn each row into a `DiscoverItem::Song(Track)` so the
+/// same `ShelfRow` component renders it as a row of song tiles.
+fn parse_artist_song_list(section: &Value) -> Option<DiscoverShelf> {
+    let shelf = section.get("musicShelfRenderer")?;
+    let title = shelf
+        .pointer("/title/runs/0/text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if title.is_empty() {
+        return None;
+    }
+    let more_browse_id = shelf
+        .pointer("/bottomEndpoint/browseEndpoint/browseId")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let items: Vec<DiscoverItem> = shelf
+        .get("contents")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|i| i.get("musicResponsiveListItemRenderer"))
+                .filter_map(parse_artist_song_row)
+                .map(DiscoverItem::Song)
+                .collect()
+        })
+        .unwrap_or_default();
+    if items.is_empty() {
+        return None;
+    }
+    Some(DiscoverShelf {
+        title,
+        strapline: None,
+        more_browse_id,
+        items,
+    })
+}
+
+fn parse_artist_song_row(row: &Value) -> Option<Track> {
+    let video_id = row
+        .pointer("/playlistItemData/videoId")
+        .and_then(|v| v.as_str())?
+        .to_string();
+    let title = row
+        .pointer("/flexColumns/0/musicResponsiveListItemFlexColumnRenderer/text/runs/0/text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if title.is_empty() {
+        return None;
+    }
+    let artist = row
+        .pointer("/flexColumns/1/musicResponsiveListItemFlexColumnRenderer/text/runs/0/text")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_default();
+    let album = row
+        .pointer("/flexColumns/2/musicResponsiveListItemFlexColumnRenderer/text/runs/0/text")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_default();
+    let thumbnail = row
+        .pointer("/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails")
+        .and_then(|v| v.as_array())
+        .and_then(|arr| {
+            arr.iter()
+                .max_by_key(|t| t.get("width").and_then(|v| v.as_u64()).unwrap_or(0))
+        })
+        .and_then(|t| t.get("url").and_then(|u| u.as_str()))
+        .map(|s| normalize_yt_thumbnail(s.to_string()));
+
+    let path = match thumbnail.as_deref() {
+        Some(url) if !url.is_empty() => PathBuf::from(format!(
+            "{SOURCE_PREFIX}:{video_id}:{}",
+            encode_url_tag(url)
+        )),
+        _ => PathBuf::from(format!("{SOURCE_PREFIX}:{video_id}")),
+    };
+    let artists = if artist.is_empty() {
+        Vec::new()
+    } else {
+        vec![artist.clone()]
+    };
+    Some(Track {
+        path,
+        album_id: synthesize_album_id(&album, &artist),
+        title,
+        artist,
+        album,
+        duration: 0,
+        khz: 0,
+        bitrate: 0,
+        track_number: None,
+        disc_number: None,
+        musicbrainz_release_id: None,
+        musicbrainz_recording_id: None,
+        musicbrainz_track_id: None,
+        playlist_item_id: None,
+        artists,
+    })
+}
+
 pub async fn fetch_album(browse_id: &str, cookies: &str) -> Result<YtAlbum, String> {
     let body = build_browse_body(Some(browse_id));
     let resp = post(

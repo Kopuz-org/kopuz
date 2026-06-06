@@ -1054,6 +1054,8 @@ fn App() -> Element {
     let mut selected_playlist_id = use_signal(|| None::<String>);
     let mut discover_selected_playlist_id = use_signal(|| None::<String>);
     let mut discover_selected_playlist_title = use_signal(|| None::<String>);
+    let mut discover_selected_artist_id = use_signal(|| None::<String>);
+    let mut discover_selected_artist_name = use_signal(|| None::<String>);
     let mut selected_artist_name = use_signal(String::new);
     let fetched_artist_images: Signal<std::collections::HashMap<String, String>> =
         use_signal(std::collections::HashMap::new);
@@ -2148,6 +2150,11 @@ fn App() -> Element {
                                     discover_selected_playlist_title.set(Some(title));
                                     current_route.set(Route::DiscoverPlaylist);
                                 },
+                                on_open_artist: move |(cid, name): (String, String)| {
+                                    discover_selected_artist_id.set(Some(cid));
+                                    discover_selected_artist_name.set(Some(name));
+                                    current_route.set(Route::DiscoverArtist);
+                                },
                                 on_search_artist: move |name: String| {
                                     search_query.set(name);
                                     current_route.set(Route::Search);
@@ -2160,6 +2167,32 @@ fn App() -> Element {
                                 selected_playlist_title: discover_selected_playlist_title,
                                 on_back: move |_| {
                                     current_route.set(Route::Discover);
+                                },
+                            }
+                        },
+                        Route::DiscoverArtist => rsx! {
+                            pages::server::discover::DiscoverArtistPage {
+                                selected_artist_id: discover_selected_artist_id,
+                                selected_artist_name: discover_selected_artist_name,
+                                on_back: move |_| {
+                                    current_route.set(Route::Discover);
+                                },
+                                on_select_album: move |id: String| {
+                                    selected_album_id.set(id);
+                                    current_route.set(Route::Album);
+                                },
+                                on_select_playlist: move |(id, title): (String, String)| {
+                                    discover_selected_playlist_id.set(Some(id));
+                                    discover_selected_playlist_title.set(Some(title));
+                                    current_route.set(Route::DiscoverPlaylist);
+                                },
+                                on_open_artist: move |(cid, name): (String, String)| {
+                                    discover_selected_artist_id.set(Some(cid));
+                                    discover_selected_artist_name.set(Some(name));
+                                },
+                                on_search_artist: move |name: String| {
+                                    search_query.set(name);
+                                    current_route.set(Route::Search);
                                 },
                             }
                         },

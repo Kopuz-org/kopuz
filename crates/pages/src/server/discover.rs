@@ -1,13 +1,14 @@
 use config::{AppConfig, MusicService};
 use dioxus::prelude::*;
 use reader::models::{Library, Track};
-use server::ytmusic::discover::{DiscoverHome, DiscoverItem, DiscoverShelf};
+use server::ytmusic::discover::{DiscoverHome, DiscoverItem, DiscoverShelf, YtArtist};
 
 #[component]
 pub fn DiscoverPage(
     library: Signal<Library>,
     on_select_album: EventHandler<String>,
     on_select_playlist: EventHandler<(String, String)>,
+    on_open_artist: EventHandler<(String, String)>,
     on_search_artist: EventHandler<String>,
 ) -> Element {
     let config = use_context::<Signal<AppConfig>>();
@@ -136,6 +137,7 @@ pub fn DiscoverPage(
                     scroll_id: format!("discover-shelf-{idx}"),
                     on_select_album: on_select_album,
                     on_select_playlist: on_select_playlist,
+                    on_open_artist: on_open_artist,
                     on_search_artist: on_search_artist,
                 }
             }
@@ -167,6 +169,7 @@ fn ShelfRow(
     scroll_id: String,
     on_select_album: EventHandler<String>,
     on_select_playlist: EventHandler<(String, String)>,
+    on_open_artist: EventHandler<(String, String)>,
     on_search_artist: EventHandler<String>,
 ) -> Element {
     let scroll_left = scroll_id.clone();
@@ -213,6 +216,7 @@ fn ShelfRow(
                         item: item.clone(),
                         on_select_album: on_select_album,
                         on_select_playlist: on_select_playlist,
+                        on_open_artist: on_open_artist,
                         on_search_artist: on_search_artist,
                     }
                 }
@@ -226,15 +230,24 @@ fn DiscoverTile(
     item: DiscoverItem,
     on_select_album: EventHandler<String>,
     on_select_playlist: EventHandler<(String, String)>,
+    on_open_artist: EventHandler<(String, String)>,
     on_search_artist: EventHandler<String>,
 ) -> Element {
-    let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
+    let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
+    let config = use_context::<Signal<AppConfig>>();
     match item {
-        DiscoverItem::Song(track) => rsx! {
-            SongCard { track: track.clone(), on_play: move |t: Track| ctrl.play_queue_linear(vec![t]) }
+        DiscoverItem::Song(track) => {
+            let mut ctrl_for_song = ctrl;
+            rsx! {
+                SongCard {
+                    track: track.clone(),
+                    on_play: move |t: Track| ctrl_for_song.play_queue_linear(vec![t]),
+                }
+            }
         },
         DiscoverItem::Playlist { playlist_id, title, subtitle, thumbnail } => {
             let title_for_click = title.clone();
+            let pid_for_play = playlist_id.clone();
             rsx! {
                 Card {
                     title: title,
@@ -244,11 +257,15 @@ fn DiscoverTile(
                     onclick: move |_| {
                         on_select_playlist.call((playlist_id.clone(), title_for_click.clone()))
                     },
+                    on_play: EventHandler::new(move |_| {
+                        play_playlist_async(pid_for_play.clone(), config, ctrl);
+                    }),
                 }
             }
         },
         DiscoverItem::Album { browse_id, title, subtitle, thumbnail } => {
             let title_for_click = title.clone();
+            let bid_for_play = browse_id.clone();
             rsx! {
                 Card {
                     title: title,
@@ -258,16 +275,24 @@ fn DiscoverTile(
                     onclick: move |_| {
                         on_select_playlist.call((browse_id.clone(), title_for_click.clone()))
                     },
+                    on_play: EventHandler::new(move |_| {
+                        play_playlist_async(bid_for_play.clone(), config, ctrl);
+                    }),
                 }
             }
         },
-        DiscoverItem::Artist { name, thumbnail, .. } => rsx! {
-            Card {
-                title: name.clone(),
-                subtitle: String::new(),
-                thumbnail: thumbnail,
-                rounded_full: true,
-                onclick: move |_| on_search_artist.call(name.clone()),
+        DiscoverItem::Artist { channel_id, name, thumbnail } => {
+            let cid = channel_id.clone();
+            let name_for_click = name.clone();
+            rsx! {
+                Card {
+                    title: name.clone(),
+                    subtitle: String::new(),
+                    thumbnail: thumbnail,
+                    rounded_full: true,
+                    onclick: move |_| on_open_artist.call((cid.clone(), name_for_click.clone())),
+                    on_play: None,
+                }
             }
         },
         DiscoverItem::Mood { title, thumbnail, .. } => rsx! {
@@ -277,9 +302,43 @@ fn DiscoverTile(
                 thumbnail: thumbnail,
                 rounded_full: false,
                 onclick: move |_| {},
+                on_play: None,
             }
         },
     }
+}
+
+/// Shared "play whatever this id resolves to" used by both Playlist
+/// and Album tiles. MPRE… ids go through the album browse endpoint,
+/// everything else through the playlist entries endpoint. The fetch
+/// happens off the click — slight delay before audio starts but no
+/// blocking the UI.
+fn play_playlist_async(
+    id: String,
+    config: Signal<AppConfig>,
+    mut ctrl: hooks::use_player_controller::PlayerController,
+) {
+    spawn(async move {
+        let Some(cookies) = config
+            .peek()
+            .server
+            .as_ref()
+            .and_then(|s| s.access_token.clone())
+        else {
+            return;
+        };
+        let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
+        let tracks = if id.starts_with("MPRE") {
+            yt.fetch_album_tracks(&id).await
+        } else {
+            yt.get_playlist_entries(&id).await
+        };
+        if let Ok(tracks) = tracks
+            && !tracks.is_empty()
+        {
+            ctrl.play_queue_linear(tracks);
+        }
+    });
 }
 
 #[component]
@@ -289,6 +348,7 @@ fn Card(
     thumbnail: Option<String>,
     rounded_full: bool,
     onclick: EventHandler<MouseEvent>,
+    on_play: Option<EventHandler<()>>,
 ) -> Element {
     let img_class = if rounded_full {
         "w-44 h-44 object-cover rounded-full bg-white/5"
@@ -300,11 +360,12 @@ fn Card(
     } else {
         "w-44 h-44 rounded-lg bg-white/5"
     };
+    let cover_radius = if rounded_full { "rounded-full" } else { "rounded-lg" };
     rsx! {
-        button {
-            class: "shrink-0 w-44 text-left cursor-pointer transition-transform duration-200 ease-out hover:scale-[1.03] hover:-translate-y-0.5",
+        div {
+            class: "shrink-0 w-44 text-left cursor-pointer transition-transform duration-200 ease-out hover:scale-[1.03] hover:-translate-y-0.5 group",
             onclick: move |e| onclick.call(e),
-            div { class: "relative w-44 h-44 mb-3 overflow-hidden rounded-lg",
+            div { class: "relative w-44 h-44 mb-3 overflow-hidden {cover_radius}",
                 if let Some(url) = thumbnail {
                     img {
                         src: "{url}",
@@ -314,6 +375,16 @@ fn Card(
                     }
                 } else {
                     div { class: "{placeholder_class}" }
+                }
+                if let Some(play) = on_play {
+                    button {
+                        class: "absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-black/40 transition-opacity duration-200 cursor-pointer",
+                        onclick: move |e: MouseEvent| {
+                            e.stop_propagation();
+                            play.call(());
+                        },
+                        i { class: "fa-solid fa-play text-white text-2xl" }
+                    }
                 }
             }
             div { class: "h-10 flex items-center overflow-hidden",
@@ -541,6 +612,131 @@ fn DiscoverPlaylistRow(track: Track, index: usize, on_play: EventHandler<Track>)
             div { class: "min-w-0 flex-1",
                 p { class: "text-sm text-white font-medium truncate", "{title}" }
                 p { class: "text-xs text-white/50 truncate", "{artist}" }
+            }
+        }
+    }
+}
+
+/// YT-backed artist profile. Pulls the immersive header (banner +
+/// subscribers) and every section shelf from `/browse?browseId=UC…` and
+/// hands each one off to the same `ShelfRow` component the Discover home
+/// uses, so all sections get hover-play, horizontal scroll, and the
+/// existing tile dispatch (artist → artist, album → album viewer, etc.).
+#[component]
+pub fn DiscoverArtistPage(
+    selected_artist_id: Signal<Option<String>>,
+    selected_artist_name: Signal<Option<String>>,
+    on_back: EventHandler<()>,
+    on_select_album: EventHandler<String>,
+    on_select_playlist: EventHandler<(String, String)>,
+    on_open_artist: EventHandler<(String, String)>,
+    on_search_artist: EventHandler<String>,
+) -> Element {
+    let config = use_context::<Signal<AppConfig>>();
+    let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
+    let mut artist = use_signal(|| None::<YtArtist>);
+    let mut loading = use_signal(|| true);
+    let mut error = use_signal(|| None::<String>);
+
+    use_effect(move || {
+        let Some(cid) = selected_artist_id.read().clone() else {
+            return;
+        };
+        artist.set(None);
+        loading.set(true);
+        error.set(None);
+        spawn(async move {
+            let cookies = config
+                .peek()
+                .server
+                .as_ref()
+                .and_then(|s| s.access_token.clone());
+            let Some(cookies) = cookies else {
+                error.set(Some("not signed in".to_string()));
+                loading.set(false);
+                return;
+            };
+            let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
+            match yt.fetch_artist(&cid).await {
+                Ok(a) => artist.set(Some(a)),
+                Err(e) => error.set(Some(e)),
+            }
+            loading.set(false);
+        });
+    });
+
+    if selected_artist_id.read().is_none() {
+        let fallback_name = selected_artist_name.read().clone().unwrap_or_default();
+        return rsx! {
+            div { class: "p-12 text-white/60", "No artist selected: {fallback_name}" }
+        };
+    }
+
+    rsx! {
+        div { class: "max-w-[1600px] mx-auto",
+            button {
+                class: "inline-flex items-center gap-2 text-white/70 hover:text-white text-sm cursor-pointer mt-6 ml-6 md:ml-10 mb-2 group",
+                onclick: move |_| on_back.call(()),
+                i { class: "fa-solid fa-chevron-left text-xs transition-transform group-hover:-translate-x-0.5" }
+                span { "{i18n::t(\"back\")}" }
+            }
+
+            if *loading.read() {
+                div { class: "flex justify-center py-24",
+                    i { class: "fa-solid fa-arrows-rotate fa-spin text-2xl text-white/60" }
+                }
+            } else if let Some(err) = error.read().clone() {
+                div { class: "py-12 px-6 md:px-10 text-rose-400 text-sm",
+                    "{i18n::t_with(\"discover_failed\", &[(\"error\", err.clone())])}"
+                }
+            } else if let Some(a) = artist.read().clone() {
+                {
+                    let banner = a.banner_thumbnail.clone();
+                    let banner_style = banner
+                        .map(|u| format!("background-image: linear-gradient(to bottom, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.95) 100%), url('{u}'); background-size: cover; background-position: center;"))
+                        .unwrap_or_default();
+                    let shuffle_pid = a.shuffle_playlist_id.clone();
+                    rsx! {
+                        div {
+                            class: "relative overflow-hidden",
+                            style: "{banner_style}",
+                            div { class: "px-6 md:px-10 pt-16 pb-10 flex flex-col gap-4",
+                                h1 { class: "text-4xl md:text-6xl font-black text-white break-words drop-shadow-lg", "{a.name}" }
+                                if let Some(s) = a.subscribers.clone() {
+                                    p { class: "text-sm text-white/70", "{s}" }
+                                }
+                                if let Some(d) = a.description.clone() {
+                                    p { class: "text-sm text-white/60 max-w-3xl line-clamp-3", "{d}" }
+                                }
+                                div { class: "flex gap-3 mt-2",
+                                    if let Some(pid) = shuffle_pid {
+                                        button {
+                                            class: "inline-flex items-center gap-2 bg-white text-black px-6 py-2.5 rounded-full font-bold hover:scale-105 active:scale-95 transition-transform cursor-pointer",
+                                            onclick: move |_| {
+                                                play_playlist_async(pid.clone(), config, ctrl);
+                                            },
+                                            i { class: "fa-solid fa-shuffle text-[11px]" }
+                                            span { class: "text-sm", "{i18n::t(\"shuffle\")}" }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        div { class: "px-6 md:px-10 pt-8",
+                            for (idx, shelf) in a.sections.iter().enumerate() {
+                                ShelfRow {
+                                    key: "{idx}",
+                                    shelf: shelf.clone(),
+                                    scroll_id: format!("artist-shelf-{idx}"),
+                                    on_select_album: on_select_album,
+                                    on_select_playlist: on_select_playlist,
+                                    on_open_artist: on_open_artist,
+                                    on_search_artist: on_search_artist,
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

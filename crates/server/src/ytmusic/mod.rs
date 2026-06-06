@@ -243,6 +243,14 @@ impl YouTubeMusicClient {
         discover::fetch_album_tracks(browse_id, cookies).await
     }
 
+    pub async fn fetch_artist(&self, channel_id: &str) -> Result<discover::YtArtist, String> {
+        let cookies = self
+            .cookies
+            .as_deref()
+            .ok_or("YouTube Music not signed in")?;
+        discover::fetch_artist(channel_id, cookies).await
+    }
+
     /// Confirms the `rustypipe-botguard` binary is reachable. Call this
     /// at server-selection time so users get the install hint up front
     /// instead of seeing a silent 403 partway into their first track.
