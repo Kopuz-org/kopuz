@@ -48,6 +48,27 @@ fn browser_candidates(browser: Browser) -> &'static [&'static str] {
     }
 }
 
+#[cfg(target_os = "macos")]
+fn macos_app_paths(browser: Browser) -> &'static [&'static str] {
+    match browser {
+        Browser::Brave => &[
+            "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+        ],
+        Browser::Chrome => &[
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        ],
+        Browser::Chromium => &[
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        ],
+        Browser::Edge => &[
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+        ],
+        Browser::Vivaldi => &[
+            "/Applications/Vivaldi.app/Contents/MacOS/Vivaldi",
+        ],
+    }
+}
+
 fn find_browser_bin(browser: Browser) -> Option<String> {
     let env_key = format!("KOPUZ_{}_BIN", browser.id().to_uppercase().replace('-', "_"));
     if let Some(v) = std::env::var_os(&env_key)
@@ -63,6 +84,12 @@ fn find_browser_bin(browser: Browser) -> Option<String> {
             if p.is_file() {
                 return Some(candidate.to_string());
             }
+        }
+    }
+    #[cfg(target_os = "macos")]
+    for path in macos_app_paths(browser) {
+        if std::path::Path::new(path).is_file() {
+            return Some((*path).to_string());
         }
     }
     None
