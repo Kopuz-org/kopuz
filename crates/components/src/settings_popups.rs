@@ -1,4 +1,4 @@
-use config::MusicService;
+use config::{Browser, MusicService};
 use dioxus::prelude::*;
 
 #[component]
@@ -6,6 +6,8 @@ pub fn AddServerPopup(
     server_name: Signal<String>,
     server_url: Signal<String>,
     server_service: Signal<MusicService>,
+    /// Selected Chromium-family browser when service is YouTube Music.
+    yt_browser: Signal<Browser>,
     error: Signal<Option<String>>,
     on_close: EventHandler<()>,
     on_save: EventHandler<()>,
@@ -14,6 +16,7 @@ pub fn AddServerPopup(
         MusicService::Jellyfin => "jellyfin",
         MusicService::Subsonic => "subsonic",
         MusicService::Custom => "custom",
+        MusicService::YtMusic => "ytmusic",
     };
 
     let server_name_optional = i18n::t("server_name_optional").to_string();
@@ -44,11 +47,11 @@ pub fn AddServerPopup(
                     onkeydown: move |e| e.stop_propagation()
                 }
 
-                input {
-                    placeholder: "{server_url_placeholder}",
-                    value: "{server_url()}",
-                    oninput: move |e| server_url.set(e.value()),
-                    onkeydown: move |e| e.stop_propagation()
+                ServerServiceFields {
+                    server_service,
+                    server_url,
+                    yt_browser,
+                    server_url_placeholder: server_url_placeholder.clone(),
                 }
 
                 select {
@@ -56,6 +59,7 @@ pub fn AddServerPopup(
                         let service = match e.value().as_str() {
                             "subsonic" => MusicService::Subsonic,
                             "custom" => MusicService::Custom,
+                            "ytmusic" => MusicService::YtMusic,
                             _ => MusicService::Jellyfin,
                         };
                         server_service.set(service);
@@ -75,6 +79,11 @@ pub fn AddServerPopup(
                         value: "custom",
                         selected: server_service() == MusicService::Custom,
                         "{custom_manual}"
+                    }
+                    option {
+                        value: "ytmusic",
+                        selected: server_service() == MusicService::YtMusic,
+                        "YouTube Music"
                     }
                 }
 
@@ -208,5 +217,73 @@ pub fn AddRegistryPopup(
                 }
             }
         }
+    }
+}
+
+#[component]
+fn ServerServiceFields(
+    server_service: Signal<MusicService>,
+    server_url: Signal<String>,
+    yt_browser: Signal<Browser>,
+    server_url_placeholder: String,
+) -> Element {
+    let mut botguard_status: Signal<Option<Result<(), String>>> = use_signal(|| None);
+
+    match server_service() {
+        MusicService::YtMusic => rsx! {
+            p { class: "text-xs text-white/60",
+                "Pick the browser you're signed in to YouTube Music on. Kopuz reads cookies directly from its profile — no separate login."
+            }
+            select {
+                onchange: move |e| {
+                    if let Some(b) = Browser::from_id(&e.value()) {
+                        yt_browser.set(b);
+                    }
+                },
+                onkeydown: move |e| e.stop_propagation(),
+                for browser in Browser::ALL.iter().copied() {
+                    option {
+                        value: "{browser.id()}",
+                        selected: yt_browser() == browser,
+                        "{browser.label()}"
+                    }
+                }
+            }
+            div { class: "flex items-center gap-2 mt-2",
+                button {
+                    class: "text-xs px-2 py-1 rounded bg-white/10 hover:bg-white/20 transition-colors",
+                    onclick: move |_| {
+                        spawn(async move {
+                            let res = ::server::ytmusic::botguard::check_available().await;
+                            botguard_status.set(Some(res));
+                        });
+                    },
+                    "Check rustypipe-botguard"
+                }
+                {match botguard_status.read().as_ref() {
+                    Some(Ok(())) => rsx! {
+                        span { class: "text-xs text-emerald-400",
+                            i { class: "fa-solid fa-check mr-1" }
+                            "Installed"
+                        }
+                    },
+                    Some(Err(msg)) => rsx! {
+                        span { class: "text-xs text-rose-400 whitespace-pre-line",
+                            i { class: "fa-solid fa-xmark mr-1" }
+                            "{msg}"
+                        }
+                    },
+                    None => rsx! { span {} },
+                }}
+            }
+        },
+        _ => rsx! {
+            input {
+                placeholder: "{server_url_placeholder}",
+                value: "{server_url()}",
+                oninput: move |e| server_url.set(e.value()),
+                onkeydown: move |e| e.stop_propagation()
+            }
+        },
     }
 }
