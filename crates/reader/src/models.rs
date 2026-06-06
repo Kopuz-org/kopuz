@@ -55,6 +55,17 @@ pub struct Library {
     pub jellyfin_albums: Vec<Album>,
     #[serde(default)]
     pub jellyfin_genres: Vec<(String, String)>,
+    /// Unix timestamp (seconds) of the last successful YT library sync.
+    /// `None` means "never synced" → the Favorites page kicks off an
+    /// initial fetch on next mount. Cleared by the manual refresh
+    /// button to force a re-fetch.
+    #[serde(default)]
+    pub last_yt_sync_at: Option<u64>,
+    /// Companion to `last_yt_sync_at` for the YT playlists list.
+    /// Tracked separately because the favorites page and the playlists
+    /// page are independent — one synced doesn't imply the other.
+    #[serde(default)]
+    pub last_yt_playlists_sync_at: Option<u64>,
     #[serde(default)]
     pub server_artist_images: std::collections::HashMap<String, String>,
     #[serde(default)]
