@@ -14,13 +14,21 @@ pub fn JellyfinPlaylists(
     #[props(default)] refresh_trigger: Signal<u64>,
 ) -> Element {
     let is_offline = use_context::<Signal<bool>>();
+    let yt_cookies_ready = use_context::<crate::YtCookiesReady>().0;
     let mut last_fetch_key = use_signal(|| None::<String>);
     let mut fetch_request_id = use_signal(|| 0u64);
+    let mut yt_refresh_nonce: Signal<u64> = use_signal(|| 0);
+    let mut yt_is_syncing = use_signal(|| false);
+    let mut yt_synced_so_far: Signal<usize> = use_signal(|| 0);
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
     use_effect(move || {
+        let yt_nonce = *yt_refresh_nonce.read();
+        let trigger = *refresh_trigger.read();
+        let _ = yt_cookies_ready;
+
         let fetch_context = {
-            let conf = config.read();
+            let conf = config.peek();
             conf.server.as_ref().and_then(|server| {
                 if let (Some(token), Some(user_id)) = (&server.access_token, &server.user_id) {
                     Some((
@@ -35,8 +43,18 @@ pub fn JellyfinPlaylists(
                 }
             })
         };
+        let is_ytmusic = fetch_context
+            .as_ref()
+            .map(|(s, _, _, _, _)| *s == MusicService::YtMusic)
+            .unwrap_or(false);
 
-        let trigger = *refresh_trigger.read();
+        if is_ytmusic
+            && yt_nonce == 0
+            && trigger == 0
+            && library.peek().last_yt_playlists_sync_at.is_some()
+        {
+            return;
+        }
 
         // Build a "server identity" key (without trigger) to detect server changes
         let server_key = fetch_context
@@ -50,13 +68,13 @@ pub fn JellyfinPlaylists(
                 format!("{service:?}|{url}|{user_id}|{token}|{trigger}")
             });
 
-        // If we already have cached playlists for this server AND the trigger hasn't changed,
-        // show the cached data without re-fetching.
+        // peek() rather than read() — we already control re-firing
+        // via yt_refresh_nonce / refresh_trigger above.
         let has_cached = {
-            let store = playlist_store.read();
+            let store = playlist_store.peek();
             !store.jellyfin_playlists.is_empty()
         };
-        let last_key = last_fetch_key.read().clone();
+        let last_key = last_fetch_key.peek().clone();
 
         // Extract the server-identity part of the last fetch key (everything before the last |)
         let last_server_key = last_key.as_ref().and_then(|k| {
@@ -146,6 +164,120 @@ pub fn JellyfinPlaylists(
                         }
                     }
                 }
+                MusicService::YtMusic => {
+                    eprintln!("[yt-playlists] sync starting");
+                    yt_is_syncing.set(true);
+                    yt_synced_so_far.set(0);
+                    let yt =
+                        ::server::ytmusic::YouTubeMusicClient::with_cookies(token.clone());
+                    let list_result = yt.list_playlists().await;
+                    eprintln!(
+                        "[yt-playlists] list_playlists → {}",
+                        list_result
+                            .as_ref()
+                            .map(|v| format!("{} entries", v.len()))
+                            .unwrap_or_else(|e| format!("ERR {e}"))
+                    );
+                    let summaries = match list_result {
+                        Ok(s) => s,
+                        Err(_) => {
+                            yt_is_syncing.set(false);
+                            return;
+                        }
+                    };
+                    let total = summaries.len();
+                    yt_synced_so_far.set(0);
+
+                    {
+                        let mut store_write = playlist_store.write();
+                        let mut seeded: Vec<reader::models::JellyfinPlaylist> = summaries
+                            .iter()
+                            .map(|s| {
+                                let image_tag = s
+                                    .thumbnail_url
+                                    .as_ref()
+                                    .map(|u| utils::jellyfin_image::encode_cover_url(u));
+                                let existing_cover_path = store_write
+                                    .jellyfin_playlists
+                                    .iter()
+                                    .find(|e| e.id == s.id)
+                                    .and_then(|e| e.cover_path.clone());
+                                reader::models::JellyfinPlaylist {
+                                    id: s.id.clone(),
+                                    name: s.title.clone(),
+                                    tracks: Vec::new(),
+                                    image_tag,
+                                    cover_path: existing_cover_path,
+                                }
+                            })
+                            .collect();
+                        for existing in store_write.jellyfin_playlists.drain(..) {
+                            if !seeded.iter().any(|s| s.id == existing.id) {
+                                seeded.push(existing);
+                            }
+                        }
+                        store_write.jellyfin_playlists = seeded;
+                    }
+
+                    let mut accumulated: Vec<reader::models::Track> = Vec::new();
+                    let mut seen_paths: std::collections::HashSet<std::path::PathBuf> =
+                        std::collections::HashSet::new();
+                    for (i, summary) in summaries.into_iter().enumerate() {
+                        yt_synced_so_far.set(i + 1);
+                        let tracks = match yt.get_playlist_entries(&summary.id).await {
+                            Ok(t) => t,
+                            Err(e) => {
+                                eprintln!("[yt-playlists] {} → ERR {e}", summary.id);
+                                Vec::new()
+                            }
+                        };
+                        let track_ids: Vec<String> = tracks
+                            .iter()
+                            .filter_map(|t| {
+                                t.path
+                                    .to_string_lossy()
+                                    .split(':')
+                                    .nth(1)
+                                    .map(|s| s.to_string())
+                            })
+                            .collect();
+                        {
+                            let mut store_write = playlist_store.write();
+                            if let Some(entry) = store_write
+                                .jellyfin_playlists
+                                .iter_mut()
+                                .find(|e| e.id == summary.id)
+                            {
+                                entry.tracks = track_ids;
+                            }
+                        }
+                        for t in tracks {
+                            if seen_paths.insert(t.path.clone()) {
+                                accumulated.push(t);
+                            }
+                        }
+                    }
+
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    let mut lib = library.write();
+                    let mut existing: std::collections::HashSet<std::path::PathBuf> = lib
+                        .jellyfin_tracks
+                        .iter()
+                        .map(|t| t.path.clone())
+                        .collect();
+                    for t in accumulated {
+                        if existing.insert(t.path.clone()) {
+                            lib.jellyfin_tracks.push(t);
+                        }
+                    }
+                    lib.last_yt_playlists_sync_at = Some(now);
+                    yt_is_syncing.set(false);
+                    yt_synced_so_far.set(total);
+                    return;
+                }
             }
 
             if *fetch_request_id.read() != request_id {
@@ -190,9 +322,52 @@ pub fn JellyfinPlaylists(
     });
 
     let playlists = jellyfin_playlists.read().clone();
+    let is_ytmusic_active = config
+        .read()
+        .server
+        .as_ref()
+        .map(|s| s.service == MusicService::YtMusic)
+        .unwrap_or(false);
 
     rsx! {
         div {
+            if is_ytmusic_active {
+                {
+                    let syncing = *yt_is_syncing.read();
+                    let done = *yt_synced_so_far.read();
+                    // Total is the number of tiles seeded into the
+                    // store; while syncing this is the target count,
+                    // after syncing it's the final count.
+                    let total = playlists.len();
+                    let remaining = total.saturating_sub(done);
+                    rsx! {
+                        div {
+                            class: "flex items-center justify-between gap-3 mb-3 px-2 text-xs text-slate-400",
+                            div {
+                                class: "flex items-center gap-2",
+                                if syncing {
+                                    i { class: "fa-solid fa-arrows-rotate fa-spin text-indigo-300" }
+                                    span { "Loading tracks — {done} / {total} playlists ({remaining} left)" }
+                                } else if total > 0 {
+                                    i { class: "fa-solid fa-check text-emerald-400" }
+                                    span { "{total} playlists synced" }
+                                }
+                            }
+                            button {
+                                class: "px-3 py-1 rounded bg-white/5 hover:bg-white/10 text-white/80 transition-colors disabled:opacity-50",
+                                disabled: syncing,
+                                onclick: move |_| {
+                                    let next = *yt_refresh_nonce.peek() + 1;
+                                    yt_refresh_nonce.set(next);
+                                },
+                                i { class: "fa-solid fa-arrows-rotate mr-1" }
+                                "Refresh"
+                            }
+                        }
+                    }
+                }
+            }
+
             if playlists.is_empty() {
                 div { class: "flex flex-col items-center justify-center h-64 text-slate-500",
                     i { class: "fa-regular fa-folder-open text-4xl mb-4 opacity-50" }
