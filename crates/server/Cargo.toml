@@ -4,6 +4,7 @@ version.workspace = true
 edition = "2024"
 
 [dependencies]
+directories = { workspace = true }
 jellyfin-sdk-rust = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true }
@@ -12,4 +13,13 @@ config = { workspace = true }
 rand = { workspace = true }
 uuid = { workspace = true }
 md5 = "0.8"
+sha1 = "0.10"
+hex = "0.4"
+aes = "0.8"
+cbc = { version = "0.1", features = ["block-padding"] }
+pbkdf2 = "0.12"
+hmac = "0.12"
+rusqlite = { version = "0.31", features = ["bundled"] }
 web-time = { workspace = true }
+tokio = { workspace = true, features = ["fs", "rt", "sync"] }
+reader = { workspace = true }
