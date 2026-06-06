@@ -16,11 +16,7 @@ md5 = "0.8"
 sha1 = "0.10"
 httpdate = "1"
 hex = "0.4"
-aes = "0.8"
-cbc = { version = "0.1", features = ["block-padding"] }
-pbkdf2 = "0.12"
-hmac = "0.12"
-rusqlite = { version = "0.31", features = ["bundled"] }
+rookie = "0.5"
 web-time = { workspace = true }
 tokio = { workspace = true, features = ["fs", "process", "rt", "sync"] }
 reader = { workspace = true }
