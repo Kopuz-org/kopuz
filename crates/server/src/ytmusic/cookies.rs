@@ -49,12 +49,19 @@ pub async fn extract_from(browser: Browser, profile_root: &Path) -> Result<Strin
         .map_err(|e| format!("snapshot cookies db: {e}"))?;
     let snapshot_for_cleanup = snapshot.clone();
 
-    let master_key = secret_tool_lookup(secret_app(browser))?.trim().to_string();
     let v10_key = derive_key(b"peanuts");
-    let v11_key = derive_key(master_key.as_bytes());
+    let v11_key = match secret_tool_lookup(secret_app(browser)) {
+        Ok(s) => Some(derive_key(s.trim().as_bytes())),
+        Err(e) => {
+            eprintln!(
+                "[yt-cookies] libsecret unavailable ({e}) — proceeding with OSCrypt v10 only"
+            );
+            None
+        }
+    };
 
     let header = tokio::task::spawn_blocking(move || {
-        let r = read_and_decrypt(&snapshot, &v10_key, &v11_key);
+        let r = read_and_decrypt(&snapshot, &v10_key, v11_key.as_ref());
         let _ = std::fs::remove_file(&snapshot);
         r
     })
@@ -145,7 +152,7 @@ fn decrypt_chromium(encrypted: &[u8], key: &[u8; 16]) -> Option<Vec<u8>> {
 fn read_and_decrypt(
     db_path: &Path,
     v10_key: &[u8; 16],
-    v11_key: &[u8; 16],
+    v11_key: Option<&[u8; 16]>,
 ) -> Result<String, String> {
     let conn = Connection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .map_err(|e| format!("open db: {e}"))?;
@@ -176,7 +183,7 @@ fn read_and_decrypt(
         let bytes = if encrypted.starts_with(b"v10") {
             decrypt_chromium(&encrypted, v10_key)
         } else if encrypted.starts_with(b"v11") {
-            decrypt_chromium(&encrypted, v11_key)
+            v11_key.and_then(|k| decrypt_chromium(&encrypted, k))
         } else if !plain.is_empty() {
             Some(plain.into_bytes())
         } else {
