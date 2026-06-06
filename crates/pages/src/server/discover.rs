@@ -247,13 +247,18 @@ fn DiscoverTile(
                 }
             }
         },
-        DiscoverItem::Album { browse_id, title, subtitle, thumbnail } => rsx! {
-            Card {
-                title: title,
-                subtitle: subtitle,
-                thumbnail: thumbnail,
-                rounded_full: false,
-                onclick: move |_| on_select_album.call(browse_id.clone()),
+        DiscoverItem::Album { browse_id, title, subtitle, thumbnail } => {
+            let title_for_click = title.clone();
+            rsx! {
+                Card {
+                    title: title,
+                    subtitle: subtitle,
+                    thumbnail: thumbnail,
+                    rounded_full: false,
+                    onclick: move |_| {
+                        on_select_playlist.call((browse_id.clone(), title_for_click.clone()))
+                    },
+                }
             }
         },
         DiscoverItem::Artist { name, thumbnail, .. } => rsx! {
@@ -417,7 +422,14 @@ pub fn DiscoverPlaylistDetail(
                 return;
             };
             let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
-            match yt.get_playlist_entries(&pid).await {
+            // Discover routes both playlists and albums through this viewer;
+            // MPRE… ids are albums and need the browse-album endpoint instead.
+            let result = if pid.starts_with("MPRE") {
+                yt.fetch_album_tracks(&pid).await
+            } else {
+                yt.get_playlist_entries(&pid).await
+            };
+            match result {
                 Ok(ts) => tracks.set(ts),
                 Err(e) => error.set(Some(e)),
             }

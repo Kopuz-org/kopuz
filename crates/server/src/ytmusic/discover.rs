@@ -66,6 +66,148 @@ pub async fn fetch_home(cookies: &str) -> Result<DiscoverHome, String> {
     Ok(parse_initial(&resp))
 }
 
+/// Album browse (`/browse?browseId=MPRE...`) returns a header with the
+/// album title/artist and a single `musicShelfRenderer` whose
+/// `musicResponsiveListItemRenderer` rows are the tracks. Track rows
+/// don't carry their own thumbnail — the cover lives on the header — so
+/// we pull the best header thumbnail once and stamp every track with it.
+pub async fn fetch_album_tracks(browse_id: &str, cookies: &str) -> Result<Vec<Track>, String> {
+    let body = build_browse_body(Some(browse_id));
+    let resp = post(
+        &format!("{ORIGIN_YOUTUBE_MUSIC}/youtubei/v1/browse?prettyPrint=false"),
+        &body,
+        cookies,
+    )
+    .await?;
+    Ok(parse_album(&resp))
+}
+
+fn parse_album(resp: &Value) -> Vec<Track> {
+    let album_title = resp
+        .pointer("/header/musicDetailHeaderRenderer/title/runs/0/text")
+        .or_else(|| resp.pointer("/contents/twoColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents/0/musicResponsiveHeaderRenderer/title/runs/0/text"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let album_thumbnail = best_album_thumbnail(resp).map(normalize_yt_thumbnail);
+
+    let shelves = resp
+        .pointer("/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents")
+        .or_else(|| resp.pointer("/contents/twoColumnBrowseResultsRenderer/secondaryContents/sectionListRenderer/contents"))
+        .and_then(|v| v.as_array());
+
+    let Some(shelves) = shelves else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    for shelf in shelves {
+        let Some(items) = shelf
+            .pointer("/musicShelfRenderer/contents")
+            .and_then(|v| v.as_array())
+        else {
+            continue;
+        };
+        for item in items {
+            if let Some(track) = parse_album_row(item, &album_title, album_thumbnail.as_deref()) {
+                out.push(track);
+            }
+        }
+    }
+    out
+}
+
+fn best_album_thumbnail(resp: &Value) -> Option<String> {
+    let pointers = [
+        "/header/musicDetailHeaderRenderer/thumbnail/croppedSquareThumbnailRenderer/thumbnail/thumbnails",
+        "/header/musicDetailHeaderRenderer/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails",
+        "/contents/twoColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents/0/musicResponsiveHeaderRenderer/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails",
+    ];
+    for p in pointers {
+        if let Some(arr) = resp.pointer(p).and_then(|v| v.as_array()) {
+            let best = arr
+                .iter()
+                .max_by_key(|t| t.get("width").and_then(|v| v.as_u64()).unwrap_or(0))
+                .and_then(|t| t.get("url").and_then(|u| u.as_str()))
+                .map(|s| s.to_string());
+            if best.is_some() {
+                return best;
+            }
+        }
+    }
+    None
+}
+
+fn parse_album_row(item: &Value, album_title: &str, album_thumbnail: Option<&str>) -> Option<Track> {
+    let row = item.get("musicResponsiveListItemRenderer")?;
+    let video_id = row
+        .pointer("/playlistItemData/videoId")
+        .and_then(|v| v.as_str())?
+        .to_string();
+    let title = row
+        .pointer("/flexColumns/0/musicResponsiveListItemFlexColumnRenderer/text/runs/0/text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if title.is_empty() {
+        return None;
+    }
+    let primary_artist = row
+        .pointer("/flexColumns/1/musicResponsiveListItemFlexColumnRenderer/text/runs/0/text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let duration = row
+        .pointer("/fixedColumns/0/musicResponsiveListItemFixedColumnRenderer/text/runs/0/text")
+        .and_then(|v| v.as_str())
+        .and_then(parse_mm_ss)
+        .unwrap_or(0);
+    let track_number = row
+        .pointer("/index/runs/0/text")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<u32>().ok());
+
+    let artists = if primary_artist.is_empty() {
+        Vec::new()
+    } else {
+        vec![primary_artist.clone()]
+    };
+    let path = match album_thumbnail {
+        Some(url) if !url.is_empty() => PathBuf::from(format!(
+            "{SOURCE_PREFIX}:{video_id}:{}",
+            encode_url_tag(url)
+        )),
+        _ => PathBuf::from(format!("{SOURCE_PREFIX}:{video_id}")),
+    };
+    let album_id = synthesize_album_id(album_title, &primary_artist);
+    Some(Track {
+        path,
+        album_id,
+        title,
+        artist: primary_artist,
+        album: album_title.to_string(),
+        duration,
+        khz: 0,
+        bitrate: 0,
+        track_number,
+        disc_number: None,
+        musicbrainz_release_id: None,
+        musicbrainz_recording_id: None,
+        musicbrainz_track_id: None,
+        playlist_item_id: None,
+        artists,
+    })
+}
+
+fn parse_mm_ss(s: &str) -> Option<u64> {
+    let mut parts = s.split(':').rev();
+    let secs: u64 = parts.next()?.parse().ok()?;
+    let mins: u64 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    let hours: u64 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    Some(hours * 3600 + mins * 60 + secs)
+}
+
 pub async fn fetch_continuation(token: &str, cookies: &str) -> Result<DiscoverHome, String> {
     let body = build_browse_body(None);
     let url = format!(
