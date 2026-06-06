@@ -258,6 +258,7 @@ discover = Discover
 discover_more_loading = Loading more…
 discover_failed = Couldn't load Discover: { $error }
 discover_requires_ytmusic = Discover is only available when YouTube Music is the active server.
+discover_show_all = Show all
 most_played_tracks = Your most played tracks.
 no_more_songs = No more songs in queue
 server_playlist = Server Playlist

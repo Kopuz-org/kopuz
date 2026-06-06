@@ -26,6 +26,11 @@ pub struct DiscoverShelf {
     pub strapline: Option<String>,
     pub more_browse_id: Option<String>,
     pub items: Vec<DiscoverItem>,
+    /// Render as a vertical song list (with row numbers / duration)
+    /// instead of a horizontal tile carousel. Only set true for the
+    /// artist-page "Top songs" shelf — discover-home shelves stay
+    /// horizontal.
+    pub is_song_list: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -257,6 +262,7 @@ fn parse_artist_carousel(section: &Value) -> Option<DiscoverShelf> {
         strapline,
         more_browse_id,
         items,
+        is_song_list: false,
     })
 }
 
@@ -297,6 +303,7 @@ fn parse_artist_song_list(section: &Value) -> Option<DiscoverShelf> {
         strapline: None,
         more_browse_id,
         items,
+        is_song_list: true,
     })
 }
 
@@ -791,6 +798,7 @@ fn parse_shelf(section: &Value) -> Option<DiscoverShelf> {
         strapline,
         more_browse_id,
         items,
+        is_song_list: false,
     })
 }
 

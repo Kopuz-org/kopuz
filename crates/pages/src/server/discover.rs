@@ -172,6 +172,12 @@ fn ShelfRow(
     on_open_artist: EventHandler<(String, String)>,
     on_search_artist: EventHandler<String>,
 ) -> Element {
+    if shelf.is_song_list {
+        return rsx! { SongListShelf {
+            shelf: shelf.clone(),
+            on_select_playlist: on_select_playlist,
+        } };
+    }
     let scroll_left = scroll_id.clone();
     let scroll_right = scroll_id.clone();
     rsx! {
@@ -218,6 +224,64 @@ fn ShelfRow(
                         on_select_playlist: on_select_playlist,
                         on_open_artist: on_open_artist,
                         on_search_artist: on_search_artist,
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Vertical song-list shelf for the artist page "Top songs" section.
+/// YT only returns the first 5 rows inline and ships a `more_browse_id`
+/// (a `VL…` playlist id) that points at the full songs playlist; we
+/// expose that as a "Show all songs" button which navigates through
+/// `on_select_playlist` into the existing `DiscoverPlaylistDetail`
+/// viewer (which already paginates).
+#[component]
+fn SongListShelf(
+    shelf: DiscoverShelf,
+    on_select_playlist: EventHandler<(String, String)>,
+) -> Element {
+    let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
+    let tracks: Vec<Track> = shelf
+        .items
+        .iter()
+        .filter_map(|i| match i {
+            DiscoverItem::Song(t) => Some(t.clone()),
+            _ => None,
+        })
+        .collect();
+    let title_for_more = shelf.title.clone();
+    let more = shelf.more_browse_id.clone();
+    rsx! {
+        section { class: "mb-12",
+            div { class: "flex items-end justify-between mb-5 gap-4",
+                h2 { class: "text-2xl md:text-3xl font-bold text-white truncate", "{shelf.title}" }
+                if let Some(more) = more {
+                    button {
+                        class: "text-xs font-bold tracking-widest uppercase text-white/60 hover:text-white cursor-pointer transition-colors",
+                        onclick: move |_| {
+                            on_select_playlist.call((more.clone(), title_for_more.clone()))
+                        },
+                        "{i18n::t(\"discover_show_all\")}"
+                    }
+                }
+            }
+            div { class: "flex flex-col",
+                for (idx, track) in tracks.iter().enumerate() {
+                    DiscoverPlaylistRow {
+                        key: "{idx}",
+                        track: track.clone(),
+                        index: idx + 1,
+                        on_play: {
+                            let tracks_for_row = tracks.clone();
+                            move |t: Track| {
+                                let mut queue = tracks_for_row.clone();
+                                let start = queue.iter().position(|x| x.path == t.path).unwrap_or(0);
+                                queue.rotate_left(start);
+                                ctrl.play_queue_linear(queue);
+                            }
+                        },
                     }
                 }
             }
