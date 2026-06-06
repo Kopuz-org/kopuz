@@ -77,7 +77,7 @@ pub async fn launch_signin_and_extract(
 
     let deadline = Instant::now() + signin_timeout;
     let outcome = loop {
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
         if Instant::now() > deadline {
             break Err(format!(
                 "Sign-in not detected within {}s — close the browser and try again",
