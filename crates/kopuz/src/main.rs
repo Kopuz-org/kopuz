@@ -211,6 +211,36 @@ fn persist_config_snapshot(config_snapshot: config::AppConfig, _path: std::path:
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+async fn run_rotation(mut config: Signal<config::AppConfig>) {
+    let cookies = match config.peek().server.as_ref() {
+        Some(s) if s.service == config::MusicService::YtMusic => s.access_token.clone(),
+        _ => return,
+    };
+    let Some(cookies) = cookies else { return };
+    let started = std::time::Instant::now();
+    match server::ytmusic::verify_session_keepalive::tick(&cookies).await {
+        Ok(Some(updated)) => {
+            eprintln!(
+                "[yt-keepalive] verify_session OK in {:.1}s, jar updated ({}B → {}B)",
+                started.elapsed().as_secs_f32(),
+                cookies.len(),
+                updated.len()
+            );
+            if let Some(srv) = config.write().server.as_mut() {
+                srv.access_token = Some(updated);
+            }
+        }
+        Ok(None) => {
+            eprintln!(
+                "[yt-keepalive] verify_session OK in {:.1}s, no change",
+                started.elapsed().as_secs_f32()
+            );
+        }
+        Err(e) => eprintln!("[yt-keepalive] verify_session failed: {e}"),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 async fn persist_queue_state_snapshot(
     queue_state: Option<PersistedQueueState>,
     path: std::path::PathBuf,
@@ -1060,15 +1090,16 @@ fn App() -> Element {
             return;
         }
 
+        // Server identity excludes access_token: tokens rotate without making it a
+        // different account, but their rotation would otherwise wipe synced playlists.
         let current_server_key = {
             let conf = config.read();
             conf.server.as_ref().map(|server| {
                 format!(
-                    "{:?}|{}|{}|{}",
+                    "{:?}|{}|{}",
                     server.service,
                     server.url,
                     server.user_id.as_deref().unwrap_or_default(),
-                    server.access_token.as_deref().unwrap_or_default()
                 )
             })
         };
@@ -1130,6 +1161,40 @@ fn App() -> Element {
         let mut config_snapshot = config.peek().clone();
         config_snapshot.volume = committed_volume;
         persist_config_snapshot(config_snapshot, config_path());
+    });
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut yt_cookies_refreshed = use_signal(|| false);
+    let mut yt_cookies_ready = use_signal(|| true);
+    use_context_provider(|| pages::YtCookiesReady(yt_cookies_ready));
+    #[cfg(not(target_arch = "wasm32"))]
+    use_effect(move || {
+        if !*initial_load_done.read() {
+            return;
+        }
+        if *yt_cookies_refreshed.peek() {
+            return;
+        }
+        let has_ytmusic_auth = config
+            .peek()
+            .server
+            .as_ref()
+            .map(|s| s.service == config::MusicService::YtMusic
+                && s.access_token.as_deref().map(|t| !t.is_empty()).unwrap_or(false))
+            .unwrap_or(false);
+        if !has_ytmusic_auth {
+            return;
+        }
+        yt_cookies_refreshed.set(true);
+        yt_cookies_ready.set(false);
+        spawn(async move {
+            run_rotation(config).await;
+            yt_cookies_ready.set(true);
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+                run_rotation(config).await;
+            }
+        });
     });
 
     #[cfg(all(
@@ -1797,6 +1862,38 @@ fn App() -> Element {
                                 } else {
                                     "{file}"
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Only show playback errors when the active server is YouTube
+            // Music — other backends (Jellyfin/Subsonic/Custom) surface
+            // their own errors via the settings popup, and a lingering YT
+            // error from a previous session shouldn't haunt a switched-to
+            // server.
+            if config
+                .read()
+                .server
+                .as_ref()
+                .map(|s| s.service == config::MusicService::YtMusic)
+                .unwrap_or(false)
+            {
+                if let Some(msg) = ctrl.playback_error.read().clone() {
+                    div {
+                        class: "flex-shrink-0",
+                        div {
+                            class: "flex items-center justify-between gap-3 px-4 py-2 bg-rose-500/15 border-b border-rose-500/20 text-rose-200 text-sm",
+                            div {
+                                class: "flex items-center gap-2 whitespace-pre-line",
+                                i { class: "fa-solid fa-triangle-exclamation text-xs" }
+                                span { "{msg}" }
+                            }
+                            button {
+                                class: "opacity-50 hover:opacity-100 transition-opacity p-1",
+                                onclick: move |_| ctrl.playback_error.set(None),
+                                i { class: "fa-solid fa-xmark text-xs" }
                             }
                         }
                     }

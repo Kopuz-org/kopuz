@@ -40,6 +40,7 @@ components = { workspace = true }
 reader = { workspace = true }
 config = { workspace = true }
 pages = { workspace = true }
+server = { workspace = true }
 kopuz_route = { workspace = true }
 radio = { workspace = true }
 tokio = { workspace = true }
