@@ -310,9 +310,11 @@ fn Card(
                     div { class: "{placeholder_class}" }
                 }
             }
-            p {
-                class: "text-sm font-semibold text-white line-clamp-2 break-words h-10 overflow-hidden",
-                "{title}"
+            div { class: "h-10 flex items-center",
+                p {
+                    class: "text-sm font-semibold text-white line-clamp-2 break-words",
+                    "{title}"
+                }
             }
             p {
                 class: "text-xs text-white/50 truncate h-4 mt-1",
@@ -356,9 +358,11 @@ fn SongCard(track: Track, on_play: EventHandler<Track>) -> Element {
                     i { class: "fa-solid fa-play text-white text-2xl" }
                 }
             }
-            p {
-                class: "text-sm font-semibold text-white line-clamp-2 break-words h-10 overflow-hidden",
-                "{title}"
+            div { class: "h-10 flex items-center",
+                p {
+                    class: "text-sm font-semibold text-white line-clamp-2 break-words",
+                    "{title}"
+                }
             }
             p {
                 class: "text-xs text-white/50 truncate h-4 mt-1",
