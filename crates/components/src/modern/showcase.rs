@@ -270,6 +270,20 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                                     )
                                             });
                                         Some(url.map_or_else(utils::default_cover_url, |u| std::sync::Arc::from(u.as_str())))
+                                    } else if path_str.starts_with("ytmusic:") {
+                                        // YT thumbnails come baked into
+                                        // album_id via urlhex; empty
+                                        // server_url skips the Jellyfin
+                                        // URL fallback branch.
+                                        let url = utils::jellyfin_image::track_cover_url_with_album_fallback(
+                                            &path_str,
+                                            &track.album_id,
+                                            "",
+                                            None,
+                                            64,
+                                            90,
+                                        );
+                                        Some(url.map_or_else(utils::default_cover_url, |u| std::sync::Arc::from(u.as_str())))
                                     } else {
                                         let lib = props.library.read();
                                         lib.albums
@@ -289,6 +303,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                 }
                                 let columns = if props.is_album { COLUMNS_MODERN_ALBUM } else { COLUMNS_MODERN };
                                 rsx! {
+                                    div { key: "{track.path.display()}", class: "contents",
                                     div { class: "flex items-center group",
                                         if has_multiple_discs && props.is_album && is_new_disc && sort_state.peek().is_none() {
                                             div { class: "flex-1 min-w-0",
@@ -301,7 +316,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                             }
                                         }
                                     }
-                                    div { key: "{track.path.display()}", class: "flex items-center group",
+                                    div { class: "flex items-center group",
                                         div { class: "flex-1 min-w-0",
                                             TrackRow {
                                                 track: track.clone(),
@@ -366,6 +381,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                                 },
                                             }
                                         }
+                                    }
                                     }
                                 }
                             }
