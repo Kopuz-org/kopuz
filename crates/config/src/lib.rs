@@ -156,6 +156,7 @@ pub enum MusicService {
     #[serde(alias = "Navidrome")]
     Subsonic,
     Custom,
+    YtMusic,
 }
 
 impl MusicService {
@@ -164,6 +165,7 @@ impl MusicService {
             Self::Jellyfin => "Jellyfin",
             Self::Subsonic => "Subsonic",
             Self::Custom => "Custom",
+            Self::YtMusic => "YouTube Music",
         }
     }
 }
@@ -605,6 +607,64 @@ pub struct MusicServer {
     pub user_id: Option<String>,
     #[serde(default)]
     pub id: Option<String>,
+    /// For `MusicService::YtMusic` only: which Chromium-family browser
+    /// the cookies were extracted from. Lets boot-time refresh hit the
+    /// right browser directly instead of falling through every
+    /// candidate.
+    #[serde(default)]
+    pub yt_browser: Option<Browser>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Browser {
+    Chrome,
+    Chromium,
+    Brave,
+    Edge,
+    Vivaldi,
+}
+
+impl Browser {
+    pub const ALL: &'static [Browser] = &[
+        Browser::Chrome,
+        Browser::Chromium,
+        Browser::Brave,
+        Browser::Edge,
+        Browser::Vivaldi,
+    ];
+
+    /// The stable id used in URL routes, settings UI option values,
+    /// libsecret lookups, etc.
+    pub fn id(self) -> &'static str {
+        match self {
+            Browser::Chrome => "chrome",
+            Browser::Chromium => "chromium",
+            Browser::Brave => "brave",
+            Browser::Edge => "edge",
+            Browser::Vivaldi => "vivaldi",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Browser::Chrome => "Chrome",
+            Browser::Chromium => "Chromium",
+            Browser::Brave => "Brave",
+            Browser::Edge => "Edge",
+            Browser::Vivaldi => "Vivaldi",
+        }
+    }
+
+    pub fn from_id(s: &str) -> Option<Browser> {
+        Browser::ALL.iter().copied().find(|b| b.id() == s)
+    }
+}
+
+impl std::fmt::Display for Browser {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
+    }
 }
 
 pub type JellyfinServer = MusicServer;
@@ -623,7 +683,12 @@ impl MusicServer {
             access_token: None,
             user_id: None,
             id: Some(uuid::Uuid::new_v4().to_string()),
+            yt_browser: None,
         }
+    }
+
+    pub fn yt_browser(&self) -> Option<Browser> {
+        self.yt_browser
     }
 }
 
@@ -901,6 +966,7 @@ impl Default for MusicServer {
             access_token: None,
             user_id: None,
             id: None,
+            yt_browser: None,
         }
     }
 }
