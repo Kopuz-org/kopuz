@@ -6,6 +6,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Once;
 
 use aes::Aes128;
 use cbc::cipher::block_padding::Pkcs7;
@@ -53,9 +54,7 @@ pub async fn extract_from(browser: Browser, profile_root: &Path) -> Result<Strin
     let v11_key = match secret_tool_lookup(secret_app(browser)) {
         Ok(s) => Some(derive_key(s.trim().as_bytes())),
         Err(e) => {
-            eprintln!(
-                "[yt-cookies] libsecret unavailable ({e}) — proceeding with OSCrypt v10 only"
-            );
+            warn_libsecret_unavailable_once(&e);
             None
         }
     };
@@ -91,6 +90,20 @@ fn pick_cookies_path(profile_root: &Path) -> Option<PathBuf> {
         profile_root.join("Default").join("Cookies"),
     ];
     candidates.into_iter().find(|p| p.exists())
+}
+
+fn warn_libsecret_unavailable_once(reason: &str) {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        eprintln!("[yt-cookies] libsecret unavailable ({reason}) — proceeding with OSCrypt v10 only");
+        if cfg!(target_os = "macos") {
+            eprintln!(
+                "[yt-cookies] note: on macOS the v10 fallback can't actually decrypt — \
+                 Chromium uses a Keychain-derived key there, not the literal 'peanuts'. \
+                 macOS cookie extraction needs Keychain support (not yet implemented)."
+            );
+        }
+    });
 }
 
 fn secret_tool_lookup(application: &str) -> Result<String, String> {
