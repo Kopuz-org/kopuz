@@ -10,7 +10,7 @@ pub fn DiscoverPage(
     on_select_playlist: EventHandler<(String, String)>,
     on_search_artist: EventHandler<String>,
 ) -> Element {
-    let mut config = use_context::<Signal<AppConfig>>();
+    let config = use_context::<Signal<AppConfig>>();
     let mut shelves = use_signal(Vec::<DiscoverShelf>::new);
     let mut continuation = use_signal(|| None::<String>);
     let mut loading_more = use_signal(|| false);
