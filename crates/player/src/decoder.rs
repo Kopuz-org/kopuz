@@ -1,7 +1,7 @@
 use std::io::{Read, Seek};
 use std::path::Path;
+use symphonia::core::formats::probe::Hint;
 use symphonia::core::io::MediaSource;
-use symphonia::core::probe::Hint;
 
 struct ReadSeekSource {
     inner: Box<dyn ReadSeekSendSync>,

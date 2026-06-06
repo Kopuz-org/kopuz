@@ -6,11 +6,11 @@ use lofty::prelude::*;
 use lofty::tag::ItemKey;
 use lofty::{file::TaggedFile, probe::Probe, properties::FileProperties, tag::Tag};
 use std::path::Path;
-use symphonia::core::codecs::CODEC_TYPE_NULL;
 use symphonia::core::formats::FormatOptions;
+use symphonia::core::formats::probe::Hint;
 use symphonia::core::io::MediaSourceStream;
-use symphonia::core::meta::{MetadataOptions, StandardTagKey, Tag as SymphoniaTag, Value};
-use symphonia::core::probe::Hint;
+use symphonia::core::meta::{MetadataOptions, RawValue, StandardTag, Tag as SymphoniaTag};
+use symphonia::core::units::Timestamp;
 
 fn slugify_album_key(value: &str) -> String {
     value
@@ -232,31 +232,36 @@ fn is_matroska_audio(track_path: &Path) -> bool {
 }
 
 fn symphonia_tag_to_string(tag: &SymphoniaTag) -> Option<String> {
-    match &tag.value {
-        Value::String(value) => {
+    match &tag.raw.value {
+        RawValue::String(value) => {
             let value = value.trim();
             (!value.is_empty()).then(|| value.to_string())
         }
-        Value::UnsignedInt(value) => Some(value.to_string()),
-        Value::SignedInt(value) => Some(value.to_string()),
-        Value::Float(value) => Some(value.to_string()),
-        Value::Boolean(value) => Some(value.to_string()),
+        RawValue::StringList(values) => {
+            let joined = values.join(", ");
+            let joined = joined.trim();
+            (!joined.is_empty()).then(|| joined.to_string())
+        }
+        RawValue::UnsignedInt(value) => Some(value.to_string()),
+        RawValue::SignedInt(value) => Some(value.to_string()),
+        RawValue::Float(value) => Some(value.to_string()),
+        RawValue::Boolean(value) => Some(value.to_string()),
         _ => None,
     }
 }
 
 fn find_symphonia_tag<'a>(
     tags: &'a [SymphoniaTag],
-    std_key: StandardTagKey,
+    matches_std: impl Fn(&StandardTag) -> bool,
     fallback_keys: &[&str],
 ) -> Option<&'a SymphoniaTag> {
     tags.iter()
-        .find(|tag| tag.std_key == Some(std_key))
+        .find(|tag| tag.std.as_ref().is_some_and(&matches_std))
         .or_else(|| {
             tags.iter().find(|tag| {
                 fallback_keys
                     .iter()
-                    .any(|key| tag.key.eq_ignore_ascii_case(key))
+                    .any(|key| tag.raw.key.eq_ignore_ascii_case(key))
             })
         })
 }
@@ -279,63 +284,53 @@ fn read_with_symphonia(
     let mut duration = 0;
 
     let mss = MediaSourceStream::new(Box::new(file), Default::default());
-    if let Ok(mut probed) = symphonia::default::get_probe().format(
+    if let Ok(mut format) = symphonia::default::get_probe().probe(
         &hint,
         mss,
-        &FormatOptions::default(),
-        &MetadataOptions::default(),
+        FormatOptions::default(),
+        MetadataOptions::default(),
     ) {
-        if let Some(mut metadata) = probed.metadata.get() {
-            let revision = metadata
-                .skip_to_latest()
-                .cloned()
-                .or_else(|| metadata.current().cloned());
-            if let Some(revision) = revision {
-                tags.extend(revision.tags().iter().cloned());
-            }
-        }
-
-        let mut format = probed.format;
         {
             let mut metadata = format.metadata();
-            let revision = metadata
-                .skip_to_latest()
-                .cloned()
-                .or_else(|| metadata.current().cloned());
-            if let Some(revision) = revision {
-                tags.extend(revision.tags().iter().cloned());
+            if let Some(revision) = metadata.skip_to_latest() {
+                tags.extend(revision.media.tags.iter().cloned());
             }
         }
 
         if let Some(track_info) = format
             .tracks()
             .iter()
-            .find(|track| track.codec_params.codec != CODEC_TYPE_NULL)
+            .find(|track| track.codec_params.as_ref().and_then(|p| p.audio()).is_some())
             .or_else(|| format.tracks().first())
         {
-            let codec_params = &track_info.codec_params;
-            sample_rate = codec_params.sample_rate.unwrap_or(0);
-            duration = codec_params
+            if let Some(audio) = track_info.codec_params.as_ref().and_then(|p| p.audio()) {
+                sample_rate = audio.sample_rate.unwrap_or(0);
+            }
+            duration = track_info
                 .time_base
-                .zip(codec_params.n_frames)
-                .map(|(time_base, n_frames)| {
-                    let time = time_base.calc_time(n_frames);
-                    time.seconds + u64::from(time.frac > 0.0)
+                .zip(track_info.num_frames)
+                .and_then(|(time_base, n_frames)| {
+                    time_base.calc_time(Timestamp::from(n_frames as i64))
                 })
+                .map(|time| time.as_secs_f64().ceil().max(0.0) as u64)
                 .unwrap_or(0);
         }
     }
 
-    let artist = find_symphonia_tag(&tags, StandardTagKey::Artist, &["ARTIST"])
+    let artist = find_symphonia_tag(&tags, |t| matches!(t, StandardTag::Artist(_)), &["ARTIST"])
         .and_then(symphonia_tag_to_string)
         .unwrap_or_else(|| "Unknown Artist".to_string());
 
-    let album_title = find_symphonia_tag(&tags, StandardTagKey::Album, &["ALBUM"])
+    let album_title = find_symphonia_tag(&tags, |t| matches!(t, StandardTag::Album(_)), &["ALBUM"])
         .and_then(symphonia_tag_to_string);
 
-    let album_artist = find_symphonia_tag(&tags, StandardTagKey::AlbumArtist, &["ALBUMARTIST"])
-        .and_then(symphonia_tag_to_string)
-        .unwrap_or_else(|| artist.clone());
+    let album_artist = find_symphonia_tag(
+        &tags,
+        |t| matches!(t, StandardTag::AlbumArtist(_)),
+        &["ALBUMARTIST"],
+    )
+    .and_then(symphonia_tag_to_string)
+    .unwrap_or_else(|| artist.clone());
 
     let parent_path = track_path.parent().map(|p| p.to_string_lossy());
     let grouping_key = album_title
@@ -344,7 +339,7 @@ fn read_with_symphonia(
         .or(parent_path.as_deref())
         .unwrap_or(&artist);
 
-    let title = find_symphonia_tag(&tags, StandardTagKey::TrackTitle, &["TITLE"])
+    let title = find_symphonia_tag(&tags, |t| matches!(t, StandardTag::TrackTitle(_)), &["TITLE"])
         .and_then(symphonia_tag_to_string)
         .or_else(|| {
             track_path
@@ -369,27 +364,35 @@ fn read_with_symphonia(
         khz: sample_rate,
         bitrate: bitrate_kbps,
         duration,
-        track_number: find_symphonia_tag(&tags, StandardTagKey::TrackNumber, &["TRACKNUMBER"])
-            .and_then(symphonia_tag_to_string)
-            .and_then(|value| value.parse().ok()),
-        disc_number: find_symphonia_tag(&tags, StandardTagKey::DiscNumber, &["DISCNUMBER"])
-            .and_then(symphonia_tag_to_string)
-            .and_then(|value| value.parse().ok()),
+        track_number: find_symphonia_tag(
+            &tags,
+            |t| matches!(t, StandardTag::TrackNumber(_)),
+            &["TRACKNUMBER"],
+        )
+        .and_then(symphonia_tag_to_string)
+        .and_then(|value| value.parse().ok()),
+        disc_number: find_symphonia_tag(
+            &tags,
+            |t| matches!(t, StandardTag::DiscNumber(_)),
+            &["DISCNUMBER"],
+        )
+        .and_then(symphonia_tag_to_string)
+        .and_then(|value| value.parse().ok()),
         musicbrainz_release_id: find_symphonia_tag(
             &tags,
-            StandardTagKey::MusicBrainzAlbumId,
+            |t| matches!(t, StandardTag::MusicBrainzAlbumId(_)),
             &["MUSICBRAINZ_ALBUMID"],
         )
         .and_then(symphonia_tag_to_string),
         musicbrainz_recording_id: find_symphonia_tag(
             &tags,
-            StandardTagKey::MusicBrainzRecordingId,
+            |t| matches!(t, StandardTag::MusicBrainzRecordingId(_)),
             &["MUSICBRAINZ_TRACKID"],
         )
         .and_then(symphonia_tag_to_string),
         musicbrainz_track_id: find_symphonia_tag(
             &tags,
-            StandardTagKey::MusicBrainzTrackId,
+            |t| matches!(t, StandardTag::MusicBrainzTrackId(_)),
             &["MUSICBRAINZ_RELEASETRACKID"],
         )
         .and_then(symphonia_tag_to_string),
@@ -419,11 +422,15 @@ fn read_with_symphonia(
     };
 
     if !album_exists || cover.is_some() {
-        let genre = find_symphonia_tag(&tags, StandardTagKey::Genre, &["GENRE"])
+        let genre = find_symphonia_tag(&tags, |t| matches!(t, StandardTag::Genre(_)), &["GENRE"])
             .and_then(symphonia_tag_to_string)
             .unwrap_or_else(|| "Unknown".to_string());
-        let year = find_symphonia_tag(&tags, StandardTagKey::Date, &["DATE", "YEAR"])
-            .and_then(symphonia_tag_to_string)
+        let year = find_symphonia_tag(
+            &tags,
+            |t| matches!(t, StandardTag::ReleaseDate(_) | StandardTag::ReleaseYear(_)),
+            &["DATE", "YEAR"],
+        )
+        .and_then(symphonia_tag_to_string)
             .and_then(|value| value.get(..4).and_then(|prefix| prefix.parse::<u16>().ok()))
             .unwrap_or(0);
 
