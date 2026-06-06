@@ -2,8 +2,8 @@ use ::server::jellyfin::JellyfinClient;
 use ::server::subsonic::SubsonicClient;
 use config::{AppConfig, ListenNowStyle, MusicService, UiStyle};
 use dioxus::prelude::*;
+use rand::rng;
 use rand::seq::SliceRandom;
-use rand::thread_rng;
 use reader::{Album, FavoritesStore, Library, PlaylistStore, Track};
 use std::collections::HashMap;
 
@@ -169,7 +169,7 @@ pub fn JellyfinHome(
         if albums.is_empty() {
             return Vec::new();
         }
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let mut shuffled = albums.clone();
         shuffled.shuffle(&mut rng);
         shuffled
@@ -344,7 +344,7 @@ pub fn JellyfinHome(
             })
             .cloned()
             .collect();
-        let mut rng = thread_rng();
+        let mut rng = rng();
         albums.shuffle(&mut rng);
         albums.truncate(12);
         let cards = albums

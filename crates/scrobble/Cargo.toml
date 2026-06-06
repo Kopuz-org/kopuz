@@ -4,7 +4,7 @@ version.workspace = true
 edition = "2024"
 
 [dependencies]
-md5 = "0.7"
+md5 = "0.8"
 tracing = "0.1"
 reqwest.workspace = true
 config.workspace = true

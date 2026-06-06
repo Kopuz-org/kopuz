@@ -11,5 +11,5 @@ serde_json = { workspace = true }
 config = { workspace = true }
 rand = { workspace = true }
 uuid = { workspace = true }
-md5 = "0.7"
+md5 = "0.8"
 web-time = { workspace = true }

@@ -88,17 +88,19 @@ use std::sync::{Arc, Mutex};
 use wasm_bindgen::JsCast;
 
 #[cfg(not(target_arch = "wasm32"))]
-use symphonia::core::audio::{AudioBufferRef, Signal};
+use symphonia::core::audio::GenericAudioBufferRef;
 #[cfg(not(target_arch = "wasm32"))]
-use symphonia::core::codecs::{CODEC_TYPE_NULL, Decoder, DecoderOptions};
+use symphonia::core::codecs::audio::{AudioDecoder, AudioDecoderOptions};
+#[cfg(not(target_arch = "wasm32"))]
+use symphonia::core::codecs::registry::RegisterableAudioDecoder;
+#[cfg(not(target_arch = "wasm32"))]
+use symphonia::core::formats::probe::Hint;
 #[cfg(not(target_arch = "wasm32"))]
 use symphonia::core::formats::{FormatOptions, SeekMode, SeekTo};
 #[cfg(not(target_arch = "wasm32"))]
 use symphonia::core::io::MediaSourceStream;
 #[cfg(not(target_arch = "wasm32"))]
 use symphonia::core::meta::MetadataOptions;
-#[cfg(not(target_arch = "wasm32"))]
-use symphonia::core::probe::Hint;
 #[cfg(not(target_arch = "wasm32"))]
 use symphonia::core::units::Time;
 
@@ -709,13 +711,13 @@ impl Player {
             }
         };
 
-        let probed = match symphonia::default::get_probe().format(
+        let mut format = match symphonia::default::get_probe().probe(
             &hint,
             mss,
-            &FormatOptions::default(),
-            &MetadataOptions::default(),
+            FormatOptions::default(),
+            MetadataOptions::default(),
         ) {
-            Ok(p) => p,
+            Ok(f) => f,
             Err(e) => {
                 eprintln!("symphonia probe error: {}", e);
                 finish_natural(&state);
@@ -723,12 +725,10 @@ impl Player {
             }
         };
 
-        let mut format = probed.format;
-
         let track = match format
             .tracks()
             .iter()
-            .find(|t| t.codec_params.codec != CODEC_TYPE_NULL)
+            .find(|t| t.codec_params.as_ref().and_then(|p| p.audio()).is_some())
         {
             Some(t) => t,
             None => {
@@ -739,30 +739,25 @@ impl Player {
         };
 
         let track_id = track.id;
-        let source_sample_rate = track.codec_params.sample_rate.unwrap_or(target_sample_rate);
-        let source_channels = track
-            .codec_params
-            .channels
-            .map(|c| c.count())
-            .unwrap_or(target_channels);
+        let audio_params = track.codec_params.as_ref().and_then(|p| p.audio()).unwrap();
+        let source_sample_rate = audio_params.sample_rate.unwrap_or(target_sample_rate);
 
-        let mut decoder: Box<dyn symphonia::core::codecs::Decoder> =
-            match symphonia::default::get_codecs()
-                .make(&track.codec_params, &DecoderOptions::default())
-            {
+        let mut decoder: Box<dyn AudioDecoder> = match symphonia::default::get_codecs()
+            .make_audio_decoder(audio_params, &AudioDecoderOptions::default())
+        {
+            Ok(d) => d,
+            Err(_) => match symphonia_adapter_libopus::OpusDecoder::try_registry_new(
+                audio_params,
+                &AudioDecoderOptions::default(),
+            ) {
                 Ok(d) => d,
-                Err(_) => match symphonia_adapter_libopus::OpusDecoder::try_new(
-                    &track.codec_params,
-                    &DecoderOptions::default(),
-                ) {
-                    Ok(d) => Box::new(d),
-                    Err(e) => {
-                        eprintln!("symphonia codec error: {}", e);
-                        finish_natural(&state);
-                        return;
-                    }
-                },
-            };
+                Err(e) => {
+                    eprintln!("symphonia codec error: {}", e);
+                    finish_natural(&state);
+                    return;
+                }
+            },
+        };
 
         loop {
             {
@@ -773,7 +768,8 @@ impl Player {
                 }
 
                 if let Some(seek_time) = st.seek_to.take() {
-                    let time = Time::new(seek_time.as_secs(), seek_time.as_secs_f64().fract());
+                    let time =
+                        Time::try_from_secs_f64(seek_time.as_secs_f64()).unwrap_or_default();
                     let seek_to = SeekTo::Time {
                         time,
                         track_id: Some(track_id),
@@ -808,11 +804,15 @@ impl Player {
             }
 
             let packet = match format.next_packet() {
-                Ok(p) => p,
+                Ok(Some(p)) => p,
+                Ok(None) => {
+                    // Natural end of track — fire the finish callback.
+                    finish_natural(&state);
+                    return;
+                }
                 Err(symphonia::core::errors::Error::IoError(ref e))
                     if e.kind() == std::io::ErrorKind::UnexpectedEof =>
                 {
-                    // Natural end of track — fire the finish callback.
                     finish_natural(&state);
                     return;
                 }
@@ -827,7 +827,7 @@ impl Player {
                 }
             };
 
-            if packet.track_id() != track_id {
+            if packet.track_id != track_id {
                 continue;
             }
 
@@ -846,7 +846,6 @@ impl Player {
 
             let samples = Self::audio_buf_to_f32_interleaved(
                 &decoded,
-                source_channels,
                 target_channels,
                 source_sample_rate,
                 target_sample_rate,
@@ -871,133 +870,14 @@ impl Player {
     }
 
     fn audio_buf_to_f32_interleaved(
-        buf: &AudioBufferRef,
-        source_channels: usize,
+        buf: &GenericAudioBufferRef,
         target_channels: usize,
         source_sample_rate: u32,
         target_sample_rate: u32,
     ) -> Vec<f32> {
-        let frames = buf.frames();
-        let src_chans = source_channels.max(1);
-
-        let mut interleaved = Vec::with_capacity(frames * src_chans);
-
-        match buf {
-            AudioBufferRef::F32(b) => {
-                for frame in 0..frames {
-                    for ch in 0..src_chans {
-                        if ch < b.spec().channels.count() {
-                            interleaved.push(b.chan(ch)[frame]);
-                        } else {
-                            interleaved.push(0.0);
-                        }
-                    }
-                }
-            }
-            AudioBufferRef::S16(b) => {
-                for frame in 0..frames {
-                    for ch in 0..src_chans {
-                        if ch < b.spec().channels.count() {
-                            interleaved.push(b.chan(ch)[frame] as f32 / 32768.0);
-                        } else {
-                            interleaved.push(0.0);
-                        }
-                    }
-                }
-            }
-            AudioBufferRef::S32(b) => {
-                for frame in 0..frames {
-                    for ch in 0..src_chans {
-                        if ch < b.spec().channels.count() {
-                            interleaved.push(b.chan(ch)[frame] as f32 / 2147483648.0);
-                        } else {
-                            interleaved.push(0.0);
-                        }
-                    }
-                }
-            }
-            AudioBufferRef::U8(b) => {
-                for frame in 0..frames {
-                    for ch in 0..src_chans {
-                        if ch < b.spec().channels.count() {
-                            interleaved.push((b.chan(ch)[frame] as f32 - 128.0) / 128.0);
-                        } else {
-                            interleaved.push(0.0);
-                        }
-                    }
-                }
-            }
-            AudioBufferRef::F64(b) => {
-                for frame in 0..frames {
-                    for ch in 0..src_chans {
-                        if ch < b.spec().channels.count() {
-                            interleaved.push(b.chan(ch)[frame] as f32);
-                        } else {
-                            interleaved.push(0.0);
-                        }
-                    }
-                }
-            }
-            AudioBufferRef::S24(b) => {
-                for frame in 0..frames {
-                    for ch in 0..src_chans {
-                        if ch < b.spec().channels.count() {
-                            let val = b.chan(ch)[frame].0;
-                            interleaved.push(val as f32 / 8388608.0);
-                        } else {
-                            interleaved.push(0.0);
-                        }
-                    }
-                }
-            }
-            AudioBufferRef::U16(b) => {
-                for frame in 0..frames {
-                    for ch in 0..src_chans {
-                        if ch < b.spec().channels.count() {
-                            interleaved.push((b.chan(ch)[frame] as f32 - 32768.0) / 32768.0);
-                        } else {
-                            interleaved.push(0.0);
-                        }
-                    }
-                }
-            }
-            AudioBufferRef::U24(b) => {
-                for frame in 0..frames {
-                    for ch in 0..src_chans {
-                        if ch < b.spec().channels.count() {
-                            let val: u32 = b.chan(ch)[frame].0;
-                            interleaved.push((val as f32 - 8388608.0) / 8388608.0);
-                        } else {
-                            interleaved.push(0.0);
-                        }
-                    }
-                }
-            }
-            AudioBufferRef::U32(b) => {
-                for frame in 0..frames {
-                    for ch in 0..src_chans {
-                        if ch < b.spec().channels.count() {
-                            interleaved.push(
-                                (b.chan(ch)[frame] as f64 - 2147483648.0) as f32 / 2147483648.0,
-                            );
-                        } else {
-                            interleaved.push(0.0);
-                        }
-                    }
-                }
-            }
-            AudioBufferRef::S8(b) => {
-                for frame in 0..frames {
-                    for ch in 0..src_chans {
-                        if ch < b.spec().channels.count() {
-                            interleaved.push(b.chan(ch)[frame] as f32 / 128.0);
-                        } else {
-                            interleaved.push(0.0);
-                        }
-                    }
-                }
-            }
-        }
+        let src_chans = buf.num_planes().max(1);
+        let mut interleaved: Vec<f32> = Vec::with_capacity(buf.frames() * src_chans);
+        buf.copy_to_vec_interleaved(&mut interleaved);
 
         let interleaved = if src_chans != target_channels {
             Self::convert_channels(&interleaved, src_chans, target_channels)
