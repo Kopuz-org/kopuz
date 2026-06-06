@@ -26,10 +26,61 @@ use components::settings_items::{
     ThemeSelector, ToggleSetting,
 };
 use components::settings_popups::{AddRegistryPopup, AddServerPopup, LoginPopup};
-use config::{AppConfig, ArtistPhotoSource, FetchStrategy, MusicService, OfflineQuality};
+use config::{AppConfig, ArtistPhotoSource, Browser, FetchStrategy, MusicService, OfflineQuality};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
+async fn validate(cookies: &str) -> bool {
+    ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies.to_string())
+        .validate_cookies()
+        .await
+        .is_ok()
+}
+
+async fn try_resume(seed: Option<String>) -> Option<String> {
+    if let Some(c) = &seed
+        && validate(c).await
+    {
+        return seed;
+    }
+    if let Some(c) = &seed
+        && let Ok(Some(rotated)) =
+            ::server::ytmusic::verify_session_keepalive::tick(c).await
+        && validate(&rotated).await
+    {
+        return Some(rotated);
+    }
+    None
+}
+
+async fn ensure_signed_in(
+    config_cookies: Option<String>,
+    browser: Browser,
+) -> Result<String, String> {
+    if let Some(c) = try_resume(config_cookies).await {
+        return Ok(c);
+    }
+
+    let profile = ::server::ytmusic::isolated_profile::profile_dir();
+    if profile.is_dir() {
+        let from_profile = ::server::ytmusic::cookies::extract_from(browser, &profile)
+            .await
+            .ok();
+        if let Some(c) = try_resume(from_profile).await {
+            return Ok(c);
+        }
+    }
+
+    let cookies = ::server::ytmusic::isolated_profile::launch_signin_and_extract(
+        browser,
+        std::time::Duration::from_secs(300),
+    )
+    .await?;
+    if !validate(&cookies).await {
+        return Err("Sign-in completed but YT validation still failed".to_string());
+    }
+    Ok(cookies)
+}
 
 #[component]
 pub fn Settings(config: Signal<AppConfig>) -> Element {
@@ -112,45 +163,34 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             .as_ref()
             .and_then(|s| s.yt_browser)
             .unwrap_or(*yt_browser.peek());
-        // Route YT sign-in failures through PlayerController.playback_error
-        // so the existing YT-banner in main.rs surfaces them after the
-        // popup auto-closes — without this channel the error signal is
-        // tied to the popup component and disappears as soon as the
-        // popup unmounts, leaving "switch to YT did nothing" as the
-        // user's only signal.
+        let existing = config
+            .peek()
+            .server
+            .as_ref()
+            .and_then(|s| s.access_token.clone())
+            .filter(|t| !t.is_empty());
         let mut report = move |msg: String| {
             error.set(Some(msg.clone()));
             ctrl.playback_error.set(Some(msg));
         };
         spawn(async move {
-            let cookies = match server::ytmusic::isolated_profile::launch_signin_and_extract(
-                browser,
-                std::time::Duration::from_secs(300),
-            )
-            .await
+            if let Err(e) =
+                server::ytmusic::YouTubeMusicClient::new().check_botguard_available().await
             {
+                report(format!(
+                    "YouTube Music needs the rustypipe-botguard helper. {e}"
+                ));
+                return;
+            }
+
+            let cookies = match ensure_signed_in(existing, browser).await {
                 Ok(c) => c,
                 Err(e) => {
                     report(format!("YT Music sign-in failed ({browser}): {e}"));
                     return;
                 }
             };
-            let client = server::ytmusic::YouTubeMusicClient::with_cookies(cookies.clone());
-            if let Err(e) = client.check_botguard_available().await {
-                report(format!(
-                    "YouTube Music needs the rustypipe-botguard helper. {e}"
-                ));
-                return;
-            }
-            if let Err(e) = client.validate_cookies().await {
-                report(format!("YT Music sign-in check failed: {e}"));
-                return;
-            }
-            // Pages everywhere gate on (access_token, user_id) both being
-            // Some — YT has no real user_id concept, but the SAPISID cookie
-            // is stable per Google account, so a short hash of it gives us
-            // an opaque-but-account-distinct id so switching accounts
-            // invalidates per-server caches without exposing the cookie.
+
             let yt_user_id =
                 ::server::ytmusic::derive_user_id(&cookies).unwrap_or_else(|| "me".to_string());
             {
