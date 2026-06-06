@@ -1,0 +1,186 @@
+use std::path::PathBuf;
+
+use reader::models::Track;
+use serde_json::{Value, json};
+
+use super::SOURCE_PREFIX;
+use super::clients::WEB_REMIX;
+use super::innertube::sapisid_hash;
+use super::search::{encode_url_tag, synthesize_album_id};
+
+const ORIGIN: &str = "https://music.youtube.com";
+
+pub async fn start_mix(seed_video_id: &str, cookies: &str) -> Result<Vec<Track>, String> {
+    let playlist_id = format!("RDAMVM{seed_video_id}");
+    let client = WEB_REMIX;
+    let body = json!({
+        "enablePersistentPlaylistPanel": true,
+        "tunerSettingValue": "AUTOMIX_SETTING_NORMAL",
+        "videoId": seed_video_id,
+        "playlistId": playlist_id,
+        "params": "wAEB",
+        "isAudioOnly": true,
+        "context": {
+            "client": {
+                "clientName": client.client_name,
+                "clientVersion": client.client_version,
+                "hl": "en",
+                "gl": "US",
+            },
+            "user": { "lockedSafetyMode": false },
+        },
+    });
+
+    let auth = sapisid_hash(cookies, ORIGIN).ok_or_else(|| "SAPISID missing".to_string())?;
+    let resp: Value = reqwest::Client::new()
+        .post(format!("{ORIGIN}/youtubei/v1/next?prettyPrint=false"))
+        .header("Content-Type", "application/json")
+        .header("X-YouTube-Client-Name", client.client_id)
+        .header("X-YouTube-Client-Version", client.client_version)
+        .header("Origin", ORIGIN)
+        .header("Referer", format!("{ORIGIN}/"))
+        .header("Cookie", cookies)
+        .header("Authorization", auth)
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("next HTTP: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("next HTTP: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("next JSON: {e}"))?;
+
+    Ok(walk_queue(&resp))
+}
+
+fn walk_queue(resp: &Value) -> Vec<Track> {
+    let items = resp
+        .pointer(
+            "/contents/singleColumnMusicWatchNextResultsRenderer/tabbedRenderer/watchNextTabbedResultsRenderer/tabs/0/tabRenderer/content/musicQueueRenderer/content/playlistPanelRenderer/contents",
+        )
+        .and_then(|v| v.as_array());
+    let Some(items) = items else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    for item in items {
+        let row = item
+            .get("playlistPanelVideoRenderer")
+            .or_else(|| item.pointer("/playlistPanelVideoWrapperRenderer/primaryRenderer/playlistPanelVideoRenderer"));
+        let Some(row) = row else {
+            continue;
+        };
+        if let Some(track) = parse_queue_row(row) {
+            out.push(track);
+        }
+    }
+    out
+}
+
+fn parse_queue_row(row: &Value) -> Option<Track> {
+    let video_id = row.get("videoId").and_then(|v| v.as_str())?.to_string();
+    let mvt = row
+        .pointer("/navigationEndpoint/watchEndpoint/watchEndpointMusicSupportedConfigs/watchEndpointMusicConfig/musicVideoType")
+        .and_then(|v| v.as_str());
+    if !matches!(
+        mvt,
+        Some("MUSIC_VIDEO_TYPE_ATV" | "MUSIC_VIDEO_TYPE_OMV" | "MUSIC_VIDEO_TYPE_UGC" | "MUSIC_VIDEO_TYPE_OFFICIAL_SOURCE_MUSIC")
+    ) {
+        return None;
+    }
+    let has_album = matches!(
+        mvt,
+        Some("MUSIC_VIDEO_TYPE_ATV" | "MUSIC_VIDEO_TYPE_OFFICIAL_SOURCE_MUSIC")
+    );
+
+    let title = row
+        .pointer("/title/runs/0/text")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let byline: Vec<String> = row
+        .pointer("/longBylineText/runs")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|r| r.get("text").and_then(|t| t.as_str()))
+                .filter(|s| !matches!(*s, " • " | " & " | ", "))
+                .map(|s| s.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // For songs (has_album): byline = [artist, album, year-or-views, likes]
+    // For videos:            byline = [artist, views, likes]
+    let primary_artist = byline.first().cloned().unwrap_or_default();
+    let artists = if primary_artist.is_empty() {
+        Vec::new()
+    } else {
+        vec![primary_artist.clone()]
+    };
+    let album = if has_album {
+        byline.get(1).cloned().unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let duration = row
+        .pointer("/lengthText/runs/0/text")
+        .and_then(|v| v.as_str())
+        .and_then(parse_mm_ss)
+        .unwrap_or(0);
+
+    let thumbnail = row
+        .pointer("/thumbnail/thumbnails")
+        .and_then(|v| v.as_array())
+        .and_then(|arr| arr.iter().max_by_key(|t| t.get("width").and_then(|w| w.as_u64()).unwrap_or(0)))
+        .and_then(|t| t.get("url"))
+        .and_then(|u| u.as_str())
+        .map(normalize_yt_thumbnail);
+
+    let path = match thumbnail {
+        Some(ref url) if !url.is_empty() => PathBuf::from(format!(
+            "{SOURCE_PREFIX}:{video_id}:{}",
+            encode_url_tag(url)
+        )),
+        _ => PathBuf::from(format!("{SOURCE_PREFIX}:{video_id}")),
+    };
+    let album_id = synthesize_album_id(&album, &primary_artist);
+
+    Some(Track {
+        path,
+        album_id,
+        title,
+        artist: primary_artist,
+        album,
+        duration,
+        khz: 0,
+        bitrate: 0,
+        track_number: None,
+        disc_number: None,
+        musicbrainz_release_id: None,
+        musicbrainz_recording_id: None,
+        musicbrainz_track_id: None,
+        playlist_item_id: None,
+        artists,
+    })
+}
+
+fn normalize_yt_thumbnail(url: &str) -> String {
+    let base = match url.rfind('=') {
+        Some(idx) if url[idx + 1..].starts_with('w') => &url[..idx],
+        _ => url,
+    };
+    format!("{base}=w544-h544-l90-rj")
+}
+
+fn parse_mm_ss(s: &str) -> Option<u64> {
+    let mut parts = s.split(':').rev();
+    let secs: u64 = parts.next()?.parse().ok()?;
+    let mins: u64 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    let hours: u64 = parts.next().and_then(|p| p.parse().ok()).unwrap_or(0);
+    Some(hours * 3600 + mins * 60 + secs)
+}
