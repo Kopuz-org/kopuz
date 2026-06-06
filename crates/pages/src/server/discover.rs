@@ -3,6 +3,16 @@ use dioxus::prelude::*;
 use reader::models::{Library, Track};
 use server::ytmusic::discover::{DiscoverHome, DiscoverItem, DiscoverShelf, YtArtist};
 
+/// Tracks the id (playlist_id or MPRE… album browse id) that last
+/// initiated playback through a Discover surface. Album and playlist
+/// tiles read this to decide whether to render a play or pause icon
+/// in their hover overlay, and whether the click should
+/// fetch+enqueue or just toggle the player. Cleared when a
+/// stand-alone song starts playing from a SongCard so we don't
+/// incorrectly show "playing" on the album that previously played.
+#[derive(Clone, Copy)]
+pub struct DiscoverNowPlaying(pub Signal<Option<String>>);
+
 #[component]
 pub fn DiscoverPage(
     library: Signal<Library>,
@@ -243,6 +253,7 @@ fn SongListShelf(
     on_select_playlist: EventHandler<(String, String)>,
 ) -> Element {
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
+    let mut now_playing = use_context::<DiscoverNowPlaying>().0;
     let tracks: Vec<Track> = shelf
         .items
         .iter()
@@ -279,6 +290,11 @@ fn SongListShelf(
                                 let mut queue = tracks_for_row.clone();
                                 let start = queue.iter().position(|x| x.path == t.path).unwrap_or(0);
                                 queue.rotate_left(start);
+                                // The Top Songs preview isn't a real playlist
+                                // — clear the discover source so no album/
+                                // playlist tile incorrectly shows the pause
+                                // overlay while this plays.
+                                now_playing.set(None);
                                 ctrl.play_queue_linear(queue);
                             }
                         },
@@ -299,19 +315,25 @@ fn DiscoverTile(
 ) -> Element {
     let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let config = use_context::<Signal<AppConfig>>();
+    let now_playing = use_context::<DiscoverNowPlaying>().0;
     match item {
         DiscoverItem::Song(track) => {
             let mut ctrl_for_song = ctrl;
+            let mut now_playing_for_song = now_playing;
             rsx! {
                 SongCard {
                     track: track.clone(),
-                    on_play: move |t: Track| ctrl_for_song.play_queue_linear(vec![t]),
+                    on_play: move |t: Track| {
+                        now_playing_for_song.set(None);
+                        ctrl_for_song.play_queue_linear(vec![t]);
+                    },
                 }
             }
         },
         DiscoverItem::Playlist { playlist_id, title, subtitle, thumbnail } => {
             let title_for_click = title.clone();
             let pid_for_play = playlist_id.clone();
+            let pid_for_source = playlist_id.clone();
             rsx! {
                 Card {
                     title: title,
@@ -322,14 +344,16 @@ fn DiscoverTile(
                         on_select_playlist.call((playlist_id.clone(), title_for_click.clone()))
                     },
                     on_play: EventHandler::new(move |_| {
-                        play_playlist_async(pid_for_play.clone(), config, ctrl);
+                        play_playlist_async(pid_for_play.clone(), config, ctrl, now_playing);
                     }),
+                    source_id: Some(pid_for_source),
                 }
             }
         },
         DiscoverItem::Album { browse_id, title, subtitle, thumbnail } => {
             let title_for_click = title.clone();
             let bid_for_play = browse_id.clone();
+            let bid_for_source = browse_id.clone();
             rsx! {
                 Card {
                     title: title,
@@ -340,8 +364,9 @@ fn DiscoverTile(
                         on_select_playlist.call((browse_id.clone(), title_for_click.clone()))
                     },
                     on_play: EventHandler::new(move |_| {
-                        play_playlist_async(bid_for_play.clone(), config, ctrl);
+                        play_playlist_async(bid_for_play.clone(), config, ctrl, now_playing);
                     }),
+                    source_id: Some(bid_for_source),
                 }
             }
         },
@@ -356,6 +381,7 @@ fn DiscoverTile(
                     rounded_full: true,
                     onclick: move |_| on_open_artist.call((cid.clone(), name_for_click.clone())),
                     on_play: None,
+                    source_id: None,
                 }
             }
         },
@@ -367,6 +393,7 @@ fn DiscoverTile(
                 rounded_full: false,
                 onclick: move |_| {},
                 on_play: None,
+                source_id: None,
             }
         },
     }
@@ -386,8 +413,10 @@ fn play_playlist_async(
     id: String,
     config: Signal<AppConfig>,
     mut ctrl: hooks::use_player_controller::PlayerController,
+    mut now_playing: Signal<Option<String>>,
 ) {
     ctrl.is_loading.set(true);
+    now_playing.set(Some(id.clone()));
     spawn(async move {
         let Some(cookies) = config
             .peek()
@@ -423,6 +452,10 @@ fn Card(
     rounded_full: bool,
     onclick: EventHandler<MouseEvent>,
     on_play: Option<EventHandler<()>>,
+    /// The id (playlist_id / MPRE…) this card represents. When set
+    /// and equal to DiscoverNowPlaying, the overlay shows pause and
+    /// clicking it toggles the player instead of refetching.
+    source_id: Option<String>,
 ) -> Element {
     let img_class = if rounded_full {
         "w-44 h-44 object-cover rounded-full bg-white/5"
@@ -435,6 +468,14 @@ fn Card(
         "w-44 h-44 rounded-lg bg-white/5"
     };
     let cover_radius = if rounded_full { "rounded-full" } else { "rounded-lg" };
+    let now_playing = use_context::<DiscoverNowPlaying>().0;
+    let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
+    let is_this_source = match (&source_id, now_playing.read().as_ref()) {
+        (Some(sid), Some(active)) => sid == active,
+        _ => false,
+    };
+    let is_playing = *ctrl.is_playing.read();
+    let show_pause = is_this_source && is_playing;
     rsx! {
         div {
             class: "shrink-0 w-44 text-left cursor-pointer transition-transform duration-200 ease-out hover:scale-[1.03] hover:-translate-y-0.5 group",
@@ -455,9 +496,19 @@ fn Card(
                         class: "absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-black/40 transition-opacity duration-200 cursor-pointer",
                         onclick: move |e: MouseEvent| {
                             e.stop_propagation();
-                            play.call(());
+                            if is_this_source {
+                                ctrl.toggle();
+                            } else {
+                                play.call(());
+                            }
                         },
-                        i { class: "fa-solid fa-play text-white text-2xl" }
+                        i {
+                            class: if show_pause {
+                                "fa-solid fa-pause text-white text-2xl"
+                            } else {
+                                "fa-solid fa-play text-white text-2xl"
+                            }
+                        }
                     }
                 }
             }
@@ -538,6 +589,7 @@ pub fn DiscoverPlaylistDetail(
 ) -> Element {
     let config = use_context::<Signal<AppConfig>>();
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
+    let mut now_playing = use_context::<DiscoverNowPlaying>().0;
     let mut tracks = use_signal(Vec::<Track>::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
@@ -614,6 +666,9 @@ pub fn DiscoverPlaylistDetail(
                     onclick: move |_| {
                         let all = tracks.read().clone();
                         if !all.is_empty() {
+                            if let Some(pid) = selected_playlist_id.read().clone() {
+                                now_playing.set(Some(pid));
+                            }
                             ctrl.play_queue_linear(all);
                         }
                     },
@@ -644,6 +699,9 @@ pub fn DiscoverPlaylistDetail(
                                     .position(|x| x.path == t.path)
                                     .unwrap_or(0);
                                 queue.rotate_left(start_idx);
+                                if let Some(pid) = selected_playlist_id.read().clone() {
+                                    now_playing.set(Some(pid));
+                                }
                                 ctrl.play_queue_linear(queue);
                             },
                         }
@@ -708,6 +766,7 @@ pub fn DiscoverArtistPage(
 ) -> Element {
     let config = use_context::<Signal<AppConfig>>();
     let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
+    let now_playing = use_context::<DiscoverNowPlaying>().0;
     let mut artist = use_signal(|| None::<YtArtist>);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
@@ -787,7 +846,7 @@ pub fn DiscoverArtistPage(
                                         button {
                                             class: "inline-flex items-center gap-2 bg-white text-black px-6 py-2.5 rounded-full font-bold hover:scale-105 active:scale-95 transition-transform cursor-pointer",
                                             onclick: move |_| {
-                                                play_playlist_async(pid.clone(), config, ctrl);
+                                                play_playlist_async(pid.clone(), config, ctrl, now_playing);
                                             },
                                             i { class: "fa-solid fa-shuffle text-[11px]" }
                                             span { class: "text-sm", "{i18n::t(\"shuffle\")}" }

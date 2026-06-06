@@ -1747,6 +1747,10 @@ fn App() -> Element {
 
     provide_context(ctrl);
     provide_context(config);
+    let discover_now_playing = use_signal(|| None::<String>);
+    provide_context(pages::server::discover::DiscoverNowPlaying(
+        discover_now_playing,
+    ));
     provide_context(download_queue);
     provide_context(download_progress);
     provide_context(scroll_positions);
