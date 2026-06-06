@@ -33,14 +33,39 @@ pub fn profile_dir(server_id: &str) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(format!("./{leaf}")))
 }
 
-fn browser_binary(browser: Browser) -> &'static str {
+fn browser_candidates(browser: Browser) -> &'static [&'static str] {
     match browser {
-        Browser::Brave => "brave",
-        Browser::Chrome => "google-chrome",
-        Browser::Chromium => "chromium",
-        Browser::Edge => "microsoft-edge",
-        Browser::Vivaldi => "vivaldi",
+        Browser::Brave => &["brave", "brave-browser"],
+        Browser::Chrome => &["google-chrome", "google-chrome-stable", "chrome"],
+        Browser::Chromium => &["chromium", "chromium-browser"],
+        Browser::Edge => &[
+            "microsoft-edge",
+            "microsoft-edge-stable",
+            "microsoft-edge-beta",
+            "microsoft-edge-dev",
+        ],
+        Browser::Vivaldi => &["vivaldi", "vivaldi-stable"],
     }
+}
+
+fn find_browser_bin(browser: Browser) -> Option<String> {
+    let env_key = format!("KOPUZ_{}_BIN", browser.id().to_uppercase().replace('-', "_"));
+    if let Some(v) = std::env::var_os(&env_key)
+        && !v.is_empty()
+    {
+        return Some(v.to_string_lossy().into_owned());
+    }
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let dirs: Vec<PathBuf> = std::env::split_paths(&path).collect();
+    for candidate in browser_candidates(browser) {
+        for dir in &dirs {
+            let p = dir.join(candidate);
+            if p.is_file() {
+                return Some(candidate.to_string());
+            }
+        }
+    }
+    None
 }
 
 /// Wipe the isolated profile, launch the chosen browser at the Google
@@ -68,12 +93,19 @@ pub async fn launch_signin_and_extract(
         let _ = std::fs::remove_file(profile.join(name));
     }
 
-    let bin = browser_binary(browser);
+    let bin = find_browser_bin(browser).ok_or_else(|| {
+        format!(
+            "{} not found in PATH (looked for: {}). Install it, or set ${}_BIN to its absolute path.",
+            browser,
+            browser_candidates(browser).join(", "),
+            format!("KOPUZ_{}", browser.id().to_uppercase().replace('-', "_"))
+        )
+    })?;
     eprintln!(
         "[yt-signin] launching {bin} against {} (sign-in URL: {SIGNIN_URL})",
         profile.display()
     );
-    let mut child = Command::new(bin)
+    let mut child = Command::new(&bin)
         .arg("--no-first-run")
         .arg("--no-default-browser-check")
         .arg(format!("--user-data-dir={}", profile.display()))
@@ -82,7 +114,7 @@ pub async fn launch_signin_and_extract(
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)
         .spawn()
-        .map_err(|e| format!("spawn {bin}: {e} (is `{bin}` installed and in PATH?)"))?;
+        .map_err(|e| format!("spawn {bin}: {e}"))?;
     eprintln!("[yt-signin] {bin} pid={:?} — waiting for sign-in", child.id());
 
     let deadline = Instant::now() + signin_timeout;
