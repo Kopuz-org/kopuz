@@ -374,14 +374,20 @@ fn DiscoverTile(
 
 /// Shared "play whatever this id resolves to" used by both Playlist
 /// and Album tiles. MPRE… ids go through the album browse endpoint,
-/// everything else through the playlist entries endpoint. The fetch
-/// happens off the click — slight delay before audio starts but no
-/// blocking the UI.
+/// everything else through the playlist entries endpoint.
+///
+/// Flips `is_loading` true SYNCHRONOUSLY on the calling frame so the
+/// player bar shows the spinner the instant the user clicks — the
+/// fetch + stream resolution takes a beat, and without this the click
+/// felt unresponsive. The signal gets cleared by `play_queue_linear`
+/// once playback actually begins (or by the early-return branches if
+/// the fetch fails / returns nothing).
 fn play_playlist_async(
     id: String,
     config: Signal<AppConfig>,
     mut ctrl: hooks::use_player_controller::PlayerController,
 ) {
+    ctrl.is_loading.set(true);
     spawn(async move {
         let Some(cookies) = config
             .peek()
@@ -389,6 +395,7 @@ fn play_playlist_async(
             .as_ref()
             .and_then(|s| s.access_token.clone())
         else {
+            ctrl.is_loading.set(false);
             return;
         };
         let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
@@ -397,10 +404,13 @@ fn play_playlist_async(
         } else {
             yt.get_playlist_entries(&id).await
         };
-        if let Ok(tracks) = tracks
-            && !tracks.is_empty()
-        {
-            ctrl.play_queue_linear(tracks);
+        match tracks {
+            Ok(tracks) if !tracks.is_empty() => {
+                ctrl.play_queue_linear(tracks);
+            }
+            _ => {
+                ctrl.is_loading.set(false);
+            }
         }
     });
 }
