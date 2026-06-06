@@ -58,6 +58,11 @@ pub struct PlayerController {
     pub pending_crossfade_ui: Signal<Option<PendingCrossfadeUiState>>,
     pub radio_task: Signal<Option<dioxus_core::Task>>,
     pub station_registry: Signal<radio::registry::StationRegistry>,
+    /// User-visible playback error. Set when something needs the user's
+    /// attention (missing `rustypipe-botguard`, expired YT cookies, …).
+    /// Rendered as a banner by whoever subscribes — currently the
+    /// settings popup error sink mirrors it on next open.
+    pub playback_error: Signal<Option<String>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -153,6 +158,22 @@ impl PlayerController {
                     )
                 })
                 .unwrap_or_default(),
+            "ytmusic" => {
+                // YT tracks carry their thumbnail in album_id as
+                // `ytmusic:_:urlhex_HEX`. Pass empty server_url so
+                // `track_cover_url_with_album_fallback` skips its
+                // jellyfin-URL fallback path and only returns the
+                // embedded URL via decode_embedded_cover_url.
+                utils::jellyfin_image::track_cover_url_with_album_fallback(
+                    &path_str,
+                    &track.album_id,
+                    "",
+                    None,
+                    800,
+                    90,
+                )
+                .unwrap_or_default()
+            }
             _ => self
                 .library
                 .read()
@@ -402,7 +423,8 @@ impl PlayerController {
                 .unwrap_or_default()
                 .to_ascii_lowercase();
             let is_radio_item = scheme.as_str() == "radio";
-            let is_server_item = matches!(scheme.as_str(), "jellyfin" | "subsonic" | "custom");
+            let is_server_item =
+                matches!(scheme.as_str(), "jellyfin" | "subsonic" | "custom" | "ytmusic");
 
             if is_server_item || is_radio_item {
                 let parts: Vec<&str> = path_str.split(':').collect();
@@ -583,6 +605,27 @@ impl PlayerController {
 
                                 (stream_url, cover_url)
                             }
+                            // YT can't resolve its stream URL synchronously (the
+                            // /player call is async + multi-client fallback). Tag
+                            // the URL with a sentinel that the async spawn below
+                            // recognises and replaces with the real URL. The
+                            // cover URL, however, is already encoded in the
+                            // track's path (`ytmusic:VID:urlhex_HEX`) so we
+                            // can produce it synchronously here so the
+                            // bottombar shows artwork immediately on click.
+                            MusicService::YtMusic => {
+                                let cover_url =
+                                    utils::jellyfin_image::track_cover_url_with_album_fallback(
+                                        &path_str,
+                                        &track.album_id,
+                                        "",
+                                        None,
+                                        800,
+                                        90,
+                                    )
+                                    .unwrap_or_default();
+                                (format!("__YT_PENDING:{id}"), cover_url)
+                            }
                         })
                     }
                 } {
@@ -601,6 +644,7 @@ impl PlayerController {
                     let mut is_playing = self.is_playing;
                     let mut is_loading = self.is_loading;
                     let mut skip_in_progress = self.skip_in_progress;
+                    let mut playback_error = self.playback_error;
                     let play_generation = self.play_generation;
                     let volume = self.volume;
                     let mut current_song_progress = self.current_song_progress;
@@ -625,15 +669,77 @@ impl PlayerController {
 
                     #[cfg(not(target_arch = "wasm32"))]
                     spawn(async move {
-                        let stream = utils::stream_buffer::StreamBuffer::new(stream_url, is_radio);
+                        let (stream_url, yt_format, yt_user_agent) = if let Some(video_id) =
+                            stream_url.strip_prefix("__YT_PENDING:")
+                        {
+                            let cookies = cfg_signal
+                                .peek()
+                                .server
+                                .as_ref()
+                                .and_then(|s| s.access_token.clone());
+                            let Some(cookies) = cookies else {
+                                eprintln!("YT Music: not signed in");
+                                is_loading.set(false);
+                                skip_in_progress.set(false);
+                                return;
+                            };
+                            let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
+                            match yt.get_stream(video_id).await {
+                                Ok(info) => (
+                                    info.url,
+                                    Some(info.format),
+                                    Some(info.user_agent),
+                                ),
+                                Err(e) => {
+                                    eprintln!("YT Music stream URL fetch failed: {e}");
+                                    playback_error.set(Some(format!(
+                                        "YouTube Music couldn't load this track:\n{e}"
+                                    )));
+                                    is_loading.set(false);
+                                    skip_in_progress.set(false);
+                                    return;
+                                }
+                            }
+                        } else {
+                            (stream_url, None, None)
+                        };
+                        let yt_format_for_blocking = yt_format;
+                        let stream_url_for_blocking = stream_url.clone();
+                        let yt_ua_for_blocking = yt_user_agent.clone();
                         let source_res = tokio::task::spawn_blocking(move || {
                             if is_radio {
-                                let (source, hint) = decoder::from_stream_with_hint(stream, "ogg");
+                                let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
+                                    stream_url_for_blocking,
+                                    true,
+                                    yt_ua_for_blocking,
+                                );
+                                let (source, hint) =
+                                    decoder::from_stream_with_hint(stream, "ogg");
+                                Ok::<_, std::io::Error>((source, hint))
+                            } else if let Some(fmt) = yt_format_for_blocking {
+                                // YT: HTTP Range-backed source. Symphonia
+                                // can seek freely (Matroska Cues at the
+                                // end, scrub anywhere) and startup probes
+                                // only fetch the ~512 KiB they need.
+                                let range = utils::range_source::RangeStreamSource::new(
+                                    stream_url_for_blocking,
+                                    yt_ua_for_blocking,
+                                )?;
+                                let len = Some(range.total_size());
+                                let (source, mut hint) =
+                                    decoder::from_stream_with_len(range, len);
+                                hint.with_extension(fmt.extension());
                                 Ok::<_, std::io::Error>((source, hint))
                             } else {
+                                let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
+                                    stream_url_for_blocking,
+                                    false,
+                                    yt_ua_for_blocking,
+                                );
                                 stream.wait_for_total_size();
                                 let len = stream.known_total_size();
-                                let (source, hint) = decoder::from_stream_with_len(stream, len);
+                                let (source, hint) =
+                                    decoder::from_stream_with_len(stream, len);
                                 Ok::<_, std::io::Error>((source, hint))
                             }
                         })
@@ -1942,6 +2048,7 @@ pub fn use_player_controller(
     let pending_crossfade_ui = use_signal(|| None::<PendingCrossfadeUiState>);
     let radio_task = use_signal(|| None::<dioxus_core::Task>);
     let station_registry = use_context::<Signal<radio::registry::StationRegistry>>();
+    let playback_error = use_signal(|| None::<String>);
 
     PlayerController {
         player,
@@ -1971,5 +2078,6 @@ pub fn use_player_controller(
         pending_crossfade_ui,
         radio_task,
         station_registry,
+        playback_error,
     }
 }
