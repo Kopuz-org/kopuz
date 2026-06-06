@@ -318,6 +318,59 @@ On **Windows** it uses your AppData folder:
 If covers aren't showing or the library looks off, just delete the cache folder
 and hit rescan.
 
+## Spotify Integration
+
+Kopuz integrates with Spotify through Spotify's official public interfaces only.
+Two backends are available:
+
+- **Connect**: pure Web API control. Kopuz authenticates, browses metadata, and
+  controls playback on a user-selected Spotify Connect device. Audio is emitted
+  by that device, not by Kopuz.
+- **Web Playback** (feature `spotify-web-playback`): embeds Spotify's official
+  Web Playback SDK inside a WebView. Audio is emitted by the SDK in the embedded
+  browser context. Requires a WebView capable of running the SDK's media/DRM
+  stack.
+
+### Setup
+
+1. Create an app at <https://developer.spotify.com/dashboard>.
+2. In the app settings, register a redirect URI of exactly
+   `http://127.0.0.1:8898/callback`. Do not use `localhost`; Spotify requires a
+   loopback IP literal for PKCE on desktop. The URI must match byte-for-byte,
+   including the port. If 8898 conflicts with something else on your machine,
+   change `redirect_uri` in `[spotify]` to a free port and register that exact
+   string in the Dashboard.
+3. Copy the client ID into the Kopuz config:
+
+   ```toml
+   [spotify]
+   enabled = true
+   client_id = "YOUR_CLIENT_ID"
+   redirect_uri = "http://127.0.0.1:8898/callback"
+   backend = "connect" # or "web-playback"
+   device_name = "Kopuz"
+   default_device_id = ""
+   market = ""
+   ```
+
+4. Spotify **Premium** is required for any playback control endpoint and for the
+   Web Playback SDK. Free accounts can authenticate and read metadata only.
+
+### Scopes requested
+
+Always: `user-read-private`, `user-read-email`, `user-read-playback-state`,
+`user-read-currently-playing`, `user-modify-playback-state`,
+`playlist-read-private`, `playlist-read-collaborative`, `user-library-read`.
+
+Plus `streaming` only when the Web Playback backend is selected.
+
+### Credentials
+
+OAuth tokens are stored in the OS keyring (Secret Service / Keychain / Windows
+Credential Manager). No client secret is required and no secret is shipped in
+the desktop binary. A plaintext file cache exists only behind the
+development-only `insecure-token-cache` Cargo feature.
+
 ## Optimization
 
 Kopuz is built to feel snappy even with large libraries. Here's what we do under
