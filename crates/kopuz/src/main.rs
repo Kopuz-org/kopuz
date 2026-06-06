@@ -1056,7 +1056,7 @@ fn App() -> Element {
     let fetched_artist_images: Signal<std::collections::HashMap<String, String>> =
         use_signal(std::collections::HashMap::new);
     let is_fetching_artist_images = use_signal(|| false);
-    let search_query = use_signal(String::new);
+    let mut search_query = use_signal(String::new);
     let mut last_server_playlist_key = use_signal(|| None::<String>);
     let mut server_playlist_key_initialized = use_signal(|| false);
     let mut queue = use_signal(Vec::<reader::Track>::new);
@@ -2132,6 +2132,23 @@ fn App() -> Element {
                                     selected_artist_name.set(artist);
                                     current_route.set(Route::Artist);
                                 }
+                            }
+                        },
+                        Route::Discover => rsx! {
+                            pages::server::discover::DiscoverPage {
+                                library: library,
+                                on_select_album: move |id: String| {
+                                    selected_album_id.set(id);
+                                    current_route.set(Route::Album);
+                                },
+                                on_select_playlist: move |id: String| {
+                                    selected_playlist_id.set(Some(id));
+                                    current_route.set(Route::Playlists);
+                                },
+                                on_search_artist: move |name: String| {
+                                    search_query.set(name);
+                                    current_route.set(Route::Search);
+                                },
                             }
                         },
                         Route::Search => rsx! {

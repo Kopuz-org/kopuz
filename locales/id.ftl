@@ -423,3 +423,6 @@ radio_registries_empty = Tidak ada registri yang dikonfigurasi
 offline_downloads = Unduhan Offline
 download_quality = Kualitas Unduhan
 saving = Menyimpan...
+discover_more_loading = Memuat lainnya…
+discover_failed = Tidak bisa memuat Jelajahi: { $error }
+discover_requires_ytmusic = Jelajahi hanya tersedia ketika YouTube Music adalah server aktif.

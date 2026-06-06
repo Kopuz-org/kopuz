@@ -424,3 +424,6 @@ radio_registries_empty = lipu ijo ala li lon
 offline_downloads = ijo tawa ilo
 download_quality = pona pi ijo tawa ilo
 saving = awen...
+discover_more_loading = mi alasa e ijo sin…
+discover_failed = pakala — mi ken ala alasa: { $error }
+discover_requires_ytmusic = sona sin li lon taso lon tenpo pi YouTube Music.

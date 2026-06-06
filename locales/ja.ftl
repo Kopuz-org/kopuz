@@ -430,3 +430,6 @@ radio_registries_empty = レジストリが設定されていません
 offline_downloads = オフラインダウンロード
 download_quality = ダウンロード品質
 saving = 保存中...
+discover_more_loading = さらに読み込み中…
+discover_failed = 発見を読み込めません: { $error }
+discover_requires_ytmusic = 発見は YouTube Music がアクティブなサーバーの場合にのみ利用できます。

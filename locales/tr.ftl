@@ -424,3 +424,6 @@ radio_registries_empty = Yapılandırılmış kayıt defteri yok
 offline_downloads = Çevrimdışı İndirmeler
 download_quality = İndirme Kalitesi
 saving = Kaydediliyor...
+discover_more_loading = Daha fazlası yükleniyor…
+discover_failed = Keşfet yüklenemedi: { $error }
+discover_requires_ytmusic = Keşfet yalnızca YouTube Music aktif sunucu olduğunda kullanılabilir.

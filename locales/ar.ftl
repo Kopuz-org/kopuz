@@ -430,3 +430,6 @@ radio_registries_empty = لم يتم تكوين أي سجلات
 offline_downloads = التنزيلات دون اتصال
 download_quality = جودة التنزيل
 saving = جارٍ الحفظ...
+discover_more_loading = جارٍ تحميل المزيد…
+discover_failed = تعذّر تحميل قسم الاكتشاف: { $error }
+discover_requires_ytmusic = الاكتشاف متاح فقط عندما تكون YouTube Music هي الخادم النشط.

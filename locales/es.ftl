@@ -425,3 +425,6 @@ radio_registries_empty = No hay registros configurados
 offline_downloads = Descargas sin conexión
 download_quality = Calidad de descarga
 saving = Guardando...
+discover_more_loading = Cargando más…
+discover_failed = No se pudo cargar Descubrir: { $error }
+discover_requires_ytmusic = Descubrir solo está disponible cuando YouTube Music es el servidor activo.

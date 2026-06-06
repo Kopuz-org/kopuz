@@ -424,3 +424,6 @@ radio_registries_empty = לא הוגדרו רשומות
 offline_downloads = הורדות לא מקוונות
 download_quality = איכות הורדה
 saving = שומר...
+discover_more_loading = טוען עוד…
+discover_failed = לא ניתן לטעון את גילוי: { $error }
+discover_requires_ytmusic = גילוי זמין רק כאשר YouTube Music הוא השרת הפעיל.

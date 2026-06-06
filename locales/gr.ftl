@@ -424,3 +424,6 @@ radio_registries_empty = Δεν έχουν ρυθμιστεί μητρώα
 offline_downloads = Λήψεις εκτός σύνδεσης
 download_quality = Ποιότητα λήψης
 saving = Αποθήκευση...
+discover_more_loading = Φόρτωση περισσότερων…
+discover_failed = Αδυναμία φόρτωσης Ανακάλυψης: { $error }
+discover_requires_ytmusic = Η Ανακάλυψη είναι διαθέσιμη μόνο όταν το YouTube Music είναι ο ενεργός διακομιστής.

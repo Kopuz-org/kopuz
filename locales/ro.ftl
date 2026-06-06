@@ -424,3 +424,6 @@ radio_registries_empty = Niciun registru configurat
 offline_downloads = Descărcări Offline
 download_quality = Calitatea descărcării
 saving = Se salvează...
+discover_more_loading = Se încarcă mai mult…
+discover_failed = Nu s-a putut încărca Descoperă: { $error }
+discover_requires_ytmusic = Descoperă este disponibil doar când YouTube Music este serverul activ.

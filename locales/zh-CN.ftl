@@ -424,3 +424,6 @@ radio_registries_empty = 未配置注册表
 offline_downloads = 离线下载
 download_quality = 下载质量
 saving = 保存中...
+discover_more_loading = 加载更多…
+discover_failed = 无法加载发现: { $error }
+discover_requires_ytmusic = 仅当 YouTube Music 是当前服务器时才能使用发现。

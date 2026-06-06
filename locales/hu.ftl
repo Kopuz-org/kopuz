@@ -424,3 +424,6 @@ radio_registries_empty = Nincsenek nyilvántartások konfigurálva
 offline_downloads = Offline letöltések
 download_quality = Letöltés minősége
 saving = Mentés...
+discover_more_loading = További betöltése…
+discover_failed = Nem sikerült betölteni a Felfedezést: { $error }
+discover_requires_ytmusic = A Felfedezés csak akkor érhető el, ha a YouTube Music az aktív szerver.

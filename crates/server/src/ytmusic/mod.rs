@@ -4,6 +4,7 @@ use serde_json::Value;
 pub mod botguard;
 pub mod clients;
 pub mod cookies;
+pub mod discover;
 pub mod innertube;
 pub mod isolated_profile;
 pub mod mix;
@@ -213,6 +214,25 @@ impl YouTubeMusicClient {
             .as_deref()
             .ok_or("YouTube Music not signed in")?;
         mix::start_mix(seed_video_id, cookies).await
+    }
+
+    pub async fn discover_home(&self) -> Result<discover::DiscoverHome, String> {
+        let cookies = self
+            .cookies
+            .as_deref()
+            .ok_or("YouTube Music not signed in")?;
+        discover::fetch_home(cookies).await
+    }
+
+    pub async fn discover_continuation(
+        &self,
+        token: &str,
+    ) -> Result<discover::DiscoverHome, String> {
+        let cookies = self
+            .cookies
+            .as_deref()
+            .ok_or("YouTube Music not signed in")?;
+        discover::fetch_continuation(token, cookies).await
     }
 
     /// Confirms the `rustypipe-botguard` binary is reachable. Call this
