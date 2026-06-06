@@ -118,11 +118,16 @@ pub async fn launch_signin_and_extract(
     eprintln!("[yt-signin] {bin} pid={:?} — waiting for sign-in", child.id());
 
     let deadline = Instant::now() + signin_timeout;
+    let mut last_extract_err: Option<String> = None;
     let outcome = loop {
         tokio::time::sleep(Duration::from_millis(500)).await;
         if Instant::now() > deadline {
+            let detail = last_extract_err
+                .as_deref()
+                .map(|e| format!("; last extract error: {e}"))
+                .unwrap_or_default();
             break Err(format!(
-                "Sign-in not detected within {}s — close the browser and try again",
+                "Sign-in not detected within {}s — close the browser and try again{detail}",
                 signin_timeout.as_secs()
             ));
         }
@@ -132,8 +137,15 @@ pub async fn launch_signin_and_extract(
                 "Browser ({bin}) exited before sign-in completed (status {status}) — try again, or pick a different browser in settings"
             ));
         }
-        let Ok(cookies) = super::cookies::extract_from(browser, &profile).await else {
-            continue;
+        let cookies = match super::cookies::extract_from(browser, &profile).await {
+            Ok(c) => c,
+            Err(e) => {
+                if last_extract_err.as_deref() != Some(e.as_str()) {
+                    eprintln!("[yt-signin] cookie extract: {e}");
+                    last_extract_err = Some(e);
+                }
+                continue;
+            }
         };
         if has_cookie(&cookies, "SAPISID") && has_cookie(&cookies, "SID") {
             eprintln!("[yt-signin] cookies detected — closing {bin}");
