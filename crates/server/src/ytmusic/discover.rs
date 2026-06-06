@@ -90,6 +90,7 @@ fn parse_album(resp: &Value) -> Vec<Track> {
         .unwrap_or("")
         .to_string();
 
+    let album_artist = album_primary_artist(resp);
     let album_thumbnail = best_album_thumbnail(resp).map(normalize_yt_thumbnail);
 
     let shelves = resp
@@ -110,7 +111,12 @@ fn parse_album(resp: &Value) -> Vec<Track> {
             continue;
         };
         for item in items {
-            if let Some(track) = parse_album_row(item, &album_title, album_thumbnail.as_deref()) {
+            if let Some(track) = parse_album_row(
+                item,
+                &album_title,
+                album_artist.as_deref(),
+                album_thumbnail.as_deref(),
+            ) {
                 out.push(track);
             }
         }
@@ -139,7 +145,12 @@ fn best_album_thumbnail(resp: &Value) -> Option<String> {
     None
 }
 
-fn parse_album_row(item: &Value, album_title: &str, album_thumbnail: Option<&str>) -> Option<Track> {
+fn parse_album_row(
+    item: &Value,
+    album_title: &str,
+    album_artist: Option<&str>,
+    album_thumbnail: Option<&str>,
+) -> Option<Track> {
     let row = item.get("musicResponsiveListItemRenderer")?;
     let video_id = row
         .pointer("/playlistItemData/videoId")
@@ -153,11 +164,20 @@ fn parse_album_row(item: &Value, album_title: &str, album_thumbnail: Option<&str
     if title.is_empty() {
         return None;
     }
-    let primary_artist = row
+    // YT sometimes emits the kind label ("Song"/"Video"/"Audio") in the
+    // artist slot when the row has no per-track artist, instead of just
+    // leaving it blank. Detect those and fall back to the album header's
+    // primary artist so the row reads as "<album artist>" not "Song".
+    let row_artist = row
         .pointer("/flexColumns/1/musicResponsiveListItemFlexColumnRenderer/text/runs/0/text")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+    let primary_artist = if is_kind_label(&row_artist) || row_artist.is_empty() {
+        album_artist.unwrap_or("").to_string()
+    } else {
+        row_artist
+    };
     let duration = row
         .pointer("/fixedColumns/0/musicResponsiveListItemFixedColumnRenderer/text/runs/0/text")
         .and_then(|v| v.as_str())
@@ -198,6 +218,36 @@ fn parse_album_row(item: &Value, album_title: &str, album_thumbnail: Option<&str
         playlist_item_id: None,
         artists,
     })
+}
+
+fn is_kind_label(s: &str) -> bool {
+    matches!(s, "Song" | "Video" | "Audio" | "Single")
+}
+
+fn album_primary_artist(resp: &Value) -> Option<String> {
+    let subtitle_runs = resp
+        .pointer("/header/musicDetailHeaderRenderer/subtitle/runs")
+        .or_else(|| {
+            resp.pointer(
+                "/contents/twoColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents/0/musicResponsiveHeaderRenderer/straplineTextOne/runs",
+            )
+        })
+        .and_then(|v| v.as_array())?;
+    // Header subtitle is "<Kind> • <Artist> • <Year>". Skip the kind label
+    // and any " • " separator runs, then take the first non-empty piece —
+    // its navigationEndpoint links to the artist channel, but we only need
+    // the text.
+    for run in subtitle_runs {
+        let Some(text) = run.get("text").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let trimmed = text.trim();
+        if trimmed.is_empty() || trimmed == "•" || is_kind_label(trimmed) {
+            continue;
+        }
+        return Some(trimmed.to_string());
+    }
+    None
 }
 
 fn parse_mm_ss(s: &str) -> Option<u64> {
