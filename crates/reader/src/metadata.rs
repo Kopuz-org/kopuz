@@ -116,11 +116,11 @@ pub fn extract_metadata(
         .map(|s| s.to_string());
 
     let musicbrainz_recording_id = tag
-        .and_then(|t| t.get_string(&ItemKey::MusicBrainzRecordingId))
+        .and_then(|t| t.get_string(ItemKey::MusicBrainzRecordingId))
         .map(|s| s.to_string());
 
     let musicbrainz_track_id = tag
-        .and_then(|t| t.get_string(&ItemKey::MusicBrainzTrackId))
+        .and_then(|t| t.get_string(ItemKey::MusicBrainzTrackId))
         .map(|s| s.to_string());
 
     let sample_rate = properties.sample_rate().unwrap_or(0);

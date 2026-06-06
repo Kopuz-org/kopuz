@@ -369,7 +369,7 @@ fn read_embedded_lyrics(audio_path: &str) -> Option<String> {
 
     let tagged = Probe::open(audio_path).ok()?.read().ok()?;
     let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
-    tag.get_string(&ItemKey::Lyrics)
+    tag.get_string(ItemKey::Lyrics)
         .filter(|s| !s.trim().is_empty())
         .map(|s| s.to_string())
 }

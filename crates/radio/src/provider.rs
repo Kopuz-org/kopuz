@@ -250,6 +250,7 @@ async fn start_ws_metadata(
                                     tracing::warn!("WebSocket heartbeat failed: {}", e);
                                     break;
                                 }
+                            }
                         }
                         msg = ws_stream.next() => {
                             match msg {
