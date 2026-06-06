@@ -98,7 +98,14 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     let mut server_name = use_signal(|| String::new());
     let mut server_url = use_signal(|| String::new());
     let mut server_service = use_signal(|| MusicService::Jellyfin);
-    let yt_browser = use_signal(|| config::Browser::Chrome);
+    let yt_browser = use_signal(|| {
+        config
+            .peek()
+            .server
+            .as_ref()
+            .and_then(|s| s.yt_browser)
+            .unwrap_or(config::Browser::Chrome)
+    });
 
     let mut username = use_signal(|| String::new());
     let mut password = use_signal(|| String::new());

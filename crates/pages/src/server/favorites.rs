@@ -526,10 +526,14 @@ pub fn JellyfinFavorites(
                                 class: "flex items-center gap-2",
                                 if syncing {
                                     i { class: "fa-solid fa-arrows-rotate fa-spin text-indigo-300" }
-                                    span { "Syncing — {synced} tracks loaded so far" }
+                                    span {
+                                        "{i18n::t_with(\"yt_syncing_progress\", &[(\"count\", synced.to_string())])}"
+                                    }
                                 } else if total > 0 {
                                     i { class: "fa-solid fa-check text-emerald-400" }
-                                    span { "{total} liked tracks synced" }
+                                    span {
+                                        "{i18n::t_with(\"yt_synced_total\", &[(\"count\", total.to_string())])}"
+                                    }
                                 }
                             }
                             button {
@@ -540,7 +544,7 @@ pub fn JellyfinFavorites(
                                     refresh_nonce.set(next);
                                 },
                                 i { class: "fa-solid fa-arrows-rotate mr-1" }
-                                "Refresh"
+                                "{i18n::t(\"refresh\")}"
                             }
                         }
                     }

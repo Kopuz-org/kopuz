@@ -681,7 +681,9 @@ impl PlayerController {
                                 .as_ref()
                                 .and_then(|s| s.access_token.clone());
                             let Some(cookies) = cookies else {
-                                eprintln!("YT Music: not signed in");
+                                playback_error.set(Some(
+                                    "YouTube Music isn't signed in. Open Settings → YouTube Music → Re-sign in.".to_string()
+                                ));
                                 is_loading.set(false);
                                 skip_in_progress.set(false);
                                 return;

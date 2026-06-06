@@ -153,19 +153,21 @@ pub async fn launch_signin_and_extract(
     signin_timeout: Duration,
 ) -> Result<String, String> {
     let profile = profile_dir(server_id);
-    if profile.exists() {
-        std::fs::remove_dir_all(&profile)
-            .map_err(|e| format!("wipe yt-profile: {e}"))?;
+    match tokio::fs::remove_dir_all(&profile).await {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(format!("wipe yt-profile: {e}")),
     }
-    std::fs::create_dir_all(&profile)
+    tokio::fs::create_dir_all(&profile)
+        .await
         .map_err(|e| format!("mkdir yt-profile: {e}"))?;
 
-    // A leftover SingletonLock from a previous run (kopuz killed, the
-    // browser already wiped, but the symlink lingered) makes Chromium-
-    // family browsers exit immediately because they think another
-    // instance owns this profile. Wipe the locks before relaunching.
     for name in ["SingletonLock", "SingletonCookie", "SingletonSocket"] {
-        let _ = std::fs::remove_file(profile.join(name));
+        match tokio::fs::remove_file(profile.join(name)).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => {}
+        }
     }
 
     let bin = find_browser_bin(browser).ok_or_else(|| {
