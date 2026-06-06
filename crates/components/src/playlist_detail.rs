@@ -83,6 +83,17 @@ pub fn PlaylistDetail(
                     };
                     if let Some((service, url, token, device_id, user_id)) = server_info {
                         match service {
+                            MusicService::YtMusic => {
+                                let yt = server::ytmusic::YouTubeMusicClient::with_cookies(
+                                    token.clone(),
+                                );
+                                if let Ok(yt_tracks) =
+                                    yt.get_playlist_entries(&pid_clone).await
+                                {
+                                    tracks.set(yt_tracks);
+                                    has_loaded_jellyfin_tracks.set(true);
+                                }
+                            }
                             MusicService::Jellyfin => {
                                 let remote = server::jellyfin::JellyfinClient::new(
                                     &url,
@@ -351,6 +362,12 @@ pub fn PlaylistDetail(
                     } else {
                         let pid_clone = pid_for_remove.clone();
                         let entry_id_opt = t.playlist_item_id.clone();
+                        let track_video_id = t
+                            .path
+                            .to_string_lossy()
+                            .split(':')
+                            .nth(1)
+                            .map(|s| s.to_string());
                         let remove_idx = idx;
                         spawn(async move {
                             let conf = config.peek();
@@ -359,6 +376,19 @@ pub fn PlaylistDetail(
                                     (&server.access_token, &server.user_id)
                                 {
                                     let removed = match server.service {
+                                        MusicService::YtMusic => {
+                                            if let Some(vid) = track_video_id.as_deref() {
+                                                let yt =
+                                                    server::ytmusic::YouTubeMusicClient::with_cookies(
+                                                        token.clone(),
+                                                    );
+                                                yt.remove_from_playlist(&pid_clone, vid)
+                                                    .await
+                                                    .is_ok()
+                                            } else {
+                                                false
+                                            }
+                                        }
                                         MusicService::Jellyfin => {
                                             if let Some(entry_id) = entry_id_opt {
                                                 let remote = server::jellyfin::JellyfinClient::new(
@@ -422,6 +452,7 @@ pub fn PlaylistDetail(
                                 let moved_item =
                                     track_list.get(idx - 1).and_then(|t| t.playlist_item_id.clone());
                                 match server.service {
+                                    MusicService::YtMusic => {}
                                     MusicService::Jellyfin => {
                                         if let Some(item_id) = moved_item {
                                             let remote = server::jellyfin::JellyfinClient::new(
@@ -488,6 +519,7 @@ pub fn PlaylistDetail(
                                 let moved_item =
                                     track_list.get(idx + 1).and_then(|t| t.playlist_item_id.clone());
                                 match server.service {
+                                    MusicService::YtMusic => {}
                                     MusicService::Jellyfin => {
                                         if let Some(item_id) = moved_item {
                                             let remote = server::jellyfin::JellyfinClient::new(
