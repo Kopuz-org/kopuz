@@ -909,6 +909,8 @@ fn App() -> Element {
     #[cfg(not(target_arch = "wasm32"))]
     let _ = std::fs::create_dir_all(cover_cache());
     let download_queue = use_signal(DownloadQueue::default);
+    let download_progress = use_signal(::server::DownloadProgress::default);
+    pages::server::download_manager::register_progress_signal(download_progress);
     let mut trigger_rescan = use_signal(|| 0);
     let mut last_scan_key = use_signal(|| None::<String>);
     let mut scan_current_file = use_signal(|| Option::<String>::None);
@@ -1737,6 +1739,7 @@ fn App() -> Element {
     provide_context(ctrl);
     provide_context(config);
     provide_context(download_queue);
+    provide_context(download_progress);
     provide_context(scroll_positions);
     provide_context(fetched_artist_images);
     provide_context(is_fetching_artist_images);
