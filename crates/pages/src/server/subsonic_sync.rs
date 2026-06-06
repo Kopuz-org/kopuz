@@ -337,6 +337,7 @@ pub async fn sync_server_library(
             }
             info!("Subsonic/Custom sync completed successfully.");
         }
+        MusicService::YtMusic => {}
     }
 
     Ok(())
@@ -353,6 +354,7 @@ pub async fn fetch_subsonic_library(
         MusicService::Subsonic => "subsonic",
         MusicService::Custom => "custom",
         MusicService::Jellyfin => "jellyfin",
+        MusicService::YtMusic => "ytmusic",
     };
 
     let mut albums_out = Vec::new();

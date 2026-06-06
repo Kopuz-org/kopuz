@@ -871,6 +871,7 @@ fn ServerHeroBanner(
                                                                 remote.unstar(id).await
                                                             }
                                                         }
+                                                        MusicService::YtMusic => Ok(()),
                                                     };
                                                     if let Err(e) = result {
                                                         eprintln!("Failed to sync favorite: {e}");

@@ -124,6 +124,14 @@ pub fn JellyfinSearch(
                                                     );
                                                     let _ = remote.add_to_playlist(&pid, item_id).await;
                                                 }
+                                                MusicService::YtMusic => {
+                                                    let yt = server::ytmusic::YouTubeMusicClient::with_cookies(
+                                                        token.clone(),
+                                                    );
+                                                    let _ = yt
+                                                        .add_to_playlist(&pid, item_id)
+                                                        .await;
+                                                }
                                             }
                                         }
                                     }
@@ -169,6 +177,18 @@ pub fn JellyfinSearch(
                                                         token,
                                                     );
                                                     let _ = remote.create_playlist(&playlist_name, &[item_id]).await;
+                                                }
+                                                MusicService::YtMusic => {
+                                                    let yt = server::ytmusic::YouTubeMusicClient::with_cookies(
+                                                        token.clone(),
+                                                    );
+                                                    let _ = yt
+                                                        .create_playlist(
+                                                            &playlist_name,
+                                                            "",
+                                                            &[item_id],
+                                                        )
+                                                        .await;
                                                 }
                                             }
                                         }
