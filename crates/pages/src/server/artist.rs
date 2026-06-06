@@ -129,6 +129,7 @@ pub fn JellyfinArtist(
                         }
                     }
                 }
+                config::MusicService::YtMusic => {}
             }
 
             fetched_artist_images.set(images);
@@ -427,6 +428,23 @@ pub fn JellyfinArtist(
                                                             }
                                                         }
                                                     }
+                                                    MusicService::YtMusic => {
+                                                        let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(
+                                                            token.clone(),
+                                                        );
+                                                        for path in selected_paths {
+                                                            let parts: Vec<&str> = path
+                                                                .to_str()
+                                                                .unwrap_or_default()
+                                                                .split(':')
+                                                                .collect();
+                                                            if parts.len() >= 2 {
+                                                                let _ = yt
+                                                                    .add_to_playlist(&pid, parts[1])
+                                                                    .await;
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -475,6 +493,18 @@ pub fn JellyfinArtist(
                                                             let remote = SubsonicClient::new(&server.url, user_id, token);
                                                             let _ = remote
                                                                 .create_playlist(&playlist_name, &item_id_refs)
+                                                                .await;
+                                                        }
+                                                        MusicService::YtMusic => {
+                                                            let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(
+                                                                token.clone(),
+                                                            );
+                                                            let _ = yt
+                                                                .create_playlist(
+                                                                    &playlist_name,
+                                                                    "",
+                                                                    &item_id_refs,
+                                                                )
                                                                 .await;
                                                         }
                                                     }
@@ -577,6 +607,23 @@ pub fn JellyfinArtist(
                                                                 }
                                                             }
                                                         }
+                                                        MusicService::YtMusic => {
+                                                            let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(
+                                                                token.clone(),
+                                                            );
+                                                            for path in paths {
+                                                                let parts: Vec<&str> = path
+                                                                    .to_str()
+                                                                    .unwrap_or_default()
+                                                                    .split(':')
+                                                                    .collect();
+                                                                if parts.len() >= 2 {
+                                                                    let _ = yt
+                                                                        .add_to_playlist(&pid, parts[1])
+                                                                        .await;
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
@@ -622,6 +669,18 @@ pub fn JellyfinArtist(
                                                             let remote = SubsonicClient::new(&server.url, user_id, token);
                                                             let _ = remote
                                                                 .create_playlist(&playlist_name, &item_id_refs)
+                                                                .await;
+                                                        }
+                                                        MusicService::YtMusic => {
+                                                            let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(
+                                                                token.clone(),
+                                                            );
+                                                            let _ = yt
+                                                                .create_playlist(
+                                                                    &playlist_name,
+                                                                    "",
+                                                                    &item_id_refs,
+                                                                )
                                                                 .await;
                                                         }
                                                     }
@@ -1009,7 +1068,7 @@ pub fn ServerArtist(
                 current_queue_index,
             }
         },
-        MusicService::Custom => rsx! {
+        MusicService::Custom | MusicService::YtMusic => rsx! {
             CustomArtist {
                 library,
                 config,
