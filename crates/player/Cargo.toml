@@ -9,7 +9,7 @@ config = { workspace = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 cpal = { workspace = true }
 symphonia = { workspace = true }
-symphonia-adapter-libopus = "0.1"
+symphonia-adapter-libopus = "0.3"
 rb = { workspace = true }
 tokio = { workspace = true }
 
