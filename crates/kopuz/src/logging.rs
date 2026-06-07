@@ -209,29 +209,38 @@ pub fn init(log_dir: &Path, config_tracing_enabled: bool) {
 /// panics — a hard native crash (SIGSEGV) won't run it.
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 fn install_panic_hook() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    // Only the first panic of the process writes a report. A crash usually
+    // cascades — the unwinding main thread trips in-flight worker tasks, which
+    // panic too — and without this guard each one would spray its own
+    // crash-<timestamp>.txt. The first panic is the root cause; the rest still
+    // reach the default hook (console) but don't duplicate the file.
+    static CRASH_WRITTEN: AtomicBool = AtomicBool::new(false);
     let default = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        let message = info
-            .payload()
-            .downcast_ref::<&str>()
-            .map(|s| s.to_string())
-            .or_else(|| info.payload().downcast_ref::<String>().cloned())
-            .unwrap_or_else(|| "<non-string panic payload>".to_string());
-        let location = info
-            .location()
-            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
-            .unwrap_or_else(|| "unknown".to_string());
-        let backtrace = std::backtrace::Backtrace::force_capture().to_string();
+        if !CRASH_WRITTEN.swap(true, Ordering::SeqCst) {
+            let message = info
+                .payload()
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| info.payload().downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "<non-string panic payload>".to_string());
+            let location = info
+                .location()
+                .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+                .unwrap_or_else(|| "unknown".to_string());
+            let backtrace = std::backtrace::Backtrace::force_capture().to_string();
 
-        if let Some(dir) = utils::logs::log_dir() {
-            if let Some(path) = utils::logs::write_crash_report(
-                &dir,
-                env!("CARGO_PKG_VERSION"),
-                &message,
-                &location,
-                &backtrace,
-            ) {
-                tracing::error!(crash_report = %path.display(), panic = %message, %location, "panic — crash report written");
+            if let Some(dir) = utils::logs::log_dir() {
+                if let Some(path) = utils::logs::write_crash_report(
+                    &dir,
+                    env!("CARGO_PKG_VERSION"),
+                    &message,
+                    &location,
+                    &backtrace,
+                ) {
+                    tracing::error!(crash_report = %path.display(), panic = %message, %location, "panic — crash report written");
+                }
             }
         }
         default(info);
