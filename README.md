@@ -376,49 +376,78 @@ mode can't play Premium-only content at all.
 
 ## Logs & Debugging
 
-Kopuz logs through [`tracing`](https://docs.rs/tracing). Output goes to two
-places by default:
+Kopuz logs through [`tracing`](https://docs.rs/tracing). Most of this is reachable
+from the app itself — **Settings → Logs** has **Open logs folder**, **Export
+logs**, and an **Enable Performance Tracing** toggle — so users never need a
+terminal to send a useful report.
 
-- **Console** (stderr) — live logs when you run from a terminal. Info, warnings,
-  and errors.
-- **Log file** — a daily-rolling file with per-span timing, useful for bug
-  reports:
-  - Linux: `~/.cache/kopuz/logs/kopuz.log.<date>`
-  - macOS: `~/Library/Caches/com.temidaradev.kopuz/logs/kopuz.log.<date>`
-  - Windows: `%LOCALAPPDATA%\temidaradev\kopuz\cache\logs\kopuz.log.<date>`
+### Where the files live
 
-### Verbosity
+All files sit in the logs directory (the **Open logs folder** button jumps
+straight here):
 
-Ordinary runs log at `info` to keep the file small. For deeper logs:
+- Linux: `~/.cache/kopuz/logs/`
+- macOS: `~/Library/Caches/com.temidaradev.kopuz/logs/`
+- Windows: `%LOCALAPPDATA%\temidaradev\kopuz\cache\logs\`
+
+| File | What it is |
+|------|------------|
+| `latest.log` | The current session. Span timing + events; the live log. |
+| `kopuz-<timestamp>.log` | Previous sessions, archived on startup (last 10 kept). A restart never erases the run before it. |
+| `crash-<timestamp>.txt` | Written **only on a crash** (Rust panic): message, backtrace, recent log tail, app/OS version. |
+| `kopuz-trace.json` | Performance trace — only when tracing is enabled (see below). Overwritten each run. |
+
+Timestamps are UTC `YYYY-MM-DD_HH-MM-SS`, so the files sort chronologically.
+
+### Triage cheat-sheet
+
+**App crashed →** a `crash-<timestamp>.txt` is generated automatically. Ask the
+user for **Settings → Logs → Export logs** (bundles `latest.log` + the newest
+crash report into one file), or **Open logs folder** and grab the newest
+`crash-*.txt`.
+
+**Performance issue (freeze / slow load / stutter) →** ask the user to:
+
+1. **Settings → Logs → enable "Performance Tracing"**, then **restart** the app
+   (the toggle warns about this — the trace recorder is set up once at startup).
+2. Reproduce the slow action.
+3. **Quit the app** (this flushes the trace cleanly).
+4. **Settings → Logs → Open logs folder** and send `kopuz-trace.json` (or
+   **Export logs**).
+
+Open the trace at [speedscope.app](https://speedscope.app) or
+[ui.perfetto.dev](https://ui.perfetto.dev). Critical paths (YouTube stream
+resolve, browse/search/pagination, mix radio, library scan, downloads, playback
+transitions, per-component renders) are instrumented as named spans, and
+worker-thread work nests under the action that launched it, so the trace shows
+exactly where time goes. Turn it back off afterward — it adds overhead and grows
+the trace file during long sessions.
+
+### Power-user env vars
+
+Everything above has an env-var equivalent for terminal runs (these take
+precedence over the in-app toggle):
 
 ```bash
-# Bump everything to debug
+# Verbose (debug-level) logs for a session
 KOPUZ_DEBUG=1 kopuz
 
-# Or target specific modules (overrides KOPUZ_DEBUG); accepts the standard
-# tracing/env_logger directive syntax
+# Fine-grained, per-module (overrides KOPUZ_DEBUG); standard tracing directive syntax
 KOPUZ_LOG="server::ytmusic=trace,kopuz=debug" kopuz
-```
 
-`RUST_LOG` works too; `KOPUZ_LOG` takes precedence.
-
-### Performance traces
-
-To investigate freezes or slow playback/scans, capture a span trace and open it
-in a span analyzer:
-
-```bash
-# Writes a Chrome/Perfetto trace; "1" uses the default logs dir
+# Performance trace without touching settings ("1"/"true" = default path)
 KOPUZ_TRACE=1 kopuz
-# or a specific path
 KOPUZ_TRACE=/tmp/kopuz-trace.json kopuz
+
+# Deep render-tree profiling: Dioxus's own per-component render/diff spans
+KOPUZ_LOG="info,dioxus_core=trace" KOPUZ_TRACE=1 kopuz
 ```
 
-Open the resulting JSON in [ui.perfetto.dev](https://ui.perfetto.dev) or
-`chrome://tracing`. Critical paths (YouTube stream resolve, browse/search, mix
-radio, library scan, downloads, playback transitions) are instrumented as spans,
-so the trace shows exactly where time goes. Tracing is off by default — zero
-overhead unless `KOPUZ_TRACE` is set.
+`RUST_LOG` works too; `KOPUZ_LOG` takes precedence. Tracing is off by default —
+zero overhead unless enabled via the toggle or `KOPUZ_TRACE`.
+
+> Debug builds add a **Trigger crash** button in Settings → Logs to exercise the
+> crash-report path. It's compiled out of release builds.
 
 ## Optimization
 
