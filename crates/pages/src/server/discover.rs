@@ -474,13 +474,14 @@ fn Card(
         (Some(sid), Some(active)) => sid == active,
         _ => false,
     };
-    // Treat the tile as "playing" the moment is_loading flips true on
-    // click, not only once is_playing eventually does — otherwise the
-    // overlay sits on a play icon for the entire fetch + stream warm-up
-    // and only flips to pause when audio finally starts.
+    // Three icon states: play (default), spinner (this tile is fetching
+    // / stream is warming up), pause (audio actually playing). The
+    // spinner kicks in synchronously because play_playlist_async flips
+    // is_loading on the same frame as the click.
     let is_playing = *ctrl.is_playing.read();
     let is_loading = *ctrl.is_loading.read();
-    let show_pause = is_this_source && (is_playing || is_loading);
+    let show_loading = is_this_source && is_loading;
+    let show_pause = is_this_source && is_playing && !is_loading;
     rsx! {
         div {
             class: "shrink-0 w-44 text-left cursor-pointer transition-transform duration-200 ease-out hover:scale-[1.03] hover:-translate-y-0.5 group",
@@ -501,6 +502,9 @@ fn Card(
                         class: "absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-black/40 transition-opacity duration-200 cursor-pointer",
                         onclick: move |e: MouseEvent| {
                             e.stop_propagation();
+                            if show_loading {
+                                return;
+                            }
                             if is_this_source {
                                 ctrl.toggle();
                             } else {
@@ -508,7 +512,9 @@ fn Card(
                             }
                         },
                         i {
-                            class: if show_pause {
+                            class: if show_loading {
+                                "fa-solid fa-arrows-rotate fa-spin text-white text-2xl"
+                            } else if show_pause {
                                 "fa-solid fa-pause text-white text-2xl"
                             } else {
                                 "fa-solid fa-play text-white text-2xl"
