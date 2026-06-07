@@ -108,8 +108,12 @@ fn read_tail(path: &Path) -> Option<String> {
     let len = f.metadata().ok()?.len();
     let start = len.saturating_sub(TAIL_BYTES);
     f.seek(SeekFrom::Start(start)).ok()?;
-    let mut buf = String::new();
-    f.read_to_string(&mut buf).ok()?;
+    // Read bytes and lossily decode: seeking to a fixed offset can land
+    // mid-UTF-8, which would make read_to_string fail and drop the tail
+    // entirely despite the "lossy" intent.
+    let mut bytes = Vec::new();
+    f.read_to_end(&mut bytes).ok()?;
+    let mut buf = String::from_utf8_lossy(&bytes).into_owned();
     if start > 0 {
         // Drop the (likely partial) first line.
         if let Some(nl) = buf.find('\n') {
@@ -181,23 +185,33 @@ pub fn open_log_dir() -> io::Result<()> {
 pub fn export_logs(dest: &Path) -> io::Result<()> {
     let dir =
         log_dir().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "log dir not set"))?;
+
+    // Read sources BEFORE creating (truncating) dest — the user could pick an
+    // existing log file (even latest.log itself) as the destination, which
+    // File::create would erase before we read it.
+    let latest = std::fs::read_to_string(dir.join(LATEST));
+    let crash = newest_crash(&dir).map(|p| {
+        let name = p
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("crash report")
+            .to_string();
+        (name, std::fs::read_to_string(&p))
+    });
+
     let mut out = std::fs::File::create(dest)?;
     writeln!(out, "=== kopuz log export — {} UTC ===", timestamp())?;
     writeln!(out, "os: {} / {}", std::env::consts::OS, std::env::consts::ARCH)?;
 
     writeln!(out, "\n=== {LATEST} ===")?;
-    match std::fs::read_to_string(dir.join(LATEST)) {
+    match latest {
         Ok(s) => out.write_all(s.as_bytes())?,
         Err(e) => writeln!(out, "(unavailable: {e})")?,
     }
 
-    if let Some(crash) = newest_crash(&dir) {
-        let name = crash
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("crash report");
+    if let Some((name, body)) = crash {
         writeln!(out, "\n=== {name} ===")?;
-        if let Ok(s) = std::fs::read_to_string(&crash) {
+        if let Ok(s) = body {
             out.write_all(s.as_bytes())?;
         }
     }
