@@ -831,17 +831,10 @@ fn ServerHeroBanner(
                                             if parts.len() >= 2 { Some(parts[1].to_string()) } else { None }
                                         }).collect();
                                         spawn(async move {
-                                            let conn = {
-                                                let conf = config.peek();
-                                                let Some(server) = conf.server.as_ref() else { return; };
-                                                let Some(token) = server.access_token.as_ref() else { return; };
-                                                ::server::server_ops::ServerConn {
-                                                    service: server.service,
-                                                    url: server.url.clone(),
-                                                    token: token.clone(),
-                                                    user_id: server.user_id.clone().unwrap_or_default(),
-                                                    device_id: conf.device_id.clone(),
-                                                }
+                                            let Some(conn) =
+                                                ::server::server_ops::ServerConn::resolve(&config.peek())
+                                            else {
+                                                return;
                                             };
                                             if let Err(e) = ::server::server_ops::set_tracks_favorite(
                                                 &conn, &track_ids, new_fav,

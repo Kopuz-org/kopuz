@@ -104,8 +104,12 @@ pub fn init(log_dir: &Path) {
         .with_filter(console_filter());
 
     let chrome_guard = match std::env::var("KOPUZ_TRACE") {
-        Ok(v) if !v.is_empty() => {
-            let trace_path = if v == "1" {
+        // Boolean-style off values disable tracing, matching KOPUZ_DEBUG —
+        // otherwise KOPUZ_TRACE=0 would turn it on and write to a file
+        // literally named "0". "1"/"true" use the default path; any other
+        // non-empty value is treated as an explicit output path.
+        Ok(v) if !v.is_empty() && v != "0" && v != "false" => {
+            let trace_path = if v == "1" || v == "true" {
                 log_dir.join("kopuz-trace.json")
             } else {
                 PathBuf::from(v)

@@ -56,24 +56,7 @@ pub fn toggle_favorite(
                     .write()
                     .set_jellyfin(item_id.clone(), new_fav);
                 spawn(async move {
-                    let conn = {
-                        let conf = config.peek();
-                        conf.server.as_ref().and_then(|server| {
-                            if let (Some(token), Some(user_id)) =
-                                (&server.access_token, &server.user_id)
-                            {
-                                Some(::server::server_ops::ServerConn {
-                                    service: server.service,
-                                    url: server.url.clone(),
-                                    token: token.clone(),
-                                    user_id: user_id.clone(),
-                                    device_id: conf.device_id.clone(),
-                                })
-                            } else {
-                                None
-                            }
-                        })
-                    };
+                    let conn = ::server::server_ops::ServerConn::resolve(&config.peek());
                     match conn {
                         Some(conn) => {
                             let result = ::server::server_ops::set_tracks_favorite(

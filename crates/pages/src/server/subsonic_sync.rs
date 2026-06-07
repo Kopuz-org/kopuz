@@ -27,7 +27,7 @@ pub struct SubsonicLibraryData {
     pub artist_images: std::collections::HashMap<String, String>,
 }
 
-#[tracing::instrument(name = "library.sync", skip_all, fields(clear_first))]
+#[tracing::instrument(name = "library.sync", skip_all, fields(clear_first = clear_first))]
 pub async fn sync_server_library(
     mut library: Signal<Library>,
     config: Signal<AppConfig>,

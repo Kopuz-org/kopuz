@@ -94,17 +94,10 @@ pub fn JellyfinSearch(
                             let path_clone = path.clone();
                             let pid = playlist_id.clone();
                             spawn(async move {
-                                let conn = {
-                                    let conf = config.peek();
-                                    let Some(server) = conf.server.as_ref() else { return; };
-                                    let Some(token) = server.access_token.as_ref() else { return; };
-                                    ::server::server_ops::ServerConn {
-                                        service: server.service,
-                                        url: server.url.clone(),
-                                        token: token.clone(),
-                                        user_id: server.user_id.clone().unwrap_or_default(),
-                                        device_id: conf.device_id.clone(),
-                                    }
+                                let Some(conn) =
+                                    ::server::server_ops::ServerConn::resolve(&config.peek())
+                                else {
+                                    return;
                                 };
                                 let item_ids: Vec<String> =
                                     ::server::server_ops::parse_item_id(
@@ -126,28 +119,21 @@ pub fn JellyfinSearch(
                             let path_clone = path.clone();
                             let playlist_name = name.clone();
                             spawn(async move {
-                                let conn = {
-                                    let conf = config.peek();
-                                    let Some(server) = conf.server.as_ref() else { return; };
-                                    let Some(token) = server.access_token.as_ref() else { return; };
-                                    ::server::server_ops::ServerConn {
-                                        service: server.service,
-                                        url: server.url.clone(),
-                                        token: token.clone(),
-                                        user_id: server.user_id.clone().unwrap_or_default(),
-                                        device_id: conf.device_id.clone(),
-                                    }
+                                let Some(conn) =
+                                    ::server::server_ops::ServerConn::resolve(&config.peek())
+                                else {
+                                    return;
                                 };
-                                let item_ids: Vec<String> =
-                                    ::server::server_ops::parse_item_id(
-                                        path_clone.to_str().unwrap_or_default(),
-                                    )
-                                    .map(|id| vec![id.to_string()])
-                                    .unwrap_or_default();
+                                let Some(item_id) = ::server::server_ops::parse_item_id(
+                                    path_clone.to_str().unwrap_or_default(),
+                                ) else {
+                                    // Unparseable track id → don't create an empty playlist.
+                                    return;
+                                };
                                 let _ = ::server::server_ops::create_server_playlist(
                                     &conn,
                                     &playlist_name,
-                                    &item_ids,
+                                    &[item_id.to_string()],
                                 )
                                 .await;
                             });
