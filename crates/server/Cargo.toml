@@ -20,3 +20,10 @@ rookie = "0.5"
 web-time = { workspace = true }
 tokio = { workspace = true, features = ["fs", "process", "rt", "sync"] }
 reader = { workspace = true }
+
+[[example]]
+name = "duration_probe"
+path = "examples/duration_probe.rs"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
