@@ -230,6 +230,7 @@ pub async fn browse_continuation(
     browse_continuation_maybe_auth(continuation, Some(cookies)).await
 }
 
+#[tracing::instrument(name = "yt.browse_continuation", skip(continuation, cookies), fields(anon = cookies.is_none()))]
 pub async fn browse_continuation_maybe_auth(
     continuation: &str,
     cookies: Option<&str>,

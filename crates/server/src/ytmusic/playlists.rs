@@ -138,9 +138,10 @@ where
     if !first.is_empty() {
         on_batch(first);
     }
+    let mut page = 1u32;
     while let Some(token) = next.take() {
-        let page = innertube::browse_continuation_maybe_auth(&token, auth).await?;
-        let (more, next_token) = super::search::walk_playlist_continuation(&page);
+        let resp = innertube::browse_continuation_maybe_auth(&token, auth).await?;
+        let (more, next_token) = super::search::walk_playlist_continuation(&resp);
         let unique: Vec<Track> = more
             .into_iter()
             .filter(|t| keep_unique(t, &mut seen))
@@ -151,9 +152,12 @@ where
         if unique.is_empty() {
             break;
         }
+        page += 1;
+        tracing::debug!(page, new_tracks = unique.len(), total = seen.len(), "playlist continuation page");
         on_batch(unique);
         next = next_token;
     }
+    tracing::debug!(pages = page, total = seen.len(), "playlist pagination complete");
     Ok(())
 }
 
