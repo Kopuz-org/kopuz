@@ -806,17 +806,21 @@ fn play_song_with_mix(
     });
 }
 
-/// Put `seed` at index 0, deduping it out of `mix` if present so it
-/// doesn't double-up. The mix radio usually starts with the seed
-/// anyway; this just ensures we don't queue it twice.
+/// Put the seed at index 0 and append the rest of the mix. The seed
+/// passed in (from the Discover home tile) has duration=0 because the
+/// home feed shape doesn't ship one. The mix endpoint DOES ship a
+/// duration per row (lengthText), and its first entry is normally the
+/// same video as the seed — prefer that version so the player bar
+/// gets the right time. Falls back to the caller-provided seed if the
+/// mix doesn't contain it.
 fn build_song_queue(seed: &Track, mix: Vec<Track>) -> Vec<Track> {
-    let mut out = Vec::with_capacity(mix.len() + 1);
-    out.push(seed.clone());
-    for t in mix {
-        if t.path != seed.path {
-            out.push(t);
-        }
-    }
+    let seed_vid = track_video_id(seed);
+    let (seed_in_queue, rest): (Vec<Track>, Vec<Track>) = mix
+        .into_iter()
+        .partition(|t| seed_vid.is_some() && track_video_id(t) == seed_vid);
+    let mut out = Vec::with_capacity(rest.len() + 1);
+    out.push(seed_in_queue.into_iter().next().unwrap_or_else(|| seed.clone()));
+    out.extend(rest);
     out
 }
 

@@ -467,43 +467,6 @@ impl PlayerController {
                     if let Some(local_path) = offline_path
                         && let Ok((source, hint)) = decoder::open_file(&local_path)
                     {
-                        // Discover/mix tracks come in with duration=0 because
-                        // the list view doesn't carry it. The offline path
-                        // skips the YT spawn (where my fix would have grabbed
-                        // duration from the stream resolve), so the bar would
-                        // stay at 0:00. Fire a parallel duration-only fetch
-                        // here to backfill.
-                        if track.duration == 0
-                            && scheme == "ytmusic"
-                            && let Some(cookies) = self
-                                .config
-                                .peek()
-                                .server
-                                .as_ref()
-                                .and_then(|s| s.access_token.clone())
-                        {
-                            let video_id = id.clone();
-                            let target_idx = idx;
-                            let mut queue_for_dur = self.queue;
-                            let cur_idx_for_dur = self.current_queue_index;
-                            let mut current_song_duration_for_dur = self.current_song_duration;
-                            spawn(async move {
-                                let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
-                                if let Ok(info) = yt.get_stream(&video_id).await
-                                    && let Some(secs) = info.duration_secs
-                                    && secs > 0
-                                {
-                                    if let Some(t) =
-                                        queue_for_dur.write().get_mut(target_idx)
-                                    {
-                                        t.duration = secs;
-                                    }
-                                    if *cur_idx_for_dur.peek() == target_idx {
-                                        current_song_duration_for_dur.set(secs);
-                                    }
-                                }
-                            });
-                        }
                         if !use_crossfade {
                             self.current_queue_index.set(idx);
                             self.player.write().stop_for_transition();
