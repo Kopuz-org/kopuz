@@ -715,11 +715,15 @@ fn build_browse_body(browse_id: Option<&str>) -> Value {
     body
 }
 
+/// Anonymous-friendly POST against the YT browse endpoint. When
+/// cookies is None / empty, omits Cookie + SAPISID auth so anonymous
+/// YT mode can hit discover/album/artist endpoints. Private surfaces
+/// (FEmusic_liked_playlists, the user's library) silently fall back
+/// to a sign-in shelf the parsers will surface as empty.
 async fn post(url: &str, body: &Value, cookies: &str) -> Result<Value, String> {
+    let cookies_opt = if cookies.is_empty() { None } else { Some(cookies) };
     let client = WEB_REMIX;
-    let auth = sapisid_hash(cookies, ORIGIN_YOUTUBE_MUSIC)
-        .ok_or_else(|| "SAPISID missing".to_string())?;
-    http_client()
+    let mut req = http_client()
         .post(url)
         .header("User-Agent", client.user_agent)
         .header("Content-Type", "application/json")
@@ -727,10 +731,13 @@ async fn post(url: &str, body: &Value, cookies: &str) -> Result<Value, String> {
         .header("X-YouTube-Client-Name", client.client_id)
         .header("X-YouTube-Client-Version", client.client_version)
         .header("X-Origin", ORIGIN_YOUTUBE_MUSIC)
-        .header("Referer", format!("{ORIGIN_YOUTUBE_MUSIC}/"))
-        .header("Cookie", cookies)
-        .header("Authorization", auth)
-        .json(body)
+        .header("Referer", format!("{ORIGIN_YOUTUBE_MUSIC}/"));
+    if let Some(c) = cookies_opt {
+        let auth = sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC)
+            .ok_or_else(|| "SAPISID missing".to_string())?;
+        req = req.header("Cookie", c).header("Authorization", auth);
+    }
+    req.json(body)
         .send()
         .await
         .map_err(|e| format!("discover HTTP: {e}"))?

@@ -613,6 +613,13 @@ pub struct MusicServer {
     /// candidate.
     #[serde(default)]
     pub yt_browser: Option<Browser>,
+    /// For `MusicService::YtMusic` only: anonymous mode — no sign-in,
+    /// no cookies. Browse + play public surfaces work; Liked / Library
+    /// Playlists / follow / like are disabled. Set when the user picks
+    /// "Continue without signing in" (the only option on Windows for
+    /// now — see isolated_profile.rs).
+    #[serde(default)]
+    pub yt_anonymous: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -684,6 +691,7 @@ impl MusicServer {
             user_id: None,
             id: Some(uuid::Uuid::new_v4().to_string()),
             yt_browser: None,
+            yt_anonymous: false,
         }
     }
 
@@ -705,6 +713,10 @@ pub struct SavedServer {
     /// user actually has installed.
     #[serde(default)]
     pub yt_browser: Option<Browser>,
+    /// Persisted anonymous-mode flag — when true a "switch to YT"
+    /// click skips the sign-in launch entirely and runs anonymously.
+    #[serde(default)]
+    pub yt_anonymous: bool,
 }
 
 impl SavedServer {
@@ -715,6 +727,7 @@ impl SavedServer {
             url: url.trim_end_matches('/').to_string(),
             service,
             yt_browser: None,
+            yt_anonymous: false,
         }
     }
 
@@ -902,6 +915,7 @@ impl AppConfig {
                     url: server.url.clone(),
                     service: server.service,
                     yt_browser: server.yt_browser,
+                    yt_anonymous: server.yt_anonymous,
                 });
             }
         }
@@ -975,6 +989,7 @@ impl Default for MusicServer {
             user_id: None,
             id: None,
             yt_browser: None,
+            yt_anonymous: false,
         }
     }
 }

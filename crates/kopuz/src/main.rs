@@ -217,6 +217,10 @@ async fn run_rotation(mut config: Signal<config::AppConfig>) {
         _ => return,
     };
     let Some(cookies) = cookies else { return };
+    // Anonymous YT carries an empty token — nothing to keep alive.
+    if cookies.is_empty() {
+        return;
+    }
     let started = std::time::Instant::now();
     // Logging policy: noisy in the rare cases (jar rotated, error),
     // silent on the steady-state OK-no-change tick. The keepalive

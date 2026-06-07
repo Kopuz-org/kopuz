@@ -31,16 +31,23 @@ pub async fn start_mix(seed_video_id: &str, cookies: &str) -> Result<Vec<Track>,
         },
     });
 
-    let auth = sapisid_hash(cookies, ORIGIN).ok_or_else(|| "SAPISID missing".to_string())?;
-    let resp: Value = super::innertube::http_client().clone()
+    // Mix endpoint works without auth (anonymous radio for any public
+    // video). Skip Cookie + SAPISID when cookies is empty so anon
+    // YT mode can still hit Start-Radio.
+    let cookies_opt = if cookies.is_empty() { None } else { Some(cookies) };
+    let mut req = super::innertube::http_client().clone()
         .post(format!("{ORIGIN}/youtubei/v1/next?prettyPrint=false"))
         .header("Content-Type", "application/json")
         .header("X-YouTube-Client-Name", client.client_id)
         .header("X-YouTube-Client-Version", client.client_version)
         .header("Origin", ORIGIN)
-        .header("Referer", format!("{ORIGIN}/"))
-        .header("Cookie", cookies)
-        .header("Authorization", auth)
+        .header("Referer", format!("{ORIGIN}/"));
+    if let Some(c) = cookies_opt {
+        let auth = sapisid_hash(c, ORIGIN)
+            .ok_or_else(|| "SAPISID missing".to_string())?;
+        req = req.header("Cookie", c).header("Authorization", auth);
+    }
+    let resp: Value = req
         .json(&body)
         .send()
         .await

@@ -60,14 +60,19 @@ pub struct YtStreamInfo {
 /// per-IP heuristics. Replaced naturally on process restart.
 static VISITOR_DATA: OnceCell<String> = OnceCell::const_new();
 
-async fn visitor_data(cookies: &str) -> Result<&'static str, String> {
+async fn visitor_data(cookies: Option<&str>) -> Result<&'static str, String> {
     VISITOR_DATA
-        .get_or_try_init(|| async { innertube::visitor_id(Some(cookies)).await })
+        .get_or_try_init(|| async { innertube::visitor_id(cookies).await })
         .await
         .map(|s| s.as_str())
 }
 
-pub async fn resolve(video_id: &str, cookies: &str) -> Result<YtStreamInfo, String> {
+/// Resolve a YT video to a playable stream. Cookies are optional —
+/// the primary ANDROID_VR + content_pot path doesn't need them at all
+/// (visitor_data fetches anonymously, ANDROID_VR is login_supported=
+/// false). Without cookies, Music-Premium-locked tracks naturally
+/// hit UNPLAYABLE and fall through; everything else plays normally.
+pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamInfo, String> {
     // Primary: ANDROID_VR + content_pot. Mint and visitor_data in parallel.
     let (pot_result, visitor_result) = tokio::join!(
         botguard::mint_content_pot(video_id),
@@ -122,7 +127,7 @@ pub async fn resolve(video_id: &str, cookies: &str) -> Result<YtStreamInfo, Stri
     // Fallback chain — kept around in case Google changes ANDROID_VR's
     // behavior. None of these accept a PO token, so they're sent bare.
     let main =
-        innertube::player(MAIN_CLIENT, video_id, Some(cookies), PlayerExtras::default()).await;
+        innertube::player(MAIN_CLIENT, video_id, cookies, PlayerExtras::default()).await;
     if let Ok(json) = &main {
         if PlayabilityStatus::from_response(json) == PlayabilityStatus::Ok
             && let Some(info) = pick_plain_format(json, MAIN_CLIENT)
@@ -133,7 +138,7 @@ pub async fn resolve(video_id: &str, cookies: &str) -> Result<YtStreamInfo, Stri
         primary_err = Some(format!("{}: {e}", MAIN_CLIENT.client_name));
     }
     for client in STREAM_FALLBACK_CLIENTS {
-        let cookies_for = if client.login_supported { Some(cookies) } else { None };
+        let cookies_for = if client.login_supported { cookies } else { None };
         match innertube::player(*client, video_id, cookies_for, PlayerExtras::default()).await {
             Ok(json) => {
                 let status = PlayabilityStatus::from_response(&json);
@@ -161,7 +166,11 @@ pub async fn resolve(video_id: &str, cookies: &str) -> Result<YtStreamInfo, Stri
     }
     let primary_err = primary_err.unwrap_or_else(|| "no client returned a usable stream URL".to_string());
     eprintln!("[yt-player] InnerTube chain exhausted ({primary_err}) — trying yt-dlp fallback");
-    match super::ytdlp_fallback::resolve(video_id, cookies).await {
+    // yt-dlp still wants cookies for Music-Premium tracks; pass an
+    // empty header when we're anonymous, the fallback will just fail
+    // for Premium-locked content (acceptable for anon mode).
+    let cookies_for_ytdlp = cookies.unwrap_or("");
+    match super::ytdlp_fallback::resolve(video_id, cookies_for_ytdlp).await {
         Ok(info) => {
             eprintln!("[yt-player] yt-dlp fallback succeeded");
             Ok(info)

@@ -147,6 +147,17 @@ fn find_browser_bin(browser: Browser) -> Option<String> {
 /// sign-in page, and poll the cookie SQLite until both SAPISID and SID
 /// land. Returns the decrypted cookie header. The browser is always
 /// killed before returning, success or timeout.
+///
+// TODO(windows-signin): browser sign-in is disabled on Windows in the
+// UI (settings_popups.rs forces anonymous mode there) because the
+// Google accounts page renders a blank document inside the isolated
+// `--user-data-dir` profile — the omnibox shows the ServiceLogin URL
+// but the page body is about:blank, so SAPISID/SID never land and
+// this loops to timeout. Linux/macOS work. Likely Edge/Chrome
+// first-run + automation heuristics specific to Windows; needs a
+// Windows tester to iterate (tried --disable-blink-features=
+// AutomationControlled + UA spoof, reverted — see commits
+// 6bec69d/8a03c89). Until then, Windows users get anonymous YT.
 pub async fn launch_signin_and_extract(
     browser: Browser,
     server_id: &str,

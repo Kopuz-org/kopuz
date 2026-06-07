@@ -164,15 +164,25 @@ pub async fn browse(
     browse_id: &str,
     cookies: &str,
 ) -> Result<Value, String> {
+    browse_maybe_auth(browse_id, Some(cookies)).await
+}
+
+/// Anonymous-friendly browse. Skips SAPISID + Cookie headers when no
+/// cookies are provided so anonymous YT mode can hit public surfaces
+/// (artists, albums, public playlists, discover home with generic
+/// recs). Private surfaces (Liked, user library) will return a
+/// sign-in shelf for anonymous callers — caller has to detect that.
+pub async fn browse_maybe_auth(
+    browse_id: &str,
+    cookies: Option<&str>,
+) -> Result<Value, String> {
     let client = super::clients::WEB_REMIX;
     let context = build_context(client);
     let body = json!({
         "context": { "client": context, "user": { "lockedSafetyMode": false } },
         "browseId": browse_id,
     });
-    let auth =
-        sapisid_hash(cookies, ORIGIN_YOUTUBE_MUSIC).ok_or_else(|| "SAPISID missing".to_string())?;
-    let resp = http_client()
+    let mut req = http_client()
         .post(format!("{ORIGIN_YOUTUBE_MUSIC}/youtubei/v1/browse?prettyPrint=false"))
         .header("User-Agent", client.user_agent)
         .header("Content-Type", "application/json")
@@ -180,9 +190,13 @@ pub async fn browse(
         .header("X-YouTube-Client-Name", client.client_id)
         .header("X-YouTube-Client-Version", client.client_version)
         .header("X-Origin", ORIGIN_YOUTUBE_MUSIC)
-        .header("Referer", format!("{ORIGIN_YOUTUBE_MUSIC}/"))
-        .header("Cookie", cookies)
-        .header("Authorization", auth)
+        .header("Referer", format!("{ORIGIN_YOUTUBE_MUSIC}/"));
+    if let Some(c) = cookies {
+        let auth = sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC)
+            .ok_or_else(|| "SAPISID missing".to_string())?;
+        req = req.header("Cookie", c).header("Authorization", auth);
+    }
+    let resp = req
         .json(&body)
         .send()
         .await
@@ -211,14 +225,19 @@ pub async fn browse_continuation(
     continuation: &str,
     cookies: &str,
 ) -> Result<Value, String> {
+    browse_continuation_maybe_auth(continuation, Some(cookies)).await
+}
+
+pub async fn browse_continuation_maybe_auth(
+    continuation: &str,
+    cookies: Option<&str>,
+) -> Result<Value, String> {
     let client = super::clients::WEB_REMIX;
     let context = build_context(client);
     let body = json!({
         "context": { "client": context, "user": { "lockedSafetyMode": false } },
     });
-    let auth =
-        sapisid_hash(cookies, ORIGIN_YOUTUBE_MUSIC).ok_or_else(|| "SAPISID missing".to_string())?;
-    let resp = http_client()
+    let mut req = http_client()
         .post(format!(
             "{ORIGIN_YOUTUBE_MUSIC}/youtubei/v1/browse?ctoken={continuation}&continuation={continuation}&prettyPrint=false"
         ))
@@ -228,9 +247,13 @@ pub async fn browse_continuation(
         .header("X-YouTube-Client-Name", client.client_id)
         .header("X-YouTube-Client-Version", client.client_version)
         .header("X-Origin", ORIGIN_YOUTUBE_MUSIC)
-        .header("Referer", format!("{ORIGIN_YOUTUBE_MUSIC}/"))
-        .header("Cookie", cookies)
-        .header("Authorization", auth)
+        .header("Referer", format!("{ORIGIN_YOUTUBE_MUSIC}/"));
+    if let Some(c) = cookies {
+        let auth = sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC)
+            .ok_or_else(|| "SAPISID missing".to_string())?;
+        req = req.header("Cookie", c).header("Authorization", auth);
+    }
+    let resp = req
         .json(&body)
         .send()
         .await

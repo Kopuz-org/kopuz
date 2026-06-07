@@ -8,6 +8,10 @@ pub fn AddServerPopup(
     server_service: Signal<MusicService>,
     /// Selected Chromium-family browser when service is YouTube Music.
     yt_browser: Signal<Browser>,
+    /// YouTube Music anonymous mode — true = no sign-in, browse + play
+    /// public surfaces only. Forced true on Windows (browser sign-in
+    /// is disabled there for now).
+    yt_anonymous: Signal<bool>,
     error: Signal<Option<String>>,
     on_close: EventHandler<()>,
     on_save: EventHandler<()>,
@@ -51,6 +55,7 @@ pub fn AddServerPopup(
                     server_service,
                     server_url,
                     yt_browser,
+                    yt_anonymous,
                     server_url_placeholder: server_url_placeholder.clone(),
                 }
 
@@ -225,56 +230,110 @@ fn ServerServiceFields(
     server_service: Signal<MusicService>,
     server_url: Signal<String>,
     yt_browser: Signal<Browser>,
+    mut yt_anonymous: Signal<bool>,
     server_url_placeholder: String,
 ) -> Element {
     let mut botguard_status: Signal<Option<Result<(), String>>> = use_signal(|| None);
 
+    // Browser sign-in is disabled on Windows for now — the Google
+    // accounts page renders blank in the isolated profile there
+    // (about:blank under the hood). Force anonymous so Windows users
+    // still get a working YT backend. See isolated_profile.rs TODO.
+    let windows = cfg!(target_os = "windows");
+    use_effect(move || {
+        if cfg!(target_os = "windows") && !*yt_anonymous.peek() {
+            yt_anonymous.set(true);
+        }
+    });
+
     match server_service() {
-        MusicService::YtMusic => rsx! {
-            p { class: "text-xs text-white/60",
-                "Pick which browser kopuz should use for the YouTube Music sign-in window. It opens in an isolated profile (a fresh, separate session) — your normal browsing is untouched. Make sure the browser is installed."
-            }
-            select {
-                onchange: move |e| {
-                    if let Some(b) = Browser::from_id(&e.value()) {
-                        yt_browser.set(b);
+        MusicService::YtMusic => {
+            let anon = yt_anonymous();
+            rsx! {
+                // Auth method selector. On Windows only the anonymous
+                // row is shown (sign-in disabled).
+                div { class: "flex flex-col gap-2 mb-2",
+                    if !windows {
+                        label { class: "flex items-center gap-2 text-sm text-white cursor-pointer",
+                            input {
+                                r#type: "radio",
+                                name: "yt-auth-method",
+                                checked: !anon,
+                                onchange: move |_| yt_anonymous.set(false),
+                            }
+                            span { "Sign in with a browser" }
+                        }
                     }
-                },
-                onkeydown: move |e| e.stop_propagation(),
-                for browser in Browser::ALL.iter().copied() {
-                    option {
-                        value: "{browser.id()}",
-                        selected: yt_browser() == browser,
-                        "{browser.label()}"
+                    label { class: "flex items-center gap-2 text-sm text-white cursor-pointer",
+                        input {
+                            r#type: "radio",
+                            name: "yt-auth-method",
+                            checked: anon,
+                            onchange: move |_| yt_anonymous.set(true),
+                        }
+                        span { "Continue without signing in (anonymous)" }
                     }
                 }
-            }
-            div { class: "flex items-center gap-2 mt-2",
-                button {
-                    class: "text-xs px-2 py-1 rounded bg-white/10 hover:bg-white/20 transition-colors",
-                    onclick: move |_| {
-                        spawn(async move {
-                            let res = ::server::ytmusic::botguard::check_available().await;
-                            botguard_status.set(Some(res));
-                        });
-                    },
-                    "Check rustypipe-botguard"
+
+                if anon {
+                    p { class: "text-xs text-white/60",
+                        if windows {
+                            "Browser sign-in isn't available on Windows yet, so kopuz will use YouTube Music anonymously. You can browse, search, and play — but Liked Music, your library playlists, and following/liking are disabled."
+                        } else {
+                            "kopuz will use YouTube Music without signing in. You can browse, search, and play — but Liked Music, your library playlists, and following/liking are disabled."
+                        }
+                    }
+                } else {
+                    p { class: "text-xs text-white/60",
+                        "Pick which browser kopuz should use for the YouTube Music sign-in window. It opens in an isolated profile (a fresh, separate session) — your normal browsing is untouched. Make sure the browser is installed."
+                    }
+                    select {
+                        onchange: move |e| {
+                            if let Some(b) = Browser::from_id(&e.value()) {
+                                yt_browser.set(b);
+                            }
+                        },
+                        onkeydown: move |e| e.stop_propagation(),
+                        for browser in Browser::ALL.iter().copied() {
+                            option {
+                                value: "{browser.id()}",
+                                selected: yt_browser() == browser,
+                                "{browser.label()}"
+                            }
+                        }
+                    }
                 }
-                {match botguard_status.read().as_ref() {
-                    Some(Ok(())) => rsx! {
-                        span { class: "text-xs text-emerald-400",
-                            i { class: "fa-solid fa-check mr-1" }
-                            "Installed"
-                        }
-                    },
-                    Some(Err(msg)) => rsx! {
-                        span { class: "text-xs text-rose-400 whitespace-pre-line",
-                            i { class: "fa-solid fa-xmark mr-1" }
-                            "{msg}"
-                        }
-                    },
-                    None => rsx! { span {} },
-                }}
+
+                // botguard helper is needed for playback in BOTH modes
+                // (it mints the content PO token), so the check stays
+                // visible regardless of auth method.
+                div { class: "flex items-center gap-2 mt-2",
+                    button {
+                        class: "text-xs px-2 py-1 rounded bg-white/10 hover:bg-white/20 transition-colors",
+                        onclick: move |_| {
+                            spawn(async move {
+                                let res = ::server::ytmusic::botguard::check_available().await;
+                                botguard_status.set(Some(res));
+                            });
+                        },
+                        "Check rustypipe-botguard"
+                    }
+                    {match botguard_status.read().as_ref() {
+                        Some(Ok(())) => rsx! {
+                            span { class: "text-xs text-emerald-400",
+                                i { class: "fa-solid fa-check mr-1" }
+                                "Installed"
+                            }
+                        },
+                        Some(Err(msg)) => rsx! {
+                            span { class: "text-xs text-rose-400 whitespace-pre-line",
+                                i { class: "fa-solid fa-xmark mr-1" }
+                                "{msg}"
+                            }
+                        },
+                        None => rsx! { span {} },
+                    }}
+                }
             }
         },
         _ => rsx! {

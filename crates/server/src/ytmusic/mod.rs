@@ -19,6 +19,12 @@ pub use player::YtStreamInfo;
 
 pub const SOURCE_PREFIX: &str = "ytmusic";
 
+/// Surfaced by auth-only operations (like/unlike, add-to-playlist,
+/// liked-songs sync) when the YT backend is in anonymous mode.
+/// Callers should detect this and either skip the action or hint at
+/// signing in.
+pub const ANON_AUTH_REQUIRED: &str = "YouTube Music not signed in";
+
 /// Stable per-Google-account id derived from the SAPISID cookie. Used
 /// as the server-identity cache-bust key so switching YT accounts
 /// invalidates synced library/favorites state. Never logged.
@@ -43,8 +49,12 @@ impl YouTubeMusicClient {
     }
 
     pub fn with_cookies(cookies: String) -> Self {
+        // Normalize the empty string (anonymous-mode marker, stored as
+        // access_token: Some("")) to None so every `self.cookies` check
+        // — auth-only guards, is_anonymous, the public-surface
+        // unwrap_or("") — treats anonymous consistently.
         Self {
-            cookies: Some(cookies),
+            cookies: (!cookies.is_empty()).then_some(cookies),
         }
     }
 
@@ -63,25 +73,25 @@ impl YouTubeMusicClient {
     /// Playlists, minus the Liked Music auto-playlist). Returns summary
     /// rows; call [`get_playlist_entries`] for the tracks of any given
     /// playlist.
+    /// Library playlists view (FEmusic_liked_playlists). Auth-only —
+    /// returns Ok(vec![]) in anonymous mode so the playlists tab
+    /// just shows empty rather than erroring.
     pub async fn list_playlists(
         &self,
     ) -> Result<Vec<playlists::YtPlaylistSummary>, String> {
-        let cookies = self
-            .cookies
-            .as_deref()
-            .ok_or("YouTube Music not signed in")?;
+        let Some(cookies) = self.cookies.as_deref() else {
+            return Ok(Vec::new());
+        };
         playlists::list_playlists(cookies).await
     }
 
+    /// Playlist contents. Public playlists work anonymously; the
+    /// user's personal/private ones obviously won't.
     pub async fn get_playlist_entries(
         &self,
         playlist_id: &str,
     ) -> Result<Vec<Track>, String> {
-        let cookies = self
-            .cookies
-            .as_deref()
-            .ok_or("YouTube Music not signed in")?;
-        playlists::get_playlist_entries(playlist_id, cookies).await
+        playlists::get_playlist_entries(playlist_id, self.cookies.as_deref().unwrap_or("")).await
     }
 
     pub async fn stream_playlist_entries<F>(
@@ -92,26 +102,19 @@ impl YouTubeMusicClient {
     where
         F: FnMut(Vec<Track>),
     {
-        let cookies = self
-            .cookies
-            .as_deref()
-            .ok_or("YouTube Music not signed in")?;
-        playlists::stream_playlist_entries(playlist_id, cookies, on_batch).await
+        playlists::stream_playlist_entries(playlist_id, self.cookies.as_deref().unwrap_or(""), on_batch).await
     }
 
+    // Mutations are inherently auth-only — keep the explicit "not
+    // signed in" error so callers (favorite toggle, add-to-playlist
+    // modal) can surface a clear "sign in to enable" message.
     pub async fn like_video(&self, video_id: &str) -> Result<(), String> {
-        let cookies = self
-            .cookies
-            .as_deref()
-            .ok_or("YouTube Music not signed in")?;
+        let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
         mutations::like_video(video_id, cookies).await
     }
 
     pub async fn unlike_video(&self, video_id: &str) -> Result<(), String> {
-        let cookies = self
-            .cookies
-            .as_deref()
-            .ok_or("YouTube Music not signed in")?;
+        let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
         mutations::unlike_video(video_id, cookies).await
     }
 
@@ -120,10 +123,7 @@ impl YouTubeMusicClient {
         playlist_id: &str,
         video_id: &str,
     ) -> Result<(), String> {
-        let cookies = self
-            .cookies
-            .as_deref()
-            .ok_or("YouTube Music not signed in")?;
+        let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
         mutations::add_to_playlist(playlist_id, video_id, cookies).await
     }
 
@@ -132,10 +132,7 @@ impl YouTubeMusicClient {
         playlist_id: &str,
         video_id: &str,
     ) -> Result<(), String> {
-        let cookies = self
-            .cookies
-            .as_deref()
-            .ok_or("YouTube Music not signed in")?;
+        let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
         mutations::remove_from_playlist(playlist_id, video_id, cookies).await
     }
 
@@ -145,10 +142,7 @@ impl YouTubeMusicClient {
         description: &str,
         video_ids: &[&str],
     ) -> Result<String, String> {
-        let cookies = self
-            .cookies
-            .as_deref()
-            .ok_or("YouTube Music not signed in")?;
+        let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
         mutations::create_playlist(title, description, video_ids, cookies).await
     }
 
@@ -161,10 +155,13 @@ impl YouTubeMusicClient {
     where
         F: FnMut(Vec<Track>),
     {
-        let cookies = self
-            .cookies
-            .as_deref()
-            .ok_or("YouTube Music not signed in")?;
+        // Liked Music is auth-only — anonymous callers get an empty
+        // list rather than an error so favorites views render the
+        // standard empty state without surfacing a stack trace.
+        let Some(cookies) = self.cookies.as_deref() else {
+            let _ = &mut on_page;
+            return Ok(());
+        };
         let resp: Value = innertube::browse("VLLM", cookies).await?;
         if !has_playlist_shelf(&resp) {
             return Err("Sign-in prompt returned — cookies expired".to_string());
@@ -222,55 +219,38 @@ impl YouTubeMusicClient {
     /// Resolves a playable stream URL: mints a content-bound PO token via
     /// `rustypipe-botguard`, then asks `/player` (ANDROID_VR client) for a
     /// plain audio URL. ~400 ms warm, ~1 s cold (snapshot regeneration).
+    /// Works without cookies (anonymous mode) — Premium-locked tracks
+    /// fail UNPLAYABLE, everything else plays.
     pub async fn get_stream(&self, video_id: &str) -> Result<YtStreamInfo, String> {
-        let cookies = self
-            .cookies
-            .as_deref()
-            .ok_or("YouTube Music not signed in")?;
-        player::resolve(video_id, cookies).await
+        player::resolve(video_id, self.cookies.as_deref()).await
     }
 
+    // Public surfaces — work anonymously. `cookies.as_deref().unwrap_or("")`
+    // hands an empty header to the parser, which the lower-level
+    // discover/mix `post` and innertube::browse now interpret as "skip
+    // SAPISID auth headers" (see browse_maybe_auth / discover::post).
+
     pub async fn start_mix(&self, seed_video_id: &str) -> Result<Vec<Track>, String> {
-        let cookies = self
-            .cookies
-            .as_deref()
-            .ok_or("YouTube Music not signed in")?;
-        mix::start_mix(seed_video_id, cookies).await
+        mix::start_mix(seed_video_id, self.cookies.as_deref().unwrap_or("")).await
     }
 
     pub async fn discover_home(&self) -> Result<discover::DiscoverHome, String> {
-        let cookies = self
-            .cookies
-            .as_deref()
-            .ok_or("YouTube Music not signed in")?;
-        discover::fetch_home(cookies).await
+        discover::fetch_home(self.cookies.as_deref().unwrap_or("")).await
     }
 
     pub async fn discover_continuation(
         &self,
         token: &str,
     ) -> Result<discover::DiscoverHome, String> {
-        let cookies = self
-            .cookies
-            .as_deref()
-            .ok_or("YouTube Music not signed in")?;
-        discover::fetch_continuation(token, cookies).await
+        discover::fetch_continuation(token, self.cookies.as_deref().unwrap_or("")).await
     }
 
     pub async fn fetch_album_tracks(&self, browse_id: &str) -> Result<Vec<Track>, String> {
-        let cookies = self
-            .cookies
-            .as_deref()
-            .ok_or("YouTube Music not signed in")?;
-        discover::fetch_album_tracks(browse_id, cookies).await
+        discover::fetch_album_tracks(browse_id, self.cookies.as_deref().unwrap_or("")).await
     }
 
     pub async fn fetch_artist(&self, channel_id: &str) -> Result<discover::YtArtist, String> {
-        let cookies = self
-            .cookies
-            .as_deref()
-            .ok_or("YouTube Music not signed in")?;
-        discover::fetch_artist(channel_id, cookies).await
+        discover::fetch_artist(channel_id, self.cookies.as_deref().unwrap_or("")).await
     }
 
     /// Confirms the `rustypipe-botguard` binary is reachable. Call this
@@ -285,16 +265,28 @@ impl YouTubeMusicClient {
     /// returns a `signInEndpoint`-bearing message renderer for anonymous
     /// callers and real playlist content for signed-in ones.
     pub async fn validate_cookies(&self) -> Result<(), String> {
-        let cookies = self
-            .cookies
-            .as_deref()
-            .ok_or("YouTube Music not signed in")?;
+        // Anonymous mode has no cookies to validate — succeed silently
+        // so callers (settings probe, keepalive) treat it as healthy.
+        let Some(cookies) = self.cookies.as_deref() else {
+            return Ok(());
+        };
         let json: Value = innertube::browse("VLLM", cookies).await?;
         if has_playlist_shelf(&json) {
             Ok(())
         } else {
             Err("YouTube returned no playlist shelf — cookies expired or browser signed out".into())
         }
+    }
+
+    /// True when no cookies are configured — the YT backend is in
+    /// anonymous mode (Browse + play public surfaces work; Liked,
+    /// Library Playlists, follow/like mutations are disabled).
+    /// Used by UI gates to swap auth-only views for a 'sign in to
+    /// enable' empty state.
+    pub fn is_anonymous(&self) -> bool {
+        // with_cookies normalizes "" → None, so absence of cookies is
+        // exactly anonymous mode.
+        self.cookies.is_none()
     }
 }
 

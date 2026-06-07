@@ -106,6 +106,10 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             .and_then(|s| s.yt_browser)
             .unwrap_or(config::Browser::Chrome)
     });
+    // Anonymous YT mode for the add-server popup. Defaults to true on
+    // Windows (browser sign-in disabled there) so the popup opens
+    // pre-selected on the only working method.
+    let yt_anonymous = use_signal(|| cfg!(target_os = "windows"));
 
     let mut username = use_signal(|| String::new());
     let mut password = use_signal(|| String::new());
@@ -261,18 +265,28 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                 url_input
             };
 
-            let new_server = config::MusicServer::new_with_service(
+            let mut new_server = config::MusicServer::new_with_service(
                 display_name,
                 effective_url,
                 selected_service,
             );
+            let is_anon = is_ytmusic && *yt_anonymous.peek();
+            new_server.yt_anonymous = is_anon;
+            if is_anon {
+                // Mark anonymous mode at the server level. Empty access
+                // token + yt_anonymous=true is what get_stream /
+                // discover etc. read as "no cookies, public surfaces
+                // only".
+                new_server.access_token = Some(String::new());
+            }
 
             let saved = config::SavedServer {
                 id: new_server.id.clone().unwrap_or_default(),
                 name: new_server.name.clone(),
                 url: new_server.url.clone(),
                 service: new_server.service,
-                yt_browser: is_ytmusic.then(|| *yt_browser.peek()),
+                yt_browser: (is_ytmusic && !is_anon).then(|| *yt_browser.peek()),
+                yt_anonymous: is_anon,
             };
             {
                 let mut cfg = config.write();
@@ -286,11 +300,13 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             error.set(None);
             show_add_server.set(false);
 
-            if is_ytmusic {
+            if is_ytmusic && !is_anon {
                 ytmusic_auto_login();
-            } else {
+            } else if !is_ytmusic {
                 show_login.set(true);
             }
+            // Anonymous YT needs no further setup — the server entry
+            // is already active and playable.
         });
     };
 
@@ -301,24 +317,29 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         };
         if let Some(saved) = server {
             let is_ytmusic = saved.service == MusicService::YtMusic;
+            let is_anon = is_ytmusic && saved.yt_anonymous;
             let active = config::MusicServer {
                 name: saved.name,
                 url: saved.url,
                 service: saved.service,
-                access_token: None,
+                // Anonymous YT keeps an empty (non-None) token so the
+                // backend treats it as anon rather than "needs sign-in".
+                access_token: is_anon.then(String::new),
                 user_id: None,
                 id: Some(saved.id),
                 // Carry the saved browser choice over so the sign-in
                 // launch hits the binary the user picked, not whatever
                 // the popup's default selector happens to be.
                 yt_browser: saved.yt_browser,
+                yt_anonymous: is_anon,
             };
             config.write().server = Some(active);
-            if is_ytmusic {
+            if is_ytmusic && !is_anon {
                 ytmusic_auto_login();
-            } else {
+            } else if !is_ytmusic {
                 show_login.set(true);
             }
+            // Anonymous YT is immediately active — no sign-in launch.
         }
     };
 
@@ -942,6 +963,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         server_url,
                         server_service,
                         yt_browser,
+                        yt_anonymous,
                         error,
                         on_close: move |_| show_add_server.set(false),
                         on_save: handle_add_server
