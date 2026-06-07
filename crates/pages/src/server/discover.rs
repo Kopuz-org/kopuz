@@ -1042,15 +1042,24 @@ fn DiscoverPlaylistRow(track: Track, index: usize, on_play: EventHandler<Track>)
     }
 }
 
-/// YT-backed artist profile. Pulls the immersive header (banner +
-/// subscribers) and every section shelf from `/browse?browseId=UC…` and
-/// hands each one off to the same `ShelfRow` component the Discover home
-/// uses, so all sections get hover-play, horizontal scroll, and the
-/// existing tile dispatch (artist → artist, album → album viewer, etc.).
+/// YT-backed artist profile. Used wherever YT Music is the active
+/// backend — not just inside Discover. Pulls the immersive header
+/// (banner + subscribers) and every section shelf from
+/// `/browse?browseId=UC…` and hands each one off to the same
+/// `ShelfRow` component the Discover home uses, so all sections get
+/// hover-play, horizontal scroll, and the existing tile dispatch.
+///
+/// Callers that already know the channel_id (Discover tiles, mix
+/// entries that carry a UC… browseEndpoint) write it into
+/// `selected_artist_id`. Callers that only have a name (track row's
+/// "go to artist", sidebar Artist tab, NavigationController) leave id
+/// at None — the effect kicks off a YT search filtered to artists,
+/// takes the top hit's UC… id, then loads the profile. Adds one extra
+/// roundtrip but means every artist click in the app lands here.
 #[component]
 pub fn DiscoverArtistPage(
     selected_artist_id: Signal<Option<String>>,
-    selected_artist_name: Signal<Option<String>>,
+    selected_artist_name: Signal<String>,
     on_back: EventHandler<()>,
     on_select_album: EventHandler<String>,
     on_select_playlist: EventHandler<(String, String)>,
@@ -1065,14 +1074,18 @@ pub fn DiscoverArtistPage(
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
 
-    // Generation guard: same role as DiscoverPlaylistDetail's
-    // fetch_gen — drop late results when the user navigates to a
-    // different artist mid-fetch.
+    // Generation guard: drop late results when the user navigates to
+    // a different artist mid-fetch (both the resolve search AND the
+    // browse hit are gated on it).
     let mut fetch_gen = use_signal(|| 0u64);
     use_effect(move || {
-        let Some(cid) = selected_artist_id.read().clone() else {
+        // Effect re-runs when either signal changes. Selection key is
+        // (id, name): id wins when set, name is the resolve fallback.
+        let cid_opt = selected_artist_id.read().clone();
+        let name = selected_artist_name.read().clone();
+        if cid_opt.is_none() && name.trim().is_empty() {
             return;
-        };
+        }
         let my_gen = fetch_gen.with_mut(|g| {
             *g += 1;
             *g
@@ -1094,6 +1107,36 @@ pub fn DiscoverArtistPage(
                 return;
             };
             let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
+            // Resolve cid from name if we didn't get one with the
+            // click. Top YT search hit for the artist filter is the
+            // first UC… browseId in the response — see
+            // search::resolve_artist_channel_id.
+            let cid = match cid_opt {
+                Some(c) => c,
+                None => match yt.resolve_artist_channel_id(name.trim()).await {
+                    Ok(Some(c)) => c,
+                    Ok(None) => {
+                        if *fetch_gen.peek() == my_gen {
+                            error.set(Some(format!(
+                                "No YouTube Music artist found for \"{}\"",
+                                name.trim()
+                            )));
+                            loading.set(false);
+                        }
+                        return;
+                    }
+                    Err(e) => {
+                        if *fetch_gen.peek() == my_gen {
+                            error.set(Some(e));
+                            loading.set(false);
+                        }
+                        return;
+                    }
+                },
+            };
+            if *fetch_gen.peek() != my_gen {
+                return;
+            }
             let result = yt.fetch_artist(&cid).await;
             if *fetch_gen.peek() != my_gen {
                 return;
@@ -1106,10 +1149,9 @@ pub fn DiscoverArtistPage(
         });
     });
 
-    if selected_artist_id.read().is_none() {
-        let fallback_name = selected_artist_name.read().clone().unwrap_or_default();
+    if selected_artist_id.read().is_none() && selected_artist_name.read().trim().is_empty() {
         return rsx! {
-            div { class: "p-12 text-white/60", "No artist selected: {fallback_name}" }
+            div { class: "p-12 text-white/60", "No artist selected" }
         };
     }
 

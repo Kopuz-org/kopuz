@@ -10,6 +10,10 @@ use super::innertube::sapisid_hash;
 const ORIGIN_YT_MUSIC: &str = "https://music.youtube.com";
 const SONGS_FILTER: &str = "EgWKAQIIAWoMEAMQBBAJEAoQDhAV";
 const VIDEOS_FILTER: &str = "EgWKAQIQAWoMEAMQBBAJEAoQDhAV";
+// `params` value for "Artists" tab on YT Music search. Restricts hits
+// to musicResponsiveListItemRenderer rows whose nav endpoint browseId
+// begins with `UC…`, exactly what we need for name → channel resolve.
+const ARTISTS_FILTER: &str = "EgWKAQIgAWoMEAMQBBAJEAoQDhAV";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MusicVideoType {
@@ -92,12 +96,52 @@ pub async fn music_search_tracks(
     Ok(out)
 }
 
-async fn do_search(
+/// Resolve a free-text artist name to a YT Music channel id (`UC…`).
+/// Powers the artist page when navigation only had a name (track row
+/// click, sidebar tag, etc.) and the YT backend is active. Returns
+/// None if the search returned no artist row at all.
+pub async fn resolve_artist_channel_id(
+    query: &str,
+    cookies: Option<&str>,
+) -> Result<Option<String>, String> {
+    if query.trim().is_empty() {
+        return Ok(None);
+    }
+    let http = super::innertube::http_client();
+    let resp = do_search_raw(&http, query, Some(ARTISTS_FILTER), cookies).await?;
+    Ok(walk_first_artist_browse_id(&resp))
+}
+
+/// Recursively walk the JSON for the first browseEndpoint pointing at
+/// a `UC…` channel. The artists filter restricts results to artist
+/// rows so the first hit is the top-ranked match.
+fn walk_first_artist_browse_id(v: &Value) -> Option<String> {
+    match v {
+        Value::Object(map) => {
+            if let Some(ep) = map.get("browseEndpoint")
+                && let Some(bid) = ep.get("browseId").and_then(|x| x.as_str())
+                && bid.starts_with("UC")
+            {
+                return Some(bid.to_string());
+            }
+            for child in map.values() {
+                if let Some(found) = walk_first_artist_browse_id(child) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        Value::Array(arr) => arr.iter().find_map(walk_first_artist_browse_id),
+        _ => None,
+    }
+}
+
+async fn do_search_raw(
     http: &reqwest::Client,
     query: &str,
     params: Option<&str>,
     cookies: Option<&str>,
-) -> Result<Vec<Track>, String> {
+) -> Result<Value, String> {
     let client = WEB_REMIX;
     let mut body = json!({
         "context": {
@@ -113,7 +157,6 @@ async fn do_search(
     if let Some(p) = params {
         body.as_object_mut().unwrap().insert("params".into(), json!(p));
     }
-
     let mut req = http
         .post(format!("{ORIGIN_YT_MUSIC}/youtubei/v1/search?prettyPrint=false"))
         .header("Content-Type", "application/json")
@@ -128,17 +171,23 @@ async fn do_search(
             req = req.header("Authorization", auth);
         }
     }
-
-    let resp: Value = req
-        .send()
+    req.send()
         .await
         .map_err(|e| format!("search HTTP: {e}"))?
         .error_for_status()
         .map_err(|e| format!("search HTTP: {e}"))?
-        .json()
+        .json::<Value>()
         .await
-        .map_err(|e| format!("search JSON: {e}"))?;
+        .map_err(|e| format!("search JSON: {e}"))
+}
 
+async fn do_search(
+    http: &reqwest::Client,
+    query: &str,
+    params: Option<&str>,
+    cookies: Option<&str>,
+) -> Result<Vec<Track>, String> {
+    let resp = do_search_raw(http, query, params, cookies).await?;
     Ok(walk_tracks(&resp))
 }
 

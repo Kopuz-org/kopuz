@@ -3,7 +3,6 @@ pub enum Route {
     Home,
     Discover,
     DiscoverPlaylist,
-    DiscoverArtist,
     Search,
     Library,
     Album,

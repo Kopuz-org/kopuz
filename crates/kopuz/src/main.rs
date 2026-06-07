@@ -1053,8 +1053,11 @@ fn App() -> Element {
     let mut selected_playlist_id = use_signal(|| None::<String>);
     let mut discover_selected_playlist_id = use_signal(|| None::<String>);
     let mut discover_selected_playlist_title = use_signal(|| None::<String>);
-    let mut discover_selected_artist_id = use_signal(|| None::<String>);
-    let mut discover_selected_artist_name = use_signal(|| None::<String>);
+    // YT channel id corresponding to selected_artist_name when known
+    // (Discover tile / mix entry carries it). Left None when the
+    // click only had a name — the YT artist page resolves it via
+    // search at render time.
+    let mut selected_artist_channel_id = use_signal(|| None::<String>);
     let mut selected_artist_name = use_signal(String::new);
     let fetched_artist_images: Signal<std::collections::HashMap<String, String>> =
         use_signal(std::collections::HashMap::new);
@@ -1783,6 +1786,7 @@ fn App() -> Element {
     provide_context(components::NavigationController {
         current_route,
         selected_artist_name,
+        selected_artist_channel_id,
         selected_album_id,
     });
 
@@ -2055,6 +2059,7 @@ fn App() -> Element {
                         }
                         if route == Route::Artist {
                             selected_artist_name.set(String::new());
+                            selected_artist_channel_id.set(None);
                         }
                         current_route.set(route);
                     }
@@ -2094,7 +2099,10 @@ fn App() -> Element {
                                             onclick: move |_| {
                                                 match *current_route.peek() {
                                                     Route::Album => selected_album_id.set(String::new()),
-                                                    Route::Artist => selected_artist_name.set(String::new()),
+                                                    Route::Artist => {
+                                                        selected_artist_name.set(String::new());
+                                                        selected_artist_channel_id.set(None);
+                                                    }
                                                     Route::Playlists => selected_playlist_id.set(None),
                                                     _ => {}
                                                 }
@@ -2162,6 +2170,7 @@ fn App() -> Element {
                                 },
                                 on_search_artist: move |artist: String| {
                                     selected_artist_name.set(artist);
+                                    selected_artist_channel_id.set(None);
                                     current_route.set(Route::Artist);
                                 }
                             }
@@ -2179,9 +2188,9 @@ fn App() -> Element {
                                     current_route.set(Route::DiscoverPlaylist);
                                 },
                                 on_open_artist: move |(cid, name): (String, String)| {
-                                    discover_selected_artist_id.set(Some(cid));
-                                    discover_selected_artist_name.set(Some(name));
-                                    current_route.set(Route::DiscoverArtist);
+                                    selected_artist_channel_id.set(Some(cid));
+                                    selected_artist_name.set(name);
+                                    current_route.set(Route::Artist);
                                 },
                                 on_search_artist: move |name: String| {
                                     search_query.set(name);
@@ -2199,41 +2208,6 @@ fn App() -> Element {
                                     discover_selected_playlist_id.set(None);
                                     discover_selected_playlist_title.set(None);
                                     current_route.set(Route::Discover);
-                                },
-                            }
-                        },
-                        Route::DiscoverArtist => rsx! {
-                            pages::server::discover::DiscoverArtistPage {
-                                selected_artist_id: discover_selected_artist_id,
-                                selected_artist_name: discover_selected_artist_name,
-                                on_back: move |_| {
-                                    // Clear the id signal so re-opening the
-                                    // same artist after Back triggers
-                                    // DiscoverArtistPage's use_effect again
-                                    // (Dioxus dedupes equal-value sets, so a
-                                    // bare Some(A)→Some(A) re-set is a no-op
-                                    // and stale `error`/`artist` would
-                                    // persist).
-                                    discover_selected_artist_id.set(None);
-                                    discover_selected_artist_name.set(None);
-                                    current_route.set(Route::Discover);
-                                },
-                                on_select_album: move |id: String| {
-                                    selected_album_id.set(id);
-                                    current_route.set(Route::Album);
-                                },
-                                on_select_playlist: move |(id, title): (String, String)| {
-                                    discover_selected_playlist_id.set(Some(id));
-                                    discover_selected_playlist_title.set(Some(title));
-                                    current_route.set(Route::DiscoverPlaylist);
-                                },
-                                on_open_artist: move |(cid, name): (String, String)| {
-                                    discover_selected_artist_id.set(Some(cid));
-                                    discover_selected_artist_name.set(Some(name));
-                                },
-                                on_search_artist: move |name: String| {
-                                    search_query.set(name);
-                                    current_route.set(Route::Search);
                                 },
                             }
                         },
@@ -2287,26 +2261,70 @@ fn App() -> Element {
                                 current_queue_index: current_queue_index,
                             }
                         },
-                        Route::Artist => rsx! {
-                            pages::artist::Artist {
-                                library: library,
-                                config: config,
-                                artist_name: selected_artist_name,
-                                playlist_store: playlist_store,
-                                player: player,
-                                on_navigate: move |album_id| {
-                                    selected_album_id.set(album_id);
-                                    current_route.set(Route::Album);
-                                },
-                                is_playing: is_playing,
-                                current_playing: current_playing,
-                                current_song_cover_url: current_song_cover_url,
-                                current_song_title: current_song_title,
-                                current_song_artist: current_song_artist,
-                                current_song_duration: current_song_duration,
-                                current_song_progress: current_song_progress,
-                                queue: queue,
-                                current_queue_index: current_queue_index,
+                        Route::Artist => {
+                            // YT Music backend gets the rich YT-backed artist
+                            // profile (banner, top songs, albums, related)
+                            // — same UI Discover uses for its artist tiles.
+                            // Local / Jellyfin / Subsonic backends keep the
+                            // existing library-driven artist page.
+                            let is_ytmusic = config
+                                .read()
+                                .server
+                                .as_ref()
+                                .map(|s| s.service == config::MusicService::YtMusic)
+                                .unwrap_or(false);
+                            if is_ytmusic {
+                                rsx! {
+                                    pages::server::discover::DiscoverArtistPage {
+                                        selected_artist_id: selected_artist_channel_id,
+                                        selected_artist_name: selected_artist_name,
+                                        on_back: move |_| {
+                                            selected_artist_name.set(String::new());
+                                            selected_artist_channel_id.set(None);
+                                            current_route.set(Route::Library);
+                                        },
+                                        on_select_album: move |id: String| {
+                                            selected_album_id.set(id);
+                                            current_route.set(Route::Album);
+                                        },
+                                        on_select_playlist: move |(id, title): (String, String)| {
+                                            discover_selected_playlist_id.set(Some(id));
+                                            discover_selected_playlist_title.set(Some(title));
+                                            current_route.set(Route::DiscoverPlaylist);
+                                        },
+                                        on_open_artist: move |(cid, name): (String, String)| {
+                                            selected_artist_channel_id.set(Some(cid));
+                                            selected_artist_name.set(name);
+                                        },
+                                        on_search_artist: move |name: String| {
+                                            search_query.set(name);
+                                            current_route.set(Route::Search);
+                                        },
+                                    }
+                                }
+                            } else {
+                                rsx! {
+                                    pages::artist::Artist {
+                                        library: library,
+                                        config: config,
+                                        artist_name: selected_artist_name,
+                                        playlist_store: playlist_store,
+                                        player: player,
+                                        on_navigate: move |album_id| {
+                                            selected_album_id.set(album_id);
+                                            current_route.set(Route::Album);
+                                        },
+                                        is_playing: is_playing,
+                                        current_playing: current_playing,
+                                        current_song_cover_url: current_song_cover_url,
+                                        current_song_title: current_song_title,
+                                        current_song_artist: current_song_artist,
+                                        current_song_duration: current_song_duration,
+                                        current_song_progress: current_song_progress,
+                                        queue: queue,
+                                        current_queue_index: current_queue_index,
+                                    }
+                                }
                             }
                         },
                         Route::Favorites => rsx! {

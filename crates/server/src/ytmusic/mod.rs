@@ -52,6 +52,13 @@ impl YouTubeMusicClient {
         search::music_search_tracks(query, self.cookies.as_deref()).await
     }
 
+    pub async fn resolve_artist_channel_id(
+        &self,
+        query: &str,
+    ) -> Result<Option<String>, String> {
+        search::resolve_artist_channel_id(query, self.cookies.as_deref()).await
+    }
+
     /// List the user's saved playlists (everything under Library →
     /// Playlists, minus the Liked Music auto-playlist). Returns summary
     /// rows; call [`get_playlist_entries`] for the tracks of any given
