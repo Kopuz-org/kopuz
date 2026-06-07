@@ -309,14 +309,37 @@ async fn download_with_progress(
             .map_err(|_| format!("range request timed out after {RANGE_TIMEOUT_SECS}s"))?
             .map_err(|e| format!("Range request failed: {e}"))?;
 
-            if !resp.status().is_success() {
-                return Err(format!("HTTP {} on range {start}-{end}", resp.status()));
+            let status = resp.status();
+            if !status.is_success() {
+                return Err(format!("HTTP {status} on range {start}-{end}"));
+            }
+            // Defensive: a CDN edge ignoring the Range header and
+            // returning 200 (full body) plus a CONTENT_LENGTH equal
+            // to `total` would otherwise let us write the whole file
+            // every iteration (quadratic growth, fills disk). Require
+            // 206 Partial Content explicitly.
+            if status != reqwest::StatusCode::PARTIAL_CONTENT {
+                return Err(format!(
+                    "expected 206 Partial Content but got {status} on range {start}-{end} — server ignored Range header"
+                ));
             }
 
             let bytes = resp
                 .bytes()
                 .await
                 .map_err(|e| format!("Range read error: {e}"))?;
+            let expected_len = end - start + 1;
+            // Defensive: a short read (network hiccup mid-Range)
+            // would otherwise advance `start = end + 1` past where
+            // bytes actually landed, leaving a zero-filled hole in
+            // the output file. Reject and let the retry loop above
+            // do its job.
+            if bytes.len() as u64 != expected_len {
+                return Err(format!(
+                    "short read on range {start}-{end}: got {} bytes, expected {expected_len}",
+                    bytes.len()
+                ));
+            }
 
             writer
                 .write_all(&bytes)
