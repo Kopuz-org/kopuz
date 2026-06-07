@@ -121,7 +121,7 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
     };
 
     if let Some(reason) = primary_err.as_deref() {
-        eprintln!("[yt-player] primary path failed ({reason}) — falling back to client chain");
+        tracing::debug!(reason, "primary path failed — falling back to client chain");
     }
 
     // Fallback chain — kept around in case Google changes ANDROID_VR's
@@ -165,14 +165,14 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
         }
     }
     let primary_err = primary_err.unwrap_or_else(|| "no client returned a usable stream URL".to_string());
-    eprintln!("[yt-player] InnerTube chain exhausted ({primary_err}) — trying yt-dlp fallback");
+    tracing::warn!(%primary_err, "InnerTube chain exhausted — trying yt-dlp fallback");
     // yt-dlp still wants cookies for Music-Premium tracks; pass an
     // empty header when we're anonymous, the fallback will just fail
     // for Premium-locked content (acceptable for anon mode).
     let cookies_for_ytdlp = cookies.unwrap_or("");
     match super::ytdlp_fallback::resolve(video_id, cookies_for_ytdlp).await {
         Ok(info) => {
-            eprintln!("[yt-player] yt-dlp fallback succeeded");
+            tracing::info!("yt-dlp fallback succeeded");
             Ok(info)
         }
         Err(yt_err) => Err(format!(

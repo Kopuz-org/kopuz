@@ -874,7 +874,7 @@ fn ServerHeroBanner(
                                                         MusicService::YtMusic => Ok(()),
                                                     };
                                                     if let Err(e) = result {
-                                                        eprintln!("Failed to sync favorite: {e}");
+                                                        tracing::warn!(error = %e, "failed to sync favorite");
                                                     }
                                                 }
                                             }

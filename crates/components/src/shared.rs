@@ -111,11 +111,11 @@ pub fn toggle_favorite(
                             }
                         };
                         if let Err(e) = result {
-                            eprintln!("Failed to sync favorite to server: {e}");
+                            tracing::warn!(error = %e, "failed to sync favorite to server");
                             favorites_store.write().set_jellyfin(item_id, !new_fav);
                         }
                     } else {
-                        eprintln!("No server credentials, reverting favorite change");
+                        tracing::warn!("no server credentials, reverting favorite change");
                         favorites_store.write().set_jellyfin(item_id, !new_fav);
                     }
                 });

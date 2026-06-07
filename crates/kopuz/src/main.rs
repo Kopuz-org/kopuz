@@ -228,18 +228,18 @@ async fn run_rotation(mut config: Signal<config::AppConfig>) {
     // per-tick OK line drowned stderr.
     match server::ytmusic::verify_session_keepalive::tick(&cookies).await {
         Ok(Some(updated)) => {
-            eprintln!(
-                "[yt-keepalive] verify_session OK in {:.1}s, jar updated ({}B → {}B)",
-                started.elapsed().as_secs_f32(),
-                cookies.len(),
-                updated.len()
+            tracing::debug!(
+                secs = started.elapsed().as_secs_f32(),
+                from = cookies.len(),
+                to = updated.len(),
+                "verify_session OK — jar rotated",
             );
             if let Some(srv) = config.write().server.as_mut() {
                 srv.access_token = Some(updated);
             }
         }
         Ok(None) => {}
-        Err(e) => eprintln!("[yt-keepalive] verify_session failed: {e}"),
+        Err(e) => tracing::warn!(error = %e, "verify_session failed"),
     }
 }
 

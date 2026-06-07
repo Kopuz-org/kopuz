@@ -804,8 +804,8 @@ fn start_radio_from(
             Ok(tracks) if !tracks.is_empty() => {
                 ctrl.play_queue_linear(tracks);
             }
-            Ok(_) => eprintln!("[yt-mix] empty queue for seed {video_id}"),
-            Err(e) => eprintln!("[yt-mix] failed for seed {video_id}: {e}"),
+            Ok(_) => tracing::debug!(seed = %video_id, "YT mix returned empty queue"),
+            Err(e) => tracing::warn!(seed = %video_id, error = %e, "YT mix failed"),
         }
     });
 }

@@ -189,10 +189,7 @@ pub async fn launch_signin_and_extract(
             format!("KOPUZ_{}", browser.id().to_uppercase().replace('-', "_"))
         )
     })?;
-    eprintln!(
-        "[yt-signin] launching {bin} against {} (sign-in URL: {SIGNIN_URL})",
-        profile.display()
-    );
+    tracing::info!(%bin, profile = %profile.display(), "launching sign-in browser");
     let mut child = Command::new(&bin)
         .arg("--no-first-run")
         .arg("--no-default-browser-check")
@@ -203,7 +200,7 @@ pub async fn launch_signin_and_extract(
         .kill_on_drop(true)
         .spawn()
         .map_err(|e| format!("spawn {bin}: {e}"))?;
-    eprintln!("[yt-signin] {bin} pid={:?} — waiting for sign-in", child.id());
+    tracing::debug!(%bin, pid = ?child.id(), "browser spawned — waiting for sign-in");
 
     let deadline = Instant::now() + signin_timeout;
     let mut last_extract_err: Option<String> = None;
@@ -232,21 +229,21 @@ pub async fn launch_signin_and_extract(
         if child_exited_at.is_none()
             && let Ok(Some(status)) = child.try_wait()
         {
-            eprintln!("[yt-signin] {bin} exited (status {status}) — continuing to poll cookies in case the browser is still running as a detached process");
+            tracing::debug!(%bin, %status, "browser process exited — still polling cookies (may be a detached UI)");
             child_exited_at = Some(Instant::now());
         }
         let cookies = match super::cookies::extract_from(browser, &profile).await {
             Ok(c) => c,
             Err(e) => {
                 if last_extract_err.as_deref() != Some(e.as_str()) {
-                    eprintln!("[yt-signin] cookie extract: {e}");
+                    tracing::trace!(error = %e, "cookie extract not ready yet");
                     last_extract_err = Some(e);
                 }
                 continue;
             }
         };
         if has_cookie(&cookies, "SAPISID") && has_cookie(&cookies, "SID") {
-            eprintln!("[yt-signin] cookies detected — closing {bin}");
+            tracing::info!(%bin, "sign-in cookies detected — closing browser");
             break Ok(cookies);
         }
     };

@@ -163,7 +163,7 @@ pub fn JellyfinPlaylists(
                     }
                 }
                 MusicService::YtMusic => {
-                    eprintln!("[yt-playlists] sync starting");
+                    tracing::debug!("YT playlists sync starting");
                     yt_is_syncing.set(true);
                     yt_synced_so_far.set(0);
                     let yt =
@@ -172,13 +172,10 @@ pub fn JellyfinPlaylists(
                     if *fetch_request_id.read() != request_id {
                         return;
                     }
-                    eprintln!(
-                        "[yt-playlists] list_playlists → {}",
-                        list_result
-                            .as_ref()
-                            .map(|v| format!("{} entries", v.len()))
-                            .unwrap_or_else(|e| format!("ERR {e}"))
-                    );
+                    match list_result.as_ref() {
+                        Ok(v) => tracing::debug!(entries = v.len(), "YT list_playlists"),
+                        Err(e) => tracing::warn!(error = %e, "YT list_playlists failed"),
+                    }
                     let summaries = match list_result {
                         Ok(s) => s,
                         Err(_) => {
@@ -231,7 +228,7 @@ pub fn JellyfinPlaylists(
                         let tracks = match yt.get_playlist_entries(&summary.id).await {
                             Ok(t) => t,
                             Err(e) => {
-                                eprintln!("[yt-playlists] {} → ERR {e}", summary.id);
+                                tracing::warn!(playlist = %summary.id, error = %e, "YT playlist entries failed");
                                 Vec::new()
                             }
                         };

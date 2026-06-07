@@ -168,7 +168,7 @@ async fn download_worker(
                         info.content_length,
                     )),
                     Err(e) => {
-                        eprintln!("Download URL resolve failed for {id} (YT): {e}");
+                        tracing::warn!(%id, error = %e, "YT download URL resolve failed");
                         None
                     }
                 }
@@ -210,7 +210,7 @@ async fn download_worker(
                 clear_progress(&id);
             }
             Err(e) => {
-                eprintln!("Download failed for {id}: {e}");
+                tracing::error!(%id, error = %e, "download failed");
                 if let Some(item) = queue.write().items.iter_mut().find(|i| i.id == id) {
                     item.status = DownloadStatus::Failed;
                 }

@@ -385,7 +385,7 @@ impl Player {
                     }
                 },
                 move |err| {
-                    eprintln!("cpal stream error: {}", err);
+                    tracing::error!(error = %err, "cpal stream error");
                 },
                 None,
             )
@@ -729,7 +729,7 @@ impl Player {
         ) {
             Ok(f) => f,
             Err(e) => {
-                eprintln!("symphonia probe error: {}", e);
+                tracing::error!(error = %e, "symphonia probe error");
                 finish_natural(&state);
                 return;
             }
@@ -742,7 +742,7 @@ impl Player {
         {
             Some(t) => t,
             None => {
-                eprintln!("no supported audio tracks found");
+                tracing::error!("no supported audio tracks found");
                 finish_natural(&state);
                 return;
             }
@@ -784,7 +784,7 @@ impl Player {
             ) {
                 Ok(d) => d,
                 Err(e) => {
-                    eprintln!("symphonia codec error: {}", e);
+                    tracing::error!(error = %e, "symphonia codec error");
                     finish_natural(&state);
                     return;
                 }
@@ -813,9 +813,9 @@ impl Player {
                         }));
                     match seek_result {
                         Ok(Ok(_)) => decoder.reset(),
-                        Ok(Err(e)) => eprintln!("seek error: {}", e),
+                        Ok(Err(e)) => tracing::warn!(error = %e, "seek error"),
                         Err(_) => {
-                            eprintln!(
+                            tracing::warn!(
                                 "seek panicked inside symphonia demuxer; continuing playback"
                             );
                             decoder.reset();
@@ -853,7 +853,7 @@ impl Player {
                     continue;
                 }
                 Err(e) => {
-                    eprintln!("format error: {}", e);
+                    tracing::warn!(error = %e, "format error — ending track");
                     finish_natural(&state);
                     return;
                 }
@@ -866,11 +866,11 @@ impl Player {
             let decoded = match decoder.decode(&packet) {
                 Ok(d) => d,
                 Err(symphonia::core::errors::Error::DecodeError(e)) => {
-                    eprintln!("decode error: {}", e);
+                    tracing::debug!(error = %e, "recoverable decode error — skipping packet");
                     continue;
                 }
                 Err(e) => {
-                    eprintln!("fatal decode error: {}", e);
+                    tracing::error!(error = %e, "fatal decode error");
                     finish_natural(&state);
                     return;
                 }

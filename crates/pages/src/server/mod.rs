@@ -135,7 +135,7 @@ pub async fn download_tracks_batch(
                         .offline_tracks
                         .insert(id.clone(), path.to_string_lossy().into_owned());
                 }
-                Err(e) => eprintln!("Batch download failed for {id}: {e}"),
+                Err(e) => tracing::warn!(%id, error = %e, "batch download failed"),
             }
         }
     }

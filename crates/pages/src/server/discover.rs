@@ -551,7 +551,7 @@ fn play_playlist_async(
                 cache_writer.write().insert(id, accumulated);
             }
             Err(e) => {
-                eprintln!("[discover] playlist stream errored mid-flight: {e}");
+                tracing::warn!(error = %e, "discover playlist stream errored mid-flight");
                 ctrl.playback_error.set(Some(format!(
                     "Discover playlist failed mid-load:\n{e}"
                 )));

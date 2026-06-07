@@ -84,14 +84,14 @@ impl StreamBuffer {
 
             match client.get(&url).send().await {
                 Ok(mut response) => {
-                    eprintln!(
-                        "[streambuf] HTTP {} content-length={:?} content-type={:?}",
-                        response.status(),
-                        response.content_length(),
-                        response
+                    tracing::trace!(
+                        status = %response.status(),
+                        content_length = ?response.content_length(),
+                        content_type = ?response
                             .headers()
                             .get("content-type")
-                            .and_then(|v| v.to_str().ok())
+                            .and_then(|v| v.to_str().ok()),
+                        "stream buffer HTTP response",
                     );
                     if !response.status().is_success() {
                         let (lock, notify) = &*state_clone;

@@ -511,7 +511,7 @@ impl PlayerController {
                                     player.write().play(source, meta, hint)
                                 };
                                 if let Err(e) = result {
-                                    eprintln!("Offline playback error: {e}");
+                                    tracing::error!(error = %e, "offline playback failed");
                                     is_loading.set(false);
                                     skip_in_progress.set(false);
                                     return;
@@ -718,7 +718,7 @@ impl PlayerController {
                                     if *play_generation.read() != current_gen {
                                         return;
                                     }
-                                    eprintln!("YT Music stream URL fetch failed: {e}");
+                                    tracing::error!(error = %e, "YT Music stream URL fetch failed");
                                     playback_error.set(Some(format!(
                                         "YouTube Music couldn't load this track:\n{e}"
                                     )));
@@ -793,7 +793,7 @@ impl PlayerController {
                                     player.write().play(source, meta, hint)
                                 };
                                 if let Err(e) = result {
-                                    eprintln!("Playback error: {e}");
+                                    tracing::error!(error = %e, "playback failed");
                                     is_loading.set(false);
                                     skip_in_progress.set(false);
                                     return;
@@ -1446,7 +1446,7 @@ impl PlayerController {
                             self.player.write().play(source, meta, hint)
                         };
                         if let Err(e) = result {
-                            eprintln!("Playback error: {e}");
+                            tracing::error!(error = %e, "playback failed");
                             self.skip_in_progress.set(false);
                             return;
                         }

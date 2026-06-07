@@ -1021,12 +1021,12 @@ impl AppConfig {
                     config
                 }
                 Err(e) => {
-                    eprintln!("Failed to parse config at {:?}: {}", path, e);
+                    tracing::error!(?path, error = %e, "failed to parse config — using defaults");
                     Self::default()
                 }
             },
             Err(e) => {
-                eprintln!("Failed to read config at {:?}: {}", path, e);
+                tracing::warn!(?path, error = %e, "failed to read config — using defaults");
                 Self::default()
             }
         }
@@ -1036,18 +1036,18 @@ impl AppConfig {
         if let Some(parent) = path.parent()
             && let Err(e) = fs::create_dir_all(parent)
         {
-            eprintln!("Failed to create config directory {:?}: {}", parent, e);
+            tracing::error!(?parent, error = %e, "failed to create config directory");
             return Err(e);
         }
         let data = match serde_json::to_string_pretty(self) {
             Ok(d) => d,
             Err(e) => {
-                eprintln!("Failed to serialize config: {}", e);
+                tracing::error!(error = %e, "failed to serialize config");
                 return Err(std::io::Error::other(e));
             }
         };
         if let Err(e) = fs::write(path, data) {
-            eprintln!("Failed to write config to {:?}: {}", path, e);
+            tracing::error!(?path, error = %e, "failed to write config");
             return Err(e);
         }
         Ok(())

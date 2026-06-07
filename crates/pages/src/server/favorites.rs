@@ -152,7 +152,7 @@ pub fn JellyfinFavorites(
                             ids
                         }
                         Err(e) => {
-                            eprintln!("[yt-favorites] sync failed: {e}");
+                            tracing::warn!(error = %e, "YT favorites sync failed");
                             Vec::new()
                         }
                     }
