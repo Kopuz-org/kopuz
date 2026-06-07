@@ -79,6 +79,7 @@ pub(super) fn content_type_to_ext(content_type: &str) -> Option<&'static str> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[tracing::instrument(name = "download.to_cache", skip(url), fields(item_id = %item_id))]
 pub async fn download_track_to_cache(
     item_id: &str,
     url: &str,

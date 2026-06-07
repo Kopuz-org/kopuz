@@ -437,6 +437,7 @@ impl Player {
     #[cfg(not(target_os = "android"))]
     const RING_BUF_SECONDS: usize = 2;
 
+    #[tracing::instrument(name = "player.play", skip_all, fields(title = %meta.title))]
     pub fn play(
         &mut self,
         source: Box<dyn symphonia::core::io::MediaSource>,
@@ -504,6 +505,7 @@ impl Player {
         Ok(())
     }
 
+    #[tracing::instrument(name = "player.crossfade", skip_all, fields(title = %meta.title))]
     pub fn crossfade_to(
         &mut self,
         source: Box<dyn symphonia::core::io::MediaSource>,

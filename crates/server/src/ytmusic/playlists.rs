@@ -110,6 +110,7 @@ pub async fn get_playlist_entries(
 /// of buffering the entire playlist. Used by the discover play-on-hover
 /// flow so audio can start streaming on the first ~100 rows without
 /// waiting for the rest of a 1000-row playlist to paginate in.
+#[tracing::instrument(name = "yt.playlist_entries", skip(cookies, on_batch), fields(playlist_id = %playlist_id))]
 pub async fn stream_playlist_entries<F>(
     playlist_id: &str,
     cookies: &str,

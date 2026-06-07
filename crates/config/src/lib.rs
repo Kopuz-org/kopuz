@@ -1007,6 +1007,7 @@ impl AppConfig {
         self.active_service() == Some(MusicService::Jellyfin)
     }
 
+    #[tracing::instrument(name = "config.load", skip_all)]
     pub fn load(path: &Path) -> Self {
         if !path.exists() {
             return Self::default();
@@ -1032,6 +1033,7 @@ impl AppConfig {
         }
     }
 
+    #[tracing::instrument(name = "config.save", skip_all)]
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         if let Some(parent) = path.parent()
             && let Err(e) = fs::create_dir_all(parent)

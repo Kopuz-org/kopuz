@@ -173,6 +173,7 @@ struct SubsonicPlainLyricsData {
 ///
 /// For Jellyfin: `server_token` = access token, `server_user_id` = user_id (unused for lyrics)
 /// For Subsonic: `server_token` = password, `server_user_id` = username
+#[tracing::instrument(name = "lyrics.fetch", skip(track_path), fields(artist = %artist, title = %title))]
 pub async fn fetch_lyrics(
     artist: &str,
     title: &str,
