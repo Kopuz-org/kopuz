@@ -1873,16 +1873,18 @@ fn App() -> Element {
         document::Link { rel: "stylesheet", href: TAILWIND_CSS }
         document::Link { rel: "stylesheet", href: REDUCED_ANIMATIONS_CSS }
         WindowsToolbarIconAssets {}
-        document::Script {
-            "(function(){{
-                ['https://fonts.bunny.net/css?family=jetbrains-mono:400,500,700,800&display=swap',
-                 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css']
-                .forEach(function(href){{
-                    var l=document.createElement('link');
-                    l.rel='stylesheet';l.href=href;
-                    document.head.appendChild(l);
-                }});
-            }})();"
+        // Font stylesheets injected declaratively rather than via a
+        // document::Script: a Script is processed once but App re-renders
+        // on every signal change, and dioxus_document warns "Changing the
+        // props of Script {} is not supported" each time. Links are
+        // re-render-safe and do the same job (and load a touch earlier).
+        document::Link {
+            rel: "stylesheet",
+            href: "https://fonts.bunny.net/css?family=jetbrains-mono:400,500,700,800&display=swap",
+        }
+        document::Link {
+            rel: "stylesheet",
+            href: "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css",
         }
 
         div {
