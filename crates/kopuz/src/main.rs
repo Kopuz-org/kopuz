@@ -2174,6 +2174,10 @@ fn App() -> Element {
                                 selected_playlist_id: discover_selected_playlist_id,
                                 selected_playlist_title: discover_selected_playlist_title,
                                 on_back: move |_| {
+                                    // Mirror DiscoverArtist: clear id so
+                                    // re-opening the same playlist refetches.
+                                    discover_selected_playlist_id.set(None);
+                                    discover_selected_playlist_title.set(None);
                                     current_route.set(Route::Discover);
                                 },
                             }
@@ -2183,6 +2187,15 @@ fn App() -> Element {
                                 selected_artist_id: discover_selected_artist_id,
                                 selected_artist_name: discover_selected_artist_name,
                                 on_back: move |_| {
+                                    // Clear the id signal so re-opening the
+                                    // same artist after Back triggers
+                                    // DiscoverArtistPage's use_effect again
+                                    // (Dioxus dedupes equal-value sets, so a
+                                    // bare Some(A)→Some(A) re-set is a no-op
+                                    // and stale `error`/`artist` would
+                                    // persist).
+                                    discover_selected_artist_id.set(None);
+                                    discover_selected_artist_name.set(None);
                                     current_route.set(Route::Discover);
                                 },
                                 on_select_album: move |id: String| {

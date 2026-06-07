@@ -880,10 +880,18 @@ pub fn DiscoverPlaylistDetail(
         .clone()
         .unwrap_or_else(String::new);
 
+    // Bumped on every effect re-run; spawned fetchers check it before
+    // committing their result so a slow fetch for playlist A can't
+    // overwrite B's tracks after the user has navigated B → A → B.
+    let mut fetch_gen = use_signal(|| 0u64);
     use_effect(move || {
         let Some(pid) = selected_playlist_id.read().clone() else {
             return;
         };
+        let my_gen = fetch_gen.with_mut(|g| {
+            *g += 1;
+            *g
+        });
         tracks.set(Vec::new());
         loading.set(true);
         error.set(None);
@@ -894,8 +902,10 @@ pub fn DiscoverPlaylistDetail(
                 .as_ref()
                 .and_then(|s| s.access_token.clone());
             let Some(cookies) = cookies else {
-                error.set(Some("not signed in".to_string()));
-                loading.set(false);
+                if *fetch_gen.peek() == my_gen {
+                    error.set(Some("not signed in".to_string()));
+                    loading.set(false);
+                }
                 return;
             };
             let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
@@ -906,6 +916,9 @@ pub fn DiscoverPlaylistDetail(
             } else {
                 yt.get_playlist_entries(&pid).await
             };
+            if *fetch_gen.peek() != my_gen {
+                return;
+            }
             match result {
                 Ok(ts) => tracks.set(ts),
                 Err(e) => error.set(Some(e)),
@@ -1052,10 +1065,18 @@ pub fn DiscoverArtistPage(
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
 
+    // Generation guard: same role as DiscoverPlaylistDetail's
+    // fetch_gen — drop late results when the user navigates to a
+    // different artist mid-fetch.
+    let mut fetch_gen = use_signal(|| 0u64);
     use_effect(move || {
         let Some(cid) = selected_artist_id.read().clone() else {
             return;
         };
+        let my_gen = fetch_gen.with_mut(|g| {
+            *g += 1;
+            *g
+        });
         artist.set(None);
         loading.set(true);
         error.set(None);
@@ -1066,12 +1087,18 @@ pub fn DiscoverArtistPage(
                 .as_ref()
                 .and_then(|s| s.access_token.clone());
             let Some(cookies) = cookies else {
-                error.set(Some("not signed in".to_string()));
-                loading.set(false);
+                if *fetch_gen.peek() == my_gen {
+                    error.set(Some("not signed in".to_string()));
+                    loading.set(false);
+                }
                 return;
             };
             let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
-            match yt.fetch_artist(&cid).await {
+            let result = yt.fetch_artist(&cid).await;
+            if *fetch_gen.peek() != my_gen {
+                return;
+            }
+            match result {
                 Ok(a) => artist.set(Some(a)),
                 Err(e) => error.set(Some(e)),
             }
