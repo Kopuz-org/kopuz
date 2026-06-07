@@ -331,17 +331,7 @@ fn DiscoverTile(
     let cache = use_context::<DiscoverPrefetchCache>().0;
     match item {
         DiscoverItem::Song(track) => {
-            let mut ctrl_for_song = ctrl;
-            let mut now_playing_for_song = now_playing;
-            rsx! {
-                SongCard {
-                    track: track.clone(),
-                    on_play: move |t: Track| {
-                        now_playing_for_song.set(None);
-                        ctrl_for_song.play_queue_linear(vec![t]);
-                    },
-                }
-            }
+            rsx! { SongCard { track: track.clone() } }
         },
         DiscoverItem::Playlist { playlist_id, title, subtitle, thumbnail } => {
             let title_for_click = title.clone();
@@ -640,7 +630,7 @@ fn Card(
 }
 
 #[component]
-fn SongCard(track: Track, on_play: EventHandler<Track>) -> Element {
+fn SongCard(track: Track) -> Element {
     let thumbnail = utils::jellyfin_image::track_cover_url_with_album_fallback(
         &track.path.to_string_lossy(),
         &track.album_id,
@@ -651,12 +641,76 @@ fn SongCard(track: Track, on_play: EventHandler<Track>) -> Element {
     );
     let title = track.title.clone();
     let artist = track.artist.clone();
+    let video_id = track_video_id(&track);
+
+    let config = use_context::<Signal<AppConfig>>();
+    let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
+    let now_playing = use_context::<DiscoverNowPlaying>().0;
+    let mut cache = use_context::<DiscoverPrefetchCache>().0;
+
+    let source_id = video_id.clone();
+    let is_this_source = match (&source_id, now_playing.read().as_ref()) {
+        (Some(sid), Some(active)) => sid == active,
+        _ => false,
+    };
+    let is_playing = *ctrl.is_playing.read();
+    let is_loading = *ctrl.is_loading.read();
+    let show_loading = is_this_source && is_loading;
+    let show_pause = is_this_source && is_playing && !is_loading;
+
+    let mut hover_armed = use_signal(|| false);
+    let prefetch_id = video_id.clone();
+
     rsx! {
-        button {
+        div {
             class: "shrink-0 w-44 text-left cursor-pointer transition-transform duration-200 ease-out hover:scale-[1.03] hover:-translate-y-0.5 group",
+            onmouseenter: move |_| {
+                let Some(id) = prefetch_id.clone() else { return; };
+                hover_armed.set(true);
+                spawn(async move {
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                    if !*hover_armed.peek() {
+                        return;
+                    }
+                    if cache.peek().contains_key(&id) {
+                        return;
+                    }
+                    let Some(cookies) = config
+                        .peek()
+                        .server
+                        .as_ref()
+                        .and_then(|s| s.access_token.clone())
+                    else {
+                        return;
+                    };
+                    let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
+                    if let Ok(mix) = yt.start_mix(&id).await
+                        && !mix.is_empty()
+                    {
+                        cache.write().insert(id, mix);
+                    }
+                });
+            },
+            onmouseleave: move |_| {
+                hover_armed.set(false);
+            },
             onclick: {
                 let track = track.clone();
-                move |_| on_play.call(track.clone())
+                let video_id = video_id.clone();
+                move |_| {
+                    if show_loading {
+                        return;
+                    }
+                    if is_this_source {
+                        ctrl.toggle();
+                        return;
+                    }
+                    if let Some(vid) = video_id.clone() {
+                        play_song_with_mix(track.clone(), vid, config, ctrl, now_playing, cache);
+                    } else {
+                        ctrl.play_queue_linear(vec![track.clone()]);
+                    }
+                }
             },
             div { class: "relative w-44 h-44 mb-3 overflow-hidden rounded-lg",
                 if let Some(url) = thumbnail {
@@ -670,7 +724,15 @@ fn SongCard(track: Track, on_play: EventHandler<Track>) -> Element {
                     div { class: "w-44 h-44 rounded-lg bg-white/5" }
                 }
                 div { class: "absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-black/40 transition-opacity duration-200",
-                    i { class: "fa-solid fa-play text-white text-2xl" }
+                    i {
+                        class: if show_loading {
+                            "fa-solid fa-arrows-rotate fa-spin text-white text-2xl"
+                        } else if show_pause {
+                            "fa-solid fa-pause text-white text-2xl"
+                        } else {
+                            "fa-solid fa-play text-white text-2xl"
+                        }
+                    }
                 }
             }
             div { class: "h-10 flex items-center overflow-hidden",
@@ -686,6 +748,76 @@ fn SongCard(track: Track, on_play: EventHandler<Track>) -> Element {
             }
         }
     }
+}
+
+/// Pull the YT videoId out of a ytmusic:VIDEOID[:thumb] path. Returns
+/// None if the track isn't a YT one (defensive — discover-feed songs
+/// should always be).
+fn track_video_id(track: &Track) -> Option<String> {
+    let s = track.path.to_string_lossy();
+    let rest = s.strip_prefix("ytmusic:")?;
+    Some(rest.split(':').next().unwrap_or(rest).to_string())
+}
+
+/// Click a single Discover song → kick off the YT mix radio so "next"
+/// works, with the clicked song as the seed at queue index 0. Same
+/// cache + sync-on-hit semantics as play_playlist_async.
+fn play_song_with_mix(
+    seed: Track,
+    video_id: String,
+    config: Signal<AppConfig>,
+    mut ctrl: hooks::use_player_controller::PlayerController,
+    mut now_playing: Signal<Option<String>>,
+    cache: Signal<HashMap<String, Vec<Track>>>,
+) {
+    ctrl.is_loading.set(true);
+    now_playing.set(Some(video_id.clone()));
+    if let Some(mix) = cache.peek().get(&video_id).cloned()
+        && !mix.is_empty()
+    {
+        let queue = build_song_queue(&seed, mix);
+        ctrl.play_queue_linear(queue);
+        return;
+    }
+    spawn(async move {
+        let Some(cookies) = config
+            .peek()
+            .server
+            .as_ref()
+            .and_then(|s| s.access_token.clone())
+        else {
+            ctrl.is_loading.set(false);
+            return;
+        };
+        let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
+        match yt.start_mix(&video_id).await {
+            Ok(mix) if !mix.is_empty() => {
+                let mut cache_writer = cache;
+                cache_writer.write().insert(video_id, mix.clone());
+                let queue = build_song_queue(&seed, mix);
+                ctrl.play_queue_linear(queue);
+            }
+            _ => {
+                // Mix failed → at least play the seed alone so the user
+                // gets the song they clicked, even if "next" won't work.
+                ctrl.play_queue_linear(vec![seed]);
+            }
+        }
+    });
+}
+
+/// Put `seed` at index 0, deduping it out of `mix` if present so it
+/// doesn't double-up. The mix radio usually starts with the seed
+/// anyway; this just ensures we don't queue it twice.
+fn build_song_queue(seed: &Track, mix: Vec<Track>) -> Vec<Track> {
+    let mut out = Vec::with_capacity(mix.len() + 1);
+    out.push(seed.clone());
+    for t in mix {
+        if t.path != seed.path {
+            out.push(t);
+        }
+    }
+    out
 }
 
 /// Standalone viewer for a YT Music playlist discovered from the home
