@@ -425,8 +425,7 @@ the trace file during long sessions.
 
 ### Power-user env vars
 
-Everything above has an env-var equivalent for terminal runs (these take
-precedence over the in-app toggle):
+Log **verbosity** is controlled by env vars for terminal runs:
 
 ```bash
 # Verbose (debug-level) logs for a session
@@ -435,16 +434,16 @@ KOPUZ_DEBUG=1 kopuz
 # Fine-grained, per-module (overrides KOPUZ_DEBUG); standard tracing directive syntax
 KOPUZ_LOG="server::ytmusic=trace,kopuz=debug" kopuz
 
-# Performance trace without touching settings ("1"/"true" = default path)
-KOPUZ_TRACE=1 kopuz
-KOPUZ_TRACE=/tmp/kopuz-trace.json kopuz
-
 # Deep render-tree profiling: Dioxus's own per-component render/diff spans
-KOPUZ_LOG="info,dioxus_core=trace" KOPUZ_TRACE=1 kopuz
+# (enable the trace toggle in Settings first; this just controls what's recorded)
+KOPUZ_LOG="info,dioxus_core=trace" kopuz
 ```
 
-`RUST_LOG` works too; `KOPUZ_LOG` takes precedence. Tracing is off by default —
-zero overhead unless enabled via the toggle or `KOPUZ_TRACE`.
+`RUST_LOG` works too; `KOPUZ_LOG` takes precedence.
+
+The **performance trace** is enabled only via **Settings → Logs → Enable
+Performance Tracing** (then restart) — there's no env var for it; the UI is the
+single source of truth. Off by default → zero overhead.
 
 > Debug builds add a **Trigger crash** button in Settings → Logs to exercise the
 > crash-report path. It's compiled out of release builds.
