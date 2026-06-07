@@ -88,6 +88,7 @@ async fn run_resolve(video_id: &str, cookies_path: &std::path::Path) -> Result<Y
         format,
         user_agent,
         content_length: parts[2].parse::<u64>().ok(),
+        duration_secs: None,
     })
 }
 

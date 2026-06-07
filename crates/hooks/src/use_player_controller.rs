@@ -660,6 +660,9 @@ impl PlayerController {
                     let mut current_song_album = self.current_song_album;
                     let mut current_song_cover_url = self.current_song_cover_url;
                     let station_registry = self.station_registry;
+                    let mut queue_for_yt = self.queue;
+                    let current_queue_index_for_yt = self.current_queue_index;
+                    let mut current_song_duration_for_yt = self.current_song_duration;
 
                     if !use_crossfade {
                         self.hydrate_current_track_metadata(idx, 0);
@@ -690,11 +693,19 @@ impl PlayerController {
                             };
                             let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
                             match yt.get_stream(video_id).await {
-                                Ok(info) => (
-                                    info.url,
-                                    Some(info.format),
-                                    Some(info.user_agent),
-                                ),
+                                Ok(info) => {
+                                    if let Some(secs) = info.duration_secs
+                                        && secs > 0
+                                    {
+                                        if let Some(t) = queue_for_yt.write().get_mut(idx) {
+                                            t.duration = secs;
+                                        }
+                                        if *current_queue_index_for_yt.peek() == idx {
+                                            current_song_duration_for_yt.set(secs);
+                                        }
+                                    }
+                                    (info.url, Some(info.format), Some(info.user_agent))
+                                }
                                 Err(e) => {
                                     eprintln!("YT Music stream URL fetch failed: {e}");
                                     playback_error.set(Some(format!(
