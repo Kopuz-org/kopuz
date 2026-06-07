@@ -431,13 +431,24 @@ fn play_playlist_async(
         return;
     }
     spawn(async move {
+        let mut cache_writer = cache;
+        // Shared failure path: release is_loading AND let go of the
+        // now_playing tag so the tile drops out of phantom-pause state
+        // and a subsequent click can retry through the normal play path
+        // rather than landing on ctrl.toggle() against an unrelated
+        // currently-playing track.
+        let fail = |ctrl: &mut hooks::use_player_controller::PlayerController,
+                    now_playing: &mut Signal<Option<String>>| {
+            ctrl.is_loading.set(false);
+            now_playing.set(None);
+        };
         let Some(cookies) = config
             .peek()
             .server
             .as_ref()
             .and_then(|s| s.access_token.clone())
         else {
-            ctrl.is_loading.set(false);
+            fail(&mut ctrl, &mut now_playing);
             return;
         };
         let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
@@ -448,8 +459,14 @@ fn play_playlist_async(
         // start playing instantly while the tail fills in.
         if id.starts_with("MPRE") {
             match yt.fetch_album_tracks(&id).await {
-                Ok(tracks) if !tracks.is_empty() => ctrl.play_queue_linear(tracks),
-                _ => ctrl.is_loading.set(false),
+                Ok(tracks) if !tracks.is_empty() => {
+                    // Warm the cache for the next click on the same
+                    // tile — without this the MPRE branch repaid full
+                    // network roundtrip for every cold click.
+                    cache_writer.write().insert(id, tracks.clone());
+                    ctrl.play_queue_linear(tracks);
+                }
+                _ => fail(&mut ctrl, &mut now_playing),
             }
             return;
         }
@@ -471,14 +488,26 @@ fn play_playlist_async(
             })
             .await;
         if !started {
-            ctrl.is_loading.set(false);
-            let _ = result;
+            fail(&mut ctrl, &mut now_playing);
             return;
         }
-        // Cache the assembled list so the next click on this same
-        // tile is instant (e.g. the user navigated away and came back).
-        let mut cache_writer = cache;
-        cache_writer.write().insert(id, accumulated);
+        // Only cache when the WHOLE playlist successfully streamed. A
+        // mid-stream failure (continuation 5xx, network blip) yields a
+        // truncated `accumulated` — caching it would poison every
+        // future click on this tile with the partial copy, with no UI
+        // affordance to refresh. Surface the failure to the user so
+        // they can retry from the playlist viewer.
+        match result {
+            Ok(()) => {
+                cache_writer.write().insert(id, accumulated);
+            }
+            Err(e) => {
+                eprintln!("[discover] playlist stream errored mid-flight: {e}");
+                ctrl.playback_error.set(Some(format!(
+                    "Discover playlist failed mid-load:\n{e}"
+                )));
+            }
+        }
     });
 }
 
@@ -787,6 +816,7 @@ fn play_song_with_mix(
             .and_then(|s| s.access_token.clone())
         else {
             ctrl.is_loading.set(false);
+            now_playing.set(None);
             return;
         };
         let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
@@ -800,6 +830,8 @@ fn play_song_with_mix(
             _ => {
                 // Mix failed → at least play the seed alone so the user
                 // gets the song they clicked, even if "next" won't work.
+                // now_playing stays as the video_id so the tile shows
+                // pause overlay for the seed song that IS now playing.
                 ctrl.play_queue_linear(vec![seed]);
             }
         }

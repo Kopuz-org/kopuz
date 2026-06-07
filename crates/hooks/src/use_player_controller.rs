@@ -694,7 +694,13 @@ impl PlayerController {
                             let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
                             match yt.get_stream(video_id).await {
                                 Ok(info) => {
-                                    if let Some(secs) = info.duration_secs
+                                    // Stale-resolve guard: don't stamp duration / mutate
+                                    // queue if the user has clicked another track while
+                                    // we were awaiting get_stream. Otherwise a slow
+                                    // resolver for track A scribbles A's duration on
+                                    // whatever sits at idx now.
+                                    if *play_generation.read() == current_gen
+                                        && let Some(secs) = info.duration_secs
                                         && secs > 0
                                     {
                                         if let Some(t) = queue_for_yt.write().get_mut(idx) {
@@ -707,6 +713,11 @@ impl PlayerController {
                                     (info.url, Some(info.format), Some(info.user_agent))
                                 }
                                 Err(e) => {
+                                    // Same guard: a stale error must NOT post a banner
+                                    // for or clear is_loading on the user's new track.
+                                    if *play_generation.read() != current_gen {
+                                        return;
+                                    }
                                     eprintln!("YT Music stream URL fetch failed: {e}");
                                     playback_error.set(Some(format!(
                                         "YouTube Music couldn't load this track:\n{e}"
@@ -1867,8 +1878,17 @@ impl PlayerController {
     /// changes — without it, a queued `ytmusic:` track would be replayed
     /// through whichever backend's stream-builder is now active.
     pub fn reset_for_backend_switch(&mut self) {
+        // Invalidate any in-flight track-load spawn (YT __YT_PENDING
+        // resolver, Jellyfin stream open, etc.) so its eventual
+        // completion doesn't start playback against the cleared queue
+        // or post a stale error banner / clear is_loading for the new
+        // backend's first track.
+        self.play_generation.with_mut(|g| *g += 1);
+        self.cancel_radio_task();
         self.player.write().stop_for_transition();
         self.is_playing.set(false);
+        self.is_loading.set(false);
+        self.skip_in_progress.set(false);
         self.queue.write().clear();
         self.history.write().clear();
         self.current_queue_index.set(0);
