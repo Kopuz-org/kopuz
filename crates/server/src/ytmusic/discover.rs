@@ -721,7 +721,6 @@ fn build_browse_body(browse_id: Option<&str>) -> Value {
 /// (FEmusic_liked_playlists, the user's library) silently fall back
 /// to a sign-in shelf the parsers will surface as empty.
 async fn post(url: &str, body: &Value, cookies: &str) -> Result<Value, String> {
-    let cookies_opt = if cookies.is_empty() { None } else { Some(cookies) };
     let client = WEB_REMIX;
     let mut req = http_client()
         .post(url)
@@ -732,10 +731,15 @@ async fn post(url: &str, body: &Value, cookies: &str) -> Result<Value, String> {
         .header("X-YouTube-Client-Version", client.client_version)
         .header("X-Origin", ORIGIN_YOUTUBE_MUSIC)
         .header("Referer", format!("{ORIGIN_YOUTUBE_MUSIC}/"));
-    if let Some(c) = cookies_opt {
-        let auth = sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC)
-            .ok_or_else(|| "SAPISID missing".to_string())?;
-        req = req.header("Cookie", c).header("Authorization", auth);
+    // Attach auth only when we have cookies that actually yield a
+    // SAPISIDHASH. Empty cookies (anonymous mode) or a partial/expired
+    // jar with no SAPISID both fall through to an anonymous request —
+    // discover still returns generic recommendations rather than
+    // hard-failing with "SAPISID missing".
+    if !cookies.is_empty()
+        && let Some(auth) = sapisid_hash(cookies, ORIGIN_YOUTUBE_MUSIC)
+    {
+        req = req.header("Cookie", cookies).header("Authorization", auth);
     }
     req.json(body)
         .send()
