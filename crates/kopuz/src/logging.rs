@@ -44,7 +44,7 @@ static GUARDS: std::sync::Mutex<Option<LogGuards>> = std::sync::Mutex::new(None)
 /// recompute spans, which otherwise dominate the log) regardless of
 /// the base level. Applied as a suffix to every default directive.
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-const QUIET_DEPS: &str = "symphonia=warn,wgpu_core=warn,wgpu_hal=warn,naga=warn,h2=warn,hyper=warn,reqwest=info,cpal=info,sctk=warn,calloop=warn,dioxus_signals=warn,dioxus_core=warn,dioxus_document=warn";
+const QUIET_DEPS: &str = "symphonia=warn,wgpu_core=warn,wgpu_hal=warn,naga=warn,h2=warn,hyper=warn,reqwest=info,cpal=info,sctk=warn,calloop=warn,dioxus_signals=warn,dioxus_core=warn,dioxus_document=warn,zbus=warn,zbus_names=warn,tracing=warn";
 
 /// Base level for the default (no explicit KOPUZ_LOG) case. `info`
 /// for ordinary users — keeps the log file small. `KOPUZ_DEBUG=1`
