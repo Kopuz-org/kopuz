@@ -3,7 +3,7 @@ use components::search_bar::SearchBar;
 use components::search_genre_detail::SearchGenreDetail;
 use components::search_genres::SearchGenres;
 use components::search_results::SearchResults;
-use config::{AppConfig, MusicService, UiStyle};
+use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_search_data::use_search_data;
 use player::player;
@@ -126,53 +126,30 @@ pub fn JellyfinSearch(
                             let path_clone = path.clone();
                             let playlist_name = name.clone();
                             spawn(async move {
-                                let conf = config.peek();
-                                if let Some(server) = &conf.server {
+                                let conn = {
+                                    let conf = config.peek();
+                                    let Some(server) = conf.server.as_ref() else { return; };
                                     let Some(token) = server.access_token.as_ref() else { return; };
-                                    let parts: Vec<&str> = path_clone
-                                        .to_str()
-                                        .unwrap_or_default()
-                                        .split(':')
-                                        .collect();
-                                    if parts.len() >= 2 {
-                                        let item_id = parts[1];
-                                        match server.service {
-                                            MusicService::Jellyfin => {
-                                                let Some(user_id) = server.user_id.as_ref() else { return; };
-                                                let remote = server::jellyfin::JellyfinClient::new(
-                                                    &server.url,
-                                                    Some(token),
-                                                    &conf.device_id,
-                                                    Some(user_id),
-                                                );
-                                                let _ = remote
-                                                    .create_playlist(&playlist_name, &[item_id])
-                                                    .await;
-                                            }
-                                            MusicService::Subsonic | MusicService::Custom => {
-                                                let Some(user_id) = server.user_id.as_ref() else { return; };
-                                                let remote = server::subsonic::SubsonicClient::new(
-                                                    &server.url,
-                                                    user_id,
-                                                    token,
-                                                );
-                                                let _ = remote.create_playlist(&playlist_name, &[item_id]).await;
-                                            }
-                                            MusicService::YtMusic => {
-                                                let yt = server::ytmusic::YouTubeMusicClient::with_cookies(
-                                                    token.clone(),
-                                                );
-                                                let _ = yt
-                                                    .create_playlist(
-                                                        &playlist_name,
-                                                        "",
-                                                        &[item_id],
-                                                    )
-                                                    .await;
-                                            }
-                                        }
+                                    ::server::server_ops::ServerConn {
+                                        service: server.service,
+                                        url: server.url.clone(),
+                                        token: token.clone(),
+                                        user_id: server.user_id.clone().unwrap_or_default(),
+                                        device_id: conf.device_id.clone(),
                                     }
-                                }
+                                };
+                                let item_ids: Vec<String> =
+                                    ::server::server_ops::parse_item_id(
+                                        path_clone.to_str().unwrap_or_default(),
+                                    )
+                                    .map(|id| vec![id.to_string()])
+                                    .unwrap_or_default();
+                                let _ = ::server::server_ops::create_server_playlist(
+                                    &conn,
+                                    &playlist_name,
+                                    &item_ids,
+                                )
+                                .await;
                             });
                         }
                         show_playlist_modal.set(false);
