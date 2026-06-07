@@ -17,6 +17,7 @@ pub fn PlaylistDetail(
     on_download_track: Option<EventHandler<usize>>,
     #[props(default = false)] is_downloading_all: bool,
 ) -> Element {
+    let _render = tracing::info_span!("render.playlist_detail").entered();
     let store = playlist_store.read();
     let mut tracks = use_signal(Vec::<reader::models::Track>::new);
     let mut has_loaded_jellyfin_tracks = use_signal(|| false);

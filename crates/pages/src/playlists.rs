@@ -18,6 +18,7 @@ pub fn PlaylistsPage(
     config: Signal<AppConfig>,
     mut selected_playlist_id: Signal<Option<String>>,
 ) -> Element {
+    let _render = tracing::info_span!("render.playlists_page").entered();
     let is_server = config.read().active_source == MusicSource::Server;
 
     let mut selected_folder = use_signal(|| Option::<String>::None);
