@@ -1,5 +1,6 @@
 use config::{Browser, MusicService};
 use dioxus::prelude::*;
+use tracing::Instrument;
 
 #[component]
 pub fn AddServerPopup(
@@ -314,7 +315,7 @@ fn ServerServiceFields(
                             spawn(async move {
                                 let res = ::server::ytmusic::botguard::check_available().await;
                                 botguard_status.set(Some(res));
-                            });
+                            }.instrument(tracing::info_span!("botguard.check")));
                         },
                         "Check rustypipe-botguard"
                     }

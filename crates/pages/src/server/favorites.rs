@@ -11,6 +11,7 @@ use hooks::use_player_controller::PlayerController;
 use reader::{FavoritesStore, Library, PlaylistStore};
 use std::collections::HashSet;
 use std::path::PathBuf;
+use tracing::Instrument;
 
 #[component]
 pub fn JellyfinFavorites(
@@ -161,7 +162,7 @@ pub fn JellyfinFavorites(
 
             favorites_store.write().jellyfin_favorites = ids;
             is_syncing.set(false);
-        });
+        }.instrument(tracing::info_span!("favorites.sync")));
     });
 
     let displayed_tracks: Vec<(reader::models::Track, Option<utils::CoverUrl>)> = {

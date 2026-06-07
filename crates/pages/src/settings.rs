@@ -29,6 +29,7 @@ use components::settings_popups::{AddRegistryPopup, AddServerPopup, LoginPopup};
 use config::{AppConfig, ArtistPhotoSource, Browser, FetchStrategy, MusicService, OfflineQuality};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
+use tracing::Instrument;
 
 async fn validate(cookies: &str) -> bool {
     ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies.to_string())
@@ -163,7 +164,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                 }
             }
             registry_loading.set(false);
-        });
+        }.instrument(tracing::info_span!("radio.import_registry")));
     };
 
     let ytmusic_auto_login = move || {
@@ -307,7 +308,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             }
             // Anonymous YT needs no further setup — the server entry
             // is already active and playable.
-        });
+        }.instrument(tracing::info_span!("yt.anon_setup")));
     };
 
     let handle_switch_server = move |id: String| {
