@@ -1175,8 +1175,13 @@ fn App() -> Element {
         persist_config_snapshot(config_snapshot, config_path());
     });
 
+    // Generation counter rather than a permanent bool latch: every
+    // effect re-run that observes a valid YT session bumps the gen
+    // and spawns a fresh loop bound to that gen. The loop checks the
+    // gen each tick and exits when it doesn't own it any more —
+    // covers sign-out, account switch, and YT server removal.
     #[cfg(not(target_arch = "wasm32"))]
-    let mut yt_keepalive_running = use_signal(|| false);
+    let yt_keepalive_gen = use_signal(|| 0u64);
     #[cfg(not(target_arch = "wasm32"))]
     use_effect(move || {
         if !*initial_load_done.read() {
@@ -1195,14 +1200,40 @@ fn App() -> Element {
         if !has_ytmusic_auth {
             return;
         }
-        if *yt_keepalive_running.peek() {
-            return;
-        }
-        yt_keepalive_running.set(true);
+        let mut keepalive_gen = yt_keepalive_gen;
+        let my_gen = keepalive_gen.with_mut(|g| {
+            *g += 1;
+            *g
+        });
         spawn(async move {
             run_rotation(config).await;
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+                // Old loops still own the spawned future after the
+                // effect re-fires (e.g. account switch) — they must
+                // exit here so only one rotation runs against the
+                // current cookies.
+                if *keepalive_gen.peek() != my_gen {
+                    return;
+                }
+                // Also bail if the live config no longer has YT auth
+                // (sign-out, server deleted): hammering verify_session
+                // with empty cookies is pointless and racy.
+                let still_valid = config
+                    .peek()
+                    .server
+                    .as_ref()
+                    .map(|s| {
+                        s.service == config::MusicService::YtMusic
+                            && s.access_token
+                                .as_deref()
+                                .map(|t| !t.is_empty())
+                                .unwrap_or(false)
+                    })
+                    .unwrap_or(false);
+                if !still_valid {
+                    return;
+                }
                 run_rotation(config).await;
             }
         });
