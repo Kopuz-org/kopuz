@@ -4,6 +4,7 @@ version.workspace = true
 edition = "2024"
 
 [dependencies]
+tracing = { workspace = true }
 config = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

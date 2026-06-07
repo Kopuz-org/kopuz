@@ -32,7 +32,7 @@ use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{Layer, layer::SubscriberExt, util::SubscriberInitExt};
 #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
 use windows::Win32::Foundation::HWND;
 
@@ -498,15 +498,34 @@ fn main() {
 
         let file_appender = tracing_appender::rolling::daily(&log_dir, "kopuz.log");
         let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
+        // Filter precedence: KOPUZ_LOG, then RUST_LOG, then a default
+        // that keeps our crates at info and quiets noisy dependencies.
+        // e.g. KOPUZ_LOG="server::ytmusic=debug,kopuz=debug" for deep
+        // YT tracing without recompiling.
+        let make_filter = || {
+            std::env::var("KOPUZ_LOG")
+                .or_else(|_| std::env::var("RUST_LOG"))
+                .ok()
+                .and_then(|s| tracing_subscriber::EnvFilter::try_new(&s).ok())
+                .unwrap_or_else(|| {
+                    tracing_subscriber::EnvFilter::new(
+                        "info,symphonia=warn,wgpu_core=warn,wgpu_hal=warn,naga=warn,h2=warn,hyper=warn,reqwest=warn",
+                    )
+                })
+        };
         tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-            )
+            // File layer: plain (no ANSI), captures everything for bug reports.
             .with(
                 tracing_subscriber::fmt::layer()
                     .with_ansi(false)
-                    .with_writer(non_blocking),
+                    .with_writer(non_blocking)
+                    .with_filter(make_filter()),
+            )
+            // Console layer: ANSI colors, for `dx serve` / terminal runs.
+            .with(
+                tracing_subscriber::fmt::layer()
+                    .with_writer(std::io::stderr)
+                    .with_filter(make_filter()),
             )
             .init();
         tracing::info!("Log file: {}", log_dir.display());

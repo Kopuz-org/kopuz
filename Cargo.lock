@@ -957,6 +957,7 @@ dependencies = [
  "directories",
  "serde",
  "serde_json",
+ "tracing",
  "uuid 1.23.2",
 ]
 
@@ -3188,6 +3189,7 @@ dependencies = [
  "scrobble",
  "server",
  "tokio",
+ "tracing",
  "utils",
  "web-time",
 ]
@@ -5422,6 +5424,7 @@ dependencies = [
  "symphonia",
  "symphonia-adapter-libopus",
  "tokio",
+ "tracing",
  "wasm-bindgen",
  "web-sys",
  "windows 0.62.2",
@@ -6735,6 +6738,7 @@ dependencies = [
  "serde_json",
  "sha1",
  "tokio",
+ "tracing",
  "uuid 1.23.2",
  "web-time",
 ]
