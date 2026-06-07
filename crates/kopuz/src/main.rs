@@ -834,6 +834,18 @@ fn main() {
 
 #[component]
 fn App() -> Element {
+    // tao's event loop calls process::exit() on window close, so the
+    // logging::shutdown() after .launch() never runs and the chrome trace
+    // would be left truncated (cut mid-event, unloadable). Flush on the
+    // loop's final event so a normally-closed window still yields a valid
+    // trace. (Ctrl+C is covered separately by the SIGINT handler.)
+    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+    dioxus::desktop::use_wry_event_handler(|event, _| {
+        if matches!(event, dioxus::desktop::tao::event::Event::LoopDestroyed) {
+            crate::logging::shutdown();
+        }
+    });
+
     let mut library = use_signal(reader::Library::default);
     let mut current_route = use_signal(|| Route::Home);
     let mut scroll_positions: Signal<std::collections::HashMap<Route, f64>> =
