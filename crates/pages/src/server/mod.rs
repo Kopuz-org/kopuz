@@ -1,6 +1,7 @@
 pub mod activity;
 pub mod album;
 pub mod artist;
+pub mod discover;
 pub mod download_manager;
 pub mod favorites;
 pub mod home;
@@ -56,6 +57,7 @@ pub fn build_download_url(item_id: &str, config: &AppConfig) -> Option<(String, 
             let kbps = quality.subsonic_max_bitrate_kbps();
             client.stream_url_with_bitrate(item_id, Some(kbps)).ok()?
         }
+        MusicService::YtMusic => return None,
     };
     Some((url, ext))
 }

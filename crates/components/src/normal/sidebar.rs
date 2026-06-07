@@ -26,6 +26,11 @@ const TOP_MENU: &[SidebarItem] = &[
         icon: "fa-solid fa-magnifying-glass",
     },
     SidebarItem {
+        key: "discover",
+        route: Route::Discover,
+        icon: "fa-solid fa-compass",
+    },
+    SidebarItem {
         key: "library",
         route: Route::Library,
         icon: "fa-solid fa-book",
@@ -80,6 +85,11 @@ const TOP_MENU: &[SidebarItem] = &[
         icon: "fa-solid fa-magnifying-glass",
     },
     SidebarItem {
+        key: "discover",
+        route: Route::Discover,
+        icon: "fa-solid fa-compass",
+    },
+    SidebarItem {
         key: "library",
         route: Route::Library,
         icon: "fa-solid fa-book",
@@ -127,6 +137,11 @@ const TOP_MENU: &[SidebarItem] = &[
         key: "search",
         route: Route::Search,
         icon: "fa-solid fa-magnifying-glass",
+    },
+    SidebarItem {
+        key: "discover",
+        route: Route::Discover,
+        icon: "fa-solid fa-compass",
     },
     SidebarItem {
         key: "library",

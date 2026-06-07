@@ -168,6 +168,20 @@ pub fn Album(
                                                             }
                                                         }
                                                     }
+                                                    MusicService::YtMusic => {
+                                                        let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(
+                                                            token.clone(),
+                                                        );
+                                                        for id in &item_ids {
+                                                            if yt
+                                                                .add_to_playlist(&pid, id)
+                                                                .await
+                                                                .is_ok()
+                                                            {
+                                                                added.push(id.clone());
+                                                            }
+                                                        }
+                                                    }
                                                 }
                                                 if !added.is_empty() {
                                                     let mut store = playlist_store.write();
@@ -284,6 +298,7 @@ pub fn Album(
                                                         let remote = SubsonicClient::new(&url, &user_id, &token);
                                                         remote.create_playlist(&playlist_name, &id_refs).await
                                                     }
+                                                    MusicService::YtMusic => Err("YouTube Music not yet implemented".to_string()),
                                                 };
                                                 if let Ok(new_id) = result {
                                                     let mut store = playlist_store.write();

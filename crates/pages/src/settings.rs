@@ -26,9 +26,63 @@ use components::settings_items::{
     ThemeSelector, ToggleSetting,
 };
 use components::settings_popups::{AddRegistryPopup, AddServerPopup, LoginPopup};
-use config::{AppConfig, ArtistPhotoSource, FetchStrategy, MusicService, OfflineQuality};
+use config::{AppConfig, ArtistPhotoSource, Browser, FetchStrategy, MusicService, OfflineQuality};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
+
+async fn validate(cookies: &str) -> bool {
+    ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies.to_string())
+        .validate_cookies()
+        .await
+        .is_ok()
+}
+
+async fn try_resume(seed: Option<String>) -> Option<String> {
+    if let Some(c) = &seed
+        && validate(c).await
+    {
+        return seed;
+    }
+    if let Some(c) = &seed
+        && let Ok(Some(rotated)) =
+            ::server::ytmusic::verify_session_keepalive::tick(c).await
+        && validate(&rotated).await
+    {
+        return Some(rotated);
+    }
+    None
+}
+
+async fn ensure_signed_in(
+    config_cookies: Option<String>,
+    browser: Browser,
+    server_id: &str,
+) -> Result<String, String> {
+    if let Some(c) = try_resume(config_cookies).await {
+        return Ok(c);
+    }
+
+    let profile = ::server::ytmusic::isolated_profile::profile_dir(server_id);
+    if profile.is_dir() {
+        let from_profile = ::server::ytmusic::cookies::extract_from(browser, &profile)
+            .await
+            .ok();
+        if let Some(c) = try_resume(from_profile).await {
+            return Ok(c);
+        }
+    }
+
+    let cookies = ::server::ytmusic::isolated_profile::launch_signin_and_extract(
+        browser,
+        server_id,
+        std::time::Duration::from_secs(300),
+    )
+    .await?;
+    if !validate(&cookies).await {
+        return Err("Sign-in completed but YT validation still failed".to_string());
+    }
+    Ok(cookies)
+}
 
 #[component]
 pub fn Settings(config: Signal<AppConfig>) -> Element {
@@ -44,6 +98,18 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     let mut server_name = use_signal(|| String::new());
     let mut server_url = use_signal(|| String::new());
     let mut server_service = use_signal(|| MusicService::Jellyfin);
+    let yt_browser = use_signal(|| {
+        config
+            .peek()
+            .server
+            .as_ref()
+            .and_then(|s| s.yt_browser)
+            .unwrap_or(config::Browser::Chrome)
+    });
+    // Anonymous YT mode for the add-server popup. Defaults to true on
+    // Windows (browser sign-in disabled there) so the popup opens
+    // pre-selected on the only working method.
+    let yt_anonymous = use_signal(|| cfg!(target_os = "windows"));
 
     let mut username = use_signal(|| String::new());
     let mut password = use_signal(|| String::new());
@@ -100,44 +166,148 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         });
     };
 
+    let ytmusic_auto_login = move || {
+        // Prefer the browser already saved on the active server entry
+        // (set during a previous successful sign-in); fall back to the
+        // settings popup's selector for first-time setup.
+        let (browser, existing, server_id) = {
+            let cfg = config.peek();
+            let srv = cfg.server.as_ref();
+            (
+                srv.and_then(|s| s.yt_browser).unwrap_or(*yt_browser.peek()),
+                srv.and_then(|s| s.access_token.clone()).filter(|t| !t.is_empty()),
+                srv.and_then(|s| s.id.clone()).unwrap_or_default(),
+            )
+        };
+        let mut report = move |msg: String| {
+            error.set(Some(msg.clone()));
+            ctrl.playback_error.set(Some(msg));
+        };
+        spawn(async move {
+            if let Err(e) =
+                server::ytmusic::YouTubeMusicClient::new().check_botguard_available().await
+            {
+                report(format!(
+                    "YouTube Music needs the rustypipe-botguard helper. {e}"
+                ));
+                return;
+            }
+
+            let cookies = match ensure_signed_in(existing, browser, &server_id).await {
+                Ok(c) => c,
+                Err(e) => {
+                    report(format!("YT Music sign-in failed ({browser}): {e}"));
+                    return;
+                }
+            };
+
+            let yt_user_id =
+                ::server::ytmusic::derive_user_id(&cookies).unwrap_or_else(|| "me".to_string());
+            {
+                let mut cfg = config.write();
+                let saved_id = cfg.server.as_ref().and_then(|s| s.id.clone());
+                if let Some(srv) = cfg.server.as_mut() {
+                    srv.access_token = Some(cookies);
+                    srv.user_id = Some(yt_user_id);
+                    srv.yt_browser = Some(browser);
+                }
+                if let Some(id) = saved_id
+                    && let Some(saved) = cfg.servers.iter_mut().find(|s| s.id == id)
+                {
+                    saved.yt_browser = Some(browser);
+                }
+            }
+            error.set(None);
+        });
+    };
+
     let handle_add_server = move |_| {
-        if !server_url().starts_with("http") {
+        let selected_service = server_service();
+        let is_ytmusic = selected_service == MusicService::YtMusic;
+
+        if !is_ytmusic && !server_url().starts_with("http") {
             error.set(Some(i18n::t("invalid_server_url").to_string()));
             return;
         }
 
-        let selected_service = server_service();
-        let display_name = if server_name().is_empty() {
-            format!("Local {}", selected_service.display_name())
-        } else {
-            server_name()
-        };
+        // Snapshot the synchronous inputs so the async block doesn't have
+        // to re-read signals (which it could, but this keeps the data
+        // flow obvious).
+        let name_input = server_name();
+        let url_input = server_url();
 
-        let new_server = config::MusicServer::new_with_service(
-            display_name.clone(),
-            server_url(),
-            selected_service,
-        );
+        spawn(async move {
+            // For YT Music we refuse to even create the server entry if
+            // the botguard helper isn't installed — otherwise the user
+            // gets a dead-on-arrival server they can't actually play
+            // from. The probe is cheap (~ms) and happens before any
+            // mutation of the config.
+            if is_ytmusic {
+                if let Err(msg) =
+                    ::server::ytmusic::botguard::check_available().await
+                {
+                    error.set(Some(format!(
+                        "Can't add YouTube Music server: {msg}"
+                    )));
+                    return;
+                }
+            }
 
-        let saved = config::SavedServer {
-            id: new_server.id.clone().unwrap_or_default(),
-            name: new_server.name.clone(),
-            url: new_server.url.clone(),
-            service: new_server.service,
-        };
-        {
-            let mut cfg = config.write();
-            cfg.add_saved_server(saved);
-            cfg.server = Some(new_server);
-        }
+            let display_name = if name_input.is_empty() {
+                format!("Local {}", selected_service.display_name())
+            } else {
+                name_input
+            };
 
-        server_name.set(String::new());
-        server_url.set(String::new());
-        server_service.set(MusicService::Jellyfin);
-        error.set(None);
-        show_add_server.set(false);
+            let effective_url = if is_ytmusic {
+                "https://music.youtube.com".to_string()
+            } else {
+                url_input
+            };
 
-        show_login.set(true);
+            let mut new_server = config::MusicServer::new_with_service(
+                display_name,
+                effective_url,
+                selected_service,
+            );
+            let is_anon = is_ytmusic && *yt_anonymous.peek();
+            new_server.yt_anonymous = is_anon;
+            if is_anon {
+                // Mark anonymous mode at the server level. Empty access
+                // token + yt_anonymous=true is what get_stream /
+                // discover etc. read as "no cookies, public surfaces
+                // only".
+                new_server.access_token = Some(String::new());
+            }
+
+            let saved = config::SavedServer {
+                id: new_server.id.clone().unwrap_or_default(),
+                name: new_server.name.clone(),
+                url: new_server.url.clone(),
+                service: new_server.service,
+                yt_browser: (is_ytmusic && !is_anon).then(|| *yt_browser.peek()),
+                yt_anonymous: is_anon,
+            };
+            {
+                let mut cfg = config.write();
+                cfg.add_saved_server(saved);
+                cfg.server = Some(new_server);
+            }
+
+            server_name.set(String::new());
+            server_url.set(String::new());
+            server_service.set(MusicService::Jellyfin);
+            error.set(None);
+            show_add_server.set(false);
+
+            if is_ytmusic && !is_anon {
+                ytmusic_auto_login();
+            } else if !is_ytmusic {
+                show_login.set(true);
+            }
+            // Anonymous YT needs no further setup — the server entry
+            // is already active and playable.
+        });
     };
 
     let handle_switch_server = move |id: String| {
@@ -146,21 +316,43 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             cfg.find_saved_server(&id).cloned()
         };
         if let Some(saved) = server {
+            let is_ytmusic = saved.service == MusicService::YtMusic;
+            let is_anon = is_ytmusic && saved.yt_anonymous;
             let active = config::MusicServer {
                 name: saved.name,
                 url: saved.url,
                 service: saved.service,
-                access_token: None,
+                // Anonymous YT keeps an empty (non-None) token so the
+                // backend treats it as anon rather than "needs sign-in".
+                access_token: is_anon.then(String::new),
                 user_id: None,
                 id: Some(saved.id),
+                // Carry the saved browser choice over so the sign-in
+                // launch hits the binary the user picked, not whatever
+                // the popup's default selector happens to be.
+                yt_browser: saved.yt_browser,
+                yt_anonymous: is_anon,
             };
             config.write().server = Some(active);
-            show_login.set(true);
+            if is_ytmusic && !is_anon {
+                ytmusic_auto_login();
+            } else if !is_ytmusic {
+                show_login.set(true);
+            }
+            // Anonymous YT is immediately active — no sign-in launch.
         }
     };
 
     let handle_delete_saved = move |id: String| {
+        let was_ytmusic = config
+            .peek()
+            .find_saved_server(&id)
+            .map(|s| s.service == MusicService::YtMusic)
+            .unwrap_or(false);
         config.write().remove_saved_server(&id);
+        if was_ytmusic {
+            let _ = ::server::ytmusic::isolated_profile::delete_profile(&id);
+        }
     };
 
     let handle_login = move |_| {
@@ -331,7 +523,19 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     on_add: move |_| show_add_server.set(true),
                                     on_delete: handle_delete_saved,
                                     on_switch: handle_switch_server,
-                                    on_login: move |_| show_login.set(true),
+                                    on_login: move |_| {
+                                        let is_ytmusic = config
+                                            .read()
+                                            .server
+                                            .as_ref()
+                                            .map(|s| s.service == MusicService::YtMusic)
+                                            .unwrap_or(false);
+                                        if is_ytmusic {
+                                            ytmusic_auto_login();
+                                        } else {
+                                            show_login.set(true);
+                                        }
+                                    },
                                 }
                             }
                         }
@@ -758,6 +962,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         server_name,
                         server_url,
                         server_service,
+                        yt_browser,
+                        yt_anonymous,
                         error,
                         on_close: move |_| show_add_server.set(false),
                         on_save: handle_add_server

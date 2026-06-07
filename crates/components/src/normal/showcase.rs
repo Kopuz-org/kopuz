@@ -242,6 +242,16 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                                  80,
                                              )
                                          }
+                                         MusicService::YtMusic => {
+                                             utils::jellyfin_image::track_cover_url_with_album_fallback(
+                                                 &path_str,
+                                                 &track.album_id,
+                                                 "",
+                                                 None,
+                                                 80,
+                                                 80,
+                                             )
+                                         }
                                      };
                                      utils::map_cover_url(url)
                                  } else { None }
@@ -282,7 +292,9 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                              }
 
                              rsx! {
-                                 // discs
+                                 div {
+                                     key: "{track.path.display()}",
+                                     class: "contents",
                                  div {
                                      class: "flex items-center group",
                                      if has_multiple_discs && props.is_album && is_new_disc && sort_state.peek().is_none() {
@@ -299,7 +311,6 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                  }
 
                                  div {
-                                     key: "{track.path.display()}",
                                      class: "flex items-center group",
                                      div { class: "flex-1 min-w-0",
                                          TrackRow {
@@ -373,6 +384,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                              on_move_down: move |_| props.on_move_down.call(idx),
                                          }
                                      }
+                                 }
                                  }
                              }
                          }

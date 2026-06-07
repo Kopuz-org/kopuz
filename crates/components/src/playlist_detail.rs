@@ -21,6 +21,17 @@ pub fn PlaylistDetail(
     let mut tracks = use_signal(Vec::<reader::models::Track>::new);
     let mut has_loaded_jellyfin_tracks = use_signal(|| false);
 
+    // YT Music's InnerTube has no playlist-reorder mutation, so reorder
+    // affordances need to be hidden / no-op on YT playlists. Doing the
+    // optimistic local swap and then no-op'ing the server side leaves a
+    // visual ghost that reverts on next sync — silent UX loss.
+    let active_service_is_ytmusic = config
+        .peek()
+        .server
+        .as_ref()
+        .map(|s| s.service == MusicService::YtMusic)
+        .unwrap_or(false);
+
     let (playlist_name, local_tracks_paths, is_jellyfin, playlist_custom_cover, playlist_image_tag) =
         if let Some(p) = store.playlists.iter().find(|p| p.id == playlist_id) {
             (
@@ -83,6 +94,17 @@ pub fn PlaylistDetail(
                     };
                     if let Some((service, url, token, device_id, user_id)) = server_info {
                         match service {
+                            MusicService::YtMusic => {
+                                let yt = server::ytmusic::YouTubeMusicClient::with_cookies(
+                                    token.clone(),
+                                );
+                                if let Ok(yt_tracks) =
+                                    yt.get_playlist_entries(&pid_clone).await
+                                {
+                                    tracks.set(yt_tracks);
+                                    has_loaded_jellyfin_tracks.set(true);
+                                }
+                            }
                             MusicService::Jellyfin => {
                                 let remote = server::jellyfin::JellyfinClient::new(
                                     &url,
@@ -351,6 +373,12 @@ pub fn PlaylistDetail(
                     } else {
                         let pid_clone = pid_for_remove.clone();
                         let entry_id_opt = t.playlist_item_id.clone();
+                        let track_video_id = t
+                            .path
+                            .to_string_lossy()
+                            .split(':')
+                            .nth(1)
+                            .map(|s| s.to_string());
                         let remove_idx = idx;
                         spawn(async move {
                             let conf = config.peek();
@@ -359,6 +387,19 @@ pub fn PlaylistDetail(
                                     (&server.access_token, &server.user_id)
                                 {
                                     let removed = match server.service {
+                                        MusicService::YtMusic => {
+                                            if let Some(vid) = track_video_id.as_deref() {
+                                                let yt =
+                                                    server::ytmusic::YouTubeMusicClient::with_cookies(
+                                                        token.clone(),
+                                                    );
+                                                yt.remove_from_playlist(&pid_clone, vid)
+                                                    .await
+                                                    .is_ok()
+                                            } else {
+                                                false
+                                            }
+                                        }
                                         MusicService::Jellyfin => {
                                             if let Some(entry_id) = entry_id_opt {
                                                 let remote = server::jellyfin::JellyfinClient::new(
@@ -399,9 +440,9 @@ pub fn PlaylistDetail(
                     }
                 }
             },
-            is_reorderable: true,
+            is_reorderable: !active_service_is_ytmusic,
             on_move_up: move |idx: usize| {
-                if idx == 0 { return; }
+                if idx == 0 || active_service_is_ytmusic { return; }
                 tracks.write().swap(idx - 1, idx);
                 if !is_jellyfin {
                     let mut store = playlist_store.write();
@@ -422,6 +463,7 @@ pub fn PlaylistDetail(
                                 let moved_item =
                                     track_list.get(idx - 1).and_then(|t| t.playlist_item_id.clone());
                                 match server.service {
+                                    MusicService::YtMusic => {}
                                     MusicService::Jellyfin => {
                                         if let Some(item_id) = moved_item {
                                             let remote = server::jellyfin::JellyfinClient::new(
@@ -467,7 +509,7 @@ pub fn PlaylistDetail(
             },
             on_move_down: move |idx: usize| {
                 let len = tracks.read().len();
-                if idx + 1 >= len { return; }
+                if idx + 1 >= len || active_service_is_ytmusic { return; }
                 tracks.write().swap(idx, idx + 1);
                 if !is_jellyfin {
                     let mut store = playlist_store.write();
@@ -488,6 +530,7 @@ pub fn PlaylistDetail(
                                 let moved_item =
                                     track_list.get(idx + 1).and_then(|t| t.playlist_item_id.clone());
                                 match server.service {
+                                    MusicService::YtMusic => {}
                                     MusicService::Jellyfin => {
                                         if let Some(item_id) = moved_item {
                                             let remote = server::jellyfin::JellyfinClient::new(

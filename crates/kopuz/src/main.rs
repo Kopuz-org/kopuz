@@ -211,6 +211,39 @@ fn persist_config_snapshot(config_snapshot: config::AppConfig, _path: std::path:
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+async fn run_rotation(mut config: Signal<config::AppConfig>) {
+    let cookies = match config.peek().server.as_ref() {
+        Some(s) if s.service == config::MusicService::YtMusic => s.access_token.clone(),
+        _ => return,
+    };
+    let Some(cookies) = cookies else { return };
+    // Anonymous YT carries an empty token — nothing to keep alive.
+    if cookies.is_empty() {
+        return;
+    }
+    let started = std::time::Instant::now();
+    // Logging policy: noisy in the rare cases (jar rotated, error),
+    // silent on the steady-state OK-no-change tick. The keepalive
+    // fires every 5 min and 99% of ticks are no-change; the original
+    // per-tick OK line drowned stderr.
+    match server::ytmusic::verify_session_keepalive::tick(&cookies).await {
+        Ok(Some(updated)) => {
+            eprintln!(
+                "[yt-keepalive] verify_session OK in {:.1}s, jar updated ({}B → {}B)",
+                started.elapsed().as_secs_f32(),
+                cookies.len(),
+                updated.len()
+            );
+            if let Some(srv) = config.write().server.as_mut() {
+                srv.access_token = Some(updated);
+            }
+        }
+        Ok(None) => {}
+        Err(e) => eprintln!("[yt-keepalive] verify_session failed: {e}"),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 async fn persist_queue_state_snapshot(
     queue_state: Option<PersistedQueueState>,
     path: std::path::PathBuf,
@@ -879,6 +912,8 @@ fn App() -> Element {
     #[cfg(not(target_arch = "wasm32"))]
     let _ = std::fs::create_dir_all(cover_cache());
     let download_queue = use_signal(DownloadQueue::default);
+    let download_progress = use_signal(::server::DownloadProgress::default);
+    pages::server::download_manager::register_progress_signal(download_progress);
     let mut trigger_rescan = use_signal(|| 0);
     let mut last_scan_key = use_signal(|| None::<String>);
     let mut scan_current_file = use_signal(|| Option::<String>::None);
@@ -1020,11 +1055,18 @@ fn App() -> Element {
 
     let mut selected_album_id = use_signal(String::new);
     let mut selected_playlist_id = use_signal(|| None::<String>);
+    let mut discover_selected_playlist_id = use_signal(|| None::<String>);
+    let mut discover_selected_playlist_title = use_signal(|| None::<String>);
+    // YT channel id corresponding to selected_artist_name when known
+    // (Discover tile / mix entry carries it). Left None when the
+    // click only had a name — the YT artist page resolves it via
+    // search at render time.
+    let mut selected_artist_channel_id = use_signal(|| None::<String>);
     let mut selected_artist_name = use_signal(String::new);
     let fetched_artist_images: Signal<std::collections::HashMap<String, String>> =
         use_signal(std::collections::HashMap::new);
     let is_fetching_artist_images = use_signal(|| false);
-    let search_query = use_signal(String::new);
+    let mut search_query = use_signal(String::new);
     let mut last_server_playlist_key = use_signal(|| None::<String>);
     let mut server_playlist_key_initialized = use_signal(|| false);
     let mut queue = use_signal(Vec::<reader::Track>::new);
@@ -1060,15 +1102,16 @@ fn App() -> Element {
             return;
         }
 
+        // Server identity excludes access_token: tokens rotate without making it a
+        // different account, but their rotation would otherwise wipe synced playlists.
         let current_server_key = {
             let conf = config.read();
             conf.server.as_ref().map(|server| {
                 format!(
-                    "{:?}|{}|{}|{}",
+                    "{:?}|{}|{}",
                     server.service,
                     server.url,
                     server.user_id.as_deref().unwrap_or_default(),
-                    server.access_token.as_deref().unwrap_or_default()
                 )
             })
         };
@@ -1083,6 +1126,12 @@ fn App() -> Element {
             last_server_playlist_key.set(current_server_key);
             selected_playlist_id.set(None);
             playlist_store.write().jellyfin_playlists.clear();
+            {
+                let mut lib = library.write();
+                lib.jellyfin_tracks.clear();
+                lib.jellyfin_albums.clear();
+            }
+            ctrl.reset_for_backend_switch();
         }
     });
 
@@ -1130,6 +1179,60 @@ fn App() -> Element {
         let mut config_snapshot = config.peek().clone();
         config_snapshot.volume = committed_volume;
         persist_config_snapshot(config_snapshot, config_path());
+    });
+
+    // Keepalive is rearm-on-account-change, not rearm-on-every-config-
+    // write. Re-running the effect on every config save would spawn
+    // a fresh loop that immediately fires run_rotation, spamming
+    // /verify_session a dozen times a minute on any settings churn.
+    //
+    // The signal stores the YT identity (a stable hash of the SAPISID
+    // cookie) we currently have a loop running against. The effect
+    // re-runs cheap, but only spawns a new loop when the identity
+    // changes (sign-in, account switch). Sign-out clears the
+    // identity and the running loop exits on its next tick.
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut yt_keepalive_identity = use_signal(|| None::<String>);
+    #[cfg(not(target_arch = "wasm32"))]
+    use_effect(move || {
+        if !*initial_load_done.read() {
+            return;
+        }
+        let yt_cookies: Option<String> = config.read().server.as_ref().and_then(|s| {
+            (s.service == config::MusicService::YtMusic)
+                .then(|| s.access_token.clone())
+                .flatten()
+                .filter(|t| !t.is_empty())
+        });
+        let live_identity = yt_cookies
+            .as_deref()
+            .and_then(server::ytmusic::derive_user_id);
+        if live_identity == *yt_keepalive_identity.peek() {
+            return;
+        }
+        // Identity changed (fresh sign-in, account switch, or
+        // sign-out): the previously-running loop (if any) will read
+        // the new identity on its next tick and exit. Update the
+        // tracked identity; spawn a fresh loop only if we still have
+        // valid auth.
+        yt_keepalive_identity.set(live_identity.clone());
+        let Some(my_identity) = live_identity else {
+            return;
+        };
+        spawn(async move {
+            run_rotation(config).await;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+                if yt_keepalive_identity
+                    .peek()
+                    .as_deref()
+                    != Some(my_identity.as_str())
+                {
+                    return;
+                }
+                run_rotation(config).await;
+            }
+        });
     });
 
     #[cfg(all(
@@ -1671,13 +1774,23 @@ fn App() -> Element {
 
     provide_context(ctrl);
     provide_context(config);
+    let discover_now_playing = use_signal(|| None::<String>);
+    provide_context(pages::server::discover::DiscoverNowPlaying(
+        discover_now_playing,
+    ));
+    let discover_prefetch_cache = use_signal(std::collections::HashMap::new);
+    provide_context(pages::server::discover::DiscoverPrefetchCache(
+        discover_prefetch_cache,
+    ));
     provide_context(download_queue);
+    provide_context(download_progress);
     provide_context(scroll_positions);
     provide_context(fetched_artist_images);
     provide_context(is_fetching_artist_images);
     provide_context(components::NavigationController {
         current_route,
         selected_artist_name,
+        selected_artist_channel_id,
         selected_album_id,
     });
 
@@ -1803,6 +1916,38 @@ fn App() -> Element {
                 }
             }
 
+            // Only show playback errors when the active server is YouTube
+            // Music — other backends (Jellyfin/Subsonic/Custom) surface
+            // their own errors via the settings popup, and a lingering YT
+            // error from a previous session shouldn't haunt a switched-to
+            // server.
+            if config
+                .read()
+                .server
+                .as_ref()
+                .map(|s| s.service == config::MusicService::YtMusic)
+                .unwrap_or(false)
+            {
+                if let Some(msg) = ctrl.playback_error.read().clone() {
+                    div {
+                        class: "flex-shrink-0",
+                        div {
+                            class: "flex items-center justify-between gap-3 px-4 py-2 bg-rose-500/15 border-b border-rose-500/20 text-rose-200 text-sm",
+                            div {
+                                class: "flex items-center gap-2 whitespace-pre-line",
+                                i { class: "fa-solid fa-triangle-exclamation text-xs" }
+                                span { "{msg}" }
+                            }
+                            button {
+                                class: "opacity-50 hover:opacity-100 transition-opacity p-1",
+                                onclick: move |_| ctrl.playback_error.set(None),
+                                i { class: "fa-solid fa-xmark text-xs" }
+                            }
+                        }
+                    }
+                }
+            }
+
             if let Some(is_offline) = *network_banner.read() {
                 div {
                     class: "flex-shrink-0",
@@ -1918,6 +2063,7 @@ fn App() -> Element {
                         }
                         if route == Route::Artist {
                             selected_artist_name.set(String::new());
+                            selected_artist_channel_id.set(None);
                         }
                         current_route.set(route);
                     }
@@ -1957,7 +2103,10 @@ fn App() -> Element {
                                             onclick: move |_| {
                                                 match *current_route.peek() {
                                                     Route::Album => selected_album_id.set(String::new()),
-                                                    Route::Artist => selected_artist_name.set(String::new()),
+                                                    Route::Artist => {
+                                                        selected_artist_name.set(String::new());
+                                                        selected_artist_channel_id.set(None);
+                                                    }
                                                     Route::Playlists => selected_playlist_id.set(None),
                                                     _ => {}
                                                 }
@@ -2025,8 +2174,45 @@ fn App() -> Element {
                                 },
                                 on_search_artist: move |artist: String| {
                                     selected_artist_name.set(artist);
+                                    selected_artist_channel_id.set(None);
                                     current_route.set(Route::Artist);
                                 }
+                            }
+                        },
+                        Route::Discover => rsx! {
+                            pages::server::discover::DiscoverPage {
+                                library: library,
+                                on_select_album: move |id: String| {
+                                    selected_album_id.set(id);
+                                    current_route.set(Route::Album);
+                                },
+                                on_select_playlist: move |(id, title): (String, String)| {
+                                    discover_selected_playlist_id.set(Some(id));
+                                    discover_selected_playlist_title.set(Some(title));
+                                    current_route.set(Route::DiscoverPlaylist);
+                                },
+                                on_open_artist: move |(cid, name): (String, String)| {
+                                    selected_artist_channel_id.set(Some(cid));
+                                    selected_artist_name.set(name);
+                                    current_route.set(Route::Artist);
+                                },
+                                on_search_artist: move |name: String| {
+                                    search_query.set(name);
+                                    current_route.set(Route::Search);
+                                },
+                            }
+                        },
+                        Route::DiscoverPlaylist => rsx! {
+                            pages::server::discover::DiscoverPlaylistDetail {
+                                selected_playlist_id: discover_selected_playlist_id,
+                                selected_playlist_title: discover_selected_playlist_title,
+                                on_back: move |_| {
+                                    // Mirror DiscoverArtist: clear id so
+                                    // re-opening the same playlist refetches.
+                                    discover_selected_playlist_id.set(None);
+                                    discover_selected_playlist_title.set(None);
+                                    current_route.set(Route::Discover);
+                                },
                             }
                         },
                         Route::Search => rsx! {
@@ -2079,26 +2265,77 @@ fn App() -> Element {
                                 current_queue_index: current_queue_index,
                             }
                         },
-                        Route::Artist => rsx! {
-                            pages::artist::Artist {
-                                library: library,
-                                config: config,
-                                artist_name: selected_artist_name,
-                                playlist_store: playlist_store,
-                                player: player,
-                                on_navigate: move |album_id| {
-                                    selected_album_id.set(album_id);
-                                    current_route.set(Route::Album);
-                                },
-                                is_playing: is_playing,
-                                current_playing: current_playing,
-                                current_song_cover_url: current_song_cover_url,
-                                current_song_title: current_song_title,
-                                current_song_artist: current_song_artist,
-                                current_song_duration: current_song_duration,
-                                current_song_progress: current_song_progress,
-                                queue: queue,
-                                current_queue_index: current_queue_index,
+                        Route::Artist => {
+                            // YT Music gets the rich YT-backed profile (banner,
+                            // top songs, albums, related) ONLY when an artist
+                            // is actually selected. The Artists sidebar tab /
+                            // back-to-list navigation lands with both signals
+                            // cleared — fall through to the library-driven
+                            // grid in that case (populated on YT from followed
+                            // artists + liked-song artists by the library
+                            // sync). Local / Jellyfin / Subsonic keep the
+                            // library-driven page in all cases.
+                            let is_ytmusic = config
+                                .read()
+                                .server
+                                .as_ref()
+                                .map(|s| s.service == config::MusicService::YtMusic)
+                                .unwrap_or(false);
+                            let has_selection = !selected_artist_name.read().is_empty()
+                                || selected_artist_channel_id.read().is_some();
+                            if is_ytmusic && has_selection {
+                                rsx! {
+                                    pages::server::discover::DiscoverArtistPage {
+                                        selected_artist_id: selected_artist_channel_id,
+                                        selected_artist_name: selected_artist_name,
+                                        on_back: move |_| {
+                                            // Empty selection on Route::Artist renders the grid.
+                                            selected_artist_name.set(String::new());
+                                            selected_artist_channel_id.set(None);
+                                            current_route.set(Route::Artist);
+                                        },
+                                        on_select_album: move |id: String| {
+                                            selected_album_id.set(id);
+                                            current_route.set(Route::Album);
+                                        },
+                                        on_select_playlist: move |(id, title): (String, String)| {
+                                            discover_selected_playlist_id.set(Some(id));
+                                            discover_selected_playlist_title.set(Some(title));
+                                            current_route.set(Route::DiscoverPlaylist);
+                                        },
+                                        on_open_artist: move |(cid, name): (String, String)| {
+                                            selected_artist_channel_id.set(Some(cid));
+                                            selected_artist_name.set(name);
+                                        },
+                                        on_search_artist: move |name: String| {
+                                            search_query.set(name);
+                                            current_route.set(Route::Search);
+                                        },
+                                    }
+                                }
+                            } else {
+                                rsx! {
+                                    pages::artist::Artist {
+                                        library: library,
+                                        config: config,
+                                        artist_name: selected_artist_name,
+                                        playlist_store: playlist_store,
+                                        player: player,
+                                        on_navigate: move |album_id| {
+                                            selected_album_id.set(album_id);
+                                            current_route.set(Route::Album);
+                                        },
+                                        is_playing: is_playing,
+                                        current_playing: current_playing,
+                                        current_song_cover_url: current_song_cover_url,
+                                        current_song_title: current_song_title,
+                                        current_song_artist: current_song_artist,
+                                        current_song_duration: current_song_duration,
+                                        current_song_progress: current_song_progress,
+                                        queue: queue,
+                                        current_queue_index: current_queue_index,
+                                    }
+                                }
                             }
                         },
                         Route::Favorites => rsx! {

@@ -58,6 +58,11 @@ pub struct PlayerController {
     pub pending_crossfade_ui: Signal<Option<PendingCrossfadeUiState>>,
     pub radio_task: Signal<Option<dioxus_core::Task>>,
     pub station_registry: Signal<radio::registry::StationRegistry>,
+    /// User-visible playback error. Set when something needs the user's
+    /// attention (missing `rustypipe-botguard`, expired YT cookies, …).
+    /// Rendered as a banner by whoever subscribes — currently the
+    /// settings popup error sink mirrors it on next open.
+    pub playback_error: Signal<Option<String>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -153,6 +158,22 @@ impl PlayerController {
                     )
                 })
                 .unwrap_or_default(),
+            "ytmusic" => {
+                // YT tracks carry their thumbnail in album_id as
+                // `ytmusic:_:urlhex_HEX`. Pass empty server_url so
+                // `track_cover_url_with_album_fallback` skips its
+                // jellyfin-URL fallback path and only returns the
+                // embedded URL via decode_embedded_cover_url.
+                utils::jellyfin_image::track_cover_url_with_album_fallback(
+                    &path_str,
+                    &track.album_id,
+                    "",
+                    None,
+                    800,
+                    90,
+                )
+                .unwrap_or_default()
+            }
             _ => self
                 .library
                 .read()
@@ -379,6 +400,9 @@ impl PlayerController {
     fn play_track_no_history_with_transition(&mut self, idx: usize, allow_crossfade: bool) {
         self.play_generation.with_mut(|g| *g += 1);
         let current_gen = *self.play_generation.peek();
+        // Starting a new track clears the previous track's error banner —
+        // otherwise a 403 from a skipped YT track lingers on screen.
+        self.playback_error.set(None);
         self.cancel_radio_task();
 
         if let Some(track) = self.get_track_at(idx) {
@@ -402,7 +426,8 @@ impl PlayerController {
                 .unwrap_or_default()
                 .to_ascii_lowercase();
             let is_radio_item = scheme.as_str() == "radio";
-            let is_server_item = matches!(scheme.as_str(), "jellyfin" | "subsonic" | "custom");
+            let is_server_item =
+                matches!(scheme.as_str(), "jellyfin" | "subsonic" | "custom" | "ytmusic");
 
             if is_server_item || is_radio_item {
                 let parts: Vec<&str> = path_str.split(':').collect();
@@ -583,6 +608,27 @@ impl PlayerController {
 
                                 (stream_url, cover_url)
                             }
+                            // YT can't resolve its stream URL synchronously (the
+                            // /player call is async + multi-client fallback). Tag
+                            // the URL with a sentinel that the async spawn below
+                            // recognises and replaces with the real URL. The
+                            // cover URL, however, is already encoded in the
+                            // track's path (`ytmusic:VID:urlhex_HEX`) so we
+                            // can produce it synchronously here so the
+                            // bottombar shows artwork immediately on click.
+                            MusicService::YtMusic => {
+                                let cover_url =
+                                    utils::jellyfin_image::track_cover_url_with_album_fallback(
+                                        &path_str,
+                                        &track.album_id,
+                                        "",
+                                        None,
+                                        800,
+                                        90,
+                                    )
+                                    .unwrap_or_default();
+                                (format!("__YT_PENDING:{id}"), cover_url)
+                            }
                         })
                     }
                 } {
@@ -601,6 +647,7 @@ impl PlayerController {
                     let mut is_playing = self.is_playing;
                     let mut is_loading = self.is_loading;
                     let mut skip_in_progress = self.skip_in_progress;
+                    let mut playback_error = self.playback_error;
                     let play_generation = self.play_generation;
                     let volume = self.volume;
                     let mut current_song_progress = self.current_song_progress;
@@ -613,6 +660,9 @@ impl PlayerController {
                     let mut current_song_album = self.current_song_album;
                     let mut current_song_cover_url = self.current_song_cover_url;
                     let station_registry = self.station_registry;
+                    let mut queue_for_yt = self.queue;
+                    let current_queue_index_for_yt = self.current_queue_index;
+                    let mut current_song_duration_for_yt = self.current_song_duration;
 
                     if !use_crossfade {
                         self.hydrate_current_track_metadata(idx, 0);
@@ -625,15 +675,98 @@ impl PlayerController {
 
                     #[cfg(not(target_arch = "wasm32"))]
                     spawn(async move {
-                        let stream = utils::stream_buffer::StreamBuffer::new(stream_url, is_radio);
+                        let (stream_url, yt_format, yt_user_agent) = if let Some(video_id) =
+                            stream_url.strip_prefix("__YT_PENDING:")
+                        {
+                            let cookies = cfg_signal
+                                .peek()
+                                .server
+                                .as_ref()
+                                .and_then(|s| s.access_token.clone());
+                            let Some(cookies) = cookies else {
+                                playback_error.set(Some(
+                                    "YouTube Music isn't signed in. Open Settings → YouTube Music → Re-sign in.".to_string()
+                                ));
+                                is_loading.set(false);
+                                skip_in_progress.set(false);
+                                return;
+                            };
+                            let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
+                            match yt.get_stream(video_id).await {
+                                Ok(info) => {
+                                    // Stale-resolve guard: don't stamp duration / mutate
+                                    // queue if the user has clicked another track while
+                                    // we were awaiting get_stream. Otherwise a slow
+                                    // resolver for track A scribbles A's duration on
+                                    // whatever sits at idx now.
+                                    if *play_generation.read() == current_gen
+                                        && let Some(secs) = info.duration_secs
+                                        && secs > 0
+                                    {
+                                        if let Some(t) = queue_for_yt.write().get_mut(idx) {
+                                            t.duration = secs;
+                                        }
+                                        if *current_queue_index_for_yt.peek() == idx {
+                                            current_song_duration_for_yt.set(secs);
+                                        }
+                                    }
+                                    (info.url, Some(info.format), Some(info.user_agent))
+                                }
+                                Err(e) => {
+                                    // Same guard: a stale error must NOT post a banner
+                                    // for or clear is_loading on the user's new track.
+                                    if *play_generation.read() != current_gen {
+                                        return;
+                                    }
+                                    eprintln!("YT Music stream URL fetch failed: {e}");
+                                    playback_error.set(Some(format!(
+                                        "YouTube Music couldn't load this track:\n{e}"
+                                    )));
+                                    is_loading.set(false);
+                                    skip_in_progress.set(false);
+                                    return;
+                                }
+                            }
+                        } else {
+                            (stream_url, None, None)
+                        };
+                        let yt_format_for_blocking = yt_format;
+                        let stream_url_for_blocking = stream_url.clone();
+                        let yt_ua_for_blocking = yt_user_agent.clone();
                         let source_res = tokio::task::spawn_blocking(move || {
                             if is_radio {
-                                let (source, hint) = decoder::from_stream_with_hint(stream, "ogg");
+                                let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
+                                    stream_url_for_blocking,
+                                    true,
+                                    yt_ua_for_blocking,
+                                );
+                                let (source, hint) =
+                                    decoder::from_stream_with_hint(stream, "ogg");
+                                Ok::<_, std::io::Error>((source, hint))
+                            } else if let Some(fmt) = yt_format_for_blocking {
+                                // YT: HTTP Range-backed source. Symphonia
+                                // can seek freely (Matroska Cues at the
+                                // end, scrub anywhere) and startup probes
+                                // only fetch the ~512 KiB they need.
+                                let range = utils::range_source::RangeStreamSource::new(
+                                    stream_url_for_blocking,
+                                    yt_ua_for_blocking,
+                                )?;
+                                let len = Some(range.total_size());
+                                let (source, mut hint) =
+                                    decoder::from_stream_with_len(range, len);
+                                hint.with_extension(fmt.extension());
                                 Ok::<_, std::io::Error>((source, hint))
                             } else {
+                                let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
+                                    stream_url_for_blocking,
+                                    false,
+                                    yt_ua_for_blocking,
+                                );
                                 stream.wait_for_total_size();
                                 let len = stream.known_total_size();
-                                let (source, hint) = decoder::from_stream_with_len(stream, len);
+                                let (source, hint) =
+                                    decoder::from_stream_with_len(stream, len);
                                 Ok::<_, std::io::Error>((source, hint))
                             }
                         })
@@ -1740,6 +1873,29 @@ impl PlayerController {
         self.loop_mode.with_mut(|l| *l = l.next());
     }
 
+    /// Hard reset: stop playback, drop the queue/history/current track,
+    /// clear any pending playback error. Called when the active server
+    /// changes — without it, a queued `ytmusic:` track would be replayed
+    /// through whichever backend's stream-builder is now active.
+    pub fn reset_for_backend_switch(&mut self) {
+        // Invalidate any in-flight track-load spawn (YT __YT_PENDING
+        // resolver, Jellyfin stream open, etc.) so its eventual
+        // completion doesn't start playback against the cleared queue
+        // or post a stale error banner / clear is_loading for the new
+        // backend's first track.
+        self.play_generation.with_mut(|g| *g += 1);
+        self.cancel_radio_task();
+        self.player.write().stop_for_transition();
+        self.is_playing.set(false);
+        self.is_loading.set(false);
+        self.skip_in_progress.set(false);
+        self.queue.write().clear();
+        self.history.write().clear();
+        self.current_queue_index.set(0);
+        self.clear_current_track_metadata();
+        self.playback_error.set(None);
+    }
+
     pub fn pause(&mut self) {
         let idx = *self.current_queue_index.peek();
         let is_radio = self
@@ -1942,6 +2098,7 @@ pub fn use_player_controller(
     let pending_crossfade_ui = use_signal(|| None::<PendingCrossfadeUiState>);
     let radio_task = use_signal(|| None::<dioxus_core::Task>);
     let station_registry = use_context::<Signal<radio::registry::StationRegistry>>();
+    let playback_error = use_signal(|| None::<String>);
 
     PlayerController {
         player,
@@ -1971,5 +2128,6 @@ pub fn use_player_controller(
         pending_crossfade_ui,
         radio_task,
         station_registry,
+        playback_error,
     }
 }

@@ -4,6 +4,7 @@
   craneLib,
   pkg-config,
   cmake,
+  git,
   openssl,
   tailwindcss_4,
   dioxus-cli,
@@ -31,6 +32,7 @@ let
     cmake
     tailwindcss_4
     dioxus-cli
+    git
   ]
   ++ lib.optionals stdenv.isLinux [ wrapGAppsHook3 ];
 

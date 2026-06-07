@@ -411,6 +411,16 @@ pub fn QueueListView(
                             80,
                         )
                     }
+                    config::MusicService::YtMusic => {
+                        utils::jellyfin_image::track_cover_url_with_album_fallback(
+                            &path_str,
+                            &track.album_id,
+                            "",
+                            None,
+                            cover_max_width,
+                            80,
+                        )
+                    }
                 };
                 return utils::map_cover_url(url);
             }

@@ -3,6 +3,8 @@ pub mod jellyfin_image;
 pub mod lyrics;
 pub mod musicbrainz;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod range_source;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod stream_buffer;
 pub mod subsonic_image;
 pub mod themes;

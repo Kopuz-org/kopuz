@@ -38,7 +38,7 @@ fn server_track_id(path: &str) -> Option<String> {
     let mut parts = path.split(':');
     let prefix = parts.next()?;
     let id = parts.next()?;
-    if prefix == "jellyfin" || prefix == "subsonic" {
+    if prefix == "jellyfin" || prefix == "subsonic" || prefix == "ytmusic" {
         Some(id.to_string())
     } else {
         None
@@ -871,6 +871,7 @@ fn ServerHeroBanner(
                                                                 remote.unstar(id).await
                                                             }
                                                         }
+                                                        MusicService::YtMusic => Ok(()),
                                                     };
                                                     if let Err(e) = result {
                                                         eprintln!("Failed to sync favorite: {e}");

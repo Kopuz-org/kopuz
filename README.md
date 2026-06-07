@@ -32,11 +32,12 @@ this is mythological rather than historical.
 
 ## Overview
 
-Kopuz allows you to scan your local directories for audio files, or stream from
-your Jellyfin or Subsonic (Navidrome, etc.) server, automatically organizing
-everything into a browsable library. You can navigate by artists, albums,
-genres, or explore your custom playlists. The application is built for
-performance and desktop integration, utilizing the power of Rust.
+Kopuz allows you to scan your local directories for audio files, stream from
+your Jellyfin or Subsonic (Navidrome, etc.) server, or connect **YouTube Music**
+as a streaming backend — automatically organizing everything into a browsable
+library. You can navigate by artists, albums, genres, or explore your custom
+playlists. The application is built for performance and desktop integration,
+utilizing the power of Rust.
 
 ## Features
 
@@ -50,8 +51,15 @@ performance and desktop integration, utilizing the power of Rust.
   Media Transport Controls).
 - **Discord RPC**: Embedded RPC included!!!
 - **Multiple Backends**: Stream from your Jellyfin or Subsonic-compatible server
-  (Navidrome works great), or just point it at a local folder. Mix and match as
-  you like.
+  (Navidrome works great), connect YouTube Music, or just point it at a local
+  folder. Mix and match as you like.
+- **YouTube Music**: Full streaming backend with a Spotify-style **Discover**
+  page (recommended songs, playlists, albums, artists, and moods), rich **artist
+  profiles** (banner, top songs, albums, singles, related artists),
+  album/playlist browsing, and **mix radio** ("start radio" from any track).
+  Sign in with your account for your library, Liked Music, and playlists — or
+  run it **anonymously** (no sign-in) for browse, search, and playback of public
+  tracks. See [YouTube Music Setup](#youtube-music-setup).
 - **Lyrics Support**: Enjoy real-time synced and plain lyrics, complete with
   auto-scrolling to follow along with your music.
 - **Favorites**: Star tracks locally or sync favorites with your
@@ -317,6 +325,54 @@ On **Windows** it uses your AppData folder:
 
 If covers aren't showing or the library looks off, just delete the cache folder
 and hit rescan.
+
+## YouTube Music Setup
+
+Kopuz can use YouTube Music as a streaming backend. Add it from **Settings →
+Media servers → Add → YouTube Music**.
+
+### Prerequisite: rustypipe-botguard
+
+Playback (in both signed-in and anonymous modes) needs the
+[`rustypipe-botguard`](https://crates.io/crates/rustypipe-botguard) helper to
+mint the PO token YouTube requires for stream URLs. Install it once:
+
+```bash
+cargo install rustypipe-botguard --version 0.1.2
+```
+
+The Add-server dialog has a **Check rustypipe-botguard** button to confirm it's
+on your `PATH`. Without it, tracks resolve but fail to play.
+
+### Choosing a mode
+
+The setup dialog offers two methods:
+
+- **Sign in with a browser** — kopuz opens the Google sign-in page in an
+  **isolated browser profile** (a fresh, separate session; your normal browsing
+  is never touched), waits for you to log in, and extracts the session cookies.
+  Pick which installed Chromium-family browser to use (Chrome, Chromium, Brave,
+  Edge, or Vivaldi). This unlocks your **library, Liked Music, playlists, and
+  followed artists**.
+
+- **Continue without signing in (anonymous)** — no sign-in, no cookies. You can
+  **browse, search, open artist/album/playlist pages, start mix radio, and play
+  public tracks**. Liked Music, library playlists, and following/liking are
+  disabled (those views show a "sign in to enable" prompt). Music Premium-only
+  tracks can't be played anonymously.
+
+> [!NOTE]
+> On **Windows**, browser sign-in is currently disabled — the Google accounts
+> page renders blank inside the isolated profile. Windows users get anonymous
+> mode automatically. Sign-in works on Linux and macOS. (Tracked as
+> `TODO(windows-signin)` in `crates/server/src/ytmusic/isolated_profile.rs`.)
+
+### Premium tracks
+
+Music Premium-locked tracks fall back to a local
+[`yt-dlp`](https://github.com/yt-dlp/yt-dlp) resolve when the primary path
+returns `UNPLAYABLE`, so having `yt-dlp` installed helps for those. Anonymous
+mode can't play Premium-only content at all.
 
 ## Optimization
 

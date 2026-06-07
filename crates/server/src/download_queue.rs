@@ -6,6 +6,17 @@ pub enum DownloadStatus {
     Failed,
 }
 
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+#[derive(Clone, Debug, Default)]
+pub struct DownloadProgress {
+    pub per_item: HashMap<String, u64>,
+    pub bytes_done_session: u64,
+    pub session_elapsed_secs: f64,
+}
+
 #[derive(Clone, Debug)]
 pub struct DownloadItem {
     pub id: String,
@@ -21,6 +32,7 @@ pub struct DownloadQueue {
     pub items: Vec<DownloadItem>,
     pub is_running: bool,
     pub cancel_requested: bool,
+    pub cancel_flag: Arc<AtomicBool>,
     pub bytes_done_session: u64,
     pub session_elapsed_secs: f64,
 }
@@ -116,6 +128,7 @@ impl DownloadQueue {
 
     pub fn cancel_all(&mut self) {
         self.cancel_requested = true;
+        self.cancel_flag.store(true, Ordering::Relaxed);
         for item in &mut self.items {
             if matches!(
                 item.status,

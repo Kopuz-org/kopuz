@@ -28,6 +28,11 @@ const SECTIONS: &[(&str, &[NavItem])] = &[
                 icon: "fa-solid fa-magnifying-glass",
             },
             NavItem {
+                key: "discover",
+                route: Route::Discover,
+                icon: "fa-solid fa-compass",
+            },
+            NavItem {
                 key: "radio",
                 route: Route::Radio,
                 icon: "fa-solid fa-radio",
