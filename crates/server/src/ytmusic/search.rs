@@ -562,11 +562,20 @@ fn best_thumbnail(row: &Value) -> Option<String> {
 }
 
 fn normalize_yt_thumbnail(url: &str) -> String {
-    let base = match url.rfind('=') {
-        Some(idx) if url[idx + 1..].starts_with('w') => &url[..idx],
-        _ => url,
-    };
-    format!("{base}=w544-h544-l90-rj")
+    // Only rewrite photo-CDN URLs whose existing size suffix is
+    // `=wNNN-hNNN…`. Other shapes (mixart token URLs, query-string
+    // CDN URLs) get the suffix glued on incorrectly and 404. Match
+    // discover.rs's guarded version: require `=w` immediately
+    // followed by a digit.
+    if let Some(idx) = url.rfind("=w")
+        && url[idx + 2..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit())
+    {
+        return format!("{}=w544-h544-l90-rj", &url[..idx]);
+    }
+    url.to_string()
 }
 
 pub(crate) fn encode_url_tag(url: &str) -> String {

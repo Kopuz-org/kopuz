@@ -478,10 +478,18 @@ fn album_section_contents(resp: &Value) -> Vec<&Value> {
 }
 
 fn find_album_header<'a>(resp: &'a Value, sections: &[&'a Value]) -> Option<&'a Value> {
+    // Two-pass: prefer the modern Responsive header across all
+    // sections before falling back to the legacy Detail header. A
+    // single-pass interleaved scan would let a stray Detail in
+    // section[0] win over a Responsive in section[1] during a YT
+    // layout-migration window, silently dropping artist / audio
+    // playlist id (Detail header has neither).
     for section in sections {
         if let Some(h) = section.get("musicResponsiveHeaderRenderer") {
             return Some(h);
         }
+    }
+    for section in sections {
         if let Some(h) = section.get("musicDetailHeaderRenderer") {
             return Some(h);
         }
@@ -515,9 +523,14 @@ fn pick_album_artist(header: Option<&Value>) -> Option<String> {
         return from_strapline;
     }
     // Legacy layout crammed "<Kind> • <Artist> • <Year>" into subtitle.
+    // Use `let else continue` instead of `?` so a single empty/structural
+    // run in the middle doesn't abort the whole scan and miss the real
+    // artist later in the array.
     let arr = header.pointer("/subtitle/runs").and_then(|v| v.as_array())?;
     for r in arr {
-        let text = r.get("text").and_then(|v| v.as_str())?;
+        let Some(text) = r.get("text").and_then(|v| v.as_str()) else {
+            continue;
+        };
         let t = text.trim();
         if t.is_empty() || t == "•" {
             continue;
@@ -1037,36 +1050,67 @@ fn classify_flex_columns(row: &Value) -> Vec<RowColumn> {
             out.push(RowColumn::Empty);
             continue;
         }
-        let nav = runs.iter().find_map(|r| r.get("navigationEndpoint"));
-        if let Some(nav) = nav {
-            if let Some(vid) = nav
+        // Title check FIRST against runs[0] specifically — that's where
+        // the watchEndpoint lives in every observed shape. Looking at
+        // any run's navigationEndpoint (the prior `find_map` approach)
+        // lost rows whose title was multi-run with an inline artist
+        // mention: run[0] had the title text but no nav endpoint, and
+        // run[1]'s UC… browseEndpoint won, tagging the column as Artist
+        // and silently dropping the entire row.
+        let first_nav = runs.first().and_then(|r| r.get("navigationEndpoint"));
+        if let Some(nav) = first_nav
+            && let Some(vid) = nav
                 .pointer("/watchEndpoint/videoId")
                 .and_then(|v| v.as_str())
-            {
-                let pid = nav
-                    .pointer("/watchEndpoint/playlistId")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string());
-                out.push(RowColumn::Title {
-                    text,
-                    video_id: Some(vid.to_string()),
-                    playlist_id: pid,
-                });
+        {
+            let pid = nav
+                .pointer("/watchEndpoint/playlistId")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            out.push(RowColumn::Title {
+                text,
+                video_id: Some(vid.to_string()),
+                playlist_id: pid,
+            });
+            continue;
+        }
+        // Artist / Album: any run carrying a typed browseEndpoint
+        // wins. Also recognise the album column's OLAK5uy_… audio
+        // playlist endpoint (some artist Top Songs rows link the
+        // album cell to its playlist instead of the MPRE browseId).
+        let mut classified = false;
+        for r in runs {
+            let Some(nav) = r.get("navigationEndpoint") else {
                 continue;
-            }
+            };
             if let Some(bid) = nav
                 .pointer("/browseEndpoint/browseId")
                 .and_then(|v| v.as_str())
             {
                 if bid.starts_with("UC") {
-                    out.push(RowColumn::Artist { text });
-                } else if bid.starts_with("MPRE") {
-                    out.push(RowColumn::Album { text });
-                } else {
-                    out.push(RowColumn::Other);
+                    out.push(RowColumn::Artist { text: text.clone() });
+                    classified = true;
+                    break;
                 }
-                continue;
+                if bid.starts_with("MPRE") {
+                    out.push(RowColumn::Album { text: text.clone() });
+                    classified = true;
+                    break;
+                }
             }
+            if let Some(pid) = nav
+                .pointer("/watchPlaylistEndpoint/playlistId")
+                .or_else(|| nav.pointer("/watchEndpoint/playlistId"))
+                .and_then(|v| v.as_str())
+                && pid.starts_with("OLAK5uy_")
+            {
+                out.push(RowColumn::Album { text: text.clone() });
+                classified = true;
+                break;
+            }
+        }
+        if classified {
+            continue;
         }
         if let Some(secs) = parse_mm_ss(text.trim()) {
             out.push(RowColumn::Duration { secs });
@@ -1089,10 +1133,15 @@ fn is_play_count_text(s: &str) -> bool {
 fn fixed_columns_duration(row: &Value) -> Option<u64> {
     let cols = row.get("fixedColumns").and_then(|v| v.as_array())?;
     for col in cols {
-        let text = runs_text(
+        // `let else continue` — a textless column (e.g. a like-toggle
+        // fixedColumn before the duration column) must not abort the
+        // whole scan; iterate until we find one that parses as mm:ss.
+        let Some(text) = runs_text(
             col,
             "/musicResponsiveListItemFixedColumnRenderer/text/runs",
-        )?;
+        ) else {
+            continue;
+        };
         if let Some(secs) = parse_mm_ss(text.trim()) {
             return Some(secs);
         }

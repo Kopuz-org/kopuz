@@ -55,11 +55,28 @@ pub async fn start_mix(seed_video_id: &str, cookies: &str) -> Result<Vec<Track>,
 }
 
 fn walk_queue(resp: &Value) -> Vec<Track> {
-    let items = resp
+    // Iterate the watchNext tabs by tabRenderer presence rather than
+    // assuming the queue lives at tabs[0]. YT A/B-tests the tab order
+    // (Up next vs Lyrics vs Related) and the positional dive
+    // silently returned an empty queue whenever the queue tab wasn't
+    // first — kills 'next song' and the radio button.
+    let tabs = resp
         .pointer(
-            "/contents/singleColumnMusicWatchNextResultsRenderer/tabbedRenderer/watchNextTabbedResultsRenderer/tabs/0/tabRenderer/content/musicQueueRenderer/content/playlistPanelRenderer/contents",
+            "/contents/singleColumnMusicWatchNextResultsRenderer/tabbedRenderer/watchNextTabbedResultsRenderer/tabs",
         )
         .and_then(|v| v.as_array());
+    let Some(tabs) = tabs else {
+        return Vec::new();
+    };
+    let items = tabs.iter().find_map(|tab| {
+        tab.get("tabRenderer")
+            .and_then(|t| t.get("content"))
+            .and_then(|c| c.get("musicQueueRenderer"))
+            .and_then(|q| q.get("content"))
+            .and_then(|c| c.get("playlistPanelRenderer"))
+            .and_then(|p| p.get("contents"))
+            .and_then(|v| v.as_array())
+    });
     let Some(items) = items else {
         return Vec::new();
     };
@@ -170,11 +187,18 @@ fn parse_queue_row(row: &Value) -> Option<Track> {
 }
 
 fn normalize_yt_thumbnail(url: &str) -> String {
-    let base = match url.rfind('=') {
-        Some(idx) if url[idx + 1..].starts_with('w') => &url[..idx],
-        _ => url,
-    };
-    format!("{base}=w544-h544-l90-rj")
+    // See discover.rs for the rationale: only rewrite when the URL
+    // already carries a `=wNNN` size suffix; otherwise the suffix
+    // glues onto mixart / query-style URLs and 404s.
+    if let Some(idx) = url.rfind("=w")
+        && url[idx + 2..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit())
+    {
+        return format!("{}=w544-h544-l90-rj", &url[..idx]);
+    }
+    url.to_string()
 }
 
 fn parse_mm_ss(s: &str) -> Option<u64> {
