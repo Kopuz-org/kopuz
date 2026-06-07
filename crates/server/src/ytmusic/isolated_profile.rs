@@ -196,6 +196,13 @@ pub async fn launch_signin_and_extract(
 
     let deadline = Instant::now() + signin_timeout;
     let mut last_extract_err: Option<String> = None;
+    // Edge / Chrome on Windows often spawn the visible UI in detached
+    // processes and the launched parent exits with status 0 in <1s.
+    // Polling the cookie SQLite still works — it's on disk in the
+    // profile dir we control. Track child exit but DON'T bail on it;
+    // wait for cookies up to the full timeout. If a non-zero exit
+    // happens (crash) we still tolerate it for the same reason.
+    let mut child_exited_at: Option<Instant> = None;
     let outcome = loop {
         tokio::time::sleep(Duration::from_millis(500)).await;
         if Instant::now() > deadline {
@@ -203,16 +210,19 @@ pub async fn launch_signin_and_extract(
                 .as_deref()
                 .map(|e| format!("; last extract error: {e}"))
                 .unwrap_or_default();
+            let exited_note = child_exited_at
+                .map(|_| " — note: the browser process exited early (likely detached UI); close all browser windows and try again")
+                .unwrap_or_default();
             break Err(format!(
-                "Sign-in not detected within {}s — close the browser and try again{detail}",
+                "Sign-in not detected within {}s{exited_note}{detail}",
                 signin_timeout.as_secs()
             ));
         }
-        if let Ok(Some(status)) = child.try_wait() {
-            eprintln!("[yt-signin] {bin} exited early: {status}");
-            break Err(format!(
-                "Browser ({bin}) exited before sign-in completed (status {status}) — try again, or pick a different browser in settings"
-            ));
+        if child_exited_at.is_none()
+            && let Ok(Some(status)) = child.try_wait()
+        {
+            eprintln!("[yt-signin] {bin} exited (status {status}) — continuing to poll cookies in case the browser is still running as a detached process");
+            child_exited_at = Some(Instant::now());
         }
         let cookies = match super::cookies::extract_from(browser, &profile).await {
             Ok(c) => c,
