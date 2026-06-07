@@ -218,6 +218,10 @@ async fn run_rotation(mut config: Signal<config::AppConfig>) {
     };
     let Some(cookies) = cookies else { return };
     let started = std::time::Instant::now();
+    // Logging policy: noisy in the rare cases (jar rotated, error),
+    // silent on the steady-state OK-no-change tick. The keepalive
+    // fires every 5 min and 99% of ticks are no-change; the original
+    // per-tick OK line drowned stderr.
     match server::ytmusic::verify_session_keepalive::tick(&cookies).await {
         Ok(Some(updated)) => {
             eprintln!(
@@ -230,12 +234,7 @@ async fn run_rotation(mut config: Signal<config::AppConfig>) {
                 srv.access_token = Some(updated);
             }
         }
-        Ok(None) => {
-            eprintln!(
-                "[yt-keepalive] verify_session OK in {:.1}s, no change",
-                started.elapsed().as_secs_f32()
-            );
-        }
+        Ok(None) => {}
         Err(e) => eprintln!("[yt-keepalive] verify_session failed: {e}"),
     }
 }
@@ -1175,63 +1174,53 @@ fn App() -> Element {
         persist_config_snapshot(config_snapshot, config_path());
     });
 
-    // Generation counter rather than a permanent bool latch: every
-    // effect re-run that observes a valid YT session bumps the gen
-    // and spawns a fresh loop bound to that gen. The loop checks the
-    // gen each tick and exits when it doesn't own it any more —
-    // covers sign-out, account switch, and YT server removal.
+    // Keepalive is rearm-on-account-change, not rearm-on-every-config-
+    // write. Re-running the effect on every config save would spawn
+    // a fresh loop that immediately fires run_rotation, spamming
+    // /verify_session a dozen times a minute on any settings churn.
+    //
+    // The signal stores the YT identity (a stable hash of the SAPISID
+    // cookie) we currently have a loop running against. The effect
+    // re-runs cheap, but only spawns a new loop when the identity
+    // changes (sign-in, account switch). Sign-out clears the
+    // identity and the running loop exits on its next tick.
     #[cfg(not(target_arch = "wasm32"))]
-    let yt_keepalive_gen = use_signal(|| 0u64);
+    let mut yt_keepalive_identity = use_signal(|| None::<String>);
     #[cfg(not(target_arch = "wasm32"))]
     use_effect(move || {
         if !*initial_load_done.read() {
             return;
         }
-        // Subscribe to config so adding/changing the YT server after boot
-        // re-runs this effect and starts the loop. peek() would have
-        // pinned us to the boot snapshot.
-        let has_ytmusic_auth = config
-            .read()
-            .server
-            .as_ref()
-            .map(|s| s.service == config::MusicService::YtMusic
-                && s.access_token.as_deref().map(|t| !t.is_empty()).unwrap_or(false))
-            .unwrap_or(false);
-        if !has_ytmusic_auth {
+        let yt_cookies: Option<String> = config.read().server.as_ref().and_then(|s| {
+            (s.service == config::MusicService::YtMusic)
+                .then(|| s.access_token.clone())
+                .flatten()
+                .filter(|t| !t.is_empty())
+        });
+        let live_identity = yt_cookies
+            .as_deref()
+            .and_then(server::ytmusic::derive_user_id);
+        if live_identity == *yt_keepalive_identity.peek() {
             return;
         }
-        let mut keepalive_gen = yt_keepalive_gen;
-        let my_gen = keepalive_gen.with_mut(|g| {
-            *g += 1;
-            *g
-        });
+        // Identity changed (fresh sign-in, account switch, or
+        // sign-out): the previously-running loop (if any) will read
+        // the new identity on its next tick and exit. Update the
+        // tracked identity; spawn a fresh loop only if we still have
+        // valid auth.
+        yt_keepalive_identity.set(live_identity.clone());
+        let Some(my_identity) = live_identity else {
+            return;
+        };
         spawn(async move {
             run_rotation(config).await;
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(300)).await;
-                // Old loops still own the spawned future after the
-                // effect re-fires (e.g. account switch) — they must
-                // exit here so only one rotation runs against the
-                // current cookies.
-                if *keepalive_gen.peek() != my_gen {
-                    return;
-                }
-                // Also bail if the live config no longer has YT auth
-                // (sign-out, server deleted): hammering verify_session
-                // with empty cookies is pointless and racy.
-                let still_valid = config
+                if yt_keepalive_identity
                     .peek()
-                    .server
-                    .as_ref()
-                    .map(|s| {
-                        s.service == config::MusicService::YtMusic
-                            && s.access_token
-                                .as_deref()
-                                .map(|t| !t.is_empty())
-                                .unwrap_or(false)
-                    })
-                    .unwrap_or(false);
-                if !still_valid {
+                    .as_deref()
+                    != Some(my_identity.as_str())
+                {
                     return;
                 }
                 run_rotation(config).await;
