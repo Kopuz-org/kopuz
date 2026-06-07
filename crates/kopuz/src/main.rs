@@ -2289,9 +2289,10 @@ fn App() -> Element {
                                         selected_artist_id: selected_artist_channel_id,
                                         selected_artist_name: selected_artist_name,
                                         on_back: move |_| {
+                                            // Empty selection on Route::Artist renders the grid.
                                             selected_artist_name.set(String::new());
                                             selected_artist_channel_id.set(None);
-                                            current_route.set(Route::Library);
+                                            current_route.set(Route::Artist);
                                         },
                                         on_select_album: move |id: String| {
                                             selected_album_id.set(id);
