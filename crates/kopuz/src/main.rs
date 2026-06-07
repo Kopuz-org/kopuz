@@ -2262,18 +2262,24 @@ fn App() -> Element {
                             }
                         },
                         Route::Artist => {
-                            // YT Music backend gets the rich YT-backed artist
-                            // profile (banner, top songs, albums, related)
-                            // — same UI Discover uses for its artist tiles.
-                            // Local / Jellyfin / Subsonic backends keep the
-                            // existing library-driven artist page.
+                            // YT Music gets the rich YT-backed profile (banner,
+                            // top songs, albums, related) ONLY when an artist
+                            // is actually selected. The Artists sidebar tab /
+                            // back-to-list navigation lands with both signals
+                            // cleared — fall through to the library-driven
+                            // grid in that case (populated on YT from followed
+                            // artists + liked-song artists by the library
+                            // sync). Local / Jellyfin / Subsonic keep the
+                            // library-driven page in all cases.
                             let is_ytmusic = config
                                 .read()
                                 .server
                                 .as_ref()
                                 .map(|s| s.service == config::MusicService::YtMusic)
                                 .unwrap_or(false);
-                            if is_ytmusic {
+                            let has_selection = !selected_artist_name.read().is_empty()
+                                || selected_artist_channel_id.read().is_some();
+                            if is_ytmusic && has_selection {
                                 rsx! {
                                     pages::server::discover::DiscoverArtistPage {
                                         selected_artist_id: selected_artist_channel_id,
