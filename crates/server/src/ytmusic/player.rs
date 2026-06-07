@@ -51,7 +51,6 @@ pub struct YtStreamInfo {
     pub format: AudioFormat,
     pub user_agent: String,
     pub content_length: Option<u64>,
-    pub duration_secs: Option<u64>,
 }
 
 /// Process-wide visitor_data cache. Bound to whatever auth state was
@@ -267,22 +266,11 @@ fn pick_plain_format(json: &Value, client: YouTubeClient) -> Option<YtStreamInfo
         .get("contentLength")
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse::<u64>().ok());
-    let duration_secs = json
-        .pointer("/videoDetails/lengthSeconds")
-        .and_then(|v| v.as_str())
-        .and_then(|s| s.parse::<u64>().ok())
-        .or_else(|| {
-            fmt.get("approxDurationMs")
-                .and_then(|v| v.as_str())
-                .and_then(|s| s.parse::<u64>().ok())
-                .map(|ms| (ms + 500) / 1000)
-        });
 
     Some(YtStreamInfo {
         url,
         format,
         user_agent: client.user_agent.to_string(),
         content_length,
-        duration_secs,
     })
 }
