@@ -142,6 +142,7 @@ pub fn init(log_dir: &Path) {
         }
     };
 
+    let trace_enabled = chrome_guard.is_some();
     *GUARDS.lock().unwrap() = Some(LogGuards {
         _file: file_guard,
         _chrome: chrome_guard,
@@ -154,6 +155,31 @@ pub fn init(log_dir: &Path) {
         shutdown();
         std::process::exit(130);
     });
+
+    // tracing-chrome writes through a BufWriter that only reaches disk on
+    // flush or on a clean guard-drop. If the process is killed before the
+    // guard drops (hard exit, or a flush race against another exit path),
+    // the tail is lost mid-event and the JSON won't parse at all. Flushing
+    // on a cadence keeps the on-disk file at complete-event boundaries, so
+    // even an ungraceful exit yields a loadable trace — chrome://tracing and
+    // Perfetto tolerate a missing trailing `]`, they just can't recover a
+    // string cut in half. The clean close (with `]`) still comes from the
+    // guard drop on normal exit; this is the backstop.
+    if trace_enabled {
+        std::thread::spawn(|| {
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                match GUARDS.lock() {
+                    Ok(g) => match g.as_ref().and_then(|guards| guards._chrome.as_ref()) {
+                        Some(chrome) => chrome.flush(),
+                        // Guards were taken on shutdown — nothing left to flush.
+                        None => break,
+                    },
+                    Err(_) => break,
+                }
+            }
+        });
+    }
 
     tracing::info!(log_dir = %log_dir.display(), "logging initialized");
 }

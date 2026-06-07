@@ -841,7 +841,18 @@ fn App() -> Element {
     // trace. (Ctrl+C is covered separately by the SIGINT handler.)
     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
     dioxus::desktop::use_wry_event_handler(|event, _| {
-        if matches!(event, dioxus::desktop::tao::event::Event::LoopDestroyed) {
+        use dioxus::desktop::tao::event::{Event, WindowEvent};
+        // Flush the moment the window starts closing (CloseRequested),
+        // well before tao calls process::exit; LoopDestroyed is the final
+        // backstop. shutdown() is idempotent so firing on both is fine.
+        if matches!(
+            event,
+            Event::LoopDestroyed
+                | Event::WindowEvent {
+                    event: WindowEvent::CloseRequested,
+                    ..
+                }
+        ) {
             crate::logging::shutdown();
         }
     });
