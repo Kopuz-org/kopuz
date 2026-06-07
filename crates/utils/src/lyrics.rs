@@ -173,7 +173,10 @@ struct SubsonicPlainLyricsData {
 ///
 /// For Jellyfin: `server_token` = access token, `server_user_id` = user_id (unused for lyrics)
 /// For Subsonic: `server_token` = password, `server_user_id` = username
-#[tracing::instrument(name = "lyrics.fetch", skip(track_path), fields(artist = %artist, title = %title))]
+// skip_all, not skip(track_path): a bare skip auto-records every other arg
+// as a span field, which would leak server_token (and url/user_id) into the
+// trace + log. Record only artist/title, explicitly.
+#[tracing::instrument(name = "lyrics.fetch", skip_all, fields(artist = %artist, title = %title))]
 pub async fn fetch_lyrics(
     artist: &str,
     title: &str,
