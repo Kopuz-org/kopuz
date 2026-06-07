@@ -113,6 +113,14 @@ pub fn init(log_dir: &Path) {
             let (chrome_layer, guard) = tracing_chrome::ChromeLayerBuilder::new()
                 .file(&trace_path)
                 .include_args(true)
+                // Async style nests spans by their tracing parent/child
+                // relationship on a single track instead of splitting them
+                // across per-thread rows. This is what makes an
+                // `.instrument()`'d span that hops to a worker thread (e.g.
+                // playlist.load_entries -> yt.playlist_entries ->
+                // yt.browse_continuation) render as one nested tree you can
+                // read without hunting through the worker tracks.
+                .trace_style(tracing_chrome::TraceStyle::Async)
                 .build();
             tracing_subscriber::registry()
                 .with(file_layer)
