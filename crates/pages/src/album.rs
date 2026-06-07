@@ -1,6 +1,4 @@
-use ::server::jellyfin::JellyfinClient;
-use ::server::subsonic::SubsonicClient;
-use config::{AppConfig, MusicService, MusicSource};
+use config::{AppConfig, MusicSource};
 use dioxus::prelude::*;
 use reader::{Library, PlaylistStore};
 
@@ -238,37 +236,26 @@ pub fn Album(
                                         };
                                         if let Some((service, url, token, user_id, device_id)) = server_vals {
                                             spawn(async move {
+                                                let conn = ::server::server_ops::ServerConn {
+                                                    service,
+                                                    url,
+                                                    token,
+                                                    user_id,
+                                                    device_id,
+                                                };
                                                 let item_ids: Vec<String> = paths
                                                     .iter()
                                                     .filter_map(|p| {
-                                                        let parts: Vec<&str> = p.to_str()?.split(':').collect();
-                                                        if parts.len() >= 2 {
-                                                            Some(parts[1].to_string())
-                                                        } else {
-                                                            None
-                                                        }
+                                                        ::server::server_ops::parse_item_id(p.to_str()?)
+                                                            .map(str::to_string)
                                                     })
                                                     .collect();
-                                                let id_refs: Vec<&str> = item_ids
-                                                    .iter()
-                                                    .map(|s| s.as_str())
-                                                    .collect();
-                                                let result = match service {
-                                                    MusicService::Jellyfin => {
-                                                        let remote = JellyfinClient::new(
-                                                            &url,
-                                                            Some(&token),
-                                                            &device_id,
-                                                            Some(&user_id),
-                                                        );
-                                                        remote.create_playlist(&playlist_name, &id_refs).await
-                                                    }
-                                                    MusicService::Subsonic | MusicService::Custom => {
-                                                        let remote = SubsonicClient::new(&url, &user_id, &token);
-                                                        remote.create_playlist(&playlist_name, &id_refs).await
-                                                    }
-                                                    MusicService::YtMusic => Err("YouTube Music not yet implemented".to_string()),
-                                                };
+                                                let result = ::server::server_ops::create_server_playlist(
+                                                    &conn,
+                                                    &playlist_name,
+                                                    &item_ids,
+                                                )
+                                                .await;
                                                 if let Ok(new_id) = result {
                                                     let mut store = playlist_store.write();
                                                     store
