@@ -376,10 +376,10 @@ mode can't play Premium-only content at all.
 
 ## Logs & Debugging
 
-Kopuz logs through [`tracing`](https://docs.rs/tracing). Most of this is reachable
-from the app itself — **Settings → Logs** has **Open logs folder**, **Export
-logs**, and an **Enable Performance Tracing** toggle — so users never need a
-terminal to send a useful report.
+Kopuz logs through [`tracing`](https://docs.rs/tracing). Most of this is
+reachable from the app itself — **Settings → Logs** has **Open logs folder**,
+**Export logs**, and an **Enable Performance Tracing** toggle — so users never
+need a terminal to send a useful report.
 
 ### Where the files live
 
@@ -390,12 +390,12 @@ straight here):
 - macOS: `~/Library/Caches/com.temidaradev.kopuz/logs/`
 - Windows: `%LOCALAPPDATA%\temidaradev\kopuz\cache\logs\`
 
-| File | What it is |
-|------|------------|
-| `latest.log` | The current session. Span timing + events; the live log. |
+| File                    | What it is                                                                                       |
+| ----------------------- | ------------------------------------------------------------------------------------------------ |
+| `latest.log`            | The current session. Span timing + events; the live log.                                         |
 | `kopuz-<timestamp>.log` | Previous sessions, archived on startup (last 10 kept). A restart never erases the run before it. |
-| `crash-<timestamp>.txt` | Written **only on a crash** (Rust panic): message, backtrace, recent log tail, app/OS version. |
-| `kopuz-trace.json` | Performance trace — only when tracing is enabled (see below). Overwritten each run. |
+| `crash-<timestamp>.txt` | Written **only on a crash** (Rust panic): message, backtrace, recent log tail, app/OS version.   |
+| `kopuz-trace.json`      | Performance trace — only when tracing is enabled (see below). Overwritten each run.              |
 
 Timestamps are UTC `YYYY-MM-DD_HH-MM-SS`, so the files sort chronologically.
 
