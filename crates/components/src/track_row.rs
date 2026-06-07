@@ -166,9 +166,14 @@ pub fn TrackRow(
         actions.push(action);
     }
 
-    if !hide_delete {
-        actions.push(MenuAction::new(delete_song_text.as_str(), "fa-solid fa-trash").destructive());
-    }
+    let delete_action_idx = if !hide_delete {
+        let idx = actions.len();
+        actions
+            .push(MenuAction::new(delete_song_text.as_str(), "fa-solid fa-trash").destructive());
+        Some(idx)
+    } else {
+        None
+    };
 
     let share_idx = actions.len();
     actions.push(MenuAction::new(
@@ -197,11 +202,6 @@ pub fn TrackRow(
         add_to_playlist_idx + 1 + usize::from(has_remove)
     } else {
         0
-    };
-    let delete_action_idx = if has_download {
-        download_action_idx + 1
-    } else {
-        add_to_playlist_idx + 1 + usize::from(has_remove)
     };
 
     let mut long_press_task = use_signal(|| None);
@@ -495,7 +495,7 @@ pub fn TrackRow(
                                 } else if mix_idx == Some(idx) {
                                     start_radio_from(track.path.clone(), config, ctrl);
                                     on_close_menu.call(());
-                                } else if idx == delete_action_idx {
+                                } else if Some(idx) == delete_action_idx {
                                     on_delete.call(());
                                 }
                             },
@@ -764,7 +764,7 @@ pub fn TrackRow(
                             } else if mix_idx == Some(idx) {
                                 start_radio_from(track.path.clone(), config, ctrl);
                                 on_close_menu.call(());
-                            } else if idx == delete_action_idx {
+                            } else if Some(idx) == delete_action_idx {
                                 on_delete.call(());
                             }
                         },
