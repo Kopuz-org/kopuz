@@ -374,6 +374,52 @@ Music Premium-locked tracks fall back to a local
 returns `UNPLAYABLE`, so having `yt-dlp` installed helps for those. Anonymous
 mode can't play Premium-only content at all.
 
+## Logs & Debugging
+
+Kopuz logs through [`tracing`](https://docs.rs/tracing). Output goes to two
+places by default:
+
+- **Console** (stderr) — live logs when you run from a terminal. Info, warnings,
+  and errors.
+- **Log file** — a daily-rolling file with per-span timing, useful for bug
+  reports:
+  - Linux: `~/.cache/kopuz/logs/kopuz.log.<date>`
+  - macOS: `~/Library/Caches/com.temidaradev.kopuz/logs/kopuz.log.<date>`
+  - Windows: `%LOCALAPPDATA%\temidaradev\kopuz\cache\logs\kopuz.log.<date>`
+
+### Verbosity
+
+Ordinary runs log at `info` to keep the file small. For deeper logs:
+
+```bash
+# Bump everything to debug
+KOPUZ_DEBUG=1 kopuz
+
+# Or target specific modules (overrides KOPUZ_DEBUG); accepts the standard
+# tracing/env_logger directive syntax
+KOPUZ_LOG="server::ytmusic=trace,kopuz=debug" kopuz
+```
+
+`RUST_LOG` works too; `KOPUZ_LOG` takes precedence.
+
+### Performance traces
+
+To investigate freezes or slow playback/scans, capture a span trace and open it
+in a span analyzer:
+
+```bash
+# Writes a Chrome/Perfetto trace; "1" uses the default logs dir
+KOPUZ_TRACE=1 kopuz
+# or a specific path
+KOPUZ_TRACE=/tmp/kopuz-trace.json kopuz
+```
+
+Open the resulting JSON in [ui.perfetto.dev](https://ui.perfetto.dev) or
+`chrome://tracing`. Critical paths (YouTube stream resolve, browse/search, mix
+radio, library scan, downloads, playback transitions) are instrumented as spans,
+so the trace shows exactly where time goes. Tracing is off by default — zero
+overhead unless `KOPUZ_TRACE` is set.
+
 ## Optimization
 
 Kopuz is built to feel snappy even with large libraries. Here's what we do under
