@@ -158,6 +158,7 @@ fn find_browser_bin(browser: Browser) -> Option<String> {
 // Windows tester to iterate (tried --disable-blink-features=
 // AutomationControlled + UA spoof, reverted — see commits
 // 6bec69d/8a03c89). Until then, Windows users get anonymous YT.
+#[tracing::instrument(name = "yt.signin", skip(server_id, signin_timeout), fields(browser = %browser))]
 pub async fn launch_signin_and_extract(
     browser: Browser,
     server_id: &str,

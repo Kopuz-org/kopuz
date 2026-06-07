@@ -397,6 +397,7 @@ impl PlayerController {
         self.play_track_no_history_with_transition(idx, false);
     }
 
+    #[tracing::instrument(name = "player.transition", skip(self), fields(idx, crossfade = allow_crossfade))]
     fn play_track_no_history_with_transition(&mut self, idx: usize, allow_crossfade: bool) {
         self.play_generation.with_mut(|g| *g += 1);
         let current_gen = *self.play_generation.peek();

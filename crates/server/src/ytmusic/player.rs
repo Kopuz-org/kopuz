@@ -72,11 +72,17 @@ async fn visitor_data(cookies: Option<&str>) -> Result<&'static str, String> {
 /// (visitor_data fetches anonymously, ANDROID_VR is login_supported=
 /// false). Without cookies, Music-Premium-locked tracks naturally
 /// hit UNPLAYABLE and fall through; everything else plays normally.
+#[tracing::instrument(name = "yt.resolve", skip(cookies), fields(video_id = %video_id, anon = cookies.is_none()))]
 pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamInfo, String> {
     // Primary: ANDROID_VR + content_pot. Mint and visitor_data in parallel.
     let (pot_result, visitor_result) = tokio::join!(
         botguard::mint_content_pot(video_id),
         visitor_data(cookies),
+    );
+    tracing::debug!(
+        pot = pot_result.is_ok(),
+        visitor = visitor_result.is_ok(),
+        "minted content pot + visitor data"
     );
 
     let mut primary_err: Option<String> = match (pot_result.as_ref(), visitor_result) {
@@ -90,6 +96,12 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
                     let status = PlayabilityStatus::from_response(&json);
                     if status == PlayabilityStatus::Ok {
                         if let Some(info) = pick_plain_format(&json, ANDROID_VR_1_61_48) {
+                            tracing::info!(
+                                client = "ANDROID_VR",
+                                format = ?info.format,
+                                duration_secs = ?info.duration_secs,
+                                "stream resolved (primary path)"
+                            );
                             return Ok(info);
                         }
                         Some("ANDROID_VR+pot: no plain audio format".to_string())

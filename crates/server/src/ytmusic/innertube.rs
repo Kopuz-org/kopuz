@@ -84,6 +84,7 @@ pub struct PlayerExtras<'a> {
 
 /// Hits `/youtubei/v1/player`. For WEB_REMIX we go via music.youtube.com,
 /// everything else uses www.youtube.com.
+#[tracing::instrument(name = "yt.player_http", skip(cookies, extras), fields(client = client.client_name, video_id = %video_id))]
 pub async fn player(
     client: YouTubeClient,
     video_id: &str,
@@ -172,6 +173,7 @@ pub async fn browse(
 /// (artists, albums, public playlists, discover home with generic
 /// recs). Private surfaces (Liked, user library) will return a
 /// sign-in shelf for anonymous callers — caller has to detect that.
+#[tracing::instrument(name = "yt.browse", skip(cookies), fields(browse_id = %browse_id, anon = cookies.is_none()))]
 pub async fn browse_maybe_auth(
     browse_id: &str,
     cookies: Option<&str>,

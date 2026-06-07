@@ -241,6 +241,11 @@ pub fn delete_downloads(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[tracing::instrument(
+    name = "download.track",
+    skip(url, user_agent, queue, session_start, cancel_flag),
+    fields(item_id = %item_id, content_length)
+)]
 async fn download_with_progress(
     item_id: &str,
     url: &str,
