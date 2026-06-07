@@ -495,9 +495,9 @@ fn main() {
             .unwrap_or_else(|| std::path::PathBuf::from("logs"));
         let _ = std::fs::create_dir_all(&log_dir);
 
-        // Held for the program's lifetime so the file appender + chrome
-        // trace flush on exit. See `logging` module.
-        let _log_guards = logging::init(&log_dir);
+        // Guards live in a global inside `logging`; flushed by
+        // logging::shutdown() after launch returns or on Ctrl+C.
+        logging::init(&log_dir);
 
         migrate_legacy_locations();
 
@@ -744,6 +744,9 @@ fn main() {
         dioxus::LaunchBuilder::desktop()
             .with_cfg(config)
             .launch(App);
+        // Window closed → flush the log file tail + finalize the
+        // chrome trace's closing bracket.
+        logging::shutdown();
     }
 
     #[cfg(target_os = "android")]

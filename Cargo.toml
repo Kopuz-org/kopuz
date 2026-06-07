@@ -50,6 +50,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 tracing-appender = "0.2"
 tracing-chrome = "0.7"
+ctrlc = "3.5"
 i18n = { path = "./crates/i18n" }
 player = { path = "./crates/player" }
 reader = { path = "./crates/reader" }

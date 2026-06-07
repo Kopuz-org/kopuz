@@ -24,13 +24,21 @@ use tracing_subscriber::{
 };
 
 /// RAII guards that must outlive the program: the file appender's
-/// worker thread and (if enabled) the chrome trace flusher. Drop on
-/// shutdown flushes both.
+/// worker thread and (if enabled) the chrome trace flusher. Dropping
+/// them flushes both — the daily file's tail and the chrome trace's
+/// closing bracket (without which Perfetto can't load it).
+///
+/// Held in a process global rather than handed to `main` so a Ctrl+C
+/// handler can flush them too — `main`'s stack guards never run their
+/// Drop on SIGINT, which would leave a truncated, unloadable trace.
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-pub struct LogGuards {
+struct LogGuards {
     _file: tracing_appender::non_blocking::WorkerGuard,
     _chrome: Option<tracing_chrome::FlushGuard>,
 }
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+static GUARDS: std::sync::Mutex<Option<LogGuards>> = std::sync::Mutex::new(None);
 
 /// Quiet the chatty dependencies (and dioxus's per-render memo
 /// recompute spans, which otherwise dominate the log) regardless of
@@ -78,10 +86,11 @@ fn user_directives() -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// Initialize the global subscriber. Returns guards the caller must
-/// keep alive for the process lifetime.
+/// Initialize the global subscriber. Guards are stashed in a process
+/// global; call [`shutdown`] on normal exit. A SIGINT handler also
+/// flushes them so Ctrl+C still yields a valid trace.
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-pub fn init(log_dir: &Path) -> LogGuards {
+pub fn init(log_dir: &Path) {
     let file_appender = tracing_appender::rolling::daily(log_dir, "kopuz.log");
     let (non_blocking, file_guard) = tracing_appender::non_blocking(file_appender);
 
@@ -108,7 +117,10 @@ pub fn init(log_dir: &Path) -> LogGuards {
             tracing_subscriber::registry()
                 .with(file_layer)
                 .with(console_layer)
-                .with(chrome_layer)
+                // Filter the chrome layer the same as the file so the
+                // trace isn't 30MB of h2/wgpu/dioxus-internal spans
+                // burying the kopuz spans you actually want to analyze.
+                .with(chrome_layer.with_filter(file_filter()))
                 .init();
             tracing::info!(trace = %trace_path.display(), "chrome span trace enabled");
             Some(guard)
@@ -122,9 +134,27 @@ pub fn init(log_dir: &Path) -> LogGuards {
         }
     };
 
-    tracing::info!(log_dir = %log_dir.display(), "logging initialized");
-    LogGuards {
+    *GUARDS.lock().unwrap() = Some(LogGuards {
         _file: file_guard,
         _chrome: chrome_guard,
+    });
+
+    // SIGINT (Ctrl+C from a terminal `cargo run`) skips stack/global
+    // Drop, leaving the trace truncated. Flush guards explicitly, then
+    // exit with the conventional 130.
+    let _ = ctrlc::set_handler(|| {
+        shutdown();
+        std::process::exit(130);
+    });
+
+    tracing::info!(log_dir = %log_dir.display(), "logging initialized");
+}
+
+/// Flush + drop the logging guards. Idempotent. Called on normal exit
+/// and from the SIGINT handler.
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+pub fn shutdown() {
+    if let Ok(mut g) = GUARDS.lock() {
+        g.take();
     }
 }
