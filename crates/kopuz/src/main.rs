@@ -496,9 +496,17 @@ fn main() {
             .unwrap_or_else(|| std::path::PathBuf::from("logs"));
         let _ = std::fs::create_dir_all(&log_dir);
 
+        // Read the persisted tracing toggle from config.json before the app
+        // (and its config Signal) exists — the subscriber is built once here,
+        // so the setting is applied at startup. Same path the settings UI
+        // writes to. Missing/unreadable config defaults to off.
+        let config_tracing_enabled = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
+            .map(|dirs| config::AppConfig::load(&dirs.config_dir().join("config.json")).tracing_enabled)
+            .unwrap_or(false);
+
         // Guards live in a global inside `logging`; flushed by
         // logging::shutdown() after launch returns or on Ctrl+C.
-        logging::init(&log_dir);
+        logging::init(&log_dir, config_tracing_enabled);
 
         migrate_legacy_locations();
 

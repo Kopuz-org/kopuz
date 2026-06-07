@@ -93,7 +93,7 @@ fn user_directives() -> Option<String> {
 /// global; call [`shutdown`] on normal exit. A SIGINT handler also
 /// flushes them so Ctrl+C still yields a valid trace.
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-pub fn init(log_dir: &Path) {
+pub fn init(log_dir: &Path, config_tracing_enabled: bool) {
     // Register the dir for crash reports + the export button, then archive the
     // previous session's latest.log (and prune old archives) BEFORE the
     // appender opens a fresh one — so a restart never erases a crashing run.
@@ -112,47 +112,51 @@ pub fn init(log_dir: &Path) {
         .with_writer(std::io::stderr)
         .with_filter(console_filter());
 
-    let chrome_guard = match std::env::var("KOPUZ_TRACE") {
-        // Boolean-style off values disable tracing, matching KOPUZ_DEBUG —
-        // otherwise KOPUZ_TRACE=0 would turn it on and write to a file
-        // literally named "0". "1"/"true" use the default path; any other
-        // non-empty value is treated as an explicit output path.
-        Ok(v) if !v.is_empty() && v != "0" && v != "false" => {
-            let trace_path = if v == "1" || v == "true" {
-                log_dir.join("kopuz-trace.json")
-            } else {
-                PathBuf::from(v)
-            };
-            let (chrome_layer, guard) = tracing_chrome::ChromeLayerBuilder::new()
-                .file(&trace_path)
-                .include_args(true)
-                // Async style nests spans by their tracing parent/child
-                // relationship on a single track instead of splitting them
-                // across per-thread rows. This is what makes an
-                // `.instrument()`'d span that hops to a worker thread (e.g.
-                // playlist.load_entries -> yt.playlist_entries ->
-                // yt.browse_continuation) render as one nested tree you can
-                // read without hunting through the worker tracks.
-                .trace_style(tracing_chrome::TraceStyle::Async)
-                .build();
-            tracing_subscriber::registry()
-                .with(file_layer)
-                .with(console_layer)
-                // Filter the chrome layer the same as the file so the
-                // trace isn't 30MB of h2/wgpu/dioxus-internal spans
-                // burying the kopuz spans you actually want to analyze.
-                .with(chrome_layer.with_filter(file_filter()))
-                .init();
-            tracing::info!(trace = %trace_path.display(), "chrome span trace enabled");
-            Some(guard)
-        }
-        _ => {
-            tracing_subscriber::registry()
-                .with(file_layer)
-                .with(console_layer)
-                .init();
-            None
-        }
+    // Tracing turns on from either the `KOPUZ_TRACE` env var (the dev path)
+    // or the in-app settings toggle (`config_tracing_enabled`, the path for
+    // users who can't set env vars). Env boolean-off values (0/false/empty)
+    // disable it — otherwise KOPUZ_TRACE=0 would enable it and write to a file
+    // named "0". A non-boolean env value is treated as an explicit output path
+    // ("1"/"true" → the default path).
+    let env_trace = std::env::var("KOPUZ_TRACE").ok();
+    let env_on = env_trace
+        .as_deref()
+        .is_some_and(|v| !v.is_empty() && v != "0" && v != "false");
+    let trace_on = env_on || config_tracing_enabled;
+    let trace_path = match env_trace.as_deref() {
+        Some(v) if env_on && v != "1" && v != "true" => PathBuf::from(v),
+        _ => log_dir.join("kopuz-trace.json"),
+    };
+
+    let chrome_guard = if trace_on {
+        let (chrome_layer, guard) = tracing_chrome::ChromeLayerBuilder::new()
+            .file(&trace_path)
+            .include_args(true)
+            // Async style nests spans by their tracing parent/child
+            // relationship on a single track instead of splitting them
+            // across per-thread rows. This is what makes an
+            // `.instrument()`'d span that hops to a worker thread (e.g.
+            // playlist.load_entries -> yt.playlist_entries ->
+            // yt.browse_continuation) render as one nested tree you can
+            // read without hunting through the worker tracks.
+            .trace_style(tracing_chrome::TraceStyle::Async)
+            .build();
+        tracing_subscriber::registry()
+            .with(file_layer)
+            .with(console_layer)
+            // Filter the chrome layer the same as the file so the
+            // trace isn't 30MB of h2/wgpu/dioxus-internal spans
+            // burying the kopuz spans you actually want to analyze.
+            .with(chrome_layer.with_filter(file_filter()))
+            .init();
+        tracing::info!(trace = %trace_path.display(), "chrome span trace enabled");
+        Some(guard)
+    } else {
+        tracing_subscriber::registry()
+            .with(file_layer)
+            .with(console_layer)
+            .init();
+        None
     };
 
     let trace_enabled = chrome_guard.is_some();

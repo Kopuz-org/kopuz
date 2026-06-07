@@ -539,6 +539,11 @@ pub struct AppConfig {
     pub language: String,
     #[serde(default)]
     pub reduce_animations: bool,
+    /// Opt-in chrome/Perfetto performance trace. Read at startup (the
+    /// subscriber is built once), so a change needs a restart. Adds runtime
+    /// overhead — surfaced with a warning in settings.
+    #[serde(default)]
+    pub tracing_enabled: bool,
     #[serde(default = "default_auto_check_updates")]
     pub auto_check_updates: bool,
     #[serde(default = "default_show_source_toggle")]
@@ -844,6 +849,7 @@ impl Default for AppConfig {
             lastfm_session_key: String::new(),
             language: default_language(),
             reduce_animations: false,
+            tracing_enabled: false,
             auto_check_updates: default_auto_check_updates(),
             show_source_toggle: default_show_source_toggle(),
             sidebar_order: default_sidebar_order(),
