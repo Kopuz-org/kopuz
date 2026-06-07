@@ -217,3 +217,49 @@ pub fn export_logs(dest: &Path) -> io::Result<()> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("kopuz-logtest-{}-{name}", std::process::id()))
+    }
+
+    #[test]
+    fn read_tail_small_file_returns_all() {
+        let p = tmp("small");
+        std::fs::write(&p, b"line1\nline2\nline3\n").unwrap();
+        assert_eq!(read_tail(&p).unwrap(), "line1\nline2\nline3\n");
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn read_tail_caps_at_64k_and_trims_partial_first_line() {
+        let p = tmp("large");
+        // One giant line (> 64 KiB, no newline) then a complete trailing line.
+        // The 64 KiB window starts mid-giant-line, which must be dropped.
+        let mut content = "x".repeat(70_000);
+        content.push('\n');
+        content.push_str("TAIL LINE");
+        std::fs::write(&p, content.as_bytes()).unwrap();
+        let out = read_tail(&p).unwrap();
+        assert!(out.len() <= TAIL_BYTES as usize, "tail {} exceeds cap", out.len());
+        assert_eq!(out, "TAIL LINE", "partial first line should be trimmed");
+        let _ = std::fs::remove_file(&p);
+    }
+
+    #[test]
+    fn read_tail_lossy_when_offset_splits_utf8() {
+        let p = tmp("utf8");
+        // 75_000 bytes of 3-byte chars: 64 KiB from the end lands mid-codepoint
+        // (75000-65536 = 9464, 9464 % 3 = 2). read_to_string would error here
+        // and drop the tail; the lossy read must still return it.
+        std::fs::write(&p, "€".repeat(25_000).as_bytes()).unwrap();
+        assert!(
+            read_tail(&p).is_some(),
+            "mid-UTF-8 window boundary should not drop the tail"
+        );
+        let _ = std::fs::remove_file(&p);
+    }
+}
