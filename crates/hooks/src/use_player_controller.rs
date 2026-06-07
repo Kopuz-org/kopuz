@@ -876,6 +876,8 @@ impl PlayerController {
                                     let duration_secs = scrobble_track.duration;
                                     let threshold_secs = std::cmp::min(240, duration_secs / 2);
 
+                                    let scrobble_span =
+                                        tracing::info_span!("scrobble.submit", track = %scrobble_id);
                                     spawn(async move {
                                         // track must be longer than 30 seconds
                                         if duration_secs < 30 {
@@ -1099,7 +1101,7 @@ impl PlayerController {
                                                 }
                                             }
                                         }
-                                    });
+                                    }.instrument(scrobble_span));
 
                                     let cover_url = cover_url.clone();
                                     let track = track.clone();

@@ -75,6 +75,8 @@ pub fn PlaylistDetail(
         use_effect(move || {
             if !*has_loaded_jellyfin_tracks.read() {
                 let pid_clone = pid.clone();
+                let load_span =
+                    tracing::info_span!("playlist.load_entries", playlist_id = %pid_clone);
                 spawn(async move {
                     let server_info = {
                         let conf = config.peek();
@@ -217,7 +219,7 @@ pub fn PlaylistDetail(
                             }
                         }
                     }
-                });
+                }.instrument(load_span));
             }
         });
     }

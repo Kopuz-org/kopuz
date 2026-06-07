@@ -4,6 +4,7 @@ use ::server::subsonic::SubsonicClient;
 use config::{AppConfig, MusicService};
 use dioxus::prelude::*;
 use reader::{Library, PlaylistStore};
+use tracing::Instrument;
 
 #[component]
 #[tracing::instrument(name = "render.jellyfin_playlists", skip_all)]
@@ -298,7 +299,7 @@ pub fn JellyfinPlaylists(
                 }
             }
             store_write.jellyfin_playlists = server_playlists;
-        });
+        }.instrument(tracing::info_span!("playlists.fetch")));
     });
 
     let jellyfin_playlists = use_memo(move || {

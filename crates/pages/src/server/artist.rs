@@ -9,6 +9,7 @@ use server::jellyfin::JellyfinClient;
 use server::subsonic::SubsonicClient;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use tracing::Instrument;
 
 #[component]
 pub fn JellyfinArtist(
@@ -134,7 +135,7 @@ pub fn JellyfinArtist(
 
             fetched_artist_images.set(images);
             is_fetching_images.set(false);
-        });
+        }.instrument(tracing::info_span!("artist.fetch_images")));
     });
 
     let jellyfin_artists = use_memo(move || {
