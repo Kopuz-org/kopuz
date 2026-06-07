@@ -16,7 +16,13 @@ use std::path::PathBuf;
 ///   3. Walking up from cwd looking for `bin/rustypipe-botguard` (dev mode:
 ///      finds it whether you started Kopuz from the workspace root or from
 ///      a crate subdir).
-///   4. Bare `rustypipe-botguard` (resolved via PATH).
+///   4. Common install dirs (`~/.cargo/bin`, `~/.nix-profile/bin`,
+///      `/usr/local/bin`, `/opt/homebrew/bin`, and the Nix system profiles).
+///      GUI apps launched from Finder/dock get a minimal PATH
+///      (`/usr/bin:/bin:/usr/sbin:/sbin`) that excludes these, so a
+///      `cargo install` or `nix profile install` lands somewhere the bare
+///      PATH lookup in step 5 can't see. Probe them explicitly.
+///   5. Bare `rustypipe-botguard` (resolved via PATH).
 fn binary_path() -> PathBuf {
     if let Some(p) = std::env::var_os("RUSTYPIPE_BOTGUARD_BIN") {
         return PathBuf::from(p);
@@ -42,6 +48,25 @@ fn binary_path() -> PathBuf {
             if !p.pop() {
                 break;
             }
+        }
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        for sub in [".cargo/bin", ".nix-profile/bin"] {
+            let candidate = PathBuf::from(&home).join(sub).join("rustypipe-botguard");
+            if candidate.is_file() {
+                return candidate;
+            }
+        }
+    }
+    for dir in [
+        "/usr/local/bin",
+        "/opt/homebrew/bin",
+        "/run/current-system/sw/bin",
+        "/nix/var/nix/profiles/default/bin",
+    ] {
+        let candidate = PathBuf::from(dir).join("rustypipe-botguard");
+        if candidate.is_file() {
+            return candidate;
         }
     }
     PathBuf::from("rustypipe-botguard")
