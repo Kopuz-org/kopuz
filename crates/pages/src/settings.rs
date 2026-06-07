@@ -24,15 +24,40 @@ fn theme_editor_section(_config: Signal<AppConfig>) -> Element {
 // bundle (latest.log + newest crash report) via a save dialog. rfd is
 // excluded on Android and utils::logs is filesystem-only, so the rest get a
 // stub.
+// Declared `-> ()` so the panic coerces here; calling it from the onclick
+// keeps the handler's return type `()` (a bare `panic!` in the closure infers
+// `!`, which the event-handler trait rejects).
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-fn logs_section() -> Element {
+fn trigger_test_crash() {
+    panic!("manual crash trigger from settings (debug build)");
+}
+
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+fn logs_section(mut config: Signal<AppConfig>) -> Element {
     rsx! {
         section {
             h2 {
                 class: "text-lg font-semibold text-white/80 mb-4 border-b border-white/5 pb-2",
                 "{i18n::t(\"logs\")}"
             }
-            div { class: "flex flex-wrap gap-3",
+            div { class: "space-y-4",
+                SettingItem {
+                    title: i18n::t("enable_tracing").to_string(),
+                    control: rsx! {
+                        ToggleSetting {
+                            enabled: config.read().tracing_enabled,
+                            on_change: move |v| {
+                                config.write().tracing_enabled = v;
+                            },
+                        }
+                    },
+                }
+                p {
+                    class: "text-xs text-amber-400/80 -mt-2",
+                    "{i18n::t(\"tracing_warning\")}"
+                }
+            }
+            div { class: "flex flex-wrap gap-3 mt-4",
                 button {
                     class: "px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors flex items-center gap-2",
                     onclick: move |_| {
@@ -61,13 +86,23 @@ fn logs_section() -> Element {
                     i { class: "fa-solid fa-file-export" }
                     "{i18n::t(\"export_logs\")}"
                 }
+                // Debug builds only: deliberately panic to exercise the crash
+                // hook / crash-report path. English-only by design (dev tool).
+                if cfg!(debug_assertions) {
+                    button {
+                        class: "px-4 py-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 text-sm transition-colors flex items-center gap-2",
+                        onclick: move |_| trigger_test_crash(),
+                        i { class: "fa-solid fa-bomb" }
+                        "Trigger crash (debug)"
+                    }
+                }
             }
         }
     }
 }
 
 #[cfg(any(target_arch = "wasm32", target_os = "android"))]
-fn logs_section() -> Element {
+fn logs_section(_config: Signal<AppConfig>) -> Element {
     rsx! {}
 }
 use components::settings_items::{
@@ -1005,7 +1040,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     }
                 }
 
-                {logs_section()}
+                {logs_section(config)}
 
                 {theme_editor_section(config)}
 
