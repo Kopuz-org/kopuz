@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::time::Duration;
+
 use config::{AppConfig, MusicService};
 use dioxus::prelude::*;
 use reader::models::{Library, Track};
@@ -12,6 +15,15 @@ use server::ytmusic::discover::{DiscoverHome, DiscoverItem, DiscoverShelf, YtArt
 /// incorrectly show "playing" on the album that previously played.
 #[derive(Clone, Copy)]
 pub struct DiscoverNowPlaying(pub Signal<Option<String>>);
+
+/// Hover-prefetched track lists keyed by the id the user would click —
+/// playlist_id or MPRE… browse id. Populated by Card's onmouseenter
+/// handler (after a short hover delay) and consumed by
+/// play_playlist_async, so when the user actually clicks Play the
+/// tracks are already in memory and playback can start without
+/// waiting on a browse roundtrip.
+#[derive(Clone, Copy)]
+pub struct DiscoverPrefetchCache(pub Signal<HashMap<String, Vec<Track>>>);
 
 #[component]
 pub fn DiscoverPage(
@@ -316,6 +328,7 @@ fn DiscoverTile(
     let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let config = use_context::<Signal<AppConfig>>();
     let now_playing = use_context::<DiscoverNowPlaying>().0;
+    let cache = use_context::<DiscoverPrefetchCache>().0;
     match item {
         DiscoverItem::Song(track) => {
             let mut ctrl_for_song = ctrl;
@@ -344,7 +357,7 @@ fn DiscoverTile(
                         on_select_playlist.call((playlist_id.clone(), title_for_click.clone()))
                     },
                     on_play: EventHandler::new(move |_| {
-                        play_playlist_async(pid_for_play.clone(), config, ctrl, now_playing);
+                        play_playlist_async(pid_for_play.clone(), config, ctrl, now_playing, cache);
                     }),
                     source_id: Some(pid_for_source),
                 }
@@ -364,7 +377,7 @@ fn DiscoverTile(
                         on_select_playlist.call((browse_id.clone(), title_for_click.clone()))
                     },
                     on_play: EventHandler::new(move |_| {
-                        play_playlist_async(bid_for_play.clone(), config, ctrl, now_playing);
+                        play_playlist_async(bid_for_play.clone(), config, ctrl, now_playing, cache);
                     }),
                     source_id: Some(bid_for_source),
                 }
@@ -414,9 +427,19 @@ fn play_playlist_async(
     config: Signal<AppConfig>,
     mut ctrl: hooks::use_player_controller::PlayerController,
     mut now_playing: Signal<Option<String>>,
+    cache: Signal<HashMap<String, Vec<Track>>>,
 ) {
     ctrl.is_loading.set(true);
     now_playing.set(Some(id.clone()));
+    // Cache hit from hover-prefetch — start playback synchronously, no
+    // network roundtrip needed. This is the path that makes Discover
+    // tiles feel like Favorites: warm data, instant playback.
+    if let Some(tracks) = cache.peek().get(&id).cloned()
+        && !tracks.is_empty()
+    {
+        ctrl.play_queue_linear(tracks);
+        return;
+    }
     spawn(async move {
         let Some(cookies) = config
             .peek()
@@ -442,11 +465,13 @@ fn play_playlist_async(
         }
 
         let mut started = false;
+        let mut accumulated = Vec::<Track>::new();
         let result = yt
             .stream_playlist_entries(&id, |batch| {
                 if batch.is_empty() {
                     return;
                 }
+                accumulated.extend(batch.iter().cloned());
                 if started {
                     ctrl.add_to_queue(batch);
                 } else {
@@ -456,10 +481,14 @@ fn play_playlist_async(
             })
             .await;
         if !started {
-            // Nothing ever played — fetch failed or returned no rows.
             ctrl.is_loading.set(false);
             let _ = result;
+            return;
         }
+        // Cache the assembled list so the next click on this same
+        // tile is instant (e.g. the user navigated away and came back).
+        let mut cache_writer = cache;
+        cache_writer.write().insert(id, accumulated);
     });
 }
 
@@ -488,7 +517,13 @@ fn Card(
     };
     let cover_radius = if rounded_full { "rounded-full" } else { "rounded-lg" };
     let now_playing = use_context::<DiscoverNowPlaying>().0;
+    let mut cache = use_context::<DiscoverPrefetchCache>().0;
+    let config_ctx = use_context::<Signal<AppConfig>>();
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
+    // Per-tile hover gate that survives across renders so the spawned
+    // prefetch task can check whether the cursor is still on the tile
+    // after the debounce sleep.
+    let mut hover_armed = use_signal(|| false);
     let is_this_source = match (&source_id, now_playing.read().as_ref()) {
         (Some(sid), Some(active)) => sid == active,
         _ => false,
@@ -501,10 +536,57 @@ fn Card(
     let is_loading = *ctrl.is_loading.read();
     let show_loading = is_this_source && is_loading;
     let show_pause = is_this_source && is_playing && !is_loading;
+    let prefetch_id = source_id.clone();
     rsx! {
         div {
             class: "shrink-0 w-44 text-left cursor-pointer transition-transform duration-200 ease-out hover:scale-[1.03] hover:-translate-y-0.5 group",
             onclick: move |e| onclick.call(e),
+            onmouseenter: move |_| {
+                let Some(id) = prefetch_id.clone() else { return; };
+                hover_armed.set(true);
+                spawn(async move {
+                    // Short hover delay so the cursor passing over a
+                    // shelf doesn't fire a dozen requests. If the user
+                    // moves off the tile inside the delay window,
+                    // onmouseleave disarms hover_armed and we skip.
+                    tokio::time::sleep(Duration::from_millis(250)).await;
+                    if !*hover_armed.peek() {
+                        return;
+                    }
+                    if cache.peek().contains_key(&id) {
+                        return;
+                    }
+                    let Some(cookies) = config_ctx
+                        .peek()
+                        .server
+                        .as_ref()
+                        .and_then(|s| s.access_token.clone())
+                    else {
+                        return;
+                    };
+                    let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
+                    let fetched: Result<Vec<Track>, String> = if id.starts_with("MPRE") {
+                        yt.fetch_album_tracks(&id).await
+                    } else {
+                        let mut buf = Vec::new();
+                        match yt
+                            .stream_playlist_entries(&id, |batch| buf.extend(batch))
+                            .await
+                        {
+                            Ok(()) => Ok(buf),
+                            Err(e) => Err(e),
+                        }
+                    };
+                    if let Ok(tracks) = fetched
+                        && !tracks.is_empty()
+                    {
+                        cache.write().insert(id, tracks);
+                    }
+                });
+            },
+            onmouseleave: move |_| {
+                hover_armed.set(false);
+            },
             div { class: "relative w-44 h-44 mb-3 overflow-hidden {cover_radius}",
                 if let Some(url) = thumbnail {
                     img {
@@ -797,6 +879,7 @@ pub fn DiscoverArtistPage(
     let config = use_context::<Signal<AppConfig>>();
     let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let now_playing = use_context::<DiscoverNowPlaying>().0;
+    let cache = use_context::<DiscoverPrefetchCache>().0;
     let mut artist = use_signal(|| None::<YtArtist>);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
@@ -876,7 +959,7 @@ pub fn DiscoverArtistPage(
                                         button {
                                             class: "inline-flex items-center gap-2 bg-white text-black px-6 py-2.5 rounded-full font-bold hover:scale-105 active:scale-95 transition-transform cursor-pointer",
                                             onclick: move |_| {
-                                                play_playlist_async(pid.clone(), config, ctrl, now_playing);
+                                                play_playlist_async(pid.clone(), config, ctrl, now_playing, cache);
                                             },
                                             i { class: "fa-solid fa-shuffle text-[11px]" }
                                             span { class: "text-sm", "{i18n::t(\"shuffle\")}" }
