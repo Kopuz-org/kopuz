@@ -959,7 +959,7 @@ pub fn DiscoverPlaylistDetail(
         let load_span = tracing::info_span!("playlist.load", playlist_id = %pid);
         spawn(
             async move {
-                tracing::info!("playlist load started");
+                tracing::debug!("playlist load started");
                 let cookies = config
                     .peek()
                     .server
@@ -985,7 +985,7 @@ pub fn DiscoverPlaylistDetail(
                 }
                 match result {
                     Ok(ts) => {
-                        tracing::info!(tracks = ts.len(), "playlist load complete");
+                        tracing::debug!(tracks = ts.len(), "playlist load complete");
                         tracks.set(ts);
                     }
                     Err(e) => {

@@ -78,7 +78,7 @@ pub fn PlaylistDetail(
                 let load_span =
                     tracing::info_span!("playlist.load_entries", playlist_id = %pid_clone);
                 spawn(async move {
-                    tracing::info!("playlist entries load started");
+                    tracing::debug!("playlist entries load started");
                     let server_info = {
                         let conf = config.peek();
                         conf.server.as_ref().and_then(|server| {
@@ -106,7 +106,7 @@ pub fn PlaylistDetail(
                                 if let Ok(yt_tracks) =
                                     yt.get_playlist_entries(&pid_clone).await
                                 {
-                                    tracing::info!(count = yt_tracks.len(), "playlist entries loaded, setting tracks");
+                                    tracing::debug!(count = yt_tracks.len(), "playlist entries loaded, setting tracks");
                                     tracks.set(yt_tracks);
                                     has_loaded_jellyfin_tracks.set(true);
                                 }
@@ -157,7 +157,7 @@ pub fn PlaylistDetail(
                                             artists: item.artists.unwrap_or_default(),
                                         });
                                     }
-                                    tracing::info!(count = new_tracks.len(), "playlist entries loaded, setting tracks");
+                                    tracing::debug!(count = new_tracks.len(), "playlist entries loaded, setting tracks");
                                     tracks.set(new_tracks);
                                     has_loaded_jellyfin_tracks.set(true);
                                 }
@@ -216,7 +216,7 @@ pub fn PlaylistDetail(
                                             artists: vec![item.artist.unwrap_or_default()],
                                         });
                                     }
-                                    tracing::info!(count = new_tracks.len(), "playlist entries loaded, setting tracks");
+                                    tracing::debug!(count = new_tracks.len(), "playlist entries loaded, setting tracks");
                                     tracks.set(new_tracks);
                                     has_loaded_jellyfin_tracks.set(true);
                                 }
