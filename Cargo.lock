@@ -919,7 +919,7 @@ dependencies = [
 
 [[package]]
 name = "components"
-version = "0.6.5"
+version = "0.6.7"
 dependencies = [
  "config",
  "dioxus",
@@ -952,7 +952,7 @@ dependencies = [
 
 [[package]]
 name = "config"
-version = "0.6.5"
+version = "0.6.7"
 dependencies = [
  "directories",
  "serde",
@@ -1979,7 +1979,7 @@ dependencies = [
 
 [[package]]
 name = "discord-presence"
-version = "0.6.5"
+version = "0.6.7"
 dependencies = [
  "discord-rich-presence",
  "reader",
@@ -3175,7 +3175,7 @@ dependencies = [
 
 [[package]]
 name = "hooks"
-version = "0.6.5"
+version = "0.6.7"
 dependencies = [
  "config",
  "dioxus",
@@ -3841,7 +3841,7 @@ checksum = "a4933f3f57a8e9d9da04db23fb153356ecaf00cbd14aee46279c33dc80925c37"
 
 [[package]]
 name = "kopuz"
-version = "0.6.5"
+version = "0.6.7"
 dependencies = [
  "block2",
  "components",
@@ -3886,7 +3886,7 @@ dependencies = [
 
 [[package]]
 name = "kopuz_route"
-version = "0.6.5"
+version = "0.6.7"
 
 [[package]]
 name = "kuchikiki"
@@ -5119,7 +5119,7 @@ dependencies = [
 
 [[package]]
 name = "pages"
-version = "0.6.5"
+version = "0.6.7"
 dependencies = [
  "components",
  "config",
@@ -5402,7 +5402,7 @@ checksum = "19f132c84eca552bf34cab8ec81f1c1dcc229b811638f9d283dceabe58c5569e"
 
 [[package]]
 name = "player"
-version = "0.6.5"
+version = "0.6.7"
 dependencies = [
  "base64 0.22.1",
  "block2",
@@ -5786,7 +5786,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "radio"
-version = "0.6.5"
+version = "0.6.7"
 dependencies = [
  "futures-util",
  "reqwest 0.13.4",
@@ -6028,7 +6028,7 @@ checksum = "56cf8381505b60ae18a4097f1d0be093287ca3bf4fbb23d36ac5ad3bba335daa"
 
 [[package]]
 name = "reader"
-version = "0.6.5"
+version = "0.6.7"
 dependencies = [
  "config",
  "lofty",
@@ -6534,7 +6534,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "scrobble"
-version = "0.6.5"
+version = "0.6.7"
 dependencies = [
  "config",
  "dioxus",
@@ -6719,7 +6719,7 @@ dependencies = [
 
 [[package]]
 name = "server"
-version = "0.6.5"
+version = "0.6.7"
 dependencies = [
  "config",
  "directories",
@@ -8072,7 +8072,7 @@ checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
 
 [[package]]
 name = "utils"
-version = "0.6.5"
+version = "0.6.7"
 dependencies = [
  "base64 0.22.1",
  "color-thief",
