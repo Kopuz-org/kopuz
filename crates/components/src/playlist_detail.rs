@@ -4,6 +4,7 @@ use reader::{Library, PlaylistStore};
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use rfd::AsyncFileDialog;
 use std::path::PathBuf;
+use tracing::Instrument;
 
 #[component]
 #[tracing::instrument(name = "render.playlist_detail", skip_all)]

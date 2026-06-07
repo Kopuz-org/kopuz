@@ -4,6 +4,7 @@ use std::cell::Cell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
+use tracing::Instrument;
 
 pub use ::server::{DownloadItem, DownloadProgress, DownloadQueue, DownloadStatus};
 
@@ -94,6 +95,7 @@ pub fn queue_downloads(
     reset_progress_session();
 
     let session_start = Instant::now();
+    let session_span = tracing::info_span!("downloads.session");
     spawn(async move {
         tokio::join!(
             download_worker(queue, config, session_start, cancel_flag.clone()),
@@ -105,7 +107,7 @@ pub fn queue_downloads(
         let mut q = queue.write();
         q.is_running = false;
         q.cancel_requested = false;
-    });
+    }.instrument(session_span));
 }
 
 #[cfg(not(target_arch = "wasm32"))]

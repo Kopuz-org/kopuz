@@ -7,6 +7,7 @@ use reader::models::{Library, Track};
 use server::ytmusic::discover::{DiscoverHome, DiscoverItem, DiscoverShelf, YtArtist};
 use components::track_row::TrackRow;
 use std::path::PathBuf;
+use tracing::Instrument;
 
 /// Tracks the id (playlist_id or MPRE… album browse id) that last
 /// initiated playback through a Discover surface. Album and playlist
@@ -58,6 +59,7 @@ pub fn DiscoverPage(
         if !shelves.peek().is_empty() {
             return;
         }
+        let home_span = tracing::info_span!("discover.load_home");
         spawn(async move {
             let token = config
                 .peek()
@@ -78,7 +80,7 @@ pub fn DiscoverPage(
                 Err(e) => error.set(Some(e)),
             }
             initial_loading.set(false);
-        });
+        }.instrument(home_span));
     });
 
     if !is_ytmusic {
@@ -97,6 +99,7 @@ pub fn DiscoverPage(
             return;
         }
         loading_more.set(true);
+        let more_span = tracing::info_span!("discover.load_more");
         spawn(async move {
             let cookies = config
                 .peek()
@@ -111,7 +114,7 @@ pub fn DiscoverPage(
                 }
             }
             loading_more.set(false);
-        });
+        }.instrument(more_span));
     };
 
     use_effect(move || {
@@ -480,6 +483,7 @@ fn play_playlist_async(
         ctrl.play_queue_linear(tracks);
         return;
     }
+    let play_span = tracing::info_span!("discover.play_playlist", playlist_id = %id);
     spawn(async move {
         let mut cache_writer = cache;
         // Shared failure path: release is_loading AND let go of the
@@ -558,7 +562,7 @@ fn play_playlist_async(
                 )));
             }
         }
-    });
+    }.instrument(play_span));
 }
 
 #[component]
@@ -613,6 +617,7 @@ fn Card(
             onmouseenter: move |_| {
                 let Some(id) = prefetch_id.clone() else { return; };
                 hover_armed.set(true);
+                let prefetch_span = tracing::info_span!("discover.prefetch", id = %id);
                 spawn(async move {
                     // Short hover delay so the cursor passing over a
                     // shelf doesn't fire a dozen requests. If the user
@@ -651,7 +656,7 @@ fn Card(
                     {
                         cache.write().insert(id, tracks);
                     }
-                });
+                }.instrument(prefetch_span));
             },
             onmouseleave: move |_| {
                 hover_armed.set(false);
@@ -746,6 +751,7 @@ fn SongCard(track: Track) -> Element {
             onmouseenter: move |_| {
                 let Some(id) = prefetch_id.clone() else { return; };
                 hover_armed.set(true);
+                let mix_span = tracing::info_span!("discover.prefetch_mix", id = %id);
                 spawn(async move {
                     tokio::time::sleep(Duration::from_millis(250)).await;
                     if !*hover_armed.peek() {
@@ -768,7 +774,7 @@ fn SongCard(track: Track) -> Element {
                     {
                         cache.write().insert(id, mix);
                     }
-                });
+                }.instrument(mix_span));
             },
             onmouseleave: move |_| {
                 hover_armed.set(false);
@@ -858,6 +864,7 @@ fn play_song_with_mix(
         ctrl.play_queue_linear(queue);
         return;
     }
+    let song_span = tracing::info_span!("discover.play_song", video_id = %video_id);
     spawn(async move {
         let Some(cookies) = config
             .peek()
@@ -885,7 +892,7 @@ fn play_song_with_mix(
                 ctrl.play_queue_linear(vec![seed]);
             }
         }
-    });
+    }.instrument(song_span));
 }
 
 /// Put the seed at index 0 and append the rest of the mix. The seed
@@ -946,36 +953,50 @@ pub fn DiscoverPlaylistDetail(
         tracks.set(Vec::new());
         loading.set(true);
         error.set(None);
-        spawn(async move {
-            let cookies = config
-                .peek()
-                .server
-                .as_ref()
-                .and_then(|s| s.access_token.clone());
-            let Some(cookies) = cookies else {
-                if *fetch_gen.peek() == my_gen {
-                    error.set(Some("not signed in".to_string()));
-                    loading.set(false);
+        // Span created on the render thread, attached to the spawned
+        // task via .instrument() so the worker-thread fetch (and its
+        // inner yt.* spans) nest under this load instead of orphaning.
+        let load_span = tracing::info_span!("playlist.load", playlist_id = %pid);
+        spawn(
+            async move {
+                tracing::info!("playlist load started");
+                let cookies = config
+                    .peek()
+                    .server
+                    .as_ref()
+                    .and_then(|s| s.access_token.clone());
+                let Some(cookies) = cookies else {
+                    if *fetch_gen.peek() == my_gen {
+                        error.set(Some("not signed in".to_string()));
+                        loading.set(false);
+                    }
+                    return;
+                };
+                let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
+                // Discover routes both playlists and albums through this viewer;
+                // MPRE… ids are albums and need the browse-album endpoint instead.
+                let result = if pid.starts_with("MPRE") {
+                    yt.fetch_album_tracks(&pid).await
+                } else {
+                    yt.get_playlist_entries(&pid).await
+                };
+                if *fetch_gen.peek() != my_gen {
+                    return;
                 }
-                return;
-            };
-            let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
-            // Discover routes both playlists and albums through this viewer;
-            // MPRE… ids are albums and need the browse-album endpoint instead.
-            let result = if pid.starts_with("MPRE") {
-                yt.fetch_album_tracks(&pid).await
-            } else {
-                yt.get_playlist_entries(&pid).await
-            };
-            if *fetch_gen.peek() != my_gen {
-                return;
+                match result {
+                    Ok(ts) => {
+                        tracing::info!(tracks = ts.len(), "playlist load complete");
+                        tracks.set(ts);
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "playlist load failed");
+                        error.set(Some(e));
+                    }
+                }
+                loading.set(false);
             }
-            match result {
-                Ok(ts) => tracks.set(ts),
-                Err(e) => error.set(Some(e)),
-            }
-            loading.set(false);
-        });
+            .instrument(load_span),
+        );
     });
 
     if playlist_id.is_none() {
@@ -1144,6 +1165,7 @@ pub fn DiscoverArtistPage(
         artist.set(None);
         loading.set(true);
         error.set(None);
+        let artist_span = tracing::info_span!("artist.load", artist = %name);
         spawn(async move {
             let cookies = config
                 .peek()
@@ -1197,7 +1219,7 @@ pub fn DiscoverArtistPage(
                 Err(e) => error.set(Some(e)),
             }
             loading.set(false);
-        });
+        }.instrument(artist_span));
     });
 
     if selected_artist_id.read().is_none() && selected_artist_name.read().trim().is_empty() {

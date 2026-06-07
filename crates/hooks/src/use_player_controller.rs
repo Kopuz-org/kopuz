@@ -1,6 +1,7 @@
 use config::AppConfig;
 use config::BackBehavior;
 use config::MusicService;
+use dioxus::logger::tracing::Instrument;
 use dioxus::{logger::tracing, prelude::*};
 use player::player::{NowPlayingMeta, Player};
 use reader::{Library, Track};
@@ -1138,7 +1139,7 @@ impl PlayerController {
                             is_loading.set(false);
                             skip_in_progress.set(false);
                         }
-                    });
+                    }.instrument(tracing::info_span!("player.resolve_stream", idx)));
 
                     #[cfg(target_arch = "wasm32")]
                     spawn(async move {

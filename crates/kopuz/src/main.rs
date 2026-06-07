@@ -20,6 +20,7 @@ use dioxus::desktop::tao::platform::windows::WindowExtWindows;
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use dioxus::desktop::tao::window::Icon;
 use dioxus::prelude::*;
+use tracing::Instrument;
 #[cfg(not(target_arch = "wasm32"))]
 use discord_presence::Presence;
 use kopuz_route::Route;
@@ -201,7 +202,7 @@ fn persist_config_snapshot(config_snapshot: config::AppConfig, path: std::path::
             Ok(Err(e)) => tracing::error!("Failed to save config: {}", e),
             Err(e) => tracing::error!("Failed to join config save task: {}", e),
         }
-    });
+    }.instrument(tracing::info_span!("config.persist")));
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -737,7 +738,7 @@ fn main() {
                                 .body(std::borrow::Cow::from(bytes))
                                 .unwrap(),
                         );
-                    });
+                    }.instrument(tracing::info_span!("artwork.serve")));
                 },
             );
 
@@ -983,7 +984,7 @@ fn App() -> Element {
                 if let Some(colors) = utils::color::get_palette_from_url(&url).await {
                     palette.set(Some(colors));
                 }
-            });
+            }.instrument(tracing::info_span!("ui.palette_fetch")));
         } else {
             palette.set(None);
         }
@@ -1041,7 +1042,7 @@ fn App() -> Element {
             if import_count > 0 {
                 tracing::info!("Imported {} external radio registries", import_count);
             }
-        });
+        }.instrument(tracing::info_span!("radio.registry_load")));
     });
 
     let mut selected_album_id = use_signal(String::new);
@@ -1149,7 +1150,7 @@ fn App() -> Element {
             if let Some(update) = fetch_available_update().await {
                 update_banner.set(Some(update));
             }
-        });
+        }.instrument(tracing::info_span!("app.update_check")));
     });
 
     use_effect(move || {
@@ -1258,7 +1259,7 @@ fn App() -> Element {
                 if let Ok(Err(e)) = result {
                     tracing::error!("Failed to save playlists: {}", e);
                 }
-            });
+            }.instrument(tracing::info_span!("playlists.persist")));
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -1280,7 +1281,7 @@ fn App() -> Element {
                 if let Ok(Err(e)) = result {
                     tracing::error!("Failed to save library: {}", e);
                 }
-            });
+            }.instrument(tracing::info_span!("library.persist")));
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -1302,7 +1303,7 @@ fn App() -> Element {
                 if let Ok(Err(e)) = result {
                     tracing::error!("Failed to save favorites: {}", e);
                 }
-            });
+            }.instrument(tracing::info_span!("favorites.persist")));
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -1517,7 +1518,7 @@ fn App() -> Element {
                 }
 
                 initial_load_done.set(true);
-            });
+            }.instrument(tracing::info_span!("startup.load")));
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -1740,7 +1741,7 @@ fn App() -> Element {
                         if let Some(merged_lib) = merged_lib {
                             let _ = merged_lib.save(&lib_path());
                         }
-                    });
+                    }.instrument(tracing::info_span!("library.fetch_covers")));
                 } else {
                     // No cover fetching — drop the callback so the progress bar closes.
                     drop(progress_cb);
@@ -1752,7 +1753,7 @@ fn App() -> Element {
                 library.set(current_lib.clone());
                 let _ = current_lib.save(&lib_path());
             }
-        });
+        }.instrument(tracing::info_span!("library.rescan")));
     });
 
     use_effect(move || {
