@@ -6,6 +6,7 @@ use dioxus::prelude::*;
 use reader::{Library, PlaylistStore};
 
 #[component]
+#[tracing::instrument(name = "render.jellyfin_playlists", skip_all)]
 pub fn JellyfinPlaylists(
     playlist_store: Signal<PlaylistStore>,
     library: Signal<Library>,
@@ -13,7 +14,6 @@ pub fn JellyfinPlaylists(
     mut selected_playlist_id: Signal<Option<String>>,
     #[props(default)] refresh_trigger: Signal<u64>,
 ) -> Element {
-    let _render = tracing::info_span!("render.jellyfin_playlists").entered();
     let is_offline = use_context::<Signal<bool>>();
     let mut last_fetch_key = use_signal(|| None::<String>);
     let mut fetch_request_id = use_signal(|| 0u64);

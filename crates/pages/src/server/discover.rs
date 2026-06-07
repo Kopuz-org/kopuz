@@ -28,6 +28,7 @@ pub struct DiscoverNowPlaying(pub Signal<Option<String>>);
 pub struct DiscoverPrefetchCache(pub Signal<HashMap<String, Vec<Track>>>);
 
 #[component]
+#[tracing::instrument(name = "render.discover_home", skip_all)]
 pub fn DiscoverPage(
     library: Signal<Library>,
     on_select_album: EventHandler<String>,
@@ -35,7 +36,6 @@ pub fn DiscoverPage(
     on_open_artist: EventHandler<(String, String)>,
     on_search_artist: EventHandler<String>,
 ) -> Element {
-    let _render = tracing::info_span!("render.discover_home").entered();
     let config = use_context::<Signal<AppConfig>>();
     let mut shelves = use_signal(Vec::<DiscoverShelf>::new);
     let mut continuation = use_signal(|| None::<String>);
@@ -912,14 +912,12 @@ fn build_song_queue(seed: &Track, mix: Vec<Track>) -> Vec<Track> {
 /// nothing about this view touches `playlist_store`, so a discover
 /// playlist never pollutes the user's saved Library Playlists.
 #[component]
+#[tracing::instrument(name = "render.discover_playlist", skip_all)]
 pub fn DiscoverPlaylistDetail(
     selected_playlist_id: Signal<Option<String>>,
     selected_playlist_title: Signal<Option<String>>,
     on_back: EventHandler<()>,
 ) -> Element {
-    // Times the synchronous render (signal reads + building the track
-    // rows). A multi-second span here = the render itself is the freeze.
-    let _render = tracing::info_span!("render.discover_playlist").entered();
     let config = use_context::<Signal<AppConfig>>();
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let mut now_playing = use_context::<DiscoverNowPlaying>().0;

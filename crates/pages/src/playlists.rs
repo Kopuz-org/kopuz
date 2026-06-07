@@ -12,13 +12,13 @@ use crate::server::download_manager::{DownloadQueue, DownloadStatus, queue_downl
 use crate::server::playlists::ServerPlaylists;
 
 #[component]
+#[tracing::instrument(name = "render.playlists_page", skip_all)]
 pub fn PlaylistsPage(
     playlist_store: Signal<PlaylistStore>,
     library: Signal<Library>,
     config: Signal<AppConfig>,
     mut selected_playlist_id: Signal<Option<String>>,
 ) -> Element {
-    let _render = tracing::info_span!("render.playlists_page").entered();
     let is_server = config.read().active_source == MusicSource::Server;
 
     let mut selected_folder = use_signal(|| Option::<String>::None);
