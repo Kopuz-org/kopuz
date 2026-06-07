@@ -1,4 +1,3 @@
-use config::MusicService;
 use dioxus::prelude::*;
 use reader::FavoritesStore;
 
@@ -57,66 +56,41 @@ pub fn toggle_favorite(
                     .write()
                     .set_jellyfin(item_id.clone(), new_fav);
                 spawn(async move {
-                    let server_config = {
+                    let conn = {
                         let conf = config.peek();
                         conf.server.as_ref().and_then(|server| {
                             if let (Some(token), Some(user_id)) =
                                 (&server.access_token, &server.user_id)
                             {
-                                Some((
-                                    server.service,
-                                    server.url.clone(),
-                                    token.clone(),
-                                    user_id.clone(),
-                                    conf.device_id.clone(),
-                                ))
+                                Some(::server::server_ops::ServerConn {
+                                    service: server.service,
+                                    url: server.url.clone(),
+                                    token: token.clone(),
+                                    user_id: user_id.clone(),
+                                    device_id: conf.device_id.clone(),
+                                })
                             } else {
                                 None
                             }
                         })
                     };
-                    if let Some((service, url, token, user_id, device_id)) = server_config {
-                        let result = match service {
-                            MusicService::Jellyfin => {
-                                let remote = server::jellyfin::JellyfinClient::new(
-                                    &url,
-                                    Some(&token),
-                                    &device_id,
-                                    Some(&user_id),
-                                );
-                                if new_fav {
-                                    remote.mark_favorite(&item_id).await
-                                } else {
-                                    remote.unmark_favorite(&item_id).await
-                                }
+                    match conn {
+                        Some(conn) => {
+                            let result = ::server::server_ops::set_tracks_favorite(
+                                &conn,
+                                std::slice::from_ref(&item_id),
+                                new_fav,
+                            )
+                            .await;
+                            if let Err(e) = result {
+                                tracing::warn!(error = %e, "failed to sync favorite to server");
+                                favorites_store.write().set_jellyfin(item_id, !new_fav);
                             }
-                            MusicService::Subsonic | MusicService::Custom => {
-                                let remote =
-                                    server::subsonic::SubsonicClient::new(&url, &user_id, &token);
-                                if new_fav {
-                                    remote.star(&item_id).await
-                                } else {
-                                    remote.unstar(&item_id).await
-                                }
-                            }
-                            MusicService::YtMusic => {
-                                let yt = server::ytmusic::YouTubeMusicClient::with_cookies(
-                                    token.clone(),
-                                );
-                                if new_fav {
-                                    yt.like_video(&item_id).await
-                                } else {
-                                    yt.unlike_video(&item_id).await
-                                }
-                            }
-                        };
-                        if let Err(e) = result {
-                            tracing::warn!(error = %e, "failed to sync favorite to server");
+                        }
+                        None => {
+                            tracing::warn!("no server credentials, reverting favorite change");
                             favorites_store.write().set_jellyfin(item_id, !new_fav);
                         }
-                    } else {
-                        tracing::warn!("no server credentials, reverting favorite change");
-                        favorites_store.write().set_jellyfin(item_id, !new_fav);
                     }
                 });
             }
