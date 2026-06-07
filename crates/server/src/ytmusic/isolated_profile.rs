@@ -185,13 +185,6 @@ pub async fn launch_signin_and_extract(
     let mut child = Command::new(&bin)
         .arg("--no-first-run")
         .arg("--no-default-browser-check")
-        // accounts.google.com runs an anti-automation check that flips
-        // signed-in sign-in into an empty document (omnibox shows the
-        // ServiceLogin URL, the page renders blank and F12 reveals
-        // about:blank). Disabling the AutomationControlled blink
-        // feature drops the `navigator.webdriver` getter and the
-        // `cdc_*` tells that Google fingerprints on.
-        .arg("--disable-blink-features=AutomationControlled")
         .arg(format!("--user-data-dir={}", profile.display()))
         .arg(SIGNIN_URL)
         .stdout(std::process::Stdio::null())
