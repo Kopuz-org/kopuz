@@ -428,3 +428,5 @@ discover_more_loading = Se încarcă mai mult…
 discover_failed = Nu s-a putut încărca Descoperă: { $error }
 discover_requires_ytmusic = Descoperă este disponibil doar când YouTube Music este serverul activ.
 discover_show_all = Afișează toate
+yt_anon_playlists = Conectează-te la YouTube Music pentru a vedea playlisturile din bibliotecă.
+yt_anon_favorites = Conectează-te la YouTube Music pentru a vedea melodiile apreciate.

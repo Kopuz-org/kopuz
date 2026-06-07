@@ -434,3 +434,5 @@ discover_more_loading = جارٍ تحميل المزيد…
 discover_failed = تعذّر تحميل قسم الاكتشاف: { $error }
 discover_requires_ytmusic = الاكتشاف متاح فقط عندما تكون YouTube Music هي الخادم النشط.
 discover_show_all = عرض الكل
+yt_anon_playlists = سجّل الدخول إلى YouTube Music لعرض قوائم التشغيل في مكتبتك.
+yt_anon_favorites = سجّل الدخول إلى YouTube Music لعرض الأغاني التي أعجبتك.

@@ -428,3 +428,5 @@ discover_more_loading = 더 불러오는 중…
 discover_failed = 탐색을 불러올 수 없음: { $error }
 discover_requires_ytmusic = 탐색은 YouTube Music이 활성 서버일 때만 사용할 수 있습니다.
 discover_show_all = 모두 보기
+yt_anon_playlists = 라이브러리 재생목록을 보려면 YouTube Music에 로그인하세요.
+yt_anon_favorites = 좋아요 표시한 곡을 보려면 YouTube Music에 로그인하세요.

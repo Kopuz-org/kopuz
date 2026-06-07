@@ -422,3 +422,5 @@ discover_more_loading = Ładowanie więcej…
 discover_failed = Nie można załadować Odkrywaj: { $error }
 discover_requires_ytmusic = Odkrywaj jest dostępne tylko wtedy, gdy YouTube Music jest aktywnym serwerem.
 discover_show_all = Pokaż wszystko
+yt_anon_playlists = Zaloguj się do YouTube Music, aby zobaczyć playlisty z biblioteki.
+yt_anon_favorites = Zaloguj się do YouTube Music, aby zobaczyć polubione utwory.

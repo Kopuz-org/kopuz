@@ -428,3 +428,5 @@ discover_more_loading = További betöltése…
 discover_failed = Nem sikerült betölteni a Felfedezést: { $error }
 discover_requires_ytmusic = A Felfedezés csak akkor érhető el, ha a YouTube Music az aktív szerver.
 discover_show_all = Összes megjelenítése
+yt_anon_playlists = Jelentkezz be a YouTube Musicba a könyvtárad lejátszási listáinak megtekintéséhez.
+yt_anon_favorites = Jelentkezz be a YouTube Musicba a kedvelt dalaid megtekintéséhez.

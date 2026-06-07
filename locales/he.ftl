@@ -428,3 +428,5 @@ discover_more_loading = טוען עוד…
 discover_failed = לא ניתן לטעון את גילוי: { $error }
 discover_requires_ytmusic = גילוי זמין רק כאשר YouTube Music הוא השרת הפעיל.
 discover_show_all = הצג הכל
+yt_anon_playlists = היכנס ל-YouTube Music כדי לראות את רשימות ההשמעה בספרייה שלך.
+yt_anon_favorites = היכנס ל-YouTube Music כדי לראות את השירים שאהבת.

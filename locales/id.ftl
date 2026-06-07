@@ -427,3 +427,5 @@ discover_more_loading = Memuat lainnya…
 discover_failed = Tidak bisa memuat Jelajahi: { $error }
 discover_requires_ytmusic = Jelajahi hanya tersedia ketika YouTube Music adalah server aktif.
 discover_show_all = Tampilkan semua
+yt_anon_playlists = Masuk ke YouTube Music untuk melihat playlist pustaka kamu.
+yt_anon_favorites = Masuk ke YouTube Music untuk melihat lagu yang kamu sukai.

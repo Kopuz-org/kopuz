@@ -554,12 +554,29 @@ pub fn JellyfinFavorites(
             }
 
             if is_empty && !*is_syncing.read() {
-                div {
-                    class: "flex flex-col items-center justify-center h-64 text-slate-500",
-                    i { class: "fa-regular fa-heart text-4xl mb-4 opacity-30" }
-                    p { class: "text-base", "{i18n::t(\"no_favorites\")}" }
-                    p { class: "text-sm mt-1 opacity-70",
-                        "{i18n::t(\"heart_track_to_add_server\")}"
+                {
+                    let yt_anon = config
+                        .read()
+                        .server
+                        .as_ref()
+                        .map(|s| {
+                            s.service == config::MusicService::YtMusic && s.yt_anonymous
+                        })
+                        .unwrap_or(false);
+                    rsx! {
+                        div {
+                            class: "flex flex-col items-center justify-center h-64 text-slate-500 text-center px-6",
+                            if yt_anon {
+                                i { class: "fa-solid fa-right-to-bracket text-4xl mb-4 opacity-50" }
+                                p { class: "text-base", "{i18n::t(\"yt_anon_favorites\")}" }
+                            } else {
+                                i { class: "fa-regular fa-heart text-4xl mb-4 opacity-30" }
+                                p { class: "text-base", "{i18n::t(\"no_favorites\")}" }
+                                p { class: "text-sm mt-1 opacity-70",
+                                    "{i18n::t(\"heart_track_to_add_server\")}"
+                                }
+                            }
+                        }
                     }
                 }
             } else if !is_empty {

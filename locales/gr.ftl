@@ -428,3 +428,5 @@ discover_more_loading = Φόρτωση περισσότερων…
 discover_failed = Αδυναμία φόρτωσης Ανακάλυψης: { $error }
 discover_requires_ytmusic = Η Ανακάλυψη είναι διαθέσιμη μόνο όταν το YouTube Music είναι ο ενεργός διακομιστής.
 discover_show_all = Εμφάνιση όλων
+yt_anon_playlists = Συνδέσου στο YouTube Music για να δεις τις λίστες αναπαραγωγής σου.
+yt_anon_favorites = Συνδέσου στο YouTube Music για να δεις τα τραγούδια που σου άρεσαν.

@@ -428,3 +428,5 @@ discover_more_loading = 加载更多…
 discover_failed = 无法加载发现: { $error }
 discover_requires_ytmusic = 仅当 YouTube Music 是当前服务器时才能使用发现。
 discover_show_all = 显示全部
+yt_anon_playlists = 登录 YouTube Music 以查看你的媒体库播放列表。
+yt_anon_favorites = 登录 YouTube Music 以查看你喜欢的歌曲。

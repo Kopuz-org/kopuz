@@ -376,9 +376,29 @@ pub fn JellyfinPlaylists(
             }
 
             if playlists.is_empty() {
-                div { class: "flex flex-col items-center justify-center h-64 text-slate-500",
-                    i { class: "fa-regular fa-folder-open text-4xl mb-4 opacity-50" }
-                    p { "{i18n::t(\"no_playlists_found\")}" }
+                {
+                    // Anonymous YT has no library playlists by design —
+                    // show a sign-in prompt rather than the generic
+                    // "no playlists found" empty state.
+                    let yt_anon = config
+                        .read()
+                        .server
+                        .as_ref()
+                        .map(|s| {
+                            s.service == config::MusicService::YtMusic && s.yt_anonymous
+                        })
+                        .unwrap_or(false);
+                    rsx! {
+                        div { class: "flex flex-col items-center justify-center h-64 text-slate-500 text-center px-6",
+                            if yt_anon {
+                                i { class: "fa-solid fa-right-to-bracket text-4xl mb-4 opacity-50" }
+                                p { "{i18n::t(\"yt_anon_playlists\")}" }
+                            } else {
+                                i { class: "fa-regular fa-folder-open text-4xl mb-4 opacity-50" }
+                                p { "{i18n::t(\"no_playlists_found\")}" }
+                            }
+                        }
+                    }
                 }
             } else {
                 div { class: "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6",

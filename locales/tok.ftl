@@ -428,3 +428,5 @@ discover_more_loading = mi alasa e ijo sin…
 discover_failed = pakala — mi ken ala alasa: { $error }
 discover_requires_ytmusic = sona sin li lon taso lon tenpo pi YouTube Music.
 discover_show_all = lukin e ale
+yt_anon_playlists = o kama lon YouTube Music la sina ken lukin e kulupu kalama sina.
+yt_anon_favorites = o kama lon YouTube Music la sina ken lukin e kalama pi olin sina.

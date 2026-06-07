@@ -434,3 +434,5 @@ discover_more_loading = さらに読み込み中…
 discover_failed = 発見を読み込めません: { $error }
 discover_requires_ytmusic = 発見は YouTube Music がアクティブなサーバーの場合にのみ利用できます。
 discover_show_all = すべて表示
+yt_anon_playlists = ライブラリのプレイリストを表示するには YouTube Music にログインしてください。
+yt_anon_favorites = 高評価した曲を表示するには YouTube Music にログインしてください。

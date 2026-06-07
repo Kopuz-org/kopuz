@@ -423,3 +423,5 @@ discover_more_loading = Загрузка…
 discover_failed = Не удалось загрузить раздел Открытий: { $error }
 discover_requires_ytmusic = Открытия доступны только когда YouTube Music — активный сервер.
 discover_show_all = Показать все
+yt_anon_playlists = Войдите в YouTube Music, чтобы увидеть плейлисты из библиотеки.
+yt_anon_favorites = Войдите в YouTube Music, чтобы увидеть понравившиеся треки.

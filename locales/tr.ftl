@@ -428,3 +428,5 @@ discover_more_loading = Daha fazlası yükleniyor…
 discover_failed = Keşfet yüklenemedi: { $error }
 discover_requires_ytmusic = Keşfet yalnızca YouTube Music aktif sunucu olduğunda kullanılabilir.
 discover_show_all = Tümünü gör
+yt_anon_playlists = Kitaplık çalma listelerini görmek için YouTube Music'e giriş yap.
+yt_anon_favorites = Beğendiğin şarkıları görmek için YouTube Music'e giriş yap.

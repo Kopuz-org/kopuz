@@ -789,13 +789,15 @@ fn start_radio_from(
         Some(id) if !id.is_empty() => id,
         _ => return,
     };
-    let cookies = match config.peek().server.as_ref().and_then(|s| s.access_token.clone()) {
-        Some(c) if !c.is_empty() => c,
-        _ => {
-            eprintln!("[yt-mix] no cookies; user not signed in");
-            return;
-        }
-    };
+    // Mix radio works anonymously — start_mix hits /next with no auth
+    // when cookies are empty. Pass whatever token we have (empty for
+    // anonymous mode) instead of bailing on missing cookies.
+    let cookies = config
+        .peek()
+        .server
+        .as_ref()
+        .and_then(|s| s.access_token.clone())
+        .unwrap_or_default();
     spawn(async move {
         let yt = server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
         match yt.start_mix(&video_id).await {
