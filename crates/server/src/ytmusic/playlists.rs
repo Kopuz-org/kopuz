@@ -100,6 +100,24 @@ pub async fn get_playlist_entries(
     playlist_id: &str,
     cookies: &str,
 ) -> Result<Vec<Track>, String> {
+    let mut out = Vec::new();
+    stream_playlist_entries(playlist_id, cookies, |batch| out.extend(batch)).await?;
+    Ok(out)
+}
+
+/// Same playlist walk as `get_playlist_entries`, but fires `on_batch`
+/// the moment each page (initial + every continuation) returns instead
+/// of buffering the entire playlist. Used by the discover play-on-hover
+/// flow so audio can start streaming on the first ~100 rows without
+/// waiting for the rest of a 1000-row playlist to paginate in.
+pub async fn stream_playlist_entries<F>(
+    playlist_id: &str,
+    cookies: &str,
+    mut on_batch: F,
+) -> Result<(), String>
+where
+    F: FnMut(Vec<Track>),
+{
     let browse_id = if playlist_id.starts_with("VL") {
         playlist_id.to_string()
     } else {
@@ -108,10 +126,13 @@ pub async fn get_playlist_entries(
     let resp: Value = innertube::browse(&browse_id, cookies).await?;
     let (raw_first, mut next) = walk_playlist_shelf(&resp);
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut tracks: Vec<Track> = raw_first
+    let first: Vec<Track> = raw_first
         .into_iter()
         .filter(|t| keep_unique(t, &mut seen))
         .collect();
+    if !first.is_empty() {
+        on_batch(first);
+    }
     while let Some(token) = next.take() {
         let page = innertube::browse_continuation(&token, cookies).await?;
         let (more, next_token) = super::search::walk_playlist_continuation(&page);
@@ -125,10 +146,10 @@ pub async fn get_playlist_entries(
         if unique.is_empty() {
             break;
         }
-        tracks.extend(unique);
+        on_batch(unique);
         next = next_token;
     }
-    Ok(tracks)
+    Ok(())
 }
 
 /// Recursively look for a `signInEndpoint` object key in the response.

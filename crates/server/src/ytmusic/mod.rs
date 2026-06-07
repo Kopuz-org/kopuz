@@ -77,6 +77,21 @@ impl YouTubeMusicClient {
         playlists::get_playlist_entries(playlist_id, cookies).await
     }
 
+    pub async fn stream_playlist_entries<F>(
+        &self,
+        playlist_id: &str,
+        on_batch: F,
+    ) -> Result<(), String>
+    where
+        F: FnMut(Vec<Track>),
+    {
+        let cookies = self
+            .cookies
+            .as_deref()
+            .ok_or("YouTube Music not signed in")?;
+        playlists::stream_playlist_entries(playlist_id, cookies, on_batch).await
+    }
+
     pub async fn like_video(&self, video_id: &str) -> Result<(), String> {
         let cookies = self
             .cookies

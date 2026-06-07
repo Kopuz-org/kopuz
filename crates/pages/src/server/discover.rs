@@ -428,18 +428,37 @@ fn play_playlist_async(
             return;
         };
         let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
-        let tracks = if id.starts_with("MPRE") {
-            yt.fetch_album_tracks(&id).await
-        } else {
-            yt.get_playlist_entries(&id).await
-        };
-        match tracks {
-            Ok(tracks) if !tracks.is_empty() => {
-                ctrl.play_queue_linear(tracks);
+
+        // Albums come back in a single browse hit. Playlists give the
+        // first ~100 rows on the initial browse and paginate the rest
+        // via continuation tokens — stream them so the first batch can
+        // start playing instantly while the tail fills in.
+        if id.starts_with("MPRE") {
+            match yt.fetch_album_tracks(&id).await {
+                Ok(tracks) if !tracks.is_empty() => ctrl.play_queue_linear(tracks),
+                _ => ctrl.is_loading.set(false),
             }
-            _ => {
-                ctrl.is_loading.set(false);
-            }
+            return;
+        }
+
+        let mut started = false;
+        let result = yt
+            .stream_playlist_entries(&id, |batch| {
+                if batch.is_empty() {
+                    return;
+                }
+                if started {
+                    ctrl.add_to_queue(batch);
+                } else {
+                    ctrl.play_queue_linear(batch);
+                    started = true;
+                }
+            })
+            .await;
+        if !started {
+            // Nothing ever played — fetch failed or returned no rows.
+            ctrl.is_loading.set(false);
+            let _ = result;
         }
     });
 }
