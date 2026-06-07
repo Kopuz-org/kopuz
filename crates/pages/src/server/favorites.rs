@@ -340,40 +340,29 @@ pub fn JellyfinFavorites(
                         if !selected_paths.is_empty() {
                                 let pid = playlist_id.clone();
                             spawn(async move {
-                                let conf = config.peek();
-                                if let Some(server) = &conf.server {
-                                    if let (Some(token), Some(user_id)) = (&server.access_token, &server.user_id) {
-                                        for path in selected_paths {
-                                            let parts: Vec<&str> = path.to_str().unwrap_or_default().split(':').collect();
-                                            if parts.len() >= 2 {
-                                                let item_id = parts[1];
-                                                    match server.service {
-                                                        MusicService::Jellyfin => {
-                                                            let remote = JellyfinClient::new(
-                                                                &server.url,
-                                                                Some(token),
-                                                                &conf.device_id,
-                                                                Some(user_id),
-                                                            );
-                                                            let _ = remote.add_to_playlist(&pid, item_id).await;
-                                                        }
-                                                        MusicService::Subsonic | MusicService::Custom => {
-                                                            let remote = SubsonicClient::new(&server.url, user_id, token);
-                                                            let _ = remote.add_to_playlist(&pid, item_id).await;
-                                                        }
-                                                        MusicService::YtMusic => {
-                                                            let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(
-                                                                token.clone(),
-                                                            );
-                                                            let _ = yt
-                                                                .add_to_playlist(&pid, item_id)
-                                                                .await;
-                                                        }
-                                                    }
-                                            }
-                                        }
+                                let conn = {
+                                    let conf = config.peek();
+                                    let Some(server) = conf.server.as_ref() else { return; };
+                                    let Some(token) = server.access_token.as_ref() else { return; };
+                                    ::server::server_ops::ServerConn {
+                                        service: server.service,
+                                        url: server.url.clone(),
+                                        token: token.clone(),
+                                        user_id: server.user_id.clone().unwrap_or_default(),
+                                        device_id: conf.device_id.clone(),
                                     }
-                                }
+                                };
+                                let item_ids: Vec<String> = selected_paths
+                                    .iter()
+                                    .filter_map(|p| {
+                                        ::server::server_ops::parse_item_id(p.to_str()?)
+                                            .map(str::to_string)
+                                    })
+                                    .collect();
+                                let _ = ::server::server_ops::add_tracks_to_playlist(
+                                    &conn, &pid, &item_ids,
+                                )
+                                .await;
                             });
                         }
                         show_playlist_modal.set(false);

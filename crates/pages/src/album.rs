@@ -134,55 +134,24 @@ pub fn Album(
                                         };
                                         if let Some((service, url, token, user_id, device_id)) = server_vals {
                                             spawn(async move {
+                                                let conn = ::server::server_ops::ServerConn {
+                                                    service,
+                                                    url,
+                                                    token,
+                                                    user_id,
+                                                    device_id,
+                                                };
                                                 let item_ids: Vec<String> = paths
                                                     .iter()
                                                     .filter_map(|p| {
-                                                        let parts: Vec<&str> = p.to_str()?.split(':').collect();
-                                                        if parts.len() >= 2 {
-                                                            Some(parts[1].to_string())
-                                                        } else {
-                                                            None
-                                                        }
+                                                        ::server::server_ops::parse_item_id(p.to_str()?)
+                                                            .map(str::to_string)
                                                     })
                                                     .collect();
-                                                let mut added = Vec::new();
-                                                match service {
-                                                    MusicService::Jellyfin => {
-                                                        let remote = JellyfinClient::new(
-                                                            &url,
-                                                            Some(&token),
-                                                            &device_id,
-                                                            Some(&user_id),
-                                                        );
-                                                        for id in &item_ids {
-                                                            if remote.add_to_playlist(&pid, id).await.is_ok() {
-                                                                added.push(id.clone());
-                                                            }
-                                                        }
-                                                    }
-                                                    MusicService::Subsonic | MusicService::Custom => {
-                                                        let remote = SubsonicClient::new(&url, &user_id, &token);
-                                                        for id in &item_ids {
-                                                            if remote.add_to_playlist(&pid, id).await.is_ok() {
-                                                                added.push(id.clone());
-                                                            }
-                                                        }
-                                                    }
-                                                    MusicService::YtMusic => {
-                                                        let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(
-                                                            token.clone(),
-                                                        );
-                                                        for id in &item_ids {
-                                                            if yt
-                                                                .add_to_playlist(&pid, id)
-                                                                .await
-                                                                .is_ok()
-                                                            {
-                                                                added.push(id.clone());
-                                                            }
-                                                        }
-                                                    }
-                                                }
+                                                let added = ::server::server_ops::add_tracks_to_playlist(
+                                                    &conn, &pid, &item_ids,
+                                                )
+                                                .await;
                                                 if !added.is_empty() {
                                                     let mut store = playlist_store.write();
                                                     if let Some(pl) = store
