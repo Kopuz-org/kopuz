@@ -123,7 +123,11 @@ where
     } else {
         format!("VL{playlist_id}")
     };
-    let resp: Value = innertube::browse(&browse_id, cookies).await?;
+    // Public playlists (the ones Discover surfaces) load anonymously.
+    // Empty cookies (anon mode) → None so browse skips SAPISID auth
+    // instead of erroring "SAPISID missing".
+    let auth = if cookies.is_empty() { None } else { Some(cookies) };
+    let resp: Value = innertube::browse_maybe_auth(&browse_id, auth).await?;
     let (raw_first, mut next) = walk_playlist_shelf(&resp);
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let first: Vec<Track> = raw_first
@@ -134,7 +138,7 @@ where
         on_batch(first);
     }
     while let Some(token) = next.take() {
-        let page = innertube::browse_continuation(&token, cookies).await?;
+        let page = innertube::browse_continuation_maybe_auth(&token, auth).await?;
         let (more, next_token) = super::search::walk_playlist_continuation(&page);
         let unique: Vec<Track> = more
             .into_iter()
