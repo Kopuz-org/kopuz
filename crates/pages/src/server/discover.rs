@@ -5,6 +5,8 @@ use config::{AppConfig, MusicService};
 use dioxus::prelude::*;
 use reader::models::{Library, Track};
 use server::ytmusic::discover::{DiscoverHome, DiscoverItem, DiscoverShelf, YtArtist};
+use components::track_row::TrackRow;
+use std::path::PathBuf;
 
 /// Tracks the id (playlist_id or MPRE… album browse id) that last
 /// initiated playback through a Discover surface. Album and playlist
@@ -291,25 +293,72 @@ fn SongListShelf(
                 }
             }
             div { class: "flex flex-col",
-                for (idx, track) in tracks.iter().enumerate() {
-                    DiscoverPlaylistRow {
-                        key: "{idx}",
-                        track: track.clone(),
-                        index: idx + 1,
-                        on_play: {
-                            let tracks_for_row = tracks.clone();
-                            move |t: Track| {
-                                let mut queue = tracks_for_row.clone();
-                                let start = queue.iter().position(|x| x.path == t.path).unwrap_or(0);
-                                queue.rotate_left(start);
-                                // The Top Songs preview isn't a real playlist
-                                // — clear the discover source so no album/
-                                // playlist tile incorrectly shows the pause
-                                // overlay while this plays.
-                                now_playing.set(None);
-                                ctrl.play_queue_linear(queue);
+                {
+                    // Shared menu / playing state across the rows.
+                    let mut active_menu_path = use_signal(|| None::<PathBuf>);
+                    let mut current_playing_path = use_signal(|| None::<PathBuf>);
+                    rsx! {
+                        for (idx, track) in tracks.iter().enumerate() {
+                            {
+                                let track = track.clone();
+                                let tracks_for_play = tracks.clone();
+                                let cover_url = utils::jellyfin_image::track_cover_url_with_album_fallback(
+                                    &track.path.to_string_lossy(),
+                                    &track.album_id,
+                                    "",
+                                    None,
+                                    96,
+                                    80,
+                                )
+                                .map(utils::cover_url_from_string);
+                                let track_for_play = track.clone();
+                                let track_for_menu = track.clone();
+                                let track_path_for_match = track.path.clone();
+                                let is_current = current_playing_path.read().as_ref()
+                                    == Some(&track_path_for_match);
+                                let is_menu_open = active_menu_path.read().as_ref()
+                                    == Some(&track.path);
+                                rsx! {
+                                    TrackRow {
+                                        key: "{idx}",
+                                        track: track.clone(),
+                                        cover_url,
+                                        row_num: Some(idx + 1),
+                                        is_menu_open,
+                                        is_currently_playing: is_current,
+                                        hide_delete: true,
+                                        on_play: move |_| {
+                                            let mut queue = tracks_for_play.clone();
+                                            let start = queue
+                                                .iter()
+                                                .position(|x| x.path == track_for_play.path)
+                                                .unwrap_or(0);
+                                            queue.rotate_left(start);
+                                            current_playing_path.set(Some(track_for_play.path.clone()));
+                                            // Top Songs is a preview — clear the
+                                            // discover source so no album/playlist
+                                            // tile incorrectly shows the pause
+                                            // overlay while one of these plays.
+                                            now_playing.set(None);
+                                            ctrl.play_queue_linear(queue);
+                                        },
+                                        on_click_menu: move |_| {
+                                            let p = track_for_menu.path.clone();
+                                            if active_menu_path.read().as_ref() == Some(&p) {
+                                                active_menu_path.set(None);
+                                            } else {
+                                                active_menu_path.set(Some(p));
+                                            }
+                                        },
+                                        on_close_menu: move |_| active_menu_path.set(None),
+                                        on_add_to_playlist: move |_| {
+                                            active_menu_path.set(None);
+                                        },
+                                        on_delete: move |_| active_menu_path.set(None),
+                                    }
+                                }
                             }
-                        },
+                        }
                     }
                 }
             }
@@ -1175,13 +1224,16 @@ pub fn DiscoverArtistPage(
             } else if let Some(a) = artist.read().clone() {
                 {
                     let banner = a.banner_thumbnail.clone();
+                    // Bigger hero — 360px min on desktop. Previous version
+                    // sized to content height (≈200px) which felt cramped
+                    // for a Spotify-style profile banner.
                     let banner_style = banner
-                        .map(|u| format!("background-image: linear-gradient(to bottom, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.95) 100%), url('{u}'); background-size: cover; background-position: center;"))
-                        .unwrap_or_default();
+                        .map(|u| format!("background-image: linear-gradient(to bottom, rgba(0,0,0,0.2) 0%, rgba(0,0,0,0.95) 100%), url('{u}'); background-size: cover; background-position: center; min-height: 360px;"))
+                        .unwrap_or_else(|| "min-height: 280px;".to_string());
                     let shuffle_pid = a.shuffle_playlist_id.clone();
                     rsx! {
                         div {
-                            class: "relative overflow-hidden",
+                            class: "relative overflow-hidden flex flex-col justify-end",
                             style: "{banner_style}",
                             div { class: "px-6 md:px-10 pt-16 pb-10 flex flex-col gap-4",
                                 h1 { class: "text-4xl md:text-6xl font-black text-white break-words drop-shadow-lg", "{a.name}" }
