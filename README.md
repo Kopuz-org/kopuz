@@ -33,11 +33,11 @@ this is mythological rather than historical.
 ## Overview
 
 Kopuz allows you to scan your local directories for audio files, stream from
-your Jellyfin or Subsonic (Navidrome, etc.) server, or connect **YouTube
-Music** as a streaming backend — automatically organizing everything into a
-browsable library. You can navigate by artists, albums, genres, or explore
-your custom playlists. The application is built for performance and desktop
-integration, utilizing the power of Rust.
+your Jellyfin or Subsonic (Navidrome, etc.) server, or connect **YouTube Music**
+as a streaming backend — automatically organizing everything into a browsable
+library. You can navigate by artists, albums, genres, or explore your custom
+playlists. The application is built for performance and desktop integration,
+utilizing the power of Rust.
 
 ## Features
 
@@ -54,12 +54,12 @@ integration, utilizing the power of Rust.
   (Navidrome works great), connect YouTube Music, or just point it at a local
   folder. Mix and match as you like.
 - **YouTube Music**: Full streaming backend with a Spotify-style **Discover**
-  page (recommended songs, playlists, albums, artists, and moods), rich
-  **artist profiles** (banner, top songs, albums, singles, related artists),
+  page (recommended songs, playlists, albums, artists, and moods), rich **artist
+  profiles** (banner, top songs, albums, singles, related artists),
   album/playlist browsing, and **mix radio** ("start radio" from any track).
   Sign in with your account for your library, Liked Music, and playlists — or
-  run it **anonymously** (no sign-in) for browse, search, and playback of
-  public tracks. See [YouTube Music Setup](#youtube-music-setup).
+  run it **anonymously** (no sign-in) for browse, search, and playback of public
+  tracks. See [YouTube Music Setup](#youtube-music-setup).
 - **Lyrics Support**: Enjoy real-time synced and plain lyrics, complete with
   auto-scrolling to follow along with your music.
 - **Favorites**: Star tracks locally or sync favorites with your
@@ -328,8 +328,8 @@ and hit rescan.
 
 ## YouTube Music Setup
 
-Kopuz can use YouTube Music as a streaming backend. Add it from
-**Settings → Media servers → Add → YouTube Music**.
+Kopuz can use YouTube Music as a streaming backend. Add it from **Settings →
+Media servers → Add → YouTube Music**.
 
 ### Prerequisite: rustypipe-botguard
 
