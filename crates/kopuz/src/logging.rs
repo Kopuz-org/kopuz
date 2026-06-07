@@ -11,15 +11,15 @@
 //!     `kopuz-<timestamp>.log` (last 10 kept) so a restart never erases a
 //!     crashing run. A panic also drops a `crash-<timestamp>.txt`. Files
 //!     live under `<cache>/logs/`; see `utils::logs`.
-//!   - **chrome trace** (opt-in via `KOPUZ_TRACE`): a Chrome/Perfetto
-//!     trace file for span-level performance + bottleneck analysis.
-//!     Off by default → zero overhead.
+//!   - **chrome trace** (opt-in via the Settings → Logs toggle): a
+//!     Chrome/Perfetto trace file for span-level performance + bottleneck
+//!     analysis. Off by default → zero overhead.
 //!
 //! Filter precedence everywhere: `KOPUZ_LOG`, then `RUST_LOG`, then a
 //! sensible default. e.g. `KOPUZ_LOG="server::ytmusic=trace,kopuz=debug"`.
 
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use tracing_subscriber::{
@@ -112,23 +112,13 @@ pub fn init(log_dir: &Path, config_tracing_enabled: bool) {
         .with_writer(std::io::stderr)
         .with_filter(console_filter());
 
-    // Tracing turns on from either the `KOPUZ_TRACE` env var (the dev path)
-    // or the in-app settings toggle (`config_tracing_enabled`, the path for
-    // users who can't set env vars). Env boolean-off values (0/false/empty)
-    // disable it — otherwise KOPUZ_TRACE=0 would enable it and write to a file
-    // named "0". A non-boolean env value is treated as an explicit output path
-    // ("1"/"true" → the default path).
-    let env_trace = std::env::var("KOPUZ_TRACE").ok();
-    let env_on = env_trace
-        .as_deref()
-        .is_some_and(|v| !v.is_empty() && v != "0" && v != "false");
-    let trace_on = env_on || config_tracing_enabled;
-    let trace_path = match env_trace.as_deref() {
-        Some(v) if env_on && v != "1" && v != "true" => PathBuf::from(v),
-        _ => log_dir.join("kopuz-trace.json"),
-    };
+    // The chrome trace is controlled solely by the in-app settings toggle
+    // (`config_tracing_enabled`, read from config at startup) — the UI is the
+    // single source of truth, so there's no `KOPUZ_TRACE` env var. Verbosity
+    // and filters still come from `KOPUZ_LOG` / `RUST_LOG` / `KOPUZ_DEBUG`.
+    let trace_path = log_dir.join("kopuz-trace.json");
 
-    let chrome_guard = if trace_on {
+    let chrome_guard = if config_tracing_enabled {
         let (chrome_layer, guard) = tracing_chrome::ChromeLayerBuilder::new()
             .file(&trace_path)
             .include_args(true)
