@@ -19,6 +19,57 @@ fn theme_editor_section(config: Signal<AppConfig>) -> Element {
 fn theme_editor_section(_config: Signal<AppConfig>) -> Element {
     rsx! {}
 }
+
+// Desktop-only: open the logs folder in the OS file manager, or export a
+// bundle (latest.log + newest crash report) via a save dialog. rfd is
+// excluded on Android and utils::logs is filesystem-only, so the rest get a
+// stub.
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+fn logs_section() -> Element {
+    rsx! {
+        section {
+            h2 {
+                class: "text-lg font-semibold text-white/80 mb-4 border-b border-white/5 pb-2",
+                "{i18n::t(\"logs\")}"
+            }
+            div { class: "flex flex-wrap gap-3",
+                button {
+                    class: "px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors flex items-center gap-2",
+                    onclick: move |_| {
+                        if let Err(e) = utils::logs::open_log_dir() {
+                            tracing::warn!(error = %e, "failed to open logs folder");
+                        }
+                    },
+                    i { class: "fa-solid fa-folder-open" }
+                    "{i18n::t(\"open_logs_folder\")}"
+                }
+                button {
+                    class: "px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors flex items-center gap-2",
+                    onclick: move |_| {
+                        spawn(async move {
+                            if let Some(file) = rfd::AsyncFileDialog::new()
+                                .set_file_name("kopuz-logs.txt")
+                                .save_file()
+                                .await
+                            {
+                                if let Err(e) = utils::logs::export_logs(file.path()) {
+                                    tracing::warn!(error = %e, "failed to export logs");
+                                }
+                            }
+                        });
+                    },
+                    i { class: "fa-solid fa-file-export" }
+                    "{i18n::t(\"export_logs\")}"
+                }
+            }
+        }
+    }
+}
+
+#[cfg(any(target_arch = "wasm32", target_os = "android"))]
+fn logs_section() -> Element {
+    rsx! {}
+}
 use components::settings_items::{
     BackBehaviorSelector, ChannelModeSelector, DiscordPresencePausedSettings,
     DiscordPresenceSettings, EqualizerPanel, LanguageSelector, LastFmSettings,
@@ -953,6 +1004,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         }
                     }
                 }
+
+                {logs_section()}
 
                 {theme_editor_section(config)}
 

@@ -5,9 +5,12 @@
 //!   - **console** (stderr, ANSI): live logs for `dx serve` / terminal
 //!     runs, at the user filter (default info). Errors/warns always
 //!     surface here.
-//!   - **file** (daily-rolling, plain): richer (default debug) with
-//!     span close + busy/idle timing, for bug reports and offline
-//!     analysis. Lives under `<cache>/logs/kopuz.log`.
+//!   - **file** (`latest.log`, plain): the current session with span
+//!     close + busy/idle timing, for bug reports and offline analysis.
+//!     Rotated on startup — the previous session is archived to
+//!     `kopuz-<timestamp>.log` (last 10 kept) so a restart never erases a
+//!     crashing run. A panic also drops a `crash-<timestamp>.txt`. Files
+//!     live under `<cache>/logs/`; see `utils::logs`.
 //!   - **chrome trace** (opt-in via `KOPUZ_TRACE`): a Chrome/Perfetto
 //!     trace file for span-level performance + bottleneck analysis.
 //!     Off by default → zero overhead.
@@ -91,7 +94,13 @@ fn user_directives() -> Option<String> {
 /// flushes them so Ctrl+C still yields a valid trace.
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 pub fn init(log_dir: &Path) {
-    let file_appender = tracing_appender::rolling::daily(log_dir, "kopuz.log");
+    // Register the dir for crash reports + the export button, then archive the
+    // previous session's latest.log (and prune old archives) BEFORE the
+    // appender opens a fresh one — so a restart never erases a crashing run.
+    utils::logs::set_log_dir(log_dir.to_path_buf());
+    utils::logs::rotate_session_log(log_dir);
+
+    let file_appender = tracing_appender::rolling::never(log_dir, "latest.log");
     let (non_blocking, file_guard) = tracing_appender::non_blocking(file_appender);
 
     let file_layer = tracing_subscriber::fmt::layer()
@@ -185,7 +194,44 @@ pub fn init(log_dir: &Path) {
         });
     }
 
+    install_panic_hook();
+
     tracing::info!(log_dir = %log_dir.display(), "logging initialized");
+}
+
+/// Chain a panic hook that writes a discrete crash report (panic message +
+/// backtrace + recent log tail + version/OS) next to the logs, then defers to
+/// the previous hook so the console still shows the panic. Only fires on Rust
+/// panics — a hard native crash (SIGSEGV) won't run it.
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+fn install_panic_hook() {
+    let default = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let message = info
+            .payload()
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| info.payload().downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "<non-string panic payload>".to_string());
+        let location = info
+            .location()
+            .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
+            .unwrap_or_else(|| "unknown".to_string());
+        let backtrace = std::backtrace::Backtrace::force_capture().to_string();
+
+        if let Some(dir) = utils::logs::log_dir() {
+            if let Some(path) = utils::logs::write_crash_report(
+                &dir,
+                env!("CARGO_PKG_VERSION"),
+                &message,
+                &location,
+                &backtrace,
+            ) {
+                tracing::error!(crash_report = %path.display(), panic = %message, %location, "panic — crash report written");
+            }
+        }
+        default(info);
+    }));
 }
 
 /// Flush + drop the logging guards. Idempotent. Called on normal exit
