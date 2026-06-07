@@ -38,7 +38,7 @@ async fn run_resolve(video_id: &str, cookies_path: &std::path::Path) -> Result<Y
         "--no-warnings",
         "--quiet",
         "--print",
-        "%(url)s|%(http_headers.User-Agent)s|%(filesize,filesize_approx)s|%(ext)s",
+        "%(url)s|%(http_headers.User-Agent)s|%(filesize,filesize_approx)s|%(ext)s|%(duration)s",
         url.as_str(),
     ]);
     let out = tokio::time::timeout(Duration::from_secs(30), cmd.output())
@@ -66,10 +66,10 @@ async fn run_resolve(video_id: &str, cookies_path: &std::path::Path) -> Result<Y
         .next()
         .ok_or_else(|| "yt-dlp returned no output".to_string())?
         .trim();
-    let parts: Vec<&str> = line.splitn(4, '|').collect();
-    if parts.len() != 4 {
+    let parts: Vec<&str> = line.splitn(5, '|').collect();
+    if parts.len() != 5 {
         return Err(format!(
-            "yt-dlp --print output malformed (expected 4 fields, got {}): {line}",
+            "yt-dlp --print output malformed (expected 5 fields, got {}): {line}",
             parts.len()
         ));
     }
@@ -82,13 +82,19 @@ async fn run_resolve(video_id: &str, cookies_path: &std::path::Path) -> Result<Y
         "m4a" | "mp4" => AudioFormat::M4a,
         _ => AudioFormat::Webm,
     };
+    // yt-dlp prints duration as a float in seconds (e.g. "194.0"). Some
+    // streams (livestream-ish) print "NA"; treat that as unknown.
+    let duration_secs = match parts[4] {
+        "NA" | "" => None,
+        s => s.parse::<f64>().ok().map(|f| f.round() as u64),
+    };
 
     Ok(YtStreamInfo {
         url: parts[0].to_string(),
         format,
         user_agent,
         content_length: parts[2].parse::<u64>().ok(),
-        duration_secs: None,
+        duration_secs,
     })
 }
 
