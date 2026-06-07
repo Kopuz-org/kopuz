@@ -474,8 +474,13 @@ fn Card(
         (Some(sid), Some(active)) => sid == active,
         _ => false,
     };
+    // Treat the tile as "playing" the moment is_loading flips true on
+    // click, not only once is_playing eventually does — otherwise the
+    // overlay sits on a play icon for the entire fetch + stream warm-up
+    // and only flips to pause when audio finally starts.
     let is_playing = *ctrl.is_playing.read();
-    let show_pause = is_this_source && is_playing;
+    let is_loading = *ctrl.is_loading.read();
+    let show_pause = is_this_source && (is_playing || is_loading);
     rsx! {
         div {
             class: "shrink-0 w-44 text-left cursor-pointer transition-transform duration-200 ease-out hover:scale-[1.03] hover:-translate-y-0.5 group",
