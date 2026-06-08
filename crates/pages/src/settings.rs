@@ -962,6 +962,19 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
 
                     div { class: "space-y-4",
                         SettingItem {
+                            title: i18n::t("ytm_premium_audio").to_string(),
+                            control: rsx! {
+                                ToggleSetting {
+                                    enabled: config.read().ytm_premium_audio,
+                                    on_change: move |val| config.write().ytm_premium_audio = val,
+                                }
+                            }
+                        }
+                        p {
+                            class: "text-xs text-white/40 -mt-2",
+                            "{i18n::t(\"ytm_premium_audio_hint\")}"
+                        }
+                        SettingItem {
                             title: i18n::t("crossfade").to_string(),
                             control: rsx! {
                                 div { class: "flex items-center gap-3 min-w-[220px]",

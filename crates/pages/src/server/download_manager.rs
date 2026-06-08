@@ -149,19 +149,21 @@ async fn download_worker(
             continue;
         }
 
-        let (service, yt_cookies) = {
+        let (service, yt_cookies, hq) = {
             let conf = config.read();
             let s = conf.server.as_ref();
             (
                 s.map(|x| x.service),
                 s.and_then(|x| x.access_token.clone()),
+                conf.ytm_premium_audio,
             )
         };
 
         let resolved: Option<(String, &'static str, Option<String>, Option<u64>)> =
             if matches!(service, Some(MusicService::YtMusic)) {
                 let cookies = yt_cookies.unwrap_or_default();
-                let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
+                let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies)
+                    .premium_audio(hq);
                 match yt.get_stream(&id).await {
                     Ok(info) => Some((
                         info.url,

@@ -544,6 +544,13 @@ pub struct AppConfig {
     /// overhead — surfaced with a warning in settings.
     #[serde(default)]
     pub tracing_enabled: bool,
+    /// Opt-in: resolve signed-in YouTube Music streams via yt-dlp so Premium
+    /// accounts get the 256k formats (itag 141/774). The plain-URL clients
+    /// Kopuz uses can't reach Premium tier, and YouTube's current signature
+    /// can only be deciphered by yt-dlp. Needs sign-in + yt-dlp installed;
+    /// falls back to the standard ~128k path otherwise.
+    #[serde(default)]
+    pub ytm_premium_audio: bool,
     #[serde(default = "default_auto_check_updates")]
     pub auto_check_updates: bool,
     #[serde(default = "default_show_source_toggle")]
@@ -850,6 +857,7 @@ impl Default for AppConfig {
             language: default_language(),
             reduce_animations: false,
             tracing_enabled: false,
+            ytm_premium_audio: false,
             auto_check_updates: default_auto_check_updates(),
             show_source_toggle: default_show_source_toggle(),
             sidebar_order: default_sidebar_order(),

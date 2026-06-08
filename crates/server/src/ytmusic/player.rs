@@ -72,8 +72,33 @@ async fn visitor_data(cookies: Option<&str>) -> Result<&'static str, String> {
 /// (visitor_data fetches anonymously, ANDROID_VR is login_supported=
 /// false). Without cookies, Music-Premium-locked tracks naturally
 /// hit UNPLAYABLE and fall through; everything else plays normally.
-#[tracing::instrument(name = "yt.resolve", skip(cookies), fields(video_id = %video_id, anon = cookies.is_none()))]
-pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamInfo, String> {
+#[tracing::instrument(name = "yt.resolve", skip(cookies), fields(video_id = %video_id, anon = cookies.is_none(), hq = prefer_ytdlp))]
+pub async fn resolve(
+    video_id: &str,
+    cookies: Option<&str>,
+    prefer_ytdlp: bool,
+) -> Result<YtStreamInfo, String> {
+    // Premium high-quality path: a signed-in user who opted in resolves through
+    // yt-dlp, which authenticates as Premium AND deciphers YouTube's current
+    // signature to reach the 256k formats (itag 141/774). The plain-URL
+    // InnerTube clients below top out at ~128k (itag 251) for everyone, because
+    // Premium tier is only offered ciphered to web clients and nothing but
+    // yt-dlp can currently decode that signature. Falls through to the standard
+    // path on any failure (yt-dlp missing, non-Premium track, network, …).
+    if prefer_ytdlp
+        && let Some(ck) = cookies
+    {
+        match super::ytdlp_fallback::resolve(video_id, ck).await {
+            Ok(info) => {
+                tracing::info!(format = ?info.format, "stream resolved (premium yt-dlp path)");
+                return Ok(info);
+            }
+            Err(e) => {
+                tracing::debug!(error = %e, "premium yt-dlp path failed; using standard path")
+            }
+        }
+    }
+
     // Primary: ANDROID_VR + content_pot. Mint and visitor_data in parallel.
     let (pot_result, visitor_result) = tokio::join!(
         botguard::mint_content_pot(video_id),
