@@ -29,7 +29,16 @@ pub fn profile_dir(server_id: &str) -> PathBuf {
         format!("yt-profile-{safe}")
     };
     directories::ProjectDirs::from("com", "temidaradev", "kopuz")
-        .map(|d| d.config_dir().join(&leaf))
+        .map(|d| {
+            // Chromium profiles must live in Local AppData on Windows, not
+            // Roaming (`config_dir()`): a Roaming profile that OneDrive syncs
+            // locks the browser's files and it hangs loading every page.
+            #[cfg(target_os = "windows")]
+            let base = d.data_local_dir();
+            #[cfg(not(target_os = "windows"))]
+            let base = d.config_dir();
+            base.join(&leaf)
+        })
         .unwrap_or_else(|| PathBuf::from(format!("./{leaf}")))
 }
 
