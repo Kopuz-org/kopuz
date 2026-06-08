@@ -719,10 +719,6 @@ impl PlayerController {
                                         && let Some(bps) = info.bitrate
                                     {
                                         let kbps = (bps / 1000) as u16;
-                                        eprintln!(
-                                            "[ctrl] yt bitrate resolved: {kbps} kbps (idx={idx}, current_idx={}, gen_ok=true)",
-                                            *current_queue_index_for_yt.peek()
-                                        );
                                         if let Some(t) = queue_for_yt.write().get_mut(idx) {
                                             t.bitrate = kbps;
                                         }
