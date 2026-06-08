@@ -183,10 +183,10 @@ pub async fn launch_signin_and_extract(
 
     let bin = find_browser_bin(browser).ok_or_else(|| {
         format!(
-            "{} not found in PATH (looked for: {}). Install it, or set ${}_BIN to its absolute path.",
+            "{} not found in PATH (looked for: {}). Install it, or set $KOPUZ_{}_BIN to its absolute path.",
             browser,
             browser_candidates(browser).join(", "),
-            format!("KOPUZ_{}", browser.id().to_uppercase().replace('-', "_"))
+            browser.id().to_uppercase().replace('-', "_")
         )
     })?;
     eprintln!(
