@@ -22,6 +22,7 @@ pub fn Bottombar(
     current_song_title: Signal<String>,
     current_song_artist: Signal<String>,
     current_song_cover_url: Signal<String>,
+    current_song_bitrate: Signal<u16>,
     volume: Signal<f32>,
     persisted_volume: Signal<f32>,
     is_rightbar_open: Signal<bool>,
@@ -39,6 +40,7 @@ pub fn Bottombar(
                 library, favorites_store, config, player, is_playing, is_fullscreen,
                 current_song_duration, current_song_progress, queue, current_queue_index,
                 current_song_title, current_song_artist, current_song_cover_url,
+                current_song_bitrate,
                 volume, persisted_volume, is_rightbar_open,
             }
         },
@@ -47,6 +49,7 @@ pub fn Bottombar(
                 library, favorites_store, config, player, is_playing, is_fullscreen,
                 current_song_duration, current_song_progress, queue, current_queue_index,
                 current_song_title, current_song_artist, current_song_cover_url,
+                current_song_bitrate,
                 volume, persisted_volume, is_rightbar_open,
             }
         },

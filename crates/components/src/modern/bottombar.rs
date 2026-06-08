@@ -22,6 +22,7 @@ pub fn BottombarModern(
     mut current_song_title: Signal<String>,
     mut current_song_artist: Signal<String>,
     mut current_song_cover_url: Signal<String>,
+    current_song_bitrate: Signal<u16>,
     mut volume: Signal<f32>,
     mut persisted_volume: Signal<f32>,
     mut is_rightbar_open: Signal<bool>,
@@ -80,6 +81,10 @@ pub fn BottombarModern(
                 div { class: "flex-1 min-w-0 flex flex-col justify-center gap-0.5",
                     span { class: "text-[13px] font-semibold text-white/90 truncate leading-tight", "{current_song_title}" }
                     span { class: "text-[11px] text-slate-400 truncate leading-tight", "{current_song_artist}" }
+                    // Debug-only: resolved stream bitrate (128 anon / ~270 Premium).
+                    if cfg!(debug_assertions) && current_song_bitrate() > 0 {
+                        span { class: "text-[9px] font-mono text-amber-400/80 leading-tight", "{current_song_bitrate} kbps" }
+                    }
                 }
                 div { class: "flex items-center gap-0.5 pr-1",
                     button {

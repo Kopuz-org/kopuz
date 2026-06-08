@@ -48,6 +48,11 @@ pub struct YtStreamInfo {
     pub user_agent: String,
     pub content_length: Option<u64>,
     pub duration_secs: Option<u64>,
+    /// Average bitrate of the chosen format, in bits/sec. Surfaced for the
+    /// debug bitrate readout (itag 251 ≈ 128 kbps anon, 774 ≈ 270 kbps Premium).
+    pub bitrate: Option<u32>,
+    /// YouTube format id of the chosen stream.
+    pub itag: Option<u32>,
 }
 
 /// Resolve a YT video to a playable stream. Native decipher (WEB_REMIX) is
@@ -175,10 +180,17 @@ fn pick_plain_format(json: &Value, client: YouTubeClient) -> Option<YtStreamInfo
 
     // Prefer webm (symphonia + libopus path) over m4a (symphonia fMP4
     // probe walks the whole file which kills startup latency).
-    let (fmt, _) = best_webm.or(best_m4a)?;
+    let (fmt, bitrate) = best_webm.or(best_m4a)?;
     let url = fmt.get("url")?.as_str()?.to_string();
     let mime = fmt.get("mimeType")?.as_str()?;
     let format = AudioFormat::from_mime(mime)?;
+    let itag = fmt.get("itag").and_then(|v| v.as_u64()).map(|v| v as u32);
+    eprintln!(
+        "[yt-player] resolved itag={} {} kbps {mime} via {} (plain)",
+        itag.unwrap_or(0),
+        bitrate / 1000,
+        client.client_name
+    );
     // `contentLength` ships as a numeric string in adaptiveFormats.
     let content_length = fmt
         .get("contentLength")
@@ -201,6 +213,8 @@ fn pick_plain_format(json: &Value, client: YouTubeClient) -> Option<YtStreamInfo
         user_agent: client.user_agent.to_string(),
         content_length,
         duration_secs,
+        bitrate: Some(bitrate as u32),
+        itag,
     })
 }
 
@@ -243,12 +257,22 @@ fn stream_info_from(
                 .and_then(|s| s.parse::<u64>().ok())
                 .map(|ms| (ms + 500) / 1000)
         });
+    let bitrate = fmt.get("bitrate").and_then(|v| v.as_u64()).map(|v| v as u32);
+    let itag = fmt.get("itag").and_then(|v| v.as_u64()).map(|v| v as u32);
+    eprintln!(
+        "[yt-player] resolved itag={} {} kbps {mime} via {} (decipher)",
+        itag.unwrap_or(0),
+        bitrate.unwrap_or(0) / 1000,
+        client.client_name
+    );
     Some(YtStreamInfo {
         url,
         format,
         user_agent: client.user_agent.to_string(),
         content_length,
         duration_secs,
+        bitrate,
+        itag,
     })
 }
 

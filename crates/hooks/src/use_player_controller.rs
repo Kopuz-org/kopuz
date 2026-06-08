@@ -59,7 +59,7 @@ pub struct PlayerController {
     pub radio_task: Signal<Option<dioxus_core::Task>>,
     pub station_registry: Signal<radio::registry::StationRegistry>,
     /// User-visible playback error. Set when something needs the user's
-    /// attention (missing `rustypipe-botguard`, expired YT cookies, …).
+    /// attention (expired YT cookies, a failed stream resolve, …).
     /// Rendered as a banner by whoever subscribes — currently the
     /// settings popup error sink mirrors it on next open.
     pub playback_error: Signal<Option<String>>,
@@ -663,6 +663,7 @@ impl PlayerController {
                     let mut queue_for_yt = self.queue;
                     let current_queue_index_for_yt = self.current_queue_index;
                     let mut current_song_duration_for_yt = self.current_song_duration;
+                    let mut current_song_bitrate_for_yt = self.current_song_bitrate;
 
                     if !use_crossfade {
                         self.hydrate_current_track_metadata(idx, 0);
@@ -709,6 +710,14 @@ impl PlayerController {
                                         if *current_queue_index_for_yt.peek() == idx {
                                             current_song_duration_for_yt.set(secs);
                                         }
+                                    }
+                                    // Surface the resolved stream bitrate (kbps) for the
+                                    // debug readout — 128 anon vs ~270 Premium.
+                                    if *play_generation.read() == current_gen
+                                        && *current_queue_index_for_yt.peek() == idx
+                                        && let Some(bps) = info.bitrate
+                                    {
+                                        current_song_bitrate_for_yt.set((bps / 1000) as u16);
                                     }
                                     (info.url, Some(info.format), Some(info.user_agent))
                                 }
