@@ -25,7 +25,7 @@
 }:
 let
   pname = "kopuz";
-  version = "0.6.5";
+  version = "0.6.7";
 
   nativeBuildInputs = [
     pkg-config
