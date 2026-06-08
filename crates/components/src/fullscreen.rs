@@ -221,7 +221,6 @@ fn TrackMetadata(
     current_song_title: Signal<String>,
     current_song_artist: Signal<String>,
     current_song_album: Signal<String>,
-    current_song_khz: Signal<u32>,
     current_song_bitrate: Signal<u16>,
 ) -> Element {
     rsx! {
@@ -268,7 +267,7 @@ fn TrackMetadata(
         div {
             class: "flex items-center gap-4 text-xs text-white/50 mb-6 w-full",
             style: "max-width: 420px;",
-            span { style: "font-size: 10px;", "{current_song_khz() / 1000} kHz / {current_song_bitrate} kbps" }
+            span { style: "font-size: 10px;", "{current_song_bitrate} kbps" }
         }
     }
 }
@@ -343,7 +342,6 @@ pub fn Fullscreen(
     mut current_queue_index: Signal<usize>,
     mut current_song_title: Signal<String>,
     mut current_song_artist: Signal<String>,
-    mut current_song_khz: Signal<u32>,
     mut current_song_bitrate: Signal<u16>,
     mut current_song_cover_url: Signal<String>,
     mut current_song_album: Signal<String>,
@@ -517,7 +515,6 @@ pub fn Fullscreen(
                             current_song_title,
                             current_song_artist,
                             current_song_album,
-                            current_song_khz,
                             current_song_bitrate,
                         }
                         ProgressBarControl { player, current_song_duration, current_song_progress }
@@ -565,7 +562,6 @@ pub fn Fullscreen(
                         current_song_title,
                         current_song_artist,
                         current_song_album,
-                        current_song_khz,
                         current_song_bitrate,
                     }
 

@@ -2441,7 +2441,6 @@ fn App() -> Element {
                 current_song_album: current_song_album,
                 current_queue_index: current_queue_index,
                 current_song_title: current_song_title,
-                current_song_khz: current_song_khz,
                 current_song_bitrate: current_song_bitrate,
                 current_song_artist: current_song_artist,
                 current_song_cover_url: current_song_cover_url,
