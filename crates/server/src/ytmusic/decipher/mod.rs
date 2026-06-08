@@ -38,7 +38,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use tokio::sync::{OnceCell, mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot};
 
 const LIB: &str = include_str!("solver/lib.min.js");
 const CORE: &str = include_str!("solver/core.min.js");
@@ -357,7 +357,7 @@ impl JsEngine for SubprocessEngine {
                     .await
                     .map_err(|e| format!("write solver temp: {e}"))?;
             }
-            let mut child = match tokio::process::Command::new(rt.bin)
+            let child = match tokio::process::Command::new(rt.bin)
                 .args(rt.args)
                 .arg(&path)
                 .stdout(std::process::Stdio::piped())

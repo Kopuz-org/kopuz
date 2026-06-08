@@ -69,6 +69,19 @@ fn init_script() -> String {
     format!(
         r#"
 window.module = {{ exports: {{}} }}; window.exports = window.module.exports;
+// Chromium (WebView2) enforces Trusted Types on `new Function`/`eval`; the
+// BotGuard VM does unwrapped `new Function(...)` internally, so a permissive
+// `default` policy is needed to let those through. WebKit (Linux/macOS) ignores
+// this (no enforcement). Best-effort: a pre-existing default policy throws.
+try {{
+  if (window.trustedTypes && window.trustedTypes.createPolicy) {{
+    window.trustedTypes.createPolicy('default', {{
+      createHTML: function(s) {{ return s; }},
+      createScript: function(s) {{ return s; }},
+      createScriptURL: function(s) {{ return s; }}
+    }});
+  }}
+}} catch (e) {{}}
 {BGUTILS}
 window.__KOPUZ_BGX = (window.module && window.module.exports) || null;
 window.__kopuzMinter = null;
