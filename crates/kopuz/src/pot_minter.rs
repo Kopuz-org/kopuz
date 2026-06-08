@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use dioxus::desktop::tao::dpi::LogicalSize;
+use dioxus::desktop::tao::dpi::{LogicalPosition, LogicalSize};
 use dioxus::desktop::tao::event_loop::EventLoopWindowTarget;
 use dioxus::desktop::tao::platform::unix::WindowExtUnix;
 use dioxus::desktop::tao::window::{Window, WindowBuilder};
@@ -47,22 +47,35 @@ thread_local! {
 }
 
 fn init_script() -> String {
+    // `PoToken.generate` does the whole BotGuard dance — VM load, snapshot, and
+    // the GenerateIT WAA round-trip (jnn-pa) — on *every* call (~1 s). The
+    // integrity token it negotiates is reusable for `estimatedTtlSecs` (hours)
+    // and content pots are minted from it locally. So we split: negotiate the
+    // integrity token + WebPoMinter once (and refresh near expiry), then per
+    // track only `mintAsWebsafeString(videoId)` runs — sub-ms, no network.
     format!(
         r#"
 window.module = {{ exports: {{}} }}; window.exports = window.module.exports;
 {BGUTILS}
-window.__KOPUZ_BG = (window.module && window.module.exports && window.module.exports.BG) || null;
-window.__kopuzMint = async function(videoId, reqId) {{
-  function send(o) {{ o.id = reqId; try {{ window.ipc.postMessage(JSON.stringify(o)); }} catch(e) {{}} }}
-  try {{
-    var BG = window.__KOPUZ_BG;
-    if (!BG) return send({{err:'no BG'}});
+window.__KOPUZ_BGX = (window.module && window.module.exports) || null;
+window.__kopuzMinter = null;
+window.__kopuzMinterExp = 0;
+window.__kopuzMinting = null;
+
+window.__kopuzEnsureMinter = function() {{
+  var now = Date.now();
+  if (window.__kopuzMinter && now < window.__kopuzMinterExp) return Promise.resolve(window.__kopuzMinter);
+  if (window.__kopuzMinting) return window.__kopuzMinting;
+  window.__kopuzMinting = (async function() {{
+    var X = window.__KOPUZ_BGX;
+    if (!X || !X.BG) throw new Error('no BG');
+    var BG = X.BG;
     var bgConfig = {{
       fetch: function(u, o) {{ return fetch(u, o); }},
-      globalObj: window, identifier: videoId, requestKey: "O43z0dpjhgX20SCx4KAo"
+      globalObj: window, identifier: '', requestKey: "O43z0dpjhgX20SCx4KAo"
     }};
     var ch = await BG.Challenge.create(bgConfig);
-    if (!ch) return send({{err:'null challenge'}});
+    if (!ch) throw new Error('null challenge');
     var js = ch.interpreterJavascript && ch.interpreterJavascript.privateDoNotAccessOrElseSafeScriptWrappedValue;
     if (js) {{
       var src = js;
@@ -72,10 +85,45 @@ window.__kopuzMint = async function(videoId, reqId) {{
       }}
       new Function(src)();
     }}
-    var res = await BG.PoToken.generate({{ program: ch.program, globalName: ch.globalName, bgConfig: bgConfig }});
-    send({{pot: (res && (res.poToken || res.pot || res)) + ''}});
-  }} catch (e) {{ send({{err: (e && e.stack) ? e.stack : ('' + e)}}); }}
+    var botguard = await BG.BotGuardClient.create({{ program: ch.program, globalName: ch.globalName, globalObj: window }});
+    var sig = [];
+    var botguardResponse = await botguard.snapshot({{ webPoSignalOutput: sig }});
+    var itUrl = X.buildURL('GenerateIT', bgConfig.useYouTubeAPI);
+    var itResp = await bgConfig.fetch(itUrl, {{
+      method: 'POST', headers: X.getHeaders(),
+      body: JSON.stringify([bgConfig.requestKey, botguardResponse])
+    }});
+    var it = await itResp.json();
+    var itData = {{ integrityToken: it[0], estimatedTtlSecs: it[1], mintRefreshThreshold: it[2], websafeFallbackToken: it[3] }};
+    var minter = await BG.WebPoMinter.create(itData, sig);
+    var ttl = (itData.estimatedTtlSecs > 0) ? itData.estimatedTtlSecs : 21600;
+    window.__kopuzMinter = minter;
+    window.__kopuzMinterExp = Date.now() + Math.floor(ttl * 0.8) * 1000;
+    return minter;
+  }})();
+  window.__kopuzMinting.then(function() {{ window.__kopuzMinting = null; }},
+    function() {{ window.__kopuzMinting = null; window.__kopuzMinter = null; window.__kopuzMinterExp = 0; }});
+  return window.__kopuzMinting;
 }};
+
+window.__kopuzMint = async function(videoId, reqId) {{
+  function send(o) {{ o.id = reqId; try {{ window.ipc.postMessage(JSON.stringify(o)); }} catch(e) {{}} }}
+  try {{
+    var minter = await window.__kopuzEnsureMinter();
+    var pot = await minter.mintAsWebsafeString(videoId);
+    send({{pot: (pot || '') + ''}});
+  }} catch (e) {{
+    window.__kopuzMinter = null; window.__kopuzMinterExp = 0;
+    send({{err: (e && e.stack) ? e.stack : ('' + e)}});
+  }}
+}};
+
+// Pre-warm the integrity token as soon as the origin is live, so even the
+// first track doesn't pay the negotiation. Best-effort, backs off, then stops.
+(function warm(n) {{
+  if (!window.__KOPUZ_BGX || !window.__KOPUZ_BGX.BG) {{ if (n > 0) setTimeout(function() {{ warm(n - 1); }}, 500); return; }}
+  window.__kopuzEnsureMinter().catch(function() {{ if (n > 0) setTimeout(function() {{ warm(n - 1); }}, 2000); }});
+}})(20);
 "#
     )
 }
@@ -91,11 +139,14 @@ pub fn install_if_wanted<T: 'static>(target: &EventLoopWindowTarget<T>) {
         return;
     }
 
-    // Hidden window; on Linux wry attaches to the window's GTK vbox container
-    // (the generic raw-handle `build` isn't supported here).
+    // Hidden, undecorated, parked off-screen — the webview runs (JS, fetch)
+    // regardless of visibility. On Linux wry attaches to the window's GTK vbox
+    // container (the generic raw-handle `build` isn't supported here).
     let window = match WindowBuilder::new()
         .with_title("kopuz pot minter")
         .with_inner_size(LogicalSize::new(1.0, 1.0))
+        .with_position(LogicalPosition::new(-32000.0, -32000.0))
+        .with_decorations(false)
         .with_visible(false)
         .build(target)
     {

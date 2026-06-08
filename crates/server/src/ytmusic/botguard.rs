@@ -37,9 +37,10 @@ pub fn is_available() -> bool {
     MINTER.get().is_some()
 }
 
-/// Mint a content-bound PO token for `video_id`. ~1 s (the WebView runs the full
-/// BotGuard challenge each call; no caching). Errors if no minter is registered
-/// (anon YT Music not selected) or the WebView failed.
+/// Mint a content-bound PO token for `video_id`. Sub-ms in steady state: the
+/// WebView negotiates the BotGuard integrity token once (pre-warmed at startup,
+/// refreshed near its TTL) and mints each content pot from it locally. Errors if
+/// no minter is registered (anon YT Music not selected) or the WebView failed.
 pub async fn mint_content_pot(video_id: &str) -> Result<String, String> {
     let tx = MINTER
         .get()
