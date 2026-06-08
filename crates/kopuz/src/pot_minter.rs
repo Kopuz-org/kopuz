@@ -14,7 +14,7 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use dioxus::desktop::tao::dpi::LogicalSize;
 use dioxus::desktop::tao::event_loop::EventLoopWindowTarget;
@@ -29,6 +29,14 @@ const UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, lik
                   Chrome/131.0.0.0 Safari/537.36";
 
 static REQ_ID: AtomicU64 = AtomicU64::new(1);
+/// Set by the app when an anonymous YouTube Music server is active; the
+/// event-loop handler then installs the minter on the next tick.
+static WANT: AtomicBool = AtomicBool::new(false);
+
+/// Called from the app (anon YT Music selected) to request the minter.
+pub fn request() {
+    WANT.store(true, Ordering::Relaxed);
+}
 
 type Pending = Rc<RefCell<HashMap<u64, tokio::sync::oneshot::Sender<Result<String, String>>>>>;
 
@@ -72,9 +80,13 @@ window.__kopuzMint = async function(videoId, reqId) {{
     )
 }
 
-/// Create the minter WebView once and register its channel with `botguard`.
-/// Called from `Config::with_custom_event_handler` (gives the window target).
-pub fn install<T: 'static>(target: &EventLoopWindowTarget<T>) {
+/// Create the minter WebView once an anon YT Music server is active and register
+/// its channel with `botguard`. Called every event-loop tick from
+/// `Config::with_custom_event_handler`; no-ops until `request()` is set.
+pub fn install_if_wanted<T: 'static>(target: &EventLoopWindowTarget<T>) {
+    if !WANT.load(Ordering::Relaxed) {
+        return;
+    }
     if INSTALLED.with(|c| c.replace(true)) {
         return;
     }

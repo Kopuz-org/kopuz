@@ -573,7 +573,7 @@ fn main() {
             // once we have the event-loop target (issue #349).
             .with_custom_event_handler(|_event, _target| {
                 #[cfg(target_os = "linux")]
-                crate::pot_minter::install(_target);
+                crate::pot_minter::install_if_wanted(_target);
             })
             .with_asynchronous_custom_protocol(
                 "artwork",
@@ -938,6 +938,19 @@ fn App() -> Element {
     let lib_path = use_memo(move || config_dir().join("library.json"));
     let config_path = use_memo(move || config_dir().join("config.json"));
     let mut config = use_signal(config::AppConfig::default);
+    // Start the anon PoToken minter only once an anonymous YouTube Music server
+    // is active (YtMusic + no access token). Reactive: fires when config loads
+    // or the server changes.
+    #[cfg(target_os = "linux")]
+    use_effect(move || {
+        let anon_yt = config.read().server.as_ref().is_some_and(|s| {
+            s.service == config::MusicService::YtMusic
+                && s.access_token.as_deref().unwrap_or("").is_empty()
+        });
+        if anon_yt {
+            crate::pot_minter::request();
+        }
+    });
     #[allow(unused_variables)]
     let playlist_path = use_memo(move || config_dir().join("playlists.json"));
     let mut playlist_store = use_signal(reader::PlaylistStore::default);
