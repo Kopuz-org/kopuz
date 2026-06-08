@@ -1,6 +1,7 @@
 use reader::models::Track;
 use serde_json::Value;
 
+pub mod botguard;
 pub mod clients;
 pub mod cookies;
 pub mod decipher;

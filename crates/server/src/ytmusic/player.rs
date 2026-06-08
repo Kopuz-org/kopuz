@@ -1,18 +1,21 @@
 //! Resolve a video_id to a playable stream URL.
 //!
-//! Primary path: native sig/n deciphering (`decipher`) against WEB_REMIX.
-//! With cookies this unlocks Premium itags (~270 kbps); anonymously it serves
-//! the standard ~128 kbps. No PO token is needed either way — an authenticated
-//! session is its own proof-of-origin (issue #349).
+//! - **Premium (cookies):** WEB_REMIX + native sig/n decipher → Premium itags
+//!   (~270 kbps), no PO token — an authenticated session is its own
+//!   proof-of-origin.
+//! - **Anonymous:** ANDROID_VR + a content-bound PO token minted by the in-app
+//!   WebView (`botguard`). Anon googlevideo URLs 403 on deep/seek ranges
+//!   without it; ANDROID_VR's plain URLs + the pot sustain full tracks.
+//! - **Last resort:** ANDROID_VR bare (no pot — won't survive deep ranges, but
+//!   better than nothing if the minter is down).
 //!
-//! Fallback path: if deciphering is unavailable (no JS engine wired yet) or
-//! fails, walk `STREAM_FALLBACK_CLIENTS` (ANDROID_VR) bare — they still hand
-//! back plain ~128 kbps URLs without a PO token, so anonymous playback keeps
-//! working with zero external dependencies.
+//! No yt-dlp, no external binary (issue #349).
 
 use serde_json::Value;
+use tokio::sync::OnceCell;
 
-use super::clients::{STREAM_FALLBACK_CLIENTS, WEB_REMIX, YouTubeClient};
+use super::botguard;
+use super::clients::{ANDROID_VR_1_61_48, STREAM_FALLBACK_CLIENTS, WEB_REMIX, YouTubeClient};
 use super::decipher;
 use super::innertube::{self, PlayerExtras};
 
@@ -55,19 +58,64 @@ pub struct YtStreamInfo {
     pub itag: Option<u32>,
 }
 
-/// Resolve a YT video to a playable stream. Native decipher (WEB_REMIX) is
-/// tried first — with cookies it returns Premium itags, anonymously the
-/// ~128 kbps ceiling, and no PO token in either case. On failure we fall back
-/// to the ANDROID_VR clients, which still return plain ~128 kbps URLs bare —
-/// no JS engine required, so anonymous playback always has a path.
+/// Process-wide anonymous visitor_data cache (the ANDROID_VR + pot path).
+/// Refetched on process restart.
+static VISITOR_DATA: OnceCell<String> = OnceCell::const_new();
+
+async fn visitor_data(cookies: Option<&str>) -> Result<&'static str, String> {
+    VISITOR_DATA
+        .get_or_try_init(|| async { innertube::visitor_id(cookies).await })
+        .await
+        .map(|s| s.as_str())
+}
+
+/// Resolve a YT video to a playable stream. Premium (cookies) → decipher;
+/// anonymous → ANDROID_VR + a webview-minted content pot; last resort →
+/// ANDROID_VR bare.
 pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamInfo, String> {
-    let mut last_err = match try_native_decipher(video_id, cookies).await {
-        Ok(info) => return Ok(info),
-        Err(e) => {
-            eprintln!("[yt-player] native decipher failed ({e}) — falling back to ANDROID_VR");
-            e
+    // Premium: the account session authorises sustained streaming, no pot.
+    if cookies.is_some() {
+        match try_native_decipher(video_id, cookies).await {
+            Ok(info) => return Ok(info),
+            Err(e) => eprintln!("[yt-player] premium decipher failed ({e}) — falling back"),
+        }
+    }
+
+    // Anonymous: ANDROID_VR + content_pot. Mint + visitor_data in parallel.
+    let mut last_err = {
+        let (pot, visitor) =
+            tokio::join!(botguard::mint_content_pot(video_id), visitor_data(None));
+        match (pot, visitor) {
+            (Ok(pot), Ok(visitor)) => {
+                let extras = PlayerExtras {
+                    content_pot: Some(&pot),
+                    visitor_data: Some(visitor),
+                    signature_timestamp: None,
+                };
+                match innertube::player(ANDROID_VR_1_61_48, video_id, None, extras).await {
+                    Ok(json) => {
+                        let status = PlayabilityStatus::from_response(&json);
+                        if status == PlayabilityStatus::Ok {
+                            if let Some(info) = pick_plain_format(&json, ANDROID_VR_1_61_48) {
+                                return Ok(info);
+                            }
+                            "ANDROID_VR+pot: no plain audio format".to_string()
+                        } else {
+                            format!(
+                                "ANDROID_VR+pot playability {}: {}",
+                                status.as_str(),
+                                playability_reason(&json)
+                            )
+                        }
+                    }
+                    Err(e) => format!("ANDROID_VR+pot: {e}"),
+                }
+            }
+            (Err(e), _) => format!("PO mint: {e}"),
+            (_, Err(e)) => format!("visitor_data: {e}"),
         }
     };
+    eprintln!("[yt-player] ANDROID_VR+pot failed ({last_err}) — trying bare clients");
 
     for client in STREAM_FALLBACK_CLIENTS {
         let cookies_for = if client.login_supported { cookies } else { None };
@@ -185,8 +233,12 @@ fn pick_plain_format(json: &Value, client: YouTubeClient) -> Option<YtStreamInfo
     let mime = fmt.get("mimeType")?.as_str()?;
     let format = AudioFormat::from_mime(mime)?;
     let itag = fmt.get("itag").and_then(|v| v.as_u64()).map(|v| v as u32);
+    let vid = json
+        .pointer("/videoDetails/videoId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
     eprintln!(
-        "[yt-player] resolved itag={} {} kbps {mime} via {} (plain)",
+        "[yt-player] resolved {vid} itag={} {} kbps {mime} via {} (plain)",
         itag.unwrap_or(0),
         bitrate / 1000,
         client.client_name
@@ -259,8 +311,12 @@ fn stream_info_from(
         });
     let bitrate = fmt.get("bitrate").and_then(|v| v.as_u64()).map(|v| v as u32);
     let itag = fmt.get("itag").and_then(|v| v.as_u64()).map(|v| v as u32);
+    let vid = json
+        .pointer("/videoDetails/videoId")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
     eprintln!(
-        "[yt-player] resolved itag={} {} kbps {mime} via {} (decipher)",
+        "[yt-player] resolved {vid} itag={} {} kbps {mime} via {} (decipher)",
         itag.unwrap_or(0),
         bitrate.unwrap_or(0) / 1000,
         client.client_name
