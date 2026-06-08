@@ -18,8 +18,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::desktop::tao::dpi::LogicalSize;
 use dioxus::desktop::tao::event_loop::EventLoopWindowTarget;
+use dioxus::desktop::tao::platform::unix::WindowExtUnix;
 use dioxus::desktop::tao::window::{Window, WindowBuilder};
-use dioxus::desktop::wry::{WebView, WebViewBuilder};
+use dioxus::desktop::wry::{WebView, WebViewBuilder, WebViewBuilderExtUnix};
 use server::ytmusic::botguard::{self, MintRequest};
 use tokio::sync::mpsc;
 
@@ -78,12 +79,12 @@ pub fn install<T: 'static>(target: &EventLoopWindowTarget<T>) {
         return;
     }
 
-    // Tiny visible window so the native handle exists (wry needs a realized
-    // window); hidden again right after the webview attaches.
+    // Hidden window; on Linux wry attaches to the window's GTK vbox container
+    // (the generic raw-handle `build` isn't supported here).
     let window = match WindowBuilder::new()
         .with_title("kopuz pot minter")
         .with_inner_size(LogicalSize::new(1.0, 1.0))
-        .with_visible(true)
+        .with_visible(false)
         .build(target)
     {
         Ok(w) => w,
@@ -91,6 +92,10 @@ pub fn install<T: 'static>(target: &EventLoopWindowTarget<T>) {
             eprintln!("[pot-minter] window build failed: {e}");
             return;
         }
+    };
+    let Some(vbox) = window.default_vbox() else {
+        eprintln!("[pot-minter] no GTK vbox on window");
+        return;
     };
 
     let pending: Pending = Rc::new(RefCell::new(HashMap::new()));
@@ -118,7 +123,7 @@ pub fn install<T: 'static>(target: &EventLoopWindowTarget<T>) {
                 let _ = reply.send(result);
             }
         })
-        .build(&window);
+        .build_gtk(vbox);
 
     let webview = match webview {
         Ok(w) => Rc::new(w),
@@ -127,7 +132,6 @@ pub fn install<T: 'static>(target: &EventLoopWindowTarget<T>) {
             return;
         }
     };
-    let _ = window.set_visible(false);
 
     let (tx, mut rx) = mpsc::unbounded_channel::<MintRequest>();
     if botguard::set_minter(tx).is_err() {

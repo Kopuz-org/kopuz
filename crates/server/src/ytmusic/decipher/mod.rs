@@ -103,9 +103,15 @@ pub async fn deciphered_url(base_js: &str, format: &Value) -> Result<String, Str
 async fn solve(base_js: &str, requests: &[Value]) -> Result<Value, String> {
     let data = json!({ "type": "player", "player": base_js, "requests": requests });
     let data_json = serde_json::to_string(&data).map_err(|e| format!("encode solver data: {e}"))?;
+    // yt_dlp_ejs sets `globalThis.location = new URL(".../watch?v=yt-dlp-wins")`
+    // as environment setup. Harmless in node/deno, but in a real WebView
+    // globalThis === window, so it NAVIGATES (out to the browser). Rename the
+    // write to a dummy property — the extraction passes the URL explicitly and
+    // doesn't read window.location (verified: decipher works without it).
+    let core = CORE.replace("globalThis.location =", "globalThis.__kopuz_loc =");
     // `print` (JSC/qjs) or `console.log` (node/deno/bun) — whichever exists.
     let program = format!(
-        "{LIB}\nObject.assign(globalThis, lib);\n{CORE}\n\
+        "{LIB}\nObject.assign(globalThis, lib);\n{core}\n\
          (function(){{var __p=(typeof print==='function')?print:function(s){{console.log(s);}};\
          var o=jsc({data_json});__p(JSON.stringify(o.responses));}})();"
     );
