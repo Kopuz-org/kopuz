@@ -712,12 +712,23 @@ impl PlayerController {
                                         }
                                     }
                                     // Surface the resolved stream bitrate (kbps) for the
-                                    // debug readout — 128 anon vs ~270 Premium.
+                                    // debug readout — 128 anon vs ~270 Premium. Write it
+                                    // back onto the queue Track too (YT tracks carry no
+                                    // bitrate metadata), so a re-hydrate doesn't reset it.
                                     if *play_generation.read() == current_gen
-                                        && *current_queue_index_for_yt.peek() == idx
                                         && let Some(bps) = info.bitrate
                                     {
-                                        current_song_bitrate_for_yt.set((bps / 1000) as u16);
+                                        let kbps = (bps / 1000) as u16;
+                                        eprintln!(
+                                            "[ctrl] yt bitrate resolved: {kbps} kbps (idx={idx}, current_idx={}, gen_ok=true)",
+                                            *current_queue_index_for_yt.peek()
+                                        );
+                                        if let Some(t) = queue_for_yt.write().get_mut(idx) {
+                                            t.bitrate = kbps;
+                                        }
+                                        if *current_queue_index_for_yt.peek() == idx {
+                                            current_song_bitrate_for_yt.set(kbps);
+                                        }
                                     }
                                     (info.url, Some(info.format), Some(info.user_agent))
                                 }

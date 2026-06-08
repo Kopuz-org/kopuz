@@ -303,3 +303,59 @@ async fn try_native_decipher(
     stream_info_from(&json, fmt, url, WEB_REMIX)
         .ok_or_else(|| "deciphered format missing fields".to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn pick_plain_format_carries_bitrate_and_itag() {
+        let json = json!({
+            "streamingData": { "adaptiveFormats": [
+                { "itag": 251, "mimeType": "audio/webm; codecs=\"opus\"",
+                  "bitrate": 136544, "contentLength": "3433755",
+                  "url": "https://r.googlevideo.com/v?n=N" }
+            ]},
+            "videoDetails": { "lengthSeconds": "212" }
+        });
+        let info = pick_plain_format(&json, WEB_REMIX).expect("should pick a plain format");
+        assert_eq!(info.itag, Some(251));
+        assert_eq!(info.bitrate, Some(136544));
+        assert_eq!(info.duration_secs, Some(212));
+    }
+
+    #[test]
+    fn stream_info_from_carries_bitrate_and_itag() {
+        let json = json!({ "videoDetails": { "lengthSeconds": "212" } });
+        let fmt = json!({ "itag": 774, "mimeType": "audio/webm; codecs=\"opus\"",
+                          "bitrate": 270204, "contentLength": "6852699" });
+        let info = stream_info_from(&json, &fmt, "https://x/y".into(), WEB_REMIX)
+            .expect("should build stream info");
+        assert_eq!(info.itag, Some(774));
+        assert_eq!(info.bitrate, Some(270204));
+        assert_eq!(info.duration_secs, Some(212));
+    }
+
+    /// End-to-end: resolve a public track (decipher via the SubprocessEngine)
+    /// and assert the resolved stream carries a real bitrate + itag — the same
+    /// `YtStreamInfo` the player controller stamps onto the bottom bar.
+    #[tokio::test]
+    #[ignore = "hits live YouTube + needs a system JS runtime"]
+    async fn resolve_populates_bitrate_itag_duration() {
+        let info = resolve("dQw4w9WgXcQ", None).await.expect("resolve should succeed");
+        eprintln!(
+            "[test] resolved itag={:?} bitrate={:?} kbps duration={:?}s",
+            info.itag,
+            info.bitrate.map(|b| b / 1000),
+            info.duration_secs,
+        );
+        assert!(info.itag.is_some(), "itag must be set");
+        assert!(
+            info.bitrate.unwrap_or(0) > 0,
+            "bitrate must be > 0, got {:?}",
+            info.bitrate
+        );
+        assert!(info.duration_secs.unwrap_or(0) > 0, "duration must be set");
+    }
+}

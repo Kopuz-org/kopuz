@@ -852,13 +852,21 @@ fn App() -> Element {
         let _ = server::ytmusic::decipher::set_engine(engine);
         spawn(async move {
             while let Some(req) = rx.recv().await {
-                let wrapped =
-                    format!("globalThis.print = (s) => dioxus.send(s);\n{}", req.program);
-                let result = {
-                    let mut eval = dioxus::document::eval(&wrapped);
-                    eval.recv::<String>()
-                        .await
-                        .map_err(|e| format!("webview eval: {e}"))
+                // Always send exactly one message back: the printed result, or
+                // the JS error prefixed with a NUL marker. Without the
+                // try/catch a throwing solver would never call `dioxus.send`
+                // and `recv()` below would hang forever, stalling playback.
+                let wrapped = format!(
+                    "globalThis.print=function(s){{dioxus.send(s);}};\
+                     try{{{}}}catch(e){{dioxus.send('\\u0000ERR'+(e&&e.stack?e.stack:e));}}",
+                    req.program
+                );
+                let result = match dioxus::document::eval(&wrapped).recv::<String>().await {
+                    Ok(s) => match s.strip_prefix('\u{0}') {
+                        Some(err) => Err(format!("webview JS: {}", err.trim_start_matches("ERR"))),
+                        None => Ok(s),
+                    },
+                    Err(e) => Err(format!("webview eval recv: {e}")),
                 };
                 let _ = req.reply.send(result);
             }
