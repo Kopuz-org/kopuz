@@ -13,6 +13,7 @@
 
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use tokio::sync::OnceCell;
@@ -192,23 +193,26 @@ fn is_premium_itag(itag: Option<u32>) -> bool {
 
 /// Premium-tier memo, keyed by Google user id (so switching accounts re-learns).
 /// Lets us skip the redundant Premium decipher attempt for accounts already
-/// known to be non-Premium.
-static ACCOUNT_PREMIUM: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
+/// known to be non-Premium. The "free" verdict carries a timestamp and expires
+/// so that an account upgraded free→Premium (same id, no re-sign-in) is
+/// re-checked rather than pinned to ANDROID_VR for the session.
+static ACCOUNT_PREMIUM: OnceLock<Mutex<HashMap<String, (Instant, bool)>>> = OnceLock::new();
+const TIER_TTL: Duration = Duration::from_secs(5 * 60);
 
-fn account_premium() -> &'static Mutex<HashMap<String, bool>> {
+fn account_premium() -> &'static Mutex<HashMap<String, (Instant, bool)>> {
     ACCOUNT_PREMIUM.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn known_non_premium(user_id: &str) -> bool {
     matches!(
         account_premium().lock().ok().and_then(|m| m.get(user_id).copied()),
-        Some(false)
+        Some((at, false)) if at.elapsed() < TIER_TTL
     )
 }
 
 fn remember_tier(user_id: &str, premium: bool) {
     if let Ok(mut m) = account_premium().lock() {
-        m.insert(user_id.to_string(), premium);
+        m.insert(user_id.to_string(), (Instant::now(), premium));
     }
 }
 

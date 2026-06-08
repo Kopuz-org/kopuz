@@ -267,7 +267,9 @@ fn TrackMetadata(
         div {
             class: "flex items-center gap-4 text-xs text-white/50 mb-6 w-full",
             style: "max-width: 420px;",
-            span { style: "font-size: 10px;", "{current_song_bitrate} kbps" }
+            if current_song_bitrate() > 0 {
+                span { style: "font-size: 10px;", "{current_song_bitrate} kbps" }
+            }
         }
     }
 }
