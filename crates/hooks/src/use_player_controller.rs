@@ -1765,8 +1765,10 @@ impl PlayerController {
             return;
         }
         self.queue.set(tracks);
+        // `play_track` already starts track 0 (with history + shuffle handling);
+        // a second bare play call here just bumped the play generation and
+        // spawned a duplicate stream resolve for the same video.
         self.play_track(0);
-        self.play_track_no_history(0);
     }
 
     pub fn add_to_queue(&mut self, tracks: impl IntoIterator<Item = Track>) {
