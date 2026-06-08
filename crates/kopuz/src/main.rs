@@ -36,7 +36,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
 use windows::Win32::Foundation::HWND;
 
-#[cfg(target_os = "linux")]
+#[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
 mod pot_minter;
 mod queue_state;
 mod web_storage;
@@ -572,8 +572,8 @@ fn main() {
             // Anon PoToken minter: stand up the hidden music.youtube.com webview
             // once we have the event-loop target (issue #349).
             .with_custom_event_handler(|_event, _target| {
-                #[cfg(target_os = "linux")]
                 crate::pot_minter::install_if_wanted(_target);
+                crate::pot_minter::pump();
             })
             .with_asynchronous_custom_protocol(
                 "artwork",
@@ -938,16 +938,20 @@ fn App() -> Element {
     let lib_path = use_memo(move || config_dir().join("library.json"));
     let config_path = use_memo(move || config_dir().join("config.json"));
     let mut config = use_signal(config::AppConfig::default);
-    // Start the anon PoToken minter only once an anonymous YouTube Music server
-    // is active (YtMusic + no access token). Reactive: fires when config loads
-    // or the server changes.
-    #[cfg(target_os = "linux")]
+    // Start the PoToken minter whenever a YouTube Music server is active — not
+    // just anon. A *signed-in but non-Premium* account streams the same 251 as
+    // anon and also needs a content pot for deep ranges; only true Premium
+    // subscribers (itag 774) are pot-exempt, and we can't know that until a
+    // track resolves. So run the minter for any YtMusic session; Premium just
+    // leaves it idle. Reactive: fires when config loads or the server changes.
+    #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
     use_effect(move || {
-        let anon_yt = config.read().server.as_ref().is_some_and(|s| {
-            s.service == config::MusicService::YtMusic
-                && s.access_token.as_deref().unwrap_or("").is_empty()
-        });
-        if anon_yt {
+        let yt_active = config
+            .read()
+            .server
+            .as_ref()
+            .is_some_and(|s| s.service == config::MusicService::YtMusic);
+        if yt_active {
             crate::pot_minter::request();
         }
     });

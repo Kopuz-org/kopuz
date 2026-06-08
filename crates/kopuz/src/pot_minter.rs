@@ -3,8 +3,10 @@
 //! Stands up a hidden `wry` WebView at the music.youtube.com origin (same-origin
 //! so BgUtils' WAA `fetch` isn't CORS-blocked), injects BgUtils, and mints
 //! content pots on demand — feeding `server::ytmusic::botguard`'s channel. No
-//! external binary, no yt-dlp. Linux/webkit2gtk only (declared `mod` is
-//! cfg-gated in main.rs); other platforms fall back to no anon minting.
+//! external binary, no yt-dlp. Desktop (Linux/macOS/Windows): only the webview
+//! attach differs per platform (GTK vbox vs raw NSView/HWND); the mint channel
+//! is drained from the event-loop tick on the main thread, so there's no
+//! platform-specific async runtime.
 //!
 //! Proven standalone in /tmp/yt-wry-minter. Tricks: same-origin page for the
 //! WAA fetch, `trustedTypes.createPolicy` to `new Function` the BotGuard VM
@@ -18,11 +20,15 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use dioxus::desktop::tao::dpi::{LogicalPosition, LogicalSize};
 use dioxus::desktop::tao::event_loop::EventLoopWindowTarget;
-use dioxus::desktop::tao::platform::unix::WindowExtUnix;
 use dioxus::desktop::tao::window::{Window, WindowBuilder};
-use dioxus::desktop::wry::{WebView, WebViewBuilder, WebViewBuilderExtUnix};
+use dioxus::desktop::wry::{WebView, WebViewBuilder};
 use server::ytmusic::botguard::{self, MintRequest};
 use tokio::sync::mpsc;
+
+#[cfg(target_os = "linux")]
+use dioxus::desktop::tao::platform::unix::WindowExtUnix;
+#[cfg(target_os = "linux")]
+use dioxus::desktop::wry::WebViewBuilderExtUnix;
 
 const BGUTILS: &str = include_str!("bgutils.js");
 const UA: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) \
@@ -40,10 +46,17 @@ pub fn request() {
 
 type Pending = Rc<RefCell<HashMap<u64, tokio::sync::oneshot::Sender<Result<String, String>>>>>;
 
+/// The live minter, kept on the main thread for the app's lifetime.
+struct Minter {
+    _window: Window,
+    webview: WebView,
+    pending: Pending,
+    rx: mpsc::UnboundedReceiver<MintRequest>,
+}
+
 thread_local! {
     static INSTALLED: Cell<bool> = const { Cell::new(false) };
-    // Keep the window + webview alive for the app's lifetime.
-    static KEEPALIVE: RefCell<Option<(Window, Rc<WebView>)>> = const { RefCell::new(None) };
+    static STATE: RefCell<Option<Minter>> = const { RefCell::new(None) };
 }
 
 fn init_script() -> String {
@@ -156,15 +169,10 @@ pub fn install_if_wanted<T: 'static>(target: &EventLoopWindowTarget<T>) {
             return;
         }
     };
-    let Some(vbox) = window.default_vbox() else {
-        eprintln!("[pot-minter] no GTK vbox on window");
-        return;
-    };
-
     let pending: Pending = Rc::new(RefCell::new(HashMap::new()));
     let pending_ipc = pending.clone();
 
-    let webview = WebViewBuilder::new()
+    let builder = WebViewBuilder::new()
         .with_url("https://music.youtube.com/")
         .with_user_agent(UA)
         .with_initialization_script(&init_script())
@@ -185,32 +193,65 @@ pub fn install_if_wanted<T: 'static>(target: &EventLoopWindowTarget<T>) {
             if let Some(reply) = pending_ipc.borrow_mut().remove(&id) {
                 let _ = reply.send(result);
             }
-        })
-        .build_gtk(vbox);
+        });
 
-    let webview = match webview {
-        Ok(w) => Rc::new(w),
+    // The only platform-specific bit: Linux wry attaches to the window's GTK
+    // vbox; macOS/Windows take the raw NSView/HWND via the generic `build`.
+    #[cfg(target_os = "linux")]
+    let built = match window.default_vbox() {
+        Some(vbox) => builder.build_gtk(vbox),
+        None => {
+            eprintln!("[pot-minter] no GTK vbox on window");
+            return;
+        }
+    };
+    #[cfg(not(target_os = "linux"))]
+    let built = builder.build(&window);
+
+    let webview = match built {
+        Ok(w) => w,
         Err(e) => {
             eprintln!("[pot-minter] webview build failed: {e}");
             return;
         }
     };
 
-    let (tx, mut rx) = mpsc::unbounded_channel::<MintRequest>();
+    let (tx, rx) = mpsc::unbounded_channel::<MintRequest>();
     if botguard::set_minter(tx).is_err() {
         eprintln!("[pot-minter] minter already registered");
     }
 
-    let wv = webview.clone();
-    glib::MainContext::default().spawn_local(async move {
-        while let Some(req) = rx.recv().await {
+    STATE.with(|s| {
+        *s.borrow_mut() = Some(Minter {
+            _window: window,
+            webview,
+            pending,
+            rx,
+        });
+    });
+    eprintln!("[pot-minter] installed (anon PoToken minting via webview)");
+}
+
+/// Drain queued mint requests and dispatch each to the webview. Called every
+/// event-loop tick from the custom event handler — runs on the main thread on
+/// all platforms, replacing the old Linux-only glib async drain.
+pub fn pump() {
+    STATE.with(|s| {
+        let mut guard = s.borrow_mut();
+        let Some(state) = guard.as_mut() else {
+            return;
+        };
+        while let Ok(req) = state.rx.try_recv() {
             let id = REQ_ID.fetch_add(1, Ordering::Relaxed);
-            pending.borrow_mut().insert(id, req.reply);
-            let vid: String = req.video_id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-').collect();
-            let _ = wv.evaluate_script(&format!("window.__kopuzMint && window.__kopuzMint('{vid}', {id})"));
+            state.pending.borrow_mut().insert(id, req.reply);
+            let vid: String = req
+                .video_id
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+                .collect();
+            let _ = state.webview.evaluate_script(&format!(
+                "window.__kopuzMint && window.__kopuzMint('{vid}', {id})"
+            ));
         }
     });
-
-    KEEPALIVE.with(|k| *k.borrow_mut() = Some((window, webview)));
-    eprintln!("[pot-minter] installed (anon PoToken minting via webview)");
 }
