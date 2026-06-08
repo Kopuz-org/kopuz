@@ -97,6 +97,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: kopuz-windows-msi
-          path: target/dx/**/*.msi
+          name: kopuz-windows-installer
+          path: |
+            target/dx/**/*setup*.exe
+            target/dx/**/*.msi
           if-no-files-found: warn
