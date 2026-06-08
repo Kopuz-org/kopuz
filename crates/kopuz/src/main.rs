@@ -36,6 +36,8 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
 use windows::Win32::Foundation::HWND;
 
+#[cfg(target_os = "linux")]
+mod pot_minter;
 mod queue_state;
 mod web_storage;
 #[cfg(target_os = "windows")]
@@ -567,6 +569,12 @@ fn main() {
             .with_background_color((0, 0, 0, 255))
             .with_data_directory(webview_data_dir)
             .with_window(window)
+            // Anon PoToken minter: stand up the hidden music.youtube.com webview
+            // once we have the event-loop target (issue #349).
+            .with_custom_event_handler(|_event, _target| {
+                #[cfg(target_os = "linux")]
+                crate::pot_minter::install(_target);
+            })
             .with_asynchronous_custom_protocol(
                 "artwork",
                 |_id, request, responder: RequestAsyncResponder| {

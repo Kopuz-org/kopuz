@@ -3851,6 +3851,7 @@ dependencies = [
  "discord-presence",
  "discord-rich-presence",
  "getrandom 0.4.2",
+ "glib",
  "hooks",
  "http 1.4.1",
  "i18n",
