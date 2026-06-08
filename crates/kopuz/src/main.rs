@@ -857,7 +857,9 @@ fn App() -> Element {
     // botguard — the decipher path uses the engine already loaded for the UI.
     use_hook(|| {
         let (engine, mut rx) = server::ytmusic::decipher::webview_channel();
-        let _ = server::ytmusic::decipher::set_engine(engine);
+        if server::ytmusic::decipher::set_engine(engine).is_err() {
+            eprintln!("[yt-decipher] engine already registered — webview solver not active");
+        }
         spawn(async move {
             while let Some(req) = rx.recv().await {
                 // Always send exactly one message back: the printed result, or
@@ -869,12 +871,21 @@ fn App() -> Element {
                      try{{{}}}catch(e){{dioxus.send('\\u0000ERR'+(e&&e.stack?e.stack:e));}}",
                     req.program
                 );
-                let result = match dioxus::document::eval(&wrapped).recv::<String>().await {
-                    Ok(s) => match s.strip_prefix('\u{0}') {
+                // Bound the wait — a non-returning solver script must not stall
+                // the decipher queue forever.
+                let mut eval = dioxus::document::eval(&wrapped);
+                let result = match tokio::time::timeout(
+                    std::time::Duration::from_secs(20),
+                    eval.recv::<String>(),
+                )
+                .await
+                {
+                    Ok(Ok(s)) => match s.strip_prefix('\u{0}') {
                         Some(err) => Err(format!("webview JS: {}", err.trim_start_matches("ERR"))),
                         None => Ok(s),
                     },
-                    Err(e) => Err(format!("webview eval recv: {e}")),
+                    Ok(Err(e)) => Err(format!("webview eval recv: {e}")),
+                    Err(_) => Err("webview decipher timed out".to_string()),
                 };
                 let _ = req.reply.send(result);
             }

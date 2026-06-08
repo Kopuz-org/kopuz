@@ -664,6 +664,10 @@ impl PlayerController {
                     let current_queue_index_for_yt = self.current_queue_index;
                     let mut current_song_duration_for_yt = self.current_song_duration;
                     let mut current_song_bitrate_for_yt = self.current_song_bitrate;
+                    // Physical queue slot for the metadata write-backs below — the
+                    // resolve closure's `get_mut` indexes the raw Vec, so the
+                    // display/shuffle `idx` would hit the wrong track in shuffle.
+                    let phys_idx = self.get_queue_index(idx);
 
                     if !use_crossfade {
                         self.hydrate_current_track_metadata(idx, 0);
@@ -704,7 +708,9 @@ impl PlayerController {
                                         && let Some(secs) = info.duration_secs
                                         && secs > 0
                                     {
-                                        if let Some(t) = queue_for_yt.write().get_mut(idx) {
+                                        if let Some(p) = phys_idx
+                                            && let Some(t) = queue_for_yt.write().get_mut(p)
+                                        {
                                             t.duration = secs;
                                         }
                                         if *current_queue_index_for_yt.peek() == idx {
@@ -719,7 +725,9 @@ impl PlayerController {
                                         && let Some(bps) = info.bitrate
                                     {
                                         let kbps = (bps / 1000) as u16;
-                                        if let Some(t) = queue_for_yt.write().get_mut(idx) {
+                                        if let Some(p) = phys_idx
+                                            && let Some(t) = queue_for_yt.write().get_mut(p)
+                                        {
                                             t.bitrate = kbps;
                                         }
                                         if *current_queue_index_for_yt.peek() == idx {

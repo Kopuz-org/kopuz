@@ -33,8 +33,9 @@
 
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tokio::sync::{OnceCell, mpsc, oneshot};
@@ -223,19 +224,27 @@ fn pct_encode(s: &str) -> String {
 
 // ---- base.js (player JS) fetch + signatureTimestamp cache --------------
 
-/// Cached `(base_js, signature_timestamp)`. `base.js` rotates every few
-/// hours; the matching `signatureTimestamp` must be sent on `/player` so the
-/// `signatureCipher` YouTube returns corresponds to the `base.js` we hold.
-/// Caching the pair keeps them consistent. Refreshed on process restart (and
-/// callers should re-fetch if decipher starts failing after a rotation).
-static PLAYER_JS: OnceCell<(String, u64)> = OnceCell::const_new();
+/// Cached `(base_js, signature_timestamp)` with a refresh TTL. `base.js` rotates
+/// every few hours and its `signatureTimestamp` must match, so we re-fetch the
+/// pair periodically instead of pinning it for the whole process — otherwise a
+/// rotation would break decipher until restart.
+static PLAYER_JS: Mutex<Option<(Instant, Arc<(String, u64)>)>> = Mutex::new(None);
+const PLAYER_JS_TTL: Duration = Duration::from_secs(60 * 60);
 
-/// Fetch (once, then cached) YouTube's player `base.js` and its embedded
-/// `signatureTimestamp`. Seeded from any `video_id`'s watch page.
-pub async fn player_js(video_id: &str) -> Result<&'static (String, u64), String> {
-    PLAYER_JS
-        .get_or_try_init(|| async { fetch_player_js(video_id).await })
-        .await
+/// Fetch YouTube's player `base.js` and its embedded `signatureTimestamp`,
+/// cached for [`PLAYER_JS_TTL`]. Seeded from any `video_id`'s watch page.
+pub async fn player_js(video_id: &str) -> Result<Arc<(String, u64)>, String> {
+    if let Ok(g) = PLAYER_JS.lock()
+        && let Some((at, data)) = g.as_ref()
+        && at.elapsed() < PLAYER_JS_TTL
+    {
+        return Ok(data.clone());
+    }
+    let data = Arc::new(fetch_player_js(video_id).await?);
+    if let Ok(mut g) = PLAYER_JS.lock() {
+        *g = Some((Instant::now(), data.clone()));
+    }
+    Ok(data)
 }
 
 async fn fetch_player_js(video_id: &str) -> Result<(String, u64), String> {
@@ -335,17 +344,44 @@ impl JsEngine for SubprocessEngine {
                 std::process::id(),
                 SEQ.fetch_add(1, Ordering::Relaxed)
             ));
-            tokio::fs::write(&path, program)
-                .await
-                .map_err(|e| format!("write solver temp: {e}"))?;
-            let out = tokio::process::Command::new(rt.bin)
+            // O_EXCL: never write through a pre-existing (possibly symlinked) path.
+            {
+                use tokio::io::AsyncWriteExt;
+                let mut f = tokio::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&path)
+                    .await
+                    .map_err(|e| format!("create solver temp: {e}"))?;
+                f.write_all(program.as_bytes())
+                    .await
+                    .map_err(|e| format!("write solver temp: {e}"))?;
+            }
+            let mut child = match tokio::process::Command::new(rt.bin)
                 .args(rt.args)
                 .arg(&path)
-                .output()
-                .await
-                .map_err(|e| format!("spawn {}: {e}", rt.bin));
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .kill_on_drop(true)
+                .spawn()
+            {
+                Ok(c) => c,
+                Err(e) => {
+                    let _ = tokio::fs::remove_file(&path).await;
+                    return Err(format!("spawn {}: {e}", rt.bin));
+                }
+            };
+            // Bound it — a hung runtime must not stall deciphering. On timeout the
+            // dropped future kills the child (kill_on_drop).
+            let out =
+                tokio::time::timeout(std::time::Duration::from_secs(30), child.wait_with_output())
+                    .await;
             let _ = tokio::fs::remove_file(&path).await;
-            let out = out?;
+            let out = match out {
+                Ok(Ok(o)) => o,
+                Ok(Err(e)) => return Err(format!("{}: {e}", rt.bin)),
+                Err(_) => return Err(format!("{} solver timed out (30s)", rt.bin)),
+            };
             if !out.status.success() {
                 let err = String::from_utf8_lossy(&out.stderr);
                 let head: String = err.chars().take(200).collect();

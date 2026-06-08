@@ -148,7 +148,9 @@ pub fn install_if_wanted<T: 'static>(target: &EventLoopWindowTarget<T>) {
     if !WANT.load(Ordering::Relaxed) {
         return;
     }
-    if INSTALLED.with(|c| c.replace(true)) {
+    // Only mark installed once setup actually succeeds — otherwise a transient
+    // failure on the way down would wedge the minter off for the whole session.
+    if INSTALLED.with(|c| c.get()) {
         return;
     }
 
@@ -229,6 +231,7 @@ pub fn install_if_wanted<T: 'static>(target: &EventLoopWindowTarget<T>) {
             rx,
         });
     });
+    INSTALLED.with(|c| c.set(true));
     eprintln!("[pot-minter] installed (anon PoToken minting via webview)");
 }
 

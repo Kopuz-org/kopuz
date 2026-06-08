@@ -153,6 +153,15 @@ fn in_flatpak() -> bool {
 /// Resolve the browser command on the *host* PATH (the sandbox can't stat host
 /// binaries). Probes each candidate with `flatpak-spawn --host command -v`.
 async fn find_host_browser_bin(browser: Browser) -> Option<String> {
+    // Honour an explicit override (e.g. a non-standard host install path) — same
+    // escape hatch as the native `find_browser_bin`. `flatpak-spawn --host` runs
+    // it in the host environment, so an absolute host path works.
+    let env_key = format!("KOPUZ_{}_BIN", browser.id().to_uppercase().replace('-', "_"));
+    if let Some(v) = std::env::var_os(&env_key)
+        && !v.is_empty()
+    {
+        return Some(v.to_string_lossy().into_owned());
+    }
     for cand in browser_candidates(browser) {
         let ok = Command::new("flatpak-spawn")
             .args(["--host", "sh", "-c"])

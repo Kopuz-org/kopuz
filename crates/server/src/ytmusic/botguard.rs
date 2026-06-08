@@ -51,6 +51,12 @@ pub async fn mint_content_pot(video_id: &str) -> Result<String, String> {
         reply,
     })
     .map_err(|_| "PO token minter channel closed".to_string())?;
-    rx.await
-        .map_err(|_| "PO token minter dropped the reply".to_string())?
+    // Bound the wait: if the webview bridge isn't ready (page still loading /
+    // navigating, `window.__kopuzMint` not yet defined) the dispatch is a no-op
+    // and no reply ever comes — without this the caller would hang forever.
+    match tokio::time::timeout(std::time::Duration::from_secs(15), rx).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(_)) => Err("PO token minter dropped the reply".to_string()),
+        Err(_) => Err("PO token mint timed out (webview not ready)".to_string()),
+    }
 }
