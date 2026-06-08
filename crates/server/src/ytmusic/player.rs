@@ -1,23 +1,19 @@
 //! Resolve a video_id to a playable stream URL.
 //!
-//! Primary path: ANDROID_VR_1_61_48 + a content-bound PO token in the
-//! request body. The PO token is minted via `rustypipe-botguard`, a
-//! `visitor_data` is fetched once per process and reused. The URL that
-//! comes back is plain (no `signatureCipher`) and accepts arbitrary Range
-//! fetches — symphonia can seek inside the track normally.
+//! Primary path: native sig/n deciphering (`decipher`) against WEB_REMIX.
+//! With cookies this unlocks Premium itags (~270 kbps); anonymously it serves
+//! the standard ~128 kbps. No PO token is needed either way — an authenticated
+//! session is its own proof-of-origin (issue #349).
 //!
-//! Fallback path: if anything in the primary fails (PO mint, visitor_data
-//! fetch, or `/player` itself), walk `STREAM_FALLBACK_CLIENTS` from
-//! `clients.rs` without a PO token. Most of those don't accept one. This
-//! is a safety net for the day Google changes ANDROID_VR's behavior.
+//! Fallback path: if deciphering is unavailable (no JS engine wired yet) or
+//! fails, walk `STREAM_FALLBACK_CLIENTS` (ANDROID_VR) bare — they still hand
+//! back plain ~128 kbps URLs without a PO token, so anonymous playback keeps
+//! working with zero external dependencies.
 
 use serde_json::Value;
-use tokio::sync::OnceCell;
 
-use super::botguard;
-use super::clients::{
-    ANDROID_VR_1_61_48, MAIN_CLIENT, STREAM_FALLBACK_CLIENTS, YouTubeClient,
-};
+use super::clients::{STREAM_FALLBACK_CLIENTS, WEB_REMIX, YouTubeClient};
+use super::decipher;
 use super::innertube::{self, PlayerExtras};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -54,131 +50,43 @@ pub struct YtStreamInfo {
     pub duration_secs: Option<u64>,
 }
 
-/// Process-wide visitor_data cache. Bound to whatever auth state was
-/// active on first fetch; for our case (single signed-in user per process)
-/// that's fine. Stale data is benign — it just means slightly different
-/// per-IP heuristics. Replaced naturally on process restart.
-static VISITOR_DATA: OnceCell<String> = OnceCell::const_new();
-
-async fn visitor_data(cookies: Option<&str>) -> Result<&'static str, String> {
-    VISITOR_DATA
-        .get_or_try_init(|| async { innertube::visitor_id(cookies).await })
-        .await
-        .map(|s| s.as_str())
-}
-
-/// Resolve a YT video to a playable stream. Cookies are optional —
-/// the primary ANDROID_VR + content_pot path doesn't need them at all
-/// (visitor_data fetches anonymously, ANDROID_VR is login_supported=
-/// false). Without cookies, Music-Premium-locked tracks naturally
-/// hit UNPLAYABLE and fall through; everything else plays normally.
+/// Resolve a YT video to a playable stream. Native decipher (WEB_REMIX) is
+/// tried first — with cookies it returns Premium itags, anonymously the
+/// ~128 kbps ceiling, and no PO token in either case. On failure we fall back
+/// to the ANDROID_VR clients, which still return plain ~128 kbps URLs bare —
+/// no JS engine required, so anonymous playback always has a path.
 pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamInfo, String> {
-    // Primary: ANDROID_VR + content_pot. Mint and visitor_data in parallel.
-    let (pot_result, visitor_result) = tokio::join!(
-        botguard::mint_content_pot(video_id),
-        visitor_data(cookies),
-    );
-
-    let mut primary_err: Option<String> = match (pot_result.as_ref(), visitor_result) {
-        (Ok(pot), Ok(visitor)) => {
-            let extras = PlayerExtras {
-                content_pot: Some(pot.as_str()),
-                visitor_data: Some(visitor),
-            };
-            match innertube::player(ANDROID_VR_1_61_48, video_id, None, extras).await {
-                Ok(json) => {
-                    let status = PlayabilityStatus::from_response(&json);
-                    if status == PlayabilityStatus::Ok {
-                        if let Some(info) = pick_plain_format(&json, ANDROID_VR_1_61_48) {
-                            return Ok(info);
-                        }
-                        Some("ANDROID_VR+pot: no plain audio format".to_string())
-                    } else {
-                        Some(format!(
-                            "ANDROID_VR+pot playability {}: {}",
-                            status.as_str(),
-                            playability_reason(&json)
-                        ))
-                    }
-                }
-                Err(e) => Some(format!("ANDROID_VR+pot: {e}")),
-            }
+    let mut last_err = match try_native_decipher(video_id, cookies).await {
+        Ok(info) => return Ok(info),
+        Err(e) => {
+            eprintln!("[yt-player] native decipher failed ({e}) — falling back to ANDROID_VR");
+            e
         }
-        (Err(e), _) => {
-            // Specifically detect "binary missing" — the fallback chain
-            // will return URLs that 403 on chunked Range fetches past the
-            // first MiB, so degrading to it leaves the user with a track
-            // that plays for 5 s then dies. Better to surface the real
-            // problem immediately.
-            if e.contains("not found") || e.contains("No such file") {
-                return Err(
-                    "rustypipe-botguard not installed — run:\n  cargo install rustypipe-botguard --version 0.1.2".to_string()
-                );
-            }
-            Some(format!("PO mint failed: {e}"))
-        }
-        (_, Err(e)) => Some(format!("visitor_data fetch failed: {e}")),
     };
 
-    if let Some(reason) = primary_err.as_deref() {
-        eprintln!("[yt-player] primary path failed ({reason}) — falling back to client chain");
-    }
-
-    // Fallback chain — kept around in case Google changes ANDROID_VR's
-    // behavior. None of these accept a PO token, so they're sent bare.
-    let main =
-        innertube::player(MAIN_CLIENT, video_id, cookies, PlayerExtras::default()).await;
-    if let Ok(json) = &main {
-        if PlayabilityStatus::from_response(json) == PlayabilityStatus::Ok
-            && let Some(info) = pick_plain_format(json, MAIN_CLIENT)
-        {
-            return Ok(info);
-        }
-    } else if let Err(e) = main {
-        primary_err = Some(format!("{}: {e}", MAIN_CLIENT.client_name));
-    }
     for client in STREAM_FALLBACK_CLIENTS {
         let cookies_for = if client.login_supported { cookies } else { None };
         match innertube::player(*client, video_id, cookies_for, PlayerExtras::default()).await {
             Ok(json) => {
                 let status = PlayabilityStatus::from_response(&json);
                 if !status.is_attemptable() {
-                    primary_err = Some(format!(
+                    last_err = format!(
                         "{} playability {}: {}",
                         client.client_name,
                         status.as_str(),
                         playability_reason(&json)
-                    ));
+                    );
                     continue;
                 }
                 if let Some(info) = pick_plain_format(&json, *client) {
                     return Ok(info);
                 }
-                primary_err = Some(format!(
-                    "{} returned no plain audio formats",
-                    client.client_name
-                ));
+                last_err = format!("{} returned no plain audio formats", client.client_name);
             }
-            Err(e) => {
-                primary_err = Some(format!("{}: {e}", client.client_name));
-            }
+            Err(e) => last_err = format!("{}: {e}", client.client_name),
         }
     }
-    let primary_err = primary_err.unwrap_or_else(|| "no client returned a usable stream URL".to_string());
-    eprintln!("[yt-player] InnerTube chain exhausted ({primary_err}) — trying yt-dlp fallback");
-    // yt-dlp still wants cookies for Music-Premium tracks; pass an
-    // empty header when we're anonymous, the fallback will just fail
-    // for Premium-locked content (acceptable for anon mode).
-    let cookies_for_ytdlp = cookies.unwrap_or("");
-    match super::ytdlp_fallback::resolve(video_id, cookies_for_ytdlp).await {
-        Ok(info) => {
-            eprintln!("[yt-player] yt-dlp fallback succeeded");
-            Ok(info)
-        }
-        Err(yt_err) => Err(format!(
-            "{primary_err}; yt-dlp fallback also failed: {yt_err}"
-        )),
-    }
+    Err(format!("all stream paths failed; last error: {last_err}"))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -294,4 +202,80 @@ fn pick_plain_format(json: &Value, client: YouTubeClient) -> Option<YtStreamInfo
         content_length,
         duration_secs,
     })
+}
+
+/// Best audio format by bitrate, regardless of whether it's `signatureCipher`
+/// or plain — the native decipher path handles either.
+fn pick_best_audio(json: &Value) -> Option<&Value> {
+    json.pointer("/streamingData/adaptiveFormats")
+        .and_then(|v| v.as_array())?
+        .iter()
+        .filter(|f| {
+            f.get("mimeType")
+                .and_then(|v| v.as_str())
+                .map(|m| m.starts_with("audio/"))
+                .unwrap_or(false)
+        })
+        .max_by_key(|f| f.get("bitrate").and_then(|v| v.as_u64()).unwrap_or(0))
+}
+
+/// Build a `YtStreamInfo` from an already-resolved (deciphered) URL plus the
+/// format + player JSON it came from.
+fn stream_info_from(
+    json: &Value,
+    fmt: &Value,
+    url: String,
+    client: YouTubeClient,
+) -> Option<YtStreamInfo> {
+    let mime = fmt.get("mimeType")?.as_str()?;
+    let format = AudioFormat::from_mime(mime)?;
+    let content_length = fmt
+        .get("contentLength")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<u64>().ok());
+    let duration_secs = json
+        .pointer("/videoDetails/lengthSeconds")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<u64>().ok())
+        .or_else(|| {
+            fmt.get("approxDurationMs")
+                .and_then(|v| v.as_str())
+                .and_then(|s| s.parse::<u64>().ok())
+                .map(|ms| (ms + 500) / 1000)
+        });
+    Some(YtStreamInfo {
+        url,
+        format,
+        user_agent: client.user_agent.to_string(),
+        content_length,
+        duration_secs,
+    })
+}
+
+/// WEB_REMIX + native sig/n decipher. Authenticated cookies (when present)
+/// unlock Premium itags; **no PO token is sent** — an authenticated session is
+/// its own proof-of-origin (issue #349). Anonymous callers still resolve here,
+/// at the standard ~128 kbps ceiling.
+async fn try_native_decipher(
+    video_id: &str,
+    cookies: Option<&str>,
+) -> Result<YtStreamInfo, String> {
+    let player = decipher::player_js(video_id).await?;
+    let extras = PlayerExtras {
+        signature_timestamp: Some(player.1),
+        ..Default::default()
+    };
+    let json = innertube::player(WEB_REMIX, video_id, cookies, extras).await?;
+    let status = PlayabilityStatus::from_response(&json);
+    if status != PlayabilityStatus::Ok {
+        return Err(format!(
+            "WEB_REMIX playability {}: {}",
+            status.as_str(),
+            playability_reason(&json)
+        ));
+    }
+    let fmt = pick_best_audio(&json).ok_or("WEB_REMIX returned no audio format")?;
+    let url = decipher::deciphered_url(&player.0, fmt).await?;
+    stream_info_from(&json, fmt, url, WEB_REMIX)
+        .ok_or_else(|| "deciphered format missing fields".to_string())
 }

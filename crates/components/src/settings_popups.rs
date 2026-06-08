@@ -233,8 +233,6 @@ fn ServerServiceFields(
     mut yt_anonymous: Signal<bool>,
     server_url_placeholder: String,
 ) -> Element {
-    let mut botguard_status: Signal<Option<Result<(), String>>> = use_signal(|| None);
-
     // Browser sign-in is disabled on Windows for now — the Google
     // accounts page renders blank in the isolated profile there
     // (about:blank under the hood). Force anonymous so Windows users
@@ -304,36 +302,6 @@ fn ServerServiceFields(
                     }
                 }
 
-                // botguard helper is needed for playback in BOTH modes
-                // (it mints the content PO token), so the check stays
-                // visible regardless of auth method.
-                div { class: "flex items-center gap-2 mt-2",
-                    button {
-                        class: "text-xs px-2 py-1 rounded bg-white/10 hover:bg-white/20 transition-colors",
-                        onclick: move |_| {
-                            spawn(async move {
-                                let res = ::server::ytmusic::botguard::check_available().await;
-                                botguard_status.set(Some(res));
-                            });
-                        },
-                        "Check rustypipe-botguard"
-                    }
-                    {match botguard_status.read().as_ref() {
-                        Some(Ok(())) => rsx! {
-                            span { class: "text-xs text-emerald-400",
-                                i { class: "fa-solid fa-check mr-1" }
-                                "Installed"
-                            }
-                        },
-                        Some(Err(msg)) => rsx! {
-                            span { class: "text-xs text-rose-400 whitespace-pre-line",
-                                i { class: "fa-solid fa-xmark mr-1" }
-                                "{msg}"
-                            }
-                        },
-                        None => rsx! { span {} },
-                    }}
-                }
             }
         },
         _ => rsx! {

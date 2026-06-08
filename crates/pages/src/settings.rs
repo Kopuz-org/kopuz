@@ -184,15 +184,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             ctrl.playback_error.set(Some(msg));
         };
         spawn(async move {
-            if let Err(e) =
-                server::ytmusic::YouTubeMusicClient::new().check_botguard_available().await
-            {
-                report(format!(
-                    "YouTube Music needs the rustypipe-botguard helper. {e}"
-                ));
-                return;
-            }
-
             let cookies = match ensure_signed_in(existing, browser, &server_id).await {
                 Ok(c) => c,
                 Err(e) => {
@@ -237,22 +228,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         let url_input = server_url();
 
         spawn(async move {
-            // For YT Music we refuse to even create the server entry if
-            // the botguard helper isn't installed — otherwise the user
-            // gets a dead-on-arrival server they can't actually play
-            // from. The probe is cheap (~ms) and happens before any
-            // mutation of the config.
-            if is_ytmusic {
-                if let Err(msg) =
-                    ::server::ytmusic::botguard::check_available().await
-                {
-                    error.set(Some(format!(
-                        "Can't add YouTube Music server: {msg}"
-                    )));
-                    return;
-                }
-            }
-
             let display_name = if name_input.is_empty() {
                 format!("Local {}", selected_service.display_name())
             } else {

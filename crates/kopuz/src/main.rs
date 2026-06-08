@@ -842,6 +842,29 @@ fn main() {
 
 #[component]
 fn App() -> Element {
+    // Native YouTube sig/n deciphering runs in this WebView's own
+    // JavaScriptCore (issue #349): register a JS engine that forwards each
+    // solver program to this task, which executes it via `document::eval` and
+    // returns the printed result. No external JS runtime, no yt-dlp, no
+    // botguard — the decipher path uses the engine already loaded for the UI.
+    use_hook(|| {
+        let (engine, mut rx) = server::ytmusic::decipher::webview_channel();
+        let _ = server::ytmusic::decipher::set_engine(engine);
+        spawn(async move {
+            while let Some(req) = rx.recv().await {
+                let wrapped =
+                    format!("globalThis.print = (s) => dioxus.send(s);\n{}", req.program);
+                let result = {
+                    let mut eval = dioxus::document::eval(&wrapped);
+                    eval.recv::<String>()
+                        .await
+                        .map_err(|e| format!("webview eval: {e}"))
+                };
+                let _ = req.reply.send(result);
+            }
+        });
+    });
+
     let mut library = use_signal(reader::Library::default);
     let mut current_route = use_signal(|| Route::Home);
     let mut scroll_positions: Signal<std::collections::HashMap<Route, f64>> =
