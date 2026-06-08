@@ -11,6 +11,9 @@
 //!
 //! No yt-dlp, no external binary (issue #349).
 
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+
 use serde_json::Value;
 use tokio::sync::OnceCell;
 
@@ -73,11 +76,43 @@ async fn visitor_data(cookies: Option<&str>) -> Result<&'static str, String> {
 /// anonymous → ANDROID_VR + a webview-minted content pot; last resort →
 /// ANDROID_VR bare.
 pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamInfo, String> {
-    // Premium: the account session authorises sustained streaming, no pot.
-    if cookies.is_some() {
-        match try_native_decipher(video_id, cookies).await {
-            Ok(info) => return Ok(info),
-            Err(e) => eprintln!("[yt-player] premium decipher failed ({e}) — falling back"),
+    // A Premium *subscription* — not merely being signed in — is what exempts a
+    // stream from a PO token. The signal is the itag: subscribers get 774-class
+    // Opus; a signed-in *free* account gets the same 251 as anon and still 403s
+    // on deep ranges without a content pot. So only short-circuit on a Premium
+    // itag; otherwise fall through to the pot path (which ignores cookies — free
+    // accounts cap at 251 regardless, so nothing is lost).
+    // Hold a non-Premium decipher result as a graceful fallback: if no pot can
+    // be minted (e.g. minter not running / unported platform), this still plays
+    // from the start — only deep seeks 403 — which beats total failure.
+    let mut decipher_fallback: Option<YtStreamInfo> = None;
+    if let Some(c) = cookies {
+        let uid = super::derive_user_id(c);
+        // Skip the Premium decipher attempt for accounts already known to be
+        // non-Premium — but only when a pot can actually be minted (the decipher
+        // stream is our fallback when it can't). Saves a /player round-trip per
+        // track once the account's tier is learned.
+        let skip = uid.as_deref().is_some_and(known_non_premium) && botguard::is_available();
+        if !skip {
+            match try_native_decipher(video_id, cookies).await {
+                Ok(info) if is_premium_itag(info.itag) => {
+                    if let Some(u) = &uid {
+                        remember_tier(u, true);
+                    }
+                    return Ok(info);
+                }
+                Ok(info) => {
+                    if let Some(u) = &uid {
+                        remember_tier(u, false);
+                    }
+                    eprintln!(
+                        "[yt-player] {video_id} signed-in but non-Premium (itag={:?}) — needs a content pot, trying ANDROID_VR",
+                        info.itag
+                    );
+                    decipher_fallback = Some(info);
+                }
+                Err(e) => eprintln!("[yt-player] decipher failed ({e}) — falling back"),
+            }
         }
     }
 
@@ -139,7 +174,42 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
             Err(e) => last_err = format!("{}: {e}", client.client_name),
         }
     }
+    if let Some(info) = decipher_fallback {
+        eprintln!(
+            "[yt-player] {video_id} no content pot available (minter not running?) — using the non-Premium decipher stream; deep seeks may 403"
+        );
+        return Ok(info);
+    }
     Err(format!("all stream paths failed; last error: {last_err}"))
+}
+
+/// A Premium *subscription* yields 774-class Opus and is PO-token-exempt. Any
+/// lesser itag (251, etc.) — even from a signed-in account — needs a content
+/// pot for deep ranges, exactly like anonymous.
+fn is_premium_itag(itag: Option<u32>) -> bool {
+    matches!(itag, Some(774))
+}
+
+/// Premium-tier memo, keyed by Google user id (so switching accounts re-learns).
+/// Lets us skip the redundant Premium decipher attempt for accounts already
+/// known to be non-Premium.
+static ACCOUNT_PREMIUM: OnceLock<Mutex<HashMap<String, bool>>> = OnceLock::new();
+
+fn account_premium() -> &'static Mutex<HashMap<String, bool>> {
+    ACCOUNT_PREMIUM.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn known_non_premium(user_id: &str) -> bool {
+    matches!(
+        account_premium().lock().ok().and_then(|m| m.get(user_id).copied()),
+        Some(false)
+    )
+}
+
+fn remember_tier(user_id: &str, premium: bool) {
+    if let Ok(mut m) = account_premium().lock() {
+        m.insert(user_id.to_string(), premium);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
