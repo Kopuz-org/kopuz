@@ -262,10 +262,20 @@ pub async fn launch_signin_and_extract(
         "[yt-signin] launching {bin} against {} (sign-in URL: {SIGNIN_URL})",
         profile.display()
     );
-    let mut child = browser_command(&bin)
-        .arg("--no-first-run")
+    let mut cmd = browser_command(&bin);
+    cmd.arg("--no-first-run")
         .arg("--no-default-browser-check")
-        .arg(format!("--user-data-dir={}", profile.display()))
+        .arg(format!("--user-data-dir={}", profile.display()));
+    // kopuz's own UI is WebView2 (Chromium), so kopuz runs inside a Windows job
+    // object. A spawned Chrome inherits it, and Chromium's sandbox can't create
+    // the nested jobs its renderer/GPU children need (the sandbox job's
+    // active-process quota is 1) — the window opens but the content is dead (no
+    // DOM, no network, not even right-clickable). CREATE_BREAKAWAY_FROM_JOB
+    // (0x01000000) detaches the child from kopuz's job so the browser's own
+    // sandbox jobs can be created.
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x0100_0000);
+    let mut child = cmd
         .arg(SIGNIN_URL)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
