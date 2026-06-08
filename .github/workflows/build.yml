@@ -79,5 +79,24 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build Windows app
-        run: cargo build -p kopuz --locked
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install dioxus-cli
+        run: cargo binstall dioxus-cli@0.7.9 -y
+
+      - name: Bundle Windows installer (.msi)
+        run: dx bundle --release --platform desktop --package kopuz
+
+      - name: List bundle output
+        if: always()
+        shell: pwsh
+        run: Get-ChildItem -Recurse target/dx -Include *.msi,*.exe -ErrorAction SilentlyContinue | Select-Object FullName
+
+      - name: Upload Windows installer
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kopuz-windows-msi
+          path: target/dx/**/*.msi
+          if-no-files-found: warn
