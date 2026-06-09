@@ -62,16 +62,10 @@ async fn ensure_signed_in(
         return Ok(c);
     }
 
-    let profile = ::server::ytmusic::isolated_profile::profile_dir(server_id);
-    if profile.is_dir() {
-        let from_profile = ::server::ytmusic::cookies::extract_from(browser, &profile)
-            .await
-            .ok();
-        if let Some(c) = try_resume(from_profile).await {
-            return Ok(c);
-        }
-    }
-
+    // (Previously also tried re-reading an existing profile's Cookies DB to
+    // skip relaunching the browser; that path read encrypted cookies off disk,
+    // which CDP replaces — and CDP needs the browser running — so we go straight
+    // to a sign-in launch when the stored cookies don't resume.)
     let cookies = ::server::ytmusic::isolated_profile::launch_signin_and_extract(
         browser,
         server_id,

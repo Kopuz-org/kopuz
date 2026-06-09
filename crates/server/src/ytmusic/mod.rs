@@ -2,8 +2,8 @@ use reader::models::Track;
 use serde_json::Value;
 
 pub mod botguard;
+mod cdp;
 pub mod clients;
-pub mod cookies;
 pub mod decipher;
 pub mod discover;
 pub mod innertube;
