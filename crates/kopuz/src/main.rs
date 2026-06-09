@@ -36,6 +36,8 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
 use windows::Win32::Foundation::HWND;
 
+#[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+mod pot_minter;
 mod queue_state;
 mod web_storage;
 #[cfg(target_os = "windows")]
@@ -567,6 +569,12 @@ fn main() {
             .with_background_color((0, 0, 0, 255))
             .with_data_directory(webview_data_dir)
             .with_window(window)
+            // Anon PoToken minter: stand up the hidden music.youtube.com webview
+            // once we have the event-loop target (issue #349).
+            .with_custom_event_handler(|_event, _target| {
+                crate::pot_minter::install_if_wanted(_target);
+                crate::pot_minter::pump();
+            })
             .with_asynchronous_custom_protocol(
                 "artwork",
                 |_id, request, responder: RequestAsyncResponder| {
@@ -842,6 +850,48 @@ fn main() {
 
 #[component]
 fn App() -> Element {
+    // Native YouTube sig/n deciphering runs in this WebView's own
+    // JavaScriptCore (issue #349): register a JS engine that forwards each
+    // solver program to this task, which executes it via `document::eval` and
+    // returns the printed result. No external JS runtime, no yt-dlp, no
+    // botguard — the decipher path uses the engine already loaded for the UI.
+    use_hook(|| {
+        let (engine, mut rx) = server::ytmusic::decipher::webview_channel();
+        if server::ytmusic::decipher::set_engine(engine).is_err() {
+            eprintln!("[yt-decipher] engine already registered — webview solver not active");
+        }
+        spawn(async move {
+            while let Some(req) = rx.recv().await {
+                // Always send exactly one message back: the printed result, or
+                // the JS error prefixed with a NUL marker. Without the
+                // try/catch a throwing solver would never call `dioxus.send`
+                // and `recv()` below would hang forever, stalling playback.
+                let wrapped = format!(
+                    "globalThis.print=function(s){{dioxus.send(s);}};\
+                     try{{{}}}catch(e){{dioxus.send('\\u0000ERR'+(e&&e.stack?e.stack:e));}}",
+                    req.program
+                );
+                // Bound the wait — a non-returning solver script must not stall
+                // the decipher queue forever.
+                let mut eval = dioxus::document::eval(&wrapped);
+                let result = match tokio::time::timeout(
+                    std::time::Duration::from_secs(20),
+                    eval.recv::<String>(),
+                )
+                .await
+                {
+                    Ok(Ok(s)) => match s.strip_prefix('\u{0}') {
+                        Some(err) => Err(format!("webview JS: {}", err.trim_start_matches("ERR"))),
+                        None => Ok(s),
+                    },
+                    Ok(Err(e)) => Err(format!("webview eval recv: {e}")),
+                    Err(_) => Err("webview decipher timed out".to_string()),
+                };
+                let _ = req.reply.send(result);
+            }
+        });
+    });
+
     let mut library = use_signal(reader::Library::default);
     let mut current_route = use_signal(|| Route::Home);
     let mut scroll_positions: Signal<std::collections::HashMap<Route, f64>> =
@@ -899,6 +949,23 @@ fn App() -> Element {
     let lib_path = use_memo(move || config_dir().join("library.json"));
     let config_path = use_memo(move || config_dir().join("config.json"));
     let mut config = use_signal(config::AppConfig::default);
+    // Start the PoToken minter whenever a YouTube Music server is active — not
+    // just anon. A *signed-in but non-Premium* account streams the same 251 as
+    // anon and also needs a content pot for deep ranges; only true Premium
+    // subscribers (itag 774) are pot-exempt, and we can't know that until a
+    // track resolves. So run the minter for any YtMusic session; Premium just
+    // leaves it idle. Reactive: fires when config loads or the server changes.
+    #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+    use_effect(move || {
+        let yt_active = config
+            .read()
+            .server
+            .as_ref()
+            .is_some_and(|s| s.service == config::MusicService::YtMusic);
+        if yt_active {
+            crate::pot_minter::request();
+        }
+    });
     #[allow(unused_variables)]
     let playlist_path = use_memo(move || config_dir().join("playlists.json"));
     let mut playlist_store = use_signal(reader::PlaylistStore::default);
@@ -2409,7 +2476,6 @@ fn App() -> Element {
                 current_song_album: current_song_album,
                 current_queue_index: current_queue_index,
                 current_song_title: current_song_title,
-                current_song_khz: current_song_khz,
                 current_song_bitrate: current_song_bitrate,
                 current_song_artist: current_song_artist,
                 current_song_cover_url: current_song_cover_url,

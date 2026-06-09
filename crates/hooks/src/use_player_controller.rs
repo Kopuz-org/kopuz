@@ -59,7 +59,7 @@ pub struct PlayerController {
     pub radio_task: Signal<Option<dioxus_core::Task>>,
     pub station_registry: Signal<radio::registry::StationRegistry>,
     /// User-visible playback error. Set when something needs the user's
-    /// attention (missing `rustypipe-botguard`, expired YT cookies, …).
+    /// attention (expired YT cookies, a failed stream resolve, …).
     /// Rendered as a banner by whoever subscribes — currently the
     /// settings popup error sink mirrors it on next open.
     pub playback_error: Signal<Option<String>>,
@@ -663,6 +663,11 @@ impl PlayerController {
                     let mut queue_for_yt = self.queue;
                     let current_queue_index_for_yt = self.current_queue_index;
                     let mut current_song_duration_for_yt = self.current_song_duration;
+                    let mut current_song_bitrate_for_yt = self.current_song_bitrate;
+                    // Physical queue slot for the metadata write-backs below — the
+                    // resolve closure's `get_mut` indexes the raw Vec, so the
+                    // display/shuffle `idx` would hit the wrong track in shuffle.
+                    let phys_idx = self.get_queue_index(idx);
 
                     if !use_crossfade {
                         self.hydrate_current_track_metadata(idx, 0);
@@ -703,11 +708,30 @@ impl PlayerController {
                                         && let Some(secs) = info.duration_secs
                                         && secs > 0
                                     {
-                                        if let Some(t) = queue_for_yt.write().get_mut(idx) {
+                                        if let Some(p) = phys_idx
+                                            && let Some(t) = queue_for_yt.write().get_mut(p)
+                                        {
                                             t.duration = secs;
                                         }
                                         if *current_queue_index_for_yt.peek() == idx {
                                             current_song_duration_for_yt.set(secs);
+                                        }
+                                    }
+                                    // Surface the resolved stream bitrate (kbps) for the
+                                    // debug readout — 128 anon vs ~270 Premium. Write it
+                                    // back onto the queue Track too (YT tracks carry no
+                                    // bitrate metadata), so a re-hydrate doesn't reset it.
+                                    if *play_generation.read() == current_gen
+                                        && let Some(bps) = info.bitrate
+                                    {
+                                        let kbps = (bps / 1000) as u16;
+                                        if let Some(p) = phys_idx
+                                            && let Some(t) = queue_for_yt.write().get_mut(p)
+                                        {
+                                            t.bitrate = kbps;
+                                        }
+                                        if *current_queue_index_for_yt.peek() == idx {
+                                            current_song_bitrate_for_yt.set(kbps);
                                         }
                                     }
                                     (info.url, Some(info.format), Some(info.user_agent))
@@ -1749,8 +1773,10 @@ impl PlayerController {
             return;
         }
         self.queue.set(tracks);
+        // `play_track` already starts track 0 (with history + shuffle handling);
+        // a second bare play call here just bumped the play generation and
+        // spawned a duplicate stream resolve for the same video.
         self.play_track(0);
-        self.play_track_no_history(0);
     }
 
     pub fn add_to_queue(&mut self, tracks: impl IntoIterator<Item = Track>) {

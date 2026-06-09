@@ -80,6 +80,10 @@ fn build_context(client: YouTubeClient) -> Value {
 pub struct PlayerExtras<'a> {
     pub content_pot: Option<&'a str>,
     pub visitor_data: Option<&'a str>,
+    /// `playbackContext.contentPlaybackContext.signatureTimestamp`, sourced
+    /// from the player `base.js` we'll decipher against. Required for
+    /// WEB_REMIX to return a `signatureCipher` matching that `base.js`.
+    pub signature_timestamp: Option<u64>,
 }
 
 /// Hits `/youtubei/v1/player`. For WEB_REMIX we go via music.youtube.com,
@@ -108,6 +112,11 @@ pub async fn player(
     });
     if let Some(pot) = extras.content_pot {
         body["serviceIntegrityDimensions"] = json!({ "poToken": pot });
+    }
+    if let Some(sts) = extras.signature_timestamp {
+        body["playbackContext"] = json!({
+            "contentPlaybackContext": { "signatureTimestamp": sts }
+        });
     }
     if client.is_embedded {
         body["context"]["thirdParty"] = json!({
