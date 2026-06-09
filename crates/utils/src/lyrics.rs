@@ -2,7 +2,7 @@ use percent_encoding::NON_ALPHANUMERIC;
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Mutex, OnceLock};
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Deserialize)]
 struct LrcLibResponse {
@@ -13,9 +13,16 @@ struct LrcLibResponse {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct LyricWord {
+    pub start_time: f64,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub struct LyricLine {
     pub start_time: f64,
     pub text: String,
+    pub words: Vec<LyricWord>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -25,9 +32,13 @@ pub enum Lyrics {
 }
 
 const LYRICS_CACHE_CAPACITY: usize = 256;
+const MUSIXMATCH_ROOT_URL: &str = "https://apic-desktop.musixmatch.com/ws/1.1/";
+const MUSIXMATCH_TIMEOUT: Duration = Duration::from_secs(3);
+const LRCLIB_TIMEOUT: Duration = Duration::from_secs(5);
 
 static LYRICS_CACHE: OnceLock<Mutex<LyricsCache>> = OnceLock::new();
 static LYRICS_INFLIGHT: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+static MUSIXMATCH_TOKEN: OnceLock<Mutex<Option<MusixmatchToken>>> = OnceLock::new();
 
 struct LyricsCache {
     entries: HashMap<String, Option<Lyrics>>,
@@ -37,6 +48,11 @@ struct LyricsCache {
 
 struct LyricsInflightGuard {
     key: String,
+}
+
+struct MusixmatchToken {
+    value: String,
+    expires_at_ms: u128,
 }
 
 impl Drop for LyricsInflightGuard {
@@ -166,7 +182,8 @@ struct SubsonicPlainLyricsData {
 
 // --- Public API ---
 
-/// Fetch lyrics for a track, trying sources in priority order:
+/// Fetch lyrics for a track, trying sources in priority order while preferring
+/// word-timed lyrics over line-only matches:
 /// 1. Local .lrc file alongside the audio file (local tracks only)
 /// 2. Jellyfin or Subsonic server lyrics API (server tracks)
 /// 3. lrclib.net (fallback for all tracks)
@@ -185,11 +202,18 @@ pub async fn fetch_lyrics(
     prefer_local: bool,
 ) -> Option<Lyrics> {
     let cache_key = lyrics_cache_key(artist, title, album, duration, track_path);
+    let total_start = Instant::now();
     if let Some(cached) = lyrics_cache()
         .lock()
         .ok()
         .and_then(|mut cache| cache.get_cloned(&cache_key))
     {
+        tracing::info!(
+            target: "kopuz::lyrics",
+            "cache hit key={} kind={}",
+            log_lyrics_key(&cache_key),
+            lyrics_kind(cached.as_ref())
+        );
         return cached;
     }
 
@@ -228,20 +252,49 @@ pub async fn fetch_lyrics(
     let is_server = track_path.starts_with("jellyfin:")
         || track_path.starts_with("subsonic:")
         || track_path.starts_with("custom:");
+    let mut fallback: Option<Lyrics> = None;
 
     // 1. Local .lrc file (only for local tracks)
-    if !is_server && let Some(lyrics) = fetch_local_lrc(track_path).await {
-        if let Ok(mut cache) = lyrics_cache().lock() {
-            cache.put(cache_key, Some(lyrics.clone()));
+    if !is_server {
+        let started = Instant::now();
+        let local = fetch_local_lrc(track_path).await;
+        tracing::info!(
+            target: "kopuz::lyrics",
+            "local_lrc key={} elapsed_ms={} kind={}",
+            log_lyrics_key(&cache_key),
+            started.elapsed().as_millis(),
+            lyrics_kind(local.as_ref())
+        );
+        if let Some(lyrics) = local {
+            if has_word_timestamps(&lyrics) {
+                if let Ok(mut cache) = lyrics_cache().lock() {
+                    cache.put(cache_key.clone(), Some(lyrics.clone()));
+                }
+                tracing::info!(
+                    target: "kopuz::lyrics",
+                    "selected key={} source=local_lrc kind={} total_ms={}",
+                    log_lyrics_key(&cache_key),
+                    lyrics_kind(Some(&lyrics)),
+                    total_start.elapsed().as_millis()
+                );
+                return Some(lyrics);
+            }
+            fallback = Some(lyrics);
         }
-        return Some(lyrics);
     }
 
     if prefer_local && !is_server {
         if let Ok(mut cache) = lyrics_cache().lock() {
-            cache.put(cache_key, None);
+            cache.put(cache_key.clone(), fallback.clone());
         }
-        return None;
+        tracing::info!(
+            target: "kopuz::lyrics",
+            "selected key={} source=prefer_local kind={} total_ms={}",
+            log_lyrics_key(&cache_key),
+            lyrics_kind(fallback.as_ref()),
+            total_start.elapsed().as_millis()
+        );
+        return fallback;
     }
 
     // 2. Server lyrics
@@ -249,12 +302,32 @@ pub async fn fetch_lyrics(
         if track_path.starts_with("jellyfin:") {
             if let (Some(item_id), Some(token)) =
                 (extract_server_id(track_path, "jellyfin:"), server_token)
-                && let Some(lyrics) = fetch_jellyfin_lyrics(&item_id, server_url, token).await
             {
-                if let Ok(mut cache) = lyrics_cache().lock() {
-                    cache.put(cache_key, Some(lyrics.clone()));
+                let started = Instant::now();
+                let server_lyrics = fetch_jellyfin_lyrics(&item_id, server_url, token).await;
+                tracing::info!(
+                    target: "kopuz::lyrics",
+                    "server_jellyfin key={} elapsed_ms={} kind={}",
+                    log_lyrics_key(&cache_key),
+                    started.elapsed().as_millis(),
+                    lyrics_kind(server_lyrics.as_ref())
+                );
+                if let Some(lyrics) = server_lyrics {
+                    if has_word_timestamps(&lyrics) {
+                        if let Ok(mut cache) = lyrics_cache().lock() {
+                            cache.put(cache_key.clone(), Some(lyrics.clone()));
+                        }
+                        tracing::info!(
+                            target: "kopuz::lyrics",
+                            "selected key={} source=jellyfin kind={} total_ms={}",
+                            log_lyrics_key(&cache_key),
+                            lyrics_kind(Some(&lyrics)),
+                            total_start.elapsed().as_millis()
+                        );
+                        return Some(lyrics);
+                    }
+                    fallback.get_or_insert(lyrics);
                 }
-                return Some(lyrics);
             }
         } else if track_path.starts_with("subsonic:") || track_path.starts_with("custom:") {
             let prefix = if track_path.starts_with("subsonic:") {
@@ -266,22 +339,86 @@ pub async fn fetch_lyrics(
                 extract_server_id(track_path, prefix),
                 server_user_id,
                 server_token,
-            ) && let Some(lyrics) =
-                fetch_subsonic_lyrics(&song_id, server_url, username, password, artist, title).await
-            {
-                if let Ok(mut cache) = lyrics_cache().lock() {
-                    cache.put(cache_key, Some(lyrics.clone()));
+            ) {
+                let started = Instant::now();
+                let server_lyrics =
+                    fetch_subsonic_lyrics(&song_id, server_url, username, password, artist, title)
+                        .await;
+                tracing::info!(
+                    target: "kopuz::lyrics",
+                    "server_subsonic key={} elapsed_ms={} kind={}",
+                    log_lyrics_key(&cache_key),
+                    started.elapsed().as_millis(),
+                    lyrics_kind(server_lyrics.as_ref())
+                );
+                if let Some(lyrics) = server_lyrics {
+                    if has_word_timestamps(&lyrics) {
+                        if let Ok(mut cache) = lyrics_cache().lock() {
+                            cache.put(cache_key.clone(), Some(lyrics.clone()));
+                        }
+                        tracing::info!(
+                            target: "kopuz::lyrics",
+                            "selected key={} source=subsonic kind={} total_ms={}",
+                            log_lyrics_key(&cache_key),
+                            lyrics_kind(Some(&lyrics)),
+                            total_start.elapsed().as_millis()
+                        );
+                        return Some(lyrics);
+                    }
+                    fallback.get_or_insert(lyrics);
                 }
-                return Some(lyrics);
             }
         }
     }
 
-    // 3. lrclib fallback
-    let fetched = fetch_from_lrclib(artist, title, album, duration).await;
-    if let Ok(mut cache) = lyrics_cache().lock() {
-        cache.put(cache_key, fetched.clone());
+    // 3. Musixmatch richsync can provide enhanced word-by-word timestamps.
+    let started = Instant::now();
+    let musixmatch = fetch_from_musixmatch_enhanced(artist, title).await;
+    tracing::info!(
+        target: "kopuz::lyrics",
+        "musixmatch_enhanced key={} elapsed_ms={} kind={}",
+        log_lyrics_key(&cache_key),
+        started.elapsed().as_millis(),
+        lyrics_kind(musixmatch.as_ref())
+    );
+    if let Some(lyrics) = musixmatch {
+        if has_word_timestamps(&lyrics) {
+            if let Ok(mut cache) = lyrics_cache().lock() {
+                cache.put(cache_key.clone(), Some(lyrics.clone()));
+            }
+            tracing::info!(
+                target: "kopuz::lyrics",
+                "selected key={} source=musixmatch kind={} total_ms={}",
+                log_lyrics_key(&cache_key),
+                lyrics_kind(Some(&lyrics)),
+                total_start.elapsed().as_millis()
+            );
+            return Some(lyrics);
+        }
+        fallback.get_or_insert(lyrics);
     }
+
+    // 4. lrclib fallback
+    let started = Instant::now();
+    let lrclib = fetch_from_lrclib(artist, title, album, duration).await;
+    tracing::info!(
+        target: "kopuz::lyrics",
+        "lrclib key={} elapsed_ms={} kind={}",
+        log_lyrics_key(&cache_key),
+        started.elapsed().as_millis(),
+        lyrics_kind(lrclib.as_ref())
+    );
+    let fetched = lrclib.or(fallback);
+    if let Ok(mut cache) = lyrics_cache().lock() {
+        cache.put(cache_key.clone(), fetched.clone());
+    }
+    tracing::info!(
+        target: "kopuz::lyrics",
+        "selected key={} source=final kind={} total_ms={}",
+        log_lyrics_key(&cache_key),
+        lyrics_kind(fetched.as_ref()),
+        total_start.elapsed().as_millis()
+    );
     fetched
 }
 
@@ -297,6 +434,33 @@ pub fn cached_lyrics(
         .lock()
         .ok()
         .and_then(|mut cache| cache.get_cloned(&cache_key))
+}
+
+fn has_word_timestamps(lyrics: &Lyrics) -> bool {
+    match lyrics {
+        Lyrics::Synced(lines) => lines.iter().any(|line| !line.words.is_empty()),
+        Lyrics::Plain(_) => false,
+    }
+}
+
+fn lyrics_kind(lyrics: Option<&Lyrics>) -> &'static str {
+    match lyrics {
+        Some(Lyrics::Synced(lines)) if lines.iter().any(|line| !line.words.is_empty()) => {
+            "synced_word"
+        }
+        Some(Lyrics::Synced(_)) => "synced_line",
+        Some(Lyrics::Plain(_)) => "plain",
+        None => "none",
+    }
+}
+
+fn log_lyrics_key(key: &str) -> String {
+    let trimmed = key.trim();
+    let mut out = trimmed.chars().take(96).collect::<String>();
+    if trimmed.chars().count() > 96 {
+        out.push_str("...");
+    }
+    out
 }
 
 fn lyrics_cache() -> &'static Mutex<LyricsCache> {
@@ -462,6 +626,7 @@ async fn fetch_jellyfin_lyrics(item_id: &str, server_url: &str, token: &str) -> 
                     // Jellyfin uses 100-nanosecond ticks; divide by 10,000,000 to get seconds
                     start_time: ticks as f64 / 10_000_000.0,
                     text: l.text.clone(),
+                    words: Vec::new(),
                 })
             })
             .collect();
@@ -559,6 +724,7 @@ async fn subsonic_get_by_id(
                 l.start.map(|ms| LyricLine {
                     start_time: ms as f64 / 1000.0,
                     text: l.value.clone(),
+                    words: Vec::new(),
                 })
             })
             .collect();
@@ -630,6 +796,284 @@ async fn subsonic_get_by_title(
     }
 }
 
+async fn fetch_from_musixmatch_enhanced(artist: &str, title: &str) -> Option<Lyrics> {
+    let query = format!("{title} {artist}");
+    let query = query.trim();
+    if query.is_empty() {
+        return None;
+    }
+
+    let client = reqwest::Client::new();
+    let started = Instant::now();
+    let search = musixmatch_get(
+        &client,
+        "track.search",
+        vec![
+            ("q", query.to_string()),
+            ("page_size", "5".to_string()),
+            ("page", "1".to_string()),
+        ],
+        true,
+    )
+    .await?;
+    tracing::info!(
+        target: "kopuz::lyrics",
+        "musixmatch request action=track.search elapsed_ms={}",
+        started.elapsed().as_millis()
+    );
+
+    let status = search.pointer("/message/header/status_code")?.as_i64()?;
+    if status != 200 {
+        tracing::info!(
+            target: "kopuz::lyrics",
+            "musixmatch track.search status={status}"
+        );
+        return None;
+    }
+
+    let tracks = search.pointer("/message/body/track_list")?.as_array()?;
+    let Some(track_id) = best_musixmatch_track_id(tracks, query) else {
+        tracing::info!(
+            target: "kopuz::lyrics",
+            "musixmatch no_match query={query:?} candidates={}",
+            tracks.len()
+        );
+        return None;
+    };
+    let started = Instant::now();
+    let richsync = musixmatch_get(
+        &client,
+        "track.richsync.get",
+        vec![("track_id", track_id)],
+        true,
+    )
+    .await?;
+    tracing::info!(
+        target: "kopuz::lyrics",
+        "musixmatch request action=track.richsync.get elapsed_ms={}",
+        started.elapsed().as_millis()
+    );
+
+    let status = richsync.pointer("/message/header/status_code")?.as_i64()?;
+    if status != 200 {
+        tracing::info!(
+            target: "kopuz::lyrics",
+            "musixmatch richsync status={status}"
+        );
+        return None;
+    }
+
+    let body = richsync
+        .pointer("/message/body/richsync/richsync_body")?
+        .as_str()?;
+    let enhanced_lrc = musixmatch_richsync_to_lrc(body)?;
+    let parsed = parse_lrc(&enhanced_lrc);
+    if parsed.iter().any(|line| !line.words.is_empty()) {
+        Some(Lyrics::Synced(parsed))
+    } else {
+        None
+    }
+}
+
+async fn musixmatch_get(
+    client: &reqwest::Client,
+    action: &str,
+    mut query: Vec<(&str, String)>,
+    needs_token: bool,
+) -> Option<serde_json::Value> {
+    if needs_token {
+        let token = musixmatch_token(client).await?;
+        query.push(("usertoken", token));
+    }
+
+    query.push(("app_id", "web-desktop-app-v1.0".to_string()));
+    query.push(("t", now_ms().to_string()));
+
+    client
+        .get(format!("{MUSIXMATCH_ROOT_URL}{action}"))
+        .query(&query)
+        .timeout(MUSIXMATCH_TIMEOUT)
+        .send()
+        .await
+        .map_err(|error| {
+            tracing::info!(
+                target: "kopuz::lyrics",
+                "musixmatch request action={action} failed={error}"
+            );
+        })
+        .ok()?
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|error| {
+            tracing::info!(
+                target: "kopuz::lyrics",
+                "musixmatch request action={action} json_failed={error}"
+            );
+        })
+        .ok()
+}
+
+async fn musixmatch_token(client: &reqwest::Client) -> Option<String> {
+    let now = now_ms();
+    if let Some(token) = musixmatch_token_cache().lock().ok().and_then(|cache| {
+        cache
+            .as_ref()
+            .filter(|token| token.expires_at_ms > now)
+            .map(|token| token.value.clone())
+    }) {
+        return Some(token);
+    }
+
+    let response = client
+        .get(format!("{MUSIXMATCH_ROOT_URL}token.get"))
+        .query(&[
+            ("user_language", "en".to_string()),
+            ("app_id", "web-desktop-app-v1.0".to_string()),
+            ("t", now.to_string()),
+        ])
+        .timeout(MUSIXMATCH_TIMEOUT)
+        .send()
+        .await
+        .map_err(|error| {
+            tracing::info!(
+                target: "kopuz::lyrics",
+                "musixmatch token request failed={error}"
+            );
+        })
+        .ok()?
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|error| {
+            tracing::info!(
+                target: "kopuz::lyrics",
+                "musixmatch token json_failed={error}"
+            );
+        })
+        .ok()?;
+
+    let status = response.pointer("/message/header/status_code")?.as_i64()?;
+    if status != 200 {
+        tracing::info!(
+            target: "kopuz::lyrics",
+            "musixmatch token status={status}"
+        );
+        return None;
+    }
+
+    let token = response
+        .pointer("/message/body/user_token")?
+        .as_str()?
+        .to_string();
+
+    if let Ok(mut cache) = musixmatch_token_cache().lock() {
+        *cache = Some(MusixmatchToken {
+            value: token.clone(),
+            expires_at_ms: now + 10 * 60 * 1000,
+        });
+    }
+
+    Some(token)
+}
+
+fn musixmatch_token_cache() -> &'static Mutex<Option<MusixmatchToken>> {
+    MUSIXMATCH_TOKEN.get_or_init(|| Mutex::new(None))
+}
+
+fn best_musixmatch_track_id(tracks: &[serde_json::Value], query: &str) -> Option<String> {
+    tracks
+        .iter()
+        .filter_map(|entry| {
+            let track = entry.get("track")?;
+            let name = track.get("track_name")?.as_str().unwrap_or_default();
+            let artist = track.get("artist_name")?.as_str().unwrap_or_default();
+            let candidate = format!("{name} {artist}");
+            let score = lyrics_match_score(&candidate, query);
+            let id = track.get("track_id")?.as_i64()?.to_string();
+            Some((score, id))
+        })
+        .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
+        .and_then(|(score, id)| (score >= 65.0).then_some(id))
+}
+
+fn lyrics_match_score(candidate: &str, query: &str) -> f64 {
+    let candidate_tokens = normalized_lyric_match_tokens(candidate);
+    let query_tokens = normalized_lyric_match_tokens(query);
+    if candidate_tokens.is_empty() || query_tokens.is_empty() {
+        return 0.0;
+    }
+
+    let shared = candidate_tokens
+        .iter()
+        .filter(|token| query_tokens.contains(*token))
+        .count();
+    (2 * shared) as f64 * 100.0 / (candidate_tokens.len() + query_tokens.len()) as f64
+}
+
+fn normalized_lyric_match_tokens(value: &str) -> HashSet<String> {
+    value
+        .to_lowercase()
+        .replace("(feat.", " ")
+        .replace("(ft.", " ")
+        .replace("(featuring", " ")
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn musixmatch_richsync_to_lrc(body: &str) -> Option<String> {
+    let rows = serde_json::from_str::<Vec<serde_json::Value>>(body).ok()?;
+    let mut output = String::new();
+
+    for row in rows {
+        let line_start = json_number(&row, "ts")?;
+        output.push('[');
+        output.push_str(&format_lrc_time(line_start));
+        output.push(']');
+
+        if let Some(words) = row.get("l").and_then(|value| value.as_array()) {
+            for word in words {
+                let offset = json_number(word, "o").unwrap_or(0.0);
+                let content = word.get("c").and_then(|value| value.as_str()).unwrap_or("");
+                if content.trim().is_empty() {
+                    continue;
+                }
+                output.push('<');
+                output.push_str(&format_lrc_time(line_start + offset));
+                output.push('>');
+                output.push_str(content);
+                output.push(' ');
+            }
+        }
+
+        output.push('\n');
+    }
+
+    (!output.trim().is_empty()).then_some(output)
+}
+
+fn json_number(value: &serde_json::Value, key: &str) -> Option<f64> {
+    value
+        .get(key)
+        .and_then(|number| number.as_f64().or_else(|| number.as_str()?.parse().ok()))
+}
+
+fn format_lrc_time(time_in_seconds: f64) -> String {
+    let time = time_in_seconds.max(0.0);
+    let total_centiseconds = (time * 100.0).round() as u64;
+    let minutes = total_centiseconds / 6000;
+    let seconds = (total_centiseconds / 100) % 60;
+    let centiseconds = total_centiseconds % 100;
+    format!("{minutes:02}:{seconds:02}.{centiseconds:02}")
+}
+
+fn now_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or_default()
+}
+
 async fn fetch_from_lrclib(
     artist: &str,
     title: &str,
@@ -653,18 +1097,33 @@ async fn fetch_from_lrclib(
     }
 
     let client = reqwest::Client::new();
-    let res = client
+    let res = match client
         .get(&url)
         .header("User-Agent", concat!("Kopuz/", env!("CARGO_PKG_VERSION")))
+        .timeout(LRCLIB_TIMEOUT)
         .send()
         .await
-        .ok()?;
+    {
+        Ok(res) => res,
+        Err(error) => {
+            tracing::info!(
+                target: "kopuz::lyrics",
+                "lrclib get failed={error}"
+            );
+            return None;
+        }
+    };
+
+    let mut fallback = None;
 
     if res.status().is_success()
         && let Ok(data) = res.json::<LrcLibResponse>().await
         && let Some(lyrics) = extract_from_lrclib_response(&data)
     {
-        return Some(lyrics);
+        if has_word_timestamps(&lyrics) {
+            return Some(lyrics);
+        }
+        fallback = Some(lyrics);
     }
 
     let search_url = format!(
@@ -672,24 +1131,37 @@ async fn fetch_from_lrclib(
         percent_encoding::utf8_percent_encode(title, NON_ALPHANUMERIC),
         percent_encoding::utf8_percent_encode(artist, NON_ALPHANUMERIC)
     );
-    let search_res = client
+    let search_res = match client
         .get(&search_url)
         .header("User-Agent", concat!("Kopuz/", env!("CARGO_PKG_VERSION")))
+        .timeout(LRCLIB_TIMEOUT)
         .send()
         .await
-        .ok()?;
+    {
+        Ok(res) => res,
+        Err(error) => {
+            tracing::info!(
+                target: "kopuz::lyrics",
+                "lrclib search failed={error}"
+            );
+            return fallback;
+        }
+    };
 
     if search_res.status().is_success()
         && let Ok(results) = search_res.json::<Vec<LrcLibResponse>>().await
     {
         for data in results {
             if let Some(lyrics) = extract_from_lrclib_response(&data) {
-                return Some(lyrics);
+                if has_word_timestamps(&lyrics) {
+                    return Some(lyrics);
+                }
+                fallback.get_or_insert(lyrics);
             }
         }
     }
 
-    None
+    fallback
 }
 
 fn extract_from_lrclib_response(data: &LrcLibResponse) -> Option<Lyrics> {
@@ -726,70 +1198,48 @@ fn append_translation(target: &mut String, text: &str) {
     }
 }
 
+fn append_line_translation(target: &mut LyricLine, text: &str) {
+    append_translation(&mut target.text, text);
+}
+
 fn parse_lrc(lrc_text: &str) -> Vec<LyricLine> {
     let mut lines: Vec<LyricLine> = Vec::new();
 
-    for line in lrc_text.lines() {
-        let mut current_pos = 0;
-        let mut current_timestamps = Vec::new();
-        let chars: Vec<char> = line.chars().collect();
-        let mut text_start = 0;
+    for raw_line in lrc_text.lines() {
+        let (line_timestamps, content) = extract_line_timestamps(raw_line);
+        let (text, words) = parse_enhanced_words(content);
 
-        while current_pos < chars.len() {
-            if chars[current_pos] == '[' {
-                let mut j = current_pos + 1;
-                while j < chars.len() && chars[j] != ']' {
-                    j += 1;
-                }
-                if j < chars.len() && chars[j] == ']' {
-                    let time_str: String = chars[current_pos + 1..j].iter().collect();
-                    if let Some(time) = parse_lrc_time(&time_str) {
-                        let text: String = chars[text_start..current_pos].iter().collect();
-                        let text = text.trim().to_string();
-                        if !text.is_empty() {
-                            for t in &current_timestamps {
-                                lines.push(LyricLine {
-                                    start_time: *t,
-                                    text: text.clone(),
-                                });
-                            }
-                            current_timestamps.clear();
-                        }
-
-                        current_timestamps.push(time);
-                        current_pos = j + 1;
-                        text_start = current_pos;
-                        continue;
-                    } else if time_str.chars().any(|c| c.is_ascii_alphabetic())
-                        && time_str.contains(':')
-                    {
-                        current_pos = j + 1;
-                        text_start = current_pos;
-                        continue;
-                    }
-                }
+        if line_timestamps.is_empty() {
+            let is_metadata_tag = raw_line.trim().starts_with('[')
+                && raw_line.trim().ends_with(']')
+                && raw_line.contains(':');
+            if is_metadata_tag {
+                continue;
             }
-            current_pos += 1;
-        }
 
-        let text: String = chars[text_start..].iter().collect();
-        let text = text.trim().to_string();
-
-        if current_timestamps.is_empty() {
-            let is_metadata_tag =
-                text.starts_with('[') && text.ends_with(']') && text.contains(':');
-            if !is_metadata_tag {
+            if !words.is_empty() {
+                lines.push(LyricLine {
+                    start_time: words[0].start_time,
+                    text,
+                    words,
+                });
+            } else if !text.is_empty() {
                 if let Some(last) = lines.last_mut() {
-                    append_translation(&mut last.text, &text);
+                    append_line_translation(last, &text);
                 }
             }
             continue;
         }
 
-        for t in current_timestamps {
+        if text.is_empty() && words.is_empty() {
+            continue;
+        }
+
+        for start_time in line_timestamps {
             lines.push(LyricLine {
-                start_time: t,
+                start_time,
                 text: text.clone(),
+                words: words.clone(),
             });
         }
     }
@@ -805,7 +1255,7 @@ fn parse_lrc(lrc_text: &str) -> Vec<LyricLine> {
     for line in lines {
         if let Some(last) = merged.last_mut() {
             if last.start_time == line.start_time {
-                append_translation(&mut last.text, &line.text);
+                append_line_translation(last, &line.text);
                 continue;
             }
         }
@@ -814,6 +1264,83 @@ fn parse_lrc(lrc_text: &str) -> Vec<LyricLine> {
     }
 
     merged
+}
+
+fn extract_line_timestamps(line: &str) -> (Vec<f64>, &str) {
+    let mut timestamps = Vec::new();
+    let mut rest = line.trim_start();
+
+    loop {
+        let Some(after_open) = rest.strip_prefix('[') else {
+            break;
+        };
+        let Some(close_idx) = after_open.find(']') else {
+            break;
+        };
+
+        let tag = &after_open[..close_idx];
+        let after_tag = &after_open[close_idx + 1..];
+        if let Some(time) = parse_lrc_time(tag) {
+            timestamps.push(time);
+            rest = after_tag;
+        } else if tag.chars().any(|c| c.is_ascii_alphabetic()) && tag.contains(':') {
+            rest = after_tag;
+        } else {
+            break;
+        }
+    }
+
+    (timestamps, rest)
+}
+
+fn parse_enhanced_words(content: &str) -> (String, Vec<LyricWord>) {
+    let mut words = Vec::new();
+    let mut text = String::new();
+    let mut rest = content;
+    let mut pending_time: Option<f64> = None;
+
+    while let Some(open_idx) = rest.find('<') {
+        let before = &rest[..open_idx];
+        text.push_str(before);
+        if let Some(start_time) = pending_time.take()
+            && !before.is_empty()
+        {
+            words.push(LyricWord {
+                start_time,
+                text: before.to_string(),
+            });
+        }
+
+        let after_open = &rest[open_idx + 1..];
+        let Some(close_idx) = after_open.find('>') else {
+            text.push_str(&rest[open_idx..]);
+            rest = "";
+            break;
+        };
+
+        let tag = &after_open[..close_idx];
+        if let Some(time) = parse_lrc_time(tag) {
+            pending_time = Some(time);
+            rest = &after_open[close_idx + 1..];
+        } else {
+            text.push('<');
+            text.push_str(tag);
+            text.push('>');
+            rest = &after_open[close_idx + 1..];
+        }
+    }
+
+    text.push_str(rest);
+    if let Some(start_time) = pending_time
+        && !rest.is_empty()
+    {
+        words.push(LyricWord {
+            start_time,
+            text: rest.to_string(),
+        });
+    }
+
+    (text.trim().to_string(), words)
 }
 
 fn parse_lrc_time(time_str: &str) -> Option<f64> {
@@ -831,5 +1358,60 @@ fn parse_lrc_time(time_str: &str) -> Option<f64> {
         Some(total)
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_regular_lrc_lines() {
+        let lines = parse_lrc("[00:01.00]Hello\n[00:02.50]World");
+
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].start_time, 1.0);
+        assert_eq!(lines[0].text, "Hello");
+        assert!(lines[0].words.is_empty());
+        assert_eq!(lines[1].start_time, 2.5);
+        assert_eq!(lines[1].text, "World");
+    }
+
+    #[test]
+    fn parses_enhanced_lrc_word_timestamps() {
+        let lines = parse_lrc("[00:10.00]<00:10.10>Hello <00:10.60>world");
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].start_time, 10.0);
+        assert_eq!(lines[0].text, "Hello world");
+        assert_eq!(lines[0].words.len(), 2);
+        assert_eq!(lines[0].words[0].start_time, 10.1);
+        assert_eq!(lines[0].words[0].text, "Hello ");
+        assert_eq!(lines[0].words[1].start_time, 10.6);
+        assert_eq!(lines[0].words[1].text, "world");
+    }
+
+    #[test]
+    fn detects_word_timed_lyrics() {
+        let line_only = Lyrics::Synced(parse_lrc("[00:01.00]Hello"));
+        let word_timed = Lyrics::Synced(parse_lrc("[00:01.00]<00:01.10>Hello"));
+
+        assert!(!has_word_timestamps(&line_only));
+        assert!(has_word_timestamps(&word_timed));
+    }
+
+    #[test]
+    fn converts_musixmatch_richsync_to_enhanced_lrc() {
+        let body = r#"[{"ts":10.0,"l":[{"o":0.1,"c":"Hello"},{"o":0.6,"c":"world"}]}]"#;
+        let lrc = musixmatch_richsync_to_lrc(body).expect("richsync should convert");
+        let parsed = parse_lrc(&lrc);
+
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].start_time, 10.0);
+        assert_eq!(parsed[0].words.len(), 2);
+        assert_eq!(parsed[0].words[0].start_time, 10.1);
+        assert_eq!(parsed[0].words[0].text, "Hello ");
+        assert_eq!(parsed[0].words[1].start_time, 10.6);
+        assert_eq!(parsed[0].words[1].text, "world ");
     }
 }

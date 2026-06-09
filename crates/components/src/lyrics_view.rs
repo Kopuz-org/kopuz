@@ -3,6 +3,15 @@ use dioxus::{document::eval, prelude::*};
 use hooks::PlayerController;
 use std::fmt;
 
+const FULLSCREEN_LYRIC_CLASS: &str = "text-white/40 text-2xl font-semibold transition-colors duration-300 hover:text-white/60 cursor-pointer whitespace-pre-wrap";
+const FULLSCREEN_ACTIVE_LYRIC_CLASS: &str =
+    "text-white text-2xl font-semibold transition-colors duration-300 whitespace-pre-wrap";
+const RIGHTBAR_LYRIC_CLASS: &str = "text-white/40 text-lg font-semibold transition-colors duration-300 hover:text-white/60 cursor-pointer whitespace-pre-wrap";
+const RIGHTBAR_ACTIVE_LYRIC_CLASS: &str =
+    "text-white text-lg font-semibold transition-colors duration-300 whitespace-pre-wrap";
+const LYRIC_STYLE: &str =
+    "transform: scale(1); transform-origin: center; transition: color 300ms, transform 300ms;";
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LayoutMode {
     Rightbar,
@@ -36,14 +45,8 @@ pub fn LyricsView(
 
     use_hook(move || {
         let (inactive_class, active_class) = match layout {
-            LayoutMode::Fullscreen => (
-                "text-white/40 transition-all duration-300 hover:text-white/60 cursor-pointer whitespace-pre-wrap",
-                "text-white text-2xl font-bold transition-all duration-300 whitespace-pre-wrap",
-            ),
-            LayoutMode::Rightbar => (
-                "text-white/40 transition-all duration-300 hover:text-white/60 cursor-pointer whitespace-pre-wrap",
-                "text-white text-lg font-bold transition-all duration-300 whitespace-pre-wrap",
-            ),
+            LayoutMode::Fullscreen => (FULLSCREEN_LYRIC_CLASS, FULLSCREEN_ACTIVE_LYRIC_CLASS),
+            LayoutMode::Rightbar => (RIGHTBAR_LYRIC_CLASS, RIGHTBAR_ACTIVE_LYRIC_CLASS),
         };
 
         let _update_func = eval(&format!(
@@ -52,19 +55,45 @@ pub fn LyricsView(
                 let activeClass = "{active_class}";
                 let inactiveClass = "{inactive_class}";
 
-                window.__{layout}_updateLyrics = (nextIndex) => {{
+                const resetWords = (lineEl) => {{
+                    lineEl?.querySelectorAll('[data-lyric-word]').forEach((word) => {{
+                        word.style.opacity = '';
+                        word.style.textShadow = '';
+                    }});
+                }};
+
+                const updateWords = (lineEl, activeWordIndex) => {{
+                    lineEl?.querySelectorAll('[data-lyric-word]').forEach((word, index) => {{
+                        if (activeWordIndex >= 0 && index <= activeWordIndex) {{
+                            word.style.opacity = '1';
+                            word.style.textShadow = '0 0 12px rgba(255,255,255,0.72)';
+                        }} else {{
+                            word.style.opacity = '0.45';
+                            word.style.textShadow = '';
+                        }}
+                    }});
+                }};
+
+                window.__{layout}_updateLyrics = (nextIndex, nextWordIndex) => {{
                     let nextEl = document.getElementById(`{layout}-lyrics-${{nextIndex}}`)
                     if (currEl != nextEl) {{
                         if (currEl) {{
                             currEl.className = inactiveClass;
+                            currEl.style.transform = 'scale(1)';
+                            resetWords(currEl);
                         }}
 
                         if (nextEl) {{
                             nextEl.className = activeClass;
+                            nextEl.style.transform = 'scale(1.12)';
                             nextEl.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
                         }}
 
                         currEl = nextEl;
+                    }}
+
+                    if (nextEl && nextEl.querySelector('[data-lyric-word]')) {{
+                        updateWords(nextEl, nextWordIndex);
                     }}
                 }}
             "#,
@@ -98,8 +127,14 @@ pub fn LyricsView(
                             n => Some(n - 1),
                         }
                     {
+                        let current_word_index = lines[current_line_index]
+                            .words
+                            .partition_point(|w| w.start_time <= current_time)
+                            .checked_sub(1)
+                            .map(|i| i as i64)
+                            .unwrap_or(-1);
                         let _ = eval(&format!(
-                            "window.__{layout}_updateLyrics({current_line_index})"
+                            "window.__{layout}_updateLyrics({current_line_index}, {current_word_index})"
                         ));
 
                         sleep_duration_ms = times
@@ -110,7 +145,7 @@ pub fn LyricsView(
                             .unwrap_or(50);
                     } else {
                         // we are before the first line, invalidate current line
-                        let _ = eval(&format!("window.__{layout}_updateLyrics(-1)"));
+                        let _ = eval(&format!("window.__{layout}_updateLyrics(-1, -1)"));
                         sleep_duration_ms = 50;
                     }
 
@@ -141,7 +176,11 @@ pub fn LyricsView(
                                 div {
                                     key: "{i}",
                                     id: "{layout}-lyrics-{i}",
-                                    class: "text-white/40 transition-all duration-300 hover:text-white/60 cursor-pointer whitespace-pre-wrap",
+                                    class: match layout {
+                                        LayoutMode::Fullscreen => FULLSCREEN_LYRIC_CLASS,
+                                        LayoutMode::Rightbar => RIGHTBAR_LYRIC_CLASS,
+                                    },
+                                    style: LYRIC_STYLE,
                                     onclick: {
                                         let st = line.start_time;
                                         move |_| {
@@ -149,7 +188,19 @@ pub fn LyricsView(
                                             current_song_progress.set(st as u64);
                                         }
                                     },
-                                    "{line.text}"
+                                    if line.words.is_empty() {
+                                        "{line.text}"
+                                    } else {
+                                        for (word_i, word) in line.words.iter().enumerate() {
+                                            span {
+                                                key: "{word_i}",
+                                                id: "{layout}-lyrics-{i}-word-{word_i}",
+                                                "data-lyric-word": "true",
+                                                class: "transition-opacity duration-150",
+                                                "{word.text}"
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
