@@ -71,6 +71,7 @@ pub fn TrackRow(
     on_play: EventHandler<()>,
     on_delete: EventHandler<()>,
     on_remove_from_playlist: Option<EventHandler<()>>,
+    on_view_metadata: Option<EventHandler<()>>,
     #[props(default = false)] is_selection_mode: bool,
     #[props(default = false)] is_selected: bool,
     #[props(default = false)] hide_delete: bool,
@@ -185,6 +186,15 @@ pub fn TrackRow(
     let mix_idx = if is_ytmusic_track {
         let idx = actions.len();
         actions.push(MenuAction::new("Start radio", "fa-solid fa-tower-broadcast"));
+        Some(idx)
+    } else {
+        None
+    };
+
+    let has_view_metadata = on_view_metadata.is_some();
+    let view_metadata_idx = if has_view_metadata {
+        let idx = actions.len();
+        actions.push(MenuAction::new("View metadata", "fa-solid fa-circle-info"));
         Some(idx)
     } else {
         None
@@ -495,6 +505,9 @@ pub fn TrackRow(
                                 } else if mix_idx == Some(idx) {
                                     start_radio_from(track.path.clone(), config, ctrl);
                                     on_close_menu.call(());
+                                } else if view_metadata_idx == Some(idx) {
+                                    if let Some(handler) = on_view_metadata { handler.call(()); }
+                                    on_close_menu.call(());
                                 } else if Some(idx) == delete_action_idx {
                                     on_delete.call(());
                                 }
@@ -763,6 +776,11 @@ pub fn TrackRow(
                                 on_close_menu.call(());
                             } else if mix_idx == Some(idx) {
                                 start_radio_from(track.path.clone(), config, ctrl);
+                                on_close_menu.call(());
+                            } else if view_metadata_idx == Some(idx) {
+                                if let Some(handler) = on_view_metadata {
+                                    handler.call(());
+                                }
                                 on_close_menu.call(());
                             } else if Some(idx) == delete_action_idx {
                                 on_delete.call(());
