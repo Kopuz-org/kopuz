@@ -227,8 +227,38 @@ pub fn LocalLibrary(
             }
             if let Some(track) = metadata_track.read().clone() {
                 MetadataModal {
-                    track,
+                    track: track.clone(),
                     on_close: move |_| metadata_track.set(None),
+                    on_save: move |edits: reader::models::TrackEdits| {
+                        let path = track.path.clone();
+                        match reader::write_tags(&path, &edits) {
+                            Ok(()) => {
+                                let mut lib = library.write();
+                                if let Some(t) = lib.tracks.iter_mut().find(|t| t.path == path) {
+                                    t.title = edits.title.trim().to_string();
+                                    t.artist = edits.artist.trim().to_string();
+                                    t.artists = edits
+                                        .artist
+                                        .split([';', ','])
+                                        .map(|a| a.trim().to_string())
+                                        .filter(|s| !s.is_empty())
+                                        .collect();
+                                    t.album = edits.album.trim().to_string();
+                                    t.track_number = edits.track_number;
+                                    t.disc_number = edits.disc_number;
+                                    t.album_id = reader::metadata::make_album_id(
+                                        edits.album.trim(),
+                                        edits.artist.trim(),
+                                    );
+                                }
+                                drop(lib);
+                                metadata_track.set(None);
+                            }
+                            Err(e) => {
+                                tracing::error!("failed to write tags for {}: {}", path.display(), e);
+                            }
+                        }
+                    },
                 }
             }
             if is_selection_mode() {
