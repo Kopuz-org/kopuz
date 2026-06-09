@@ -1,4 +1,5 @@
 use components::header::Header;
+use components::metadata_modal::MetadataModal;
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
 use components::stat_card::StatCard;
@@ -43,6 +44,7 @@ pub fn LocalLibrary(
     let mut active_menu_track = use_signal(|| None::<PathBuf>);
     let mut show_playlist_modal = use_signal(|| false);
     let mut selected_track_for_playlist = use_signal(|| None::<PathBuf>);
+    let mut metadata_track = use_signal(|| None::<reader::models::Track>);
     let mut is_selection_mode = use_signal(|| false);
     let mut selected_tracks = use_signal(|| HashSet::<PathBuf>::new());
     let displayed_tracks = use_memo(move || (items.all_tracks)());
@@ -92,6 +94,7 @@ pub fn LocalLibrary(
                 let track_menu = track.clone();
                 let track_add = track.clone();
                 let track_queue = track.clone();
+                let track_meta = track.clone();
                 let track_delete = track.clone();
                 let track_path = track.path.clone();
                 let is_currently_playing = currently_playing_idx == Some(idx);
@@ -146,6 +149,10 @@ pub fn LocalLibrary(
                                 active_menu_track.set(None);
                             },
                             on_close_menu: move |_| active_menu_track.set(None),
+                            on_view_metadata: move |_| {
+                                metadata_track.set(Some(track_meta.clone()));
+                                active_menu_track.set(None);
+                            },
                             on_delete: move |_| {
                                 active_menu_track.set(None);
                                 if std::fs::remove_file(&track_delete.path).is_ok() {
@@ -216,6 +223,12 @@ pub fn LocalLibrary(
                         is_selection_mode.set(false);
                         selected_tracks.write().clear();
                     },
+                }
+            }
+            if let Some(track) = metadata_track.read().clone() {
+                MetadataModal {
+                    track,
+                    on_close: move |_| metadata_track.set(None),
                 }
             }
             if is_selection_mode() {

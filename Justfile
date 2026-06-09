@@ -2,7 +2,7 @@ default:
     @just --list
 
 tailwind:
-    tailwindcss -i ./tailwind.css -o ./crates/kopuz/assets/tailwind.css --content './crates/kopuz/**/*.rs,./crates/components/**/*.rs,./crates/pages/**/*.rs,./crates/hooks/**/*.rs,./crates/player/**/*.rs,./crates/reader/**/*.rs'
+    npx @tailwindcss/cli -i ./tailwind.css -o ./crates/kopuz/assets/tailwind.css
 
 serve: tailwind
     dx serve
