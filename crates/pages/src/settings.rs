@@ -106,8 +106,10 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             .and_then(|s| s.yt_browser)
             .unwrap_or(config::Browser::Chrome)
     });
-    // Anonymous YT mode for the add-server popup; defaults to signing in.
-    let yt_anonymous = use_signal(|| false);
+    // Anonymous YT mode for the add-server popup. Defaults to anonymous on
+    // Windows (browser sign-in unsupported there — App-Bound Encryption), so the
+    // popup opens on the only working method.
+    let yt_anonymous = use_signal(|| cfg!(target_os = "windows"));
 
     let mut username = use_signal(|| String::new());
     let mut password = use_signal(|| String::new());

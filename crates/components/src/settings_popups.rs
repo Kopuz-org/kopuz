@@ -233,20 +233,32 @@ fn ServerServiceFields(
     mut yt_anonymous: Signal<bool>,
     server_url_placeholder: String,
 ) -> Element {
+    // Browser sign-in must decrypt the browser's cookie store, which Chrome 127+
+    // App-Bound Encryption blocks for non-admin apps on Windows (HKLM-only policy,
+    // no in-app workaround). Force anonymous there and hide the sign-in option.
+    let windows = cfg!(target_os = "windows");
+    use_effect(move || {
+        if cfg!(target_os = "windows") && !*yt_anonymous.peek() {
+            yt_anonymous.set(true);
+        }
+    });
+
     match server_service() {
         MusicService::YtMusic => {
             let anon = yt_anonymous();
             rsx! {
-                // Auth method selector.
+                // Auth method selector (sign-in row hidden on Windows).
                 div { class: "flex flex-col gap-2 mb-2",
-                    label { class: "flex items-center gap-2 text-sm text-white cursor-pointer",
-                        input {
-                            r#type: "radio",
-                            name: "yt-auth-method",
-                            checked: !anon,
-                            onchange: move |_| yt_anonymous.set(false),
+                    if !windows {
+                        label { class: "flex items-center gap-2 text-sm text-white cursor-pointer",
+                            input {
+                                r#type: "radio",
+                                name: "yt-auth-method",
+                                checked: !anon,
+                                onchange: move |_| yt_anonymous.set(false),
+                            }
+                            span { "Sign in with a browser" }
                         }
-                        span { "Sign in with a browser" }
                     }
                     label { class: "flex items-center gap-2 text-sm text-white cursor-pointer",
                         input {
@@ -261,7 +273,11 @@ fn ServerServiceFields(
 
                 if anon {
                     p { class: "text-xs text-white/60",
-                        "kopuz will use YouTube Music without signing in. You can browse, search, and play — but Liked Music, your library playlists, and following/liking are disabled."
+                        if windows {
+                            "On Windows, kopuz uses YouTube Music anonymously (browser sign-in isn't supported here yet). You can browse, search, and play — but Liked Music, library playlists, and following/liking are disabled."
+                        } else {
+                            "kopuz will use YouTube Music without signing in. You can browse, search, and play — but Liked Music, your library playlists, and following/liking are disabled."
+                        }
                     }
                 } else {
                     p { class: "text-xs text-white/60",
