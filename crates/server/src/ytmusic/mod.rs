@@ -41,18 +41,11 @@ pub fn derive_user_id(cookies: &str) -> Option<String> {
 
 pub struct YouTubeMusicClient {
     cookies: Option<String>,
-    /// When set (and signed in), `get_stream` resolves via yt-dlp to reach
-    /// Premium 256k formats. Off by default; toggled per-client by the caller
-    /// from the `ytm_premium_audio` setting.
-    premium_audio: bool,
 }
 
 impl YouTubeMusicClient {
     pub fn new() -> Self {
-        Self {
-            cookies: None,
-            premium_audio: false,
-        }
+        Self { cookies: None }
     }
 
     pub fn with_cookies(cookies: String) -> Self {
@@ -62,14 +55,7 @@ impl YouTubeMusicClient {
         // unwrap_or("") — treats anonymous consistently.
         Self {
             cookies: (!cookies.is_empty()).then_some(cookies),
-            premium_audio: false,
         }
-    }
-
-    /// Opt into the Premium high-quality (256k via yt-dlp) stream path.
-    pub fn premium_audio(mut self, enabled: bool) -> Self {
-        self.premium_audio = enabled;
-        self
     }
 
     pub async fn search_tracks(&self, query: &str) -> Result<Vec<Track>, String> {
@@ -236,7 +222,7 @@ impl YouTubeMusicClient {
     /// Works without cookies (anonymous mode) — Premium-locked tracks
     /// fail UNPLAYABLE, everything else plays.
     pub async fn get_stream(&self, video_id: &str) -> Result<YtStreamInfo, String> {
-        player::resolve(video_id, self.cookies.as_deref(), self.premium_audio).await
+        player::resolve(video_id, self.cookies.as_deref()).await
     }
 
     // Public surfaces — work anonymously. `cookies.as_deref().unwrap_or("")`

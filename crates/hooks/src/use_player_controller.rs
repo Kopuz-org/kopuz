@@ -693,9 +693,7 @@ impl PlayerController {
                                 skip_in_progress.set(false);
                                 return;
                             };
-                            let hq = cfg_signal.peek().ytm_premium_audio;
-                            let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies)
-                                .premium_audio(hq);
+                            let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
                             match yt.get_stream(video_id).await {
                                 Ok(info) => {
                                     // Stale-resolve guard: don't stamp duration / mutate
