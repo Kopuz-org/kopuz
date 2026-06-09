@@ -436,3 +436,21 @@ discover_requires_ytmusic = الاكتشاف متاح فقط عندما تكون
 discover_show_all = عرض الكل
 yt_anon_playlists = سجّل الدخول إلى YouTube Music لعرض قوائم التشغيل في مكتبتك.
 yt_anon_favorites = سجّل الدخول إلى YouTube Music لعرض الأغاني التي أعجبتك.
+
+# Metadata Viewer / Editor
+view_metadata = عرض البيانات الوصفية
+edit_metadata = تحرير البيانات الوصفية
+edit = تحرير
+track_number = رقم المقطع
+disc_number = رقم القرص
+duration = المدة
+sample_rate = معدل العينات
+bitrate = معدل البت
+musicbrainz_release = إصدار MusicBrainz
+musicbrainz_recording = تسجيل MusicBrainz
+musicbrainz_track = مقطع MusicBrainz
+path = المسار
+add_photo = إضافة صورة
+change_photo = تغيير الصورة
+remove_photo = إزالة الصورة
+metadata_edit_warning = الحقول الفارغة تحذف الوسم. يُكتب مباشرة في الملف — لا يمكن التراجع.

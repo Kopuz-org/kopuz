@@ -429,3 +429,21 @@ discover_requires_ytmusic = Jelajahi hanya tersedia ketika YouTube Music adalah 
 discover_show_all = Tampilkan semua
 yt_anon_playlists = Masuk ke YouTube Music untuk melihat playlist pustaka kamu.
 yt_anon_favorites = Masuk ke YouTube Music untuk melihat lagu yang kamu sukai.
+
+# Metadata Viewer / Editor
+view_metadata = Lihat metadata
+edit_metadata = Edit metadata
+edit = Edit
+track_number = Nomor trek
+disc_number = Nomor disk
+duration = Durasi
+sample_rate = Laju sampel
+bitrate = Laju bit
+musicbrainz_release = Rilis MusicBrainz
+musicbrainz_recording = Rekaman MusicBrainz
+musicbrainz_track = Trek MusicBrainz
+path = Jalur
+add_photo = Tambah foto
+change_photo = Ganti foto
+remove_photo = Hapus foto
+metadata_edit_warning = Bidang kosong menghapus tag itu. Ditulis langsung ke berkas — tanpa pembatalan.
