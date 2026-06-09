@@ -60,9 +60,9 @@ pub async fn music_search_tracks(
 ) -> Result<Vec<Track>, String> {
     let http = super::innertube::http_client();
     let (top, songs, videos) = tokio::join!(
-        do_search(&http, query, None, cookies),
-        do_search(&http, query, Some(SONGS_FILTER), cookies),
-        do_search(&http, query, Some(VIDEOS_FILTER), cookies),
+        do_search(http, query, None, cookies),
+        do_search(http, query, Some(SONGS_FILTER), cookies),
+        do_search(http, query, Some(VIDEOS_FILTER), cookies),
     );
 
     let top = top?;
@@ -110,7 +110,7 @@ pub async fn resolve_artist_channel_id(
         return Ok(None);
     }
     let http = super::innertube::http_client();
-    let resp = do_search_raw(&http, query, Some(ARTISTS_FILTER), cookies).await?;
+    let resp = do_search_raw(http, query, Some(ARTISTS_FILTER), cookies).await?;
     Ok(walk_first_artist_browse_id(&resp))
 }
 

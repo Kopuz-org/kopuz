@@ -1,111 +1,62 @@
-//! Shell out to `rustypipe-botguard` for Proof-of-Origin tokens.
+//! Content PoToken minting for anonymous YouTube streaming.
 //!
-//! YouTube's /player rejects requests from web-ish clients without a valid
-//! content-bound PO token in `serviceIntegrityDimensions.poToken`. Minting
-//! requires running YouTube's obfuscated Botguard VM in a real-ish JS
-//! environment. We delegate to ThetaDev's `rustypipe-botguard` binary
-//! (V8 + jsdom-minimal); it caches a V8 startup snapshot so warm mints are
-//! ~20 ms, cold-start ~600 ms once per ~6 hours.
+//! Anonymous googlevideo URLs 403 on deep/seek ranges without a content-bound
+//! PO token (premium sessions are exempt — see `player::resolve`). The token is
+//! minted by an in-app WebView running YouTube's BotGuard VM (BgUtils on the
+//! music.youtube.com origin); this module is just the typed channel to it.
+//!
+//! The UI layer stands up that minter WebView when an anonymous YouTube Music
+//! server becomes active and registers its sender via [`set_minter`]. Replaces
+//! the old `rustypipe-botguard` subprocess — no external binary, flatpak-safe.
 
-use std::path::PathBuf;
+use std::sync::OnceLock;
 
-/// Locate the `rustypipe-botguard` binary. Search order:
-///   1. `$RUSTYPIPE_BOTGUARD_BIN` env var (escape hatch)
-///   2. Next to the running executable (release distribution shape):
-///      `<exe_dir>/rustypipe-botguard` or `<exe_dir>/bin/rustypipe-botguard`
-///   3. Walking up from cwd looking for `bin/rustypipe-botguard` (dev mode:
-///      finds it whether you started Kopuz from the workspace root or from
-///      a crate subdir).
-///   4. Bare `rustypipe-botguard` (resolved via PATH).
-fn binary_path() -> PathBuf {
-    if let Some(p) = std::env::var_os("RUSTYPIPE_BOTGUARD_BIN") {
-        return PathBuf::from(p);
-    }
-    if let Ok(exe) = std::env::current_exe()
-        && let Some(dir) = exe.parent()
-    {
-        let next_to_exe = dir.join("rustypipe-botguard");
-        if next_to_exe.is_file() {
-            return next_to_exe;
-        }
-        let in_bin = dir.join("bin").join("rustypipe-botguard");
-        if in_bin.is_file() {
-            return in_bin;
-        }
-    }
-    if let Ok(mut p) = std::env::current_dir() {
-        loop {
-            let candidate = p.join("bin").join("rustypipe-botguard");
-            if candidate.is_file() {
-                return candidate;
-            }
-            if !p.pop() {
-                break;
-            }
-        }
-    }
-    PathBuf::from("rustypipe-botguard")
+use tokio::sync::{mpsc, oneshot};
+
+/// One mint job: a `video_id` to bind the content pot to, and a one-shot for
+/// the result (the base64url pot, or an error string).
+pub struct MintRequest {
+    pub video_id: String,
+    pub reply: oneshot::Sender<Result<String, String>>,
 }
 
-/// Returns `Ok(())` if the `rustypipe-botguard` binary can be located and
-/// runs (we exec it with `--help` so the check is sub-millisecond and
-/// doesn't touch the network). Use this at server-selection / login time
-/// so the user sees the install hint up front instead of discovering it
-/// silently when their first track 403s mid-stream.
-pub async fn check_available() -> Result<(), String> {
-    let bin = binary_path();
-    tokio::task::spawn_blocking(move || -> Result<(), String> {
-        match std::process::Command::new(&bin)
-            .arg("--help")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .stdin(std::process::Stdio::null())
-            .status()
-        {
-            Ok(s) if s.success() => Ok(()),
-            Ok(s) => Err(format!(
-                "`{}` exited with {} on --help",
-                bin.display(),
-                s
-            )),
-            Err(_) => Err(
-                "rustypipe-botguard not found — install with: cargo install rustypipe-botguard --version 0.1.2".to_string()
-            ),
-        }
-    })
-    .await
-    .map_err(|e| format!("join check task: {e}"))?
+static MINTER: OnceLock<mpsc::UnboundedSender<MintRequest>> = OnceLock::new();
+
+/// Register the minter channel. Called by the UI once the anon YT Music minter
+/// WebView is up. Idempotent-ish: a second call is ignored (returns the sender
+/// back) so re-selecting the server doesn't panic.
+pub fn set_minter(
+    tx: mpsc::UnboundedSender<MintRequest>,
+) -> Result<(), mpsc::UnboundedSender<MintRequest>> {
+    MINTER.set(tx)
 }
 
-/// Mint a content-bound PO token for `video_id`. Returns the base64url
-/// token suitable for stuffing into `serviceIntegrityDimensions.poToken`.
+/// True once a minter has registered (UI uses this to decide whether anon
+/// playback is wired up yet).
+pub fn is_available() -> bool {
+    MINTER.get().is_some()
+}
+
+/// Mint a content-bound PO token for `video_id`. Sub-ms in steady state: the
+/// WebView negotiates the BotGuard integrity token once (pre-warmed at startup,
+/// refreshed near its TTL) and mints each content pot from it locally. Errors if
+/// no minter is registered (anon YT Music not selected) or the WebView failed.
 pub async fn mint_content_pot(video_id: &str) -> Result<String, String> {
-    let bin = binary_path();
-    let video_id = video_id.to_string();
-    tokio::task::spawn_blocking(move || -> Result<String, String> {
-        let out = std::process::Command::new(&bin)
-            .arg("--")
-            .arg(&video_id)
-            .output()
-            .map_err(|e| {
-                format!(
-                    "spawn `{}`: {e} — install with `cargo install rustypipe-botguard --version 0.1.2`",
-                    bin.display()
-                )
-            })?;
-        if !out.status.success() {
-            return Err(format!(
-                "rustypipe-botguard exit {}: {}",
-                out.status,
-                String::from_utf8_lossy(&out.stderr).trim()
-            ));
-        }
-        String::from_utf8_lossy(&out.stdout)
-            .split_whitespace()
-            .next()
-            .map(|s| s.to_string())
-            .ok_or_else(|| "rustypipe-botguard returned no token".to_string())
+    let tx = MINTER
+        .get()
+        .ok_or_else(|| "PO token minter not running — select a YouTube Music server".to_string())?;
+    let (reply, rx) = oneshot::channel();
+    tx.send(MintRequest {
+        video_id: video_id.to_string(),
+        reply,
     })
-    .await
-    .map_err(|e| format!("join botguard task: {e}"))?
+    .map_err(|_| "PO token minter channel closed".to_string())?;
+    // Bound the wait: if the webview bridge isn't ready (page still loading /
+    // navigating, `window.__kopuzMint` not yet defined) the dispatch is a no-op
+    // and no reply ever comes — without this the caller would hang forever.
+    match tokio::time::timeout(std::time::Duration::from_secs(15), rx).await {
+        Ok(Ok(result)) => result,
+        Ok(Err(_)) => Err("PO token minter dropped the reply".to_string()),
+        Err(_) => Err("PO token mint timed out (webview not ready)".to_string()),
+    }
 }

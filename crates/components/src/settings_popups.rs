@@ -1,6 +1,5 @@
 use config::{Browser, MusicService};
 use dioxus::prelude::*;
-use tracing::Instrument;
 
 #[component]
 pub fn AddServerPopup(
@@ -234,12 +233,9 @@ fn ServerServiceFields(
     mut yt_anonymous: Signal<bool>,
     server_url_placeholder: String,
 ) -> Element {
-    let mut botguard_status: Signal<Option<Result<(), String>>> = use_signal(|| None);
-
-    // Browser sign-in is disabled on Windows for now — the Google
-    // accounts page renders blank in the isolated profile there
-    // (about:blank under the hood). Force anonymous so Windows users
-    // still get a working YT backend. See isolated_profile.rs TODO.
+    // Browser sign-in must decrypt the browser's cookie store, which Chrome 127+
+    // App-Bound Encryption blocks for non-admin apps on Windows (HKLM-only policy,
+    // no in-app workaround). Force anonymous there and hide the sign-in option.
     let windows = cfg!(target_os = "windows");
     use_effect(move || {
         if cfg!(target_os = "windows") && !*yt_anonymous.peek() {
@@ -251,8 +247,7 @@ fn ServerServiceFields(
         MusicService::YtMusic => {
             let anon = yt_anonymous();
             rsx! {
-                // Auth method selector. On Windows only the anonymous
-                // row is shown (sign-in disabled).
+                // Auth method selector (sign-in row hidden on Windows).
                 div { class: "flex flex-col gap-2 mb-2",
                     if !windows {
                         label { class: "flex items-center gap-2 text-sm text-white cursor-pointer",
@@ -279,7 +274,7 @@ fn ServerServiceFields(
                 if anon {
                     p { class: "text-xs text-white/60",
                         if windows {
-                            "Browser sign-in isn't available on Windows yet, so kopuz will use YouTube Music anonymously. You can browse, search, and play — but Liked Music, your library playlists, and following/liking are disabled."
+                            "On Windows, kopuz uses YouTube Music anonymously (browser sign-in isn't supported here yet). You can browse, search, and play — but Liked Music, library playlists, and following/liking are disabled."
                         } else {
                             "kopuz will use YouTube Music without signing in. You can browse, search, and play — but Liked Music, your library playlists, and following/liking are disabled."
                         }
@@ -303,37 +298,6 @@ fn ServerServiceFields(
                             }
                         }
                     }
-                }
-
-                // botguard helper is needed for playback in BOTH modes
-                // (it mints the content PO token), so the check stays
-                // visible regardless of auth method.
-                div { class: "flex items-center gap-2 mt-2",
-                    button {
-                        class: "text-xs px-2 py-1 rounded bg-white/10 hover:bg-white/20 transition-colors",
-                        onclick: move |_| {
-                            spawn(async move {
-                                let res = ::server::ytmusic::botguard::check_available().await;
-                                botguard_status.set(Some(res));
-                            }.instrument(tracing::info_span!("botguard.check")));
-                        },
-                        "Check rustypipe-botguard"
-                    }
-                    {match botguard_status.read().as_ref() {
-                        Some(Ok(())) => rsx! {
-                            span { class: "text-xs text-emerald-400",
-                                i { class: "fa-solid fa-check mr-1" }
-                                "Installed"
-                            }
-                        },
-                        Some(Err(msg)) => rsx! {
-                            span { class: "text-xs text-rose-400 whitespace-pre-line",
-                                i { class: "fa-solid fa-xmark mr-1" }
-                                "{msg}"
-                            }
-                        },
-                        None => rsx! { span {} },
-                    }}
                 }
             }
         },

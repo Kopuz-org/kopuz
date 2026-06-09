@@ -1,0 +1,17 @@
+Vendored solver scripts
+========================
+
+`lib.min.js` and `core.min.js` in this directory are vendored verbatim from
+yt-dlp's `yt_dlp_ejs` package and are NOT covered by Kopuz's license.
+
+  Source:  https://github.com/yt-dlp/ejs  (shipped via the yt_dlp_ejs PyPI/pip package)
+  License: The Unlicense (public domain dedication)
+
+`lib.min.js` is a bundle that additionally embeds:
+
+  - meriyah   — ISC License  — https://github.com/meriyah/meriyah
+  - astring   — MIT License  — https://github.com/davidbonnet/astring
+
+These upstream licenses are preserved by reference here; the bundle is
+redistributed unmodified. Refresh both files from the same upstream version
+together when YouTube's player format changes.

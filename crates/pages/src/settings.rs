@@ -193,9 +193,9 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             .and_then(|s| s.yt_browser)
             .unwrap_or(config::Browser::Chrome)
     });
-    // Anonymous YT mode for the add-server popup. Defaults to true on
-    // Windows (browser sign-in disabled there) so the popup opens
-    // pre-selected on the only working method.
+    // Anonymous YT mode for the add-server popup. Defaults to anonymous on
+    // Windows (browser sign-in unsupported there — App-Bound Encryption), so the
+    // popup opens on the only working method.
     let yt_anonymous = use_signal(|| cfg!(target_os = "windows"));
 
     let mut username = use_signal(|| String::new());
@@ -271,15 +271,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             ctrl.playback_error.set(Some(msg));
         };
         spawn(async move {
-            if let Err(e) =
-                server::ytmusic::YouTubeMusicClient::new().check_botguard_available().await
-            {
-                report(format!(
-                    "YouTube Music needs the rustypipe-botguard helper. {e}"
-                ));
-                return;
-            }
-
             let cookies = match ensure_signed_in(existing, browser, &server_id).await {
                 Ok(c) => c,
                 Err(e) => {
@@ -324,22 +315,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         let url_input = server_url();
 
         spawn(async move {
-            // For YT Music we refuse to even create the server entry if
-            // the botguard helper isn't installed — otherwise the user
-            // gets a dead-on-arrival server they can't actually play
-            // from. The probe is cheap (~ms) and happens before any
-            // mutation of the config.
-            if is_ytmusic {
-                if let Err(msg) =
-                    ::server::ytmusic::botguard::check_available().await
-                {
-                    error.set(Some(format!(
-                        "Can't add YouTube Music server: {msg}"
-                    )));
-                    return;
-                }
-            }
-
             let display_name = if name_input.is_empty() {
                 format!("Local {}", selected_service.display_name())
             } else {
@@ -366,6 +341,9 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                 // only".
                 new_server.access_token = Some(String::new());
             }
+            // Persist the chosen browser on the active server too (not just the
+            // saved-list entry), so the sign-in flow knows which browser to use.
+            new_server.yt_browser = (is_ytmusic && !is_anon).then(|| *yt_browser.peek());
 
             let saved = config::SavedServer {
                 id: new_server.id.clone().unwrap_or_default(),

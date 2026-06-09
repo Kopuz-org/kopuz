@@ -4,6 +4,7 @@ use serde_json::Value;
 pub mod botguard;
 pub mod clients;
 pub mod cookies;
+pub mod decipher;
 pub mod discover;
 pub mod innertube;
 pub mod isolated_profile;
@@ -13,7 +14,6 @@ pub mod player;
 pub mod playlists;
 pub mod search;
 pub mod verify_session_keepalive;
-pub mod ytdlp_fallback;
 
 pub use player::YtStreamInfo;
 
@@ -216,11 +216,9 @@ impl YouTubeMusicClient {
         Ok(all)
     }
 
-    /// Resolves a playable stream URL: mints a content-bound PO token via
-    /// `rustypipe-botguard`, then asks `/player` (ANDROID_VR client) for a
-    /// plain audio URL. ~400 ms warm, ~1 s cold (snapshot regeneration).
-    /// Works without cookies (anonymous mode) — Premium-locked tracks
-    /// fail UNPLAYABLE, everything else plays.
+    /// Resolves a playable stream URL via native sig/n deciphering against
+    /// WEB_REMIX (see `player::resolve`). With cookies this returns Premium
+    /// itags; anonymously the ~128 kbps ceiling. No PO token, no yt-dlp.
     pub async fn get_stream(&self, video_id: &str) -> Result<YtStreamInfo, String> {
         player::resolve(video_id, self.cookies.as_deref()).await
     }
@@ -251,13 +249,6 @@ impl YouTubeMusicClient {
 
     pub async fn fetch_artist(&self, channel_id: &str) -> Result<discover::YtArtist, String> {
         discover::fetch_artist(channel_id, self.cookies.as_deref().unwrap_or("")).await
-    }
-
-    /// Confirms the `rustypipe-botguard` binary is reachable. Call this
-    /// at server-selection time so users get the install hint up front
-    /// instead of seeing a silent 403 partway into their first track.
-    pub async fn check_botguard_available(&self) -> Result<(), String> {
-        botguard::check_available().await
     }
 
     /// Confirms the cookie session is actually signed in — InnerTube
