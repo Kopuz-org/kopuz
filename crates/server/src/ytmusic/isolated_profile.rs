@@ -265,13 +265,6 @@ pub async fn launch_signin_and_extract(
     let mut cmd = browser_command(&bin);
     cmd.arg("--no-first-run")
         .arg("--no-default-browser-check")
-        // Expose the DevTools protocol so we can read cookies from the live
-        // browser (Storage.getCookies) instead of decrypting the on-disk Cookies
-        // DB — which Chrome 127+ App-Bound Encryption makes unreadable on Windows.
-        // port=0 → Chrome picks a free port + writes it to DevToolsActivePort;
-        // allow-origins=* → accept our localhost CDP connection (Chrome 111+).
-        .arg("--remote-debugging-port=0")
-        .arg("--remote-allow-origins=*")
         .arg(format!("--user-data-dir={}", profile.display()));
     // kopuz's own UI is WebView2 (Chromium), so kopuz runs inside a Windows job
     // object. A spawned Chrome inherits it, and Chromium's sandbox can't create
@@ -294,17 +287,18 @@ pub async fn launch_signin_and_extract(
     let deadline = Instant::now() + signin_timeout;
     let mut last_extract_err: Option<String> = None;
     // Edge / Chrome on Windows often spawn the visible UI in detached
-    // processes and the launched parent exits with status 0 in <1s. The
-    // DevTools endpoint stays up on the detached browser, so polling cookies
-    // over CDP keeps working. Track child exit but DON'T bail on it; wait the
-    // full timeout. A non-zero exit (crash) is tolerated for the same reason.
+    // processes and the launched parent exits with status 0 in <1s.
+    // Polling the cookie SQLite still works — it's on disk in the
+    // profile dir we control. Track child exit but DON'T bail on it;
+    // wait for cookies up to the full timeout. If a non-zero exit
+    // happens (crash) we still tolerate it for the same reason.
     let mut child_exited_at: Option<Instant> = None;
     let outcome = loop {
         tokio::time::sleep(Duration::from_millis(500)).await;
         if Instant::now() > deadline {
             let detail = last_extract_err
                 .as_deref()
-                .map(|e| format!("; last error: {e}"))
+                .map(|e| format!("; last extract error: {e}"))
                 .unwrap_or_default();
             let exited_note = child_exited_at
                 .map(|_| " — note: the browser process exited early (likely detached UI); close all browser windows and try again")
@@ -317,24 +311,22 @@ pub async fn launch_signin_and_extract(
         if child_exited_at.is_none()
             && let Ok(Some(status)) = child.try_wait()
         {
-            eprintln!("[yt-signin] {bin} exited (status {status}) — continuing to poll cookies over CDP (browser may be detached)");
+            eprintln!("[yt-signin] {bin} exited (status {status}) — continuing to poll cookies in case the browser is still running as a detached process");
             child_exited_at = Some(Instant::now());
         }
-        let cookies = match super::cdp::get_cookies(&profile).await {
+        let cookies = match super::cookies::extract_from(browser, &profile).await {
             Ok(c) => c,
             Err(e) => {
                 if last_extract_err.as_deref() != Some(e.as_str()) {
-                    eprintln!("[yt-signin] cookie fetch: {e}");
+                    eprintln!("[yt-signin] cookie extract: {e}");
                     last_extract_err = Some(e);
                 }
                 continue;
             }
         };
-        if cookies.iter().any(|(n, ..)| n == "SAPISID")
-            && cookies.iter().any(|(n, ..)| n == "SID")
-        {
+        if has_cookie(&cookies, "SAPISID") && has_cookie(&cookies, "SID") {
             eprintln!("[yt-signin] cookies detected — closing {bin}");
-            break Ok(build_cookie_header(&cookies));
+            break Ok(cookies);
         }
     };
 
@@ -342,20 +334,10 @@ pub async fn launch_signin_and_extract(
     outcome
 }
 
-/// Build a `Cookie:` header from the Google/YouTube cookies CDP returned,
-/// deduped by name (the SAPISID hash + YT auth all live on those domains).
-fn build_cookie_header(cookies: &[super::cdp::Cookie]) -> String {
-    let mut seen = std::collections::HashSet::new();
-    cookies
-        .iter()
-        .filter(|(_, _, domain)| {
-            let d = domain.trim_start_matches('.');
-            d.ends_with("google.com") || d.ends_with("youtube.com")
-        })
-        .filter(|(name, ..)| seen.insert(name.clone()))
-        .map(|(name, value, _)| format!("{name}={value}"))
-        .collect::<Vec<_>>()
-        .join("; ")
+fn has_cookie(header: &str, name: &str) -> bool {
+    header
+        .split(';')
+        .any(|p| p.trim().split_once('=').is_some_and(|(k, _)| k == name))
 }
 
 pub fn delete_profile(server_id: &str) -> std::io::Result<()> {

@@ -16,10 +16,9 @@ md5 = "0.8"
 sha1 = "0.10"
 httpdate = "1"
 hex = "0.4"
-tokio-tungstenite = "0.29"
-futures-util = "0.3"
+rookie = "0.5"
 web-time = { workspace = true }
-tokio = { workspace = true, features = ["fs", "process", "rt", "sync", "net"] }
+tokio = { workspace = true, features = ["fs", "process", "rt", "sync"] }
 reader = { workspace = true }
 
 [[example]]
