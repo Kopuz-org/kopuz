@@ -282,6 +282,7 @@ pub fn PlaylistDetail(
             library,
             playlist_store,
             on_close,
+            enable_metadata: !is_jellyfin,
             on_cover_click: move |_| {
                 let _ = &pid_for_cover;
                 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]

@@ -1,5 +1,6 @@
 use components::constants::{COLUMNS_MODERN, COLUMNS_NORMAL};
 use components::header::Header;
+use components::metadata_modal::MetadataModal;
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
 use components::showcase::{self, SortField};
@@ -23,6 +24,7 @@ pub fn LocalFavorites(
     let mut active_menu_track = use_signal(|| None::<PathBuf>);
     let mut show_playlist_modal = use_signal(|| false);
     let mut selected_track_for_playlist = use_signal(|| None::<PathBuf>);
+    let mut metadata_track = use_signal(|| None::<reader::models::Track>);
 
     // Multi-selection state
     let mut is_selection_mode = use_signal(|| false);
@@ -82,6 +84,7 @@ pub fn LocalFavorites(
                 let track_select = track.path.clone();
                 let track_add = track.clone();
                 let track_queue = track.clone();
+                let track_meta = track.clone();
                 let track_delete = track.clone();
                 let queue_source = queue_tracks.clone();
                 let track_key = format!("{}-{}", track.path.display(), idx);
@@ -134,6 +137,10 @@ pub fn LocalFavorites(
                             active_menu_track.set(None);
                         },
                         on_close_menu: move |_| active_menu_track.set(None),
+                        on_view_metadata: move |_| {
+                            metadata_track.set(Some(track_meta.clone()));
+                            active_menu_track.set(None);
+                        },
                         on_delete: move |_| {
                             active_menu_track.set(None);
                             if std::fs::remove_file(&track_delete.path).is_ok() {
@@ -222,6 +229,43 @@ pub fn LocalFavorites(
                         active_menu_track.set(None);
                         is_selection_mode.set(false);
                         selected_tracks.write().clear();
+                    },
+                }
+            }
+
+            if let Some(track) = metadata_track.read().clone() {
+                MetadataModal {
+                    track: track.clone(),
+                    on_close: move |_| metadata_track.set(None),
+                    on_save: move |edits: reader::models::TrackEdits| {
+                        let path = track.path.clone();
+                        match reader::write_tags(&path, &edits) {
+                            Ok(()) => {
+                                let mut lib = library.write();
+                                if let Some(t) = lib.tracks.iter_mut().find(|t| t.path == path) {
+                                    t.title = edits.title.trim().to_string();
+                                    t.artist = edits.artist.trim().to_string();
+                                    t.artists = edits
+                                        .artist
+                                        .split([';', ','])
+                                        .map(|a| a.trim().to_string())
+                                        .filter(|s| !s.is_empty())
+                                        .collect();
+                                    t.album = edits.album.trim().to_string();
+                                    t.track_number = edits.track_number;
+                                    t.disc_number = edits.disc_number;
+                                    t.album_id = reader::metadata::make_album_id(
+                                        edits.album.trim(),
+                                        edits.artist.trim(),
+                                    );
+                                }
+                                drop(lib);
+                                metadata_track.set(None);
+                            }
+                            Err(e) => {
+                                tracing::error!("failed to write tags for {}: {}", path.display(), e);
+                            }
+                        }
                     },
                 }
             }
