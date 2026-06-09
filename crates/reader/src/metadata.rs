@@ -253,14 +253,29 @@ pub fn write_tags(track_path: &Path, edits: &TrackEdits) -> Result<(), String> {
     }
 
     let artist = edits.artist.trim();
-    if artist.is_empty() {
-        tag.remove_artist();
+    // Compare against the same representation the editor seeds from (structured
+    // TrackArtists joined with ", ", else the single artist field). Only rewrite
+    // the artist tags when it actually changed, so editing unrelated fields keeps
+    // the structured multi-artist data intact.
+    let existing_track_artists: Vec<String> = tag
+        .get_strings(ItemKey::TrackArtists)
+        .flat_map(|s| s.split(';').map(|a| a.trim().to_string()))
+        .filter(|s| !s.is_empty())
+        .collect();
+    let existing_artist_repr = if existing_track_artists.is_empty() {
+        tag.artist().map(|a| a.to_string()).unwrap_or_default()
     } else {
-        tag.set_artist(artist.to_string());
+        existing_track_artists.join(", ")
+    };
+    if artist != existing_artist_repr {
+        if artist.is_empty() {
+            tag.remove_artist();
+        } else {
+            tag.set_artist(artist.to_string());
+        }
+        // Drop the now-stale structured split; re-derived from `artist` on scan.
+        tag.remove_key(ItemKey::TrackArtists);
     }
-    // Drop the multi-artist split so it can't contradict the single `artist`
-    // field we just wrote; it gets re-derived from `artist` on next scan.
-    tag.remove_key(ItemKey::TrackArtists);
 
     let album = edits.album.trim();
     if album.is_empty() {
@@ -281,13 +296,19 @@ pub fn write_tags(track_path: &Path, edits: &TrackEdits) -> Result<(), String> {
     match &edits.cover {
         CoverChange::Keep => {}
         CoverChange::Remove => {
-            tag.remove_picture_type(PictureType::CoverFront);
+            // Clear every embedded picture, not just CoverFront — read_cover()
+            // falls back to any picture type, so a leftover would reappear.
+            while !tag.pictures().is_empty() {
+                tag.remove_picture(0);
+            }
         }
         CoverChange::Set(bytes) => {
             let mut picture =
                 Picture::from_reader(&mut &bytes[..]).map_err(|e| e.to_string())?;
             picture.set_pic_type(PictureType::CoverFront);
-            tag.remove_picture_type(PictureType::CoverFront);
+            while !tag.pictures().is_empty() {
+                tag.remove_picture(0);
+            }
             tag.push_picture(picture);
         }
     }
