@@ -254,6 +254,9 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                 // only".
                 new_server.access_token = Some(String::new());
             }
+            // Persist the chosen browser on the active server too (not just the
+            // saved-list entry), so the sign-in flow knows which browser to use.
+            new_server.yt_browser = (is_ytmusic && !is_anon).then(|| *yt_browser.peek());
 
             let saved = config::SavedServer {
                 id: new_server.id.clone().unwrap_or_default(),
