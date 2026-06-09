@@ -80,7 +80,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
+        uses: cargo-bins/cargo-binstall@30b5ca8b54e1dcffd9548bc87ede1531310fdc67 # v1.20.0
 
       - name: Install dioxus-cli
         run: cargo binstall dioxus-cli@0.7.9 -y
@@ -95,7 +95,7 @@ jobs:
 
       - name: Upload Windows installer
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: kopuz-windows-installer
           path: |
