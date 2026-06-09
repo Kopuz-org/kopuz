@@ -29,7 +29,16 @@ pub fn profile_dir(server_id: &str) -> PathBuf {
         format!("yt-profile-{safe}")
     };
     directories::ProjectDirs::from("com", "temidaradev", "kopuz")
-        .map(|d| d.config_dir().join(&leaf))
+        .map(|d| {
+            // Chromium profiles must live in Local AppData on Windows, not
+            // Roaming (`config_dir()`): a Roaming profile that OneDrive syncs
+            // locks the browser's files and it hangs loading every page.
+            #[cfg(target_os = "windows")]
+            let base = d.data_local_dir();
+            #[cfg(not(target_os = "windows"))]
+            let base = d.config_dir();
+            base.join(&leaf)
+        })
         .unwrap_or_else(|| PathBuf::from(format!("./{leaf}")))
 }
 
@@ -143,6 +152,56 @@ fn find_browser_bin(browser: Browser) -> Option<String> {
     None
 }
 
+/// True when running inside a flatpak sandbox. The host browser binary isn't
+/// reachable from the sandbox `/usr`, so launches are proxied to the host via
+/// `flatpak-spawn --host` (which the runtime provides at `/usr/bin`).
+fn in_flatpak() -> bool {
+    std::path::Path::new("/.flatpak-info").exists()
+}
+
+/// Resolve the browser command on the *host* PATH (the sandbox can't stat host
+/// binaries). Probes each candidate with `flatpak-spawn --host command -v`.
+async fn find_host_browser_bin(browser: Browser) -> Option<String> {
+    // Honour an explicit override (e.g. a non-standard host install path) — same
+    // escape hatch as the native `find_browser_bin`. `flatpak-spawn --host` runs
+    // it in the host environment, so an absolute host path works.
+    let env_key = format!("KOPUZ_{}_BIN", browser.id().to_uppercase().replace('-', "_"));
+    if let Some(v) = std::env::var_os(&env_key)
+        && !v.is_empty()
+    {
+        return Some(v.to_string_lossy().into_owned());
+    }
+    for cand in browser_candidates(browser) {
+        let ok = Command::new("flatpak-spawn")
+            .args(["--host", "sh", "-c"])
+            .arg(format!("command -v {cand}"))
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if ok {
+            return Some(cand.to_string());
+        }
+    }
+    None
+}
+
+/// The browser launch command — transparently escapes the flatpak sandbox via
+/// `flatpak-spawn --host` when packaged, a plain `Command` natively.
+/// `--watch-bus` ties the host browser's lifetime to ours, so `child.kill()`
+/// (and `kill_on_drop`) still tears it down.
+fn browser_command(bin: &str) -> Command {
+    if in_flatpak() {
+        let mut c = Command::new("flatpak-spawn");
+        c.args(["--host", "--watch-bus", bin]);
+        c
+    } else {
+        Command::new(bin)
+    }
+}
+
 /// Wipe the isolated profile, launch the chosen browser at the Google
 /// sign-in page, and poll the cookie SQLite until both SAPISID and SID
 /// land. Returns the decrypted cookie header. The browser is always
@@ -181,22 +240,42 @@ pub async fn launch_signin_and_extract(
         }
     }
 
-    let bin = find_browser_bin(browser).ok_or_else(|| {
-        format!(
-            "{} not found in PATH (looked for: {}). Install it, or set ${}_BIN to its absolute path.",
-            browser,
-            browser_candidates(browser).join(", "),
-            format!("KOPUZ_{}", browser.id().to_uppercase().replace('-', "_"))
-        )
-    })?;
+    let bin = if in_flatpak() {
+        find_host_browser_bin(browser).await.ok_or_else(|| {
+            format!(
+                "{} not found on the host (looked for: {}). Install it on the host system.",
+                browser,
+                browser_candidates(browser).join(", ")
+            )
+        })?
+    } else {
+        find_browser_bin(browser).ok_or_else(|| {
+            format!(
+                "{} not found in PATH (looked for: {}). Install it, or set $KOPUZ_{}_BIN to its absolute path.",
+                browser,
+                browser_candidates(browser).join(", "),
+                browser.id().to_uppercase().replace('-', "_")
+            )
+        })?
+    };
     eprintln!(
         "[yt-signin] launching {bin} against {} (sign-in URL: {SIGNIN_URL})",
         profile.display()
     );
-    let mut child = Command::new(&bin)
-        .arg("--no-first-run")
+    let mut cmd = browser_command(&bin);
+    cmd.arg("--no-first-run")
         .arg("--no-default-browser-check")
-        .arg(format!("--user-data-dir={}", profile.display()))
+        .arg(format!("--user-data-dir={}", profile.display()));
+    // kopuz's own UI is WebView2 (Chromium), so kopuz runs inside a Windows job
+    // object. A spawned Chrome inherits it, and Chromium's sandbox can't create
+    // the nested jobs its renderer/GPU children need (the sandbox job's
+    // active-process quota is 1) — the window opens but the content is dead (no
+    // DOM, no network, not even right-clickable). CREATE_BREAKAWAY_FROM_JOB
+    // (0x01000000) detaches the child from kopuz's job so the browser's own
+    // sandbox jobs can be created.
+    #[cfg(target_os = "windows")]
+    cmd.creation_flags(0x0100_0000);
+    let mut child = cmd
         .arg(SIGNIN_URL)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())

@@ -348,11 +348,10 @@ fn read_with_symphonia(
         })
         .unwrap_or_else(|| "Unknown Title".to_string());
 
-    let bitrate_kbps = if duration > 0 {
-        ((file_size * 8) / duration / 1000).min(u16::MAX as u64) as u16
-    } else {
-        0
-    };
+    let bitrate_kbps = (file_size * 8)
+        .checked_div(duration)
+        .map(|bps| (bps / 1000).min(u16::MAX as u64) as u16)
+        .unwrap_or(0);
 
     let track = Track {
         path: track_path.to_path_buf(),

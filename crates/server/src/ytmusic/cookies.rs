@@ -83,5 +83,5 @@ fn pick_cookies_path(profile_root: &Path) -> Option<PathBuf> {
 fn header_safe(s: &str) -> bool {
     !s.is_empty()
         && s.bytes()
-            .all(|b| b >= 0x20 && b < 0x7f && b != b';' && b != b',')
+            .all(|b| (0x20..0x7f).contains(&b) && b != b';' && b != b',')
 }
