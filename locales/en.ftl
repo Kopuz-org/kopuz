@@ -418,3 +418,21 @@ radio_registries_empty = No registries configured
 offline_downloads = Offline Downloads
 download_quality = Download Quality
 saving = Saving...
+
+# Metadata Viewer / Editor
+view_metadata = View metadata
+edit_metadata = Edit metadata
+edit = Edit
+track_number = Track #
+disc_number = Disc #
+duration = Duration
+sample_rate = Sample rate
+bitrate = Bitrate
+musicbrainz_release = MusicBrainz release
+musicbrainz_recording = MusicBrainz recording
+musicbrainz_track = MusicBrainz track
+path = Path
+add_photo = Add photo
+change_photo = Change photo
+remove_photo = Remove photo
+metadata_edit_warning = Empty fields remove that tag. Writes directly to the file — no undo.

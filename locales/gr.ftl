@@ -430,3 +430,21 @@ discover_requires_ytmusic = Η Ανακάλυψη είναι διαθέσιμη 
 discover_show_all = Εμφάνιση όλων
 yt_anon_playlists = Συνδέσου στο YouTube Music για να δεις τις λίστες αναπαραγωγής σου.
 yt_anon_favorites = Συνδέσου στο YouTube Music για να δεις τα τραγούδια που σου άρεσαν.
+
+# Metadata Viewer / Editor
+view_metadata = Προβολή μεταδεδομένων
+edit_metadata = Επεξεργασία μεταδεδομένων
+edit = Επεξεργασία
+track_number = Αρ. κομματιού
+disc_number = Αρ. δίσκου
+duration = Διάρκεια
+sample_rate = Ρυθμός δειγματοληψίας
+bitrate = Ρυθμός bit
+musicbrainz_release = Κυκλοφορία MusicBrainz
+musicbrainz_recording = Ηχογράφηση MusicBrainz
+musicbrainz_track = Κομμάτι MusicBrainz
+path = Διαδρομή
+add_photo = Προσθήκη φωτογραφίας
+change_photo = Αλλαγή φωτογραφίας
+remove_photo = Αφαίρεση φωτογραφίας
+metadata_edit_warning = Τα κενά πεδία αφαιρούν την ετικέτα. Εγγραφή απευθείας στο αρχείο — χωρίς αναίρεση.

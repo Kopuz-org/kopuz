@@ -430,3 +430,21 @@ discover_requires_ytmusic = Descoperă este disponibil doar când YouTube Music 
 discover_show_all = Afișează toate
 yt_anon_playlists = Conectează-te la YouTube Music pentru a vedea playlisturile din bibliotecă.
 yt_anon_favorites = Conectează-te la YouTube Music pentru a vedea melodiile apreciate.
+
+# Metadata Viewer / Editor
+view_metadata = Vezi metadatele
+edit_metadata = Editează metadatele
+edit = Editează
+track_number = Nr. piesă
+disc_number = Nr. disc
+duration = Durată
+sample_rate = Rată de eșantionare
+bitrate = Rată de biți
+musicbrainz_release = Lansare MusicBrainz
+musicbrainz_recording = Înregistrare MusicBrainz
+musicbrainz_track = Piesă MusicBrainz
+path = Cale
+add_photo = Adaugă fotografie
+change_photo = Schimbă fotografia
+remove_photo = Elimină fotografia
+metadata_edit_warning = Câmpurile goale elimină eticheta. Se scrie direct în fișier — fără anulare.
