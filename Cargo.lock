@@ -6737,6 +6737,7 @@ dependencies = [
  "tokio",
  "uuid 1.23.2",
  "web-time",
+ "winreg",
 ]
 
 [[package]]

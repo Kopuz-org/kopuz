@@ -21,6 +21,9 @@ web-time = { workspace = true }
 tokio = { workspace = true, features = ["fs", "process", "rt", "sync"] }
 reader = { workspace = true }
 
+[target.'cfg(target_os = "windows")'.dependencies]
+winreg = "0.50"
+
 [[example]]
 name = "duration_probe"
 path = "examples/duration_probe.rs"

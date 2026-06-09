@@ -258,6 +258,13 @@ pub async fn launch_signin_and_extract(
             )
         })?
     };
+    // Windows: disable App-Bound Encryption for this browser (official policy)
+    // so the isolated profile writes v11 (DPAPI) cookies we can decrypt — v20
+    // ABE cookies are unreadable by external apps by design. The guard restores
+    // the previous policy value on drop, even on error/timeout.
+    #[cfg(target_os = "windows")]
+    let _abe = AbeDisabled::disable(browser);
+
     eprintln!(
         "[yt-signin] launching {bin} against {} (sign-in URL: {SIGNIN_URL})",
         profile.display()
@@ -338,6 +345,61 @@ fn has_cookie(header: &str, name: &str) -> bool {
     header
         .split(';')
         .any(|p| p.trim().split_once('=').is_some_and(|(k, _)| k == name))
+}
+
+/// HKCU policy subkey for a browser's `ApplicationBoundEncryptionEnabled`.
+#[cfg(target_os = "windows")]
+fn abe_policy_subkey(browser: Browser) -> &'static str {
+    match browser {
+        Browser::Chrome => r"SOFTWARE\Policies\Google\Chrome",
+        Browser::Edge => r"SOFTWARE\Policies\Microsoft\Edge",
+        Browser::Brave => r"SOFTWARE\Policies\BraveSoftware\Brave",
+        Browser::Chromium => r"SOFTWARE\Policies\Chromium",
+        Browser::Vivaldi => r"SOFTWARE\Policies\Vivaldi\Vivaldi",
+    }
+}
+
+/// Sets `ApplicationBoundEncryptionEnabled=0` (HKCU policy) so a freshly
+/// launched browser writes v11/DPAPI cookies instead of v20/ABE — which an
+/// external app can decrypt. Restores the prior value (or removes it) on drop.
+#[cfg(target_os = "windows")]
+struct AbeDisabled {
+    subkey: &'static str,
+    prev: Option<u32>,
+}
+
+#[cfg(target_os = "windows")]
+impl AbeDisabled {
+    const VALUE: &'static str = "ApplicationBoundEncryptionEnabled";
+
+    fn disable(browser: Browser) -> Option<Self> {
+        use winreg::RegKey;
+        use winreg::enums::HKEY_CURRENT_USER;
+        let subkey = abe_policy_subkey(browser);
+        let (key, _) = RegKey::predef(HKEY_CURRENT_USER)
+            .create_subkey(subkey)
+            .ok()?;
+        let prev: Option<u32> = key.get_value(Self::VALUE).ok();
+        key.set_value(Self::VALUE, &0u32).ok()?;
+        eprintln!("[yt-signin] disabled App-Bound Encryption policy for sign-in (restored after)");
+        Some(Self { subkey, prev })
+    }
+}
+
+#[cfg(target_os = "windows")]
+impl Drop for AbeDisabled {
+    fn drop(&mut self) {
+        use winreg::RegKey;
+        use winreg::enums::{HKEY_CURRENT_USER, KEY_SET_VALUE};
+        if let Ok(key) =
+            RegKey::predef(HKEY_CURRENT_USER).open_subkey_with_flags(self.subkey, KEY_SET_VALUE)
+        {
+            let _ = match self.prev {
+                Some(v) => key.set_value(Self::VALUE, &v),
+                None => key.delete_value(Self::VALUE),
+            };
+        }
+    }
 }
 
 pub fn delete_profile(server_id: &str) -> std::io::Result<()> {
