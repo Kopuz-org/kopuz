@@ -430,3 +430,21 @@ discover_requires_ytmusic = Keşfet yalnızca YouTube Music aktif sunucu olduğu
 discover_show_all = Tümünü gör
 yt_anon_playlists = Kitaplık çalma listelerini görmek için YouTube Music'e giriş yap.
 yt_anon_favorites = Beğendiğin şarkıları görmek için YouTube Music'e giriş yap.
+
+# Metadata Viewer / Editor
+view_metadata = Üst verileri görüntüle
+edit_metadata = Üst verileri düzenle
+edit = Düzenle
+track_number = Parça No
+disc_number = Disk No
+duration = Süre
+sample_rate = Örnekleme hızı
+bitrate = Bit hızı
+musicbrainz_release = MusicBrainz yayını
+musicbrainz_recording = MusicBrainz kaydı
+musicbrainz_track = MusicBrainz parçası
+path = Yol
+add_photo = Fotoğraf ekle
+change_photo = Fotoğrafı değiştir
+remove_photo = Fotoğrafı kaldır
+metadata_edit_warning = Boş alanlar o etiketi siler. Doğrudan dosyaya yazılır — geri alınamaz.

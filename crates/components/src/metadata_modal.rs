@@ -60,6 +60,28 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
         });
     }
 
+    let metadata_text = i18n::t("metadata").to_string();
+    let edit_metadata_text = i18n::t("edit_metadata").to_string();
+    let edit_text = i18n::t("edit").to_string();
+    let title_text = i18n::t("title").to_string();
+    let artist_text = i18n::t("artist").to_string();
+    let album_text = i18n::t("album").to_string();
+    let track_number_text = i18n::t("track_number").to_string();
+    let disc_number_text = i18n::t("disc_number").to_string();
+    let duration_text = i18n::t("duration").to_string();
+    let sample_rate_text = i18n::t("sample_rate").to_string();
+    let bitrate_text = i18n::t("bitrate").to_string();
+    let musicbrainz_release_text = i18n::t("musicbrainz_release").to_string();
+    let musicbrainz_recording_text = i18n::t("musicbrainz_recording").to_string();
+    let musicbrainz_track_text = i18n::t("musicbrainz_track").to_string();
+    let path_text = i18n::t("path").to_string();
+    let add_photo_text = i18n::t("add_photo").to_string();
+    let change_photo_text = i18n::t("change_photo").to_string();
+    let remove_photo_text = i18n::t("remove_photo").to_string();
+    let metadata_edit_warning_text = i18n::t("metadata_edit_warning").to_string();
+    let cancel_text = i18n::t("cancel").to_string();
+    let save_text = i18n::t("save").to_string();
+
     let mut readonly: Vec<(String, String)> = Vec::new();
     let mut push = |label: &str, value: String| {
         if !value.trim().is_empty() {
@@ -67,18 +89,18 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
         }
     };
     if t.duration > 0 {
-        push("Duration", fmt_dur(t.duration));
+        push(&duration_text, fmt_dur(t.duration));
     }
     if t.khz > 0 {
-        push("Sample rate", format!("{:.1} kHz", t.khz as f64 / 1000.0));
+        push(&sample_rate_text, format!("{:.1} kHz", t.khz as f64 / 1000.0));
     }
     if t.bitrate > 0 {
-        push("Bitrate", format!("{} kbps", t.bitrate));
+        push(&bitrate_text, format!("{} kbps", t.bitrate));
     }
-    push("MusicBrainz release", t.musicbrainz_release_id.clone().unwrap_or_default());
-    push("MusicBrainz recording", t.musicbrainz_recording_id.clone().unwrap_or_default());
-    push("MusicBrainz track", t.musicbrainz_track_id.clone().unwrap_or_default());
-    push("Path", t.path.display().to_string());
+    push(&musicbrainz_release_text, t.musicbrainz_release_id.clone().unwrap_or_default());
+    push(&musicbrainz_recording_text, t.musicbrainz_recording_id.clone().unwrap_or_default());
+    push(&musicbrainz_track_text, t.musicbrainz_track_id.clone().unwrap_or_default());
+    push(&path_text, t.path.display().to_string());
 
     let input_class = "w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-white/20";
 
@@ -134,13 +156,13 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
 
                 div { class: "flex items-center justify-between mb-4",
                     h2 { class: "text-xl font-bold text-white",
-                        if *editing.read() { "Edit metadata" } else { "Metadata" }
+                        if *editing.read() { "{edit_metadata_text}" } else { "{metadata_text}" }
                     }
                     div { class: "flex items-center gap-1",
                         if editable && !*editing.read() {
                             button {
                                 class: "w-8 h-8 flex items-center justify-center rounded-full text-slate-400 hover:text-white hover:bg-white/10 transition-colors",
-                                title: "Edit",
+                                title: "{edit_text}",
                                 onclick: move |_| editing.set(true),
                                 i { class: "fa-solid fa-pen" }
                             }
@@ -168,7 +190,7 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
                                 class: "bg-white/10 hover:bg-white/20 text-white px-3 py-2 rounded text-sm transition-colors flex items-center gap-2",
                                 onclick: pick_cover,
                                 i { class: "fa-solid fa-image" }
-                                if cover_preview.read().is_some() { "Change photo" } else { "Add photo" }
+                                if cover_preview.read().is_some() { "{change_photo_text}" } else { "{add_photo_text}" }
                             }
                             if cover_preview.read().is_some() {
                                 button {
@@ -178,7 +200,7 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
                                         cover_change.set(CoverChange::Remove);
                                     },
                                     i { class: "fa-solid fa-trash" }
-                                    "Remove photo"
+                                    "{remove_photo_text}"
                                 }
                             }
                         }
@@ -188,7 +210,7 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
                 div { class: "max-h-[60vh] overflow-y-auto space-y-3",
                     if *editing.read() {
                         div { class: "flex flex-col gap-1",
-                            span { class: "text-[10px] font-bold tracking-widest uppercase text-white/35", "Title" }
+                            span { class: "text-[10px] font-bold tracking-widest uppercase text-white/35", "{title_text}" }
                             input {
                                 class: input_class,
                                 value: "{title}",
@@ -197,7 +219,7 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
                             }
                         }
                         div { class: "flex flex-col gap-1",
-                            span { class: "text-[10px] font-bold tracking-widest uppercase text-white/35", "Artist" }
+                            span { class: "text-[10px] font-bold tracking-widest uppercase text-white/35", "{artist_text}" }
                             input {
                                 class: input_class,
                                 value: "{artist}",
@@ -206,7 +228,7 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
                             }
                         }
                         div { class: "flex flex-col gap-1",
-                            span { class: "text-[10px] font-bold tracking-widest uppercase text-white/35", "Album" }
+                            span { class: "text-[10px] font-bold tracking-widest uppercase text-white/35", "{album_text}" }
                             input {
                                 class: input_class,
                                 value: "{album}",
@@ -216,7 +238,7 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
                         }
                         div { class: "flex gap-3",
                             div { class: "flex flex-col gap-1 flex-1",
-                                span { class: "text-[10px] font-bold tracking-widest uppercase text-white/35", "Track #" }
+                                span { class: "text-[10px] font-bold tracking-widest uppercase text-white/35", "{track_number_text}" }
                                 input {
                                     r#type: "number",
                                     class: input_class,
@@ -226,7 +248,7 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
                                 }
                             }
                             div { class: "flex flex-col gap-1 flex-1",
-                                span { class: "text-[10px] font-bold tracking-widest uppercase text-white/35", "Disc #" }
+                                span { class: "text-[10px] font-bold tracking-widest uppercase text-white/35", "{disc_number_text}" }
                                 input {
                                     r#type: "number",
                                     class: input_class,
@@ -237,17 +259,17 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
                             }
                         }
                         p { class: "text-xs text-white/30 italic",
-                            "Empty fields remove that tag. Writes directly to the file — no undo."
+                            "{metadata_edit_warning_text}"
                         }
                     } else {
-                        MetaRow { label: "Title".to_string(), value: title.read().clone() }
-                        MetaRow { label: "Artist".to_string(), value: artist.read().clone() }
-                        MetaRow { label: "Album".to_string(), value: album.read().clone() }
+                        MetaRow { label: title_text.clone(), value: title.read().clone() }
+                        MetaRow { label: artist_text.clone(), value: artist.read().clone() }
+                        MetaRow { label: album_text.clone(), value: album.read().clone() }
                         if !track_no.read().trim().is_empty() {
-                            MetaRow { label: "Track #".to_string(), value: track_no.read().clone() }
+                            MetaRow { label: track_number_text.clone(), value: track_no.read().clone() }
                         }
                         if !disc_no.read().trim().is_empty() {
-                            MetaRow { label: "Disc #".to_string(), value: disc_no.read().clone() }
+                            MetaRow { label: disc_number_text.clone(), value: disc_no.read().clone() }
                         }
                     }
 
@@ -261,12 +283,12 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
                         button {
                             class: "text-slate-400 hover:text-white text-sm transition-colors px-3 py-2",
                             onclick: move |_| editing.set(false),
-                            "Cancel"
+                            "{cancel_text}"
                         }
                         button {
                             class: "bg-white text-black px-4 py-2 rounded text-sm font-medium hover:bg-slate-200 transition-colors",
                             onclick: move |_| do_save(),
-                            "Save"
+                            "{save_text}"
                         }
                     }
                 }

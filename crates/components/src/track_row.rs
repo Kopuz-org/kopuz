@@ -111,6 +111,7 @@ pub fn TrackRow(
     let remove_from_playlist_text = i18n::t("remove_from_playlist").to_string();
     let delete_song_text = i18n::t("delete").to_string();
     let share_text = i18n::t("share_musicbrainz").to_string();
+    let view_metadata_text = i18n::t("view_metadata").to_string();
 
     // Identifiers used to resolve the track's MusicBrainz page when sharing.
     // Cloned once per layout closure (modern / normal) since each moves them in.
@@ -194,7 +195,10 @@ pub fn TrackRow(
     let has_view_metadata = on_view_metadata.is_some();
     let view_metadata_idx = if has_view_metadata {
         let idx = actions.len();
-        actions.push(MenuAction::new("View metadata", "fa-solid fa-circle-info"));
+        actions.push(MenuAction::new(
+            view_metadata_text.as_str(),
+            "fa-solid fa-circle-info",
+        ));
         Some(idx)
     } else {
         None
