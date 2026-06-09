@@ -429,3 +429,21 @@ discover_requires_ytmusic = Descobrir só está disponível quando o YouTube Mus
 discover_show_all = Mostrar tudo
 yt_anon_playlists = Entre no YouTube Music para ver suas playlists.
 yt_anon_favorites = Entre no YouTube Music para ver suas músicas curtidas.
+
+# Metadata Viewer / Editor
+view_metadata = Ver metadados
+edit_metadata = Editar metadados
+edit = Editar
+track_number = Nº da faixa
+disc_number = Nº do disco
+duration = Duração
+sample_rate = Taxa de amostragem
+bitrate = Taxa de bits
+musicbrainz_release = Lançamento do MusicBrainz
+musicbrainz_recording = Gravação do MusicBrainz
+musicbrainz_track = Faixa do MusicBrainz
+path = Caminho
+add_photo = Adicionar foto
+change_photo = Alterar foto
+remove_photo = Remover foto
+metadata_edit_warning = Campos vazios removem a tag. Grava diretamente no arquivo — sem desfazer.

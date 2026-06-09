@@ -430,3 +430,21 @@ discover_requires_ytmusic = A Felfedezés csak akkor érhető el, ha a YouTube M
 discover_show_all = Összes megjelenítése
 yt_anon_playlists = Jelentkezz be a YouTube Musicba a könyvtárad lejátszási listáinak megtekintéséhez.
 yt_anon_favorites = Jelentkezz be a YouTube Musicba a kedvelt dalaid megtekintéséhez.
+
+# Metadata Viewer / Editor
+view_metadata = Metaadatok megtekintése
+edit_metadata = Metaadatok szerkesztése
+edit = Szerkesztés
+track_number = Szám sorszáma
+disc_number = Lemez sorszáma
+duration = Időtartam
+sample_rate = Mintavételezési frekvencia
+bitrate = Bitráta
+musicbrainz_release = MusicBrainz kiadás
+musicbrainz_recording = MusicBrainz felvétel
+musicbrainz_track = MusicBrainz szám
+path = Útvonal
+add_photo = Fénykép hozzáadása
+change_photo = Fénykép cseréje
+remove_photo = Fénykép eltávolítása
+metadata_edit_warning = Az üres mezők eltávolítják az adott címkét. Közvetlenül a fájlba ír — nincs visszavonás.

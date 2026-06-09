@@ -430,3 +430,21 @@ discover_requires_ytmusic = גילוי זמין רק כאשר YouTube Music הו
 discover_show_all = הצג הכל
 yt_anon_playlists = היכנס ל-YouTube Music כדי לראות את רשימות ההשמעה בספרייה שלך.
 yt_anon_favorites = היכנס ל-YouTube Music כדי לראות את השירים שאהבת.
+
+# Metadata Viewer / Editor
+view_metadata = הצג מטא-נתונים
+edit_metadata = ערוך מטא-נתונים
+edit = עריכה
+track_number = מספר רצועה
+disc_number = מספר תקליטור
+duration = משך
+sample_rate = קצב דגימה
+bitrate = קצב סיביות
+musicbrainz_release = הוצאה ב-MusicBrainz
+musicbrainz_recording = הקלטה ב-MusicBrainz
+musicbrainz_track = רצועה ב-MusicBrainz
+path = נתיב
+add_photo = הוסף תמונה
+change_photo = החלף תמונה
+remove_photo = הסר תמונה
+metadata_edit_warning = שדות ריקים מוחקים את התג. נכתב ישירות לקובץ — אין ביטול.
