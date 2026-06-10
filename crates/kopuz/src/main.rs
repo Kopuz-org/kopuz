@@ -881,7 +881,7 @@ fn App() -> Element {
     use_hook(|| {
         let (engine, mut rx) = server::ytmusic::decipher::webview_channel();
         if server::ytmusic::decipher::set_engine(engine).is_err() {
-            eprintln!("[yt-decipher] engine already registered — webview solver not active");
+            tracing::warn!("yt-decipher engine already registered — webview solver not active");
         }
         spawn(async move {
             while let Some(req) = rx.recv().await {

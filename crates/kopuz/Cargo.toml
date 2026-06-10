@@ -3,6 +3,9 @@ name = "kopuz"
 version.workspace = true
 edition = "2024"
 
+[lints]
+workspace = true
+
 [package.metadata.bundle]
 identifier = "com.temidaradev.kopuz"
 icon = ["assets/app.ico", "assets/logo.png"]

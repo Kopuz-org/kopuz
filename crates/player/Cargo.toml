@@ -3,6 +3,9 @@ name = "player"
 version.workspace = true
 edition = "2024"
 
+[lints]
+workspace = true
+
 [dependencies]
 tracing = { workspace = true }
 config = { workspace = true }

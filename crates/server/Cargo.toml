@@ -3,6 +3,9 @@ name = "server"
 version.workspace = true
 edition = "2024"
 
+[lints]
+workspace = true
+
 [dependencies]
 tracing = { workspace = true }
 directories = { workspace = true }

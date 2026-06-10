@@ -3,6 +3,9 @@ name = "utils"
 version.workspace = true
 edition = "2024"
 
+[lints]
+workspace = true
+
 [dependencies]
 percent-encoding = { workspace = true }
 reqwest = { workspace = true }
