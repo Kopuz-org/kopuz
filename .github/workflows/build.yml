@@ -83,13 +83,18 @@ jobs:
         uses: cargo-bins/cargo-binstall@30b5ca8b54e1dcffd9548bc87ede1531310fdc67 # v1.20.0
 
       - name: Install dioxus-cli
-        # Token lets binstall query the GitHub API for the prebuilt release
-        # asset without hitting the 60-req/hr unauthenticated limit. Disable the
-        # compile fallback so a missed prebuilt fails fast instead of building
-        # dioxus-cli from source (which breaks on auth-git2/git2 0.21).
-        run: cargo binstall dioxus-cli@0.7.9 -y --disable-strategies compile
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Fast path: prebuilt via binstall (token avoids the unauthenticated
+          # GitHub API rate limit). Disable binstall's own compile fallback —
+          # its unlocked source build breaks on auth-git2/git2 0.21. If no
+          # prebuilt is available, fall back to a *locked* source build, which
+          # uses dioxus-cli's committed Cargo.lock and so avoids git2 0.21.
+          cargo binstall dioxus-cli@0.7.9 -y --disable-strategies compile || true
+          command -v dx >/dev/null 2>&1 || cargo install dioxus-cli@0.7.9 --locked
+          dx --version
 
       - name: Bundle Windows installer (.msi)
         run: dx bundle --release --platform desktop --package kopuz
