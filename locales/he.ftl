@@ -27,10 +27,8 @@ add = הוספה
 add_folder = הוספת תיקייה
 no_music_folders = לא הוגדרו תיקיות מוזיקה
 add_server = הוספת שרת
-# TODO: NEED LOCALIZATION
-connect_to_lastfm = Connect to Last.fm
-lastfm_connected = Last.fm Connected
-# TODO: NEED LOCALIZATION
+connect_to_lastfm = התחבר ל־Last.fm
+lastfm_connected = מחובר ל־Last.fm
 server_details = פרטי שרת
 server_name = שם השרת
 server_url = כתובת השרת
@@ -81,10 +79,8 @@ create = יצירה
 save = שמירה
 enabled = מופעל
 disabled = מושבת
-# TODO: Translate lines below
-play = Play
-shuffle = Shuffle
-# ------
+play = נגן
+shuffle = ערבוב
 
 # Navigation & Headers
 tracks = שירים
@@ -140,10 +136,8 @@ heart_track_to_add_server = סמנו שיר בלב בזמן שהוא מתנגן 
 search_placeholder = חיפוש אמנים, אלבומים או שירים...
 no_results_found = לא נמצאו תוצאות עבור "{ $query }"
 listenbrainz_token_placeholder = הזנת טוקן ListenBrainz
-# TODO: NEED LOCALIZATION
-lastfm_api_key_placeholder = Enter your Last.fm API Key
-lastfm_api_secret_placeholder = Enter your Last.fm API Secret
-# TODO: NEED LOCALIZATION
+lastfm_api_key_placeholder = הזן את מפתח ה-API של Last.fm
+lastfm_api_secret_placeholder = הזן את סוד ה-API של Last.fm
 
 # Empty States
 album_not_found = האלבום לא נמצא
