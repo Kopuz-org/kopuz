@@ -1,11 +1,9 @@
 use config::AppConfig;
 use dioxus::prelude::*;
 use reader::{Library, Track};
-use std::char::ToLowercase;
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::str::Chars;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SortField {
