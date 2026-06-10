@@ -27,10 +27,8 @@ add = Tambah
 add_folder = Tambah Folder
 no_music_folders = Tidak ada folder musik yang diset
 add_server = Tambah Server
-# TODO: NEED LOCALIZATION
-connect_to_lastfm = Connect to Last.fm
-lastfm_connected = Last.fm Connected
-# TODO: NEED LOCALIZATION
+connect_to_lastfm = Hubungkan ke Last.fm
+lastfm_connected = Terhubung ke Last.fm
 server_details = Detail Server
 server_name = Nama Server
 server_url = URL Server
@@ -136,10 +134,8 @@ maximize = Maksimalkan
 close = Tutup
 enabled = AKTIF
 disabled = NONAKTIF
-# TODO: Translate lines below
-play = Play
-shuffle = Shuffle
-# ------
+play = Putar
+shuffle = Acak
 
 # Navigation & Headers
 tracks = Lagu
@@ -195,10 +191,8 @@ heart_track_to_add_server = Sukai lagu yang sedang diputar untuk menambahkannya 
 search_placeholder = Cari artis, album atau lagu...
 no_results_found = Tidak ada hasil untuk "{ $query }"
 listenbrainz_token_placeholder = Masukkan token ListenBrainz kamu
-# TODO: NEED LOCALIZATION
-lastfm_api_key_placeholder = Enter your Last.fm API Key
-lastfm_api_secret_placeholder = Enter your Last.fm API Secret
-# TODO: NEED LOCALIZATION
+lastfm_api_key_placeholder = Masukkan kunci API Last.fm Anda
+lastfm_api_secret_placeholder = Masukkan rahasia API Last.fm Anda
 
 # Empty States
 album_not_found = Album tidak ditemukan

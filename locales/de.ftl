@@ -27,10 +27,8 @@ add = Hinzufügen
 add_folder = Ordner hinzufügen
 no_music_folders = Keine Musikordner konfiguriert
 add_server = Server hinzufügen
-# TODO: NEED LOCALIZATION
-connect_to_lastfm = Connect to Last.fm
-lastfm_connected = Last.fm Connected
-# TODO: NEED LOCALIZATION
+connect_to_lastfm = Mit Last.fm verbinden
+lastfm_connected = Mit Last.fm verbunden
 server_details = Serverdetails
 server_name = Servername
 server_url = Serveradresse
@@ -81,10 +79,8 @@ create = Erstellen
 save = Speichern
 enabled = AKTIVIERT
 disabled = DEAKTIVIERT
-# TODO: Translate lines below
-play = Play
-shuffle = Shuffle
-# ------
+play = Abspielen
+shuffle = Zufall
 
 # Navigation & Headers
 tracks = Titel
@@ -140,10 +136,8 @@ heart_track_to_add_server = Markiere einen Titel mit „Gefällt mir“, um ihn 
 search_placeholder = Suche nach Künstlern, Alben oder Titeln...
 no_results_found = Keine Ergebnisse für „{ $query }“ gefunden
 listenbrainz_token_placeholder = Gib deinen ListenBrainz-Token ein
-# TODO: NEED LOCALIZATION
-lastfm_api_key_placeholder = Enter your Last.fm API Key
-lastfm_api_secret_placeholder = Enter your Last.fm API Secret
-# TODO: NEED LOCALIZATION
+lastfm_api_key_placeholder = Gib deinen Last.fm-API-Schlüssel ein
+lastfm_api_secret_placeholder = Gib dein Last.fm-API-Geheimnis ein
 
 # Empty States
 album_not_found = Album nicht gefunden
