@@ -496,11 +496,11 @@ pub fn Fullscreen(
             ctrl.shuffle_order
                 .read()
                 .iter()
-                .filter_map(|&qi| q.get(qi).cloned().map(|t| t))
+                .filter_map(|&qi| q.get(qi).cloned())
                 .collect::<Vec<_>>()
         } else {
             (0..q.len())
-                .filter_map(|qi| q.get(qi).cloned().map(|t| t))
+                .filter_map(|qi| q.get(qi).cloned())
                 .collect::<Vec<_>>()
         }
     };
@@ -508,7 +508,11 @@ pub fn Fullscreen(
     let mut active_tab = use_signal(|| 0usize);
     if cfg!(target_os = "android") {
         let tab = *active_tab.read();
-        let tab_btn = |idx: usize, icon: &'static str, label: &'static str| {
+        let close_text = i18n::t("close").to_string();
+        let music_text = i18n::t("music").to_string();
+        let up_next_text = i18n::t("up_next").to_string();
+        let lyrics_text = i18n::t("lyrics").to_string();
+        let tab_btn = |idx: usize, icon: &'static str, label: String| {
             let cls = if tab == idx {
                 "flex-1 h-10 flex items-center justify-center text-white border-b-2 border-white"
             } else {
@@ -529,14 +533,14 @@ pub fn Fullscreen(
                     class: "flex items-center gap-2 px-3 pt-[env(safe-area-inset-top)] pb-1 shrink-0",
                     button {
                         class: "w-10 h-10 flex items-center justify-center text-white/60 active:scale-95 transition-all shrink-0",
-                        "aria-label": "Close",
+                        "aria-label": "{close_text}",
                         onclick: move |_| is_fullscreen.set(false),
                         i { class: "fa-solid fa-chevron-down text-xl", "aria-hidden": "true" }
                     }
                     div { class: "flex flex-1 items-center",
-                        {tab_btn(0, "fa-solid fa-compact-disc", "Music tab")}
-                        {tab_btn(1, "fa-solid fa-list", "Queue tab")}
-                        {tab_btn(2, "fa-solid fa-align-left", "Lyrics tab")}
+                        {tab_btn(0, "fa-solid fa-compact-disc", music_text.clone())}
+                        {tab_btn(1, "fa-solid fa-list", up_next_text.clone())}
+                        {tab_btn(2, "fa-solid fa-align-left", lyrics_text.clone())}
                     }
                 }
 
