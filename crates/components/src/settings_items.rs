@@ -3,6 +3,7 @@ use config::{
     MusicServer, SavedServer,
 };
 use dioxus::prelude::*;
+use tracing::Instrument;
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use rfd::AsyncFileDialog;
@@ -510,7 +511,7 @@ pub fn LastFmSettings(
                                 tracing::warn!("Failed to get auth token: {}", e);
                             }
                         }
-                    });
+                    }.instrument(tracing::info_span!("lastfm.auth")));
                 },
 
                 if session_key.is_empty() || api_key_input.is_empty() || api_secret_input.is_empty() {

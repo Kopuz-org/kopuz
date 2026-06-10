@@ -958,6 +958,7 @@ dependencies = [
  "directories",
  "serde",
  "serde_json",
+ "tracing",
  "uuid 1.23.2",
 ]
 
@@ -1331,6 +1332,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0369ee1ad671834580515889b80f2ea915f23b8be8d0daa4bbaf2ac5c7590835"
 dependencies = [
  "cipher",
+]
+
+[[package]]
+name = "ctrlc"
+version = "3.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e0b1fab2ae45819af2d0731d60f2afe17227ebb1a1538a236da84c93e9a60162"
+dependencies = [
+ "dispatch2",
+ "nix 0.31.3",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3189,6 +3201,7 @@ dependencies = [
  "scrobble",
  "server",
  "tokio",
+ "tracing",
  "utils",
  "web-time",
 ]
@@ -3847,6 +3860,7 @@ dependencies = [
  "block2",
  "components",
  "config",
+ "ctrlc",
  "dioxus",
  "directories",
  "discord-presence",
@@ -3874,6 +3888,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-appender",
+ "tracing-chrome",
  "tracing-subscriber",
  "urlencoding",
  "utils",
@@ -4496,6 +4511,18 @@ dependencies = [
  "cfg-if",
  "libc",
  "memoffset 0.7.1",
+]
+
+[[package]]
+name = "nix"
+version = "0.31.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d"
+dependencies = [
+ "bitflags 2.13.0",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
 ]
 
 [[package]]
@@ -5423,6 +5450,7 @@ dependencies = [
  "symphonia",
  "symphonia-adapter-libopus",
  "tokio",
+ "tracing",
  "wasm-bindgen",
  "web-sys",
  "windows 0.62.2",
@@ -6736,6 +6764,7 @@ dependencies = [
  "serde_json",
  "sha1",
  "tokio",
+ "tracing",
  "uuid 1.23.2",
  "web-time",
 ]
@@ -7801,6 +7830,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-chrome"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf0a738ed5d6450a9fb96e86a23ad808de2b727fd1394585da5cdd6788ffe724"
+dependencies = [
+ "serde_json",
+ "tracing-core",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "tracing-core"
 version = "0.1.36"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7822,6 +7862,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-serde"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "704b1aeb7be0d0a84fc9828cae51dab5970fee5088f83d1dd7ee6f6246fc6ff1"
+dependencies = [
+ "serde",
+ "tracing-core",
+]
+
+[[package]]
 name = "tracing-subscriber"
 version = "0.3.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7831,12 +7881,15 @@ dependencies = [
  "nu-ansi-term",
  "once_cell",
  "regex-automata",
+ "serde",
+ "serde_json",
  "sharded-slab",
  "smallvec",
  "thread_local",
  "tracing",
  "tracing-core",
  "tracing-log",
+ "tracing-serde",
 ]
 
 [[package]]
@@ -8086,6 +8139,7 @@ dependencies = [
  "reqwest 0.13.4",
  "serde",
  "serde_json",
+ "time",
  "tokio",
  "tracing",
  "urlencoding",
@@ -9402,7 +9456,7 @@ dependencies = [
  "futures-sink",
  "futures-util",
  "hex",
- "nix",
+ "nix 0.26.4",
  "once_cell",
  "ordered-stream",
  "rand 0.8.6",

@@ -20,6 +20,13 @@ resolver = "3"
 [workspace.package]
 version = "0.6.7"
 
+# Steer code toward the tracing subscriber (see crates/kopuz/src/logging.rs).
+# Inherited per-crate via `[lints] workspace = true`. Build scripts (cargo:
+# directives), examples, and test diagnostics opt out with `#[expect(...)]`.
+[workspace.lints.clippy]
+print_stdout = "deny"
+print_stderr = "deny"
+
 [workspace.dependencies]
 dioxus = { version = "0.7.9", features = [] }
 getrandom = { version = "0.4", features = ["wasm_js"] }
@@ -47,8 +54,10 @@ web-time = "1.1"
 gloo-timers = { version = "0.4", features = ["futures"] }
 directories = "6.0"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 tracing-appender = "0.2"
+tracing-chrome = "0.7"
+ctrlc = "3.5"
 i18n = { path = "./crates/i18n" }
 player = { path = "./crates/player" }
 reader = { path = "./crates/reader" }

@@ -5,6 +5,7 @@ use dioxus::document::eval;
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 use reader::Library;
+use tracing::Instrument;
 use serde_json::Value;
 
 #[component]
@@ -112,7 +113,7 @@ pub fn Rightbar(
                 });
                 lyrics.set(Some(display));
             }
-        });
+        }.instrument(tracing::info_span!("lyrics.load")));
     });
 
     let mut is_resizing = use_signal(|| false);

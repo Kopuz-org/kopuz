@@ -4,6 +4,7 @@ use std::cell::Cell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
+use tracing::Instrument;
 
 pub use ::server::{DownloadItem, DownloadProgress, DownloadQueue, DownloadStatus};
 
@@ -94,6 +95,7 @@ pub fn queue_downloads(
     reset_progress_session();
 
     let session_start = Instant::now();
+    let session_span = tracing::info_span!("downloads.session");
     spawn(async move {
         tokio::join!(
             download_worker(queue, config, session_start, cancel_flag.clone()),
@@ -105,7 +107,7 @@ pub fn queue_downloads(
         let mut q = queue.write();
         q.is_running = false;
         q.cancel_requested = false;
-    });
+    }.instrument(session_span));
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -168,7 +170,7 @@ async fn download_worker(
                         info.content_length,
                     )),
                     Err(e) => {
-                        eprintln!("Download URL resolve failed for {id} (YT): {e}");
+                        tracing::warn!(%id, error = %e, "YT download URL resolve failed");
                         None
                     }
                 }
@@ -210,7 +212,7 @@ async fn download_worker(
                 clear_progress(&id);
             }
             Err(e) => {
-                eprintln!("Download failed for {id}: {e}");
+                tracing::error!(%id, error = %e, "download failed");
                 if let Some(item) = queue.write().items.iter_mut().find(|i| i.id == id) {
                     item.status = DownloadStatus::Failed;
                 }
@@ -241,6 +243,11 @@ pub fn delete_downloads(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[tracing::instrument(
+    name = "download.track",
+    skip(url, user_agent, queue, session_start, cancel_flag),
+    fields(item_id = %item_id, content_length)
+)]
 async fn download_with_progress(
     item_id: &str,
     url: &str,

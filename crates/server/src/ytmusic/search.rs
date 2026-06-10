@@ -53,6 +53,7 @@ struct ParsedRow {
     thumbnail_url: Option<String>,
 }
 
+#[tracing::instrument(name = "yt.search", skip(cookies), fields(query = %query))]
 pub async fn music_search_tracks(
     query: &str,
     cookies: Option<&str>,
@@ -100,6 +101,7 @@ pub async fn music_search_tracks(
 /// Powers the artist page when navigation only had a name (track row
 /// click, sidebar tag, etc.) and the YT backend is active. Returns
 /// None if the search returned no artist row at all.
+#[tracing::instrument(name = "yt.resolve_artist", skip(cookies), fields(query = %query))]
 pub async fn resolve_artist_channel_id(
     query: &str,
     cookies: Option<&str>,

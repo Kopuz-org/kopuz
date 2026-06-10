@@ -228,7 +228,7 @@ fn install_taskbar_subclass(hwnd: HWND) {
         return;
     }
     if installed_hwnd != 0 {
-        eprintln!("[windows] Taskbar subclass already installed for another HWND");
+        tracing::debug!("taskbar subclass already installed for another HWND");
         return;
     }
 
@@ -385,7 +385,7 @@ fn setup_taskbar_buttons(hwnd: HWND, playing: bool) {
     })();
 
     if let Err(e) = result {
-        eprintln!("[windows] Taskbar media buttons setup failed: {e:?}");
+        tracing::warn!(error = ?e, "taskbar media buttons setup failed");
     }
 }
 
@@ -499,10 +499,10 @@ fn setup_smtc(hwnd: HWND) {
         Ok(smtc) => {
             if SMTC.set(smtc).is_ok() {
                 setup_taskbar_buttons(hwnd, false);
-                println!("[windows] SMTC initialised");
+                tracing::debug!("SMTC initialised");
             }
         }
-        Err(e) => eprintln!("[windows] SMTC setup failed: {e:?}"),
+        Err(e) => tracing::warn!(error = ?e, "SMTC setup failed"),
     }
 }
 
@@ -528,7 +528,7 @@ pub fn init() {
 
             match find_main_hwnd() {
                 Some(hwnd) => setup_smtc(hwnd),
-                None => eprintln!("[windows] Could not find main HWND for SMTC"),
+                None => tracing::warn!("could not find main HWND for SMTC"),
             }
         });
     });

@@ -3,6 +3,7 @@
 //! prints Some(N), the wire-extraction half of the duration fix is
 //! working and any remaining 0:00 in the UI is a signal-plumbing bug
 //! in the player controller, not a network/parse bug.
+#![expect(clippy::print_stdout, reason = "CLI probe example reports its findings on stdout")]
 
 use serde_json::Value;
 use server::ytmusic::YouTubeMusicClient;

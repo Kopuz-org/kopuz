@@ -172,7 +172,7 @@ pub fn use_player_task(ctrl: PlayerController) {
         async move {
             use player::systemint::{SystemEvent, wait_event};
             player::systemint::init();
-            println!("[player_task] Starting Windows SMTC event loop");
+            tracing::debug!("starting Windows SMTC event loop");
             loop {
                 match wait_event().await {
                     Some(SystemEvent::Play) => ctrl.resume(),
