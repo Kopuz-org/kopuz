@@ -27,10 +27,8 @@ add = Hozzáadás
 add_folder = Mappa hozzáadása
 no_music_folders = Nincs zene mappa beállítva
 add_server = Szerver hozzáadása
-# TODO: NEED LOCALIZATION
-connect_to_lastfm = Connect to Last.fm
-lastfm_connected = Last.fm Connected
-# TODO: NEED LOCALIZATION
+connect_to_lastfm = Csatlakozás a Last.fm-hez
+lastfm_connected = Csatlakozva a Last.fm-hez
 server_details = Szerver részletei
 server_name = Szerver neve
 server_url = Szerver URL
@@ -63,6 +61,8 @@ add_to_queue = Hozzáadás sorhoz
 play_next = Lejátszás következőként
 add_to_playlist = Hozzáadás lejátszási listához
 remove_from_playlist = Eltávolítás a lejátszási listából
+share_musicbrainz = Megosztás (MusicBrainz)
+share_link_copied = MusicBrainz-link másolva
 delete = Törlés
 delete_song = Dal törlése
 delete_album = Album törlése
@@ -79,10 +79,8 @@ create = Létrehozás
 save = Mentés
 enabled = BE
 disabled = KI
-# TODO: Translate lines below
-play = Play
-shuffle = Shuffle
-# ------
+play = Lejátszás
+shuffle = Véletlenszerű
 
 # Navigation & Headers
 tracks = Dalok
@@ -138,10 +136,8 @@ heart_track_to_add_server = Kedveld a dalt lejátszás közben, hogy itt megjele
 search_placeholder = Keress előadókra, albumokra vagy dalokra...
 no_results_found = Nincs találat a következőre: "{ $query }"
 listenbrainz_token_placeholder = Add meg a ListenBrainz tokent
-# TODO: NEED LOCALIZATION
-lastfm_api_key_placeholder = Enter your Last.fm API Key
-lastfm_api_secret_placeholder = Enter your Last.fm API Secret
-# TODO: NEED LOCALIZATION
+lastfm_api_key_placeholder = Add meg a Last.fm API-kulcsodat
+lastfm_api_secret_placeholder = Add meg a Last.fm API-titkodat
 
 # Empty States
 album_not_found = Album nem található
@@ -187,6 +183,9 @@ most_played_local_tracks = A legtöbbet játszott helyi dalaid.
 no_tracks_in_library = Nem találhatók dalok a könyvtáradban.
 no_songs_here = Itt nincsenek dalok.
 syncing_with_server = Szinkronizálás a szerverrel...
+yt_syncing_progress = Szinkronizálás — { $count } szám betöltve eddig
+yt_synced_total = { $count } kedvelt szám szinkronizálva
+refresh = Frissítés
 most_played_tracks = A legtöbbet játszott dalaid.
 no_more_songs = Nincs több dal a sorban
 server_playlist = Szerver lejátszási lista
@@ -374,6 +373,7 @@ artist_photo_source = Előadó fotójának forrása
 artist_photo = Előadó fotója
 album_cover = Albumborító
 auto_fetch_covers = Album borítók automatikus letöltése
+prefer_local_lyrics = Helyi dalszöveg előnyben (.lrc / beágyazott, nincs online tartalék)
 cover_fetch_strategy = Borító letöltési stratégia
 musicbrainz_first = MusicBrainz először
 lastfm_first = Last.fm először
@@ -418,3 +418,27 @@ radio_registries_empty = Nincsenek nyilvántartások konfigurálva
 offline_downloads = Offline letöltések
 download_quality = Letöltés minősége
 saving = Mentés...
+discover_more_loading = További betöltése…
+discover_failed = Nem sikerült betölteni a Felfedezést: { $error }
+discover_requires_ytmusic = A Felfedezés csak akkor érhető el, ha a YouTube Music az aktív szerver.
+discover_show_all = Összes megjelenítése
+yt_anon_playlists = Jelentkezz be a YouTube Musicba a könyvtárad lejátszási listáinak megtekintéséhez.
+yt_anon_favorites = Jelentkezz be a YouTube Musicba a kedvelt dalaid megtekintéséhez.
+
+# Metadata Viewer / Editor
+view_metadata = Metaadatok megtekintése
+edit_metadata = Metaadatok szerkesztése
+edit = Szerkesztés
+track_number = Szám sorszáma
+disc_number = Lemez sorszáma
+duration = Időtartam
+sample_rate = Mintavételezési frekvencia
+bitrate = Bitráta
+musicbrainz_release = MusicBrainz kiadás
+musicbrainz_recording = MusicBrainz felvétel
+musicbrainz_track = MusicBrainz szám
+path = Útvonal
+add_photo = Fénykép hozzáadása
+change_photo = Fénykép cseréje
+remove_photo = Fénykép eltávolítása
+metadata_edit_warning = Az üres mezők eltávolítják az adott címkét. Közvetlenül a fájlba ír — nincs visszavonás.

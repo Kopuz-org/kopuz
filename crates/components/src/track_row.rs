@@ -1,14 +1,62 @@
-use crate::NavigationController;
 use crate::constants::*;
 use crate::dots_menu::{DotsMenu, MenuAction};
 use crate::queue_drag::{
     clear_dragged_queue_track, handle_select_click, is_queue_drag_enabled, set_dragged_queue_track,
     set_dragged_queue_tracks,
 };
+use crate::NavigationController;
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::PlayerController;
 use reader::models::Track;
+use config::MusicSource;
+
+pub(crate) fn copy_to_clipboard(text: &str) {
+    let value = serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_string());
+    let js = format!(
+        "navigator.clipboard.writeText({value}).catch((e) => console.error('clipboard writeText failed', e));"
+    );
+    let _ = dioxus::document::eval(&js);
+}
+
+pub(crate) fn share_to_musicbrainz(release_id: Option<String>, artist: String, title: String) {
+    spawn(async move {
+        if let Some(url) =
+            utils::musicbrainz::track_page_url(release_id.as_deref(), &artist, &title).await
+        {
+            copy_to_clipboard(&url);
+            toast("Copied MusicBrainz link");
+        } else {
+            toast("Couldn't find this track on MusicBrainz");
+        }
+    });
+}
+
+pub(crate) fn share_youtube_url(video_id: &str) {
+    let url = format!("https://music.youtube.com/watch?v={video_id}");
+    copy_to_clipboard(&url);
+    toast("Copied YouTube Music link");
+}
+
+fn toast(msg: &str) {
+    let escaped = serde_json::to_string(msg).unwrap_or_else(|_| "\"\"".to_string());
+    let js = format!(
+        r#"(function(m){{
+            let t = document.getElementById('kopuz-toast');
+            if (!t) {{
+                t = document.createElement('div');
+                t.id = 'kopuz-toast';
+                t.style.cssText = 'position:fixed;left:50%;bottom:88px;transform:translateX(-50%);background:rgba(20,20,20,0.95);color:#fff;padding:10px 18px;border-radius:8px;font:14px system-ui,sans-serif;z-index:99999;box-shadow:0 4px 16px rgba(0,0,0,0.4);pointer-events:none;opacity:0;transition:opacity 150ms;border:1px solid rgba(255,255,255,0.1);';
+                document.body.appendChild(t);
+            }}
+            t.textContent = m;
+            t.style.opacity = '1';
+            clearTimeout(t._h);
+            t._h = setTimeout(() => {{ t.style.opacity = '0'; }}, 1800);
+        }})({escaped});"#
+    );
+    let _ = dioxus::document::eval(&js);
+}
 
 #[component]
 pub fn TrackRow(
@@ -23,6 +71,7 @@ pub fn TrackRow(
     on_play: EventHandler<()>,
     on_delete: EventHandler<()>,
     on_remove_from_playlist: Option<EventHandler<()>>,
+    on_view_metadata: Option<EventHandler<()>>,
     #[props(default = false)] is_selection_mode: bool,
     #[props(default = false)] is_selected: bool,
     #[props(default = false)] hide_delete: bool,
@@ -61,6 +110,17 @@ pub fn TrackRow(
     let add_to_playlist_text = i18n::t("add_to_playlist").to_string();
     let remove_from_playlist_text = i18n::t("remove_from_playlist").to_string();
     let delete_song_text = i18n::t("delete").to_string();
+    let share_text = i18n::t("share_musicbrainz").to_string();
+    let view_metadata_text = i18n::t("view_metadata").to_string();
+
+    // Identifiers used to resolve the track's MusicBrainz page when sharing.
+    // Cloned once per layout closure (modern / normal) since each moves them in.
+    let share_modern = (
+        track.musicbrainz_release_id.clone(),
+        track.artist.clone(),
+        track.title.clone(),
+    );
+    let share_normal = share_modern.clone();
 
     let mut actions = Vec::new();
 
@@ -90,6 +150,9 @@ pub fn TrackRow(
     }
 
     let has_download = on_download.is_some();
+    let is_server = config.read().active_source == MusicSource::Server;
+    let has_download = has_download && is_server;
+
     if has_download {
         let (dl_label, dl_icon) = if is_downloading {
             ("Downloading...", "fa-solid fa-spinner fa-spin")
@@ -105,9 +168,41 @@ pub fn TrackRow(
         actions.push(action);
     }
 
-    if !hide_delete {
-        actions.push(MenuAction::new(delete_song_text.as_str(), "fa-solid fa-trash").destructive());
-    }
+    let delete_action_idx = if !hide_delete {
+        let idx = actions.len();
+        actions
+            .push(MenuAction::new(delete_song_text.as_str(), "fa-solid fa-trash").destructive());
+        Some(idx)
+    } else {
+        None
+    };
+
+    let share_idx = actions.len();
+    actions.push(MenuAction::new(
+        share_text.as_str(),
+        "fa-solid fa-share-nodes",
+    ));
+
+    let is_ytmusic_track = track.path.to_string_lossy().starts_with("ytmusic:");
+    let mix_idx = if is_ytmusic_track {
+        let idx = actions.len();
+        actions.push(MenuAction::new("Start radio", "fa-solid fa-tower-broadcast"));
+        Some(idx)
+    } else {
+        None
+    };
+
+    let has_view_metadata = on_view_metadata.is_some();
+    let view_metadata_idx = if has_view_metadata {
+        let idx = actions.len();
+        actions.push(MenuAction::new(
+            view_metadata_text.as_str(),
+            "fa-solid fa-circle-info",
+        ));
+        Some(idx)
+    } else {
+        None
+    };
 
     let play_next_idx = if has_queue { Some(0) } else { None };
     let add_to_queue_idx = if has_queue { Some(1) } else { None };
@@ -121,11 +216,6 @@ pub fn TrackRow(
         add_to_playlist_idx + 1 + usize::from(has_remove)
     } else {
         0
-    };
-    let delete_action_idx = if has_download {
-        download_action_idx + 1
-    } else {
-        add_to_playlist_idx + 1 + usize::from(has_remove)
     };
 
     let mut long_press_task = use_signal(|| None);
@@ -272,18 +362,18 @@ pub fn TrackRow(
 
                 div { class: "flex items-center min-w-0 pr-3 gap-2",
                     if !is_album {
-                        div { class: "w-8 h-8 rounded bg-white/5 overflow-hidden shrink-0 flex items-center justify-center",
-                              if let Some(ref url) = cover_url {
-                                  img {
-                                      src: "{url.as_ref()}",
-                                      class: "w-full h-full object-cover",
-                                      loading: "lazy",
-                                      decoding: "async",
-                                  }
-                              } else {
-                                  i { class: "fa-solid fa-music", style: "color: var(--color-white); opacity: 0.2; font-size: 10px;" }
-                              }
-                       }
+                        div {
+                            class: "w-8 h-8 rounded overflow-hidden shrink-0",
+                            style: "background: url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27400%27 height=%27400%27 viewBox=%270 0 400 400%27%3E%3Crect width=%27400%27 height=%27400%27 fill=%27%231e1b2e%27/%3E%3Ccircle cx=%27200%27 cy=%27180%27 r=%2770%27 fill=%27none%27 stroke=%27%233d3466%27 stroke-width=%276%27/%3E%3Cpath d=%27M155 280 Q200 240 245 280%27 fill=%27none%27 stroke=%27%233d3466%27 stroke-width=%276%27 stroke-linecap=%27round%27/%3E%3C/svg%3E') center/cover no-repeat, rgba(255,255,255,0.05);",
+                            if let Some(ref url) = cover_url {
+                                img {
+                                    src: "{url.as_ref()}",
+                                    class: "w-full h-full object-cover",
+                                    loading: "lazy",
+                                    decoding: "async",
+                                }
+                            }
+                        }
                     }
                     span {
                         class: "text-sm font-medium truncate cursor-pointer hover:underline",
@@ -294,12 +384,18 @@ pub fn TrackRow(
                         },
                         onclick: {
                             let album_id = track.album_id.clone();
+                            let has_album = !track.album.trim().is_empty();
                             move |evt: MouseEvent| {
                                 evt.stop_propagation();
                                 if !is_selection_mode {
-                                    // Mobile: tapping the title plays the track instead of
-                                    // navigating to the album.
-                                    if cfg!(target_os = "android") {
+                                    // Mobile always plays. Desktop drills into the
+                                    // album — but only if the track actually has one.
+                                    // Albumless tracks (uploads, music videos, YT
+                                    // singles, Unknown Album from local) just play
+                                    // on title click; otherwise we'd be navigating
+                                    // into a meaningless "Singles" / "Unknown Album"
+                                    // bucket.
+                                    if cfg!(target_os = "android") || !has_album {
                                         on_play.call(());
                                     } else {
                                         nav_ctrl.navigate_to_album(album_id.clone());
@@ -339,13 +435,18 @@ pub fn TrackRow(
                 if !is_album {
                     div { class: "flex items-center min-w-0 pr-3",
                         span {
-                            class: "text-sm truncate cursor-pointer hover:underline",
+                            class: if track.album.trim().is_empty() {
+                                "text-sm truncate"
+                            } else {
+                                "text-sm truncate cursor-pointer hover:underline"
+                            },
                             style: "color: var(--color-white); opacity: 0.35;",
                             onclick: {
                                 let album_id = track.album_id.clone();
+                                let has_album = !track.album.trim().is_empty();
                                 move |evt: MouseEvent| {
                                     evt.stop_propagation();
-                                    if !is_selection_mode {
+                                    if !is_selection_mode && has_album {
                                         nav_ctrl.navigate_to_album(album_id.clone());
                                     }
                                 }
@@ -381,9 +482,11 @@ pub fn TrackRow(
                                     on_close_menu.call(());
                                     return;
                                 }
-                                if let Some(queue_idx) = add_to_queue_idx {
-                                    if idx == queue_idx {
-                                        if let Some(handler) = on_queue { handler.call(()); }
+                                if let Some(queue_idx) = add_to_queue_idx
+                                    && idx == queue_idx
+                                {
+                                    if let Some(handler) = on_queue {
+                                        handler.call(());
                                         return;
                                     }
                                 }
@@ -393,7 +496,23 @@ pub fn TrackRow(
                                     if let Some(handler) = on_remove_from_playlist { handler.call(()); }
                                 } else if has_download && idx == download_action_idx {
                                     if let Some(handler) = on_download { handler.call(()); }
-                                } else if idx == delete_action_idx {
+                                } else if idx == share_idx {
+                                    if is_ytmusic_track {
+                                        if let Some(vid) = track.path.to_string_lossy().split(':').nth(1) {
+                                            share_youtube_url(vid);
+                                        }
+                                    } else {
+                                        let (rid, artist, title) = share_modern.clone();
+                                        share_to_musicbrainz(rid, artist, title);
+                                    }
+                                    on_close_menu.call(());
+                                } else if mix_idx == Some(idx) {
+                                    start_radio_from(track.path.clone(), config, ctrl);
+                                    on_close_menu.call(());
+                                } else if view_metadata_idx == Some(idx) {
+                                    if let Some(handler) = on_view_metadata { handler.call(()); }
+                                    on_close_menu.call(());
+                                } else if Some(idx) == delete_action_idx {
                                     on_delete.call(());
                                 }
                             },
@@ -409,7 +528,11 @@ pub fn TrackRow(
     } else {
         COLUMNS_NORMAL
     };
-    let column_gap = if cfg!(target_os = "android") { "0.5rem" } else { "1.5rem" };
+    let column_gap = if cfg!(target_os = "android") {
+        "0.5rem"
+    } else {
+        "1.5rem"
+    };
 
     // normal UI
     return rsx! {
@@ -645,7 +768,25 @@ pub fn TrackRow(
                                 if let Some(handler) = on_download {
                                     handler.call(());
                                 }
-                            } else if idx == delete_action_idx {
+                            } else if idx == share_idx {
+                                if is_ytmusic_track {
+                                    if let Some(vid) = track.path.to_string_lossy().split(':').nth(1) {
+                                        share_youtube_url(vid);
+                                    }
+                                } else {
+                                    let (rid, artist, title) = share_normal.clone();
+                                    share_to_musicbrainz(rid, artist, title);
+                                }
+                                on_close_menu.call(());
+                            } else if mix_idx == Some(idx) {
+                                start_radio_from(track.path.clone(), config, ctrl);
+                                on_close_menu.call(());
+                            } else if view_metadata_idx == Some(idx) {
+                                if let Some(handler) = on_view_metadata {
+                                    handler.call(());
+                                }
+                                on_close_menu.call(());
+                            } else if Some(idx) == delete_action_idx {
                                 on_delete.call(());
                             }
                         },
@@ -654,4 +795,39 @@ pub fn TrackRow(
             }
         }
     };
+}
+
+fn start_radio_from(
+    track_path: std::path::PathBuf,
+    config: Signal<AppConfig>,
+    mut ctrl: PlayerController,
+) {
+    let video_id = match track_path
+        .to_string_lossy()
+        .split(':')
+        .nth(1)
+        .map(|s| s.to_string())
+    {
+        Some(id) if !id.is_empty() => id,
+        _ => return,
+    };
+    // Mix radio works anonymously — start_mix hits /next with no auth
+    // when cookies are empty. Pass whatever token we have (empty for
+    // anonymous mode) instead of bailing on missing cookies.
+    let cookies = config
+        .peek()
+        .server
+        .as_ref()
+        .and_then(|s| s.access_token.clone())
+        .unwrap_or_default();
+    spawn(async move {
+        let yt = server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
+        match yt.start_mix(&video_id).await {
+            Ok(tracks) if !tracks.is_empty() => {
+                ctrl.play_queue_linear(tracks);
+            }
+            Ok(_) => eprintln!("[yt-mix] empty queue for seed {video_id}"),
+            Err(e) => eprintln!("[yt-mix] failed for seed {video_id}: {e}"),
+        }
+    });
 }

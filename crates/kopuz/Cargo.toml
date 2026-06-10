@@ -40,6 +40,7 @@ components = { workspace = true }
 reader = { workspace = true }
 config = { workspace = true }
 pages = { workspace = true }
+server = { workspace = true }
 kopuz_route = { workspace = true }
 radio = { workspace = true }
 tokio = { workspace = true }
@@ -60,7 +61,7 @@ reqwest = { workspace = true, features = ["json"] }
 webkit2gtk = { version = "2.0", features = ["v2_16"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = { version = "0.6.3", features = ["std"] }
+objc2 = { version = "0.6.4", features = ["std"] }
 objc2-foundation = { version = "0.3.2", features = [
     "NSString",
     "NSDictionary",

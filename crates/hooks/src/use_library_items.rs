@@ -48,7 +48,7 @@ pub fn use_library_items(library: Signal<Library>) -> LibraryItems {
     let all_tracks = use_memo(move || {
         let lib = library.read();
 
-        let mut tracks: Vec<Track> = lib.tracks.iter().cloned().collect();
+        let mut tracks: Vec<Track> = lib.tracks.to_vec();
 
         match *sort_order.read() {
             SortOrder::Title => tracks.sort_by_cached_key(|a| {

@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crate::constants::{COLUMNS_NORMAL, COLUMNS_NORMAL_ALBUM};
 use crate::header::Header;
 use crate::reorder_buttons::ReorderButtons;
-use crate::showcase::{self, ShowcaseProps, SortField};
+use crate::showcase::{self, ShowcaseProps};
 use crate::track_row::TrackRow;
 use config::{AppConfig, MusicService, MusicSource};
 use dioxus::prelude::*;
@@ -76,7 +76,11 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     } else {
         COLUMNS_NORMAL
     };
-    let column_gap = if cfg!(target_os = "android") { "0.5rem" } else { "1.5rem" };
+    let column_gap = if cfg!(target_os = "android") {
+        "0.5rem"
+    } else {
+        "1.5rem"
+    };
 
     let scroll_stat = use_signal(|| 0.0_f64);
     let container_height = use_signal(|| 0.0_f64);
@@ -238,6 +242,16 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                                  80,
                                              )
                                          }
+                                         MusicService::YtMusic => {
+                                             utils::jellyfin_image::track_cover_url_with_album_fallback(
+                                                 &path_str,
+                                                 &track.album_id,
+                                                 "",
+                                                 None,
+                                                 80,
+                                                 80,
+                                             )
+                                         }
                                      };
                                      utils::map_cover_url(url)
                                  } else { None }
@@ -278,7 +292,9 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                              }
 
                              rsx! {
-                                 // discs
+                                 div {
+                                     key: "{track.path.display()}",
+                                     class: "contents",
                                  div {
                                      class: "flex items-center group",
                                      if has_multiple_discs && props.is_album && is_new_disc && sort_state.peek().is_none() {
@@ -295,7 +311,6 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                  }
 
                                  div {
-                                     key: "{track.path.display()}",
                                      class: "flex items-center group",
                                      div { class: "flex-1 min-w-0",
                                          TrackRow {
@@ -350,6 +365,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                                      handler.call(idx);
                                                  }
                                              },
+                                             on_view_metadata: props.on_view_metadata.map(|h| EventHandler::new(move |_| h.call(idx))),
                                              on_download: move |_| {
                                                  if let Some(handler) = &props.on_download_track {
                                                      handler.call(idx);
@@ -369,6 +385,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                              on_move_down: move |_| props.on_move_down.call(idx),
                                          }
                                      }
+                                 }
                                  }
                              }
                          }

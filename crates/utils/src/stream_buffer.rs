@@ -41,6 +41,14 @@ pub struct StreamBuffer {
 
 impl StreamBuffer {
     pub fn new(url: String, is_radio: bool) -> Self {
+        Self::with_user_agent(url, is_radio, None)
+    }
+
+    pub fn with_user_agent(
+        url: String,
+        is_radio: bool,
+        user_agent: Option<String>,
+    ) -> Self {
         let prebuffer_size = if is_radio {
             16 * 1024
         } else {
@@ -66,14 +74,25 @@ impl StreamBuffer {
         // a worker thread). The sync reader side uses blocking_lock() + polling.
         let handle = tokio::runtime::Handle::current();
         handle.spawn(async move {
+            let ua = user_agent
+                .unwrap_or_else(|| concat!("Kopuz/", env!("CARGO_PKG_VERSION")).to_string());
             let client = reqwest::Client::builder()
                 .tcp_nodelay(true)
-                .user_agent(concat!("Kopuz/", env!("CARGO_PKG_VERSION")))
+                .user_agent(ua)
                 .build()
                 .unwrap_or_else(|_| reqwest::Client::new());
 
             match client.get(&url).send().await {
                 Ok(mut response) => {
+                    eprintln!(
+                        "[streambuf] HTTP {} content-length={:?} content-type={:?}",
+                        response.status(),
+                        response.content_length(),
+                        response
+                            .headers()
+                            .get("content-type")
+                            .and_then(|v| v.to_str().ok())
+                    );
                     if !response.status().is_success() {
                         let (lock, notify) = &*state_clone;
                         let mut state = lock.lock().await;
@@ -231,7 +250,7 @@ impl Read for StreamBuffer {
             let state = lock.blocking_lock();
 
             if let Some(err) = &state.error {
-                return Err(IoError::new(ErrorKind::Other, err.clone()));
+                return Err(IoError::other(err.clone()));
             }
 
             let current_len = state.buffer.len() as u64;
@@ -248,7 +267,7 @@ impl Read for StreamBuffer {
 
             if state.done {
                 if let Some(err) = &state.error {
-                    return Err(IoError::new(ErrorKind::Other, err.clone()));
+                    return Err(IoError::other(err.clone()));
                 }
                 return Ok(0);
             }

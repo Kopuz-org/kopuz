@@ -84,8 +84,9 @@ fn search_server(
                 let path_str = t.path.to_string_lossy();
                 let url = match active_service {
                     Some(MusicService::Jellyfin) => {
-                        utils::jellyfin_image::jellyfin_image_url_from_path(
+                        utils::jellyfin_image::track_cover_url_with_album_fallback(
                             &path_str,
+                            &t.album_id,
                             &srv.url,
                             srv.access_token.as_deref(),
                             80,
@@ -97,6 +98,20 @@ fn search_server(
                             &path_str,
                             &srv.url,
                             srv.access_token.as_deref(),
+                            80,
+                            80,
+                        )
+                    }
+                    Some(MusicService::YtMusic) => {
+                        // YT thumbnails are urlhex-encoded into album_id;
+                        // pass empty server_url so the fallback function
+                        // skips its Jellyfin URL constructor and only
+                        // returns the embedded URL via decode.
+                        utils::jellyfin_image::track_cover_url_with_album_fallback(
+                            &path_str,
+                            &t.album_id,
+                            "",
+                            None,
                             80,
                             80,
                         )
@@ -142,7 +157,7 @@ fn search_server(
                                 80,
                             )
                         }
-                        None => None,
+                        Some(MusicService::YtMusic) | None => None,
                     };
                     utils::map_cover_url(url)
                 })
@@ -163,6 +178,12 @@ async fn run_search(
     active_service: Option<MusicService>,
     server: Option<config::MusicServer>,
 ) -> Option<(TrackRes, AlbumRes)> {
+    if matches!(active_source, MusicSource::Server)
+        && matches!(active_service, Some(MusicService::YtMusic))
+    {
+        let cookies = server.as_ref().and_then(|s| s.access_token.clone());
+        return search_ytmusic(&query, cookies).await;
+    }
     tokio::task::spawn_blocking(move || match active_source {
         MusicSource::Local => search_local(&query, tracks, albums),
         MusicSource::Server => search_server(&query, tracks, albums, active_service, server),
@@ -170,6 +191,43 @@ async fn run_search(
     .await
     .ok()
     .flatten()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn search_ytmusic(query: &str, cookies: Option<String>) -> Option<(TrackRes, AlbumRes)> {
+    if query.trim().is_empty() {
+        return Some((Vec::new(), Vec::new()));
+    }
+    let client = match cookies {
+        Some(c) if !c.is_empty() => server::ytmusic::YouTubeMusicClient::with_cookies(c),
+        _ => server::ytmusic::YouTubeMusicClient::new(),
+    };
+    let tracks = client
+        .search_tracks(query)
+        .await
+        .map_err(|e| eprintln!("YT Music search error: {e}"))
+        .ok()?;
+    // Each track's `album_id` carries its YT thumbnail as
+    // `ytmusic:_:urlhex_HEX`; the standard fallback resolver decodes
+    // that embedded URL when we pass an empty server_url.
+    let result_tracks: TrackRes = tracks
+        .into_iter()
+        .map(|t| {
+            let path_str = t.path.to_string_lossy();
+            let cover_url = utils::map_cover_url(
+                utils::jellyfin_image::track_cover_url_with_album_fallback(
+                    &path_str,
+                    &t.album_id,
+                    "",
+                    None,
+                    80,
+                    80,
+                ),
+            );
+            (t, cover_url)
+        })
+        .collect();
+    Some((result_tracks, Vec::new()))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -202,7 +260,7 @@ pub fn use_search_data(
         if active_source == MusicSource::Server {
             let mut genre_items = std::collections::HashMap::new();
             for album in &lib.jellyfin_albums {
-                for g in album.genre.split(|c| c == '/' || c == ';' || c == ',') {
+                for g in album.genre.split(['/', ';', ',']) {
                     let g = g.trim();
                     if !g.is_empty() && !genre_items.contains_key(g) {
                         let cover_url = if let Some(server) = &server {
@@ -227,7 +285,7 @@ pub fn use_search_data(
                                             80,
                                         )
                                     }
-                                    None => None,
+                                    Some(MusicService::YtMusic) | None => None,
                                 }
                             })
                         } else {

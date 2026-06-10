@@ -1,8 +1,10 @@
 use components::header::Header;
+use components::metadata_modal::MetadataModal;
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
 use components::stat_card::StatCard;
 use components::track_row::TrackRow;
+use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_library_items::use_library_items;
@@ -11,7 +13,6 @@ use kopuz_route::Route;
 use reader::Library;
 use std::collections::HashSet;
 use std::path::PathBuf;
-use components::virtual_scroll::{use_virtual_scroll, VirtualScrollView};
 
 const ITEM_HEIGHT: f64 = 60.0; // 60px: p-2 padding (16px*2=32) + content height (~28px)
 
@@ -43,6 +44,7 @@ pub fn LocalLibrary(
     let mut active_menu_track = use_signal(|| None::<PathBuf>);
     let mut show_playlist_modal = use_signal(|| false);
     let mut selected_track_for_playlist = use_signal(|| None::<PathBuf>);
+    let mut metadata_track = use_signal(|| None::<reader::models::Track>);
     let mut is_selection_mode = use_signal(|| false);
     let mut selected_tracks = use_signal(|| HashSet::<PathBuf>::new());
     let displayed_tracks = use_memo(move || (items.all_tracks)());
@@ -92,6 +94,7 @@ pub fn LocalLibrary(
                 let track_menu = track.clone();
                 let track_add = track.clone();
                 let track_queue = track.clone();
+                let track_meta = track.clone();
                 let track_delete = track.clone();
                 let track_path = track.path.clone();
                 let is_currently_playing = currently_playing_idx == Some(idx);
@@ -146,6 +149,10 @@ pub fn LocalLibrary(
                                 active_menu_track.set(None);
                             },
                             on_close_menu: move |_| active_menu_track.set(None),
+                            on_view_metadata: move |_| {
+                                metadata_track.set(Some(track_meta.clone()));
+                                active_menu_track.set(None);
+                            },
                             on_delete: move |_| {
                                 active_menu_track.set(None);
                                 if std::fs::remove_file(&track_delete.path).is_ok() {
@@ -215,6 +222,42 @@ pub fn LocalLibrary(
                         active_menu_track.set(None);
                         is_selection_mode.set(false);
                         selected_tracks.write().clear();
+                    },
+                }
+            }
+            if let Some(track) = metadata_track.read().clone() {
+                MetadataModal {
+                    track: track.clone(),
+                    on_close: move |_| metadata_track.set(None),
+                    on_save: move |edits: reader::models::TrackEdits| {
+                        let path = track.path.clone();
+                        match reader::write_tags(&path, &edits) {
+                            Ok(()) => {
+                                let mut lib = library.write();
+                                if let Some(t) = lib.tracks.iter_mut().find(|t| t.path == path) {
+                                    t.title = edits.title.trim().to_string();
+                                    t.artist = edits.artist.trim().to_string();
+                                    t.artists = edits
+                                        .artist
+                                        .split([';', ','])
+                                        .map(|a| a.trim().to_string())
+                                        .filter(|s| !s.is_empty())
+                                        .collect();
+                                    t.album = edits.album.trim().to_string();
+                                    t.track_number = edits.track_number;
+                                    t.disc_number = edits.disc_number;
+                                    t.album_id = reader::metadata::make_album_id(
+                                        edits.album.trim(),
+                                        edits.artist.trim(),
+                                    );
+                                }
+                                drop(lib);
+                                metadata_track.set(None);
+                            }
+                            Err(e) => {
+                                tracing::error!("failed to write tags for {}: {}", path.display(), e);
+                            }
+                        }
                     },
                 }
             }

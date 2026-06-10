@@ -27,10 +27,8 @@ add = Додати
 add_folder = Додати папку
 no_music_folders = Музичні папки не налаштовані
 add_server = Додати сервер
-# TODO: NEED LOCALIZATION
-connect_to_lastfm = Connect to Last.fm
-lastfm_connected = Last.fm Connected
-# TODO: NEED LOCALIZATION
+connect_to_lastfm = Підключитися до Last.fm
+lastfm_connected = Підключено до Last.fm
 server_details = Деталі сервера
 server_name = Назва сервера
 server_url = Адреса сервера
@@ -63,6 +61,8 @@ add_to_queue = Додати до черги
 play_next = Відтворити наступною
 add_to_playlist = Додати до плейлиста
 remove_from_playlist = Видалити з плейлиста
+share_musicbrainz = Поділитися (MusicBrainz)
+share_link_copied = Посилання MusicBrainz скопійовано
 delete = Видалити
 delete_song = Видалити пісню
 delete_album = Видалити альбом
@@ -79,10 +79,8 @@ create = Створити
 save = Зберегти
 enabled = УВІМКНЕНО
 disabled = ВИМКНЕНО
-# TODO: Translate lines below
-play = Play
-shuffle = Shuffle
-# ------
+play = Грати
+shuffle = Мішання
 
 # Navigation & Headers
 tracks = Треки
@@ -138,10 +136,8 @@ heart_track_to_add_server = Уподобайте трек поки він гра
 search_placeholder = Шукайте виконавців, альбоми та пісні...
 no_results_found = Нічого не знайдено по запиту "{ $query }"
 listenbrainz_token_placeholder = Введіть свій ключ (токен) від ListenBrainz
-# TODO: NEED LOCALIZATION
-lastfm_api_key_placeholder = Enter your Last.fm API Key
-lastfm_api_secret_placeholder = Enter your Last.fm API Secret
-# TODO: NEED LOCALIZATION
+lastfm_api_key_placeholder = Введіть ключ API Last.fm
+lastfm_api_secret_placeholder = Введіть секрет API Last.fm
 
 # Empty States
 album_not_found = Альбом не знайдено
@@ -187,6 +183,9 @@ most_played_local_tracks = Найбільш програні локальні п
 no_tracks_in_library = Немає пісень у вашій бібліотеці.
 no_songs_here = Немає пісень тут.
 syncing_with_server = Синхронізація зі сервером ...
+yt_syncing_progress = Синхронізація — завантажено { $count } треків
+yt_synced_total = { $count } улюблених треків синхронізовано
+refresh = Оновити
 most_played_tracks = Ваші найбільш програні треки.
 no_more_songs = Більше ніяких пісень у черзі
 server_playlist = Плейлист сервера
@@ -374,6 +373,7 @@ artist_photo_source = Джерело фото виконавця
 artist_photo = Фото виконавця
 album_cover = Обкладинка альбому
 auto_fetch_covers = Автоматично завантажувати обкладинки альбомів
+prefer_local_lyrics = Надавати перевагу локальним текстам (.lrc / вбудовані, без онлайн-резерву)
 cover_fetch_strategy = Стратегія завантаження обкладинок
 musicbrainz_first = MusicBrainz спочатку
 lastfm_first = Last.fm спочатку
@@ -418,3 +418,27 @@ radio_registries_empty = Реєстри не налаштовані
 offline_downloads = Офлайн-завантаження
 download_quality = Якість завантаження
 saving = Збереження...
+discover_more_loading = Завантаження…
+discover_failed = Не вдалося завантажити Відкриття: { $error }
+discover_requires_ytmusic = Відкриття доступні лише коли YouTube Music — активний сервер.
+discover_show_all = Показати все
+yt_anon_playlists = Увійдіть у YouTube Music, щоб переглянути плейлисти з бібліотеки.
+yt_anon_favorites = Увійдіть у YouTube Music, щоб переглянути вподобані треки.
+
+# Metadata Viewer / Editor
+view_metadata = Переглянути метадані
+edit_metadata = Редагувати метадані
+edit = Редагувати
+track_number = № доріжки
+disc_number = № диска
+duration = Тривалість
+sample_rate = Частота дискретизації
+bitrate = Бітрейт
+musicbrainz_release = Реліз MusicBrainz
+musicbrainz_recording = Запис MusicBrainz
+musicbrainz_track = Доріжка MusicBrainz
+path = Шлях
+add_photo = Додати фото
+change_photo = Змінити фото
+remove_photo = Видалити фото
+metadata_edit_warning = Порожні поля видаляють цей тег. Запис безпосередньо у файл — без скасування.

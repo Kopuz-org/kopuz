@@ -95,26 +95,16 @@ pub fn QueueRow(
             }
 
             div {
-                class: "rounded-md overflow-hidden bg-black/30 flex-shrink-0 shadow-sm",
+                class: "rounded-md overflow-hidden flex-shrink-0 shadow-sm",
                 style: match layout {
-                    LayoutMode::Fullscreen => "width: 48px; height: 48px;",
-                    LayoutMode::Rightbar => "width: 40px; height: 40px;",
+                    LayoutMode::Fullscreen => "width: 48px; height: 48px; background: url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27400%27 height=%27400%27 viewBox=%270 0 400 400%27%3E%3Crect width=%27400%27 height=%27400%27 fill=%27%231e1b2e%27/%3E%3Ccircle cx=%27200%27 cy=%27180%27 r=%2770%27 fill=%27none%27 stroke=%27%233d3466%27 stroke-width=%276%27/%3E%3Cpath d=%27M155 280 Q200 240 245 280%27 fill=%27none%27 stroke=%27%233d3466%27 stroke-width=%276%27 stroke-linecap=%27round%27/%3E%3C/svg%3E') center/cover no-repeat, rgba(255,255,255,0.05);",
+                    LayoutMode::Rightbar => "width: 40px; height: 40px; background: url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27400%27 height=%27400%27 viewBox=%270 0 400 400%27%3E%3Crect width=%27400%27 height=%27400%27 fill=%27%231e1b2e%27/%3E%3Ccircle cx=%27200%27 cy=%27180%27 r=%2770%27 fill=%27none%27 stroke=%27%233d3466%27 stroke-width=%276%27/%3E%3Cpath d=%27M155 280 Q200 240 245 280%27 fill=%27none%27 stroke=%27%233d3466%27 stroke-width=%276%27 stroke-linecap=%27round%27/%3E%3C/svg%3E') center/cover no-repeat, rgba(255,255,255,0.05);",
                 },
 
                 if let Some(ref url) = cover_url {
                     img {
                         src: "{url.as_ref()}",
                         class: "w-full h-full object-cover",
-                    }
-                } else {
-                    div { class: "w-full h-full flex items-center justify-center",
-                        i {
-                            class: "fa-solid fa-music text-white/20",
-                            style: match layout {
-                                LayoutMode::Fullscreen => "font-size: 14px;",
-                                LayoutMode::Rightbar => "font-size: 12px;",
-                            },
-                        }
                     }
                 }
             }
@@ -403,8 +393,9 @@ pub fn QueueListView(
                 let path_str = track.path.to_string_lossy();
                 let url = match server.service {
                     config::MusicService::Jellyfin => {
-                        utils::jellyfin_image::jellyfin_image_url_from_path(
+                        utils::jellyfin_image::track_cover_url_with_album_fallback(
                             &path_str,
+                            &track.album_id,
                             &server.url,
                             server.access_token.as_deref(),
                             cover_max_width,
@@ -416,6 +407,16 @@ pub fn QueueListView(
                             &path_str,
                             &server.url,
                             server.access_token.as_deref(),
+                            cover_max_width,
+                            80,
+                        )
+                    }
+                    config::MusicService::YtMusic => {
+                        utils::jellyfin_image::track_cover_url_with_album_fallback(
+                            &path_str,
+                            &track.album_id,
+                            "",
+                            None,
                             cover_max_width,
                             80,
                         )

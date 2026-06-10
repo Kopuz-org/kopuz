@@ -4,6 +4,7 @@ version.workspace = true
 edition = "2024"
 
 [dependencies]
+directories = { workspace = true }
 jellyfin-sdk-rust = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 serde = { workspace = true }
@@ -11,5 +12,18 @@ serde_json = { workspace = true }
 config = { workspace = true }
 rand = { workspace = true }
 uuid = { workspace = true }
-md5 = "0.7"
+md5 = "0.8"
+sha1 = "0.10"
+httpdate = "1"
+hex = "0.4"
+rookie = "0.5"
 web-time = { workspace = true }
+tokio = { workspace = true, features = ["fs", "process", "rt", "sync"] }
+reader = { workspace = true }
+
+[[example]]
+name = "duration_probe"
+path = "examples/duration_probe.rs"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

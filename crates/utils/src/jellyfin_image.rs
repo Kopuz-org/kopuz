@@ -6,10 +6,10 @@ pub fn jellyfin_image_url(
     max_width: u32,
     quality: u32,
 ) -> String {
-    if let Some(tag) = image_tag {
-        if let Some(url) = decode_embedded_cover_url(tag) {
-            return url;
-        }
+    if let Some(tag) = image_tag
+        && let Some(url) = decode_embedded_cover_url(tag)
+    {
+        return url;
     }
 
     let mut params = Vec::new();
@@ -62,10 +62,14 @@ pub fn jellyfin_image_url_from_path(
         return None;
     }
 
-    if let Some(tag) = tag {
-        if let Some(url) = decode_embedded_cover_url(tag) {
-            return Some(url);
-        }
+    if let Some(tag) = tag
+        && let Some(url) = decode_embedded_cover_url(tag)
+    {
+        return Some(url);
+    }
+
+    if server_url.is_empty() {
+        return None;
     }
 
     Some(jellyfin_image_url(
@@ -86,6 +90,8 @@ pub fn track_cover_url_with_album_fallback(
     max_width: u32,
     quality: u32,
 ) -> Option<String> {
+    let can_build_remote = !server_url.is_empty();
+
     if let Some((id, Some(tag))) = parse_jellyfin_path(track_path_str) {
         if tag == "none" {
             return None;
@@ -94,28 +100,32 @@ pub fn track_cover_url_with_album_fallback(
             return Some(url);
         }
 
-        return Some(jellyfin_image_url(
-            server_url,
-            id,
-            Some(tag),
-            access_token,
-            max_width,
-            quality,
-        ));
+        if can_build_remote {
+            return Some(jellyfin_image_url(
+                server_url,
+                id,
+                Some(tag),
+                access_token,
+                max_width,
+                quality,
+            ));
+        }
     }
 
-    if !album_id_str.is_empty() {
-        if let Some((album_item_id, album_tag)) = parse_jellyfin_path(album_id_str) {
-            if album_tag == Some("none") {
-                return None;
-            }
+    if !album_id_str.is_empty()
+        && let Some((album_item_id, album_tag)) = parse_jellyfin_path(album_id_str)
+    {
+        if album_tag == Some("none") {
+            return None;
+        }
 
-            if let Some(tag) = album_tag {
-                if let Some(url) = decode_embedded_cover_url(tag) {
-                    return Some(url);
-                }
-            }
+        if let Some(tag) = album_tag
+            && let Some(url) = decode_embedded_cover_url(tag)
+        {
+            return Some(url);
+        }
 
+        if can_build_remote {
             return Some(jellyfin_image_url(
                 server_url,
                 album_item_id,
@@ -128,6 +138,9 @@ pub fn track_cover_url_with_album_fallback(
     }
 
     if let Some((id, _)) = parse_jellyfin_path(track_path_str) {
+        if !can_build_remote {
+            return None;
+        }
         return Some(jellyfin_image_url(
             server_url,
             id,
@@ -139,6 +152,33 @@ pub fn track_cover_url_with_album_fallback(
     }
 
     None
+}
+
+pub fn track_cover_url_or_default(
+    track_path_str: &str,
+    album_id_str: &str,
+    server_url: &str,
+    access_token: Option<&str>,
+    max_width: u32,
+    quality: u32,
+) -> String {
+    track_cover_url_with_album_fallback(
+        track_path_str,
+        album_id_str,
+        server_url,
+        access_token,
+        max_width,
+        quality,
+    )
+    .unwrap_or_else(|| crate::default_cover_url().as_ref().to_string())
+}
+
+/// Encode a remote cover URL into the `urlhex_HEX` tag form that
+/// `decode_embedded_cover_url` (and the cover-URL resolvers that call
+/// it) understand. The result is a single tag string — wrap it in a
+/// path / album_id / image_tag yourself per call-site convention.
+pub fn encode_cover_url(url: &str) -> String {
+    format!("urlhex_{}", hex::encode(url.as_bytes()))
 }
 
 fn decode_embedded_cover_url(tag: &str) -> Option<String> {

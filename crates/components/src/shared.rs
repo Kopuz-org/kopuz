@@ -20,6 +20,7 @@ pub fn get_favorite(
         if path_str.starts_with("jellyfin:")
             || path_str.starts_with("subsonic:")
             || path_str.starts_with("custom:")
+            || path_str.starts_with("ytmusic:")
         {
             let parts: Vec<&str> = path_str.split(':').collect();
             if parts.len() >= 2 && !parts[1].trim().is_empty() {
@@ -44,7 +45,8 @@ pub fn toggle_favorite(
         let path_str = track.path.to_string_lossy().to_string();
         let is_server_item = path_str.starts_with("jellyfin:")
             || path_str.starts_with("subsonic:")
-            || path_str.starts_with("custom:");
+            || path_str.starts_with("custom:")
+            || path_str.starts_with("ytmusic:");
         if is_server_item {
             let parts: Vec<String> = path_str.split(':').map(|s| s.to_string()).collect();
             if parts.len() >= 2 && !parts[1].trim().is_empty() {
@@ -95,6 +97,16 @@ pub fn toggle_favorite(
                                     remote.star(&item_id).await
                                 } else {
                                     remote.unstar(&item_id).await
+                                }
+                            }
+                            MusicService::YtMusic => {
+                                let yt = server::ytmusic::YouTubeMusicClient::with_cookies(
+                                    token.clone(),
+                                );
+                                if new_fav {
+                                    yt.like_video(&item_id).await
+                                } else {
+                                    yt.unlike_video(&item_id).await
                                 }
                             }
                         };

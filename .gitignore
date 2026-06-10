@@ -24,3 +24,6 @@ devenv.local.yaml
 
 # pre-commit
 .pre-commit-config.yaml
+
+# PR comments log
+pr_comments.txt

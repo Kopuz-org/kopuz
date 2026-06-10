@@ -1,6 +1,9 @@
 pub mod color;
 pub mod jellyfin_image;
 pub mod lyrics;
+pub mod musicbrainz;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod range_source;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod stream_buffer;
 pub mod subsonic_image;
@@ -118,4 +121,10 @@ pub fn format_artwork_url(path: Option<&impl AsRef<Path>>) -> Option<CoverUrl> {
 
 pub fn format_artwork_thumb_url(path: Option<&impl AsRef<Path>>, size: u32) -> Option<CoverUrl> {
     format_artwork_url_impl(path, Some(size))
+}
+
+pub fn default_cover_url() -> CoverUrl {
+    cover_url_from_string(
+        "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400' viewBox='0 0 400 400'%3E%3Crect width='400' height='400' fill='%231e1b2e'/%3E%3Ccircle cx='200' cy='180' r='70' fill='none' stroke='%233d3466' stroke-width='6'/%3E%3Cpath d='M155 280 Q200 240 245 280' fill='none' stroke='%233d3466' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E".to_string()
+    )
 }

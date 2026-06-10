@@ -12,9 +12,11 @@ pub fn AlbumDetails(
     let lib = library.read();
     let album = match lib.albums.iter().find(|a| a.id == album_id) {
         Some(a) => a,
-        None => return rsx! {
-            div { "{i18n::t(\"album_not_found\")}" }
-        },
+        None => {
+            return rsx! {
+                div { "{i18n::t(\"album_not_found\")}" }
+            };
+        }
     };
 
     let album_title = album.title.clone();
@@ -78,11 +80,10 @@ pub fn AlbumDetails(
                         }
 
                         if library.read().save(&lib_path).is_ok() {
-                            if let Some(path) = old_cover {
-                                if path.starts_with(&cover_cache) {
+                            if let Some(path) = old_cover
+                                && path.starts_with(&cover_cache) {
                                     let _ = tokio::fs::remove_file(&path).await;
                                 }
-                            }
                         } else {
                             let mut lib = library.write();
                             if let Some(album) = lib.albums.iter_mut().find(|a| a.id == aid) {
@@ -111,6 +112,7 @@ pub fn AlbumDetails(
                 library,
                 playlist_store,
                 on_close,
+                enable_metadata: true,
                 on_cover_click: move |_| {
                     let aid = aid.clone();
                     let _ = &aid;

@@ -2,8 +2,8 @@ use ::server::jellyfin::JellyfinClient;
 use ::server::subsonic::SubsonicClient;
 use config::{AppConfig, ListenNowStyle, MusicService, UiStyle};
 use dioxus::prelude::*;
+use rand::rng;
 use rand::seq::SliceRandom;
-use rand::thread_rng;
 use reader::{Album, FavoritesStore, Library, PlaylistStore, Track};
 use std::collections::HashMap;
 
@@ -38,7 +38,7 @@ fn server_track_id(path: &str) -> Option<String> {
     let mut parts = path.split(':');
     let prefix = parts.next()?;
     let id = parts.next()?;
-    if prefix == "jellyfin" || prefix == "subsonic" {
+    if prefix == "jellyfin" || prefix == "subsonic" || prefix == "ytmusic" {
         Some(id.to_string())
     } else {
         None
@@ -169,7 +169,7 @@ pub fn JellyfinHome(
         if albums.is_empty() {
             return Vec::new();
         }
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let mut shuffled = albums.clone();
         shuffled.shuffle(&mut rng);
         shuffled
@@ -344,7 +344,7 @@ pub fn JellyfinHome(
             })
             .cloned()
             .collect();
-        let mut rng = thread_rng();
+        let mut rng = rng();
         albums.shuffle(&mut rng);
         albums.truncate(12);
         let cards = albums
@@ -871,6 +871,7 @@ fn ServerHeroBanner(
                                                                 remote.unstar(id).await
                                                             }
                                                         }
+                                                        MusicService::YtMusic => Ok(()),
                                                     };
                                                     if let Err(e) = result {
                                                         eprintln!("Failed to sync favorite: {e}");

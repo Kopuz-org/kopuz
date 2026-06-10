@@ -60,14 +60,16 @@ pub fn JellyfinLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Elem
                     .cloned()
                     .unwrap_or_default();
                 let cover_url = if let Some((ref base_url, ref token)) = cover_url_base {
-                    utils::map_cover_url(utils::jellyfin_image::track_cover_url_with_album_fallback(
-                        &track.path.to_string_lossy(),
-                        &track.album_id,
-                        base_url,
-                        token.as_deref(),
-                        64,
-                        90,
-                    ))
+                    utils::map_cover_url(
+                        utils::jellyfin_image::track_cover_url_with_album_fallback(
+                            &track.path.to_string_lossy(),
+                            &track.album_id,
+                            base_url,
+                            token.as_deref(),
+                            64,
+                            90,
+                        ),
+                    )
                 } else {
                     None
                 };
@@ -256,7 +258,7 @@ pub fn ServerLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Elemen
         .unwrap_or(MusicService::Jellyfin);
 
     match service {
-        MusicService::Jellyfin | MusicService::Subsonic | MusicService::Custom => rsx! {
+        MusicService::Jellyfin | MusicService::Subsonic | MusicService::Custom | MusicService::YtMusic => rsx! {
             JellyfinLogs { library, config }
         },
     }

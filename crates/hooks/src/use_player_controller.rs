@@ -5,6 +5,7 @@ use dioxus::{logger::tracing, prelude::*};
 use player::player::{NowPlayingMeta, Player};
 use reader::{Library, Track};
 use scrobble;
+use std::collections::HashMap;
 use std::time::Duration;
 use utils;
 
@@ -57,6 +58,11 @@ pub struct PlayerController {
     pub pending_crossfade_ui: Signal<Option<PendingCrossfadeUiState>>,
     pub radio_task: Signal<Option<dioxus_core::Task>>,
     pub station_registry: Signal<radio::registry::StationRegistry>,
+    /// User-visible playback error. Set when something needs the user's
+    /// attention (expired YT cookies, a failed stream resolve, …).
+    /// Rendered as a banner by whoever subscribes — currently the
+    /// settings popup error sink mirrors it on next open.
+    pub playback_error: Signal<Option<String>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -120,15 +126,16 @@ impl PlayerController {
             .unwrap_or_default()
             .to_ascii_lowercase();
 
-        match scheme.as_str() {
+        let url = match scheme.as_str() {
             "jellyfin" => self
                 .config
                 .read()
                 .server
                 .as_ref()
                 .and_then(|server| {
-                    utils::jellyfin_image::jellyfin_image_url_from_path(
+                    utils::jellyfin_image::track_cover_url_with_album_fallback(
                         &path_str,
+                        &track.album_id,
                         &server.url,
                         server.access_token.as_deref(),
                         800,
@@ -151,6 +158,22 @@ impl PlayerController {
                     )
                 })
                 .unwrap_or_default(),
+            "ytmusic" => {
+                // YT tracks carry their thumbnail in album_id as
+                // `ytmusic:_:urlhex_HEX`. Pass empty server_url so
+                // `track_cover_url_with_album_fallback` skips its
+                // jellyfin-URL fallback path and only returns the
+                // embedded URL via decode_embedded_cover_url.
+                utils::jellyfin_image::track_cover_url_with_album_fallback(
+                    &path_str,
+                    &track.album_id,
+                    "",
+                    None,
+                    800,
+                    90,
+                )
+                .unwrap_or_default()
+            }
             _ => self
                 .library
                 .read()
@@ -160,6 +183,12 @@ impl PlayerController {
                 .and_then(|album| utils::format_artwork_url(album.cover_path.as_ref()))
                 .map(|url| url.as_ref().to_string())
                 .unwrap_or_default(),
+        };
+
+        if url.is_empty() {
+            utils::default_cover_url().as_ref().to_string()
+        } else {
+            url
         }
     }
 
@@ -371,6 +400,9 @@ impl PlayerController {
     fn play_track_no_history_with_transition(&mut self, idx: usize, allow_crossfade: bool) {
         self.play_generation.with_mut(|g| *g += 1);
         let current_gen = *self.play_generation.peek();
+        // Starting a new track clears the previous track's error banner —
+        // otherwise a 403 from a skipped YT track lingers on screen.
+        self.playback_error.set(None);
         self.cancel_radio_task();
 
         if let Some(track) = self.get_track_at(idx) {
@@ -379,7 +411,7 @@ impl PlayerController {
                 self.pending_resume_seek(&track);
             let use_crossfade = allow_crossfade
                 && self.should_crossfade()
-                && restore_seek_secs.map_or(true, |secs| secs == 0);
+                && restore_seek_secs.is_none_or(|secs| secs == 0);
             let outgoing_duration_secs = *self.current_song_duration.peek();
             let outgoing_progress_secs =
                 (*self.current_song_progress.peek()).min(outgoing_duration_secs);
@@ -394,7 +426,8 @@ impl PlayerController {
                 .unwrap_or_default()
                 .to_ascii_lowercase();
             let is_radio_item = scheme.as_str() == "radio";
-            let is_server_item = matches!(scheme.as_str(), "jellyfin" | "subsonic" | "custom");
+            let is_server_item =
+                matches!(scheme.as_str(), "jellyfin" | "subsonic" | "custom" | "ytmusic");
 
             if is_server_item || is_radio_item {
                 let parts: Vec<&str> = path_str.split(':').collect();
@@ -431,102 +464,97 @@ impl PlayerController {
                     } else {
                         None
                     };
-                    if let Some(local_path) = offline_path {
-                        if let Ok((source, hint)) = decoder::open_file(&local_path) {
-                            if !use_crossfade {
-                                self.current_queue_index.set(idx);
-                                self.player.write().stop_for_transition();
-                                self.is_playing.set(false);
-                            }
+                    if let Some(local_path) = offline_path
+                        && let Ok((source, hint)) = decoder::open_file(&local_path)
+                    {
+                        if !use_crossfade {
+                            self.current_queue_index.set(idx);
+                            self.player.write().stop_for_transition();
+                            self.is_playing.set(false);
+                        }
 
-                            let cover_url = self.cover_url_for_track(&track);
-                            if !use_crossfade {
-                                self.hydrate_current_track_metadata(idx, 0);
-                                self.current_song_cover_url.set(cover_url.clone());
-                            }
-                            self.is_loading.set(true);
+                        let cover_url = self.cover_url_for_track(&track);
+                        if !use_crossfade {
+                            self.hydrate_current_track_metadata(idx, 0);
+                            self.current_song_cover_url.set(cover_url.clone());
+                        }
+                        self.is_loading.set(true);
 
-                            let mut player = self.player;
-                            let mut is_playing = self.is_playing;
-                            let mut is_loading = self.is_loading;
-                            let mut skip_in_progress = self.skip_in_progress;
-                            let play_generation = self.play_generation;
-                            let volume = self.volume;
-                            let mut current_song_progress = self.current_song_progress;
-                            let mut pending_crossfade_ui = self.pending_crossfade_ui;
-                            let mut pending_resume = self.pending_resume;
-                            let cfg_signal = self.config;
+                        let mut player = self.player;
+                        let mut is_playing = self.is_playing;
+                        let mut is_loading = self.is_loading;
+                        let mut skip_in_progress = self.skip_in_progress;
+                        let play_generation = self.play_generation;
+                        let volume = self.volume;
+                        let mut current_song_progress = self.current_song_progress;
+                        let mut pending_crossfade_ui = self.pending_crossfade_ui;
+                        let mut pending_resume = self.pending_resume;
+                        let cfg_signal = self.config;
 
-                            spawn(async move {
-                                if *play_generation.read() == current_gen {
-                                    let meta = NowPlayingMeta {
-                                        title: track.title.clone(),
-                                        artist: track.artist.clone(),
-                                        album: track.album.clone(),
-                                        duration: std::time::Duration::from_secs(track.duration),
-                                        artwork: Some(cover_url),
-                                    };
-                                    let result = if use_crossfade {
-                                        player.write().crossfade_to(
-                                            source,
-                                            meta,
-                                            hint,
-                                            crossfade_duration,
-                                        )
-                                    } else {
-                                        player.write().play(source, meta, hint)
-                                    };
-                                    if let Err(e) = result {
-                                        eprintln!("Offline playback error: {e}");
-                                        is_loading.set(false);
-                                        skip_in_progress.set(false);
-                                        return;
-                                    }
-                                    player.write().set_volume(*volume.peek());
-                                    if let Some(seek_secs) = restore_seek_secs {
-                                        if seek_secs > 0 {
-                                            player.write().seek(Duration::from_secs(seek_secs));
-                                        }
-                                    }
-                                    if use_crossfade {
-                                        pending_crossfade_ui.set(Some(
-                                            PlayerController::build_pending_crossfade_ui(
-                                                idx,
-                                                outgoing_duration_secs,
-                                                outgoing_progress_secs,
-                                            ),
-                                        ));
-                                    } else {
-                                        current_song_progress.set(0);
-                                    }
-                                    is_playing.set(true);
+                        spawn(async move {
+                            if *play_generation.read() == current_gen {
+                                let meta = NowPlayingMeta {
+                                    title: track.title.clone(),
+                                    artist: track.artist.clone(),
+                                    album: track.album.clone(),
+                                    duration: std::time::Duration::from_secs(track.duration),
+                                    artwork: Some(cover_url),
+                                };
+                                let result = if use_crossfade {
+                                    player.write().crossfade_to(
+                                        source,
+                                        meta,
+                                        hint,
+                                        crossfade_duration,
+                                    )
+                                } else {
+                                    player.write().play(source, meta, hint)
+                                };
+                                if let Err(e) = result {
+                                    eprintln!("Offline playback error: {e}");
                                     is_loading.set(false);
                                     skip_in_progress.set(false);
-
-                                    if clear_pending_resume_on_success {
-                                        pending_resume.set(None);
-                                    }
-                                    let _ = cfg_signal;
+                                    return;
                                 }
-                            });
-                            return;
-                        }
+                                player.write().set_volume(*volume.peek());
+                                if let Some(seek_secs) = restore_seek_secs
+                                    && seek_secs > 0
+                                {
+                                    player.write().seek(Duration::from_secs(seek_secs));
+                                }
+                                if use_crossfade {
+                                    pending_crossfade_ui.set(Some(
+                                        PlayerController::build_pending_crossfade_ui(
+                                            idx,
+                                            outgoing_duration_secs,
+                                            outgoing_progress_secs,
+                                        ),
+                                    ));
+                                } else {
+                                    current_song_progress.set(0);
+                                }
+                                is_playing.set(true);
+                                is_loading.set(false);
+                                skip_in_progress.set(false);
+
+                                if clear_pending_resume_on_success {
+                                    pending_resume.set(None);
+                                }
+                                let _ = cfg_signal;
+                            }
+                        });
+                        return;
                     }
                 }
 
                 if let Some((stream_url, cover_url)) = {
                     if is_radio_item {
-                        if let Some(stream_url) = self
-                            .station_registry
+                        self.station_registry
                             .read()
                             .get(&id)
                             .and_then(|s| s.streams.iter().find(|str| str.id == stream_id))
                             .map(|s| s.url.clone())
-                        {
-                            Some((stream_url, String::new()))
-                        } else {
-                            None
-                        }
+                            .map(|stream_url| (stream_url, String::new()))
                     } else {
                         let conf = self.config.read();
                         conf.server.as_ref().map(|server| match server.service {
@@ -539,8 +567,9 @@ impl PlayerController {
 
                                 let cover_url = {
                                     let path_str = track.path.to_string_lossy();
-                                    utils::jellyfin_image::jellyfin_image_url_from_path(
+                                    utils::jellyfin_image::track_cover_url_with_album_fallback(
                                         &path_str,
+                                        &track.album_id,
                                         &server.url,
                                         server.access_token.as_deref(),
                                         800,
@@ -579,6 +608,27 @@ impl PlayerController {
 
                                 (stream_url, cover_url)
                             }
+                            // YT can't resolve its stream URL synchronously (the
+                            // /player call is async + multi-client fallback). Tag
+                            // the URL with a sentinel that the async spawn below
+                            // recognises and replaces with the real URL. The
+                            // cover URL, however, is already encoded in the
+                            // track's path (`ytmusic:VID:urlhex_HEX`) so we
+                            // can produce it synchronously here so the
+                            // bottombar shows artwork immediately on click.
+                            MusicService::YtMusic => {
+                                let cover_url =
+                                    utils::jellyfin_image::track_cover_url_with_album_fallback(
+                                        &path_str,
+                                        &track.album_id,
+                                        "",
+                                        None,
+                                        800,
+                                        90,
+                                    )
+                                    .unwrap_or_default();
+                                (format!("__YT_PENDING:{id}"), cover_url)
+                            }
                         })
                     }
                 } {
@@ -597,6 +647,7 @@ impl PlayerController {
                     let mut is_playing = self.is_playing;
                     let mut is_loading = self.is_loading;
                     let mut skip_in_progress = self.skip_in_progress;
+                    let mut playback_error = self.playback_error;
                     let play_generation = self.play_generation;
                     let volume = self.volume;
                     let mut current_song_progress = self.current_song_progress;
@@ -609,6 +660,14 @@ impl PlayerController {
                     let mut current_song_album = self.current_song_album;
                     let mut current_song_cover_url = self.current_song_cover_url;
                     let station_registry = self.station_registry;
+                    let mut queue_for_yt = self.queue;
+                    let current_queue_index_for_yt = self.current_queue_index;
+                    let mut current_song_duration_for_yt = self.current_song_duration;
+                    let mut current_song_bitrate_for_yt = self.current_song_bitrate;
+                    // Physical queue slot for the metadata write-backs below — the
+                    // resolve closure's `get_mut` indexes the raw Vec, so the
+                    // display/shuffle `idx` would hit the wrong track in shuffle.
+                    let phys_idx = self.get_queue_index(idx);
 
                     if !use_crossfade {
                         self.hydrate_current_track_metadata(idx, 0);
@@ -621,15 +680,117 @@ impl PlayerController {
 
                     #[cfg(not(target_arch = "wasm32"))]
                     spawn(async move {
-                        let stream = utils::stream_buffer::StreamBuffer::new(stream_url, is_radio);
+                        let (stream_url, yt_format, yt_user_agent) = if let Some(video_id) =
+                            stream_url.strip_prefix("__YT_PENDING:")
+                        {
+                            let cookies = cfg_signal
+                                .peek()
+                                .server
+                                .as_ref()
+                                .and_then(|s| s.access_token.clone());
+                            let Some(cookies) = cookies else {
+                                playback_error.set(Some(
+                                    "YouTube Music isn't signed in. Open Settings → YouTube Music → Re-sign in.".to_string()
+                                ));
+                                is_loading.set(false);
+                                skip_in_progress.set(false);
+                                return;
+                            };
+                            let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
+                            match yt.get_stream(video_id).await {
+                                Ok(info) => {
+                                    // Stale-resolve guard: don't stamp duration / mutate
+                                    // queue if the user has clicked another track while
+                                    // we were awaiting get_stream. Otherwise a slow
+                                    // resolver for track A scribbles A's duration on
+                                    // whatever sits at idx now.
+                                    if *play_generation.read() == current_gen
+                                        && let Some(secs) = info.duration_secs
+                                        && secs > 0
+                                    {
+                                        if let Some(p) = phys_idx
+                                            && let Some(t) = queue_for_yt.write().get_mut(p)
+                                        {
+                                            t.duration = secs;
+                                        }
+                                        if *current_queue_index_for_yt.peek() == idx {
+                                            current_song_duration_for_yt.set(secs);
+                                        }
+                                    }
+                                    // Surface the resolved stream bitrate (kbps) for the
+                                    // debug readout — 128 anon vs ~270 Premium. Write it
+                                    // back onto the queue Track too (YT tracks carry no
+                                    // bitrate metadata), so a re-hydrate doesn't reset it.
+                                    if *play_generation.read() == current_gen
+                                        && let Some(bps) = info.bitrate
+                                    {
+                                        let kbps = (bps / 1000) as u16;
+                                        if let Some(p) = phys_idx
+                                            && let Some(t) = queue_for_yt.write().get_mut(p)
+                                        {
+                                            t.bitrate = kbps;
+                                        }
+                                        if *current_queue_index_for_yt.peek() == idx {
+                                            current_song_bitrate_for_yt.set(kbps);
+                                        }
+                                    }
+                                    (info.url, Some(info.format), Some(info.user_agent))
+                                }
+                                Err(e) => {
+                                    // Same guard: a stale error must NOT post a banner
+                                    // for or clear is_loading on the user's new track.
+                                    if *play_generation.read() != current_gen {
+                                        return;
+                                    }
+                                    eprintln!("YT Music stream URL fetch failed: {e}");
+                                    playback_error.set(Some(format!(
+                                        "YouTube Music couldn't load this track:\n{e}"
+                                    )));
+                                    is_loading.set(false);
+                                    skip_in_progress.set(false);
+                                    return;
+                                }
+                            }
+                        } else {
+                            (stream_url, None, None)
+                        };
+                        let yt_format_for_blocking = yt_format;
+                        let stream_url_for_blocking = stream_url.clone();
+                        let yt_ua_for_blocking = yt_user_agent.clone();
                         let source_res = tokio::task::spawn_blocking(move || {
                             if is_radio {
-                                let (source, hint) = decoder::from_stream_with_hint(stream, "ogg");
+                                let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
+                                    stream_url_for_blocking,
+                                    true,
+                                    yt_ua_for_blocking,
+                                );
+                                let (source, hint) =
+                                    decoder::from_stream_with_hint(stream, "ogg");
+                                Ok::<_, std::io::Error>((source, hint))
+                            } else if let Some(fmt) = yt_format_for_blocking {
+                                // YT: HTTP Range-backed source. Symphonia
+                                // can seek freely (Matroska Cues at the
+                                // end, scrub anywhere) and startup probes
+                                // only fetch the ~512 KiB they need.
+                                let range = utils::range_source::RangeStreamSource::new(
+                                    stream_url_for_blocking,
+                                    yt_ua_for_blocking,
+                                )?;
+                                let len = Some(range.total_size());
+                                let (source, mut hint) =
+                                    decoder::from_stream_with_len(range, len);
+                                hint.with_extension(fmt.extension());
                                 Ok::<_, std::io::Error>((source, hint))
                             } else {
+                                let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
+                                    stream_url_for_blocking,
+                                    false,
+                                    yt_ua_for_blocking,
+                                );
                                 stream.wait_for_total_size();
                                 let len = stream.known_total_size();
-                                let (source, hint) = decoder::from_stream_with_len(stream, len);
+                                let (source, hint) =
+                                    decoder::from_stream_with_len(stream, len);
                                 Ok::<_, std::io::Error>((source, hint))
                             }
                         })
@@ -662,11 +823,11 @@ impl PlayerController {
                                     return;
                                 }
                                 player.write().set_volume(*volume.peek());
-                                if let Some(seek_secs) = restore_seek_secs {
-                                    if seek_secs > 0 {
-                                        player.write().seek(Duration::from_secs(seek_secs));
-                                        current_song_progress.set(seek_secs);
-                                    }
+                                if let Some(seek_secs) = restore_seek_secs
+                                    && seek_secs > 0
+                                {
+                                    player.write().seek(Duration::from_secs(seek_secs));
+                                    current_song_progress.set(seek_secs);
                                 }
                                 if use_crossfade {
                                     pending_crossfade_ui.set(Some(
@@ -735,8 +896,7 @@ impl PlayerController {
                                     let scrobble_cfg = cfg_signal;
                                     let scrobble_id = id.clone();
                                     let duration_secs = scrobble_track.duration;
-                                    let threshold_secs =
-                                        std::cmp::min(240, (duration_secs / 2) as u64);
+                                    let threshold_secs = std::cmp::min(240, duration_secs / 2);
 
                                     spawn(async move {
                                         // track must be longer than 30 seconds
@@ -828,6 +988,7 @@ impl PlayerController {
                                                     &scrobble_track.artist,
                                                     &scrobble_track.title,
                                                     Some(&scrobble_track.album),
+                                                    None,
                                                 );
                                             if let Err(e) = scrobble::musicbrainz::submit_listens(
                                                 &auth,
@@ -938,6 +1099,7 @@ impl PlayerController {
                                                 &scrobble_track.artist,
                                                 &scrobble_track.title,
                                                 Some(&scrobble_track.album),
+                                                None,
                                             );
                                             match scrobble::musicbrainz::submit_listens(
                                                 &auth,
@@ -967,31 +1129,29 @@ impl PlayerController {
                                     let play_generation = play_generation;
 
                                     spawn(async move {
-                                        if let Ok(response) = reqwest::get(&cover_url).await {
-                                            if let Ok(bytes) = response.bytes().await {
-                                                let temp_dir = std::env::temp_dir();
-                                                let random_id: u64 = rand::random();
-                                                let file_path = temp_dir
-                                                    .join(format!("kopuz_cover_{}.jpg", random_id));
+                                        if let Ok(response) = reqwest::get(&cover_url).await
+                                            && let Ok(bytes) = response.bytes().await
+                                        {
+                                            let temp_dir = std::env::temp_dir();
+                                            let random_id: u64 = rand::random();
+                                            let file_path = temp_dir
+                                                .join(format!("kopuz_cover_{}.jpg", random_id));
 
-                                                if tokio::fs::write(&file_path, bytes).await.is_ok()
-                                                {
-                                                    if *play_generation.read() == current_gen {
-                                                        let path_str =
-                                                            file_path.to_string_lossy().to_string();
-                                                        let new_meta = NowPlayingMeta {
-                                                            title: track.title,
-                                                            artist: track.artist,
-                                                            album: track.album,
-                                                            duration:
-                                                                std::time::Duration::from_secs(
-                                                                    track.duration,
-                                                                ),
-                                                            artwork: Some(path_str),
-                                                        };
-                                                        player.write().update_metadata(new_meta);
-                                                    }
-                                                }
+                                            if tokio::fs::write(&file_path, bytes).await.is_ok()
+                                                && *play_generation.read() == current_gen
+                                            {
+                                                let path_str =
+                                                    file_path.to_string_lossy().to_string();
+                                                let new_meta = NowPlayingMeta {
+                                                    title: track.title,
+                                                    artist: track.artist,
+                                                    album: track.album,
+                                                    duration: std::time::Duration::from_secs(
+                                                        track.duration,
+                                                    ),
+                                                    artwork: Some(path_str),
+                                                };
+                                                player.write().update_metadata(new_meta);
                                             }
                                         }
                                     });
@@ -1131,6 +1291,7 @@ impl PlayerController {
                                                     &scrobble_track.artist,
                                                     &scrobble_track.title,
                                                     Some(&scrobble_track.album),
+                                                    None,
                                                 );
                                             if let Err(e) = scrobble::musicbrainz::submit_listens(
                                                 &auth,
@@ -1237,6 +1398,7 @@ impl PlayerController {
                                                 &scrobble_track.artist,
                                                 &scrobble_track.title,
                                                 Some(&scrobble_track.album),
+                                                None,
                                             );
                                             match scrobble::musicbrainz::submit_listens(
                                                 &auth,
@@ -1328,10 +1490,10 @@ impl PlayerController {
 
                         self.is_playing.set(true);
 
-                        if let Some(seek_secs) = restore_seek_secs {
-                            if seek_secs > 0 {
-                                self.apply_restore_seek(seek_secs);
-                            }
+                        if let Some(seek_secs) = restore_seek_secs
+                            && seek_secs > 0
+                        {
+                            self.apply_restore_seek(seek_secs);
                         }
                         if clear_pending_resume_on_success {
                             self.clear_pending_resume();
@@ -1343,12 +1505,23 @@ impl PlayerController {
                             let scrobble_track = track.clone();
 
                             let duration_secs = scrobble_track.duration;
-                            let threshold_secs = std::cmp::min(240, (duration_secs / 2) as u64);
+                            let threshold_secs = std::cmp::min(240, duration_secs / 2);
 
                             spawn(async move {
                                 // track must be longer than 30 seconds
                                 if duration_secs < 30 {
                                     return;
+                                }
+
+                                let mut map: HashMap<&str, &str> = HashMap::new();
+                                if let Some(ref mbid) = scrobble_track.musicbrainz_release_id {
+                                    map.insert("release_mbid", mbid.as_str());
+                                }
+                                if let Some(ref mbid) = scrobble_track.musicbrainz_recording_id {
+                                    map.insert("recording_mbid", mbid.as_str());
+                                }
+                                if let Some(ref mbid) = scrobble_track.musicbrainz_track_id {
+                                    map.insert("track_mbid", mbid.as_str());
                                 }
 
                                 // Last.fm now-playing
@@ -1389,6 +1562,7 @@ impl PlayerController {
                                         &scrobble_track.artist,
                                         &scrobble_track.title,
                                         Some(&scrobble_track.album),
+                                        Some(map.clone()),
                                     );
                                     if let Err(e) = scrobble::musicbrainz::submit_listens(
                                         &auth,
@@ -1444,6 +1618,7 @@ impl PlayerController {
                                         &scrobble_track.artist,
                                         &scrobble_track.title,
                                         Some(&scrobble_track.album),
+                                        Some(map.clone()),
                                     );
                                     match scrobble::musicbrainz::submit_listens(
                                         &auth,
@@ -1562,7 +1737,7 @@ impl PlayerController {
 
         // Tracks that come after the current position (play these first).
         let mut ahead: Vec<usize> = (current_idx..queue_len).collect();
-        ahead.shuffle(&mut rand::thread_rng());
+        ahead.shuffle(&mut rand::rng());
         // move current played track to the front
         let pos = ahead
             .iter()
@@ -1572,7 +1747,7 @@ impl PlayerController {
 
         // Tracks that wrap around from the beginning (play after the ahead group).
         let mut wrapped: Vec<usize> = (0..current_idx).collect();
-        wrapped.shuffle(&mut rand::thread_rng());
+        wrapped.shuffle(&mut rand::rng());
 
         ahead.extend(wrapped);
         // reset current queue index to match the currently played track (now moved at pos 0)
@@ -1582,14 +1757,14 @@ impl PlayerController {
     }
 
     pub fn play_queue_shuffled(&mut self, tracks: Vec<Track>) {
-        use rand::Rng;
+        use rand::RngExt;
         let queue_len = tracks.len();
         if queue_len == 0 {
             return;
         }
 
         self.queue.set(tracks);
-        let start = rand::thread_rng().gen_range(0..queue_len);
+        let start = rand::rng().random_range(0..queue_len);
         self.play_track(start);
     }
 
@@ -1598,8 +1773,10 @@ impl PlayerController {
             return;
         }
         self.queue.set(tracks);
+        // `play_track` already starts track 0 (with history + shuffle handling);
+        // a second bare play call here just bumped the play generation and
+        // spawned a duplicate stream resolve for the same video.
         self.play_track(0);
-        self.play_track_no_history(0);
     }
 
     pub fn add_to_queue(&mut self, tracks: impl IntoIterator<Item = Track>) {
@@ -1701,6 +1878,8 @@ impl PlayerController {
             track_number: None,
             disc_number: None,
             musicbrainz_release_id: None,
+            musicbrainz_recording_id: None,
+            musicbrainz_track_id: None,
             playlist_item_id: None,
             artists: vec![],
         };
@@ -1720,11 +1899,34 @@ impl PlayerController {
         self.loop_mode.with_mut(|l| *l = l.next());
     }
 
+    /// Hard reset: stop playback, drop the queue/history/current track,
+    /// clear any pending playback error. Called when the active server
+    /// changes — without it, a queued `ytmusic:` track would be replayed
+    /// through whichever backend's stream-builder is now active.
+    pub fn reset_for_backend_switch(&mut self) {
+        // Invalidate any in-flight track-load spawn (YT __YT_PENDING
+        // resolver, Jellyfin stream open, etc.) so its eventual
+        // completion doesn't start playback against the cleared queue
+        // or post a stale error banner / clear is_loading for the new
+        // backend's first track.
+        self.play_generation.with_mut(|g| *g += 1);
+        self.cancel_radio_task();
+        self.player.write().stop_for_transition();
+        self.is_playing.set(false);
+        self.is_loading.set(false);
+        self.skip_in_progress.set(false);
+        self.queue.write().clear();
+        self.history.write().clear();
+        self.current_queue_index.set(0);
+        self.clear_current_track_metadata();
+        self.playback_error.set(None);
+    }
+
     pub fn pause(&mut self) {
         let idx = *self.current_queue_index.peek();
         let is_radio = self
             .get_track_at(idx)
-            .map_or(false, |t| t.path.to_string_lossy().starts_with("radio:"));
+            .is_some_and(|t| t.path.to_string_lossy().starts_with("radio:"));
 
         if is_radio {
             self.player.write().stop_for_transition();
@@ -1738,7 +1940,7 @@ impl PlayerController {
         let idx = *self.current_queue_index.peek();
         let is_radio = self
             .get_track_at(idx)
-            .map_or(false, |t| t.path.to_string_lossy().starts_with("radio:"));
+            .is_some_and(|t| t.path.to_string_lossy().starts_with("radio:"));
 
         if is_radio || !self.player.peek().can_resume() {
             if let Some(track) = self.get_track_at(idx) {
@@ -1914,14 +2116,15 @@ pub fn use_player_controller(
     let play_generation = use_signal(|| 0);
     let is_loading = use_signal(|| false);
     let skip_in_progress = use_signal(|| false);
-    let history = use_signal(|| Vec::new());
+    let history = use_signal(Vec::new);
     let shuffle = use_signal(|| false);
-    let shuffle_order = use_signal(|| Vec::<usize>::new());
+    let shuffle_order = use_signal(Vec::<usize>::new);
     let loop_mode = use_signal(|| LoopMode::None);
     let pending_resume = use_signal(|| None::<PendingResumeState>);
     let pending_crossfade_ui = use_signal(|| None::<PendingCrossfadeUiState>);
     let radio_task = use_signal(|| None::<dioxus_core::Task>);
     let station_registry = use_context::<Signal<radio::registry::StationRegistry>>();
+    let playback_error = use_signal(|| None::<String>);
 
     PlayerController {
         player,
@@ -1951,5 +2154,6 @@ pub fn use_player_controller(
         pending_crossfade_ui,
         radio_task,
         station_registry,
+        playback_error,
     }
 }

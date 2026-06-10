@@ -1,6 +1,5 @@
 use crate::lyrics_view::LyricsView;
 use crate::queue_list_view::QueueListView;
-use crate::reorder_buttons::ReorderButtons;
 use crate::shared::fmt_time;
 use crate::titlebar::Titlebar;
 use config::AppConfig;
@@ -222,7 +221,6 @@ fn TrackMetadata(
     current_song_title: Signal<String>,
     current_song_artist: Signal<String>,
     current_song_album: Signal<String>,
-    current_song_khz: Signal<u32>,
     current_song_bitrate: Signal<u16>,
 ) -> Element {
     rsx! {
@@ -269,7 +267,9 @@ fn TrackMetadata(
         div {
             class: "flex items-center gap-4 text-xs text-white/50 mb-6 w-full",
             style: "max-width: 420px;",
-            span { style: "font-size: 10px;", "{current_song_khz() / 1000} kHz / {current_song_bitrate} kbps" }
+            if current_song_bitrate() > 0 {
+                span { style: "font-size: 10px;", "{current_song_bitrate} kbps" }
+            }
         }
     }
 }
@@ -344,7 +344,6 @@ pub fn Fullscreen(
     mut current_queue_index: Signal<usize>,
     mut current_song_title: Signal<String>,
     mut current_song_artist: Signal<String>,
-    mut current_song_khz: Signal<u32>,
     mut current_song_bitrate: Signal<u16>,
     mut current_song_cover_url: Signal<String>,
     mut current_song_album: Signal<String>,
@@ -389,16 +388,18 @@ pub fn Fullscreen(
             return;
         }
         last_key.set(new_key);
-        let (server_url, server_token, server_user_id) = {
+        let (server_url, server_token, server_user_id, prefer_local) = {
             let conf = config.peek();
+            let prefer_local = conf.prefer_local_lyrics;
             if let Some(server) = &conf.server {
                 (
                     Some(server.url.clone()),
                     server.access_token.clone(),
                     server.user_id.clone(),
+                    prefer_local,
                 )
             } else {
-                (None, None, None)
+                (None, None, None, prefer_local)
             }
         };
 
@@ -434,6 +435,7 @@ pub fn Fullscreen(
                 server_url.as_deref(),
                 server_token.as_deref(),
                 server_user_id.as_deref(),
+                prefer_local,
             )
             .await;
             if *fetch_gen.peek() == fetch_id {
@@ -515,7 +517,6 @@ pub fn Fullscreen(
                             current_song_title,
                             current_song_artist,
                             current_song_album,
-                            current_song_khz,
                             current_song_bitrate,
                         }
                         ProgressBarControl { player, current_song_duration, current_song_progress }
@@ -563,7 +564,6 @@ pub fn Fullscreen(
                         current_song_title,
                         current_song_artist,
                         current_song_album,
-                        current_song_khz,
                         current_song_bitrate,
                     }
 

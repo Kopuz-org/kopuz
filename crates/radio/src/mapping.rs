@@ -37,10 +37,10 @@ pub fn extract_artist(json: &Value, mapping: &FieldMapping) -> String {
                 match item {
                     Value::String(s) => artists.push(s.clone()),
                     Value::Object(_) => {
-                        if let Some(field) = &mapping.artist_array_field {
-                            if let Some(s) = extract_str(item, field) {
-                                artists.push(s);
-                            }
+                        if let Some(field) = &mapping.artist_array_field
+                            && let Some(s) = extract_str(item, field)
+                        {
+                            artists.push(s);
                         }
                     }
                     _ => {}

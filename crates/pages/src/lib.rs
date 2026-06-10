@@ -10,8 +10,6 @@ pub mod radio;
 pub mod search;
 pub mod server;
 pub mod settings;
-// Theme editor + yt-dlp downloader are excluded on Android (no desktop file dialogs,
-// no yt-dlp/ffmpeg binaries, and they're removed from the mobile UI).
 #[cfg(not(target_os = "android"))]
 pub mod theme_editor;
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]

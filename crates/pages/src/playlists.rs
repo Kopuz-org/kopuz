@@ -63,6 +63,7 @@ pub fn PlaylistsPage(
                             let remote = SubsonicClient::new(&url, &user_id, &token);
                             remote.create_playlist(&name, &[]).await
                         }
+                        MusicService::YtMusic => Err("YouTube Music not yet implemented".to_string()),
                     };
                     saving.set(false);
                     match result {

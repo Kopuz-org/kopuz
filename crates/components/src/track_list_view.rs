@@ -33,6 +33,8 @@ pub struct TrackListViewProps {
     pub on_move_down: EventHandler<usize>,
     #[props(default = true)]
     pub show_delete_in_selection: bool,
+    #[props(default = false)]
+    pub enable_metadata: bool,
     pub actions: Option<Element>,
 }
 
@@ -43,7 +45,20 @@ pub fn TrackListView(mut props: TrackListViewProps) -> Element {
     let mut show_playlist_modal = use_signal(|| false);
     let mut selected_track_for_playlist = use_signal(|| None::<PathBuf>);
     let mut is_selection_mode = use_signal(|| false);
-    let mut selected_tracks = use_signal(|| HashSet::<PathBuf>::new());
+    let mut selected_tracks = use_signal(HashSet::<PathBuf>::new);
+    let mut metadata_track = use_signal(|| None::<Track>);
+
+    let view_metadata_handler = if props.enable_metadata {
+        let tracks_meta = props.tracks.clone();
+        Some(EventHandler::new(move |idx: usize| {
+            if let Some(t) = tracks_meta.get(idx) {
+                metadata_track.set(Some(t.clone()));
+                active_menu_track.set(None);
+            }
+        }))
+    } else {
+        None
+    };
 
     let tracks_select_all = props.tracks.clone();
     let tracks_long_press = props.tracks.clone();
@@ -148,6 +163,7 @@ pub fn TrackListView(mut props: TrackListViewProps) -> Element {
                     }
                 },
                 on_close_menu: move |_| active_menu_track.set(None),
+                on_view_metadata: view_metadata_handler,
                 on_delete_track: props.on_delete_track,
                 on_remove_from_playlist: props.on_remove_from_playlist,
                 on_download_all: props.on_download_all,
@@ -195,6 +211,43 @@ pub fn TrackListView(mut props: TrackListViewProps) -> Element {
                     on_cancel: move |_| {
                         is_selection_mode.set(false);
                         selected_tracks.write().clear();
+                    },
+                }
+            }
+
+            if let Some(track) = metadata_track.read().clone() {
+                crate::metadata_modal::MetadataModal {
+                    track: track.clone(),
+                    on_close: move |_| metadata_track.set(None),
+                    on_save: move |edits: reader::models::TrackEdits| {
+                        let path = track.path.clone();
+                        match reader::write_tags(&path, &edits) {
+                            Ok(()) => {
+                                let mut lib = props.library.write();
+                                if let Some(t) = lib.tracks.iter_mut().find(|t| t.path == path) {
+                                    t.title = edits.title.trim().to_string();
+                                    t.artist = edits.artist.trim().to_string();
+                                    t.artists = edits
+                                        .artist
+                                        .split([';', ','])
+                                        .map(|a| a.trim().to_string())
+                                        .filter(|s| !s.is_empty())
+                                        .collect();
+                                    t.album = edits.album.trim().to_string();
+                                    t.track_number = edits.track_number;
+                                    t.disc_number = edits.disc_number;
+                                    t.album_id = reader::metadata::make_album_id(
+                                        edits.album.trim(),
+                                        edits.artist.trim(),
+                                    );
+                                }
+                                drop(lib);
+                                metadata_track.set(None);
+                            }
+                            Err(e) => {
+                                tracing::error!("failed to write tags for {}: {}", path.display(), e);
+                            }
+                        }
                     },
                 }
             }

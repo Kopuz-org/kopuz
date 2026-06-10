@@ -101,6 +101,7 @@ pub struct ShowcaseProps {
     pub on_add_to_playlist: Option<EventHandler<usize>>,
     pub on_delete_track: Option<EventHandler<usize>>,
     pub on_remove_from_playlist: Option<EventHandler<usize>>,
+    pub on_view_metadata: Option<EventHandler<usize>>,
     pub on_download_track: Option<EventHandler<usize>>,
     pub active_track: Option<std::path::PathBuf>,
     pub on_click_menu: Option<EventHandler<usize>>,

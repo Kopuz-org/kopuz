@@ -27,10 +27,8 @@ add = Tambah
 add_folder = Tambah Folder
 no_music_folders = Tidak ada folder musik yang diset
 add_server = Tambah Server
-# TODO: NEED LOCALIZATION
-connect_to_lastfm = Connect to Last.fm
-lastfm_connected = Last.fm Connected
-# TODO: NEED LOCALIZATION
+connect_to_lastfm = Hubungkan ke Last.fm
+lastfm_connected = Terhubung ke Last.fm
 server_details = Detail Server
 server_name = Nama Server
 server_url = URL Server
@@ -115,6 +113,8 @@ add_to_queue = Tambah ke Antrian
 play_next = Putar Berikutnya
 add_to_playlist = Tambah ke Playlist
 remove_from_playlist = Hapus dari Playlist
+share_musicbrainz = Bagikan (MusicBrainz)
+share_link_copied = Tautan MusicBrainz disalin
 delete = Hapus
 delete_song = Hapus Lagu
 delete_album = Hapus Album
@@ -134,10 +134,8 @@ maximize = Maksimalkan
 close = Tutup
 enabled = AKTIF
 disabled = NONAKTIF
-# TODO: Translate lines below
-play = Play
-shuffle = Shuffle
-# ------
+play = Putar
+shuffle = Acak
 
 # Navigation & Headers
 tracks = Lagu
@@ -193,10 +191,8 @@ heart_track_to_add_server = Sukai lagu yang sedang diputar untuk menambahkannya 
 search_placeholder = Cari artis, album atau lagu...
 no_results_found = Tidak ada hasil untuk "{ $query }"
 listenbrainz_token_placeholder = Masukkan token ListenBrainz kamu
-# TODO: NEED LOCALIZATION
-lastfm_api_key_placeholder = Enter your Last.fm API Key
-lastfm_api_secret_placeholder = Enter your Last.fm API Secret
-# TODO: NEED LOCALIZATION
+lastfm_api_key_placeholder = Masukkan kunci API Last.fm Anda
+lastfm_api_secret_placeholder = Masukkan rahasia API Last.fm Anda
 
 # Empty States
 album_not_found = Album tidak ditemukan
@@ -242,6 +238,9 @@ most_played_local_tracks = Lagu yang paling sering dimainkan di local.
 no_tracks_in_library = Tidak ada lagu ditemukan di koleksimu.
 no_songs_here = Tidak ada lagu.
 syncing_with_server = Menyinkronkan dengan server...
+yt_syncing_progress = Menyinkronkan — { $count } trek dimuat sejauh ini
+yt_synced_total = { $count } trek favorit disinkronkan
+refresh = Segarkan
 most_played_tracks = Lagu yang paling sering dimainkan
 no_more_songs = Tidak ada lagu lagi di antrian
 server_playlist = Playlist Server
@@ -373,6 +372,7 @@ artist_photo_source = Sumber foto artis
 artist_photo = Foto artis
 album_cover = Sampul album
 auto_fetch_covers = Ambil sampul album otomatis
+prefer_local_lyrics = Utamakan lirik lokal (.lrc / tertanam, tanpa cadangan online)
 cover_fetch_strategy = Strategi pengambilan sampul
 musicbrainz_first = MusicBrainz dahulu
 lastfm_first = Last.fm dahulu
@@ -417,3 +417,27 @@ radio_registries_empty = Tidak ada registri yang dikonfigurasi
 offline_downloads = Unduhan Offline
 download_quality = Kualitas Unduhan
 saving = Menyimpan...
+discover_more_loading = Memuat lainnya…
+discover_failed = Tidak bisa memuat Jelajahi: { $error }
+discover_requires_ytmusic = Jelajahi hanya tersedia ketika YouTube Music adalah server aktif.
+discover_show_all = Tampilkan semua
+yt_anon_playlists = Masuk ke YouTube Music untuk melihat playlist pustaka kamu.
+yt_anon_favorites = Masuk ke YouTube Music untuk melihat lagu yang kamu sukai.
+
+# Metadata Viewer / Editor
+view_metadata = Lihat metadata
+edit_metadata = Edit metadata
+edit = Edit
+track_number = Nomor trek
+disc_number = Nomor disk
+duration = Durasi
+sample_rate = Laju sampel
+bitrate = Laju bit
+musicbrainz_release = Rilis MusicBrainz
+musicbrainz_recording = Rekaman MusicBrainz
+musicbrainz_track = Trek MusicBrainz
+path = Jalur
+add_photo = Tambah foto
+change_photo = Ganti foto
+remove_photo = Hapus foto
+metadata_edit_warning = Bidang kosong menghapus tag itu. Ditulis langsung ke berkas — tanpa pembatalan.

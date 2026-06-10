@@ -57,10 +57,8 @@ pub fn LocalLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Element
             .map(|track| {
                 let track_id = track.path.to_string_lossy().to_string();
                 let plays = conf.listen_counts.get(&track_id).copied().unwrap_or(0);
-                let (genre, cover_url) = album_map
-                    .get(&track.album_id)
-                    .cloned()
-                    .unwrap_or_default();
+                let (genre, cover_url) =
+                    album_map.get(&track.album_id).cloned().unwrap_or_default();
                 (track, plays, genre, cover_url)
             })
             .collect::<Vec<(Track, u64, String, Option<CoverUrl>)>>()

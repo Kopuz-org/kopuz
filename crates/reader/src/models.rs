@@ -30,9 +30,38 @@ pub struct Track {
     #[serde(default)]
     pub musicbrainz_release_id: Option<String>,
     #[serde(default)]
+    pub musicbrainz_recording_id: Option<String>,
+    #[serde(default)]
+    pub musicbrainz_track_id: Option<String>,
+    #[serde(default)]
     pub playlist_item_id: Option<String>,
     #[serde(default)]
     pub artists: Vec<String>,
+}
+
+/// What to do with the track's embedded front-cover picture on save.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum CoverChange {
+    /// Leave the existing picture untouched.
+    #[default]
+    Keep,
+    /// Strip the front-cover picture from the file.
+    Remove,
+    /// Replace the front cover with these image bytes (format auto-detected).
+    Set(Vec<u8>),
+}
+
+/// User-supplied edits to a track's tags. Empty strings / `None` mean
+/// "remove this tag from the file". Produced by the metadata editor UI and
+/// consumed by [`crate::metadata::write_tags`].
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TrackEdits {
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub track_number: Option<u32>,
+    pub disc_number: Option<u32>,
+    pub cover: CoverChange,
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
@@ -51,6 +80,17 @@ pub struct Library {
     pub jellyfin_albums: Vec<Album>,
     #[serde(default)]
     pub jellyfin_genres: Vec<(String, String)>,
+    /// Unix timestamp (seconds) of the last successful YT library sync.
+    /// `None` means "never synced" → the Favorites page kicks off an
+    /// initial fetch on next mount. Cleared by the manual refresh
+    /// button to force a re-fetch.
+    #[serde(default)]
+    pub last_yt_sync_at: Option<u64>,
+    /// Companion to `last_yt_sync_at` for the YT playlists list.
+    /// Tracked separately because the favorites page and the playlists
+    /// page are independent — one synced doesn't imply the other.
+    #[serde(default)]
+    pub last_yt_playlists_sync_at: Option<u64>,
     #[serde(default)]
     pub server_artist_images: std::collections::HashMap<String, String>,
     #[serde(default)]
