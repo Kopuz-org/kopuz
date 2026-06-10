@@ -27,10 +27,8 @@ add = Ajouter
 add_folder = Ajouter un dossier
 no_music_folders = Aucun dossier de musique configuré
 add_server = Ajouter Serveur
-# TODO: NEED LOCALIZATION
-connect_to_lastfm = Connect to Last.fm 
-lastfm_connected = Last.fm Connected
-# TODO: NEED LOCALIZATION
+connect_to_lastfm = Se connecter à Last.fm
+lastfm_connected = Connecté à Last.fm
 server_details = Détails du serveur
 server_name = Nom Serveur
 server_url = URL Serveur
@@ -77,10 +75,8 @@ create = Crée
 save = Sauvegarder
 enabled = Activé
 disabled = Désactivé
-# TODO: Translate lines below
-play = Play
-shuffle = Shuffle
-# ------
+play = Lecture
+shuffle = Aléatoire
 
 # Navigation & Headers
 tracks = Tracks
@@ -136,10 +132,8 @@ heart_track_to_add_server = Ajoutez ce morceau aux favoris pendant la lecture po
 search_placeholder = Chercher Des Artistes , albums ou tracks..
 no_results_found = Aucun Résultat pour "{ $query }"
 listenbrainz_token_placeholder = Entrez vous token ListenBrainz 
-# TODO: NEED LOCALIZATION
-lastfm_api_key_placeholder = Enter your Last.fm API Key 
-lastfm_api_secret_placeholder = Enter your Last.fm API Secret 
-# TODO: NEED LOCALIZATION
+lastfm_api_key_placeholder = Entrez votre clé API Last.fm
+lastfm_api_secret_placeholder = Entrez votre secret API Last.fm
 
 # Empty States
 album_not_found = Album non trouver
@@ -435,3 +429,21 @@ discover_requires_ytmusic = Découvrir n'est disponible que lorsque YouTube Musi
 discover_show_all = Tout voir
 yt_anon_playlists = Connectez-vous à YouTube Music pour voir vos playlists.
 yt_anon_favorites = Connectez-vous à YouTube Music pour voir vos titres aimés.
+
+# Metadata Viewer / Editor
+view_metadata = Voir les métadonnées
+edit_metadata = Modifier les métadonnées
+edit = Modifier
+track_number = Piste n°
+disc_number = Disque n°
+duration = Durée
+sample_rate = Fréquence d'échantillonnage
+bitrate = Débit
+musicbrainz_release = Album MusicBrainz
+musicbrainz_recording = Enregistrement MusicBrainz
+musicbrainz_track = Piste MusicBrainz
+path = Chemin
+add_photo = Ajouter une photo
+change_photo = Changer la photo
+remove_photo = Supprimer la photo
+metadata_edit_warning = Les champs vides suppriment l'étiquette. Écrit directement dans le fichier — aucune annulation possible.

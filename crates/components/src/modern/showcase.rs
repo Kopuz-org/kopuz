@@ -370,6 +370,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                                         handler.call(idx);
                                                     }
                                                 },
+                                                on_view_metadata: props.on_view_metadata.map(|h| EventHandler::new(move |_| h.call(idx))),
                                                 on_download: move |_| {
                                                     if let Some(handler) = &props.on_download_track {
                                                         handler.call(idx);

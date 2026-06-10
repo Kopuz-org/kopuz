@@ -921,6 +921,7 @@ dependencies = [
 name = "components"
 version = "0.6.7"
 dependencies = [
+ "base64 0.22.1",
  "config",
  "dioxus",
  "directories",

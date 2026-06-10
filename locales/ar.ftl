@@ -27,10 +27,8 @@ add = إضافة
 add_folder = إضافة مجلد
 no_music_folders = لم يتم تكوين مجلدات موسيقى
 add_server = إضافة خادم
-# TODO: NEED LOCALIZATION
-connect_to_lastfm = Connect to Last.fm
-lastfm_connected = Last.fm Connected
-# TODO: NEED LOCALIZATION
+connect_to_lastfm = الاتصال بـ Last.fm
+lastfm_connected = تم الاتصال بـ Last.fm
 server_details = تفاصيل الخادم
 server_name = اسم الخادم
 server_url = رابط الخادم
@@ -81,10 +79,8 @@ create = إنشاء
 save = حفظ
 enabled = مفعّل
 disabled = مُعطّل
-# TODO: Translate lines below
-play = Play
-shuffle = Shuffle
-# ------
+play = تشغيل
+shuffle = عشوائي
 
 # Navigation & Headers
 tracks = المقاطع
@@ -140,10 +136,8 @@ heart_track_to_add_server = أضف إعجابك بمقطع أثناء تشغيل
 search_placeholder = ابحث عن فنانين أو ألبومات أو مقاطع...
 no_results_found = لم يتم العثور على نتائج لـ "{ $query }"
 listenbrainz_token_placeholder = أدخل رمز ListenBrainz الخاص بك
-# TODO: NEED LOCALIZATION
-lastfm_api_key_placeholder = Enter your Last.fm API Key
-lastfm_api_secret_placeholder = Enter your Last.fm API Secret
-# TODO: NEED LOCALIZATION
+lastfm_api_key_placeholder = أدخل مفتاح API الخاص بـ Last.fm
+lastfm_api_secret_placeholder = أدخل سر API الخاص بـ Last.fm
 
 # Empty States
 album_not_found = لم يتم العثور على الألبوم
@@ -440,3 +434,21 @@ discover_requires_ytmusic = الاكتشاف متاح فقط عندما تكون
 discover_show_all = عرض الكل
 yt_anon_playlists = سجّل الدخول إلى YouTube Music لعرض قوائم التشغيل في مكتبتك.
 yt_anon_favorites = سجّل الدخول إلى YouTube Music لعرض الأغاني التي أعجبتك.
+
+# Metadata Viewer / Editor
+view_metadata = عرض البيانات الوصفية
+edit_metadata = تحرير البيانات الوصفية
+edit = تحرير
+track_number = رقم المقطع
+disc_number = رقم القرص
+duration = المدة
+sample_rate = معدل العينات
+bitrate = معدل البت
+musicbrainz_release = إصدار MusicBrainz
+musicbrainz_recording = تسجيل MusicBrainz
+musicbrainz_track = مقطع MusicBrainz
+path = المسار
+add_photo = إضافة صورة
+change_photo = تغيير الصورة
+remove_photo = إزالة الصورة
+metadata_edit_warning = الحقول الفارغة تحذف الوسم. يُكتب مباشرة في الملف — لا يمكن التراجع.
