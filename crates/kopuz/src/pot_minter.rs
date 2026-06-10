@@ -180,7 +180,7 @@ pub fn install_if_wanted<T: 'static>(target: &EventLoopWindowTarget<T>) {
     {
         Ok(w) => w,
         Err(e) => {
-            eprintln!("[pot-minter] window build failed: {e}");
+            tracing::error!(error = %e, "pot-minter window build failed");
             return;
         }
     };
@@ -216,7 +216,7 @@ pub fn install_if_wanted<T: 'static>(target: &EventLoopWindowTarget<T>) {
     let built = match window.default_vbox() {
         Some(vbox) => builder.build_gtk(vbox),
         None => {
-            eprintln!("[pot-minter] no GTK vbox on window");
+            tracing::error!("pot-minter: no GTK vbox on window");
             return;
         }
     };
@@ -226,14 +226,14 @@ pub fn install_if_wanted<T: 'static>(target: &EventLoopWindowTarget<T>) {
     let webview = match built {
         Ok(w) => w,
         Err(e) => {
-            eprintln!("[pot-minter] webview build failed: {e}");
+            tracing::error!(error = %e, "pot-minter webview build failed");
             return;
         }
     };
 
     let (tx, rx) = mpsc::unbounded_channel::<MintRequest>();
     if botguard::set_minter(tx).is_err() {
-        eprintln!("[pot-minter] minter already registered");
+        tracing::warn!("pot-minter already registered");
     }
 
     STATE.with(|s| {
@@ -245,7 +245,7 @@ pub fn install_if_wanted<T: 'static>(target: &EventLoopWindowTarget<T>) {
         });
     });
     INSTALLED.with(|c| c.set(true));
-    eprintln!("[pot-minter] installed (anon PoToken minting via webview)");
+    tracing::info!("pot-minter installed (anon PoToken minting via webview)");
 }
 
 /// Drain queued mint requests and dispatch each to the webview. Called every

@@ -15,6 +15,7 @@ fn normalize_artist_key(value: &str) -> Option<String> {
     }
 }
 
+#[tracing::instrument(name = "library.scan", skip(cover_cache, library, on_progress), fields(dir = %dir.display()))]
 pub async fn scan_directory(
     dir: PathBuf,
     cover_cache: PathBuf,
@@ -29,6 +30,11 @@ pub async fn scan_directory(
         Arc::new(library.tracks.iter().map(|t| t.path.clone()).collect());
 
     let (all_audio, artist_image_dirs) = collect_audio_files(&dir, &existing_paths).await;
+    tracing::info!(
+        new_files = all_audio.len(),
+        existing = existing_paths.len(),
+        "scanning library directory"
+    );
 
     let lib_arc = Arc::new(Mutex::new(std::mem::take(library)));
 
@@ -92,6 +98,7 @@ pub async fn scan_directory(
         }
     }
 
+    tracing::info!(total_tracks = library.tracks.len(), "library scan complete");
     Ok(())
 }
 

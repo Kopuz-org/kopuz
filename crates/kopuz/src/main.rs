@@ -20,6 +20,7 @@ use dioxus::desktop::tao::platform::windows::WindowExtWindows;
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use dioxus::desktop::tao::window::Icon;
 use dioxus::prelude::*;
+use tracing::Instrument;
 #[cfg(not(target_arch = "wasm32"))]
 use discord_presence::Presence;
 use kopuz_route::Route;
@@ -31,11 +32,10 @@ use reader::FavoritesStore;
 use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
 use windows::Win32::Foundation::HWND;
 
+mod logging;
 #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
 mod pot_minter;
 mod queue_state;
@@ -204,7 +204,7 @@ fn persist_config_snapshot(config_snapshot: config::AppConfig, path: std::path::
             Ok(Err(e)) => tracing::error!("Failed to save config: {}", e),
             Err(e) => tracing::error!("Failed to join config save task: {}", e),
         }
-    });
+    }.instrument(tracing::info_span!("config.persist")));
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -230,18 +230,18 @@ async fn run_rotation(mut config: Signal<config::AppConfig>) {
     // per-tick OK line drowned stderr.
     match server::ytmusic::verify_session_keepalive::tick(&cookies).await {
         Ok(Some(updated)) => {
-            eprintln!(
-                "[yt-keepalive] verify_session OK in {:.1}s, jar updated ({}B → {}B)",
-                started.elapsed().as_secs_f32(),
-                cookies.len(),
-                updated.len()
+            tracing::debug!(
+                secs = started.elapsed().as_secs_f32(),
+                from = cookies.len(),
+                to = updated.len(),
+                "verify_session OK — jar rotated",
             );
             if let Some(srv) = config.write().server.as_mut() {
                 srv.access_token = Some(updated);
             }
         }
         Ok(None) => {}
-        Err(e) => eprintln!("[yt-keepalive] verify_session failed: {e}"),
+        Err(e) => tracing::warn!(error = %e, "verify_session failed"),
     }
 }
 
@@ -498,20 +498,17 @@ fn main() {
             .unwrap_or_else(|| std::path::PathBuf::from("logs"));
         let _ = std::fs::create_dir_all(&log_dir);
 
-        let file_appender = tracing_appender::rolling::daily(&log_dir, "kopuz.log");
-        let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-        tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-            )
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .with_ansi(false)
-                    .with_writer(non_blocking),
-            )
-            .init();
-        tracing::info!("Log file: {}", log_dir.display());
+        // Read the persisted tracing toggle from config.json before the app
+        // (and its config Signal) exists — the subscriber is built once here,
+        // so the setting is applied at startup. Same path the settings UI
+        // writes to. Missing/unreadable config defaults to off.
+        let config_tracing_enabled = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
+            .map(|dirs| config::AppConfig::load(&dirs.config_dir().join("config.json")).tracing_enabled)
+            .unwrap_or(false);
+
+        // Guards live in a global inside `logging`; flushed by
+        // logging::shutdown() after launch returns or on Ctrl+C.
+        logging::init(&log_dir, config_tracing_enabled);
 
         migrate_legacy_locations();
 
@@ -757,13 +754,16 @@ fn main() {
                                 .body(std::borrow::Cow::from(bytes))
                                 .unwrap(),
                         );
-                    });
+                    }.instrument(tracing::info_span!("artwork.serve")));
                 },
             );
 
         dioxus::LaunchBuilder::desktop()
             .with_cfg(config)
             .launch(App);
+        // Window closed → flush the log file tail + finalize the
+        // chrome trace's closing bracket.
+        logging::shutdown();
     }
 
     #[cfg(target_os = "android")]
@@ -850,6 +850,29 @@ fn main() {
 
 #[component]
 fn App() -> Element {
+    // tao's event loop calls process::exit() on window close, so the
+    // logging::shutdown() after .launch() never runs and the chrome trace
+    // would be left truncated (cut mid-event, unloadable). Flush on the
+    // loop's final event so a normally-closed window still yields a valid
+    // trace. (Ctrl+C is covered separately by the SIGINT handler.)
+    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+    dioxus::desktop::use_wry_event_handler(|event, _| {
+        use dioxus::desktop::tao::event::{Event, WindowEvent};
+        // Flush the moment the window starts closing (CloseRequested),
+        // well before tao calls process::exit; LoopDestroyed is the final
+        // backstop. shutdown() is idempotent so firing on both is fine.
+        if matches!(
+            event,
+            Event::LoopDestroyed
+                | Event::WindowEvent {
+                    event: WindowEvent::CloseRequested,
+                    ..
+                }
+        ) {
+            crate::logging::shutdown();
+        }
+    });
+
     // Native YouTube sig/n deciphering runs in this WebView's own
     // JavaScriptCore (issue #349): register a JS engine that forwards each
     // solver program to this task, which executes it via `document::eval` and
@@ -858,7 +881,7 @@ fn App() -> Element {
     use_hook(|| {
         let (engine, mut rx) = server::ytmusic::decipher::webview_channel();
         if server::ytmusic::decipher::set_engine(engine).is_err() {
-            eprintln!("[yt-decipher] engine already registered — webview solver not active");
+            tracing::warn!("yt-decipher engine already registered — webview solver not active");
         }
         spawn(async move {
             while let Some(req) = rx.recv().await {
@@ -1064,7 +1087,7 @@ fn App() -> Element {
                 if let Some(colors) = utils::color::get_palette_from_url(&url).await {
                     palette.set(Some(colors));
                 }
-            });
+            }.instrument(tracing::info_span!("ui.palette_fetch")));
         } else {
             palette.set(None);
         }
@@ -1122,7 +1145,7 @@ fn App() -> Element {
             if import_count > 0 {
                 tracing::info!("Imported {} external radio registries", import_count);
             }
-        });
+        }.instrument(tracing::info_span!("radio.registry_load")));
     });
 
     let mut selected_album_id = use_signal(String::new);
@@ -1230,7 +1253,7 @@ fn App() -> Element {
             if let Some(update) = fetch_available_update().await {
                 update_banner.set(Some(update));
             }
-        });
+        }.instrument(tracing::info_span!("app.update_check")));
     });
 
     use_effect(move || {
@@ -1339,7 +1362,7 @@ fn App() -> Element {
                 if let Ok(Err(e)) = result {
                     tracing::error!("Failed to save playlists: {}", e);
                 }
-            });
+            }.instrument(tracing::info_span!("playlists.persist")));
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -1361,7 +1384,7 @@ fn App() -> Element {
                 if let Ok(Err(e)) = result {
                     tracing::error!("Failed to save library: {}", e);
                 }
-            });
+            }.instrument(tracing::info_span!("library.persist")));
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -1383,7 +1406,7 @@ fn App() -> Element {
                 if let Ok(Err(e)) = result {
                     tracing::error!("Failed to save favorites: {}", e);
                 }
-            });
+            }.instrument(tracing::info_span!("favorites.persist")));
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -1598,7 +1621,7 @@ fn App() -> Element {
                 }
 
                 initial_load_done.set(true);
-            });
+            }.instrument(tracing::info_span!("startup.load")));
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -1821,7 +1844,7 @@ fn App() -> Element {
                         if let Some(merged_lib) = merged_lib {
                             let _ = merged_lib.save(&lib_path());
                         }
-                    });
+                    }.instrument(tracing::info_span!("library.fetch_covers")));
                 } else {
                     // No cover fetching — drop the callback so the progress bar closes.
                     drop(progress_cb);
@@ -1833,7 +1856,7 @@ fn App() -> Element {
                 library.set(current_lib.clone());
                 let _ = current_lib.save(&lib_path());
             }
-        });
+        }.instrument(tracing::info_span!("library.rescan")));
     });
 
     use_effect(move || {
@@ -1946,16 +1969,18 @@ fn App() -> Element {
         document::Link { rel: "stylesheet", href: TAILWIND_CSS }
         document::Link { rel: "stylesheet", href: REDUCED_ANIMATIONS_CSS }
         WindowsToolbarIconAssets {}
-        document::Script {
-            "(function(){{
-                ['https://fonts.bunny.net/css?family=jetbrains-mono:400,500,700,800&display=swap',
-                 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css']
-                .forEach(function(href){{
-                    var l=document.createElement('link');
-                    l.rel='stylesheet';l.href=href;
-                    document.head.appendChild(l);
-                }});
-            }})();"
+        // Font stylesheets injected declaratively rather than via a
+        // document::Script: a Script is processed once but App re-renders
+        // on every signal change, and dioxus_document warns "Changing the
+        // props of Script {} is not supported" each time. Links are
+        // re-render-safe and do the same job (and load a touch earlier).
+        document::Link {
+            rel: "stylesheet",
+            href: "https://fonts.bunny.net/css?family=jetbrains-mono:400,500,700,800&display=swap",
+        }
+        document::Link {
+            rel: "stylesheet",
+            href: "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css",
         }
 
         div {

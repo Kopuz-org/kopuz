@@ -3,6 +3,9 @@ name = "i18n"
 version = "0.1.0"
 edition = "2024"
 
+[lints]
+workspace = true
+
 [dependencies]
 fluent-bundle = "0.16"
 unic-langid = "0.9"

@@ -539,6 +539,11 @@ pub struct AppConfig {
     pub language: String,
     #[serde(default)]
     pub reduce_animations: bool,
+    /// Opt-in chrome/Perfetto performance trace. Read at startup (the
+    /// subscriber is built once), so a change needs a restart. Adds runtime
+    /// overhead — surfaced with a warning in settings.
+    #[serde(default)]
+    pub tracing_enabled: bool,
     #[serde(default = "default_auto_check_updates")]
     pub auto_check_updates: bool,
     #[serde(default = "default_show_source_toggle")]
@@ -844,6 +849,7 @@ impl Default for AppConfig {
             lastfm_session_key: String::new(),
             language: default_language(),
             reduce_animations: false,
+            tracing_enabled: false,
             auto_check_updates: default_auto_check_updates(),
             show_source_toggle: default_show_source_toggle(),
             sidebar_order: default_sidebar_order(),
@@ -1007,6 +1013,7 @@ impl AppConfig {
         self.active_service() == Some(MusicService::Jellyfin)
     }
 
+    #[tracing::instrument(name = "config.load", skip_all)]
     pub fn load(path: &Path) -> Self {
         if !path.exists() {
             return Self::default();
@@ -1021,33 +1028,34 @@ impl AppConfig {
                     config
                 }
                 Err(e) => {
-                    eprintln!("Failed to parse config at {:?}: {}", path, e);
+                    tracing::error!(?path, error = %e, "failed to parse config — using defaults");
                     Self::default()
                 }
             },
             Err(e) => {
-                eprintln!("Failed to read config at {:?}: {}", path, e);
+                tracing::warn!(?path, error = %e, "failed to read config — using defaults");
                 Self::default()
             }
         }
     }
 
+    #[tracing::instrument(name = "config.save", skip_all)]
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         if let Some(parent) = path.parent()
             && let Err(e) = fs::create_dir_all(parent)
         {
-            eprintln!("Failed to create config directory {:?}: {}", parent, e);
+            tracing::error!(?parent, error = %e, "failed to create config directory");
             return Err(e);
         }
         let data = match serde_json::to_string_pretty(self) {
             Ok(d) => d,
             Err(e) => {
-                eprintln!("Failed to serialize config: {}", e);
+                tracing::error!(error = %e, "failed to serialize config");
                 return Err(std::io::Error::other(e));
             }
         };
         if let Err(e) = fs::write(path, data) {
-            eprintln!("Failed to write config to {:?}: {}", path, e);
+            tracing::error!(?path, error = %e, "failed to write config");
             return Err(e);
         }
         Ok(())

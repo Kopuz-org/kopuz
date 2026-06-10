@@ -205,7 +205,7 @@ async fn search_ytmusic(query: &str, cookies: Option<String>) -> Option<(TrackRe
     let tracks = client
         .search_tracks(query)
         .await
-        .map_err(|e| eprintln!("YT Music search error: {e}"))
+        .map_err(|e| tracing::warn!(error = %e, "YT Music search failed"))
         .ok()?;
     // Each track's `album_id` carries its YT thumbnail as
     // `ytmusic:_:urlhex_HEX`; the standard fallback resolver decodes

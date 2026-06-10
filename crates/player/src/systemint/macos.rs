@@ -179,7 +179,7 @@ pub fn init() {
                 objc2::msg_send![process_info, beginActivityWithOptions: options, reason: &*reason];
             if !activity.is_null() {
                 let _: *mut AnyObject = objc2::msg_send![activity, retain];
-                println!("[macos] App Nap bypassed with NSProcessInfo activity (latency-critical)");
+                tracing::debug!("App Nap bypassed with NSProcessInfo activity (latency-critical)");
             }
 
             let assertion_type = NSString::from_str("NoIdleSleepAssertion");
@@ -196,22 +196,19 @@ pub fn init() {
                 &mut assertion_id,
             );
             if kr == 0 {
-                println!(
-                    "[macos] IOKit power assertion created (id={})",
-                    assertion_id
-                );
+                tracing::debug!(id = assertion_id, "IOKit power assertion created");
             } else {
-                eprintln!("[macos] Failed to create IOKit power assertion: {}", kr);
+                tracing::warn!(kr, "failed to create IOKit power assertion");
             }
 
             let session = AVAudioSession::sharedInstance();
             if let Err(e) = session.setCategory_error(AVAudioSessionCategoryPlayback.unwrap()) {
-                eprintln!("[macos] Failed to set AVAudioSession category: {:?}", e);
+                tracing::warn!(error = ?e, "failed to set AVAudioSession category");
             }
             if let Err(e) = session.setActive_error(true) {
-                eprintln!("[macos] Failed to activate AVAudioSession: {:?}", e);
+                tracing::warn!(error = ?e, "failed to activate AVAudioSession");
             } else {
-                println!("[macos] AVAudioSession configured for background playback");
+                tracing::debug!("AVAudioSession configured for background playback");
             }
 
             let center = MPRemoteCommandCenter::sharedCommandCenter();
@@ -263,9 +260,9 @@ pub fn init() {
             );
             if !timer.is_null() {
                 CFRunLoopAddTimer(CFRunLoopGetMain(), timer, kCFRunLoopCommonModes);
-                println!("[macos] CFRunLoopTimer heartbeat started on main run loop (250ms)");
+                tracing::debug!("CFRunLoopTimer heartbeat started on main run loop (250ms)");
             } else {
-                eprintln!("[macos] Failed to create CFRunLoopTimer, falling back to thread");
+                tracing::warn!("failed to create CFRunLoopTimer, falling back to thread");
                 std::thread::spawn(|| {
                     loop {
                         std::thread::sleep(std::time::Duration::from_millis(250));
