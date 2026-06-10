@@ -107,13 +107,10 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
                     if let Some(u) = &uid {
                         remember_tier(u, false);
                     }
-                    eprintln!(
-                        "[yt-player] {video_id} signed-in but non-Premium (itag={:?}) — needs a content pot, trying ANDROID_VR",
-                        info.itag
-                    );
+                    tracing::debug!(itag = ?info.itag, "signed-in but non-Premium — needs a content pot, trying ANDROID_VR");
                     decipher_fallback = Some(info);
                 }
-                Err(e) => eprintln!("[yt-player] decipher failed ({e}) — falling back"),
+                Err(e) => tracing::debug!(error = %e, "premium decipher failed — falling back"),
             }
         }
     }
@@ -152,7 +149,7 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
             (_, Err(e)) => format!("visitor_data: {e}"),
         }
     };
-    eprintln!("[yt-player] ANDROID_VR+pot failed ({last_err}) — trying bare clients");
+    tracing::debug!(%last_err, "ANDROID_VR+pot failed — trying bare clients");
 
     for client in STREAM_FALLBACK_CLIENTS {
         let cookies_for = if client.login_supported { cookies } else { None };
@@ -177,9 +174,7 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
         }
     }
     if let Some(info) = decipher_fallback {
-        eprintln!(
-            "[yt-player] {video_id} no content pot available (minter not running?) — using the non-Premium decipher stream; deep seeks may 403"
-        );
+        tracing::warn!("no content pot available (minter not running?) — using the non-Premium decipher stream; deep seeks may 403");
         return Ok(info);
     }
     Err(format!("all stream paths failed; last error: {last_err}"))
@@ -312,12 +307,7 @@ fn pick_plain_format(json: &Value, client: YouTubeClient) -> Option<YtStreamInfo
         .pointer("/videoDetails/videoId")
         .and_then(|v| v.as_str())
         .unwrap_or("?");
-    eprintln!(
-        "[yt-player] resolved {vid} itag={} {} kbps {mime} via {} (plain)",
-        itag.unwrap_or(0),
-        bitrate / 1000,
-        client.client_name
-    );
+    tracing::info!(video_id = %vid, itag = itag.unwrap_or(0), kbps = bitrate / 1000, mime, client = client.client_name, "stream resolved (plain)");
     // `contentLength` ships as a numeric string in adaptiveFormats.
     let content_length = fmt
         .get("contentLength")
@@ -390,12 +380,7 @@ fn stream_info_from(
         .pointer("/videoDetails/videoId")
         .and_then(|v| v.as_str())
         .unwrap_or("?");
-    eprintln!(
-        "[yt-player] resolved {vid} itag={} {} kbps {mime} via {} (decipher)",
-        itag.unwrap_or(0),
-        bitrate.unwrap_or(0) / 1000,
-        client.client_name
-    );
+    tracing::info!(video_id = %vid, itag = itag.unwrap_or(0), kbps = bitrate.unwrap_or(0) / 1000, mime, client = client.client_name, "stream resolved (decipher)");
     Some(YtStreamInfo {
         url,
         format,

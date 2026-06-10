@@ -41,6 +41,7 @@ pub fn is_available() -> bool {
 /// WebView negotiates the BotGuard integrity token once (pre-warmed at startup,
 /// refreshed near its TTL) and mints each content pot from it locally. Errors if
 /// no minter is registered (anon YT Music not selected) or the WebView failed.
+#[tracing::instrument(name = "yt.mint_pot", fields(video_id = %video_id))]
 pub async fn mint_content_pot(video_id: &str) -> Result<String, String> {
     let tx = MINTER
         .get()

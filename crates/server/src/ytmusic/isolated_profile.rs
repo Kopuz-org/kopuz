@@ -259,10 +259,7 @@ pub async fn launch_signin_and_extract(
             )
         })?
     };
-    eprintln!(
-        "[yt-signin] launching {bin} against {} (sign-in URL: {SIGNIN_URL})",
-        profile.display()
-    );
+    tracing::info!(%bin, profile = %profile.display(), "launching sign-in browser");
     let mut cmd = browser_command(&bin);
     cmd.arg("--no-first-run")
         .arg("--no-default-browser-check")
