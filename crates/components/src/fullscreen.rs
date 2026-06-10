@@ -268,6 +268,9 @@ fn TrackMetadata(
                     class: "text-xl text-white/70 font-medium line-clamp-1 hover:text-white hover:underline text-left transition-colors",
                     onclick: move |_| {
                         let artist = current_song_artist.read().clone();
+                        if artist.is_empty() {
+                            return;
+                        }
                         is_fullscreen.set(false);
                         nav_ctrl.navigate_to_artist(artist);
                     },
@@ -281,6 +284,9 @@ fn TrackMetadata(
                             .as_ref()
                             .map(|track| track.album_id.clone())
                             .unwrap_or_default();
+                        if album_id.is_empty() {
+                            return;
+                        }
                         is_fullscreen.set(false);
                         nav_ctrl.navigate_to_album(album_id);
                     },
