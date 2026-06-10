@@ -1,6 +1,7 @@
 use percent_encoding::NON_ALPHANUMERIC;
 use serde::Deserialize;
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque, hash_map::DefaultHasher};
+use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -37,6 +38,9 @@ const PAXSENIX_ROOT_URL: &str = "https://lyrics.paxsenix.org";
 const MUSIXMATCH_TIMEOUT: Duration = Duration::from_secs(3);
 const PAXSENIX_TIMEOUT: Duration = Duration::from_secs(5);
 const LRCLIB_TIMEOUT: Duration = Duration::from_secs(5);
+const SERVER_LYRICS_TIMEOUT: Duration = Duration::from_secs(5);
+const LYRICS_INFLIGHT_POLL_INTERVAL: Duration = Duration::from_millis(50);
+const LYRICS_INFLIGHT_WAIT_TIMEOUT: Duration = Duration::from_secs(20);
 
 static LYRICS_CACHE: OnceLock<Mutex<LyricsCache>> = OnceLock::new();
 static LYRICS_INFLIGHT: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
@@ -260,8 +264,8 @@ pub async fn fetch_lyrics(
     {
         tracing::info!(
             target: "kopuz::lyrics",
-            "cache hit key={} kind={}",
-            log_lyrics_key(&cache_key),
+            "cache hit key_hash={} kind={}",
+            log_lyrics_key_hash(&cache_key),
             lyrics_kind(cached.as_ref())
         );
         return cached;
@@ -272,8 +276,9 @@ pub async fn fetch_lyrics(
             key: cache_key.clone(),
         })
     } else {
-        for _ in 0..100 {
-            crate::sleep(Duration::from_millis(50)).await;
+        let wait_start = Instant::now();
+        while wait_start.elapsed() < LYRICS_INFLIGHT_WAIT_TIMEOUT {
+            crate::sleep(LYRICS_INFLIGHT_POLL_INTERVAL).await;
             if let Some(cached) = lyrics_cache()
                 .lock()
                 .ok()
@@ -310,8 +315,8 @@ pub async fn fetch_lyrics(
         let local = fetch_local_lrc(track_path).await;
         tracing::info!(
             target: "kopuz::lyrics",
-            "local_lrc key={} elapsed_ms={} kind={}",
-            log_lyrics_key(&cache_key),
+            "local_lrc key_hash={} elapsed_ms={} kind={}",
+            log_lyrics_key_hash(&cache_key),
             started.elapsed().as_millis(),
             lyrics_kind(local.as_ref())
         );
@@ -322,8 +327,8 @@ pub async fn fetch_lyrics(
                 }
                 tracing::info!(
                     target: "kopuz::lyrics",
-                    "selected key={} source=local_lrc kind={} total_ms={}",
-                    log_lyrics_key(&cache_key),
+                    "selected key_hash={} source=local_lrc kind={} total_ms={}",
+                    log_lyrics_key_hash(&cache_key),
                     lyrics_kind(Some(&lyrics)),
                     total_start.elapsed().as_millis()
                 );
@@ -339,8 +344,8 @@ pub async fn fetch_lyrics(
         }
         tracing::info!(
             target: "kopuz::lyrics",
-            "selected key={} source=prefer_local kind={} total_ms={}",
-            log_lyrics_key(&cache_key),
+            "selected key_hash={} source=prefer_local kind={} total_ms={}",
+            log_lyrics_key_hash(&cache_key),
             lyrics_kind(fallback.as_ref()),
             total_start.elapsed().as_millis()
         );
@@ -357,8 +362,8 @@ pub async fn fetch_lyrics(
                 let server_lyrics = fetch_jellyfin_lyrics(&item_id, server_url, token).await;
                 tracing::info!(
                     target: "kopuz::lyrics",
-                    "server_jellyfin key={} elapsed_ms={} kind={}",
-                    log_lyrics_key(&cache_key),
+                    "server_jellyfin key_hash={} elapsed_ms={} kind={}",
+                    log_lyrics_key_hash(&cache_key),
                     started.elapsed().as_millis(),
                     lyrics_kind(server_lyrics.as_ref())
                 );
@@ -369,8 +374,8 @@ pub async fn fetch_lyrics(
                         }
                         tracing::info!(
                             target: "kopuz::lyrics",
-                            "selected key={} source=jellyfin kind={} total_ms={}",
-                            log_lyrics_key(&cache_key),
+                            "selected key_hash={} source=jellyfin kind={} total_ms={}",
+                            log_lyrics_key_hash(&cache_key),
                             lyrics_kind(Some(&lyrics)),
                             total_start.elapsed().as_millis()
                         );
@@ -396,8 +401,8 @@ pub async fn fetch_lyrics(
                         .await;
                 tracing::info!(
                     target: "kopuz::lyrics",
-                    "server_subsonic key={} elapsed_ms={} kind={}",
-                    log_lyrics_key(&cache_key),
+                    "server_subsonic key_hash={} elapsed_ms={} kind={}",
+                    log_lyrics_key_hash(&cache_key),
                     started.elapsed().as_millis(),
                     lyrics_kind(server_lyrics.as_ref())
                 );
@@ -408,8 +413,8 @@ pub async fn fetch_lyrics(
                         }
                         tracing::info!(
                             target: "kopuz::lyrics",
-                            "selected key={} source=subsonic kind={} total_ms={}",
-                            log_lyrics_key(&cache_key),
+                            "selected key_hash={} source=subsonic kind={} total_ms={}",
+                            log_lyrics_key_hash(&cache_key),
                             lyrics_kind(Some(&lyrics)),
                             total_start.elapsed().as_millis()
                         );
@@ -426,8 +431,8 @@ pub async fn fetch_lyrics(
     let paxsenix_netease = fetch_from_paxsenix_netease(artist, title, duration).await;
     tracing::info!(
         target: "kopuz::lyrics",
-        "paxsenix_netease key={} elapsed_ms={} kind={}",
-        log_lyrics_key(&cache_key),
+        "paxsenix_netease key_hash={} elapsed_ms={} kind={}",
+        log_lyrics_key_hash(&cache_key),
         started.elapsed().as_millis(),
         lyrics_kind(paxsenix_netease.as_ref())
     );
@@ -438,8 +443,8 @@ pub async fn fetch_lyrics(
             }
             tracing::info!(
                 target: "kopuz::lyrics",
-                "selected key={} source=paxsenix_netease kind={} total_ms={}",
-                log_lyrics_key(&cache_key),
+                "selected key_hash={} source=paxsenix_netease kind={} total_ms={}",
+                log_lyrics_key_hash(&cache_key),
                 lyrics_kind(Some(&lyrics)),
                 total_start.elapsed().as_millis()
             );
@@ -453,8 +458,8 @@ pub async fn fetch_lyrics(
     let musixmatch = fetch_from_musixmatch_enhanced(artist, title).await;
     tracing::info!(
         target: "kopuz::lyrics",
-        "musixmatch_enhanced key={} elapsed_ms={} kind={}",
-        log_lyrics_key(&cache_key),
+        "musixmatch_enhanced key_hash={} elapsed_ms={} kind={}",
+        log_lyrics_key_hash(&cache_key),
         started.elapsed().as_millis(),
         lyrics_kind(musixmatch.as_ref())
     );
@@ -465,8 +470,8 @@ pub async fn fetch_lyrics(
             }
             tracing::info!(
                 target: "kopuz::lyrics",
-                "selected key={} source=musixmatch kind={} total_ms={}",
-                log_lyrics_key(&cache_key),
+                "selected key_hash={} source=musixmatch kind={} total_ms={}",
+                log_lyrics_key_hash(&cache_key),
                 lyrics_kind(Some(&lyrics)),
                 total_start.elapsed().as_millis()
             );
@@ -480,8 +485,8 @@ pub async fn fetch_lyrics(
     let lrclib = fetch_from_lrclib(artist, title, album, duration).await;
     tracing::info!(
         target: "kopuz::lyrics",
-        "lrclib key={} elapsed_ms={} kind={}",
-        log_lyrics_key(&cache_key),
+        "lrclib key_hash={} elapsed_ms={} kind={}",
+        log_lyrics_key_hash(&cache_key),
         started.elapsed().as_millis(),
         lyrics_kind(lrclib.as_ref())
     );
@@ -491,8 +496,8 @@ pub async fn fetch_lyrics(
     }
     tracing::info!(
         target: "kopuz::lyrics",
-        "selected key={} source=final kind={} total_ms={}",
-        log_lyrics_key(&cache_key),
+        "selected key_hash={} source=final kind={} total_ms={}",
+        log_lyrics_key_hash(&cache_key),
         lyrics_kind(fetched.as_ref()),
         total_start.elapsed().as_millis()
     );
@@ -531,13 +536,10 @@ fn lyrics_kind(lyrics: Option<&Lyrics>) -> &'static str {
     }
 }
 
-fn log_lyrics_key(key: &str) -> String {
-    let trimmed = key.trim();
-    let mut out = trimmed.chars().take(96).collect::<String>();
-    if trimmed.chars().count() > 96 {
-        out.push_str("...");
-    }
-    out
+fn log_lyrics_key_hash(key: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    key.trim().hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }
 
 fn lyrics_cache() -> &'static Mutex<LyricsCache> {
@@ -679,6 +681,7 @@ async fn fetch_jellyfin_lyrics(item_id: &str, server_url: &str, token: &str) -> 
     let resp = client
         .get(&url)
         .header("X-Emby-Token", token)
+        .timeout(SERVER_LYRICS_TIMEOUT)
         .send()
         .await
         .ok()?;
@@ -775,7 +778,13 @@ async fn subsonic_get_by_id(
         ("id", song_id),
     ];
 
-    let resp = client.get(&url).query(&params).send().await.ok()?;
+    let resp = client
+        .get(&url)
+        .query(&params)
+        .timeout(SERVER_LYRICS_TIMEOUT)
+        .send()
+        .await
+        .ok()?;
     if !resp.status().is_success() {
         return None;
     }
@@ -849,7 +858,13 @@ async fn subsonic_get_by_title(
         ("title", title),
     ];
 
-    let resp = client.get(&url).query(&params).send().await.ok()?;
+    let resp = client
+        .get(&url)
+        .query(&params)
+        .timeout(SERVER_LYRICS_TIMEOUT)
+        .send()
+        .await
+        .ok()?;
     if !resp.status().is_success() {
         return None;
     }
@@ -1629,6 +1644,17 @@ mod tests {
 
         assert!(!has_word_timestamps(&line_only));
         assert!(has_word_timestamps(&word_timed));
+    }
+
+    #[test]
+    fn lyrics_log_key_is_hashed() {
+        let key = "/Users/someone/Music/private-library/song.flac";
+        let logged = log_lyrics_key_hash(key);
+
+        assert_eq!(logged.len(), 16);
+        assert!(logged.chars().all(|c| c.is_ascii_hexdigit()));
+        assert!(!logged.contains("/Users"));
+        assert_ne!(logged, key);
     }
 
     #[test]
