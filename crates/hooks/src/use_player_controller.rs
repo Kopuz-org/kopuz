@@ -428,8 +428,10 @@ impl PlayerController {
                 .unwrap_or_default()
                 .to_ascii_lowercase();
             let is_radio_item = scheme.as_str() == "radio";
-            let is_server_item =
-                matches!(scheme.as_str(), "jellyfin" | "subsonic" | "custom" | "ytmusic");
+            let is_server_item = matches!(
+                scheme.as_str(),
+                "jellyfin" | "subsonic" | "custom" | "ytmusic"
+            );
 
             if is_server_item || is_radio_item {
                 let parts: Vec<&str> = path_str.split(':').collect();
@@ -766,8 +768,7 @@ impl PlayerController {
                                     true,
                                     yt_ua_for_blocking,
                                 );
-                                let (source, hint) =
-                                    decoder::from_stream_with_hint(stream, "ogg");
+                                let (source, hint) = decoder::from_stream_with_hint(stream, "ogg");
                                 Ok::<_, std::io::Error>((source, hint))
                             } else if let Some(fmt) = yt_format_for_blocking {
                                 // YT: HTTP Range-backed source. Symphonia
@@ -779,8 +780,7 @@ impl PlayerController {
                                     yt_ua_for_blocking,
                                 )?;
                                 let len = Some(range.total_size());
-                                let (source, mut hint) =
-                                    decoder::from_stream_with_len(range, len);
+                                let (source, mut hint) = decoder::from_stream_with_len(range, len);
                                 hint.with_extension(fmt.extension());
                                 Ok::<_, std::io::Error>((source, hint))
                             } else {
@@ -791,8 +791,7 @@ impl PlayerController {
                                 );
                                 stream.wait_for_total_size();
                                 let len = stream.known_total_size();
-                                let (source, hint) =
-                                    decoder::from_stream_with_len(stream, len);
+                                let (source, hint) = decoder::from_stream_with_len(stream, len);
                                 Ok::<_, std::io::Error>((source, hint))
                             }
                         })
@@ -978,6 +977,32 @@ impl PlayerController {
                                             }
                                         }
 
+                                        // Libre.fm now-playing
+                                        let librefm_session_key =
+                                            scrobble_cfg.read().librefm_session_key.clone();
+                                        let has_librefm = !librefm_session_key.is_empty();
+
+                                        if has_librefm {
+                                            let playing_now = scrobble::librefm::make_playing_now(
+                                                &scrobble_track.artist,
+                                                &scrobble_track.title,
+                                                Some(&scrobble_track.album),
+                                            );
+                                            if let Err(e) = scrobble::librefm::submit_now_playing(
+                                                scrobble::librefm::API_KEY,
+                                                scrobble::librefm::API_SECRET,
+                                                &librefm_session_key,
+                                                &playing_now,
+                                            )
+                                            .await
+                                            {
+                                                tracing::warn!(
+                                                    "Libre.fm now playing failed: {}",
+                                                    e
+                                                );
+                                            }
+                                        }
+
                                         // MusicBrainz playing_now
                                         let token_raw =
                                             scrobble_cfg.read().musicbrainz_token.clone();
@@ -1086,6 +1111,35 @@ impl PlayerController {
                                                 ),
                                                 Err(e) => {
                                                     tracing::warn!("Last.fm scrobble failed: {}", e)
+                                                }
+                                            }
+                                        }
+
+                                        // Libre.fm scrobble
+                                        if has_librefm {
+                                            let scrobble = scrobble::librefm::make_scrobble(
+                                                &scrobble_track.artist,
+                                                &scrobble_track.title,
+                                                Some(&scrobble_track.album),
+                                            );
+                                            match scrobble::librefm::submit_scrobble(
+                                                scrobble::librefm::API_KEY,
+                                                scrobble::librefm::API_SECRET,
+                                                &librefm_session_key,
+                                                &scrobble,
+                                            )
+                                            .await
+                                            {
+                                                Ok(_) => tracing::info!(
+                                                    "Libre.fm scrobbled: {} - {}",
+                                                    scrobble_track.artist,
+                                                    scrobble_track.title
+                                                ),
+                                                Err(e) => {
+                                                    tracing::warn!(
+                                                        "Libre.fm scrobble failed: {}",
+                                                        e
+                                                    )
                                                 }
                                             }
                                         }

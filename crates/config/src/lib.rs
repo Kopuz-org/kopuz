@@ -535,6 +535,12 @@ pub struct AppConfig {
     pub lastfm_api_secret: String,
     #[serde(default)]
     pub lastfm_session_key: String,
+    #[serde(default)]
+    pub librefm_api_key: String,
+    #[serde(default)]
+    pub librefm_api_secret: String,
+    #[serde(default)]
+    pub librefm_session_key: String,
     #[serde(default = "default_language")]
     pub language: String,
     #[serde(default)]
@@ -847,6 +853,9 @@ impl Default for AppConfig {
             lastfm_api_key: String::new(),
             lastfm_api_secret: String::new(),
             lastfm_session_key: String::new(),
+            librefm_api_key: String::new(),
+            librefm_api_secret: String::new(),
+            librefm_session_key: String::new(),
             language: default_language(),
             reduce_animations: false,
             tracing_enabled: false,
