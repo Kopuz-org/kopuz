@@ -27,10 +27,8 @@ add = Додати
 add_folder = Додати папку
 no_music_folders = Музичні папки не налаштовані
 add_server = Додати сервер
-# TODO: NEED LOCALIZATION
-connect_to_lastfm = Connect to Last.fm
-lastfm_connected = Last.fm Connected
-# TODO: NEED LOCALIZATION
+connect_to_lastfm = Підключитися до Last.fm
+lastfm_connected = Підключено до Last.fm
 server_details = Деталі сервера
 server_name = Назва сервера
 server_url = Адреса сервера
@@ -81,10 +79,8 @@ create = Створити
 save = Зберегти
 enabled = УВІМКНЕНО
 disabled = ВИМКНЕНО
-# TODO: Translate lines below
-play = Play
-shuffle = Shuffle
-# ------
+play = Грати
+shuffle = Мішання
 
 # Navigation & Headers
 tracks = Треки
@@ -140,10 +136,8 @@ heart_track_to_add_server = Уподобайте трек поки він гра
 search_placeholder = Шукайте виконавців, альбоми та пісні...
 no_results_found = Нічого не знайдено по запиту "{ $query }"
 listenbrainz_token_placeholder = Введіть свій ключ (токен) від ListenBrainz
-# TODO: NEED LOCALIZATION
-lastfm_api_key_placeholder = Enter your Last.fm API Key
-lastfm_api_secret_placeholder = Enter your Last.fm API Secret
-# TODO: NEED LOCALIZATION
+lastfm_api_key_placeholder = Введіть ключ API Last.fm
+lastfm_api_secret_placeholder = Введіть секрет API Last.fm
 
 # Empty States
 album_not_found = Альбом не знайдено
