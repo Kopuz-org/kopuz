@@ -10,6 +10,7 @@ use config::Browser;
 
 /// Extract YouTube cookies from `profile_root` (an isolated kopuz
 /// profile, not the user's main browser). Returns a `Cookie:` header.
+#[tracing::instrument(name = "yt.cookies_extract", skip(profile_root), fields(browser = %browser))]
 pub async fn extract_from(browser: Browser, profile_root: &Path) -> Result<String, String> {
     let db_path = pick_cookies_path(profile_root).ok_or_else(|| {
         format!(

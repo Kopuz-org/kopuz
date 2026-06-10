@@ -4,8 +4,10 @@ use reader::{Library, PlaylistStore};
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use rfd::AsyncFileDialog;
 use std::path::PathBuf;
+use tracing::Instrument;
 
 #[component]
+#[tracing::instrument(name = "render.playlist_detail", skip_all)]
 pub fn PlaylistDetail(
     playlist_id: String,
     mut playlist_store: Signal<PlaylistStore>,
@@ -73,7 +75,10 @@ pub fn PlaylistDetail(
         use_effect(move || {
             if !*has_loaded_jellyfin_tracks.read() {
                 let pid_clone = pid.clone();
+                let load_span =
+                    tracing::info_span!("playlist.load_entries", playlist_id = %pid_clone);
                 spawn(async move {
+                    tracing::debug!("playlist entries load started");
                     let server_info = {
                         let conf = config.peek();
                         conf.server.as_ref().and_then(|server| {
@@ -101,6 +106,7 @@ pub fn PlaylistDetail(
                                 if let Ok(yt_tracks) =
                                     yt.get_playlist_entries(&pid_clone).await
                                 {
+                                    tracing::debug!(count = yt_tracks.len(), "playlist entries loaded, setting tracks");
                                     tracks.set(yt_tracks);
                                     has_loaded_jellyfin_tracks.set(true);
                                 }
@@ -151,6 +157,7 @@ pub fn PlaylistDetail(
                                             artists: item.artists.unwrap_or_default(),
                                         });
                                     }
+                                    tracing::debug!(count = new_tracks.len(), "playlist entries loaded, setting tracks");
                                     tracks.set(new_tracks);
                                     has_loaded_jellyfin_tracks.set(true);
                                 }
@@ -209,13 +216,14 @@ pub fn PlaylistDetail(
                                             artists: vec![item.artist.unwrap_or_default()],
                                         });
                                     }
+                                    tracing::debug!(count = new_tracks.len(), "playlist entries loaded, setting tracks");
                                     tracks.set(new_tracks);
                                     has_loaded_jellyfin_tracks.set(true);
                                 }
                             }
                         }
                     }
-                });
+                }.instrument(load_span));
             }
         });
     }

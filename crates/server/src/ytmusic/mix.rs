@@ -10,6 +10,7 @@ use super::search::{encode_url_tag, synthesize_album_id};
 
 const ORIGIN: &str = "https://music.youtube.com";
 
+#[tracing::instrument(name = "yt.start_mix", skip(cookies), fields(seed = %seed_video_id))]
 pub async fn start_mix(seed_video_id: &str, cookies: &str) -> Result<Vec<Track>, String> {
     let playlist_id = format!("RDAMVM{seed_video_id}");
     let client = WEB_REMIX;

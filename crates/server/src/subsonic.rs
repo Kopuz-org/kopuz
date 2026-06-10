@@ -441,6 +441,7 @@ impl SubsonicClient {
             .collect()
     }
 
+    #[tracing::instrument(name = "subsonic.call", skip_all, fields(endpoint = %endpoint))]
     async fn call<T: DeserializeOwned + Default>(
         &self,
         endpoint: &str,

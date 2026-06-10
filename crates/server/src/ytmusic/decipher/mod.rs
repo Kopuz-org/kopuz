@@ -72,6 +72,7 @@ fn engine() -> &'static dyn JsEngine {
 /// `signatureCipher` formats (solve `sig` + `n`) and plain `url` formats that
 /// still carry an `n` throttle param (solve `n` only). Returns the format's
 /// `url` untouched when there's nothing to solve.
+#[tracing::instrument(name = "yt.decipher", skip(base_js, format))]
 pub async fn deciphered_url(base_js: &str, format: &Value) -> Result<String, String> {
     let (mut url, sig, sp) = extract_cipher(format)?;
     let n = query_param(&url, "n");
@@ -233,6 +234,7 @@ const PLAYER_JS_TTL: Duration = Duration::from_secs(60 * 60);
 
 /// Fetch YouTube's player `base.js` and its embedded `signatureTimestamp`,
 /// cached for [`PLAYER_JS_TTL`]. Seeded from any `video_id`'s watch page.
+#[tracing::instrument(name = "yt.player_js", fields(video_id = %video_id))]
 pub async fn player_js(video_id: &str) -> Result<Arc<(String, u64)>, String> {
     if let Ok(g) = PLAYER_JS.lock()
         && let Some((at, data)) = g.as_ref()
