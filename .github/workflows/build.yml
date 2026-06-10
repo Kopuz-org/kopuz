@@ -87,11 +87,32 @@ jobs:
         # asset without hitting the 60-req/hr unauthenticated limit. Disable the
         # compile fallback so a missed prebuilt fails fast instead of building
         # dioxus-cli from source (which breaks on auth-git2/git2 0.21).
-        run: cargo binstall dioxus-cli@0.7.9 -y --disable-strategies compile
+        # Force reinstall because rust-cache can restore Cargo's install
+        # metadata without the corresponding dx.exe in .cargo/bin.
+        run: cargo binstall dioxus-cli@0.7.9 -y --force --disable-strategies compile
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Add Cargo bin to PATH
+        shell: pwsh
+        run: |
+          $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE ".cargo" }
+          $cargoBin = Join-Path $cargoHome "bin"
+          $cargoBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Verify dioxus-cli
+        shell: pwsh
+        run: |
+          if (-not (Get-Command dx -ErrorAction SilentlyContinue)) {
+            $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE ".cargo" }
+            $cargoBin = Join-Path $cargoHome "bin"
+            Get-ChildItem $cargoBin -ErrorAction SilentlyContinue
+            throw "dx.exe was not found on PATH; dioxus-cli may not have installed correctly. Expected Cargo bin directory: $cargoBin"
+          }
+          dx --version
+
       - name: Bundle Windows installer (.msi)
+        shell: pwsh
         run: dx bundle --release --platform desktop --package kopuz
 
       - name: List bundle output
