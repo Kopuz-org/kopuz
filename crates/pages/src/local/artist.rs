@@ -1,4 +1,5 @@
 use components::dots_menu::{DotsMenu, MenuAction};
+use components::metadata_modal::MetadataModal;
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
 use config::{AppConfig, ArtistPhotoSource, ArtistViewOrder};
@@ -34,6 +35,7 @@ pub fn LocalArtist(
     let mut show_playlist_modal = use_signal(|| false);
     let mut active_menu_track = use_signal(|| None::<PathBuf>);
     let mut selected_track_for_playlist = use_signal(|| None::<PathBuf>);
+    let mut metadata_track = use_signal(|| None::<reader::models::Track>);
 
     // Multi-selection state
     let mut is_selection_mode = use_signal(|| false);
@@ -282,6 +284,43 @@ pub fn LocalArtist(
                                 show_playlist_modal.set(false);
                                 active_menu_track.set(None);
                                 clear_selection(&mut is_selection_mode, &mut selected_tracks);
+                            },
+                        }
+                    }
+
+                    if let Some(track) = metadata_track.read().clone() {
+                        MetadataModal {
+                            track: track.clone(),
+                            on_close: move |_| metadata_track.set(None),
+                            on_save: move |edits: reader::models::TrackEdits| {
+                                let path = track.path.clone();
+                                match reader::write_tags(&path, &edits) {
+                                    Ok(()) => {
+                                        let mut lib = library.write();
+                                        if let Some(t) = lib.tracks.iter_mut().find(|t| t.path == path) {
+                                            t.title = edits.title.trim().to_string();
+                                            t.artist = edits.artist.trim().to_string();
+                                            t.artists = edits
+                                                .artist
+                                                .split([';', ','])
+                                                .map(|a| a.trim().to_string())
+                                                .filter(|s| !s.is_empty())
+                                                .collect();
+                                            t.album = edits.album.trim().to_string();
+                                            t.track_number = edits.track_number;
+                                            t.disc_number = edits.disc_number;
+                                            t.album_id = reader::metadata::make_album_id(
+                                                edits.album.trim(),
+                                                edits.artist.trim(),
+                                            );
+                                        }
+                                        drop(lib);
+                                        metadata_track.set(None);
+                                    }
+                                    Err(e) => {
+                                        tracing::error!("failed to write tags for {}: {}", path.display(), e);
+                                    }
+                                }
                             },
                         }
                     }
@@ -581,6 +620,12 @@ pub fn LocalArtist(
                                 on_queue: move |idx: usize| {
                                     if let Some(track) = artist_tracks().get(idx) {
                                         ctrl.add_to_queue(vec![track.clone()]);
+                                        active_menu_track.set(None);
+                                    }
+                                },
+                                on_view_metadata: move |idx: usize| {
+                                    if let Some(track) = artist_tracks().get(idx) {
+                                        metadata_track.set(Some(track.clone()));
                                         active_menu_track.set(None);
                                     }
                                 },

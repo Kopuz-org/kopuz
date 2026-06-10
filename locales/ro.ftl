@@ -27,10 +27,8 @@ add = Adaugă
 add_folder = Adaugă Folder
 no_music_folders = Nu sunt configurate foldere muzicale
 add_server = Adaugă Server
-# TODO: NEED LOCALIZATION
-connect_to_lastfm = Connect to Last.fm
-lastfm_connected = Last.fm Connected
-# TODO: NEED LOCALIZATION
+connect_to_lastfm = Conectează-te la Last.fm
+lastfm_connected = Conectat la Last.fm
 server_details = Detalii Server
 server_name = Nume Server
 server_url = URL Server
@@ -81,10 +79,8 @@ create = Creează
 save = Salvează
 enabled = PORNIT
 disabled = OPRIT
-# TODO: Translate lines below
-play = Play
-shuffle = Shuffle
-# ------
+play = Redare
+shuffle = Amestecare
 
 # Navigation & Headers
 tracks = Piese
@@ -140,10 +136,8 @@ heart_track_to_add_server = Adaugă o piesă la favorite în timp ce este redat�
 search_placeholder = Caută artiști, albume sau piese...
 no_results_found = Niciun rezultat pentru "{ $query }"
 listenbrainz_token_placeholder = Introdu token-ul ListenBrainz
-# TODO: NEED LOCALIZATION
-lastfm_api_key_placeholder = Enter your Last.fm API Key
-lastfm_api_secret_placeholder = Enter your Last.fm API Secret
-# TODO: NEED LOCALIZATION
+lastfm_api_key_placeholder = Introdu cheia API Last.fm
+lastfm_api_secret_placeholder = Introdu secretul API Last.fm
 
 # Empty States
 album_not_found = Albumul nu a fost găsit
@@ -434,3 +428,21 @@ discover_requires_ytmusic = Descoperă este disponibil doar când YouTube Music 
 discover_show_all = Afișează toate
 yt_anon_playlists = Conectează-te la YouTube Music pentru a vedea playlisturile din bibliotecă.
 yt_anon_favorites = Conectează-te la YouTube Music pentru a vedea melodiile apreciate.
+
+# Metadata Viewer / Editor
+view_metadata = Vezi metadatele
+edit_metadata = Editează metadatele
+edit = Editează
+track_number = Nr. piesă
+disc_number = Nr. disc
+duration = Durată
+sample_rate = Rată de eșantionare
+bitrate = Rată de biți
+musicbrainz_release = Lansare MusicBrainz
+musicbrainz_recording = Înregistrare MusicBrainz
+musicbrainz_track = Piesă MusicBrainz
+path = Cale
+add_photo = Adaugă fotografie
+change_photo = Schimbă fotografia
+remove_photo = Elimină fotografia
+metadata_edit_warning = Câmpurile goale elimină eticheta. Se scrie direct în fișier — fără anulare.

@@ -72,6 +72,7 @@ pub fn TrackRow(
     on_play: EventHandler<()>,
     on_delete: EventHandler<()>,
     on_remove_from_playlist: Option<EventHandler<()>>,
+    on_view_metadata: Option<EventHandler<()>>,
     #[props(default = false)] is_selection_mode: bool,
     #[props(default = false)] is_selected: bool,
     #[props(default = false)] hide_delete: bool,
@@ -111,6 +112,7 @@ pub fn TrackRow(
     let remove_from_playlist_text = i18n::t("remove_from_playlist").to_string();
     let delete_song_text = i18n::t("delete").to_string();
     let share_text = i18n::t("share_musicbrainz").to_string();
+    let view_metadata_text = i18n::t("view_metadata").to_string();
 
     // Identifiers used to resolve the track's MusicBrainz page when sharing.
     // Cloned once per layout closure (modern / normal) since each moves them in.
@@ -186,6 +188,18 @@ pub fn TrackRow(
     let mix_idx = if is_ytmusic_track {
         let idx = actions.len();
         actions.push(MenuAction::new("Start radio", "fa-solid fa-tower-broadcast"));
+        Some(idx)
+    } else {
+        None
+    };
+
+    let has_view_metadata = on_view_metadata.is_some();
+    let view_metadata_idx = if has_view_metadata {
+        let idx = actions.len();
+        actions.push(MenuAction::new(
+            view_metadata_text.as_str(),
+            "fa-solid fa-circle-info",
+        ));
         Some(idx)
     } else {
         None
@@ -496,6 +510,9 @@ pub fn TrackRow(
                                 } else if mix_idx == Some(idx) {
                                     start_radio_from(track.path.clone(), config, ctrl);
                                     on_close_menu.call(());
+                                } else if view_metadata_idx == Some(idx) {
+                                    if let Some(handler) = on_view_metadata { handler.call(()); }
+                                    on_close_menu.call(());
                                 } else if Some(idx) == delete_action_idx {
                                     on_delete.call(());
                                 }
@@ -764,6 +781,11 @@ pub fn TrackRow(
                                 on_close_menu.call(());
                             } else if mix_idx == Some(idx) {
                                 start_radio_from(track.path.clone(), config, ctrl);
+                                on_close_menu.call(());
+                            } else if view_metadata_idx == Some(idx) {
+                                if let Some(handler) = on_view_metadata {
+                                    handler.call(());
+                                }
                                 on_close_menu.call(());
                             } else if Some(idx) == delete_action_idx {
                                 on_delete.call(());

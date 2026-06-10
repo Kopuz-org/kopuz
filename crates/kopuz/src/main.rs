@@ -919,6 +919,11 @@ fn App() -> Element {
     let mut current_route = use_signal(|| Route::Home);
     let mut scroll_positions: Signal<std::collections::HashMap<Route, f64>> =
         use_signal(std::collections::HashMap::new);
+    // Album/artist list and detail share one Route, so detail scroll is kept in a
+    // separate map keyed by `album:<id>` / `artist:<name>`. This stops a detail's
+    // scroll from clobbering the list scroll the user expects back on return.
+    let mut detail_scroll_positions: Signal<std::collections::HashMap<String, f64>> =
+        use_signal(std::collections::HashMap::new);
     let cache_dir = use_memo(move || {
         // Android: external/ProjectDirs paths aren't writable; use the app-internal files
         // dir (getFilesDir via JNI) so saves don't fail with EACCES.
@@ -1856,7 +1861,23 @@ fn App() -> Element {
 
     use_effect(move || {
         let route = *current_route.read();
-        let pos = scroll_positions.peek().get(&route).copied().unwrap_or(0.0);
+        // Read detail selections so this re-runs on list<->detail toggle, not just
+        // on route change (album/artist list and detail are the same Route).
+        let album_sel = selected_album_id.read().clone();
+        let artist_sel = selected_artist_name.read().clone();
+        let pos = match route {
+            Route::Album if !album_sel.is_empty() => detail_scroll_positions
+                .peek()
+                .get(&format!("album:{album_sel}"))
+                .copied()
+                .unwrap_or(0.0),
+            Route::Artist if !artist_sel.is_empty() => detail_scroll_positions
+                .peek()
+                .get(&format!("artist:{artist_sel}"))
+                .copied()
+                .unwrap_or(0.0),
+            _ => scroll_positions.peek().get(&route).copied().unwrap_or(0.0),
+        };
         let _ = dioxus::document::eval(&format!(
             "let el = document.getElementById('main-scroll-area'); if (el) el.scrollTop = {pos};"
         ));
@@ -2165,7 +2186,24 @@ fn App() -> Element {
                     class: if cfg!(target_os = "android") { "flex-1 min-h-0 flex flex-col overflow-hidden relative" } else { "flex-1 overflow-y-auto" },
                     onscroll: move |evt| {
                         let pos = evt.scroll_top();
-                        scroll_positions.write().insert(*current_route.peek(), pos);
+                        let route = *current_route.peek();
+                        let album_sel = selected_album_id.peek().clone();
+                        let artist_sel = selected_artist_name.peek().clone();
+                        match route {
+                            Route::Album if !album_sel.is_empty() => {
+                                detail_scroll_positions
+                                    .write()
+                                    .insert(format!("album:{album_sel}"), pos);
+                            }
+                            Route::Artist if !artist_sel.is_empty() => {
+                                detail_scroll_positions
+                                    .write()
+                                    .insert(format!("artist:{artist_sel}"), pos);
+                            }
+                            _ => {
+                                scroll_positions.write().insert(route, pos);
+                            }
+                        }
                     },
 
                     if cfg!(target_os = "android") {

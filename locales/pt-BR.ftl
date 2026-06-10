@@ -27,10 +27,8 @@ add = Adicionar
 add_folder = Adicionar pasta
 no_music_folders = Nenhuma pasta de músicas configurada
 add_server = Adicionar servidor
-# TODO: NEED LOCALIZATION
-connect_to_lastfm = Connect to Last.fm
-lastfm_connected = Last.fm Connected
-# TODO: NEED LOCALIZATION
+connect_to_lastfm = Conectar ao Last.fm
+lastfm_connected = Conectado ao Last.fm
 server_details = Detalhes do servidor
 server_name = Nome do servidor
 server_url = URL do servidor
@@ -136,10 +134,8 @@ maximize = Maximizar
 close = Fechar
 enabled = ATIVADO
 disabled = DESATIVADO
-# TODO: Translate lines below
-play = Play
-shuffle = Shuffle
-# ------
+play = Tocar
+shuffle = Aleatório
 
 # Navigation & Headers
 tracks = Faixas
@@ -195,10 +191,8 @@ heart_track_to_add_server = Curta uma faixa enquanto ela estiver tocando para ad
 search_placeholder = Buscar artistas, álbuns ou faixas...
 no_results_found = Nenhum resultado encontrado para "{ $query }"
 listenbrainz_token_placeholder = Insira seu token do ListenBrainz
-# TODO: NEED LOCALIZATION
-lastfm_api_key_placeholder = Enter your Last.fm API Key
-lastfm_api_secret_placeholder = Enter your Last.fm API Secret
-# TODO: NEED LOCALIZATION
+lastfm_api_key_placeholder = Digite sua chave de API do Last.fm
+lastfm_api_secret_placeholder = Digite seu segredo de API do Last.fm
 
 # Empty States
 album_not_found = Álbum não encontrado
@@ -433,3 +427,21 @@ discover_requires_ytmusic = Descobrir só está disponível quando o YouTube Mus
 discover_show_all = Mostrar tudo
 yt_anon_playlists = Entre no YouTube Music para ver suas playlists.
 yt_anon_favorites = Entre no YouTube Music para ver suas músicas curtidas.
+
+# Metadata Viewer / Editor
+view_metadata = Ver metadados
+edit_metadata = Editar metadados
+edit = Editar
+track_number = Nº da faixa
+disc_number = Nº do disco
+duration = Duração
+sample_rate = Taxa de amostragem
+bitrate = Taxa de bits
+musicbrainz_release = Lançamento do MusicBrainz
+musicbrainz_recording = Gravação do MusicBrainz
+musicbrainz_track = Faixa do MusicBrainz
+path = Caminho
+add_photo = Adicionar foto
+change_photo = Alterar foto
+remove_photo = Remover foto
+metadata_edit_warning = Campos vazios removem a tag. Grava diretamente no arquivo — sem desfazer.

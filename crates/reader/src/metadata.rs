@@ -1,4 +1,4 @@
-use super::models::{Album, Library, Track};
+use super::models::{Album, CoverChange, Library, Track, TrackEdits};
 use super::utils::{find_folder_cover, save_cover};
 use lofty::file::TaggedFileExt;
 use lofty::picture::{Picture, PictureType};
@@ -222,6 +222,114 @@ pub fn read(track_path: &Path, cover_cache: &Path, library: &mut Library) -> Opt
 
     library.add_track(track.clone());
     Some(track)
+}
+
+/// Write `edits` back into the audio file's primary tag. Empty string fields
+/// and `None` numbers remove the corresponding tag entry. Creates a primary
+/// tag of the format's default type if the file has none. This rewrites the
+/// file in place — there's no undo.
+pub fn write_tags(track_path: &Path, edits: &TrackEdits) -> Result<(), String> {
+    use lofty::config::WriteOptions;
+    use lofty::file::AudioFile;
+
+    let mut tagged = Probe::open(track_path)
+        .map_err(|e| e.to_string())?
+        .read()
+        .map_err(|e| e.to_string())?;
+
+    if tagged.primary_tag().is_none() {
+        let tag_type = tagged.primary_tag_type();
+        tagged.insert_tag(Tag::new(tag_type));
+    }
+    let tag = tagged
+        .primary_tag_mut()
+        .ok_or_else(|| "no writable tag for this format".to_string())?;
+
+    let title = edits.title.trim();
+    if title.is_empty() {
+        tag.remove_title();
+    } else {
+        tag.set_title(title.to_string());
+    }
+
+    let artist = edits.artist.trim();
+    // Compare against the same representation the editor seeds from (structured
+    // TrackArtists joined with ", ", else the single artist field). Only rewrite
+    // the artist tags when it actually changed, so editing unrelated fields keeps
+    // the structured multi-artist data intact.
+    let existing_track_artists: Vec<String> = tag
+        .get_strings(ItemKey::TrackArtists)
+        .flat_map(|s| s.split(';').map(|a| a.trim().to_string()))
+        .filter(|s| !s.is_empty())
+        .collect();
+    let existing_artist_repr = if existing_track_artists.is_empty() {
+        tag.artist().map(|a| a.to_string()).unwrap_or_default()
+    } else {
+        existing_track_artists.join(", ")
+    };
+    if artist != existing_artist_repr {
+        if artist.is_empty() {
+            tag.remove_artist();
+        } else {
+            tag.set_artist(artist.to_string());
+        }
+        // Drop the now-stale structured split; re-derived from `artist` on scan.
+        tag.remove_key(ItemKey::TrackArtists);
+    }
+
+    let album = edits.album.trim();
+    if album.is_empty() {
+        tag.remove_album();
+    } else {
+        tag.set_album(album.to_string());
+    }
+
+    match edits.track_number {
+        Some(n) => tag.set_track(n),
+        None => tag.remove_track(),
+    }
+    match edits.disc_number {
+        Some(n) => tag.set_disk(n),
+        None => tag.remove_disk(),
+    }
+
+    match &edits.cover {
+        CoverChange::Keep => {}
+        CoverChange::Remove => {
+            // Clear every embedded picture, not just CoverFront — read_cover()
+            // falls back to any picture type, so a leftover would reappear.
+            while !tag.pictures().is_empty() {
+                tag.remove_picture(0);
+            }
+        }
+        CoverChange::Set(bytes) => {
+            let mut picture =
+                Picture::from_reader(&mut &bytes[..]).map_err(|e| e.to_string())?;
+            picture.set_pic_type(PictureType::CoverFront);
+            while !tag.pictures().is_empty() {
+                tag.remove_picture(0);
+            }
+            tag.push_picture(picture);
+        }
+    }
+
+    tagged
+        .save_to_path(track_path, WriteOptions::default())
+        .map_err(|e| e.to_string())
+}
+
+/// Read the embedded front-cover picture (or best available) as raw bytes plus
+/// its MIME type, for previewing in the metadata editor. `None` if the file has
+/// no embedded artwork.
+pub fn read_cover(track_path: &Path) -> Option<(Vec<u8>, String)> {
+    let tagged = Probe::open(track_path).ok()?.read().ok()?;
+    let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
+    let picture = extract_embedded_cover(&tagged, tag)?;
+    let mime = picture
+        .mime_type()
+        .map(|m| m.as_str().to_string())
+        .unwrap_or_else(|| "image/jpeg".to_string());
+    Some((picture.data().to_vec(), mime))
 }
 
 fn is_matroska_audio(track_path: &Path) -> bool {

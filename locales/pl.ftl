@@ -428,3 +428,21 @@ discover_requires_ytmusic = Odkrywaj jest dostępne tylko wtedy, gdy YouTube Mus
 discover_show_all = Pokaż wszystko
 yt_anon_playlists = Zaloguj się do YouTube Music, aby zobaczyć playlisty z biblioteki.
 yt_anon_favorites = Zaloguj się do YouTube Music, aby zobaczyć polubione utwory.
+
+# Metadata Viewer / Editor
+view_metadata = Pokaż metadane
+edit_metadata = Edytuj metadane
+edit = Edytuj
+track_number = Nr ścieżki
+disc_number = Nr dysku
+duration = Czas trwania
+sample_rate = Częstotliwość próbkowania
+bitrate = Przepływność
+musicbrainz_release = Wydanie MusicBrainz
+musicbrainz_recording = Nagranie MusicBrainz
+musicbrainz_track = Ścieżka MusicBrainz
+path = Ścieżka pliku
+add_photo = Dodaj zdjęcie
+change_photo = Zmień zdjęcie
+remove_photo = Usuń zdjęcie
+metadata_edit_warning = Puste pola usuwają dany tag. Zapis bezpośrednio do pliku — bez cofania.
