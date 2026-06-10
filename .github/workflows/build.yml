@@ -87,7 +87,9 @@ jobs:
         # asset without hitting the 60-req/hr unauthenticated limit. Disable the
         # compile fallback so a missed prebuilt fails fast instead of building
         # dioxus-cli from source (which breaks on auth-git2/git2 0.21).
-        run: cargo binstall dioxus-cli@0.7.9 -y --disable-strategies compile
+        # Force reinstall because rust-cache can restore Cargo's install
+        # metadata without the corresponding dx.exe in .cargo/bin.
+        run: cargo binstall dioxus-cli@0.7.9 -y --force --disable-strategies compile
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
