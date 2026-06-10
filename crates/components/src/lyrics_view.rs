@@ -9,8 +9,28 @@ const FULLSCREEN_ACTIVE_LYRIC_CLASS: &str =
 const RIGHTBAR_LYRIC_CLASS: &str = "text-white/40 text-lg font-semibold transition-colors duration-300 hover:text-white/60 cursor-pointer whitespace-pre-wrap";
 const RIGHTBAR_ACTIVE_LYRIC_CLASS: &str =
     "text-white text-lg font-semibold transition-colors duration-300 whitespace-pre-wrap";
-const LYRIC_STYLE: &str =
-    "transform: scale(1); transform-origin: center; transition: color 300ms, transform 300ms;";
+const FULLSCREEN_MAIN_LYRIC_CLASS: &str = "text-white/40 text-2xl font-semibold transition-colors duration-300 hover:text-white/60 cursor-pointer whitespace-pre-wrap text-left w-full";
+const FULLSCREEN_ACTIVE_MAIN_LYRIC_CLASS: &str = "text-white text-2xl font-semibold transition-colors duration-300 whitespace-pre-wrap text-left w-full";
+const RIGHTBAR_MAIN_LYRIC_CLASS: &str = "text-white/40 text-lg font-semibold transition-colors duration-300 hover:text-white/60 cursor-pointer whitespace-pre-wrap text-left w-full";
+const RIGHTBAR_ACTIVE_MAIN_LYRIC_CLASS: &str = "text-white text-lg font-semibold transition-colors duration-300 whitespace-pre-wrap text-left w-full";
+const FULLSCREEN_CENTER_LYRIC_CLASS: &str = "text-white/40 text-2xl font-semibold transition-colors duration-300 hover:text-white/60 cursor-pointer whitespace-pre-wrap text-center w-full";
+const FULLSCREEN_ACTIVE_CENTER_LYRIC_CLASS: &str = "text-white text-2xl font-semibold transition-colors duration-300 whitespace-pre-wrap text-center w-full";
+const RIGHTBAR_CENTER_LYRIC_CLASS: &str = "text-white/40 text-lg font-semibold transition-colors duration-300 hover:text-white/60 cursor-pointer whitespace-pre-wrap text-center w-full";
+const RIGHTBAR_ACTIVE_CENTER_LYRIC_CLASS: &str = "text-white text-lg font-semibold transition-colors duration-300 whitespace-pre-wrap text-center w-full";
+const LYRIC_STYLE: &str = "box-sizing: border-box; overflow-wrap: normal; word-break: normal; transform: scale(1); transition: color 300ms, transform 300ms, opacity 180ms, max-height 180ms, margin-top 180ms;";
+const HIDDEN_BACKGROUND_LYRIC_STYLE: &str = "box-sizing: border-box; overflow-wrap: normal; word-break: normal; overflow: hidden; pointer-events: none; opacity: 0; max-height: 0px; margin-top: 0px; transform: scale(1); transition: color 300ms, transform 300ms, opacity 180ms, max-height 180ms, margin-top 180ms;";
+const FULLSCREEN_BACKGROUND_LYRIC_CLASS: &str = "text-white/25 text-xl font-medium transition-colors duration-300 whitespace-pre-wrap text-left w-full -mt-3 pl-6 leading-snug";
+const FULLSCREEN_ACTIVE_BACKGROUND_LYRIC_CLASS: &str = "text-white/70 text-xl font-medium transition-colors duration-300 whitespace-pre-wrap text-left w-full -mt-3 pl-6 leading-snug";
+const RIGHTBAR_BACKGROUND_LYRIC_CLASS: &str = "text-white/25 text-sm font-medium transition-colors duration-300 whitespace-pre-wrap text-left w-full -mt-3 pl-4 leading-snug";
+const RIGHTBAR_ACTIVE_BACKGROUND_LYRIC_CLASS: &str = "text-white/70 text-sm font-medium transition-colors duration-300 whitespace-pre-wrap text-left w-full -mt-3 pl-4 leading-snug";
+const FULLSCREEN_BACKGROUND_OPPOSITE_LYRIC_CLASS: &str = "text-white/25 text-xl font-medium transition-colors duration-300 whitespace-pre-wrap text-right w-full -mt-3 pr-6 leading-snug";
+const FULLSCREEN_ACTIVE_BACKGROUND_OPPOSITE_LYRIC_CLASS: &str = "text-white/70 text-xl font-medium transition-colors duration-300 whitespace-pre-wrap text-right w-full -mt-3 pr-6 leading-snug";
+const RIGHTBAR_BACKGROUND_OPPOSITE_LYRIC_CLASS: &str = "text-white/25 text-sm font-medium transition-colors duration-300 whitespace-pre-wrap text-right w-full -mt-3 pr-4 leading-snug";
+const RIGHTBAR_ACTIVE_BACKGROUND_OPPOSITE_LYRIC_CLASS: &str = "text-white/70 text-sm font-medium transition-colors duration-300 whitespace-pre-wrap text-right w-full -mt-3 pr-4 leading-snug";
+const FULLSCREEN_OPPOSITE_LYRIC_CLASS: &str = "text-white/40 text-2xl italic font-semibold transition-colors duration-300 hover:text-white/60 cursor-pointer whitespace-pre-wrap text-right w-full";
+const FULLSCREEN_ACTIVE_OPPOSITE_LYRIC_CLASS: &str = "text-white text-2xl italic font-semibold transition-colors duration-300 whitespace-pre-wrap text-right w-full";
+const RIGHTBAR_OPPOSITE_LYRIC_CLASS: &str = "text-white/40 text-lg italic font-semibold transition-colors duration-300 hover:text-white/60 cursor-pointer whitespace-pre-wrap text-right w-full";
+const RIGHTBAR_ACTIVE_OPPOSITE_LYRIC_CLASS: &str = "text-white text-lg italic font-semibold transition-colors duration-300 whitespace-pre-wrap text-right w-full";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LayoutMode {
@@ -25,6 +45,149 @@ impl fmt::Display for LayoutMode {
             LayoutMode::Fullscreen => write!(f, "fullscreen"),
         }
     }
+}
+
+fn lyric_line_class(
+    layout: LayoutMode,
+    line: &utils::lyrics::LyricLine,
+    active: bool,
+    has_opposite_turn: bool,
+) -> &'static str {
+    match (
+        layout,
+        line.background,
+        line.opposite_turn,
+        has_opposite_turn,
+        active,
+    ) {
+        (LayoutMode::Fullscreen, true, false, _, false) => FULLSCREEN_BACKGROUND_LYRIC_CLASS,
+        (LayoutMode::Fullscreen, true, false, _, true) => FULLSCREEN_ACTIVE_BACKGROUND_LYRIC_CLASS,
+        (LayoutMode::Rightbar, true, false, _, false) => RIGHTBAR_BACKGROUND_LYRIC_CLASS,
+        (LayoutMode::Rightbar, true, false, _, true) => RIGHTBAR_ACTIVE_BACKGROUND_LYRIC_CLASS,
+        (LayoutMode::Fullscreen, true, true, _, false) => {
+            FULLSCREEN_BACKGROUND_OPPOSITE_LYRIC_CLASS
+        }
+        (LayoutMode::Fullscreen, true, true, _, true) => {
+            FULLSCREEN_ACTIVE_BACKGROUND_OPPOSITE_LYRIC_CLASS
+        }
+        (LayoutMode::Rightbar, true, true, _, false) => RIGHTBAR_BACKGROUND_OPPOSITE_LYRIC_CLASS,
+        (LayoutMode::Rightbar, true, true, _, true) => {
+            RIGHTBAR_ACTIVE_BACKGROUND_OPPOSITE_LYRIC_CLASS
+        }
+        (LayoutMode::Fullscreen, false, true, _, false) => FULLSCREEN_OPPOSITE_LYRIC_CLASS,
+        (LayoutMode::Fullscreen, false, true, _, true) => FULLSCREEN_ACTIVE_OPPOSITE_LYRIC_CLASS,
+        (LayoutMode::Rightbar, false, true, _, false) => RIGHTBAR_OPPOSITE_LYRIC_CLASS,
+        (LayoutMode::Rightbar, false, true, _, true) => RIGHTBAR_ACTIVE_OPPOSITE_LYRIC_CLASS,
+        (LayoutMode::Fullscreen, false, false, true, false) => FULLSCREEN_MAIN_LYRIC_CLASS,
+        (LayoutMode::Fullscreen, false, false, true, true) => FULLSCREEN_ACTIVE_MAIN_LYRIC_CLASS,
+        (LayoutMode::Rightbar, false, false, true, false) => RIGHTBAR_MAIN_LYRIC_CLASS,
+        (LayoutMode::Rightbar, false, false, true, true) => RIGHTBAR_ACTIVE_MAIN_LYRIC_CLASS,
+        (LayoutMode::Fullscreen, false, false, false, false) => FULLSCREEN_CENTER_LYRIC_CLASS,
+        (LayoutMode::Fullscreen, false, false, false, true) => FULLSCREEN_ACTIVE_CENTER_LYRIC_CLASS,
+        (LayoutMode::Rightbar, false, false, false, false) => RIGHTBAR_CENTER_LYRIC_CLASS,
+        (LayoutMode::Rightbar, false, false, false, true) => RIGHTBAR_ACTIVE_CENTER_LYRIC_CLASS,
+    }
+}
+
+fn lyric_line_active_scale(
+    line: &utils::lyrics::LyricLine,
+    has_opposite_turn: bool,
+) -> &'static str {
+    if line.background {
+        "1.02"
+    } else if line.opposite_turn || has_opposite_turn {
+        "1.06"
+    } else {
+        "1.12"
+    }
+}
+
+fn lyric_line_transform_origin(
+    line: &utils::lyrics::LyricLine,
+    has_opposite_turn: bool,
+) -> &'static str {
+    if line.opposite_turn {
+        "right center"
+    } else if has_opposite_turn {
+        "left center"
+    } else {
+        "center"
+    }
+}
+
+fn lyric_line_max_width(line: &utils::lyrics::LyricLine, has_opposite_turn: bool) -> &'static str {
+    if line.opposite_turn || has_opposite_turn {
+        "90%"
+    } else {
+        "100%"
+    }
+}
+
+fn lyric_line_style(line: &utils::lyrics::LyricLine, has_opposite_turn: bool) -> String {
+    let base_style = if line.background {
+        HIDDEN_BACKGROUND_LYRIC_STYLE
+    } else {
+        LYRIC_STYLE
+    };
+    let max_width = lyric_line_max_width(line, has_opposite_turn);
+    let margin_style = if line.opposite_turn {
+        "margin-left: auto; margin-right: 0;"
+    } else if has_opposite_turn {
+        "margin-left: 0; margin-right: auto;"
+    } else {
+        "margin-left: auto; margin-right: auto;"
+    };
+
+    format!("{base_style} width: {max_width}; max-width: {max_width}; {margin_style}")
+}
+
+fn main_line_indices(lines: &[utils::lyrics::LyricLine]) -> Vec<usize> {
+    let foreground = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(index, line)| (!line.background).then_some(index))
+        .collect::<Vec<_>>();
+    if !foreground.is_empty() {
+        return foreground;
+    }
+
+    (0..lines.len()).collect()
+}
+
+fn background_parent_index(lines: &[utils::lyrics::LyricLine], index: usize) -> Option<usize> {
+    if !lines.get(index)?.background {
+        return None;
+    }
+
+    (0..index).rev().find(|&index| !lines[index].background)
+}
+
+fn active_secondary_lines(
+    lines: &[utils::lyrics::LyricLine],
+    current_time: f64,
+    main_line_index: usize,
+) -> String {
+    let entries = lines
+        .iter()
+        .enumerate()
+        .filter(|(index, line)| {
+            *index != main_line_index
+                && line.background
+                && background_parent_index(lines, *index) == Some(main_line_index)
+        })
+        .map(|(index, line)| format!("[{},{}]", index, active_word_index(line, current_time)))
+        .collect::<Vec<_>>()
+        .join(",");
+
+    format!("[{}]", entries)
+}
+
+fn active_word_index(line: &utils::lyrics::LyricLine, current_time: f64) -> i64 {
+    line.words
+        .partition_point(|word| word.start_time <= current_time)
+        .checked_sub(1)
+        .map(|index| index as i64)
+        .unwrap_or(-1)
 }
 
 #[component]
@@ -52,6 +215,8 @@ pub fn LyricsView(
         let _update_func = eval(&format!(
             r#"
                 let currEl;
+                let activeSecondaryEls = new Set();
+                let scrollAnimationFrame;
                 let activeClass = "{active_class}";
                 let inactiveClass = "{inactive_class}";
 
@@ -74,26 +239,150 @@ pub fn LyricsView(
                     }});
                 }};
 
-                window.__{layout}_updateLyrics = (nextIndex, nextWordIndex) => {{
+                const inactiveFor = (lineEl) => lineEl?.dataset?.inactiveClass || inactiveClass;
+                const activeFor = (lineEl) => lineEl?.dataset?.activeClass || activeClass;
+                const activeScaleFor = (lineEl) => lineEl?.dataset?.activeScale || '1.06';
+                const maxWidthFor = (lineEl) => lineEl?.dataset?.maxLineWidth || '100%';
+                const isBackgroundLine = (lineEl) => lineEl?.dataset?.backgroundLine === 'true';
+
+                const applyLineLayout = (lineEl) => {{
+                    if (!lineEl) return;
+                    const origin = lineEl.dataset.transformOrigin || 'center';
+                    const maxWidth = maxWidthFor(lineEl);
+                    lineEl.style.boxSizing = 'border-box';
+                    lineEl.style.maxWidth = maxWidth;
+                    lineEl.style.width = maxWidth;
+                    lineEl.style.overflowWrap = 'normal';
+                    lineEl.style.wordBreak = 'normal';
+                    if (origin.startsWith('right')) {{
+                        lineEl.style.marginLeft = 'auto';
+                        lineEl.style.marginRight = '0';
+                    }} else if (origin.startsWith('left')) {{
+                        lineEl.style.marginLeft = '0';
+                        lineEl.style.marginRight = 'auto';
+                    }} else {{
+                        lineEl.style.marginLeft = 'auto';
+                        lineEl.style.marginRight = 'auto';
+                    }}
+                }};
+
+                const hideBackgroundLine = (lineEl) => {{
+                    if (!isBackgroundLine(lineEl)) return;
+                    lineEl.style.overflow = 'hidden';
+                    lineEl.style.pointerEvents = 'none';
+                    lineEl.style.opacity = '0';
+                    lineEl.style.maxHeight = '0px';
+                    lineEl.style.marginTop = '0px';
+                }};
+
+                const showBackgroundLine = (lineEl) => {{
+                    if (!isBackgroundLine(lineEl)) return;
+                    lineEl.style.overflow = 'hidden';
+                    lineEl.style.pointerEvents = '';
+                    lineEl.style.opacity = '';
+                    lineEl.style.maxHeight = '96px';
+                    lineEl.style.marginTop = '';
+                }};
+
+                const scrollLineIntoComfortView = (lineEl) => {{
+                    const container = document.getElementById('{layout}-lyrics-content');
+                    if (!container || !lineEl) return;
+
+                    const containerRect = container.getBoundingClientRect();
+                    const lineRect = lineEl.getBoundingClientRect();
+                    const currentOffset = lineRect.top - containerRect.top;
+                    const targetOffset = container.clientHeight * 0.42;
+                    const nextTop = container.scrollTop + currentOffset - targetOffset;
+
+                    if (scrollAnimationFrame) {{
+                        cancelAnimationFrame(scrollAnimationFrame);
+                    }}
+
+                    const startTop = container.scrollTop;
+                    const distance = nextTop - startTop;
+                    const durationMs = 720;
+                    const startedAt = performance.now();
+                    const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+
+                    const step = (now) => {{
+                        const progress = Math.min(1, (now - startedAt) / durationMs);
+                        container.scrollTop = startTop + distance * easeOutCubic(progress);
+                        if (progress < 1) {{
+                            scrollAnimationFrame = requestAnimationFrame(step);
+                        }} else {{
+                            scrollAnimationFrame = null;
+                        }}
+                    }};
+
+                    scrollAnimationFrame = requestAnimationFrame(step);
+                }};
+
+                const fadeLineIn = (lineEl) => {{
+                    if (!lineEl?.animate) return;
+                    lineEl.animate(
+                        [{{ opacity: 0.68 }}, {{ opacity: 1 }}],
+                        {{ duration: 260, easing: 'ease-out' }}
+                    );
+                }};
+
+                const deactivateLine = (lineEl) => {{
+                    if (!lineEl) return;
+                    lineEl.className = inactiveFor(lineEl);
+                    lineEl.style.transformOrigin = lineEl.dataset.transformOrigin || 'center';
+                    applyLineLayout(lineEl);
+                    lineEl.style.transform = 'scale(1)';
+                    resetWords(lineEl);
+                    hideBackgroundLine(lineEl);
+                }};
+
+                const activateLine = (lineEl, wordIndex, scale = null) => {{
+                    if (!lineEl) return;
+                    const scaleValue = scale || activeScaleFor(lineEl);
+                    const origin = lineEl.dataset.transformOrigin || 'center';
+                    showBackgroundLine(lineEl);
+                    lineEl.className = activeFor(lineEl);
+                    lineEl.style.transformOrigin = origin;
+                    applyLineLayout(lineEl);
+                    lineEl.style.transform = `scale(${{scaleValue}})`;
+                    if (lineEl.querySelector('[data-lyric-word]')) {{
+                        updateWords(lineEl, wordIndex);
+                    }}
+                }};
+
+                window.__{layout}_updateLyrics = (nextIndex, nextWordIndex, activeLinesJson = '[]') => {{
                     let nextEl = document.getElementById(`{layout}-lyrics-${{nextIndex}}`)
+                    let nextSecondary = new Map(JSON.parse(activeLinesJson));
+                    for (const lineEl of activeSecondaryEls) {{
+                        const idx = Number(lineEl.dataset.lyricIndex);
+                        if (!nextSecondary.has(idx) && lineEl !== nextEl) {{
+                            deactivateLine(lineEl);
+                        }}
+                    }}
+                    activeSecondaryEls = new Set();
+
                     if (currEl != nextEl) {{
                         if (currEl) {{
-                            currEl.className = inactiveClass;
-                            currEl.style.transform = 'scale(1)';
-                            resetWords(currEl);
+                            deactivateLine(currEl);
                         }}
 
                         if (nextEl) {{
-                            nextEl.className = activeClass;
-                            nextEl.style.transform = 'scale(1.12)';
-                            nextEl.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
+                            activateLine(nextEl, nextWordIndex);
+                            fadeLineIn(nextEl);
+                            scrollLineIntoComfortView(nextEl);
                         }}
 
                         currEl = nextEl;
                     }}
 
-                    if (nextEl && nextEl.querySelector('[data-lyric-word]')) {{
-                        updateWords(nextEl, nextWordIndex);
+                    if (nextEl) {{
+                        activateLine(nextEl, nextWordIndex);
+                    }}
+
+                    for (const [idx, wordIndex] of nextSecondary.entries()) {{
+                        const lineEl = document.getElementById(`{layout}-lyrics-${{idx}}`);
+                        if (!lineEl || lineEl === nextEl) continue;
+                        activateLine(lineEl, wordIndex);
+                        activeSecondaryEls.add(lineEl);
                     }}
                 }}
             "#,
@@ -112,7 +401,11 @@ pub fn LyricsView(
             if let Some(Some(utils::lyrics::Lyrics::Synced(lines))) = lyrics {
                 let mut sleep_duration_ms: u64;
 
-                let times = lines.iter().map(|l| l.start_time).collect::<Vec<_>>();
+                let main_line_indices = main_line_indices(&lines);
+                let main_times = main_line_indices
+                    .iter()
+                    .map(|&i| lines[i].start_time)
+                    .collect::<Vec<_>>();
 
                 loop {
                     let current_time = ctrl.displayed_progress_secs_f64();
@@ -122,30 +415,38 @@ pub fn LyricsView(
                     // Therefore `n - 1` is the last timestamp less than or equal to it.
                     // If the result is 0, we are before the first line.
                     if let Some(current_line_index) =
-                        match times.partition_point(|&t| t <= current_time) {
+                        match main_times.partition_point(|&t| t <= current_time) {
                             0 => None,
-                            n => Some(n - 1),
+                            n => main_line_indices.get(n - 1).copied(),
                         }
                     {
-                        let current_word_index = lines[current_line_index]
-                            .words
-                            .partition_point(|w| w.start_time <= current_time)
-                            .checked_sub(1)
-                            .map(|i| i as i64)
-                            .unwrap_or(-1);
+                        let current_word_index =
+                            active_word_index(&lines[current_line_index], current_time);
+                        let active_secondary_lines =
+                            active_secondary_lines(&lines, current_time, current_line_index);
                         let _ = eval(&format!(
-                            "window.__{layout}_updateLyrics({current_line_index}, {current_word_index})"
+                            "window.__{layout}_updateLyrics({current_line_index}, {current_word_index}, '{}')",
+                            active_secondary_lines
                         ));
 
-                        sleep_duration_ms = times
-                            .get(current_line_index.saturating_add(1))
+                        let active_main_position = main_line_indices
+                            .iter()
+                            .position(|&index| index == current_line_index)
+                            .unwrap_or(0);
+                        sleep_duration_ms = main_times
+                            .get(active_main_position.saturating_add(1))
                             .map(|next_time| {
                                 ((*next_time - current_time) * 1000.0).max(16.0).min(50.0) as u64
                             })
                             .unwrap_or(50);
                     } else {
                         // we are before the first line, invalidate current line
-                        let _ = eval(&format!("window.__{layout}_updateLyrics(-1, -1)"));
+                        let active_secondary_lines =
+                            active_secondary_lines(&lines, current_time, usize::MAX);
+                        let _ = eval(&format!(
+                            "window.__{layout}_updateLyrics(-1, -1, '{}')",
+                            active_secondary_lines
+                        ));
                         sleep_duration_ms = 50;
                     }
 
@@ -159,28 +460,34 @@ pub fn LyricsView(
         div {
             id: "{layout}-lyrics-content",
             class: match layout {
-                LayoutMode::Fullscreen => "flex-1 overflow-y-auto px-4 py-2 space-y-1",
-                LayoutMode::Rightbar => "flex-1 overflow-y-auto px-2 py-2 space-y-1",
+                LayoutMode::Fullscreen => "flex-1 overflow-y-auto overflow-x-hidden px-4 py-2 space-y-1",
+                LayoutMode::Rightbar => "flex-1 overflow-y-auto overflow-x-hidden px-2 py-2 space-y-1",
             },
 
             div {
                 class: match layout {
-                    LayoutMode::Fullscreen => "text-white/70 text-center py-4 px-8 leading-relaxed font-medium text-lg w-full max-w-2xl mx-auto flex flex-col gap-4",
+                    LayoutMode::Fullscreen => "text-white/70 text-center py-4 px-8 leading-relaxed font-medium text-lg w-full max-w-2xl mx-auto flex flex-col gap-4 overflow-x-hidden",
                     LayoutMode::Rightbar =>
-                    "text-white/70 text-center py-4 px-4 leading-relaxed font-medium text-sm flex flex-col gap-4"
+                    "text-white/70 text-center py-4 px-4 leading-relaxed font-medium text-sm flex flex-col gap-4 overflow-x-hidden"
                 },
                 match &*lyrics.read() {
                     Some(Some(utils::lyrics::Lyrics::Synced(lines))) => {
+                        let has_opposite_turn = lines.iter().any(|line| line.opposite_turn);
                         rsx! {
                             for (i, line) in lines.iter().enumerate() {
                                 div {
                                     key: "{i}",
                                     id: "{layout}-lyrics-{i}",
-                                    class: match layout {
-                                        LayoutMode::Fullscreen => FULLSCREEN_LYRIC_CLASS,
-                                        LayoutMode::Rightbar => RIGHTBAR_LYRIC_CLASS,
-                                    },
-                                    style: LYRIC_STYLE,
+                                    "data-lyric-line": "true",
+                                    "data-lyric-index": "{i}",
+                                    "data-background-line": "{line.background}",
+                                    "data-max-line-width": "{lyric_line_max_width(line, has_opposite_turn)}",
+                                    "data-inactive-class": "{lyric_line_class(layout, line, false, has_opposite_turn)}",
+                                    "data-active-class": "{lyric_line_class(layout, line, true, has_opposite_turn)}",
+                                    "data-active-scale": "{lyric_line_active_scale(line, has_opposite_turn)}",
+                                    "data-transform-origin": "{lyric_line_transform_origin(line, has_opposite_turn)}",
+                                    class: "{lyric_line_class(layout, line, false, has_opposite_turn)}",
+                                    style: lyric_line_style(line, has_opposite_turn),
                                     onclick: {
                                         let st = line.start_time;
                                         move |_| {
