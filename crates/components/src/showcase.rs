@@ -1,9 +1,11 @@
 use config::AppConfig;
 use dioxus::prelude::*;
 use reader::{Library, Track};
+use std::char::ToLowercase;
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::str::Chars;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SortField {
@@ -77,7 +79,22 @@ pub fn sorted_track_indices(tracks: &[Track], sort_state: SortState) -> Vec<usiz
                 SortDirection::Asc => primary,
                 SortDirection::Desc => primary.reverse(),
             };
-            directional.then_with(|| left_idx.cmp(&right_idx))
+            match field {
+                SortField::Album => directional
+                    .then_with(|| {
+                        left.disc_number
+                            .unwrap_or(0)
+                            .cmp(&right.disc_number.unwrap_or(0))
+                    })
+                    .then_with(|| {
+                        left.track_number
+                            .unwrap_or(0)
+                            .cmp(&right.track_number.unwrap_or(0))
+                    })
+                    .then_with(|| compare_text(&left.title, &right.title))
+                    .then_with(|| left_idx.cmp(&right_idx)),
+                _ => directional.then_with(|| left_idx.cmp(&right_idx)),
+            }
         });
     }
 

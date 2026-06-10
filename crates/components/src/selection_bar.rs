@@ -1,5 +1,7 @@
 use dioxus::prelude::*;
 
+const DEFAULT_SELECTION_BAR_CLASS: &str = "fixed bottom-24 left-1/2 -translate-x-1/2 bg-indigo-500 text-white px-6 py-2.5 rounded-full shadow-2xl flex items-center gap-4 z-50 animate-in fade-in zoom-in duration-200 font-mono";
+
 #[component]
 pub fn SelectionBar(
     count: usize,
@@ -8,6 +10,7 @@ pub fn SelectionBar(
     on_delete: EventHandler<()>,
     on_cancel: EventHandler<()>,
     #[props(default = true)] show_delete: bool,
+    #[props(default)] class: Option<String>,
 ) -> Element {
     if count == 0 {
         return rsx! { "" };
@@ -16,10 +19,11 @@ pub fn SelectionBar(
     let delete_text = i18n::t("delete").to_string();
     let add_to_queue_text = i18n::t("add_to_queue").to_string();
     let add_to_playlist_text = i18n::t("add_to_playlist").to_string();
+    let class = class.as_deref().unwrap_or(DEFAULT_SELECTION_BAR_CLASS);
 
     rsx! {
         div {
-            class: "fixed bottom-24 left-1/2 -translate-x-1/2 bg-indigo-500 text-white px-6 py-2.5 rounded-full shadow-2xl flex items-center gap-4 z-50 animate-in fade-in zoom-in duration-200 font-mono",
+            class,
 
             span { class: "font-bold text-lg whitespace-nowrap pl-2", "{count} selected" }
 
