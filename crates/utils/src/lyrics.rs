@@ -15,6 +15,8 @@ struct LrcLibResponse {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct LyricWord {
+    /// A timed lyric chunk. Most providers use whole words; Apple Music can
+    /// return smaller syllable-level chunks.
     pub start_time: f64,
     pub text: String,
 }
@@ -22,8 +24,11 @@ pub struct LyricWord {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LyricLine {
     pub start_time: f64,
+    pub end_time: Option<f64>,
     pub text: String,
     pub words: Vec<LyricWord>,
+    pub background: bool,
+    pub opposite_turn: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -35,8 +40,10 @@ pub enum Lyrics {
 const LYRICS_CACHE_CAPACITY: usize = 256;
 const MUSIXMATCH_ROOT_URL: &str = "https://apic-desktop.musixmatch.com/ws/1.1/";
 const PAXSENIX_ROOT_URL: &str = "https://lyrics.paxsenix.org";
+const ITUNES_SEARCH_ROOT_URL: &str = "https://itunes.apple.com/search";
 const MUSIXMATCH_TIMEOUT: Duration = Duration::from_secs(3);
 const PAXSENIX_TIMEOUT: Duration = Duration::from_secs(5);
+const PAXSENIX_APPLE_LYRICS_TIMEOUT: Duration = Duration::from_secs(10);
 const LRCLIB_TIMEOUT: Duration = Duration::from_secs(5);
 const SERVER_LYRICS_TIMEOUT: Duration = Duration::from_secs(5);
 const LYRICS_INFLIGHT_POLL_INTERVAL: Duration = Duration::from_millis(50);
@@ -45,6 +52,14 @@ const LYRICS_INFLIGHT_WAIT_TIMEOUT: Duration = Duration::from_secs(20);
 static LYRICS_CACHE: OnceLock<Mutex<LyricsCache>> = OnceLock::new();
 static LYRICS_INFLIGHT: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 static MUSIXMATCH_TOKEN: OnceLock<Mutex<Option<MusixmatchToken>>> = OnceLock::new();
+
+macro_rules! lyrics_debug {
+    ($($arg:tt)*) => {
+        if lyrics_terminal_debug_enabled() {
+            eprintln!("[lyrics] {}", format_args!($($arg)*));
+        }
+    };
+}
 
 struct LyricsCache {
     entries: HashMap<String, Option<Lyrics>>,
@@ -186,50 +201,56 @@ struct SubsonicPlainLyricsData {
     value: String,
 }
 
-// --- Paxsenix NetEase lyrics types ---
+// --- Apple Music lyrics types ---
 
 #[derive(Debug, Deserialize)]
-struct PaxsenixNeteaseSearchResponse {
+struct ItunesSearchResponse {
     #[serde(default)]
-    result: Option<PaxsenixNeteaseSearchResult>,
+    results: Vec<ItunesSong>,
 }
 
 #[derive(Debug, Deserialize)]
-struct PaxsenixNeteaseSearchResult {
+#[serde(rename_all = "camelCase")]
+struct ItunesSong {
+    track_id: u64,
+    track_name: String,
+    artist_name: String,
     #[serde(default)]
-    songs: Vec<PaxsenixNeteaseSong>,
+    track_time_millis: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
-struct PaxsenixNeteaseSong {
-    id: u64,
-    name: String,
+struct PaxsenixAppleLyricsResponse {
     #[serde(default)]
-    duration: Option<u64>,
+    content: Vec<PaxsenixAppleLyricLine>,
     #[serde(default)]
-    score: Option<f64>,
+    lrc: Option<String>,
     #[serde(default)]
-    artists: Vec<PaxsenixNeteaseArtist>,
+    plain: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
-struct PaxsenixNeteaseArtist {
-    name: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct PaxsenixNeteaseLyricLine {
+struct PaxsenixAppleLyricLine {
     #[serde(default)]
-    text: Vec<PaxsenixNeteaseLyricWord>,
+    text: Vec<PaxsenixAppleLyricPart>,
+    #[serde(default, rename = "backgroundText")]
+    background_text: Vec<PaxsenixAppleLyricPart>,
     timestamp: u64,
+    #[serde(default)]
+    endtime: Option<u64>,
     #[serde(default)]
     background: bool,
+    #[serde(default, rename = "oppositeTurn")]
+    opposite_turn: bool,
 }
 
 #[derive(Debug, Deserialize)]
-struct PaxsenixNeteaseLyricWord {
+struct PaxsenixAppleLyricPart {
     text: String,
-    timestamp: u64,
+    #[serde(default)]
+    timestamp: Option<u64>,
+    #[serde(default)]
+    part: bool,
 }
 
 // --- Public API ---
@@ -238,7 +259,7 @@ struct PaxsenixNeteaseLyricWord {
 /// word-timed lyrics over line-only matches:
 /// 1. Local .lrc file alongside the audio file (local tracks only)
 /// 2. Jellyfin or Subsonic server lyrics API (server tracks)
-/// 3. Paxsenix NetEase lyrics (word-synced fallback for all tracks)
+/// 3. Paxsenix Apple Music lyrics (syllable/line synced fallback for all tracks)
 /// 4. Musixmatch richsync (word-synced fallback for all tracks)
 /// 5. lrclib.net (fallback for all tracks)
 ///
@@ -260,7 +281,16 @@ pub async fn fetch_lyrics(
     prefer_local: bool,
 ) -> Option<Lyrics> {
     let cache_key = lyrics_cache_key(artist, title, album, duration, track_path);
+    let cache_key_hash = log_lyrics_key_hash(&cache_key);
     let total_start = Instant::now();
+    lyrics_debug!(
+        "fetch start key_hash={} artist={:?} title={:?} duration={} prefer_local={}",
+        cache_key_hash,
+        artist,
+        title,
+        duration,
+        prefer_local
+    );
     if let Some(cached) = lyrics_cache()
         .lock()
         .ok()
@@ -272,14 +302,25 @@ pub async fn fetch_lyrics(
             log_lyrics_key_hash(&cache_key),
             lyrics_kind(cached.as_ref())
         );
+        lyrics_debug!(
+            "cache hit key_hash={} kind={}",
+            cache_key_hash,
+            lyrics_kind(cached.as_ref())
+        );
         return cached;
     }
 
     let _inflight_guard = if try_begin_lyrics_fetch(&cache_key) {
+        lyrics_debug!("inflight acquired key_hash={}", cache_key_hash);
         Some(LyricsInflightGuard {
             key: cache_key.clone(),
         })
     } else {
+        lyrics_debug!(
+            "inflight wait key_hash={} timeout_ms={}",
+            cache_key_hash,
+            LYRICS_INFLIGHT_WAIT_TIMEOUT.as_millis()
+        );
         let wait_start = Instant::now();
         while wait_start.elapsed() < LYRICS_INFLIGHT_WAIT_TIMEOUT {
             crate::sleep(LYRICS_INFLIGHT_POLL_INTERVAL).await;
@@ -288,11 +329,22 @@ pub async fn fetch_lyrics(
                 .ok()
                 .and_then(|mut cache| cache.get_cloned(&cache_key))
             {
+                lyrics_debug!(
+                    "inflight resolved from cache key_hash={} elapsed_ms={} kind={}",
+                    cache_key_hash,
+                    wait_start.elapsed().as_millis(),
+                    lyrics_kind(cached.as_ref())
+                );
                 return cached;
             }
         }
 
         if try_begin_lyrics_fetch(&cache_key) {
+            lyrics_debug!(
+                "inflight timed out, acquired retry key_hash={} waited_ms={}",
+                cache_key_hash,
+                wait_start.elapsed().as_millis()
+            );
             Some(LyricsInflightGuard {
                 key: cache_key.clone(),
             })
@@ -302,8 +354,18 @@ pub async fn fetch_lyrics(
                 .ok()
                 .and_then(|mut cache| cache.get_cloned(&cache_key))
             {
+                lyrics_debug!(
+                    "inflight final cache hit key_hash={} kind={}",
+                    cache_key_hash,
+                    lyrics_kind(cached.as_ref())
+                );
                 return cached;
             }
+            lyrics_debug!(
+                "inflight unresolved key_hash={} waited_ms={}",
+                cache_key_hash,
+                wait_start.elapsed().as_millis()
+            );
             return None;
         }
     };
@@ -324,6 +386,11 @@ pub async fn fetch_lyrics(
             started.elapsed().as_millis(),
             lyrics_kind(local.as_ref())
         );
+        lyrics_debug!(
+            "provider=local_lrc elapsed_ms={} kind={}",
+            started.elapsed().as_millis(),
+            lyrics_kind(local.as_ref())
+        );
         if let Some(lyrics) = local {
             if has_word_timestamps(&lyrics) {
                 if let Ok(mut cache) = lyrics_cache().lock() {
@@ -333,6 +400,12 @@ pub async fn fetch_lyrics(
                     target: "kopuz::lyrics",
                     "selected key_hash={} source=local_lrc kind={} total_ms={}",
                     log_lyrics_key_hash(&cache_key),
+                    lyrics_kind(Some(&lyrics)),
+                    total_start.elapsed().as_millis()
+                );
+                lyrics_debug!(
+                    "selected source=local_lrc key_hash={} kind={} total_ms={}",
+                    cache_key_hash,
                     lyrics_kind(Some(&lyrics)),
                     total_start.elapsed().as_millis()
                 );
@@ -350,6 +423,12 @@ pub async fn fetch_lyrics(
             target: "kopuz::lyrics",
             "selected key_hash={} source=prefer_local kind={} total_ms={}",
             log_lyrics_key_hash(&cache_key),
+            lyrics_kind(fallback.as_ref()),
+            total_start.elapsed().as_millis()
+        );
+        lyrics_debug!(
+            "selected source=prefer_local key_hash={} kind={} total_ms={}",
+            cache_key_hash,
             lyrics_kind(fallback.as_ref()),
             total_start.elapsed().as_millis()
         );
@@ -371,6 +450,11 @@ pub async fn fetch_lyrics(
                     started.elapsed().as_millis(),
                     lyrics_kind(server_lyrics.as_ref())
                 );
+                lyrics_debug!(
+                    "provider=jellyfin elapsed_ms={} kind={}",
+                    started.elapsed().as_millis(),
+                    lyrics_kind(server_lyrics.as_ref())
+                );
                 if let Some(lyrics) = server_lyrics {
                     if has_word_timestamps(&lyrics) {
                         if let Ok(mut cache) = lyrics_cache().lock() {
@@ -380,6 +464,12 @@ pub async fn fetch_lyrics(
                             target: "kopuz::lyrics",
                             "selected key_hash={} source=jellyfin kind={} total_ms={}",
                             log_lyrics_key_hash(&cache_key),
+                            lyrics_kind(Some(&lyrics)),
+                            total_start.elapsed().as_millis()
+                        );
+                        lyrics_debug!(
+                            "selected source=jellyfin key_hash={} kind={} total_ms={}",
+                            cache_key_hash,
                             lyrics_kind(Some(&lyrics)),
                             total_start.elapsed().as_millis()
                         );
@@ -410,6 +500,11 @@ pub async fn fetch_lyrics(
                     started.elapsed().as_millis(),
                     lyrics_kind(server_lyrics.as_ref())
                 );
+                lyrics_debug!(
+                    "provider=subsonic elapsed_ms={} kind={}",
+                    started.elapsed().as_millis(),
+                    lyrics_kind(server_lyrics.as_ref())
+                );
                 if let Some(lyrics) = server_lyrics {
                     if has_word_timestamps(&lyrics) {
                         if let Ok(mut cache) = lyrics_cache().lock() {
@@ -422,6 +517,12 @@ pub async fn fetch_lyrics(
                             lyrics_kind(Some(&lyrics)),
                             total_start.elapsed().as_millis()
                         );
+                        lyrics_debug!(
+                            "selected source=subsonic key_hash={} kind={} total_ms={}",
+                            cache_key_hash,
+                            lyrics_kind(Some(&lyrics)),
+                            total_start.elapsed().as_millis()
+                        );
                         return Some(lyrics);
                     }
                     fallback.get_or_insert(lyrics);
@@ -430,25 +531,36 @@ pub async fn fetch_lyrics(
         }
     }
 
-    // 3. Paxsenix NetEase can provide enhanced word-by-word timestamps.
+    // 3. Paxsenix Apple Music can provide syllable/line-synced lyrics.
     let started = Instant::now();
-    let paxsenix_netease = fetch_from_paxsenix_netease(artist, title, duration).await;
+    let paxsenix_apple = fetch_from_paxsenix_apple_music(artist, title, duration).await;
     tracing::info!(
         target: "kopuz::lyrics",
-        "paxsenix_netease key_hash={} elapsed_ms={} kind={}",
+        "paxsenix_apple key_hash={} elapsed_ms={} kind={}",
         log_lyrics_key_hash(&cache_key),
         started.elapsed().as_millis(),
-        lyrics_kind(paxsenix_netease.as_ref())
+        lyrics_kind(paxsenix_apple.as_ref())
     );
-    if let Some(lyrics) = paxsenix_netease {
+    lyrics_debug!(
+        "provider=paxsenix_apple elapsed_ms={} kind={}",
+        started.elapsed().as_millis(),
+        lyrics_kind(paxsenix_apple.as_ref())
+    );
+    if let Some(lyrics) = paxsenix_apple {
         if has_word_timestamps(&lyrics) {
             if let Ok(mut cache) = lyrics_cache().lock() {
                 cache.put(cache_key.clone(), Some(lyrics.clone()));
             }
             tracing::info!(
                 target: "kopuz::lyrics",
-                "selected key_hash={} source=paxsenix_netease kind={} total_ms={}",
+                "selected key_hash={} source=paxsenix_apple kind={} total_ms={}",
                 log_lyrics_key_hash(&cache_key),
+                lyrics_kind(Some(&lyrics)),
+                total_start.elapsed().as_millis()
+            );
+            lyrics_debug!(
+                "selected source=paxsenix_apple key_hash={} kind={} total_ms={}",
+                cache_key_hash,
                 lyrics_kind(Some(&lyrics)),
                 total_start.elapsed().as_millis()
             );
@@ -467,6 +579,11 @@ pub async fn fetch_lyrics(
         started.elapsed().as_millis(),
         lyrics_kind(musixmatch.as_ref())
     );
+    lyrics_debug!(
+        "provider=musixmatch elapsed_ms={} kind={}",
+        started.elapsed().as_millis(),
+        lyrics_kind(musixmatch.as_ref())
+    );
     if let Some(lyrics) = musixmatch {
         if has_word_timestamps(&lyrics) {
             if let Ok(mut cache) = lyrics_cache().lock() {
@@ -476,6 +593,12 @@ pub async fn fetch_lyrics(
                 target: "kopuz::lyrics",
                 "selected key_hash={} source=musixmatch kind={} total_ms={}",
                 log_lyrics_key_hash(&cache_key),
+                lyrics_kind(Some(&lyrics)),
+                total_start.elapsed().as_millis()
+            );
+            lyrics_debug!(
+                "selected source=musixmatch key_hash={} kind={} total_ms={}",
+                cache_key_hash,
                 lyrics_kind(Some(&lyrics)),
                 total_start.elapsed().as_millis()
             );
@@ -494,6 +617,11 @@ pub async fn fetch_lyrics(
         started.elapsed().as_millis(),
         lyrics_kind(lrclib.as_ref())
     );
+    lyrics_debug!(
+        "provider=lrclib elapsed_ms={} kind={}",
+        started.elapsed().as_millis(),
+        lyrics_kind(lrclib.as_ref())
+    );
     let fetched = lrclib.or(fallback);
     if let Ok(mut cache) = lyrics_cache().lock() {
         cache.put(cache_key.clone(), fetched.clone());
@@ -502,6 +630,12 @@ pub async fn fetch_lyrics(
         target: "kopuz::lyrics",
         "selected key_hash={} source=final kind={} total_ms={}",
         log_lyrics_key_hash(&cache_key),
+        lyrics_kind(fetched.as_ref()),
+        total_start.elapsed().as_millis()
+    );
+    lyrics_debug!(
+        "selected source=final key_hash={} kind={} total_ms={}",
+        cache_key_hash,
         lyrics_kind(fetched.as_ref()),
         total_start.elapsed().as_millis()
     );
@@ -540,10 +674,30 @@ fn lyrics_kind(lyrics: Option<&Lyrics>) -> &'static str {
     }
 }
 
+fn timed_line_count(lines: &[LyricLine]) -> usize {
+    lines.iter().filter(|line| !line.words.is_empty()).count()
+}
+
+fn timed_part_count(lines: &[LyricLine]) -> usize {
+    lines.iter().map(|line| line.words.len()).sum()
+}
+
 fn log_lyrics_key_hash(key: &str) -> String {
     let mut hasher = DefaultHasher::new();
     key.trim().hash(&mut hasher);
     format!("{:016x}", hasher.finish())
+}
+
+fn lyrics_terminal_debug_enabled() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    {
+        false
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::env::var_os("KOPUZ_LYRICS_DEBUG").is_some()
+    }
 }
 
 fn lyrics_cache() -> &'static Mutex<LyricsCache> {
@@ -709,8 +863,11 @@ async fn fetch_jellyfin_lyrics(item_id: &str, server_url: &str, token: &str) -> 
                 l.start.map(|ticks| LyricLine {
                     // Jellyfin uses 100-nanosecond ticks; divide by 10,000,000 to get seconds
                     start_time: ticks as f64 / 10_000_000.0,
+                    end_time: None,
                     text: l.text.clone(),
                     words: Vec::new(),
+                    background: false,
+                    opposite_turn: false,
                 })
             })
             .collect();
@@ -813,8 +970,11 @@ async fn subsonic_get_by_id(
             .filter_map(|l| {
                 l.start.map(|ms| LyricLine {
                     start_time: ms as f64 / 1000.0,
+                    end_time: None,
                     text: l.value.clone(),
                     words: Vec::new(),
+                    background: false,
+                    opposite_turn: false,
                 })
             })
             .collect();
@@ -924,6 +1084,7 @@ async fn fetch_from_musixmatch_enhanced(artist: &str, title: &str) -> Option<Lyr
             target: "kopuz::lyrics",
             "musixmatch track.search status={status}"
         );
+        lyrics_debug!("musixmatch track.search status={status}");
         return None;
     }
 
@@ -934,8 +1095,18 @@ async fn fetch_from_musixmatch_enhanced(artist: &str, title: &str) -> Option<Lyr
             "musixmatch no_match query={query:?} candidates={}",
             tracks.len()
         );
+        lyrics_debug!(
+            "musixmatch no_match candidates={} query={:?}",
+            tracks.len(),
+            query
+        );
         return None;
     };
+    lyrics_debug!(
+        "musixmatch selected_track_id={} candidates={}",
+        track_id,
+        tracks.len()
+    );
     let started = Instant::now();
     let richsync = musixmatch_get(
         &client,
@@ -956,6 +1127,7 @@ async fn fetch_from_musixmatch_enhanced(artist: &str, title: &str) -> Option<Lyr
             target: "kopuz::lyrics",
             "musixmatch richsync status={status}"
         );
+        lyrics_debug!("musixmatch richsync status={status}");
         return None;
     }
 
@@ -965,13 +1137,24 @@ async fn fetch_from_musixmatch_enhanced(artist: &str, title: &str) -> Option<Lyr
     let enhanced_lrc = musixmatch_richsync_to_lrc(body)?;
     let parsed = parse_lrc(&enhanced_lrc);
     if parsed.iter().any(|line| !line.words.is_empty()) {
+        lyrics_debug!(
+            "musixmatch richsync parsed lines={} timed_lines={} timed_parts={}",
+            parsed.len(),
+            timed_line_count(&parsed),
+            timed_part_count(&parsed)
+        );
         Some(Lyrics::Synced(parsed))
     } else {
+        lyrics_debug!("musixmatch richsync parsed without word timestamps");
         None
     }
 }
 
-async fn fetch_from_paxsenix_netease(artist: &str, title: &str, duration: u64) -> Option<Lyrics> {
+async fn fetch_from_paxsenix_apple_music(
+    artist: &str,
+    title: &str,
+    duration: u64,
+) -> Option<Lyrics> {
     let query = format!("{title} {artist}");
     let query = query.trim();
     if query.is_empty() {
@@ -980,90 +1163,107 @@ async fn fetch_from_paxsenix_netease(artist: &str, title: &str, duration: u64) -
 
     let client = reqwest::Client::new();
     let search = client
-        .get(format!("{PAXSENIX_ROOT_URL}/netease/search"))
-        .query(&[("q", query)])
+        .get(ITUNES_SEARCH_ROOT_URL)
+        .query(&[
+            ("term", query),
+            ("entity", "song"),
+            ("limit", "8"),
+            ("country", "US"),
+        ])
         .timeout(PAXSENIX_TIMEOUT)
         .send()
         .await
         .map_err(|error| {
             tracing::info!(
                 target: "kopuz::lyrics",
-                "paxsenix_netease search failed={error}"
+                "paxsenix_apple itunes_search failed={error}"
             );
         })
         .ok()?
-        .json::<PaxsenixNeteaseSearchResponse>()
+        .json::<ItunesSearchResponse>()
         .await
         .map_err(|error| {
             tracing::info!(
                 target: "kopuz::lyrics",
-                "paxsenix_netease search json_failed={error}"
+                "paxsenix_apple itunes_search json_failed={error}"
             );
         })
         .ok()?;
 
-    let songs = search.result?.songs;
-    let Some(song) = best_paxsenix_netease_song(&songs, query, duration) else {
+    let Some(song) = best_itunes_song(&search.results, query, duration) else {
         tracing::info!(
             target: "kopuz::lyrics",
-            "paxsenix_netease no_match query={query:?} candidates={}",
-            songs.len()
+            "paxsenix_apple no_match query={query:?} candidates={}",
+            search.results.len()
+        );
+        lyrics_debug!(
+            "paxsenix_apple no_match candidates={} query={:?}",
+            search.results.len(),
+            query
         );
         return None;
     };
+    lyrics_debug!(
+        "paxsenix_apple selected_track id={} title={:?} artist={:?} candidates={}",
+        song.track_id,
+        song.track_name,
+        song.artist_name,
+        search.results.len()
+    );
 
-    let rows = client
-        .get(format!("{PAXSENIX_ROOT_URL}/netease/lyrics"))
-        .query(&[("id", song.id.to_string()), ("word", "true".to_string())])
-        .timeout(PAXSENIX_TIMEOUT)
+    let response = client
+        .get(format!("{PAXSENIX_ROOT_URL}/apple-music/lyrics"))
+        .query(&[("id", song.track_id.to_string())])
+        .timeout(PAXSENIX_APPLE_LYRICS_TIMEOUT)
         .send()
         .await
         .map_err(|error| {
             tracing::info!(
                 target: "kopuz::lyrics",
-                "paxsenix_netease lyrics failed={error}"
+                "paxsenix_apple lyrics failed={error}"
             );
         })
         .ok()?
-        .json::<Vec<PaxsenixNeteaseLyricLine>>()
+        .json::<PaxsenixAppleLyricsResponse>()
         .await
         .map_err(|error| {
             tracing::info!(
                 target: "kopuz::lyrics",
-                "paxsenix_netease lyrics json_failed={error}"
+                "paxsenix_apple lyrics json_failed={error}"
             );
         })
         .ok()?;
 
-    let lines = paxsenix_netease_to_lines(rows)?;
-    if lines.iter().any(|line| !line.words.is_empty()) {
-        Some(Lyrics::Synced(lines))
+    let lyrics = paxsenix_apple_to_lyrics(response)?;
+    if let Lyrics::Synced(lines) = &lyrics {
+        lyrics_debug!(
+            "paxsenix_apple parsed kind={} lines={} syllable_lines={} syllable_parts={}",
+            lyrics_kind(Some(&lyrics)),
+            lines.len(),
+            timed_line_count(lines),
+            timed_part_count(lines)
+        );
     } else {
-        None
+        lyrics_debug!("paxsenix_apple parsed kind={}", lyrics_kind(Some(&lyrics)));
     }
+    Some(lyrics)
 }
 
-fn best_paxsenix_netease_song<'a>(
-    songs: &'a [PaxsenixNeteaseSong],
+fn best_itunes_song<'a>(
+    songs: &'a [ItunesSong],
     query: &str,
     duration: u64,
-) -> Option<&'a PaxsenixNeteaseSong> {
+) -> Option<&'a ItunesSong> {
     songs
         .iter()
         .filter_map(|song| {
-            let artists = song
-                .artists
-                .iter()
-                .map(|artist| artist.name.as_str())
-                .collect::<Vec<_>>()
-                .join(" ");
-            let candidate = format!("{} {}", song.name, artists);
+            let candidate = format!("{} {}", song.track_name, song.artist_name);
             let text_score = lyrics_match_score(&candidate, query);
             if text_score < 55.0 {
                 return None;
             }
 
-            let duration_score = match (duration, song.duration) {
+            let duration_score = match (duration, song.track_time_millis) {
                 (0, _) | (_, None) => 0.0,
                 (expected, Some(candidate_ms)) => {
                     let candidate_seconds = candidate_ms / 1000;
@@ -1075,54 +1275,137 @@ fn best_paxsenix_netease_song<'a>(
                 }
             };
 
-            let provider_score = song.score.unwrap_or_default() / 10.0;
-            Some((text_score + duration_score + provider_score, song))
+            Some((text_score + duration_score, song))
         })
         .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
         .map(|(_, song)| song)
 }
 
-fn paxsenix_netease_to_lines(rows: Vec<PaxsenixNeteaseLyricLine>) -> Option<Vec<LyricLine>> {
-    let mut lines = rows
-        .into_iter()
-        .filter(|row| !row.background)
-        .filter_map(|row| {
-            let words = row
-                .text
-                .into_iter()
-                .filter(|word| !word.text.trim().is_empty())
-                .map(|word| LyricWord {
-                    start_time: word.timestamp as f64 / 1000.0,
-                    text: word.text,
-                })
-                .collect::<Vec<_>>();
+fn paxsenix_apple_to_lyrics(response: PaxsenixAppleLyricsResponse) -> Option<Lyrics> {
+    let lines = paxsenix_apple_to_lines(response.content);
+    if let Some(lines) = lines
+        && !lines.is_empty()
+    {
+        return Some(Lyrics::Synced(lines));
+    }
 
-            let text = words
-                .iter()
-                .map(|word| word.text.as_str())
-                .collect::<String>()
-                .trim()
-                .to_string();
+    if let Some(lrc) = response.lrc
+        && !lrc.trim().is_empty()
+    {
+        let parsed = parse_lrc(&lrc);
+        if !parsed.is_empty() {
+            return Some(Lyrics::Synced(parsed));
+        }
+    }
 
-            if text.is_empty() {
-                None
-            } else {
-                Some(LyricLine {
-                    start_time: row.timestamp as f64 / 1000.0,
-                    text,
-                    words,
-                })
-            }
-        })
-        .collect::<Vec<_>>();
+    response
+        .plain
+        .filter(|plain| !plain.trim().is_empty())
+        .map(Lyrics::Plain)
+}
 
-    lines.sort_by(|a, b| {
-        a.start_time
-            .partial_cmp(&b.start_time)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+fn paxsenix_apple_to_lines(rows: Vec<PaxsenixAppleLyricLine>) -> Option<Vec<LyricLine>> {
+    let mut lines = Vec::new();
+
+    for row in rows {
+        let row_start_time = row.timestamp as f64 / 1000.0;
+        let row_end_time = row.endtime.map(|endtime| endtime as f64 / 1000.0);
+        let opposite_turn = row.opposite_turn;
+        let row_has_background_text = !row.background_text.is_empty();
+        let main_line_is_background = row.background && !row_has_background_text;
+
+        if let Some(line) = paxsenix_apple_parts_to_line(
+            row.text,
+            row_start_time,
+            row_end_time,
+            main_line_is_background,
+            opposite_turn,
+        ) {
+            lines.push(line);
+        }
+
+        let background_start_time = row
+            .background_text
+            .iter()
+            .find_map(|part| part.timestamp)
+            .map(|timestamp| timestamp as f64 / 1000.0)
+            .unwrap_or(row_start_time);
+
+        if let Some(line) = paxsenix_apple_parts_to_line(
+            row.background_text,
+            background_start_time,
+            row_end_time,
+            true,
+            opposite_turn,
+        ) {
+            lines.push(line);
+        }
+    }
 
     (!lines.is_empty()).then_some(lines)
+}
+
+fn paxsenix_apple_parts_to_line(
+    parts: Vec<PaxsenixAppleLyricPart>,
+    start_time: f64,
+    end_time: Option<f64>,
+    background: bool,
+    opposite_turn: bool,
+) -> Option<LyricLine> {
+    let mut text = String::new();
+    let mut words = Vec::new();
+    let mut previous_part_continues = false;
+
+    for part in parts {
+        if part.text.trim().is_empty() {
+            continue;
+        }
+
+        let prefix = if should_insert_apple_space(&text, previous_part_continues, &part.text) {
+            " "
+        } else {
+            ""
+        };
+        let display_text = format!("{prefix}{}", part.text);
+
+        text.push_str(&display_text);
+        if let Some(timestamp) = part.timestamp {
+            words.push(LyricWord {
+                start_time: timestamp as f64 / 1000.0,
+                text: display_text,
+            });
+        }
+        previous_part_continues = part.part;
+    }
+
+    let text = text.trim().to_string();
+    (!text.is_empty()).then_some(LyricLine {
+        start_time,
+        end_time,
+        text,
+        words,
+        background,
+        opposite_turn,
+    })
+}
+
+fn should_insert_apple_space(
+    current_text: &str,
+    previous_part_continues: bool,
+    next_text: &str,
+) -> bool {
+    if current_text.is_empty() || previous_part_continues {
+        return false;
+    }
+
+    let Some(first_char) = next_text.chars().next() else {
+        return false;
+    };
+
+    !matches!(
+        first_char,
+        ',' | '.' | '?' | '!' | ':' | ';' | ')' | ']' | '}' | '\'' | '’'
+    )
 }
 
 async fn musixmatch_get(
@@ -1470,8 +1753,11 @@ fn parse_lrc(lrc_text: &str) -> Vec<LyricLine> {
             if !words.is_empty() {
                 lines.push(LyricLine {
                     start_time: words[0].start_time,
+                    end_time: None,
                     text,
                     words,
+                    background: false,
+                    opposite_turn: false,
                 });
             } else if !text.is_empty() {
                 if let Some(last) = lines.last_mut() {
@@ -1488,8 +1774,11 @@ fn parse_lrc(lrc_text: &str) -> Vec<LyricLine> {
         for start_time in line_timestamps {
             lines.push(LyricLine {
                 start_time,
+                end_time: None,
                 text: text.clone(),
                 words: words.clone(),
+                background: false,
+                opposite_turn: false,
             });
         }
     }
@@ -1677,60 +1966,133 @@ mod tests {
     }
 
     #[test]
-    fn converts_paxsenix_netease_word_lyrics() {
-        let rows = vec![PaxsenixNeteaseLyricLine {
-            text: vec![
-                PaxsenixNeteaseLyricWord {
-                    text: "Hello ".to_string(),
-                    timestamp: 10100,
-                },
-                PaxsenixNeteaseLyricWord {
-                    text: "world".to_string(),
-                    timestamp: 10600,
-                },
-            ],
-            timestamp: 10000,
-            background: false,
-        }];
+    fn converts_paxsenix_apple_syllable_lyrics() {
+        let response = PaxsenixAppleLyricsResponse {
+            content: vec![PaxsenixAppleLyricLine {
+                text: vec![
+                    PaxsenixAppleLyricPart {
+                        text: "Hel".to_string(),
+                        timestamp: Some(10100),
+                        part: true,
+                    },
+                    PaxsenixAppleLyricPart {
+                        text: "lo".to_string(),
+                        timestamp: Some(10300),
+                        part: false,
+                    },
+                    PaxsenixAppleLyricPart {
+                        text: "world".to_string(),
+                        timestamp: Some(10600),
+                        part: false,
+                    },
+                ],
+                background_text: Vec::new(),
+                timestamp: 10000,
+                endtime: Some(11000),
+                background: false,
+                opposite_turn: false,
+            }],
+            lrc: None,
+            plain: None,
+        };
 
-        let lines = paxsenix_netease_to_lines(rows).expect("lyrics should convert");
+        let Lyrics::Synced(lines) =
+            paxsenix_apple_to_lyrics(response).expect("lyrics should convert")
+        else {
+            panic!("apple lyrics should be synced");
+        };
 
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].start_time, 10.0);
         assert_eq!(lines[0].text, "Hello world");
-        assert_eq!(lines[0].words.len(), 2);
+        assert_eq!(lines[0].words.len(), 3);
         assert_eq!(lines[0].words[0].start_time, 10.1);
-        assert_eq!(lines[0].words[0].text, "Hello ");
-        assert_eq!(lines[0].words[1].start_time, 10.6);
-        assert_eq!(lines[0].words[1].text, "world");
+        assert_eq!(lines[0].words[0].text, "Hel");
+        assert_eq!(lines[0].words[2].start_time, 10.6);
+        assert_eq!(lines[0].words[2].text, " world");
     }
 
     #[test]
-    fn paxsenix_netease_selector_checks_duration() {
+    fn splits_paxsenix_apple_background_text() {
+        let response = PaxsenixAppleLyricsResponse {
+            content: vec![
+                PaxsenixAppleLyricLine {
+                    text: vec![
+                        PaxsenixAppleLyricPart {
+                            text: "Looking".to_string(),
+                            timestamp: Some(10000),
+                            part: false,
+                        },
+                        PaxsenixAppleLyricPart {
+                            text: "for".to_string(),
+                            timestamp: Some(10500),
+                            part: false,
+                        },
+                    ],
+                    background_text: vec![PaxsenixAppleLyricPart {
+                        text: "Echo".to_string(),
+                        timestamp: Some(10800),
+                        part: false,
+                    }],
+                    timestamp: 10000,
+                    endtime: Some(12000),
+                    background: true,
+                    opposite_turn: true,
+                },
+                PaxsenixAppleLyricLine {
+                    text: vec![PaxsenixAppleLyricPart {
+                        text: "Next".to_string(),
+                        timestamp: Some(10600),
+                        part: false,
+                    }],
+                    background_text: Vec::new(),
+                    timestamp: 10600,
+                    endtime: Some(13000),
+                    background: false,
+                    opposite_turn: true,
+                },
+            ],
+            lrc: None,
+            plain: None,
+        };
+
+        let Lyrics::Synced(lines) =
+            paxsenix_apple_to_lyrics(response).expect("lyrics should convert")
+        else {
+            panic!("apple lyrics should be synced");
+        };
+
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[0].text, "Looking for");
+        assert!(!lines[0].background);
+        assert!(lines[0].opposite_turn);
+        assert_eq!(lines[1].text, "Echo");
+        assert!(lines[1].background);
+        assert!(lines[1].opposite_turn);
+        assert_eq!(lines[1].start_time, 10.8);
+        assert_eq!(lines[2].text, "Next");
+    }
+
+    #[test]
+    fn itunes_selector_checks_duration() {
         let songs = vec![
-            PaxsenixNeteaseSong {
-                id: 1,
-                name: "Hello".to_string(),
-                duration: Some(300_000),
-                score: Some(100.0),
-                artists: vec![PaxsenixNeteaseArtist {
-                    name: "Adele".to_string(),
-                }],
+            ItunesSong {
+                track_id: 1,
+                track_name: "Somebody Told Me".to_string(),
+                artist_name: "The Killers".to_string(),
+                track_time_millis: Some(230_000),
             },
-            PaxsenixNeteaseSong {
-                id: 2,
-                name: "Hello".to_string(),
-                duration: Some(295_000),
-                score: Some(80.0),
-                artists: vec![PaxsenixNeteaseArtist {
-                    name: "Adele".to_string(),
-                }],
+            ItunesSong {
+                track_id: 2,
+                track_name: "Somebody Told Me".to_string(),
+                artist_name: "The Killers".to_string(),
+                track_time_millis: Some(197_200),
             },
         ];
 
-        let selected = best_paxsenix_netease_song(&songs, "Hello Adele", 295)
+        let selected = best_itunes_song(&songs, "Somebody Told Me The Killers", 198)
             .expect("a duration-matched result should be selected");
 
-        assert_eq!(selected.id, 2);
+        assert_eq!(selected.track_id, 2);
     }
 }
