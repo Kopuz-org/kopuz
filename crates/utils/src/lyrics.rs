@@ -33,7 +33,9 @@ pub enum Lyrics {
 
 const LYRICS_CACHE_CAPACITY: usize = 256;
 const MUSIXMATCH_ROOT_URL: &str = "https://apic-desktop.musixmatch.com/ws/1.1/";
+const PAXSENIX_ROOT_URL: &str = "https://lyrics.paxsenix.org";
 const MUSIXMATCH_TIMEOUT: Duration = Duration::from_secs(3);
+const PAXSENIX_TIMEOUT: Duration = Duration::from_secs(5);
 const LRCLIB_TIMEOUT: Duration = Duration::from_secs(5);
 
 static LYRICS_CACHE: OnceLock<Mutex<LyricsCache>> = OnceLock::new();
@@ -180,13 +182,61 @@ struct SubsonicPlainLyricsData {
     value: String,
 }
 
+// --- Paxsenix NetEase lyrics types ---
+
+#[derive(Debug, Deserialize)]
+struct PaxsenixNeteaseSearchResponse {
+    #[serde(default)]
+    result: Option<PaxsenixNeteaseSearchResult>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PaxsenixNeteaseSearchResult {
+    #[serde(default)]
+    songs: Vec<PaxsenixNeteaseSong>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PaxsenixNeteaseSong {
+    id: u64,
+    name: String,
+    #[serde(default)]
+    duration: Option<u64>,
+    #[serde(default)]
+    score: Option<f64>,
+    #[serde(default)]
+    artists: Vec<PaxsenixNeteaseArtist>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PaxsenixNeteaseArtist {
+    name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PaxsenixNeteaseLyricLine {
+    #[serde(default)]
+    text: Vec<PaxsenixNeteaseLyricWord>,
+    timestamp: u64,
+    #[serde(default)]
+    background: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct PaxsenixNeteaseLyricWord {
+    text: String,
+    timestamp: u64,
+}
+
 // --- Public API ---
 
 /// Fetch lyrics for a track, trying sources in priority order while preferring
 /// word-timed lyrics over line-only matches:
 /// 1. Local .lrc file alongside the audio file (local tracks only)
 /// 2. Jellyfin or Subsonic server lyrics API (server tracks)
-/// 3. lrclib.net (fallback for all tracks)
+/// 3. Paxsenix NetEase lyrics (word-synced fallback for all tracks)
+/// 4. Musixmatch richsync (word-synced fallback for all tracks)
+/// 5. lrclib.net (fallback for all tracks)
 ///
 /// For Jellyfin: `server_token` = access token, `server_user_id` = user_id (unused for lyrics)
 /// For Subsonic: `server_token` = password, `server_user_id` = username
@@ -371,7 +421,34 @@ pub async fn fetch_lyrics(
         }
     }
 
-    // 3. Musixmatch richsync can provide enhanced word-by-word timestamps.
+    // 3. Paxsenix NetEase can provide enhanced word-by-word timestamps.
+    let started = Instant::now();
+    let paxsenix_netease = fetch_from_paxsenix_netease(artist, title, duration).await;
+    tracing::info!(
+        target: "kopuz::lyrics",
+        "paxsenix_netease key={} elapsed_ms={} kind={}",
+        log_lyrics_key(&cache_key),
+        started.elapsed().as_millis(),
+        lyrics_kind(paxsenix_netease.as_ref())
+    );
+    if let Some(lyrics) = paxsenix_netease {
+        if has_word_timestamps(&lyrics) {
+            if let Ok(mut cache) = lyrics_cache().lock() {
+                cache.put(cache_key.clone(), Some(lyrics.clone()));
+            }
+            tracing::info!(
+                target: "kopuz::lyrics",
+                "selected key={} source=paxsenix_netease kind={} total_ms={}",
+                log_lyrics_key(&cache_key),
+                lyrics_kind(Some(&lyrics)),
+                total_start.elapsed().as_millis()
+            );
+            return Some(lyrics);
+        }
+        fallback.get_or_insert(lyrics);
+    }
+
+    // 4. Musixmatch richsync can provide enhanced word-by-word timestamps.
     let started = Instant::now();
     let musixmatch = fetch_from_musixmatch_enhanced(artist, title).await;
     tracing::info!(
@@ -398,7 +475,7 @@ pub async fn fetch_lyrics(
         fallback.get_or_insert(lyrics);
     }
 
-    // 4. lrclib fallback
+    // 5. lrclib fallback
     let started = Instant::now();
     let lrclib = fetch_from_lrclib(artist, title, album, duration).await;
     tracing::info!(
@@ -873,6 +950,160 @@ async fn fetch_from_musixmatch_enhanced(artist: &str, title: &str) -> Option<Lyr
     } else {
         None
     }
+}
+
+async fn fetch_from_paxsenix_netease(artist: &str, title: &str, duration: u64) -> Option<Lyrics> {
+    let query = format!("{title} {artist}");
+    let query = query.trim();
+    if query.is_empty() {
+        return None;
+    }
+
+    let client = reqwest::Client::new();
+    let search = client
+        .get(format!("{PAXSENIX_ROOT_URL}/netease/search"))
+        .query(&[("q", query)])
+        .timeout(PAXSENIX_TIMEOUT)
+        .send()
+        .await
+        .map_err(|error| {
+            tracing::info!(
+                target: "kopuz::lyrics",
+                "paxsenix_netease search failed={error}"
+            );
+        })
+        .ok()?
+        .json::<PaxsenixNeteaseSearchResponse>()
+        .await
+        .map_err(|error| {
+            tracing::info!(
+                target: "kopuz::lyrics",
+                "paxsenix_netease search json_failed={error}"
+            );
+        })
+        .ok()?;
+
+    let songs = search.result?.songs;
+    let Some(song) = best_paxsenix_netease_song(&songs, query, duration) else {
+        tracing::info!(
+            target: "kopuz::lyrics",
+            "paxsenix_netease no_match query={query:?} candidates={}",
+            songs.len()
+        );
+        return None;
+    };
+
+    let rows = client
+        .get(format!("{PAXSENIX_ROOT_URL}/netease/lyrics"))
+        .query(&[("id", song.id.to_string()), ("word", "true".to_string())])
+        .timeout(PAXSENIX_TIMEOUT)
+        .send()
+        .await
+        .map_err(|error| {
+            tracing::info!(
+                target: "kopuz::lyrics",
+                "paxsenix_netease lyrics failed={error}"
+            );
+        })
+        .ok()?
+        .json::<Vec<PaxsenixNeteaseLyricLine>>()
+        .await
+        .map_err(|error| {
+            tracing::info!(
+                target: "kopuz::lyrics",
+                "paxsenix_netease lyrics json_failed={error}"
+            );
+        })
+        .ok()?;
+
+    let lines = paxsenix_netease_to_lines(rows)?;
+    if lines.iter().any(|line| !line.words.is_empty()) {
+        Some(Lyrics::Synced(lines))
+    } else {
+        None
+    }
+}
+
+fn best_paxsenix_netease_song<'a>(
+    songs: &'a [PaxsenixNeteaseSong],
+    query: &str,
+    duration: u64,
+) -> Option<&'a PaxsenixNeteaseSong> {
+    songs
+        .iter()
+        .filter_map(|song| {
+            let artists = song
+                .artists
+                .iter()
+                .map(|artist| artist.name.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            let candidate = format!("{} {}", song.name, artists);
+            let text_score = lyrics_match_score(&candidate, query);
+            if text_score < 55.0 {
+                return None;
+            }
+
+            let duration_score = match (duration, song.duration) {
+                (0, _) | (_, None) => 0.0,
+                (expected, Some(candidate_ms)) => {
+                    let candidate_seconds = candidate_ms / 1000;
+                    let delta = candidate_seconds.abs_diff(expected);
+                    if delta > 12 {
+                        return None;
+                    }
+                    12.0 - delta as f64
+                }
+            };
+
+            let provider_score = song.score.unwrap_or_default() / 10.0;
+            Some((text_score + duration_score + provider_score, song))
+        })
+        .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
+        .map(|(_, song)| song)
+}
+
+fn paxsenix_netease_to_lines(rows: Vec<PaxsenixNeteaseLyricLine>) -> Option<Vec<LyricLine>> {
+    let mut lines = rows
+        .into_iter()
+        .filter(|row| !row.background)
+        .filter_map(|row| {
+            let words = row
+                .text
+                .into_iter()
+                .filter(|word| !word.text.trim().is_empty())
+                .map(|word| LyricWord {
+                    start_time: word.timestamp as f64 / 1000.0,
+                    text: word.text,
+                })
+                .collect::<Vec<_>>();
+
+            let text = words
+                .iter()
+                .map(|word| word.text.as_str())
+                .collect::<String>()
+                .trim()
+                .to_string();
+
+            if text.is_empty() {
+                None
+            } else {
+                Some(LyricLine {
+                    start_time: row.timestamp as f64 / 1000.0,
+                    text,
+                    words,
+                })
+            }
+        })
+        .collect::<Vec<_>>();
+
+    lines.sort_by(|a, b| {
+        a.start_time
+            .partial_cmp(&b.start_time)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    (!lines.is_empty()).then_some(lines)
 }
 
 async fn musixmatch_get(
@@ -1413,5 +1644,63 @@ mod tests {
         assert_eq!(parsed[0].words[0].text, "Hello ");
         assert_eq!(parsed[0].words[1].start_time, 10.6);
         assert_eq!(parsed[0].words[1].text, "world ");
+    }
+
+    #[test]
+    fn converts_paxsenix_netease_word_lyrics() {
+        let rows = vec![PaxsenixNeteaseLyricLine {
+            text: vec![
+                PaxsenixNeteaseLyricWord {
+                    text: "Hello ".to_string(),
+                    timestamp: 10100,
+                },
+                PaxsenixNeteaseLyricWord {
+                    text: "world".to_string(),
+                    timestamp: 10600,
+                },
+            ],
+            timestamp: 10000,
+            background: false,
+        }];
+
+        let lines = paxsenix_netease_to_lines(rows).expect("lyrics should convert");
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].start_time, 10.0);
+        assert_eq!(lines[0].text, "Hello world");
+        assert_eq!(lines[0].words.len(), 2);
+        assert_eq!(lines[0].words[0].start_time, 10.1);
+        assert_eq!(lines[0].words[0].text, "Hello ");
+        assert_eq!(lines[0].words[1].start_time, 10.6);
+        assert_eq!(lines[0].words[1].text, "world");
+    }
+
+    #[test]
+    fn paxsenix_netease_selector_checks_duration() {
+        let songs = vec![
+            PaxsenixNeteaseSong {
+                id: 1,
+                name: "Hello".to_string(),
+                duration: Some(300_000),
+                score: Some(100.0),
+                artists: vec![PaxsenixNeteaseArtist {
+                    name: "Adele".to_string(),
+                }],
+            },
+            PaxsenixNeteaseSong {
+                id: 2,
+                name: "Hello".to_string(),
+                duration: Some(295_000),
+                score: Some(80.0),
+                artists: vec![PaxsenixNeteaseArtist {
+                    name: "Adele".to_string(),
+                }],
+            },
+        ];
+
+        let selected = best_paxsenix_netease_song(&songs, "Hello Adele", 295)
+            .expect("a duration-matched result should be selected");
+
+        assert_eq!(selected.id, 2);
     }
 }
