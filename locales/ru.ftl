@@ -131,7 +131,7 @@ server_name_optional = Имя сервера (опционально)
 server_url_placeholder = http://localhost:8096
 change = Изменить
 heart_track_to_add = Поставьте ❤️ треку, чтобы добавить его в избранное.
-heart_track_to_add_server = Поставьте ❤️ треку, чтобы добавить его в избранное и синхронизировать на сервер.
+heart_track_to_add_server = Поставьте ❤️ треку, чтобы добавить его в избранное и синхронизировать его с сервером.
 
 # Search & Placeholders
 search_placeholder = Поиск артистов, альбомов или треков...
