@@ -27,10 +27,8 @@ add = o namako
 add_folder = o namako e poki
 no_music_folders = poki kalama li ala
 add_server = o namako e pana
-# TODO: NEED LOCALIZATION
-connect_to_lastfm = Connect to Last.fm
-lastfm_connected = Last.fm Connected
-# TODO: NEED LOCALIZATION
+connect_to_lastfm = o lon tawa Last.fm
+lastfm_connected = Last.fm li lon
 server_details = sona pana
 server_name = nimi pana
 server_url = nasin URL pana
@@ -81,10 +79,8 @@ create = o pali
 save = o kama jo
 enabled = LON
 disabled = LON ALA
-# TODO: Translate lines below
-play = Play
-shuffle = Shuffle
-# ------
+play = o kalama
+shuffle = o nasa e nasin kalama
 
 # Navigation & Headers
 tracks = kalama musi
@@ -140,10 +136,8 @@ heart_track_to_add_server = o luka e nena olin lon kute kalama la kalama li kama
 search_placeholder = o alasa e jan pali, e kulupu pi kalama sama, e kalama...
 no_results_found = "{ $query }" li lon ala
 listenbrainz_token_placeholder = o pana e "token ListenBrainz"
-# TODO: NEED LOCALIZATION
-lastfm_api_key_placeholder = Enter your Last.fm API Key
-lastfm_api_secret_placeholder = Enter your Last.fm API Secret
-# TODO: NEED LOCALIZATION
+lastfm_api_key_placeholder = o pana e Last.fm API key sina
+lastfm_api_secret_placeholder = o pana e Last.fm API secret sina
 
 # Empty States
 album_not_found = kulupu pi kalama sama li lon ala
