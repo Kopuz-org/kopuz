@@ -69,10 +69,12 @@ button:focus {
     contain-intrinsic-block-size: 400px;
 }
 
-/* Force GPU compositing on hover-animated image containers */
-.gpu-hover {
+/* Promote hover-animated image containers to a GPU layer only while hovered.
+   A permanent will-change/translateZ here gives every card its own compositing
+   layer; at 2x device pixel ratio that exhausts WebKit's layer budget and makes
+   scrolling image-heavy pages stutter. */
+.gpu-hover:hover {
     will-change: transform;
-    transform: translateZ(0);
 }
 
 body {

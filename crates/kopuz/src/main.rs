@@ -493,6 +493,18 @@ fn make_hq_image(raw: &[u8], cache_path: &std::path::Path) -> Option<Vec<u8>> {
 fn main() {
     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
     {
+        // WebKitGTK's hardware-acceleration policy is on-demand by default,
+        // which often leaves scrolling un-composited (software-rendered) and
+        // visibly laggy on hi-dpi screens. Force the accelerated compositing
+        // path unless the user explicitly set either knob themselves.
+        #[cfg(target_os = "linux")]
+        if std::env::var_os("WEBKIT_FORCE_COMPOSITING_MODE").is_none()
+            && std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE").is_none()
+        {
+            // SAFETY: runs before any other thread is spawned.
+            unsafe { std::env::set_var("WEBKIT_FORCE_COMPOSITING_MODE", "1") };
+        }
+
         let log_dir = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
             .map(|dirs| dirs.cache_dir().join("logs"))
             .unwrap_or_else(|| std::path::PathBuf::from("logs"));
@@ -1860,6 +1872,51 @@ fn App() -> Element {
         ));
     });
 
+    // Scroll-position tracking lives in a throttled JS listener instead of a
+    // Dioxus onscroll handler: a native onscroll fires every frame and each
+    // event is serialized across the webview IPC bridge, which costs WebKit
+    // frames while scrolling image-heavy pages. The listener is passive and
+    // coalesces to at most ~8 messages per second.
+    use_future(move || async move {
+        let mut tracker = dioxus::document::eval(
+            r#"
+            const install = () => {
+                const el = document.getElementById('main-scroll-area');
+                if (!el) { setTimeout(install, 100); return; }
+                let timer = null;
+                el.addEventListener('scroll', () => {
+                    if (timer !== null) return;
+                    timer = setTimeout(() => {
+                        timer = null;
+                        dioxus.send(el.scrollTop);
+                    }, 120);
+                }, { passive: true });
+            };
+            install();
+            "#,
+        );
+        while let Ok(pos) = tracker.recv::<f64>().await {
+            let route = *current_route.peek();
+            let album_sel = selected_album_id.peek().clone();
+            let artist_sel = selected_artist_name.peek().clone();
+            match route {
+                Route::Album if !album_sel.is_empty() => {
+                    detail_scroll_positions
+                        .write()
+                        .insert(format!("album:{album_sel}"), pos);
+                }
+                Route::Artist if !artist_sel.is_empty() => {
+                    detail_scroll_positions
+                        .write()
+                        .insert(format!("artist:{artist_sel}"), pos);
+                }
+                _ => {
+                    scroll_positions.write().insert(route, pos);
+                }
+            }
+        }
+    });
+
     provide_context(ctrl);
     provide_context(config);
     let discover_now_playing = use_signal(|| None::<String>);
@@ -2159,27 +2216,6 @@ fn App() -> Element {
                 div {
                     id: "main-scroll-area",
                     class: if cfg!(target_os = "android") { "flex-1 min-h-0 flex flex-col overflow-hidden relative" } else { "flex-1 overflow-y-auto" },
-                    onscroll: move |evt| {
-                        let pos = evt.scroll_top();
-                        let route = *current_route.peek();
-                        let album_sel = selected_album_id.peek().clone();
-                        let artist_sel = selected_artist_name.peek().clone();
-                        match route {
-                            Route::Album if !album_sel.is_empty() => {
-                                detail_scroll_positions
-                                    .write()
-                                    .insert(format!("album:{album_sel}"), pos);
-                            }
-                            Route::Artist if !artist_sel.is_empty() => {
-                                detail_scroll_positions
-                                    .write()
-                                    .insert(format!("artist:{artist_sel}"), pos);
-                            }
-                            _ => {
-                                scroll_positions.write().insert(route, pos);
-                            }
-                        }
-                    },
 
                     if cfg!(target_os = "android") {
                         {
