@@ -49,6 +49,8 @@
 html,
 body {
     height: 100%;
+    /* Prevent macOS WKWebView rubber-band overscroll on the root scroller */
+    overscroll-behavior: none;
 }
 
 button:focus {
@@ -61,6 +63,8 @@ button:focus {
 
 #main-scroll-area {
     contain: layout paint;
+    /* Don't chain scroll to the document when hitting top/bottom */
+    overscroll-behavior: none;
 }
 
 /* CSS-native virtualization: browser skips paint/layout for off-screen sections */
