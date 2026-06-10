@@ -107,7 +107,7 @@ fn logs_section(_config: Signal<AppConfig>) -> Element {
 }
 use components::settings_items::{
     BackBehaviorSelector, ChannelModeSelector, DiscordPresencePausedSettings,
-    DiscordPresenceSettings, EqualizerPanel, LanguageSelector, LastFmSettings,
+    DiscordPresenceSettings, EqualizerPanel, LanguageSelector, LastFmSettings, LibreFmSettings,
     MultiDirectoryPicker, MusicBrainzSettings, RadioRegistryDropdown, ServerSettings, SettingItem,
     ThemeSelector, ToggleSetting,
 };
@@ -131,8 +131,7 @@ async fn try_resume(seed: Option<String>) -> Option<String> {
         return seed;
     }
     if let Some(c) = &seed
-        && let Ok(Some(rotated)) =
-            ::server::ytmusic::verify_session_keepalive::tick(c).await
+        && let Ok(Some(rotated)) = ::server::ytmusic::verify_session_keepalive::tick(c).await
         && validate(&rotated).await
     {
         return Some(rotated);
@@ -262,7 +261,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             let srv = cfg.server.as_ref();
             (
                 srv.and_then(|s| s.yt_browser).unwrap_or(*yt_browser.peek()),
-                srv.and_then(|s| s.access_token.clone()).filter(|t| !t.is_empty()),
+                srv.and_then(|s| s.access_token.clone())
+                    .filter(|t| !t.is_empty()),
                 srv.and_then(|s| s.id.clone()).unwrap_or_default(),
             )
         };
@@ -796,6 +796,18 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
 
                                                 on_session_key_save: move |value: String| {
                                                     config.write().lastfm_session_key = value;
+                                                },
+                                            }
+                                        }
+                                    }
+                                    SettingItem {
+                                        title: i18n::t("librefm").to_string(),
+                                        control: rsx! {
+                                            LibreFmSettings {
+                                                session_key: config.read().librefm_session_key.clone(),
+
+                                                on_session_key_save: move |value: String| {
+                                                    config.write().librefm_session_key = value;
                                                 },
                                             }
                                         }
