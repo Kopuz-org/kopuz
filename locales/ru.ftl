@@ -130,8 +130,8 @@ custom_manual = Нестандартные (ручное API)
 server_name_optional = Имя сервера (опционально)
 server_url_placeholder = http://localhost:8096
 change = Изменить
-heart_track_to_add = Отметьте ❤️ трек, чтобы добавить его в избранное.
-heart_track_to_add_server = Отметьте ❤️ трек, чтобы добавить его в избранное и синхронизировать на сервер.
+heart_track_to_add = Поставьте ❤️ треку, чтобы добавить его в избранное.
+heart_track_to_add_server = Поставьте ❤️ треку, чтобы добавить его в избранное и синхронизировать его с сервером.
 
 # Search & Placeholders
 search_placeholder = Поиск артистов, альбомов или треков...
@@ -168,7 +168,7 @@ unsupported_provider_desc = Специфичные для провайдера {
 
 # Additional Keys
 no_genres_found = Жанры не найдены в вашей библиотеке.
-jump_back_in = Продолжить слушать
+jump_back_in = Продолжить прослушивание
 by_artist = От
 by_artist_full = { $artist }
 start_listening = Начать прослушивание
@@ -179,7 +179,7 @@ no_tracks_found = Треки не найдены.
 unknown_artist = Неизвестный исполнитель
 unknown_album = Неизвестный альбом
 unknown_title = Неизвестное название
-unknown_genre = Неизвестно
+unknown_genre = Неизвестный жанр
 most_played_local_tracks = Ваши самые прослушиваемые локальные треки.
 no_tracks_in_library = В вашей библиотеке не найдено треков.
 no_songs_here = Здесь нет песен.
@@ -380,8 +380,8 @@ album_cover = Обложка альбома
 auto_fetch_covers = Автоматически загружать обложки альбомов
 prefer_local_lyrics = Предпочитать локальные тексты (.lrc / встроенные, без онлайн-резерва)
 cover_fetch_strategy = Стратегия загрузки обложек
-musicbrainz_first = MusicBrainz сначала
-lastfm_first = Last.fm сначала
+musicbrainz_first = Сначала MusicBrainz
+lastfm_first = Сначала Last.fm
 musicbrainz_only = Только MusicBrainz
 lastfm_only = Только Last.fm
 remove_cover = Удалить обложку
