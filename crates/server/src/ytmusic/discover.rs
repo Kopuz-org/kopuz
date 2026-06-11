@@ -60,6 +60,7 @@ pub enum DiscoverItem {
     },
 }
 
+#[tracing::instrument(name = "yt.discover_home", skip(cookies))]
 pub async fn fetch_home(cookies: &str) -> Result<DiscoverHome, String> {
     let body = build_browse_body(Some("FEmusic_home"));
     let resp = post(
@@ -131,6 +132,7 @@ pub struct YtArtist {
     pub sections: Vec<DiscoverShelf>,
 }
 
+#[tracing::instrument(name = "yt.fetch_artist", skip(cookies), fields(channel_id = %channel_id))]
 pub async fn fetch_artist(channel_id: &str, cookies: &str) -> Result<YtArtist, String> {
     let body = build_browse_body(Some(channel_id));
     let resp = post(
@@ -373,6 +375,7 @@ fn parse_artist_song_row(row: &Value) -> Option<Track> {
     })
 }
 
+#[tracing::instrument(name = "yt.fetch_album", skip(cookies), fields(browse_id = %browse_id))]
 pub async fn fetch_album(browse_id: &str, cookies: &str) -> Result<YtAlbum, String> {
     let body = build_browse_body(Some(browse_id));
     let resp = post(

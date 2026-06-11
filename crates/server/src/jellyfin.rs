@@ -244,6 +244,7 @@ impl JellyfinClient {
         }
     }
 
+    #[tracing::instrument(name = "jellyfin.request", skip_all, fields(path = %path))]
     async fn request<T>(&self, path: &str) -> Result<T, String>
     where
         T: DeserializeOwned,
@@ -260,6 +261,7 @@ impl JellyfinClient {
         resp.json::<T>().await.map_err(|e| e.to_string())
     }
 
+    #[tracing::instrument(name = "jellyfin.request", skip_all, fields(path = %path))]
     async fn request_with_query<T, Q>(&self, path: &str, query: &Q) -> Result<T, String>
     where
         T: DeserializeOwned,

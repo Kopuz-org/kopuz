@@ -1,13 +1,18 @@
 use dioxus::prelude::*;
 use reader::PlaylistStore;
 
-#[derive(PartialEq, Clone, Copy, Props)]
+const DEFAULT_OVERLAY_CLASS: &str =
+    "fixed inset-0 bg-black/80 flex items-center justify-center z-50";
+
+#[derive(PartialEq, Clone, Props)]
 pub struct PlaylistModalProps {
     pub playlist_store: Signal<PlaylistStore>,
     pub is_jellyfin: bool,
     pub on_close: EventHandler,
     pub on_add_to_playlist: EventHandler<String>,
     pub on_create_playlist: EventHandler<String>,
+    #[props(default)]
+    pub overlay_class: Option<String>,
 }
 
 #[component]
@@ -20,6 +25,10 @@ pub fn PlaylistModal(props: PlaylistModalProps) -> Element {
     let create_text = i18n::t("create").to_string();
     let cancel_text = i18n::t("cancel").to_string();
     let playlist_name_input = i18n::t("playlist_name_input").to_string();
+    let overlay_class = props
+        .overlay_class
+        .as_deref()
+        .unwrap_or(DEFAULT_OVERLAY_CLASS);
 
     let playlists: Vec<(String, String, String)> = if props.is_jellyfin {
         store
@@ -51,7 +60,7 @@ pub fn PlaylistModal(props: PlaylistModalProps) -> Element {
 
     rsx! {
         div {
-            class: "fixed inset-0 bg-black/80 flex items-center justify-center z-50",
+            class: overlay_class,
             onclick: move |_| props.on_close.call(()),
             div {
                 class: "bg-neutral-900 rounded-xl border border-white/10 w-full max-w-md p-6",

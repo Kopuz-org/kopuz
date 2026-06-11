@@ -79,6 +79,7 @@ pub(super) fn content_type_to_ext(content_type: &str) -> Option<&'static str> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[tracing::instrument(name = "download.to_cache", skip(url), fields(item_id = %item_id))]
 pub async fn download_track_to_cache(
     item_id: &str,
     url: &str,
@@ -135,7 +136,7 @@ pub async fn download_tracks_batch(
                         .offline_tracks
                         .insert(id.clone(), path.to_string_lossy().into_owned());
                 }
-                Err(e) => eprintln!("Batch download failed for {id}: {e}"),
+                Err(e) => tracing::warn!(%id, error = %e, "batch download failed"),
             }
         }
     }

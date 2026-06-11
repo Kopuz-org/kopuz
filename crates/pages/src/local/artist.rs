@@ -175,6 +175,7 @@ pub fn LocalArtist(
     });
 
     let name = artist_name.read().clone();
+    let page_container_class = crate::layout::page_container_class(&config.read().ui_style);
 
     let mut add_tracks_to_playlist = move |playlist_id: String, paths: Vec<PathBuf>| {
         let mut store = playlist_store.write();
@@ -216,8 +217,10 @@ pub fn LocalArtist(
 
     rsx! {
         div {
+            class: page_container_class,
             if name.is_empty() {
-                div { class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-8",
+                div { class: "flex-1 min-h-0 overflow-y-auto pb-20",
+                    div { class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-8",
                     for (artist , cover_path) in local_artists() {
                         {
                             let cover_url = utils::format_artwork_thumb_url(cover_path.as_ref(), 320);
@@ -252,13 +255,16 @@ pub fn LocalArtist(
                             }
                         }
                     }
+                    }
                 }
             } else {
                 div {
+                    class: "relative flex-1 min-h-0 flex flex-col",
                     if *show_playlist_modal.read() {
                         PlaylistModal {
                             playlist_store,
                             is_jellyfin: false,
+                            overlay_class: Some("absolute inset-0 bg-black/80 flex items-center justify-center z-50".to_string()),
                             on_close: move |_| {
                                 show_playlist_modal.set(false);
                                 clear_selection(&mut is_selection_mode, &mut selected_tracks);
@@ -328,6 +334,7 @@ pub fn LocalArtist(
                     if is_selection_mode() {
                         SelectionBar {
                             count: selected_tracks.read().len(),
+                            class: Some("absolute bottom-24 left-1/2 -translate-x-1/2 bg-indigo-500 text-white px-6 py-2.5 rounded-full shadow-2xl flex items-center gap-4 z-50 animate-in fade-in zoom-in duration-200 font-mono".to_string()),
                             on_add_to_queue: move |_| {
                                 let selected = selected_tracks.read().clone();
                                 if selected.is_empty() {
@@ -365,6 +372,7 @@ pub fn LocalArtist(
                             PlaylistModal {
                                 playlist_store,
                                 is_jellyfin: false,
+                                overlay_class: Some("absolute inset-0 bg-black/80 flex items-center justify-center z-50".to_string()),
                                 on_close: move |_| show_album_playlist_modal.set(false),
                                 on_add_to_playlist: move |playlist_id: String| {
                                     if let Some(album_id) = pending_album_id_for_playlist.read().clone() {

@@ -8,6 +8,7 @@ use crate::NavigationController;
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::PlayerController;
+use tracing::Instrument;
 use reader::models::Track;
 use config::MusicSource;
 
@@ -29,7 +30,7 @@ pub(crate) fn share_to_musicbrainz(release_id: Option<String>, artist: String, t
         } else {
             toast("Couldn't find this track on MusicBrainz");
         }
-    });
+    }.instrument(tracing::info_span!("musicbrainz.fetch")));
 }
 
 pub(crate) fn share_youtube_url(video_id: &str) {
@@ -826,8 +827,8 @@ fn start_radio_from(
             Ok(tracks) if !tracks.is_empty() => {
                 ctrl.play_queue_linear(tracks);
             }
-            Ok(_) => eprintln!("[yt-mix] empty queue for seed {video_id}"),
-            Err(e) => eprintln!("[yt-mix] failed for seed {video_id}: {e}"),
+            Ok(_) => tracing::debug!(seed = %video_id, "YT mix returned empty queue"),
+            Err(e) => tracing::warn!(seed = %video_id, error = %e, "YT mix failed"),
         }
-    });
+    }.instrument(tracing::info_span!("mix.start")));
 }
