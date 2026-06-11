@@ -17,6 +17,7 @@ mod cfg_store;
 mod migrate;
 mod queries;
 mod rows;
+mod writes;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
@@ -162,5 +163,25 @@ impl Storage for Native {
 
     async fn is_favorite(&self, server_id: &str, ref_: &str) -> Result<bool, DbError> {
         queries::is_favorite(&self.pool(), server_id, ref_).await
+    }
+
+    async fn upsert_tracks(
+        &self,
+        source: &crate::Source,
+        tracks: &[reader::Track],
+    ) -> Result<(), DbError> {
+        writes::upsert_tracks(&self.pool(), source, tracks).await
+    }
+
+    async fn upsert_albums(
+        &self,
+        source: &crate::Source,
+        albums: &[reader::Album],
+    ) -> Result<(), DbError> {
+        writes::upsert_albums(&self.pool(), source, albums).await
+    }
+
+    async fn prune_local_tracks(&self, root: &str, keep: &[String]) -> Result<u64, DbError> {
+        writes::prune_local_tracks(&self.pool(), root, keep).await
     }
 }

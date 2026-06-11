@@ -1017,7 +1017,7 @@ fn App() -> Element {
         .cloned()
         .expect("db initialized in main before launch");
     use_context_provider(|| db.clone());
-    hooks::db_reactivity::use_generations_provider();
+    let generations = hooks::db_reactivity::use_generations_provider();
     // Start the PoToken minter whenever a YouTube Music server is active — not
     // just anon. A *signed-in but non-Premium* account streams the same 251 as
     // anon and also needs a content pot for deep ranges; only true Premium
@@ -1762,6 +1762,7 @@ fn App() -> Element {
         }
     });
 
+    let db_for_scan = db.clone();
     use_effect(move || {
         if !*initial_load_done.read() {
             return;
@@ -1789,6 +1790,8 @@ fn App() -> Element {
         }
         last_scan_key.set(Some(scan_key));
 
+        let db = db_for_scan.clone();
+        let gens = generations;
         #[cfg(not(target_arch = "wasm32"))]
         spawn(async move {
             let configured_dirs = configured_dirs;
@@ -1860,6 +1863,41 @@ fn App() -> Element {
                 // Show the library immediately — before any cover fetching.
                 library.set(current_lib.clone());
                 let _ = current_lib.save(&lib_path());
+
+                // Mirror the scanned local library into the DB in batches (the
+                // streaming-write target). The UI still reads the in-memory
+                // signal until the sweep; this keeps the DB current — upserts
+                // are idempotent, and prune drops tracks whose files are gone.
+                {
+                    let db = db.clone();
+                    let tracks = current_lib.tracks.clone();
+                    let albums = current_lib.albums.clone();
+                    let roots: Vec<String> = scannable_dirs
+                        .iter()
+                        .map(|d| d.to_string_lossy().into_owned())
+                        .collect();
+                    spawn(async move {
+                        for chunk in tracks.chunks(100) {
+                            if db.upsert_tracks(&db::Source::Local, chunk).await.is_ok() {
+                                gens.bump_coalesced(hooks::db_reactivity::Table::Tracks);
+                            }
+                        }
+                        if db.upsert_albums(&db::Source::Local, &albums).await.is_ok() {
+                            gens.bump_coalesced(hooks::db_reactivity::Table::Albums);
+                        }
+                        let keep: Vec<String> =
+                            tracks.iter().map(|t| t.id.key().into_owned()).collect();
+                        for root in &roots {
+                            match db.prune_local_tracks(root, &keep).await {
+                                Ok(n) if n > 0 => {
+                                    tracing::info!(removed = n, root = %root, "db: pruned deleted local tracks")
+                                }
+                                _ => {}
+                            }
+                        }
+                        gens.bump(hooks::db_reactivity::Table::Tracks);
+                    });
+                }
 
                 if fetch_covers {
                     // Fetch missing covers in the background so the UI stays responsive.

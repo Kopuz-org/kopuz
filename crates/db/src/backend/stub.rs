@@ -63,4 +63,24 @@ impl Storage for Stub {
     async fn is_favorite(&self, _server_id: &str, _ref_: &str) -> Result<bool, DbError> {
         Ok(false)
     }
+
+    async fn upsert_tracks(
+        &self,
+        _source: &crate::Source,
+        _tracks: &[reader::Track],
+    ) -> Result<(), DbError> {
+        Ok(())
+    }
+
+    async fn upsert_albums(
+        &self,
+        _source: &crate::Source,
+        _albums: &[reader::Album],
+    ) -> Result<(), DbError> {
+        Ok(())
+    }
+
+    async fn prune_local_tracks(&self, _root: &str, _keep: &[String]) -> Result<u64, DbError> {
+        Ok(0)
+    }
 }

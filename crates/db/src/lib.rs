@@ -169,6 +169,21 @@ pub trait Storage: Send + Sync {
 
     /// Whether `ref_` is favorited under `server_id`.
     async fn is_favorite(&self, server_id: &str, ref_: &str) -> Result<bool, DbError>;
+
+    /// Batch upsert tracks for a source (one transaction). Identity is
+    /// `(source, track_key)`; an existing row is updated in place. Used by the
+    /// streaming scan/sync so a batch lands atomically.
+    async fn upsert_tracks(&self, source: &Source, tracks: &[reader::Track])
+    -> Result<(), DbError>;
+
+    /// Batch upsert albums for a source (one transaction).
+    async fn upsert_albums(&self, source: &Source, albums: &[reader::Album])
+    -> Result<(), DbError>;
+
+    /// Delete local tracks whose path is under `root` but was not in the last
+    /// scan (`keep` = the scanned `track_key`s). Returns rows removed. The scan's
+    /// reconcile step, replacing the old post-scan `retain`.
+    async fn prune_local_tracks(&self, root: &str, keep: &[String]) -> Result<u64, DbError>;
 }
 
 /// Cheap-`Clone` handle to the active storage backend, shared via Dioxus context.
