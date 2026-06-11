@@ -184,4 +184,24 @@ impl Storage for Native {
     async fn prune_local_tracks(&self, root: &str, keep: &[String]) -> Result<u64, DbError> {
         writes::prune_local_tracks(&self.pool(), root, keep).await
     }
+
+    async fn set_favorite(&self, server_id: &str, ref_: &str, on: bool) -> Result<(), DbError> {
+        writes::set_favorite(&self.pool(), server_id, ref_, on).await
+    }
+
+    async fn dirty_favorites(&self, server_id: &str) -> Result<Vec<String>, DbError> {
+        writes::dirty_favorites(&self.pool(), server_id).await
+    }
+
+    async fn clear_favorite_dirty(&self, server_id: &str, ref_: &str) -> Result<(), DbError> {
+        writes::clear_favorite_dirty(&self.pool(), server_id, ref_).await
+    }
+
+    async fn replace_favorites_clean(
+        &self,
+        server_id: &str,
+        refs: &[String],
+    ) -> Result<(), DbError> {
+        writes::replace_favorites_clean(&self.pool(), server_id, refs).await
+    }
 }

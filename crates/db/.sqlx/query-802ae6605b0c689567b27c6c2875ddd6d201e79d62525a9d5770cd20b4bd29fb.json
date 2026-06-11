@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO favorites (server_id, ref, dirty) VALUES (?1, ?2, 0) ON CONFLICT(server_id, ref) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "802ae6605b0c689567b27c6c2875ddd6d201e79d62525a9d5770cd20b4bd29fb"
+}

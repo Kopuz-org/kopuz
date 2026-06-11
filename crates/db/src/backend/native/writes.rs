@@ -104,6 +104,88 @@ pub async fn upsert_albums(
     Ok(())
 }
 
+pub async fn set_favorite(
+    pool: &SqlitePool,
+    server_id: &str,
+    ref_: &str,
+    on: bool,
+) -> Result<(), DbError> {
+    if on {
+        sqlx::query!(
+            "INSERT INTO favorites (server_id, ref, dirty) VALUES (?1, ?2, 1) \
+             ON CONFLICT(server_id, ref) DO UPDATE SET dirty = 1",
+            server_id,
+            ref_
+        )
+        .execute(pool)
+        .await?;
+    } else {
+        sqlx::query!(
+            "DELETE FROM favorites WHERE server_id = ?1 AND ref = ?2",
+            server_id,
+            ref_
+        )
+        .execute(pool)
+        .await?;
+    }
+    Ok(())
+}
+
+pub async fn dirty_favorites(pool: &SqlitePool, server_id: &str) -> Result<Vec<String>, DbError> {
+    Ok(sqlx::query_scalar!(
+        "SELECT ref FROM favorites WHERE server_id = ?1 AND dirty = 1",
+        server_id
+    )
+    .fetch_all(pool)
+    .await?)
+}
+
+pub async fn clear_favorite_dirty(
+    pool: &SqlitePool,
+    server_id: &str,
+    ref_: &str,
+) -> Result<(), DbError> {
+    sqlx::query!(
+        "UPDATE favorites SET dirty = 0 WHERE server_id = ?1 AND ref = ?2",
+        server_id,
+        ref_
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn replace_favorites_clean(
+    pool: &SqlitePool,
+    server_id: &str,
+    refs: &[String],
+) -> Result<(), DbError> {
+    let keep_json = serde_json::to_string(refs)?;
+    let mut tx = pool.begin().await?;
+    // Drop clean rows the remote no longer has (dirty rows survive — not pushed yet).
+    sqlx::query(
+        "DELETE FROM favorites WHERE server_id = ?1 AND dirty = 0 \
+         AND ref NOT IN (SELECT value FROM json_each(?2))",
+    )
+    .bind(server_id)
+    .bind(&keep_json)
+    .execute(&mut *tx)
+    .await?;
+    // Add the remote set as clean rows (leave a dirty row's flag intact).
+    for r in refs {
+        sqlx::query!(
+            "INSERT INTO favorites (server_id, ref, dirty) VALUES (?1, ?2, 0) \
+             ON CONFLICT(server_id, ref) DO NOTHING",
+            server_id,
+            r
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
 pub async fn prune_local_tracks(
     pool: &SqlitePool,
     root: &str,

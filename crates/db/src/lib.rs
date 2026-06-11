@@ -170,6 +170,26 @@ pub trait Storage: Send + Sync {
     /// Whether `ref_` is favorited under `server_id`.
     async fn is_favorite(&self, server_id: &str, ref_: &str) -> Result<bool, DbError>;
 
+    /// Toggle a favorite locally and mark it `dirty` (an optimistic change not yet
+    /// pushed to the server). `on` adds the row, `!on` removes it. Works while
+    /// unauthenticated — the reconciler flushes dirty rows once a server is active.
+    async fn set_favorite(&self, server_id: &str, ref_: &str, on: bool) -> Result<(), DbError>;
+
+    /// Refs whose local favorite state hasn't been pushed to the server yet.
+    async fn dirty_favorites(&self, server_id: &str) -> Result<Vec<String>, DbError>;
+
+    /// Clear the `dirty` flag for a ref after a successful remote push.
+    async fn clear_favorite_dirty(&self, server_id: &str, ref_: &str) -> Result<(), DbError>;
+
+    /// Replace a server's favorites with the remote set (a sync pull): rows not in
+    /// `refs` and not `dirty` are dropped, rows in `refs` are added clean. Dirty
+    /// local rows are preserved (push-before-pull hasn't flushed them yet).
+    async fn replace_favorites_clean(
+        &self,
+        server_id: &str,
+        refs: &[String],
+    ) -> Result<(), DbError>;
+
     /// Batch upsert tracks for a source (one transaction). Identity is
     /// `(source, track_key)`; an existing row is updated in place. Used by the
     /// streaming scan/sync so a batch lands atomically.

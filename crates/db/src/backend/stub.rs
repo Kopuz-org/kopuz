@@ -83,4 +83,24 @@ impl Storage for Stub {
     async fn prune_local_tracks(&self, _root: &str, _keep: &[String]) -> Result<u64, DbError> {
         Ok(0)
     }
+
+    async fn set_favorite(&self, _server_id: &str, _ref_: &str, _on: bool) -> Result<(), DbError> {
+        Ok(())
+    }
+
+    async fn dirty_favorites(&self, _server_id: &str) -> Result<Vec<String>, DbError> {
+        Ok(Vec::new())
+    }
+
+    async fn clear_favorite_dirty(&self, _server_id: &str, _ref_: &str) -> Result<(), DbError> {
+        Ok(())
+    }
+
+    async fn replace_favorites_clean(
+        &self,
+        _server_id: &str,
+        _refs: &[String],
+    ) -> Result<(), DbError> {
+        Ok(())
+    }
 }
