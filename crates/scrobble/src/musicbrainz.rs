@@ -88,8 +88,20 @@ pub fn make_listen<'a>(
         .unwrap()
         .as_secs() as i64;
 
+    make_listen_at(artist, track, release, additional_info, now_unix)
+}
+
+/// Like [`make_listen`], but with an explicit listen timestamp. Used when
+/// resubmitting queued offline scrobbles so they keep their original time.
+pub fn make_listen_at<'a>(
+    artist: &'a str,
+    track: &'a str,
+    release: Option<&'a str>,
+    additional_info: Option<HashMap<&'a str, &'a str>>,
+    listened_at: i64,
+) -> Listen<'a> {
     Listen {
-        listened_at: Some(now_unix),
+        listened_at: Some(listened_at),
         track_metadata: TrackMetadata {
             artist_name: artist,
             track_name: track,
