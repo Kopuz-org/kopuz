@@ -381,6 +381,7 @@ artist_photo = 아티스트 사진
 album_cover = 앨범 커버
 auto_fetch_covers = 앨범 커버 자동 가져오기
 prefer_local_lyrics = 로컬 가사 우선 (.lrc / 내장, 온라인 대체 없음)
+enable_musixmatch_lyrics = Musixmatch를 가사 예비 소스로 사용
 cover_fetch_strategy = 커버 가져오기 전략
 musicbrainz_first = MusicBrainz 우선
 lastfm_first = Last.fm 우선

@@ -1,8 +1,8 @@
+use crate::NavigationController;
 use crate::lyrics_view::LyricsView;
 use crate::queue_list_view::QueueListView;
 use crate::shared::fmt_time;
 use crate::titlebar::Titlebar;
-use crate::NavigationController;
 use config::AppConfig;
 use dioxus::prelude::*;
 use hooks::use_player_controller::{LoopMode, PlayerController};
@@ -419,18 +419,20 @@ pub fn Fullscreen(
             return;
         }
         last_key.set(new_key);
-        let (server_url, server_token, server_user_id, prefer_local) = {
+        let (server_url, server_token, server_user_id, prefer_local, enable_musixmatch) = {
             let conf = config.peek();
             let prefer_local = conf.prefer_local_lyrics;
+            let enable_musixmatch = conf.enable_musixmatch_lyrics;
             if let Some(server) = &conf.server {
                 (
                     Some(server.url.clone()),
                     server.access_token.clone(),
                     server.user_id.clone(),
                     prefer_local,
+                    enable_musixmatch,
                 )
             } else {
-                (None, None, None, prefer_local)
+                (None, None, None, prefer_local, enable_musixmatch)
             }
         };
 
@@ -442,9 +444,14 @@ pub fn Fullscreen(
             return;
         }
 
-        if let Some(cached) =
-            utils::lyrics::cached_lyrics(&artist, &title, &album, duration, &track_path)
-        {
+        if let Some(cached) = utils::lyrics::cached_lyrics(
+            &artist,
+            &title,
+            &album,
+            duration,
+            &track_path,
+            enable_musixmatch,
+        ) {
             let display = cached.or_else(|| {
                 Some(utils::lyrics::Lyrics::Plain(
                     i18n::t("lyrics_not_found").to_string(),
@@ -457,7 +464,8 @@ pub fn Fullscreen(
         lyrics.set(None);
 
         spawn(async move {
-            let result = utils::lyrics::fetch_lyrics(
+            let mut last_displayed: Option<utils::lyrics::Lyrics> = None;
+            let result = utils::lyrics::fetch_lyrics_progressive(
                 &artist,
                 &title,
                 &album,
@@ -467,6 +475,13 @@ pub fn Fullscreen(
                 server_token.as_deref(),
                 server_user_id.as_deref(),
                 prefer_local,
+                enable_musixmatch,
+                |partial| {
+                    if *fetch_gen.peek() == fetch_id && last_displayed.as_ref() != Some(&partial) {
+                        last_displayed = Some(partial.clone());
+                        lyrics.set(Some(Some(partial)));
+                    }
+                },
             )
             .await;
             if *fetch_gen.peek() == fetch_id {
@@ -475,7 +490,9 @@ pub fn Fullscreen(
                         i18n::t("lyrics_not_found").to_string(),
                     ))
                 });
-                lyrics.set(Some(display));
+                if display.as_ref() != last_displayed.as_ref() {
+                    lyrics.set(Some(display));
+                }
             }
         });
     });

@@ -381,6 +381,7 @@ artist_photo = 艺术家照片
 album_cover = 专辑封面
 auto_fetch_covers = 自动获取专辑封面
 prefer_local_lyrics = 优先使用本地歌词（.lrc / 内嵌，无在线回退）
+enable_musixmatch_lyrics = 使用 Musixmatch 作为备用歌词来源
 cover_fetch_strategy = 获取封面策略
 musicbrainz_first = 优先 MusicBrainz
 lastfm_first = 优先 Last.fm

@@ -387,6 +387,7 @@ artist_photo = صورة الفنان
 album_cover = غلاف الألبوم
 auto_fetch_covers = الجلب التلقائي لأغلفة الألبومات
 prefer_local_lyrics = تفضيل كلمات الأغاني المحلية (.lrc / مضمّنة، دون رجوع إلى الإنترنت)
+enable_musixmatch_lyrics = استخدام Musixmatch كمصدر احتياطي لكلمات الأغاني
 cover_fetch_strategy = استراتيجية جلب الغلاف
 musicbrainz_first = MusicBrainz أولاً
 lastfm_first = Last.fm أولاً

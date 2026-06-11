@@ -381,6 +381,7 @@ artist_photo = Künstlerfoto
 album_cover = Albumcover
 auto_fetch_covers = Albumcover automatisch abrufen
 prefer_local_lyrics = Lokale Liedtexte bevorzugen (.lrc / eingebettet, kein Online-Fallback)
+enable_musixmatch_lyrics = Musixmatch als Liedtext-Fallback verwenden
 cover_fetch_strategy = Cover-Abrufstrategie
 musicbrainz_first = MusicBrainz zuerst
 lastfm_first = Last.fm zuerst
