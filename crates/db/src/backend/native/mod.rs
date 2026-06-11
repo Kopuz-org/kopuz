@@ -46,7 +46,6 @@ impl Native {
     }
 
     /// Rebind to a different pool (debug "load release DB" / "reset"). Live.
-    #[allow(dead_code)] // wired up by the debug DB panel (step 12)
     pub fn swap_pool(&self, pool: SqlitePool) {
         self.pool.store(Arc::new(pool));
     }
@@ -243,6 +242,91 @@ impl Storage for Native {
 
     async fn meta_put(&self, cache_key: &str, kind: &str, payload: &str) -> Result<(), DbError> {
         writes::meta_put(&self.pool(), cache_key, kind, payload).await
+    }
+
+    async fn debug_reset(&self, db_path: &Path) -> Result<(), DbError> {
+        self.pool().close().await;
+        for ext in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(with_ext(db_path, ext));
+        }
+        let pool = open_pool(db_path).await?;
+        MIGRATOR.run(&pool).await?;
+        self.swap_pool(pool);
+        Ok(())
+    }
+
+    async fn debug_load_release(
+        &self,
+        release_path: &Path,
+        db_path: &Path,
+    ) -> Result<(), DbError> {
+        if !release_path.exists() {
+            return Err(DbError::Io(format!(
+                "release db not found at {}",
+                release_path.display()
+            )));
+        }
+        self.pool().close().await;
+        for ext in ["", "-wal", "-shm"] {
+            let src = with_ext(release_path, ext);
+            let dst = with_ext(db_path, ext);
+            let _ = std::fs::remove_file(&dst);
+            if src.exists() {
+                std::fs::copy(&src, &dst).map_err(|e| DbError::Io(e.to_string()))?;
+            }
+        }
+        let pool = open_pool(db_path).await?;
+        MIGRATOR.run(&pool).await?;
+        self.swap_pool(pool);
+        Ok(())
+    }
+
+    async fn debug_seed_synthetic(&self, n: u32) -> Result<(), DbError> {
+        let pool = self.pool();
+        let mut tx = pool.begin().await?;
+        for i in 0..n {
+            let key = format!("/synthetic/{i:06}.flac");
+            let title = format!("Synthetic {i:06}");
+            let artist = format!("Artist {:03}", i % 100);
+            let album = format!("Album {:04}", i % 2000);
+            sqlx::query(
+                "INSERT OR IGNORE INTO tracks (source, track_key, path, title, artist, album, artists_json) \
+                 VALUES ('local', ?1, ?1, ?2, ?3, ?4, '[]')",
+            )
+            .bind(&key)
+            .bind(&title)
+            .bind(&artist)
+            .bind(&album)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn debug_info(&self) -> Result<String, DbError> {
+        let pool = self.pool();
+        let migrations: Vec<(i64, String)> = sqlx::query_as(
+            "SELECT version, description FROM _sqlx_migrations ORDER BY version",
+        )
+        .fetch_all(&*pool)
+        .await?;
+        let mut out = String::new();
+        for (v, d) in &migrations {
+            out.push_str(&format!("migration {v} — {d}\n"));
+        }
+        for table in ["tracks", "albums", "playlists", "favorites", "servers", "metadata_cache"] {
+            let n: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+                .fetch_one(&*pool)
+                .await?;
+            out.push_str(&format!("{table}: {n}\n"));
+        }
+        Ok(out)
+    }
+
+    async fn debug_vacuum(&self) -> Result<(), DbError> {
+        sqlx::query("VACUUM").execute(&*self.pool()).await?;
+        Ok(())
     }
 
     async fn clear_favorite_dirty(&self, server_id: &str, ref_: &str) -> Result<(), DbError> {

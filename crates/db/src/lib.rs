@@ -219,6 +219,29 @@ pub trait Storage: Send + Sync {
     /// Generic metadata-cache write (upsert of `payload` for `(cache_key, kind)`).
     async fn meta_put(&self, cache_key: &str, kind: &str, payload: &str) -> Result<(), DbError>;
 
+    // --- Debug-panel operations (dev tooling; no-ops on the wasm stub) -----
+
+    /// Delete the database files at `db_path`, re-init an empty schema there,
+    /// and hot-swap the live pool onto it.
+    async fn debug_reset(&self, db_path: &std::path::Path) -> Result<(), DbError>;
+
+    /// Copy the release database over `db_path` (running any pending
+    /// migrations on the copy) and hot-swap the live pool onto it.
+    async fn debug_load_release(
+        &self,
+        release_path: &std::path::Path,
+        db_path: &std::path::Path,
+    ) -> Result<(), DbError>;
+
+    /// Insert `n` synthetic local tracks (perf testing the windowed queries).
+    async fn debug_seed_synthetic(&self, n: u32) -> Result<(), DbError>;
+
+    /// Human-readable DB info: applied migrations + row counts.
+    async fn debug_info(&self) -> Result<String, DbError>;
+
+    /// VACUUM.
+    async fn debug_vacuum(&self) -> Result<(), DbError>;
+
     /// The favorite refs (`track_key`s) for a server (`"local"` for filesystem).
     async fn favorites(&self, server_id: &str) -> Result<Vec<String>, DbError>;
 
@@ -336,6 +359,13 @@ pub fn peek_config(db_path: &std::path::Path) -> Option<config::AppConfig> {
                 .flatten();
         json.and_then(|j| serde_json::from_str(&j).ok())
     })
+}
+
+/// The RELEASE database path (`kopuz.db`), independent of build profile — the
+/// debug panel's "load release DB" source.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn release_db_path() -> std::path::PathBuf {
+    config_dir().join("kopuz.db")
 }
 
 /// `<config_dir>` for kopuz (matches the legacy JSON store location).

@@ -143,6 +143,30 @@ impl Storage for Stub {
         Ok(())
     }
 
+    async fn debug_reset(&self, _db_path: &std::path::Path) -> Result<(), DbError> {
+        Ok(())
+    }
+
+    async fn debug_load_release(
+        &self,
+        _release_path: &std::path::Path,
+        _db_path: &std::path::Path,
+    ) -> Result<(), DbError> {
+        Ok(())
+    }
+
+    async fn debug_seed_synthetic(&self, _n: u32) -> Result<(), DbError> {
+        Ok(())
+    }
+
+    async fn debug_info(&self) -> Result<String, DbError> {
+        Ok("wasm stub (in-memory)".to_string())
+    }
+
+    async fn debug_vacuum(&self) -> Result<(), DbError> {
+        Ok(())
+    }
+
     async fn clear_favorite_dirty(&self, _server_id: &str, _ref_: &str) -> Result<(), DbError> {
         Ok(())
     }
