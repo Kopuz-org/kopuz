@@ -228,6 +228,28 @@ pub trait Storage: Send + Sync {
     /// Delete tracks by key for a source. Returns rows removed.
     async fn delete_tracks(&self, source: &Source, keys: &[String]) -> Result<u64, DbError>;
 
+    /// Delete an album AND its tracks (matches the legacy `Library::remove_album`).
+    async fn delete_album(&self, source: &Source, album_id: &str) -> Result<(), DbError>;
+
+    /// After a full sync: drop this source's tracks/albums that were NOT in the
+    /// sync (`keep_*` = the synced identities). The sync-side replacement for
+    /// the old clear-and-repopulate.
+    async fn prune_source(
+        &self,
+        source: &Source,
+        keep_track_keys: &[String],
+        keep_album_ids: &[String],
+    ) -> Result<(), DbError>;
+
+    /// Set (`Some`) or remove (`None`) one artist image. `kind` is
+    /// `"server" | "local" | "custom"`.
+    async fn set_artist_image(
+        &self,
+        artist_norm: &str,
+        kind: &str,
+        image_ref: Option<&str>,
+    ) -> Result<(), DbError>;
+
     /// Set/clear an album's cover (manual covers survive non-manual updates).
     async fn update_album_cover(
         &self,

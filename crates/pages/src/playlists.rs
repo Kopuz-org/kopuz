@@ -2,7 +2,10 @@ use components::folder_detail::FolderDetail;
 use components::playlist_detail::PlaylistDetail;
 use components::playlist_popups::AddPlaylistPopup;
 use config::{AppConfig, MusicSource, UiStyle};
+use db::Source;
 use dioxus::prelude::*;
+use hooks::db_reactivity::Table;
+use hooks::use_db_queries::{use_playlists, use_tracks_by_keys};
 use reader::{Library, PlaylistStore};
 
 use crate::local::playlists::LocalPlaylists;
@@ -25,6 +28,27 @@ pub fn PlaylistsPage(
     let mut error = use_signal(|| Option::<String>::None);
     let mut saving = use_signal(|| false);
     let mut playlist_refresh_trigger = use_signal(|| 0u64);
+
+    let gens = hooks::db_reactivity::use_generations();
+    let playlists_res = use_playlists();
+    let active_server_id = use_memo(move || {
+        let c = config.read();
+        c.active_server_id
+            .clone()
+            .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
+            .unwrap_or_default()
+    });
+    let server_source = use_memo(move || Source::Server(active_server_id()));
+    let sel_server_refs = use_memo(move || {
+        let store = playlists_res.read().clone().unwrap_or_default();
+        selected_playlist_id
+            .read()
+            .as_ref()
+            .and_then(|pid| store.jellyfin_playlists.iter().find(|p| p.id == *pid))
+            .map(|p| p.tracks.clone())
+            .unwrap_or_default()
+    });
+    let sel_server_tracks_res = use_tracks_by_keys(server_source, sel_server_refs);
 
     let handle_add_playlist = move |_| {
         if saving() {
@@ -77,12 +101,16 @@ pub fn PlaylistsPage(
                 error.set(Some(i18n::t("error_server_not_configured").to_string()));
             }
         } else {
-            let mut store = playlist_store.write();
-            store.playlists.push(reader::models::Playlist {
-                id: uuid::Uuid::new_v4().to_string(),
-                name,
-                tracks: Vec::new(),
-                cover_path: None,
+            let id = uuid::Uuid::new_v4().to_string();
+            let db = consume_context::<db::Db>();
+            spawn(async move {
+                if db
+                    .upsert_playlist_meta(&Source::Local, &id, &name, None, None)
+                    .await
+                    .is_ok()
+                {
+                    gens.bump(Table::Playlists);
+                }
             });
             show_add_playlist.set(false);
             playlist_name.set(String::new());
@@ -113,7 +141,7 @@ pub fn PlaylistsPage(
                 {
                     let pid_for_dl = pid.clone();
                     let is_downloading_all = {
-                        let store = playlist_store.read();
+                        let store = playlists_res.read().clone().unwrap_or_default();
                         let track_ids = store
                             .jellyfin_playlists
                             .iter()
@@ -148,8 +176,8 @@ pub fn PlaylistsPage(
                             is_downloading_all,
                             on_download_all: move |_| {
                                 let requests: Vec<(String, String, String)> = {
-                                    let store = playlist_store.read();
-                                    let lib = library.read();
+                                    let store = playlists_res.read().clone().unwrap_or_default();
+                                    let resolved = sel_server_tracks_res.read().clone().unwrap_or_default();
                                     store
                                         .jellyfin_playlists
                                         .iter()
@@ -159,10 +187,9 @@ pub fn PlaylistsPage(
                                                 .tracks
                                                 .iter()
                                                 .map(|tid| {
-                                                    let meta = lib
-                                                        .jellyfin_tracks
+                                                    let meta = resolved
                                                         .iter()
-                                                        .find(|t| t.id.uid().contains(tid.as_str()));
+                                                        .find(|t| t.id.key().as_ref() == tid.as_str());
                                                     (
                                                         tid.clone(),
                                                         meta.map(|t| t.title.clone()).unwrap_or_default(),
@@ -181,7 +208,7 @@ pub fn PlaylistsPage(
                             on_delete_all: {
                                 move |_| {
                                     let ids: Vec<String> = {
-                                        let store = playlist_store.read();
+                                        let store = playlists_res.read().clone().unwrap_or_default();
                                         store
                                             .jellyfin_playlists
                                             .iter()
@@ -200,8 +227,8 @@ pub fn PlaylistsPage(
                             },
                             on_download_track: {
                                 move |idx: usize| {
-                                    let store = playlist_store.read();
-                                    let lib = library.read();
+                                    let store = playlists_res.read().clone().unwrap_or_default();
+                                    let resolved = sel_server_tracks_res.read().clone().unwrap_or_default();
                                     let mut track_id = String::new();
                                     let mut track_title = String::new();
                                     let mut track_artist = String::new();
@@ -213,10 +240,9 @@ pub fn PlaylistsPage(
                                     {
                                         if let Some(tid) = p.tracks.get(idx) {
                                             track_id = tid.clone();
-                                            if let Some(meta) = lib
-                                                .jellyfin_tracks
+                                            if let Some(meta) = resolved
                                                 .iter()
-                                                .find(|t| t.id.uid().contains(tid.as_str()))
+                                                .find(|t| t.id.key().as_ref() == tid.as_str())
                                             {
                                                 track_title = meta.title.clone();
                                                 track_artist = meta.artist.clone();
@@ -272,15 +298,18 @@ pub fn PlaylistsPage(
                                 class: "text-white/60 flex items-center hover:text-white transition-colors p-3 rounded-full hover:bg-white/10",
                                 title: i18n::t("new_folder").to_string(),
                                 onclick: move |_| {
-                                    let new_id = uuid::Uuid::new_v4().to_string();
-                                    playlist_store
-                                        .write()
-                                        .folders
-                                        .push(reader::PlaylistFolder {
-                                            id: new_id,
-                                            name: i18n::t("new_folder").to_string(),
-                                            playlist_ids: vec![],
-                                        });
+                                    let mut folders = playlists_res.read().clone().unwrap_or_default().folders;
+                                    folders.push(reader::PlaylistFolder {
+                                        id: uuid::Uuid::new_v4().to_string(),
+                                        name: i18n::t("new_folder").to_string(),
+                                        playlist_ids: vec![],
+                                    });
+                                    let db = consume_context::<db::Db>();
+                                    spawn(async move {
+                                        if db.set_folders(&folders).await.is_ok() {
+                                            gens.bump(Table::Folders);
+                                        }
+                                    });
                                 },
                                 i { class: "fa-solid fa-folder-plus" }
                             }
@@ -313,23 +342,32 @@ pub fn PlaylistsPage(
                                 .file_name()
                                 .map(|name| name.to_string_lossy().to_string())
                                 .unwrap_or_else(|| folder_path.clone());
-                            let tracks = library
-                                .read()
-                                .tracks
-                                .iter()
-                                .filter(|track| track.id.local_path().is_some_and(|p| p.starts_with(&folder_path_buf)))
-                                .map(|track| track.id.uid_path())
-                                .collect();
-
-                            playlist_store
-                                .write()
-                                .playlists
-                                .push(reader::models::Playlist {
-                                    id: uuid::Uuid::new_v4().to_string(),
-                                    name: folder_name,
-                                    tracks,
-                                    cover_path: None,
-                                });
+                            let db = consume_context::<db::Db>();
+                            spawn(async move {
+                                let tracks = db
+                                    .tracks_all(&db::TrackFilter::new(Source::Local))
+                                    .await
+                                    .unwrap_or_default();
+                                let refs: Vec<String> = tracks
+                                    .iter()
+                                    .filter(|track| {
+                                        track
+                                            .id
+                                            .local_path()
+                                            .is_some_and(|p| p.starts_with(&folder_path_buf))
+                                    })
+                                    .map(|track| track.id.key().into_owned())
+                                    .collect();
+                                let id = uuid::Uuid::new_v4().to_string();
+                                if db
+                                    .upsert_playlist_meta(&Source::Local, &id, &folder_name, None, None)
+                                    .await
+                                    .is_ok()
+                                    && db.set_playlist_tracks(&Source::Local, &id, &refs).await.is_ok()
+                                {
+                                    gens.bump(Table::Playlists);
+                                }
+                            });
                             error.set(None);
                             playlist_name.set(String::new());
                         },

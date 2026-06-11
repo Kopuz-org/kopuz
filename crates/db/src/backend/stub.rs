@@ -97,6 +97,28 @@ impl Storage for Stub {
         Ok(0)
     }
 
+    async fn delete_album(&self, _source: &crate::Source, _album_id: &str) -> Result<(), DbError> {
+        Ok(())
+    }
+
+    async fn prune_source(
+        &self,
+        _source: &crate::Source,
+        _keep_track_keys: &[String],
+        _keep_album_ids: &[String],
+    ) -> Result<(), DbError> {
+        Ok(())
+    }
+
+    async fn set_artist_image(
+        &self,
+        _artist_norm: &str,
+        _kind: &str,
+        _image_ref: Option<&str>,
+    ) -> Result<(), DbError> {
+        Ok(())
+    }
+
     async fn update_album_cover(
         &self,
         _source: &crate::Source,

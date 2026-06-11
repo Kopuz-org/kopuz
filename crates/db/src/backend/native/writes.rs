@@ -469,6 +469,75 @@ pub async fn delete_tracks(
     Ok(res.rows_affected())
 }
 
+/// Drop a source's tracks/albums not present in the keep-sets (post-sync
+/// reconcile — the replacement for clear-and-repopulate).
+pub async fn prune_source(
+    pool: &SqlitePool,
+    source: &Source,
+    keep_track_keys: &[String],
+    keep_album_ids: &[String],
+) -> Result<(), DbError> {
+    prune_full(pool, "tracks", source.as_str(), keep_track_keys).await?;
+    prune_full(pool, "albums", source.as_str(), keep_album_ids).await?;
+    Ok(())
+}
+
+pub async fn delete_album(
+    pool: &SqlitePool,
+    source: &Source,
+    album_id: &str,
+) -> Result<(), DbError> {
+    let src = source.as_str();
+    let mut tx = pool.begin().await?;
+    sqlx::query!(
+        "DELETE FROM tracks WHERE source = ?1 AND source_album_id = ?2",
+        src,
+        album_id
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query!(
+        "DELETE FROM albums WHERE source = ?1 AND source_album_id = ?2",
+        src,
+        album_id
+    )
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+pub async fn set_artist_image(
+    pool: &SqlitePool,
+    artist_norm: &str,
+    kind: &str,
+    image_ref: Option<&str>,
+) -> Result<(), DbError> {
+    match image_ref {
+        Some(r) => {
+            sqlx::query!(
+                "INSERT INTO artist_images (artist_norm, kind, image_ref) VALUES (?1, ?2, ?3) \
+                 ON CONFLICT(artist_norm, kind) DO UPDATE SET image_ref = ?3",
+                artist_norm,
+                kind,
+                r
+            )
+            .execute(pool)
+            .await?;
+        }
+        None => {
+            sqlx::query!(
+                "DELETE FROM artist_images WHERE artist_norm = ?1 AND kind = ?2",
+                artist_norm,
+                kind
+            )
+            .execute(pool)
+            .await?;
+        }
+    }
+    Ok(())
+}
+
 pub async fn update_album_cover(
     pool: &SqlitePool,
     source: &Source,

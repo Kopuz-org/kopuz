@@ -5,7 +5,9 @@ use components::stat_card::StatCard;
 use components::track_row::TrackRow;
 use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use config::{AppConfig, UiStyle};
+use db::{Source, TrackFilter, TrackSort};
 use dioxus::prelude::*;
+use hooks::use_db_queries::{use_albums, use_all_tracks, use_artists, use_playlists};
 use hooks::use_player_controller::PlayerController;
 use kopuz_route::Route;
 use reader::Library;
@@ -48,6 +50,28 @@ pub fn JellyfinLibrary(
     let mut selected_tracks = use_signal(|| HashSet::<PathBuf>::new());
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
+    let active_server_id = use_memo(move || {
+        let c = config.read();
+        c.active_server_id
+            .clone()
+            .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
+            .unwrap_or_default()
+    });
+    let source = use_memo(move || Source::Server(active_server_id()));
+    let filter = use_memo(move || TrackFilter {
+        source: Source::Server(active_server_id()),
+        sort: match *sort_order.read() {
+            config::SortOrder::Title => TrackSort::Title,
+            config::SortOrder::Artist => TrackSort::Artist,
+            config::SortOrder::Album => TrackSort::Album,
+        },
+        ..Default::default()
+    });
+    let tracks_res = use_all_tracks(filter);
+    let albums_res = use_albums(source);
+    let artists_res = use_artists(source);
+    let playlists_res = use_playlists();
+
     let mut fetch_jellyfin = move || {
         has_fetched.set(true);
         is_loading.set(true);
@@ -66,44 +90,18 @@ pub fn JellyfinLibrary(
 
     use_effect(move || {
         if !*has_fetched.read() {
-            if library.read().jellyfin_tracks.is_empty() {
-                fetch_jellyfin();
-            } else {
-                has_fetched.set(true);
+            if let Some(tracks) = tracks_res.read().as_ref() {
+                if tracks.is_empty() {
+                    fetch_jellyfin();
+                } else {
+                    has_fetched.set(true);
+                }
             }
         }
     });
 
     let displayed_tracks = use_memo(move || {
-        let mut tracks = library.read().jellyfin_tracks.clone();
-        match *sort_order.read() {
-            config::SortOrder::Title => tracks.sort_by_cached_key(|a| {
-                (
-                    a.title.to_lowercase(),
-                    a.artist.to_lowercase(),
-                    a.album.to_lowercase(),
-                    a.disc_number,
-                    a.track_number,
-                )
-            }),
-            config::SortOrder::Artist => tracks.sort_by_cached_key(|a| {
-                (
-                    a.artist.to_lowercase(),
-                    a.album.to_lowercase(),
-                    a.disc_number,
-                    a.track_number,
-                    a.title.to_lowercase(),
-                )
-            }),
-            config::SortOrder::Album => tracks.sort_by_cached_key(|a| {
-                (
-                    a.album.to_lowercase(),
-                    a.disc_number,
-                    a.track_number,
-                    a.title.to_lowercase(),
-                )
-            }),
-        }
+        let tracks = tracks_res.read().clone().unwrap_or_default();
         let conf = config.read();
         tracks
             .into_iter()
@@ -416,23 +414,28 @@ pub fn JellyfinLibrary(
 
             div { class: if cfg!(target_os = "android") { "grid grid-cols-4 gap-2 mb-4" } else { "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-12" },
                 {
-                    let lib = library.read();
+                    let albums = albums_res.read().clone().unwrap_or_default();
                     let (artist_count, album_count) = {
                         let mut artists = HashSet::new();
                         let mut album_titles = HashSet::new();
-                        for album in &lib.jellyfin_albums {
-                            artists.insert(&album.artist);
+                        for album in &albums {
+                            artists.insert(album.artist.clone());
                             album_titles.insert(album.title.to_lowercase());
                         }
-                        for track in &lib.jellyfin_tracks {
-                            artists.insert(&track.artist);
+                        for (artist, _) in artists_res.read().clone().unwrap_or_default() {
+                            artists.insert(artist);
                         }
                         (artists.len(), album_titles.len())
                     };
+                    let playlist_count = playlists_res
+                        .read()
+                        .as_ref()
+                        .map(|s| s.jellyfin_playlists.len())
+                        .unwrap_or(0);
                     rsx! {
                         StatCard {
                             label: i18n::t("tracks").to_string(),
-                            value: "{lib.jellyfin_tracks.len()}",
+                            value: "{total_tracks}",
                             icon: "fa-music",
                         }
                         StatCard {
@@ -447,7 +450,7 @@ pub fn JellyfinLibrary(
                         }
                         StatCard {
                             label: i18n::t("playlists").to_string(),
-                            value: "{playlist_store.read().jellyfin_playlists.len()}",
+                            value: "{playlist_count}",
                             icon: "fa-list",
                         }
                     }

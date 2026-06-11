@@ -6,7 +6,10 @@ use components::selection_bar::SelectionBar;
 use components::showcase::{self, SortField};
 use components::track_row::TrackRow;
 use config::{AppConfig, MusicService, UiStyle};
+use db::Source;
 use dioxus::prelude::*;
+use hooks::db_reactivity::Table;
+use hooks::use_db_queries::{use_favorites, use_tracks_by_keys};
 use hooks::use_player_controller::PlayerController;
 use reader::{FavoritesStore, Library, PlaylistStore};
 use std::collections::HashSet;
@@ -40,6 +43,19 @@ pub fn JellyfinFavorites(
     let mut selected_track_for_playlist = use_signal(|| None::<PathBuf>);
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
+    let gens = hooks::db_reactivity::use_generations();
+    let active_server_id = use_memo(move || {
+        let c = config.read();
+        c.active_server_id
+            .clone()
+            .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
+            .unwrap_or_default()
+    });
+    let server_source = use_memo(move || Source::Server(active_server_id()));
+    let favorites_res = use_favorites(active_server_id);
+    let fav_keys = use_memo(move || favorites_res.read().clone().unwrap_or_default());
+    let fav_tracks_res = use_tracks_by_keys(server_source, fav_keys);
+
     use_effect(move || {
         let nonce = *refresh_nonce.read();
 
@@ -50,13 +66,28 @@ pub fn JellyfinFavorites(
         let service = config.peek().server.as_ref().map(|s| s.service);
         let is_ytmusic = service == Some(MusicService::YtMusic);
 
-        if is_ytmusic && nonce == 0 && library.peek().last_yt_sync_at.is_some() {
-            return;
-        }
-
-        is_syncing.set(true);
-        synced_so_far.set(0);
+        let db = consume_context::<db::Db>();
+        let sid = active_server_id();
         spawn(async move {
+            if is_ytmusic && nonce == 0 {
+                let stamps: Option<serde_json::Value> = db
+                    .meta_get("yt_sync", "timestamps")
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|s| serde_json::from_str(&s).ok());
+                let already_synced = stamps
+                    .as_ref()
+                    .and_then(|v| v.get("last_yt_sync_at"))
+                    .and_then(|v| v.as_u64())
+                    .is_some();
+                if already_synced {
+                    return;
+                }
+            }
+
+            is_syncing.set(true);
+            synced_so_far.set(0);
             let device_id = config.peek().device_id.clone();
             let server_snapshot = config.peek().server.clone();
             let Some(server) = server_snapshot else {
@@ -65,6 +96,7 @@ pub fn JellyfinFavorites(
             };
             let user_id = server.user_id.clone().unwrap_or_default();
             let url = server.url.clone();
+            let source = Source::Server(sid.clone());
 
             let ids: Vec<String> = match server.service {
                 MusicService::Jellyfin => {
@@ -84,23 +116,24 @@ pub fn JellyfinFavorites(
                     let yt =
                         ::server::ytmusic::YouTubeMusicClient::with_cookies(token);
 
-                    {
-                        let mut lib = library.write();
-                        lib.jellyfin_tracks.clear();
-                        lib.jellyfin_albums.clear();
-                    }
-
                     let mut accumulated: Vec<reader::models::Track> = Vec::new();
                     let result = yt
                         .stream_liked_songs(|page| {
                             accumulated.extend(page.iter().cloned());
                             let albums = synthesize_albums(&accumulated);
-                            {
-                                let mut lib = library.write();
-                                lib.jellyfin_tracks.extend(page);
-                                lib.jellyfin_albums = albums;
-                            }
                             synced_so_far.set(accumulated.len());
+                            let db = db.clone();
+                            let source = Source::Server(sid.clone());
+                            spawn(async move {
+                                for chunk in page.chunks(100) {
+                                    let _ = db.upsert_tracks(&source, chunk).await;
+                                }
+                                for chunk in albums.chunks(100) {
+                                    let _ = db.upsert_albums(&source, chunk).await;
+                                }
+                                gens.bump_coalesced(Table::Tracks);
+                                gens.bump_coalesced(Table::Albums);
+                            });
                         })
                         .await;
 
@@ -113,11 +146,30 @@ pub fn JellyfinFavorites(
                                     (!k.is_empty()).then(|| k.to_string())
                                 })
                                 .collect();
+                            // Full stream completed — drop YT rows no longer
+                            // liked remotely (replaces the legacy clear).
+                            let mut keep_albums: Vec<String> = accumulated
+                                .iter()
+                                .map(|t| t.album_id.clone())
+                                .collect();
+                            keep_albums.sort();
+                            keep_albums.dedup();
+                            let _ = db.prune_source(&source, &ids, &keep_albums).await;
                             let now = std::time::SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .map(|d| d.as_secs())
                                 .unwrap_or(0);
-                            library.write().last_yt_sync_at = Some(now);
+                            let mut stamps: serde_json::Value = db
+                                .meta_get("yt_sync", "timestamps")
+                                .await
+                                .ok()
+                                .flatten()
+                                .and_then(|s| serde_json::from_str(&s).ok())
+                                .unwrap_or_else(|| serde_json::json!({}));
+                            stamps["last_yt_sync_at"] = serde_json::json!(now);
+                            let _ = db
+                                .meta_put("yt_sync", "timestamps", &stamps.to_string())
+                                .await;
                             let liked_cover =
                                 accumulated.first().and_then(|t| t.cover.as_deref()).map(
                                     |c| {
@@ -128,25 +180,22 @@ pub fn JellyfinFavorites(
                                         }
                                     },
                                 );
-                            let liked_entry = reader::models::JellyfinPlaylist {
-                                id: "LM".to_string(),
-                                name: "Liked Songs".to_string(),
-                                tracks: ids.clone(),
-                                image_tag: liked_cover,
-                                cover_path: None,
-                            };
+                            if db
+                                .upsert_playlist_meta(
+                                    &source,
+                                    "LM",
+                                    "Liked Songs",
+                                    None,
+                                    liked_cover.as_deref(),
+                                )
+                                .await
+                                .is_ok()
+                                && db.set_playlist_tracks(&source, "LM", &ids).await.is_ok()
                             {
-                                let mut ps = playlist_store.write();
-                                if let Some(existing) = ps
-                                    .jellyfin_playlists
-                                    .iter_mut()
-                                    .find(|p| p.id == "LM")
-                                {
-                                    *existing = liked_entry;
-                                } else {
-                                    ps.jellyfin_playlists.insert(0, liked_entry);
-                                }
+                                gens.bump(Table::Playlists);
                             }
+                            gens.bump(Table::Tracks);
+                            gens.bump(Table::Albums);
                             ids
                         }
                         Err(e) => {
@@ -157,28 +206,22 @@ pub fn JellyfinFavorites(
                 }
             };
 
+            // Kept until W3 converts the shared favorites consumers; the DB
+            // favorites list is pulled by the reconciler.
             favorites_store.write().jellyfin_favorites = ids;
             is_syncing.set(false);
         }.instrument(tracing::info_span!("favorites.sync")));
     });
 
     let displayed_tracks: Vec<(reader::models::Track, Option<utils::CoverUrl>)> = {
-        let store = favorites_store.read();
-        let lib = library.read();
         let server = config.read();
         let server_ref = server.server.as_ref().cloned();
 
-        let fav_set: std::collections::HashSet<&str> = store
-            .jellyfin_favorites
-            .iter()
-            .map(|s| s.as_str())
-            .collect();
-        lib.jellyfin_tracks
-            .iter()
-            .filter(|t| {
-                let id = t.id.key();
-                fav_set.contains(id.as_ref())
-            })
+        fav_tracks_res
+            .read()
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
             .map(|t| {
                 let cover_url = if let Some(ref srv) = server_ref {
                     utils::map_cover_url(
@@ -195,7 +238,7 @@ pub fn JellyfinFavorites(
                 } else {
                     None
                 };
-                (t.clone(), cover_url)
+                (t, cover_url)
             })
             .collect()
     };

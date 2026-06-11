@@ -468,7 +468,6 @@ pub fn LocalArtist(
                                             {
                                                 let id_for_menu = album.id.clone();
                                                 let id_for_action = album.id.clone();
-                                                let title_for_action = album.title.clone();
                                                 let is_open = open_album_menu.read().as_deref() == Some(&album.id);
                                                 let cover_url = utils::format_artwork_url(album.cover_path.as_ref());
                                                 rsx! {
@@ -520,7 +519,6 @@ pub fn LocalArtist(
                                                                 anchor: "right".to_string(),
                                                                 on_action: {
                                                                     let id = id_for_action.clone();
-                                                                    let title = title_for_action.clone();
                                                                     move |idx: usize| {
                                                                         open_album_menu.set(None);
                                                                         match idx {
@@ -551,27 +549,23 @@ pub fn LocalArtist(
                                                                                     .clone()
                                                                                     .unwrap_or_default()
                                                                                     .into_iter()
-                                                                                    .filter(|t| t.album == title)
+                                                                                    .filter(|t| t.album_id == id)
                                                                                     .collect();
 
-                                                                                let mut keys = Vec::new();
                                                                                 for track in &tracks_to_delete {
                                                                                     if let Some(path) = track.id.local_path() {
                                                                                         let _ = std::fs::remove_file(path);
                                                                                     }
-                                                                                    keys.push(track.id.key().into_owned());
                                                                                 }
 
-                                                                                // SWEEP-TODO(no delete-album API — the albums row for this title is not removed)
-                                                                                if !keys.is_empty() {
-                                                                                    let db = consume_context::<db::Db>();
-                                                                                    spawn(async move {
-                                                                                        if db.delete_tracks(&Source::Local, &keys).await.is_ok() {
-                                                                                            gens.bump(Table::Tracks);
-                                                                                            gens.bump(Table::Albums);
-                                                                                        }
-                                                                                    });
-                                                                                }
+                                                                                let db = consume_context::<db::Db>();
+                                                                                let album_id = id.clone();
+                                                                                spawn(async move {
+                                                                                    if db.delete_album(&Source::Local, &album_id).await.is_ok() {
+                                                                                        gens.bump(Table::Tracks);
+                                                                                        gens.bump(Table::Albums);
+                                                                                    }
+                                                                                });
                                                                             }
 
                                                                             _ => {}
@@ -616,8 +610,18 @@ pub fn LocalArtist(
                                             if let Some(file) = file {
                                                 let path = file.path().to_path_buf();
                                                 let key = normalize_artist_key(&artist);
-                                                // SWEEP-TODO(no targeted custom_artist_images write API)
-                                                library.write().custom_artist_images.insert(key, path);
+                                                let db = consume_context::<db::Db>();
+                                                if db
+                                                    .set_artist_image(
+                                                        &key,
+                                                        "custom",
+                                                        Some(&path.to_string_lossy()),
+                                                    )
+                                                    .await
+                                                    .is_ok()
+                                                {
+                                                    gens.bump(Table::Tracks);
+                                                }
                                             }
                                         });
                                     }

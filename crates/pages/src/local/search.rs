@@ -4,7 +4,10 @@ use components::search_genre_detail::SearchGenreDetail;
 use components::search_genres::SearchGenres;
 use components::search_results::SearchResults;
 use config::{AppConfig, UiStyle};
+use db::{Source, TrackFilter};
 use dioxus::prelude::*;
+use hooks::db_reactivity::Table;
+use hooks::use_db_queries::{use_albums, use_all_tracks};
 use hooks::use_search_data::use_search_data;
 use player::player;
 use reader::Library;
@@ -34,24 +37,30 @@ pub fn LocalSearch(
     let mut show_playlist_modal = use_signal(|| false);
     let selected_track_for_playlist = use_signal(|| None::<std::path::PathBuf>);
 
+    let gens = hooks::db_reactivity::use_generations();
+    let source = use_memo(|| Source::Local);
+    let all_filter = use_memo(|| TrackFilter::new(Source::Local));
+    let tracks_res = use_all_tracks(all_filter);
+    let albums_res = use_albums(source);
+
     let genre_tracks = use_memo(move || {
         let genre = selected_genre.read();
 
         if let Some(g) = &*genre {
-            let lib = library.read();
+            let all_albums = albums_res.read().clone().unwrap_or_default();
+            let all_tracks = tracks_res.read().clone().unwrap_or_default();
 
-            let valid_album_ids: std::collections::HashSet<&String> = lib
-                .albums
+            let valid_album_ids: std::collections::HashSet<&String> = all_albums
                 .iter()
                 .filter(|a| a.genre.to_lowercase().contains(&g.to_lowercase()))
                 .map(|a| &a.id)
                 .collect();
 
             let album_map: std::collections::HashMap<&String, &reader::models::Album> =
-                lib.albums.iter().map(|a| (&a.id, a)).collect();
+                all_albums.iter().map(|a| (&a.id, a)).collect();
 
             let mut matching_tracks = Vec::new();
-            for track in &lib.tracks {
+            for track in &all_tracks {
                 if valid_album_ids.contains(&track.album_id) {
                     let cover = album_map
                         .get(&track.album_id)
@@ -79,24 +88,50 @@ pub fn LocalSearch(
                     on_close: move |_| show_playlist_modal.set(false),
                     on_add_to_playlist: move |playlist_id: String| {
                         if let Some(path) = selected_track_for_playlist.read().clone() {
-                            let mut store = playlist_store.write();
-                            if let Some(playlist) = store.playlists.iter_mut().find(|p| p.id == playlist_id) {
-                                if !playlist.tracks.contains(&path) {
-                                    playlist.tracks.push(path);
+                            let db = consume_context::<db::Db>();
+                            spawn(async move {
+                                let store = db.load_playlists().await.unwrap_or_default();
+                                if let Some(playlist) =
+                                    store.playlists.iter().find(|p| p.id == playlist_id)
+                                {
+                                    let mut tracks = playlist.tracks.clone();
+                                    if !tracks.contains(&path) {
+                                        tracks.push(path);
+                                    }
+                                    let refs: Vec<String> = tracks
+                                        .iter()
+                                        .map(|p| p.to_string_lossy().into_owned())
+                                        .collect();
+                                    if db
+                                        .set_playlist_tracks(&Source::Local, &playlist_id, &refs)
+                                        .await
+                                        .is_ok()
+                                    {
+                                        gens.bump(Table::Playlists);
+                                    }
                                 }
-                            }
+                            });
                         }
                         show_playlist_modal.set(false);
                         active_menu_track.set(None);
                     },
                     on_create_playlist: move |name: String| {
                         if let Some(path) = selected_track_for_playlist.read().clone() {
-                            let mut store = playlist_store.write();
-                            store.playlists.push(reader::models::Playlist {
-                                id: uuid::Uuid::new_v4().to_string(),
-                                name,
-                                tracks: vec![path],
-                                cover_path: None,
+                            let refs = vec![path.to_string_lossy().into_owned()];
+                            let id = uuid::Uuid::new_v4().to_string();
+                            let db = consume_context::<db::Db>();
+                            spawn(async move {
+                                if db
+                                    .upsert_playlist_meta(&Source::Local, &id, &name, None, None)
+                                    .await
+                                    .is_ok()
+                                    && db
+                                        .set_playlist_tracks(&Source::Local, &id, &refs)
+                                        .await
+                                        .is_ok()
+                                {
+                                    gens.bump(Table::Playlists);
+                                }
                             });
                         }
                         show_playlist_modal.set(false);

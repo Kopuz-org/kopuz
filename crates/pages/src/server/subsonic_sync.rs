@@ -1,7 +1,9 @@
 use ::server::jellyfin::JellyfinClient;
 use ::server::subsonic::SubsonicClient;
 use config::{AppConfig, MusicService};
+use db::Source;
 use dioxus::prelude::*;
+use hooks::db_reactivity::Table;
 use reader::Library;
 use reader::models::{Album, Track};
 use std::collections::HashSet;
@@ -29,10 +31,12 @@ pub struct SubsonicLibraryData {
 
 #[tracing::instrument(name = "library.sync", skip_all, fields(clear_first = clear_first))]
 pub async fn sync_server_library(
-    mut library: Signal<Library>,
+    _library: Signal<Library>,
     config: Signal<AppConfig>,
     clear_first: bool,
 ) -> Result<(), String> {
+    let db = consume_context::<db::Db>();
+    let gens = hooks::db_reactivity::use_generations();
     let snapshot = {
         let conf = config.read();
         let Some(server) = &conf.server else {
@@ -50,19 +54,40 @@ pub async fn sync_server_library(
             token.clone(),
             user_id.clone(),
             conf.device_id.clone(),
+            conf.active_server_id
+                .clone()
+                .or_else(|| server.id.clone())
+                .unwrap_or_default(),
         )
     };
 
-    let (service, server_url, token, user_id, device_id) = snapshot;
+    let (service, server_url, token, user_id, device_id, server_id) = snapshot;
+    let source = Source::Server(server_id);
+    let existing_albums = db.albums(&source).await.unwrap_or_default();
+    let merge_cover = |mut album: Album| -> Album {
+        if let Some(old) = existing_albums
+            .iter()
+            .find(|a| normalize_album_id(&a.id) == normalize_album_id(&album.id))
+        {
+            if album.cover_path.is_none() || old.manual_cover {
+                album.cover_path = old.cover_path.clone();
+            }
+            if old.manual_cover {
+                album.manual_cover = true;
+            }
+        }
+        album
+    };
 
     info!("Starting server library sync for service: {:?}", service);
 
     match service {
         MusicService::Jellyfin => {
             let remote = JellyfinClient::new(&server_url, Some(&token), &device_id, Some(&user_id));
-            let mut out_albums = Vec::new();
-            let mut out_tracks = Vec::new();
-            let mut out_genres = Vec::new();
+            let mut album_total = 0usize;
+            let mut track_total = 0usize;
+            let mut synced_track_keys: Vec<String> = Vec::new();
+            let mut synced_album_ids: Vec<String> = Vec::new();
             let libs = remote.get_music_libraries().await?;
             for lib in libs {
                 let mut album_start_index = 0;
@@ -76,6 +101,7 @@ pub async fn sync_server_library(
                         break;
                     }
                     let count = albums.len();
+                    let mut page_albums = Vec::with_capacity(count);
 
                     for album_item in albums {
                         let image_tag = album_item
@@ -89,7 +115,7 @@ pub async fn sync_server_library(
                             Some(PathBuf::from(format!("jellyfin:{}", album_item.id)))
                         };
 
-                        out_albums.push(Album {
+                        page_albums.push(merge_cover(Album {
                             id: format!("jellyfin:{}", album_item.id),
                             title: album_item.name,
                             artist: album_item
@@ -107,11 +133,19 @@ pub async fn sync_server_library(
                                 .unwrap_or(0),
                             cover_path,
                             manual_cover: false,
-                        });
+                        }));
                     }
 
+                    for chunk in page_albums.chunks(100) {
+                        db.upsert_albums(&source, chunk)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                    }
+                    gens.bump_coalesced(Table::Albums);
+
                     album_start_index += count;
-                    info!("Fetched {} albums from Jellyfin...", out_albums.len());
+                    album_total += count;
+                    info!("Fetched {} albums from Jellyfin...", album_total);
                     if count < album_limit {
                         break;
                     }
@@ -128,6 +162,7 @@ pub async fn sync_server_library(
                         break;
                     }
                     let count = items.len();
+                    let mut page_tracks = Vec::with_capacity(count);
 
                     for item in items {
                         let cover = item
@@ -138,7 +173,7 @@ pub async fn sync_server_library(
                         let bitrate_kbps = item.bitrate.unwrap_or(0) / 1000;
                         let bitrate_u16 = bitrate_kbps.min(u16::MAX as u32) as u16;
 
-                        out_tracks.push(Track {
+                        page_tracks.push(Track {
                             id: reader::models::TrackId::Server {
                                 service: MusicService::Jellyfin,
                                 item_id: item.id.clone(),
@@ -170,18 +205,25 @@ pub async fn sync_server_library(
                         });
                     }
 
+                    for chunk in page_tracks.chunks(100) {
+                        db.upsert_tracks(&source, chunk)
+                            .await
+                            .map_err(|e| e.to_string())?;
+                    }
+                    synced_track_keys
+                        .extend(page_tracks.iter().map(|t| t.id.key().into_owned()));
+                    synced_album_ids.extend(page_tracks.iter().map(|t| t.album_id.clone()));
+                    gens.bump_coalesced(Table::Tracks);
+
                     start_index += count;
-                    info!("Fetched {} tracks from Jellyfin...", out_tracks.len());
+                    track_total += count;
+                    info!("Fetched {} tracks from Jellyfin...", track_total);
                     if count < limit {
                         break;
                     }
                 }
-
-                let genres = remote.get_genres().await?;
-                out_genres = genres.into_iter().map(|g| (g.name, g.id)).collect();
             }
 
-            let mut artist_images = std::collections::HashMap::new();
             if let Ok(artists) = remote.get_artists().await {
                 for artist in artists {
                     if let Some(tags) = &artist.image_tags {
@@ -194,77 +236,23 @@ pub async fn sync_server_library(
                                 512,
                                 90,
                             );
-                            artist_images.insert(artist.name, url);
+                            db.set_artist_image(&artist.name, "server", Some(&url))
+                                .await
+                                .map_err(|e| e.to_string())?;
                         }
                     }
                 }
             }
 
-            let mut lib_write = library.write();
-            if clear_first {
-                let old_albums = std::mem::take(&mut lib_write.jellyfin_albums);
-                lib_write.jellyfin_tracks.clear();
-                lib_write.jellyfin_genres.clear();
-                info!("Cleared old jellyfin library data.");
-                for album in out_albums {
-                    let mut merged = album;
-                    if let Some(old) = old_albums
-                        .iter()
-                        .find(|a| normalize_album_id(&a.id) == normalize_album_id(&merged.id))
-                    {
-                        if merged.cover_path.is_none() || old.manual_cover {
-                            merged.cover_path = old.cover_path.clone();
-                        }
-                        if old.manual_cover {
-                            merged.manual_cover = true;
-                        }
-                    }
-                    lib_write.jellyfin_albums.push(merged);
-                }
-            } else {
-                for album in out_albums {
-                    if let Some(index) = lib_write
-                        .jellyfin_albums
-                        .iter()
-                        .position(|a| normalize_album_id(&a.id) == normalize_album_id(&album.id))
-                    {
-                        let mut new_album = album;
-                        let existing = &lib_write.jellyfin_albums[index];
-                        if new_album.cover_path.is_none() || existing.manual_cover {
-                            new_album.cover_path = existing.cover_path.clone();
-                        }
-                        if existing.manual_cover {
-                            new_album.manual_cover = true;
-                        }
-                        let old_id = existing.id.clone();
-                        lib_write.jellyfin_albums[index] = new_album.clone();
-                        for t in &mut lib_write.jellyfin_tracks {
-                            if normalize_album_id(&t.album_id) == normalize_album_id(&old_id) {
-                                t.album_id = new_album.id.clone();
-                            }
-                        }
-                    } else {
-                        lib_write.jellyfin_albums.push(album);
-                    }
-                }
-            }
-            for track in out_tracks {
-                if !lib_write
-                    .jellyfin_tracks
-                    .iter()
-                    .any(|t| t.id == track.id)
-                {
-                    lib_write.jellyfin_tracks.push(track);
-                }
-            }
-            if !out_genres.is_empty() {
-                lib_write.jellyfin_genres = out_genres;
-            }
-            if clear_first {
-                lib_write.server_artist_images = artist_images;
-            } else {
-                lib_write.server_artist_images.extend(artist_images);
-            }
+            // Full sync completed — drop rows the server no longer has (the
+            // reconcile that replaced the old clear-and-repopulate).
+            synced_album_ids.sort();
+            synced_album_ids.dedup();
+            let _ = db
+                .prune_source(&source, &synced_track_keys, &synced_album_ids)
+                .await;
+            gens.bump(Table::Tracks);
+            gens.bump(Table::Albums);
             info!("Jellyfin sync completed successfully.");
         }
         MusicService::Subsonic | MusicService::Custom => {
@@ -272,72 +260,38 @@ pub async fn sync_server_library(
             let SubsonicLibraryData {
                 albums,
                 tracks,
-                genres,
+                genres: _,
                 artist_images,
             } = fetch_subsonic_library(service, &server_url, &user_id, &token).await?;
-            let mut lib_write = library.write();
-            if clear_first {
-                let old_albums = std::mem::take(&mut lib_write.jellyfin_albums);
-                lib_write.jellyfin_tracks.clear();
-                lib_write.jellyfin_genres.clear();
-                lib_write.server_artist_images = artist_images;
-                info!("Cleared old subsonic/custom library data.");
-                for album in albums {
-                    let mut merged = album;
-                    if let Some(old) = old_albums
-                        .iter()
-                        .find(|a| normalize_album_id(&a.id) == normalize_album_id(&merged.id))
-                    {
-                        if merged.cover_path.is_none() || old.manual_cover {
-                            merged.cover_path = old.cover_path.clone();
-                        }
-                        if old.manual_cover {
-                            merged.manual_cover = true;
-                        }
-                    }
-                    lib_write.jellyfin_albums.push(merged);
-                }
-            } else {
-                for album in albums {
-                    if let Some(index) = lib_write
-                        .jellyfin_albums
-                        .iter()
-                        .position(|a| normalize_album_id(&a.id) == normalize_album_id(&album.id))
-                    {
-                        let mut new_album = album;
-                        let existing = &lib_write.jellyfin_albums[index];
-                        if new_album.cover_path.is_none() || existing.manual_cover {
-                            new_album.cover_path = existing.cover_path.clone();
-                        }
-                        if existing.manual_cover {
-                            new_album.manual_cover = true;
-                        }
-                        let old_id = existing.id.clone();
-                        lib_write.jellyfin_albums[index] = new_album.clone();
-                        for t in &mut lib_write.jellyfin_tracks {
-                            if normalize_album_id(&t.album_id) == normalize_album_id(&old_id) {
-                                t.album_id = new_album.id.clone();
-                            }
-                        }
-                    } else {
-                        lib_write.jellyfin_albums.push(album);
-                    }
-                }
-                lib_write.server_artist_images.extend(artist_images);
+
+            let merged_albums: Vec<Album> = albums.into_iter().map(merge_cover).collect();
+            for chunk in merged_albums.chunks(100) {
+                db.upsert_albums(&source, chunk)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                gens.bump_coalesced(Table::Albums);
+            }
+            for chunk in tracks.chunks(100) {
+                db.upsert_tracks(&source, chunk)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                gens.bump_coalesced(Table::Tracks);
+            }
+            for (name, url) in &artist_images {
+                db.set_artist_image(name, "server", Some(url))
+                    .await
+                    .map_err(|e| e.to_string())?;
             }
 
-            for track in tracks {
-                if !lib_write
-                    .jellyfin_tracks
-                    .iter()
-                    .any(|t| t.id == track.id)
-                {
-                    lib_write.jellyfin_tracks.push(track);
-                }
-            }
-            if !genres.is_empty() {
-                lib_write.jellyfin_genres = genres;
-            }
+            // Full sync — prune rows the server no longer has.
+            let keep_keys: Vec<String> =
+                tracks.iter().map(|t| t.id.key().into_owned()).collect();
+            let keep_albums: Vec<String> =
+                merged_albums.iter().map(|a| a.id.clone()).collect();
+            let _ = db.prune_source(&source, &keep_keys, &keep_albums).await;
+
+            gens.bump(Table::Tracks);
+            gens.bump(Table::Albums);
             info!("Subsonic/Custom sync completed successfully.");
         }
         MusicService::YtMusic => {}

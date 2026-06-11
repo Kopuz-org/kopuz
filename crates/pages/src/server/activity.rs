@@ -1,5 +1,7 @@
 use config::{AppConfig, MusicService, UiStyle};
+use db::{Source, TrackFilter};
 use dioxus::prelude::*;
+use hooks::use_db_queries::{use_albums, use_all_tracks};
 use hooks::use_player_controller::PlayerController;
 use kopuz_route::Route;
 use reader::{Library, Track};
@@ -15,12 +17,25 @@ fn format_duration(seconds: u64) -> String {
 pub fn JellyfinLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Element {
     let mut ctrl = use_context::<PlayerController>();
 
+    let active_server_id = use_memo(move || {
+        let c = config.read();
+        c.active_server_id
+            .clone()
+            .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
+            .unwrap_or_default()
+    });
+    let server_source = use_memo(move || Source::Server(active_server_id()));
+    let all_filter = use_memo(move || TrackFilter::new(Source::Server(active_server_id())));
+    let tracks_res = use_all_tracks(all_filter);
+    let albums_res = use_albums(server_source);
+
     let track_data = use_memo(move || {
-        let lib = library.read();
         let conf = config.read();
 
-        let album_genre_map: HashMap<String, String> = lib
-            .jellyfin_albums
+        let album_genre_map: HashMap<String, String> = albums_res
+            .read()
+            .clone()
+            .unwrap_or_default()
             .iter()
             .map(|a| (a.id.clone(), a.genre.clone()))
             .collect();
@@ -30,7 +45,7 @@ pub fn JellyfinLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Elem
             .as_ref()
             .map(|s| (s.url.clone(), s.access_token.clone()));
 
-        let mut all_tracks = lib.jellyfin_tracks.clone();
+        let mut all_tracks = tracks_res.read().clone().unwrap_or_default();
 
         all_tracks.sort_by(|a, b| {
             let a_plays = conf

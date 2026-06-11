@@ -3,7 +3,10 @@ use components::dots_menu::{DotsMenu, MenuAction};
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
 use config::{AppConfig, ArtistPhotoSource, ArtistViewOrder, MusicService};
+use db::{Source, TrackFilter};
 use dioxus::prelude::*;
+use hooks::db_reactivity::Table;
+use hooks::use_db_queries::{use_albums, use_all_tracks, use_artist_images};
 use reader::{Library, PlaylistStore};
 use server::jellyfin::JellyfinClient;
 use server::subsonic::SubsonicClient;
@@ -46,6 +49,20 @@ pub fn JellyfinArtist(
     let mut fetched_artist_images =
         use_context::<Signal<std::collections::HashMap<String, String>>>();
     let mut is_fetching_images = use_context::<Signal<bool>>();
+
+    let gens = hooks::db_reactivity::use_generations();
+    let active_server_id = use_memo(move || {
+        let c = config.read();
+        c.active_server_id
+            .clone()
+            .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
+            .unwrap_or_default()
+    });
+    let server_source = use_memo(move || Source::Server(active_server_id()));
+    let all_filter = use_memo(move || TrackFilter::new(Source::Server(active_server_id())));
+    let tracks_res = use_all_tracks(all_filter);
+    let albums_res = use_albums(server_source);
+    let artist_images_res = use_artist_images();
 
     use_effect(move || {
         let use_artist_photo = config.read().artist_photo_source == ArtistPhotoSource::ArtistPhoto;
@@ -139,12 +156,18 @@ pub fn JellyfinArtist(
     });
 
     let jellyfin_artists = use_memo(move || {
-        let lib = library.read();
+        let all_albums = albums_res.read().clone().unwrap_or_default();
+        let all_tracks = tracks_res.read().clone().unwrap_or_default();
+        let custom_images = artist_images_res
+            .read()
+            .clone()
+            .map(|(_, _, custom)| custom)
+            .unwrap_or_default();
         let conf = config.read();
         let use_artist_photo = conf.artist_photo_source == ArtistPhotoSource::ArtistPhoto;
         let fetched = fetched_artist_images.read();
         let mut artist_map: HashMap<String, Option<PathBuf>> = HashMap::new();
-        for album in &lib.jellyfin_albums {
+        for album in &all_albums {
             if !artist_map.contains_key(&album.artist) {
                 artist_map.insert(album.artist.clone(), album.cover_path.clone());
             }
@@ -159,7 +182,7 @@ pub fn JellyfinArtist(
         // Custom artist photos override album cover and server-fetched images.
         for name in artist_map.keys().cloned().collect::<Vec<_>>() {
             let norm = name.trim().to_lowercase();
-            if let Some(path) = lib.custom_artist_images.get(&norm) {
+            if let Some(path) = custom_images.get(&norm) {
                 if let Some(url) = utils::format_artwork_url(Some(path)) {
                     artist_map.insert(name, Some(PathBuf::from(format!("directurl:{}", url))));
                 }
@@ -173,7 +196,7 @@ pub fn JellyfinArtist(
                 if !offline {
                     return true;
                 }
-                lib.jellyfin_tracks.iter().any(|t| {
+                all_tracks.iter().any(|t| {
                     if t.artist.to_lowercase() != artist.to_lowercase() {
                         return false;
                     }
@@ -191,14 +214,14 @@ pub fn JellyfinArtist(
     });
 
     let artist_tracks = use_memo(move || {
-        let lib = library.read();
+        let all_tracks = tracks_res.read().clone().unwrap_or_default();
         let artist = artist_name.read();
         if artist.is_empty() {
             return Vec::new();
         }
         let offline = *is_offline.read();
         let conf = config.read();
-        lib.jellyfin_tracks
+        all_tracks
             .iter()
             .filter(|t| t.artist.to_lowercase() == artist.to_lowercase())
             .filter(|t| {
@@ -217,14 +240,19 @@ pub fn JellyfinArtist(
     });
 
     let artist_cover = use_memo(move || {
-        let lib = library.read();
+        let all_albums = albums_res.read().clone().unwrap_or_default();
+        let custom_images = artist_images_res
+            .read()
+            .clone()
+            .map(|(_, _, custom)| custom)
+            .unwrap_or_default();
         let conf = config.read();
         let artist = artist_name.read();
         if artist.is_empty() {
             return None;
         }
         // Custom artist photo overrides every other source, regardless of config.
-        if let Some(path) = lib.custom_artist_images.get(&artist.trim().to_lowercase()) {
+        if let Some(path) = custom_images.get(&artist.trim().to_lowercase()) {
             if let Some(url) = utils::format_artwork_url(Some(path)) {
                 return Some(url);
             }
@@ -235,7 +263,7 @@ pub fn JellyfinArtist(
                 return Some(utils::cover_url_from_string(url.clone()));
             }
         }
-        lib.jellyfin_albums
+        all_albums
             .iter()
             .find(|a| a.artist.to_lowercase() == artist.to_lowercase())
             .and_then(|album| {
@@ -257,7 +285,8 @@ pub fn JellyfinArtist(
     });
 
     let artist_albums = use_memo(move || {
-        let lib = library.read();
+        let all_albums = albums_res.read().clone().unwrap_or_default();
+        let all_tracks = tracks_res.read().clone().unwrap_or_default();
         let artist = artist_name.read();
         if artist.is_empty() {
             return Vec::new();
@@ -265,15 +294,14 @@ pub fn JellyfinArtist(
         let artist_lc = artist.to_lowercase();
         let offline = *is_offline.read();
         let conf = config.read();
-        let mut albums: Vec<_> = lib
-            .jellyfin_albums
+        let mut albums: Vec<_> = all_albums
             .iter()
             .filter(|a| a.artist.to_lowercase() == artist_lc)
             .filter(|a| {
                 if !offline {
                     return true;
                 }
-                lib.jellyfin_tracks.iter().any(|t| {
+                all_tracks.iter().any(|t| {
                     if t.album_id != a.id {
                         return false;
                     }
@@ -299,9 +327,8 @@ pub fn JellyfinArtist(
     });
 
     let name = artist_name.read().clone();
-    let tracks_for_album = |library: &Library, album_id: &str| -> Vec<PathBuf> {
-        library
-            .jellyfin_tracks
+    let tracks_for_album = |tracks: &[reader::models::Track], album_id: &str| -> Vec<PathBuf> {
+        tracks
             .iter()
             .filter(|t| t.album_id == album_id)
             .map(|t| t.id.uid_path())
@@ -499,9 +526,8 @@ pub fn JellyfinArtist(
                                 on_close: move |_| show_album_playlist_modal.set(false),
                                 on_add_to_playlist: move |playlist_id: String| {
                                     if let Some(album_id) = pending_album_id_for_playlist.read().clone() {
-                                        let lib = library.read();
-                                        let paths = tracks_for_album(&lib, &album_id);
-                                        drop(lib);
+                                        let all = tracks_res.read().clone().unwrap_or_default();
+                                        let paths = tracks_for_album(&all, &album_id);
                                         let pid = playlist_id.clone();
                                         spawn(async move {
                                             let Some(conn) =
@@ -530,8 +556,8 @@ pub fn JellyfinArtist(
                                         .read()
                                         .as_deref()
                                         .map(|id| {
-                                            let lib = library.read();
-                                            tracks_for_album(&lib, id)
+                                            let all = tracks_res.read().clone().unwrap_or_default();
+                                            tracks_for_album(&all, id)
                                         })
                                         .unwrap_or_default();
                                     spawn(async move {
@@ -579,10 +605,10 @@ pub fn JellyfinArtist(
                                                 let id_for_navigate = album.id.clone();
                                                 let is_open = open_album_menu.read().as_deref() == Some(&album.id);
                                                 let is_downloaded = {
-                                                    let lib = library.peek();
+                                                    let all = tracks_res.read().clone().unwrap_or_default();
                                                     let conf = config.read();
                                                     let aid = album.id.clone();
-                                                    let tracks: Vec<_> = lib.jellyfin_tracks.iter().filter(|t| t.album_id == aid).collect();
+                                                    let tracks: Vec<_> = all.iter().filter(|t| t.album_id == aid).collect();
                                                     !tracks.is_empty() && tracks.iter().all(|t| {
                                                         let tid = t.id.key();
                                                         if let Some(path_str) = conf.offline_tracks.get(tid.as_ref()) {
@@ -672,8 +698,10 @@ pub fn JellyfinArtist(
                                                                             if is_downloaded {
                                                                                 let album_id = id.clone();
                                                                                 let ids: Vec<String> = {
-                                                                                    let lib = library.read();
-                                                                                    lib.jellyfin_tracks
+                                                                                    tracks_res
+                                                                                        .read()
+                                                                                        .clone()
+                                                                                        .unwrap_or_default()
                                                                                         .iter()
                                                                                         .filter(|t| t.album_id == album_id)
                                                                                         .filter_map(|t| {
@@ -686,8 +714,10 @@ pub fn JellyfinArtist(
                                                                             } else {
                                                                                 let album_id = id.clone();
                                                                                 let requests: Vec<(String, String, String)> = {
-                                                                                    let lib = library.read();
-                                                                                    lib.jellyfin_tracks
+                                                                                    tracks_res
+                                                                                        .read()
+                                                                                        .clone()
+                                                                                        .unwrap_or_default()
                                                                                         .iter()
                                                                                         .filter(|t| t.album_id == album_id)
                                                                                         .filter_map(|t| {
@@ -740,7 +770,18 @@ pub fn JellyfinArtist(
                                             if let Some(file) = file {
                                                 let path = file.path().to_path_buf();
                                                 let key = artist.trim().to_lowercase();
-                                                library.write().custom_artist_images.insert(key, path);
+                                                let db = consume_context::<db::Db>();
+                                                if db
+                                                    .set_artist_image(
+                                                        &key,
+                                                        "custom",
+                                                        Some(&path.to_string_lossy()),
+                                                    )
+                                                    .await
+                                                    .is_ok()
+                                                {
+                                                    gens.bump(Table::Tracks);
+                                                }
                                             }
                                         });
                                     }

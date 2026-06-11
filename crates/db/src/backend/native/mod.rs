@@ -198,6 +198,28 @@ impl Storage for Native {
         writes::delete_tracks(&self.pool(), source, keys).await
     }
 
+    async fn delete_album(&self, source: &crate::Source, album_id: &str) -> Result<(), DbError> {
+        writes::delete_album(&self.pool(), source, album_id).await
+    }
+
+    async fn prune_source(
+        &self,
+        source: &crate::Source,
+        keep_track_keys: &[String],
+        keep_album_ids: &[String],
+    ) -> Result<(), DbError> {
+        writes::prune_source(&self.pool(), source, keep_track_keys, keep_album_ids).await
+    }
+
+    async fn set_artist_image(
+        &self,
+        artist_norm: &str,
+        kind: &str,
+        image_ref: Option<&str>,
+    ) -> Result<(), DbError> {
+        writes::set_artist_image(&self.pool(), artist_norm, kind, image_ref).await
+    }
+
     async fn update_album_cover(
         &self,
         source: &crate::Source,
