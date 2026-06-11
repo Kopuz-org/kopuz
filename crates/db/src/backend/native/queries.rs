@@ -28,43 +28,142 @@ fn order_by(sort: TrackSort) -> &'static str {
     }
 }
 
+/// WHERE clause + ordered bind values for a filter (after the `source = ?1` bind).
+fn filter_clauses(filter: &TrackFilter) -> (String, Vec<String>) {
+    let mut sql = String::new();
+    let mut binds = Vec::new();
+    if !filter.search.trim().is_empty() {
+        let n = binds.len() + 2;
+        sql.push_str(&format!(
+            " AND (title LIKE ?{n} OR artist LIKE ?{n} OR album LIKE ?{n})"
+        ));
+        binds.push(format!("%{}%", filter.search.trim()));
+    }
+    if let Some(artist) = &filter.artist {
+        let n = binds.len() + 2;
+        sql.push_str(&format!(" AND artist = ?{n}"));
+        binds.push(artist.clone());
+    }
+    if let Some(album_id) = &filter.album_id {
+        let n = binds.len() + 2;
+        sql.push_str(&format!(" AND source_album_id = ?{n}"));
+        binds.push(album_id.clone());
+    }
+    (sql, binds)
+}
+
 pub async fn tracks_page(
     pool: &SqlitePool,
     filter: &TrackFilter,
     page: Page,
 ) -> Result<Vec<Track>, DbError> {
-    let has_search = !filter.search.trim().is_empty();
-    let mut sql = format!("SELECT {TRACK_COLUMNS} FROM tracks WHERE source = ?1");
-    if has_search {
-        sql.push_str(" AND (title LIKE ?4 OR artist LIKE ?4 OR album LIKE ?4)");
+    let (clauses, binds) = filter_clauses(filter);
+    let limit_n = binds.len() + 2;
+    let sql = format!(
+        "SELECT {TRACK_COLUMNS} FROM tracks WHERE source = ?1{clauses} ORDER BY {} LIMIT ?{limit_n} OFFSET ?{}",
+        order_by(filter.sort),
+        limit_n + 1,
+    );
+    let mut q = sqlx::query_as::<_, TrackRow>(&sql).bind(filter.source.as_str());
+    for b in &binds {
+        q = q.bind(b);
     }
-    sql.push_str(&format!(
-        " ORDER BY {} LIMIT ?2 OFFSET ?3",
-        order_by(filter.sort)
-    ));
-
-    let mut q = sqlx::query_as::<_, TrackRow>(&sql)
-        .bind(filter.source.as_str())
+    let rows = q
         .bind(page.limit as i64)
-        .bind(page.offset as i64);
-    if has_search {
-        q = q.bind(format!("%{}%", filter.search.trim()));
+        .bind(page.offset as i64)
+        .fetch_all(pool)
+        .await?;
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
+pub async fn tracks_all(pool: &SqlitePool, filter: &TrackFilter) -> Result<Vec<Track>, DbError> {
+    let (clauses, binds) = filter_clauses(filter);
+    let sql = format!(
+        "SELECT {TRACK_COLUMNS} FROM tracks WHERE source = ?1{clauses} ORDER BY {}",
+        order_by(filter.sort),
+    );
+    let mut q = sqlx::query_as::<_, TrackRow>(&sql).bind(filter.source.as_str());
+    for b in &binds {
+        q = q.bind(b);
     }
     let rows = q.fetch_all(pool).await?;
     Ok(rows.into_iter().map(Into::into).collect())
 }
 
 pub async fn tracks_count(pool: &SqlitePool, filter: &TrackFilter) -> Result<u32, DbError> {
-    let has_search = !filter.search.trim().is_empty();
-    let mut sql = "SELECT COUNT(*) FROM tracks WHERE source = ?1".to_string();
-    if has_search {
-        sql.push_str(" AND (title LIKE ?2 OR artist LIKE ?2 OR album LIKE ?2)");
-    }
+    let (clauses, binds) = filter_clauses(filter);
+    let sql = format!("SELECT COUNT(*) FROM tracks WHERE source = ?1{clauses}");
     let mut q = sqlx::query_scalar::<_, i64>(&sql).bind(filter.source.as_str());
-    if has_search {
-        q = q.bind(format!("%{}%", filter.search.trim()));
+    for b in &binds {
+        q = q.bind(b);
     }
     Ok(q.fetch_one(pool).await?.max(0) as u32)
+}
+
+pub async fn tracks_by_keys(
+    pool: &SqlitePool,
+    source: &Source,
+    keys: &[String],
+) -> Result<Vec<Track>, DbError> {
+    if keys.is_empty() {
+        return Ok(Vec::new());
+    }
+    let keys_json = serde_json::to_string(keys)?;
+    let sql = format!(
+        "SELECT {TRACK_COLUMNS} FROM tracks WHERE source = ?1 \
+         AND track_key IN (SELECT value FROM json_each(?2))"
+    );
+    let rows = sqlx::query_as::<_, TrackRow>(&sql)
+        .bind(source.as_str())
+        .bind(keys_json)
+        .fetch_all(pool)
+        .await?;
+    let mut by_key: std::collections::HashMap<String, Track> = rows
+        .into_iter()
+        .map(Into::into)
+        .map(|t: Track| (t.id.key().into_owned(), t))
+        .collect();
+    Ok(keys.iter().filter_map(|k| by_key.remove(k)).collect())
+}
+
+pub async fn artists(pool: &SqlitePool, source: &Source) -> Result<Vec<(String, u32)>, DbError> {
+    let rows: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT artist, COUNT(*) FROM tracks WHERE source = ?1 AND artist != '' \
+         GROUP BY artist ORDER BY artist COLLATE NOCASE",
+    )
+    .bind(source.as_str())
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(a, n)| (a, n.max(0) as u32))
+        .collect())
+}
+
+pub async fn genres(pool: &SqlitePool, source: &Source) -> Result<Vec<String>, DbError> {
+    Ok(sqlx::query_scalar(
+        "SELECT DISTINCT genre FROM albums WHERE source = ?1 AND genre != '' \
+         ORDER BY genre COLLATE NOCASE",
+    )
+    .bind(source.as_str())
+    .fetch_all(pool)
+    .await?)
+}
+
+pub async fn album(
+    pool: &SqlitePool,
+    source: &Source,
+    album_id: &str,
+) -> Result<Option<Album>, DbError> {
+    let row = sqlx::query_as::<_, AlbumRow>(
+        "SELECT source_album_id, title, artist, genre, year, cover_path, manual_cover \
+         FROM albums WHERE source = ?1 AND source_album_id = ?2",
+    )
+    .bind(source.as_str())
+    .bind(album_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(Into::into))
 }
 
 pub async fn albums(pool: &SqlitePool, source: &Source) -> Result<Vec<Album>, DbError> {

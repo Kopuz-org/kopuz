@@ -76,22 +76,40 @@ pub enum TrackSort {
     DateAdded,
 }
 
-/// What a track listing selects: which source, how it's sorted, and an optional
-/// case-insensitive search across title/artist/album. Drives `WHERE`/`ORDER BY`
-/// so only the visible window is materialized.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// What a track listing selects: which source, how it's sorted, an optional
+/// case-insensitive search across title/artist/album, and optional exact
+/// artist / album-id narrowing. Drives `WHERE`/`ORDER BY` so only the needed
+/// rows are materialized.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TrackFilter {
     pub source: Source,
     pub sort: TrackSort,
     pub search: String,
+    pub artist: Option<String>,
+    pub album_id: Option<String>,
 }
 
 impl TrackFilter {
     pub fn new(source: Source) -> Self {
         Self {
             source,
-            sort: TrackSort::default(),
-            search: String::new(),
+            ..Default::default()
+        }
+    }
+
+    pub fn album(source: Source, album_id: impl Into<String>) -> Self {
+        Self {
+            source,
+            album_id: Some(album_id.into()),
+            ..Default::default()
+        }
+    }
+
+    pub fn artist(source: Source, artist: impl Into<String>) -> Self {
+        Self {
+            source,
+            artist: Some(artist.into()),
+            ..Default::default()
         }
     }
 }
@@ -172,6 +190,85 @@ pub trait Storage: Send + Sync {
 
     /// Total rows a `tracks_page` filter matches (for the scroll spacer).
     async fn tracks_count(&self, filter: &TrackFilter) -> Result<u32, DbError>;
+
+    /// The complete filtered+sorted list (artist/album details, small lists).
+    async fn tracks_all(&self, filter: &TrackFilter) -> Result<Vec<reader::Track>, DbError>;
+
+    /// Resolve tracks by `track_key`, preserving the input order (recents,
+    /// playlist membership). Missing keys are skipped.
+    async fn tracks_by_keys(
+        &self,
+        source: &Source,
+        keys: &[String],
+    ) -> Result<Vec<reader::Track>, DbError>;
+
+    /// Distinct artists for a source with their track counts, A→Z.
+    async fn artists(&self, source: &Source) -> Result<Vec<(String, u32)>, DbError>;
+
+    /// Distinct non-empty album genres for a source, A→Z.
+    async fn genres(&self, source: &Source) -> Result<Vec<String>, DbError>;
+
+    /// One album by id.
+    async fn album(&self, source: &Source, album_id: &str)
+    -> Result<Option<reader::Album>, DbError>;
+
+    /// The artist-image maps: (server urls, local paths, custom paths).
+    #[allow(clippy::type_complexity)]
+    async fn artist_images(
+        &self,
+    ) -> Result<
+        (
+            std::collections::HashMap<String, String>,
+            std::collections::HashMap<String, std::path::PathBuf>,
+            std::collections::HashMap<String, std::path::PathBuf>,
+        ),
+        DbError,
+    >;
+
+    /// Delete tracks by key for a source. Returns rows removed.
+    async fn delete_tracks(&self, source: &Source, keys: &[String]) -> Result<u64, DbError>;
+
+    /// Set/clear an album's cover (manual covers survive non-manual updates).
+    async fn update_album_cover(
+        &self,
+        source: &Source,
+        album_id: &str,
+        cover_path: Option<&str>,
+        manual: bool,
+    ) -> Result<(), DbError>;
+
+    /// Upsert one playlist's metadata (name/cover/image_tag), keeping membership.
+    async fn upsert_playlist_meta(
+        &self,
+        source: &Source,
+        pl_id: &str,
+        name: &str,
+        cover_path: Option<&str>,
+        image_tag: Option<&str>,
+    ) -> Result<(), DbError>;
+
+    /// Delete one playlist (membership cascades).
+    async fn delete_playlist(&self, source: &Source, pl_id: &str) -> Result<(), DbError>;
+
+    /// Replace ONE playlist's membership (creates the playlist row if absent).
+    async fn set_playlist_tracks(
+        &self,
+        source: &Source,
+        pl_id: &str,
+        refs: &[String],
+    ) -> Result<(), DbError>;
+
+    /// Replace the (local) playlist folders.
+    async fn set_folders(&self, folders: &[reader::models::PlaylistFolder])
+    -> Result<(), DbError>;
+
+    /// Increment one track's play count (single-row upsert; key = `TrackId::uid()`).
+    async fn bump_listen_count(&self, track_uid: &str) -> Result<(), DbError>;
+
+    /// Register/unregister one offline download in the config blob (single
+    /// `json_set`/`json_remove` — the downloads hot path must not rewrite the
+    /// whole config per finished song).
+    async fn set_offline_track(&self, id: &str, path: Option<&str>) -> Result<(), DbError>;
 
     /// All albums for a source, ordered by artist then title.
     async fn albums(&self, source: &Source) -> Result<Vec<reader::Album>, DbError>;

@@ -47,6 +47,93 @@ pub fn use_tracks_window(filter: Memo<TrackFilter>, page: Memo<Page>) -> TracksW
     TracksWindow { rows, total }
 }
 
+/// The complete filtered+sorted list — artist/album details and other small
+/// lists. Big unbounded lists should use [`use_tracks_window`] instead.
+pub fn use_all_tracks(filter: Memo<TrackFilter>) -> Resource<Vec<reader::Track>> {
+    let db = use_context::<Db>();
+    let gens = use_generations();
+    use_resource(move || {
+        let _ = gens.generation(Table::Tracks);
+        let (db, f) = (db.clone(), filter());
+        async move { db.tracks_all(&f).await.unwrap_or_default() }
+    })
+}
+
+/// Resolve tracks by key (recents, playlist refs), preserving input order.
+pub fn use_tracks_by_keys(
+    source: Memo<Source>,
+    keys: Memo<Vec<String>>,
+) -> Resource<Vec<reader::Track>> {
+    let db = use_context::<Db>();
+    let gens = use_generations();
+    use_resource(move || {
+        let _ = gens.generation(Table::Tracks);
+        let (db, s, k) = (db.clone(), source(), keys());
+        async move { db.tracks_by_keys(&s, &k).await.unwrap_or_default() }
+    })
+}
+
+/// One album by id.
+pub fn use_album(source: Memo<Source>, album_id: Memo<String>) -> Resource<Option<reader::Album>> {
+    let db = use_context::<Db>();
+    let gens = use_generations();
+    use_resource(move || {
+        let _ = gens.generation(Table::Albums);
+        let (db, s, id) = (db.clone(), source(), album_id());
+        async move { db.album(&s, &id).await.unwrap_or_default() }
+    })
+}
+
+/// Distinct artists for a source with track counts, A→Z.
+pub fn use_artists(source: Memo<Source>) -> Resource<Vec<(String, u32)>> {
+    let db = use_context::<Db>();
+    let gens = use_generations();
+    use_resource(move || {
+        let _ = gens.generation(Table::Tracks);
+        let (db, s) = (db.clone(), source());
+        async move { db.artists(&s).await.unwrap_or_default() }
+    })
+}
+
+/// Distinct album genres for a source, A→Z.
+pub fn use_genres(source: Memo<Source>) -> Resource<Vec<String>> {
+    let db = use_context::<Db>();
+    let gens = use_generations();
+    use_resource(move || {
+        let _ = gens.generation(Table::Albums);
+        let (db, s) = (db.clone(), source());
+        async move { db.genres(&s).await.unwrap_or_default() }
+    })
+}
+
+/// The playlist store (local + active server), re-queried on a playlists bump.
+pub fn use_playlists() -> Resource<reader::PlaylistStore> {
+    let db = use_context::<Db>();
+    let gens = use_generations();
+    use_resource(move || {
+        let _ = gens.generation(Table::Playlists);
+        let _ = gens.generation(Table::Folders);
+        let db = db.clone();
+        async move { db.load_playlists().await.unwrap_or_default() }
+    })
+}
+
+/// The artist image maps: (server urls, local paths, custom paths).
+#[allow(clippy::type_complexity)]
+pub fn use_artist_images() -> Resource<(
+    std::collections::HashMap<String, String>,
+    std::collections::HashMap<String, std::path::PathBuf>,
+    std::collections::HashMap<String, std::path::PathBuf>,
+)> {
+    let db = use_context::<Db>();
+    let gens = use_generations();
+    use_resource(move || {
+        let _ = gens.generation(Table::Tracks);
+        let db = db.clone();
+        async move { db.artist_images().await.unwrap_or_default() }
+    })
+}
+
 /// All albums for a source, re-queried when the albums table changes.
 pub fn use_albums(source: Memo<Source>) -> Resource<Vec<reader::Album>> {
     let db = use_context::<Db>();

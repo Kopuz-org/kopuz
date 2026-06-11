@@ -215,8 +215,6 @@ pub async fn load_server(pool: &SqlitePool, id: &str) -> Result<Option<MusicServ
 }
 
 /// Increment one track's play count (1-row upsert — no whole-blob rewrite).
-// Wired to the player's scrobble path when it moves off the in-memory config.
-#[allow(dead_code)]
 pub async fn bump_listen_count(pool: &SqlitePool, key: &str) -> Result<(), DbError> {
     sqlx::query!(
         "INSERT INTO listen_counts (track_key, count) VALUES (?1, 1) \

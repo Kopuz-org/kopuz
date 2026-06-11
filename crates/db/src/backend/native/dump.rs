@@ -119,7 +119,7 @@ type ArtistImages = (
     HashMap<String, PathBuf>,
 );
 
-async fn artist_images(pool: &SqlitePool) -> Result<ArtistImages, DbError> {
+pub async fn artist_images(pool: &SqlitePool) -> Result<ArtistImages, DbError> {
     let rows = sqlx::query!("SELECT artist_norm, kind, image_ref FROM artist_images")
         .fetch_all(pool)
         .await?;

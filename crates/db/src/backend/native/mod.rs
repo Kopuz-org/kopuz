@@ -153,6 +153,101 @@ impl Storage for Native {
         queries::tracks_count(&self.pool(), filter).await
     }
 
+    async fn tracks_all(&self, filter: &crate::TrackFilter) -> Result<Vec<reader::Track>, DbError> {
+        queries::tracks_all(&self.pool(), filter).await
+    }
+
+    async fn tracks_by_keys(
+        &self,
+        source: &crate::Source,
+        keys: &[String],
+    ) -> Result<Vec<reader::Track>, DbError> {
+        queries::tracks_by_keys(&self.pool(), source, keys).await
+    }
+
+    async fn artists(&self, source: &crate::Source) -> Result<Vec<(String, u32)>, DbError> {
+        queries::artists(&self.pool(), source).await
+    }
+
+    async fn genres(&self, source: &crate::Source) -> Result<Vec<String>, DbError> {
+        queries::genres(&self.pool(), source).await
+    }
+
+    async fn album(
+        &self,
+        source: &crate::Source,
+        album_id: &str,
+    ) -> Result<Option<reader::Album>, DbError> {
+        queries::album(&self.pool(), source, album_id).await
+    }
+
+    async fn artist_images(
+        &self,
+    ) -> Result<
+        (
+            std::collections::HashMap<String, String>,
+            std::collections::HashMap<String, std::path::PathBuf>,
+            std::collections::HashMap<String, std::path::PathBuf>,
+        ),
+        DbError,
+    > {
+        dump::artist_images(&self.pool()).await
+    }
+
+    async fn delete_tracks(&self, source: &crate::Source, keys: &[String]) -> Result<u64, DbError> {
+        writes::delete_tracks(&self.pool(), source, keys).await
+    }
+
+    async fn update_album_cover(
+        &self,
+        source: &crate::Source,
+        album_id: &str,
+        cover_path: Option<&str>,
+        manual: bool,
+    ) -> Result<(), DbError> {
+        writes::update_album_cover(&self.pool(), source, album_id, cover_path, manual).await
+    }
+
+    async fn upsert_playlist_meta(
+        &self,
+        source: &crate::Source,
+        pl_id: &str,
+        name: &str,
+        cover_path: Option<&str>,
+        image_tag: Option<&str>,
+    ) -> Result<(), DbError> {
+        writes::upsert_playlist_meta(&self.pool(), source, pl_id, name, cover_path, image_tag)
+            .await
+    }
+
+    async fn delete_playlist(&self, source: &crate::Source, pl_id: &str) -> Result<(), DbError> {
+        writes::delete_playlist(&self.pool(), source, pl_id).await
+    }
+
+    async fn set_playlist_tracks(
+        &self,
+        source: &crate::Source,
+        pl_id: &str,
+        refs: &[String],
+    ) -> Result<(), DbError> {
+        writes::set_playlist_tracks(&self.pool(), source, pl_id, refs).await
+    }
+
+    async fn set_folders(
+        &self,
+        folders: &[reader::models::PlaylistFolder],
+    ) -> Result<(), DbError> {
+        writes::set_folders(&self.pool(), folders).await
+    }
+
+    async fn bump_listen_count(&self, track_uid: &str) -> Result<(), DbError> {
+        cfg_store::bump_listen_count(&self.pool(), track_uid).await
+    }
+
+    async fn set_offline_track(&self, id: &str, path: Option<&str>) -> Result<(), DbError> {
+        writes::set_offline_track(&self.pool(), id, path).await
+    }
+
     async fn albums(&self, source: &crate::Source) -> Result<Vec<reader::Album>, DbError> {
         queries::albums(&self.pool(), source).await
     }

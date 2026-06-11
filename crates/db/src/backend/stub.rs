@@ -52,6 +52,100 @@ impl Storage for Stub {
         Ok(0)
     }
 
+    async fn tracks_all(&self, _filter: &crate::TrackFilter) -> Result<Vec<reader::Track>, DbError> {
+        Ok(Vec::new())
+    }
+
+    async fn tracks_by_keys(
+        &self,
+        _source: &crate::Source,
+        _keys: &[String],
+    ) -> Result<Vec<reader::Track>, DbError> {
+        Ok(Vec::new())
+    }
+
+    async fn artists(&self, _source: &crate::Source) -> Result<Vec<(String, u32)>, DbError> {
+        Ok(Vec::new())
+    }
+
+    async fn genres(&self, _source: &crate::Source) -> Result<Vec<String>, DbError> {
+        Ok(Vec::new())
+    }
+
+    async fn album(
+        &self,
+        _source: &crate::Source,
+        _album_id: &str,
+    ) -> Result<Option<reader::Album>, DbError> {
+        Ok(None)
+    }
+
+    async fn artist_images(
+        &self,
+    ) -> Result<
+        (
+            std::collections::HashMap<String, String>,
+            std::collections::HashMap<String, std::path::PathBuf>,
+            std::collections::HashMap<String, std::path::PathBuf>,
+        ),
+        DbError,
+    > {
+        Ok(Default::default())
+    }
+
+    async fn delete_tracks(&self, _source: &crate::Source, _keys: &[String]) -> Result<u64, DbError> {
+        Ok(0)
+    }
+
+    async fn update_album_cover(
+        &self,
+        _source: &crate::Source,
+        _album_id: &str,
+        _cover_path: Option<&str>,
+        _manual: bool,
+    ) -> Result<(), DbError> {
+        Ok(())
+    }
+
+    async fn upsert_playlist_meta(
+        &self,
+        _source: &crate::Source,
+        _pl_id: &str,
+        _name: &str,
+        _cover_path: Option<&str>,
+        _image_tag: Option<&str>,
+    ) -> Result<(), DbError> {
+        Ok(())
+    }
+
+    async fn delete_playlist(&self, _source: &crate::Source, _pl_id: &str) -> Result<(), DbError> {
+        Ok(())
+    }
+
+    async fn set_playlist_tracks(
+        &self,
+        _source: &crate::Source,
+        _pl_id: &str,
+        _refs: &[String],
+    ) -> Result<(), DbError> {
+        Ok(())
+    }
+
+    async fn set_folders(
+        &self,
+        _folders: &[reader::models::PlaylistFolder],
+    ) -> Result<(), DbError> {
+        Ok(())
+    }
+
+    async fn bump_listen_count(&self, _track_uid: &str) -> Result<(), DbError> {
+        Ok(())
+    }
+
+    async fn set_offline_track(&self, _id: &str, _path: Option<&str>) -> Result<(), DbError> {
+        Ok(())
+    }
+
     async fn albums(&self, _source: &crate::Source) -> Result<Vec<reader::Album>, DbError> {
         Ok(Vec::new())
     }

@@ -449,6 +449,194 @@ pub async fn save_favorites_store(
     Ok(())
 }
 
+pub async fn delete_tracks(
+    pool: &SqlitePool,
+    source: &Source,
+    keys: &[String],
+) -> Result<u64, DbError> {
+    if keys.is_empty() {
+        return Ok(0);
+    }
+    let keys_json = serde_json::to_string(keys)?;
+    let res = sqlx::query(
+        "DELETE FROM tracks WHERE source = ?1 \
+         AND track_key IN (SELECT value FROM json_each(?2))",
+    )
+    .bind(source.as_str())
+    .bind(keys_json)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected())
+}
+
+pub async fn update_album_cover(
+    pool: &SqlitePool,
+    source: &Source,
+    album_id: &str,
+    cover_path: Option<&str>,
+    manual: bool,
+) -> Result<(), DbError> {
+    let src = source.as_str();
+    let m = manual as i64;
+    sqlx::query!(
+        "UPDATE albums SET cover_path = ?3, manual_cover = ?4 \
+         WHERE source = ?1 AND source_album_id = ?2",
+        src,
+        album_id,
+        cover_path,
+        m
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn upsert_playlist_meta(
+    pool: &SqlitePool,
+    source: &Source,
+    pl_id: &str,
+    name: &str,
+    cover_path: Option<&str>,
+    image_tag: Option<&str>,
+) -> Result<(), DbError> {
+    let src = source.as_str();
+    sqlx::query!(
+        "INSERT INTO playlists (source, source_pl_id, name, cover_path, image_tag) \
+         VALUES (?1, ?2, ?3, ?4, ?5) \
+         ON CONFLICT(source, source_pl_id) DO UPDATE SET name=?3, cover_path=?4, image_tag=?5",
+        src,
+        pl_id,
+        name,
+        cover_path,
+        image_tag
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn delete_playlist(
+    pool: &SqlitePool,
+    source: &Source,
+    pl_id: &str,
+) -> Result<(), DbError> {
+    let src = source.as_str();
+    sqlx::query!(
+        "DELETE FROM playlists WHERE source = ?1 AND source_pl_id = ?2",
+        src,
+        pl_id
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Replace ONE playlist's membership (creating the playlist row if absent) —
+/// playlist-scoped, never the whole store.
+pub async fn set_playlist_tracks(
+    pool: &SqlitePool,
+    source: &Source,
+    pl_id: &str,
+    refs: &[String],
+) -> Result<(), DbError> {
+    let src = source.as_str();
+    let mut tx = pool.begin().await?;
+    let existing: Option<i64> = sqlx::query_scalar!(
+        "SELECT rowid_pk FROM playlists WHERE source = ?1 AND source_pl_id = ?2",
+        src,
+        pl_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .flatten();
+    let pk: i64 = match existing {
+        Some(pk) => pk,
+        None => {
+            let res = sqlx::query!(
+                "INSERT INTO playlists (source, source_pl_id, name) VALUES (?1, ?2, ?2)",
+                src,
+                pl_id
+            )
+            .execute(&mut *tx)
+            .await?;
+            res.last_insert_rowid()
+        }
+    };
+    sqlx::query!("DELETE FROM playlist_tracks WHERE playlist_pk = ?1", pk)
+        .execute(&mut *tx)
+        .await?;
+    for (pos, r) in refs.iter().enumerate() {
+        let pos = pos as i64;
+        sqlx::query!(
+            "INSERT INTO playlist_tracks (playlist_pk, position, track_ref) VALUES (?1, ?2, ?3)",
+            pk,
+            pos,
+            r
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+pub async fn set_folders(
+    pool: &SqlitePool,
+    folders: &[reader::models::PlaylistFolder],
+) -> Result<(), DbError> {
+    let mut tx = pool.begin().await?;
+    sqlx::query!("DELETE FROM folders").execute(&mut *tx).await?;
+    for f in folders {
+        sqlx::query!(
+            "INSERT INTO folders (id, source, name) VALUES (?1, 'local', ?2)",
+            f.id,
+            f.name
+        )
+        .execute(&mut *tx)
+        .await?;
+        for (pos, pid) in f.playlist_ids.iter().enumerate() {
+            let pos = pos as i64;
+            sqlx::query!(
+                "INSERT OR IGNORE INTO folder_playlists (folder_id, playlist_ref, position) \
+                 VALUES (?1, ?2, ?3)",
+                f.id,
+                pid,
+                pos
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+/// One `json_set`/`json_remove` on the config blob — the downloads hot path
+/// must not rewrite the whole config per finished song.
+pub async fn set_offline_track(
+    pool: &SqlitePool,
+    id: &str,
+    path: Option<&str>,
+) -> Result<(), DbError> {
+    let key = format!("$.offline_tracks.\"{}\"", id.replace('"', ""));
+    match path {
+        Some(p) => {
+            sqlx::query("UPDATE app_config SET json = json_set(json, ?1, ?2) WHERE id = 1")
+                .bind(key)
+                .bind(p)
+                .execute(pool)
+                .await?;
+        }
+        None => {
+            sqlx::query("UPDATE app_config SET json = json_remove(json, ?1) WHERE id = 1")
+                .bind(key)
+                .execute(pool)
+                .await?;
+        }
+    }
+    Ok(())
+}
+
 pub async fn meta_get(
     pool: &SqlitePool,
     cache_key: &str,
