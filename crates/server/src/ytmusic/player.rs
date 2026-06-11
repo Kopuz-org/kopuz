@@ -208,7 +208,10 @@ fn is_premium_itag(itag: Option<u32>) -> bool {
 static ACCOUNT_PREMIUM: OnceLock<Mutex<HashMap<String, (Instant, bool)>>> = OnceLock::new();
 static TIER_DB: OnceLock<db::Db> = OnceLock::new();
 const FREE_TIER_TTL: Duration = Duration::from_secs(24 * 60 * 60);
-const TIER_META_KIND: &str = "yt_tier";
+// v2: "yt_tier" rows were poisoned by the 774-only is_premium_itag (a Premium
+// account deciphering an AAC-only track got a persisted "free" verdict, pinning
+// it to anonymous 251 for a day). New kind orphans those rows.
+const TIER_META_KIND: &str = "yt_tier_v2";
 
 /// Register the database used to persist account tiers. Called once at startup.
 pub fn init_tier_store(handle: db::Db) {

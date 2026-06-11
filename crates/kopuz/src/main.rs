@@ -77,6 +77,11 @@ const REDUCED_ANIMATIONS_CSS: Asset = asset!("../assets/reduced-animations.css")
 const TOOLBAR_ICONS: Asset = asset!("../assets/toolbar_icons", AssetOptions::folder());
 const QUEUE_STATE_SAVE_DEBOUNCE_MS: u64 = 1200;
 const QUEUE_STATE_PROGRESS_STEP_SECS: u64 = 5;
+/// Store saves (config/library/playlists/favorites) are full-replace and
+/// expensive; bursts of mutations (batch downloads, syncs) coalesce into one
+/// save per settle+cooldown window instead of one per mutation.
+const STORE_SAVE_SETTLE_MS: u64 = 600;
+const STORE_SAVE_COOLDOWN_MS: u64 = 2500;
 
 #[cfg(target_os = "windows")]
 #[component]
@@ -1040,12 +1045,22 @@ fn App() -> Element {
     let is_rightbar_open = use_signal(|| false);
     let rightbar_width = use_signal(|| 320usize);
     let mut palette = use_signal(|| Option::<Vec<utils::color::Color>>::None);
+    // Per-domain "loaded successfully" flags. The save effects are FULL-REPLACE
+    // (prune/delete-and-reinsert), so persisting a default value that exists
+    // only because its LOAD FAILED would commit a wipe of real rows. A save may
+    // only run once its domain demonstrably loaded; a legitimately fresh/empty
+    // DB still counts as loaded.
+    let mut config_loaded_ok = use_signal(|| false);
+    let mut library_loaded_ok = use_signal(|| false);
+    let mut playlists_loaded_ok = use_signal(|| false);
+    let mut favorites_loaded_ok = use_signal(|| false);
+
     let mut pending_queue_state_snapshot = use_signal(|| None::<PersistedQueueState>);
     let mut pending_queue_state_revision = use_signal(|| 0u64);
 
     // tao calls process::exit() after CloseRequested, killing the debounced
-    // queue-flush loop — without this, the last ~1.2s of queue/progress changes
-    // were lost on every quit. Persist the pending snapshot synchronously (a
+    // save loops — without this, the last debounce window of queue/store
+    // changes was lost on every quit. Persist everything synchronously (a
     // throwaway current-thread runtime; the sqlx pool works across runtimes,
     // same as init_db_blocking). Idempotent across CloseRequested/LoopDestroyed.
     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
@@ -1059,31 +1074,48 @@ fn App() -> Element {
                     ..
                 }
         ) {
-            let snapshot = pending_queue_state_snapshot.peek().clone();
-            if let (Some(db), Some(snap)) = (DB_HANDLE.get(), snapshot)
-                && let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+            if let (Some(db), Ok(rt)) = (
+                DB_HANDLE.get(),
+                tokio::runtime::Builder::new_current_thread()
                     .enable_all()
-                    .build()
-            {
+                    .build(),
+            ) {
                 let db = db.clone();
+                let queue_snap = pending_queue_state_snapshot.peek().clone();
+                let active = config.peek().active_server_id.clone();
                 rt.block_on(async move {
-                    if let Err(e) = db.save_queue(&queue_snapshot(snap)).await {
+                    if let Some(snap) = queue_snap
+                        && let Err(e) = db.save_queue(&queue_snapshot(snap)).await
+                    {
                         tracing::warn!(error = %e, "queue flush on close failed");
+                    }
+                    if *config_loaded_ok.peek() {
+                        let mut cfg = config.peek().clone();
+                        cfg.volume = *volume.peek();
+                        let _ = db.save_config(&cfg).await;
+                    }
+                    if *library_loaded_ok.peek() {
+                        let _ = db
+                            .save_library(&library.peek().clone(), active.as_deref())
+                            .await;
+                    }
+                    if *playlists_loaded_ok.peek() {
+                        let _ = db
+                            .save_playlists(&playlist_store.peek().clone(), active.as_deref())
+                            .await;
+                    }
+                    if *favorites_loaded_ok.peek() {
+                        let _ = db
+                            .save_favorites_store(
+                                &favorites_store.peek().clone(),
+                                active.as_deref(),
+                            )
+                            .await;
                     }
                 });
             }
         }
     });
-
-    // Per-domain "loaded successfully" flags. The save effects are FULL-REPLACE
-    // (prune/delete-and-reinsert), so persisting a default value that exists
-    // only because its LOAD FAILED would commit a wipe of real rows. A save may
-    // only run once its domain demonstrably loaded; a legitimately fresh/empty
-    // DB still counts as loaded.
-    let mut config_loaded_ok = use_signal(|| false);
-    let mut library_loaded_ok = use_signal(|| false);
-    let mut playlists_loaded_ok = use_signal(|| false);
-    let mut favorites_loaded_ok = use_signal(|| false);
 
     #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
     use_effect(move || {
@@ -1328,26 +1360,49 @@ fn App() -> Element {
         }.instrument(tracing::info_span!("app.update_check")));
     });
 
-    let db_for_cfg_save = db.clone();
+    // The store saves are FULL-REPLACE (hundreds-to-thousands of statements),
+    // so saving on every signal mutation hammered the runtime — a batch
+    // download bumping `offline_tracks` per finished song ran a complete
+    // config save (≈840 listen-count upserts) per completion and starved the
+    // audio stream into underruns. Each domain now marks itself dirty and a
+    // debounced saver loop persists at most once per cooldown window,
+    // coalescing bursts. The CloseRequested flush below covers quitting inside
+    // the window.
+    let mut config_dirty = use_signal(|| 0u64);
     use_effect(move || {
         if !*initial_load_done.read() || !*config_loaded_ok.read() {
             return;
         }
-        let mut config_snapshot = config.read().clone();
-        config_snapshot.volume = *volume.peek();
-        persist_config_snapshot(db_for_cfg_save.clone(), config_snapshot);
+        let _ = config.read();
+        config_dirty += 1;
     });
-
-    let db_for_vol_save = db.clone();
     use_effect(move || {
         if !*initial_load_done.read() || !*config_loaded_ok.read() {
             return;
         }
-
-        let committed_volume = *persisted_volume.read();
-        let mut config_snapshot = config.peek().clone();
-        config_snapshot.volume = committed_volume;
-        persist_config_snapshot(db_for_vol_save.clone(), config_snapshot);
+        let _ = *persisted_volume.read();
+        config_dirty += 1;
+    });
+    let db_for_cfg_save = db.clone();
+    use_future(move || {
+        let db = db_for_cfg_save.clone();
+        async move {
+            let mut flushed = 0u64;
+            loop {
+                if *config_dirty.peek() == flushed {
+                    utils::sleep(std::time::Duration::from_millis(250)).await;
+                    continue;
+                }
+                utils::sleep(std::time::Duration::from_millis(STORE_SAVE_SETTLE_MS)).await;
+                flushed = *config_dirty.peek();
+                let mut snapshot = config.peek().clone();
+                snapshot.volume = *volume.peek();
+                if let Err(e) = db.save_config(&snapshot).await {
+                    tracing::error!("Failed to save config: {}", e);
+                }
+                utils::sleep(std::time::Duration::from_millis(STORE_SAVE_COOLDOWN_MS)).await;
+            }
+        }
     });
 
     // Keepalive is rearm-on-account-change, not rearm-on-every-config-
@@ -1423,52 +1478,94 @@ fn App() -> Element {
         windows_titlebar::set_custom_titlebar_enabled(mode == config::TitlebarMode::Custom);
     });
 
-    let db_for_pl_save = db.clone();
+    let mut playlists_dirty = use_signal(|| 0u64);
     use_effect(move || {
         if !*initial_load_done.read() || !*playlists_loaded_ok.read() {
             return;
         }
-        let store_snapshot = playlist_store.read().clone();
-        // The active id is snapshotted from the in-memory config (not re-read
-        // from the DB blob inside the save) so a concurrent server switch
-        // can't mis-attribute the scoped delete/insert.
-        let active = config.peek().active_server_id.clone();
+        let _ = playlist_store.read();
+        playlists_dirty += 1;
+    });
+    let db_for_pl_save = db.clone();
+    use_future(move || {
         let db = db_for_pl_save.clone();
-        spawn(async move {
-            if let Err(e) = db.save_playlists(&store_snapshot, active.as_deref()).await {
-                tracing::error!("Failed to save playlists: {}", e);
+        async move {
+            let mut flushed = 0u64;
+            loop {
+                if *playlists_dirty.peek() == flushed {
+                    utils::sleep(std::time::Duration::from_millis(250)).await;
+                    continue;
+                }
+                utils::sleep(std::time::Duration::from_millis(STORE_SAVE_SETTLE_MS)).await;
+                flushed = *playlists_dirty.peek();
+                let snapshot = playlist_store.peek().clone();
+                let active = config.peek().active_server_id.clone();
+                if let Err(e) = db.save_playlists(&snapshot, active.as_deref()).await {
+                    tracing::error!("Failed to save playlists: {}", e);
+                }
+                utils::sleep(std::time::Duration::from_millis(STORE_SAVE_COOLDOWN_MS)).await;
             }
-        }.instrument(tracing::info_span!("playlists.persist")));
+        }
     });
 
-    let db_for_lib_save = db.clone();
+    let mut library_dirty = use_signal(|| 0u64);
     use_effect(move || {
         if !*initial_load_done.read() || !*library_loaded_ok.read() {
             return;
         }
-        let lib_snapshot = library.read().clone();
-        let active = config.peek().active_server_id.clone();
+        let _ = library.read();
+        library_dirty += 1;
+    });
+    let db_for_lib_save = db.clone();
+    use_future(move || {
         let db = db_for_lib_save.clone();
-        spawn(async move {
-            if let Err(e) = db.save_library(&lib_snapshot, active.as_deref()).await {
-                tracing::error!("Failed to save library: {}", e);
+        async move {
+            let mut flushed = 0u64;
+            loop {
+                if *library_dirty.peek() == flushed {
+                    utils::sleep(std::time::Duration::from_millis(250)).await;
+                    continue;
+                }
+                utils::sleep(std::time::Duration::from_millis(STORE_SAVE_SETTLE_MS)).await;
+                flushed = *library_dirty.peek();
+                let snapshot = library.peek().clone();
+                let active = config.peek().active_server_id.clone();
+                if let Err(e) = db.save_library(&snapshot, active.as_deref()).await {
+                    tracing::error!("Failed to save library: {}", e);
+                }
+                utils::sleep(std::time::Duration::from_millis(STORE_SAVE_COOLDOWN_MS)).await;
             }
-        }.instrument(tracing::info_span!("library.persist")));
+        }
     });
 
-    let db_for_fav_save = db.clone();
+    let mut favorites_dirty = use_signal(|| 0u64);
     use_effect(move || {
         if !*initial_load_done.read() || !*favorites_loaded_ok.read() {
             return;
         }
-        let store_snapshot = favorites_store.read().clone();
-        let active = config.peek().active_server_id.clone();
+        let _ = favorites_store.read();
+        favorites_dirty += 1;
+    });
+    let db_for_fav_save = db.clone();
+    use_future(move || {
         let db = db_for_fav_save.clone();
-        spawn(async move {
-            if let Err(e) = db.save_favorites_store(&store_snapshot, active.as_deref()).await {
-                tracing::error!("Failed to save favorites: {}", e);
+        async move {
+            let mut flushed = 0u64;
+            loop {
+                if *favorites_dirty.peek() == flushed {
+                    utils::sleep(std::time::Duration::from_millis(250)).await;
+                    continue;
+                }
+                utils::sleep(std::time::Duration::from_millis(STORE_SAVE_SETTLE_MS)).await;
+                flushed = *favorites_dirty.peek();
+                let snapshot = favorites_store.peek().clone();
+                let active = config.peek().active_server_id.clone();
+                if let Err(e) = db.save_favorites_store(&snapshot, active.as_deref()).await {
+                    tracing::error!("Failed to save favorites: {}", e);
+                }
+                utils::sleep(std::time::Duration::from_millis(STORE_SAVE_COOLDOWN_MS)).await;
             }
-        }.instrument(tracing::info_span!("favorites.persist")));
+        }
     });
 
     use_effect(move || {
