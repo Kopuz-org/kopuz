@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT ref FROM favorites WHERE server_id = 'local'",
+  "describe": {
+    "columns": [
+      {
+        "name": "ref",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8c861eddebc1952c35ba1a36ff6218ed8cade7ef8c88d31669dcdb88a1ffac2d"
+}

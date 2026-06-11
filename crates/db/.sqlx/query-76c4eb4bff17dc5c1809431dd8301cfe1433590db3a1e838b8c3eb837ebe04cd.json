@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO playlists (source, source_pl_id, name, cover_path, position) VALUES ('local', ?1, ?2, ?3, ?4) RETURNING rowid_pk",
+  "describe": {
+    "columns": [
+      {
+        "name": "rowid_pk",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "76c4eb4bff17dc5c1809431dd8301cfe1433590db3a1e838b8c3eb837ebe04cd"
+}

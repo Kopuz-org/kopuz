@@ -14,6 +14,7 @@ use sqlx::sqlite::{
 use crate::{DbError, Storage};
 
 mod cfg_store;
+mod dump;
 mod migrate;
 mod queries;
 mod rows;
@@ -155,6 +156,41 @@ impl Storage for Native {
 
     async fn albums(&self, source: &crate::Source) -> Result<Vec<reader::Album>, DbError> {
         queries::albums(&self.pool(), source).await
+    }
+
+    async fn load_library(&self) -> Result<reader::Library, DbError> {
+        dump::load_library(&self.pool()).await
+    }
+
+    async fn load_queue(&self) -> Result<crate::QueueSnapshot, DbError> {
+        dump::load_queue(&self.pool()).await
+    }
+
+    async fn load_playlists(&self) -> Result<reader::PlaylistStore, DbError> {
+        dump::load_playlists(&self.pool()).await
+    }
+
+    async fn load_favorites_store(&self) -> Result<reader::FavoritesStore, DbError> {
+        dump::load_favorites_store(&self.pool()).await
+    }
+
+    async fn save_library(&self, lib: &reader::Library) -> Result<(), DbError> {
+        writes::save_library(&self.pool(), lib).await
+    }
+
+    async fn save_playlists(&self, store: &reader::PlaylistStore) -> Result<(), DbError> {
+        writes::save_playlists(&self.pool(), store).await
+    }
+
+    async fn save_favorites_store(
+        &self,
+        store: &reader::FavoritesStore,
+    ) -> Result<(), DbError> {
+        writes::save_favorites_store(&self.pool(), store).await
+    }
+
+    async fn save_queue(&self, snap: &crate::QueueSnapshot) -> Result<(), DbError> {
+        writes::save_queue(&self.pool(), snap).await
     }
 
     async fn favorites(&self, server_id: &str) -> Result<Vec<String>, DbError> {

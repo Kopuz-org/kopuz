@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO artist_images (artist_norm, kind, image_ref) VALUES (?1, 'custom', ?2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "56d17cf58e19e400643caeafa0a9da214685a172f082b8e7c0809d2cac59990b"
+}

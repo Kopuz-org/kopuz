@@ -56,6 +56,41 @@ impl Storage for Stub {
         Ok(Vec::new())
     }
 
+    async fn load_library(&self) -> Result<reader::Library, DbError> {
+        Ok(reader::Library::default())
+    }
+
+    async fn load_queue(&self) -> Result<crate::QueueSnapshot, DbError> {
+        Ok(crate::QueueSnapshot::default())
+    }
+
+    async fn load_playlists(&self) -> Result<reader::PlaylistStore, DbError> {
+        Ok(reader::PlaylistStore::default())
+    }
+
+    async fn load_favorites_store(&self) -> Result<reader::FavoritesStore, DbError> {
+        Ok(reader::FavoritesStore::default())
+    }
+
+    async fn save_library(&self, _lib: &reader::Library) -> Result<(), DbError> {
+        Ok(())
+    }
+
+    async fn save_playlists(&self, _store: &reader::PlaylistStore) -> Result<(), DbError> {
+        Ok(())
+    }
+
+    async fn save_favorites_store(
+        &self,
+        _store: &reader::FavoritesStore,
+    ) -> Result<(), DbError> {
+        Ok(())
+    }
+
+    async fn save_queue(&self, _snap: &crate::QueueSnapshot) -> Result<(), DbError> {
+        Ok(())
+    }
+
     async fn favorites(&self, _server_id: &str) -> Result<Vec<String>, DbError> {
         Ok(Vec::new())
     }

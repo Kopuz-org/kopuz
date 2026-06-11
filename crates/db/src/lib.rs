@@ -51,6 +51,18 @@ pub struct Page {
     pub limit: u32,
 }
 
+/// The queue/progress snapshot, reconstructed from the `queue_state` row. The
+/// in-memory `PersistedQueueState` (in the app crate) maps directly from this.
+#[derive(Clone, Debug, Default)]
+pub struct QueueSnapshot {
+    pub version: u8,
+    pub queue: Vec<reader::Track>,
+    pub current_queue_index: usize,
+    pub progress_secs: u64,
+    pub shuffle_order: Vec<usize>,
+    pub shuffle_enabled: bool,
+}
+
 /// Sort order for a track listing — maps to an indexed `ORDER BY`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TrackSort {
@@ -163,6 +175,38 @@ pub trait Storage: Send + Sync {
 
     /// All albums for a source, ordered by artist then title.
     async fn albums(&self, source: &Source) -> Result<Vec<reader::Album>, DbError>;
+
+    /// Reconstruct the full in-memory `Library` from the DB — local + active
+    /// server tracks/albums, artist images, and the YT sync timestamps. Replaces
+    /// the legacy `Library::load` from `library.json` (which can't parse the new
+    /// `Track` shape); the DB is the converted source of truth.
+    async fn load_library(&self) -> Result<reader::Library, DbError>;
+
+    /// Reconstruct the queue/progress snapshot from the `queue_state` row.
+    async fn load_queue(&self) -> Result<QueueSnapshot, DbError>;
+
+    /// Reconstruct the in-memory `PlaylistStore` (local + server playlists +
+    /// folders) from the DB.
+    async fn load_playlists(&self) -> Result<reader::PlaylistStore, DbError>;
+
+    /// Reconstruct the in-memory `FavoritesStore` (local + active-server
+    /// favorites) from the DB.
+    async fn load_favorites_store(&self) -> Result<reader::FavoritesStore, DbError>;
+
+    /// Persist the whole in-memory `Library` to the DB: upsert local + active
+    /// server tracks/albums, prune rows no longer present, replace artist images,
+    /// and stamp the YT sync timestamps into the config blob.
+    async fn save_library(&self, lib: &reader::Library) -> Result<(), DbError>;
+
+    /// Replace the persisted playlists/folders with the in-memory store.
+    async fn save_playlists(&self, store: &reader::PlaylistStore) -> Result<(), DbError>;
+
+    /// Sync the in-memory favorites to the DB (local + active server).
+    async fn save_favorites_store(&self, store: &reader::FavoritesStore)
+    -> Result<(), DbError>;
+
+    /// Persist the queue/progress snapshot to the single `queue_state` row.
+    async fn save_queue(&self, snap: &QueueSnapshot) -> Result<(), DbError>;
 
     /// The favorite refs (`track_key`s) for a server (`"local"` for filesystem).
     async fn favorites(&self, server_id: &str) -> Result<Vec<String>, DbError>;

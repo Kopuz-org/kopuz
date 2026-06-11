@@ -12,7 +12,7 @@ use sqlx::SqlitePool;
 use super::rows::{AlbumRow, TrackRow};
 use crate::{DbError, Page, Source, TrackFilter, TrackSort};
 
-const TRACK_COLUMNS: &str = "source, track_key, service, cover_path, source_album_id, title, \
+pub(super) const TRACK_COLUMNS: &str = "source, track_key, service, cover_path, source_album_id, title, \
     artist, album, duration, khz, bitrate, track_number, disc_number, mb_release_id, \
     mb_recording_id, mb_track_id, playlist_item_id, artists_json";
 

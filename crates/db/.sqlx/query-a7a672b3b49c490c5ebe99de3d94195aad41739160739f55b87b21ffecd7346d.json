@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE app_config SET json = json_set(json, '$.last_yt_sync_at', ?1, '$.last_yt_playlists_sync_at', ?2) WHERE id = 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "a7a672b3b49c490c5ebe99de3d94195aad41739160739f55b87b21ffecd7346d"
+}

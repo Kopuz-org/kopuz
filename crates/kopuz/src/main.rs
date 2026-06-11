@@ -243,38 +243,27 @@ async fn run_rotation(mut config: Signal<config::AppConfig>) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-async fn persist_queue_state_snapshot(
-    queue_state: Option<PersistedQueueState>,
-    path: std::path::PathBuf,
-) {
-    let result = tokio::task::spawn_blocking(move || -> std::io::Result<()> {
-        if let Some(queue_state) = queue_state {
-            queue_state.save(&path)
-        } else {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            match std::fs::remove_file(&path) {
-                Ok(()) => Ok(()),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                Err(e) => Err(e),
-            }
-        }
-    })
-    .await;
+async fn persist_queue_state_snapshot(db: db::Db, queue_state: Option<PersistedQueueState>) {
+    let snap = queue_state.map(queue_snapshot).unwrap_or_default();
+    if let Err(e) = db.save_queue(&snap).await {
+        tracing::error!("Failed to save queue state: {}", e);
+    }
+}
 
-    match result {
-        Ok(Ok(())) => {}
-        Ok(Err(e)) => tracing::error!("Failed to save queue state: {}", e),
-        Err(e) => tracing::error!("Failed to join queue state save task: {}", e),
+#[cfg(not(target_arch = "wasm32"))]
+fn queue_snapshot(q: PersistedQueueState) -> db::QueueSnapshot {
+    db::QueueSnapshot {
+        version: q.version,
+        queue: q.queue,
+        current_queue_index: q.current_queue_index,
+        progress_secs: q.progress_secs,
+        shuffle_order: q.shuffle_order,
+        shuffle_enabled: q.shuffle_enabled,
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-async fn persist_queue_state_snapshot(
-    queue_state: Option<PersistedQueueState>,
-    _path: std::path::PathBuf,
-) {
+async fn persist_queue_state_snapshot(_db: db::Db, queue_state: Option<PersistedQueueState>) {
     if let Some(queue_state) = queue_state {
         save_web_queue_state(&queue_state);
     } else {
@@ -1009,7 +998,6 @@ fn App() -> Element {
         #[cfg(target_arch = "wasm32")]
         std::path::PathBuf::from("./config")
     });
-    let lib_path = use_memo(move || config_dir().join("library.json"));
     let config_path = use_memo(move || config_dir().join("config.json"));
     let mut config = use_signal(config::AppConfig::default);
     let db = DB_HANDLE
@@ -1017,7 +1005,7 @@ fn App() -> Element {
         .cloned()
         .expect("db initialized in main before launch");
     use_context_provider(|| db.clone());
-    let generations = hooks::db_reactivity::use_generations_provider();
+    hooks::db_reactivity::use_generations_provider();
     // Start the PoToken minter whenever a YouTube Music server is active — not
     // just anon. A *signed-in but non-Premium* account streams the same 251 as
     // anon and also needs a content pot for deep ranges; only true Premium
@@ -1035,12 +1023,7 @@ fn App() -> Element {
             crate::pot_minter::request();
         }
     });
-    #[allow(unused_variables)]
-    let playlist_path = use_memo(move || config_dir().join("playlists.json"));
     let mut playlist_store = use_signal(reader::PlaylistStore::default);
-    #[allow(unused_variables)]
-    let favorites_path = use_memo(move || config_dir().join("favorites.json"));
-    let queue_state_path = use_memo(move || config_dir().join("queue_state.json"));
     let mut favorites_store = use_signal(FavoritesStore::default);
     let mut initial_load_done = use_signal(|| false);
     #[allow(unused_variables)]
@@ -1392,68 +1375,65 @@ fn App() -> Element {
         windows_titlebar::set_custom_titlebar_enabled(mode == config::TitlebarMode::Custom);
     });
 
+    let db_for_pl_save = db.clone();
     use_effect(move || {
         if !*initial_load_done.read() {
             return;
         }
+        let store_snapshot = playlist_store.read().clone();
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let store_snapshot = playlist_store.read().clone();
-            let path = playlist_path();
+            let db = db_for_pl_save.clone();
             spawn(async move {
-                let result = tokio::task::spawn_blocking(move || store_snapshot.save(&path)).await;
-                if let Ok(Err(e)) = result {
+                if let Err(e) = db.save_playlists(&store_snapshot).await {
                     tracing::error!("Failed to save playlists: {}", e);
                 }
             }.instrument(tracing::info_span!("playlists.persist")));
         }
         #[cfg(target_arch = "wasm32")]
         {
-            let store_snapshot = playlist_store.read().clone();
             save_web_playlists(&store_snapshot);
         }
     });
 
+    let db_for_lib_save = db.clone();
     use_effect(move || {
         if !*initial_load_done.read() {
             return;
         }
+        let lib_snapshot = library.read().clone();
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let lib_snapshot = library.read().clone();
-            let path = lib_path();
+            let db = db_for_lib_save.clone();
             spawn(async move {
-                let result = tokio::task::spawn_blocking(move || lib_snapshot.save(&path)).await;
-                if let Ok(Err(e)) = result {
+                if let Err(e) = db.save_library(&lib_snapshot).await {
                     tracing::error!("Failed to save library: {}", e);
                 }
             }.instrument(tracing::info_span!("library.persist")));
         }
         #[cfg(target_arch = "wasm32")]
         {
-            let lib_snapshot = library.read().clone();
             save_web_library(&lib_snapshot);
         }
     });
 
+    let db_for_fav_save = db.clone();
     use_effect(move || {
         if !*initial_load_done.read() {
             return;
         }
+        let store_snapshot = favorites_store.read().clone();
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let store_snapshot = favorites_store.read().clone();
-            let path = favorites_path();
+            let db = db_for_fav_save.clone();
             spawn(async move {
-                let result = tokio::task::spawn_blocking(move || store_snapshot.save(&path)).await;
-                if let Ok(Err(e)) = result {
+                if let Err(e) = db.save_favorites_store(&store_snapshot).await {
                     tracing::error!("Failed to save favorites: {}", e);
                 }
             }.instrument(tracing::info_span!("favorites.persist")));
         }
         #[cfg(target_arch = "wasm32")]
         {
-            let store_snapshot = favorites_store.read().clone();
             save_web_favorites(&store_snapshot);
         }
     });
@@ -1482,8 +1462,9 @@ fn App() -> Element {
         }
     });
 
+    let db_for_queue_save = db.clone();
     use_future(move || {
-        let path = queue_state_path();
+        let db = db_for_queue_save.clone();
         async move {
             let mut flushed_revision = 0u64;
 
@@ -1505,7 +1486,7 @@ fn App() -> Element {
                 }
 
                 let snapshot = pending_queue_state_snapshot.read().clone();
-                persist_queue_state_snapshot(snapshot, path.clone()).await;
+                persist_queue_state_snapshot(db.clone(), snapshot).await;
                 flushed_revision = latest_revision;
             }
         }
@@ -1591,25 +1572,14 @@ fn App() -> Element {
     use_hook(move || {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let lib_path = lib_path();
-            let config_path = config_path();
-            let playlist_path = playlist_path();
-            let favorites_path = favorites_path();
-            let queue_state_path = queue_state_path();
+            let config_path_fallback = config_path();
             let db = db_for_load;
             let mut ctrl = ctrl;
 
-            let config_path_fallback = config_path.clone();
             spawn(async move {
-                let lib_path_c = lib_path.clone();
-                let playlist_path_c = playlist_path.clone();
-                let favorites_path_c = favorites_path.clone();
-                let queue_state_path_c = queue_state_path.clone();
-
-                // Config is the source of truth in SQLite now (creds in the
-                // servers table, counts in listen_counts — all hydrated by
-                // load_config). Fall back to the legacy file only if the DB has
-                // no blob yet (a fresh install where the import found nothing).
+                // Everything loads from the DB now — the converted source of
+                // truth. The legacy JSON files are no longer read or written.
+                // Config falls back to the file only on a fresh DB (no blob yet).
                 let cfg_loaded = match db.load_config().await {
                     Ok(Some(c)) => Some(c),
                     Ok(None) => None,
@@ -1618,21 +1588,15 @@ fn App() -> Element {
                         None
                     }
                 };
+                let lib_loaded = db.load_library().await.unwrap_or_else(|e| {
+                    tracing::error!(error = %e, "failed to load library from db");
+                    reader::Library::default()
+                });
+                let pl_loaded = db.load_playlists().await.ok();
+                let fav_loaded = db.load_favorites_store().await.ok();
+                let queue_loaded = db.load_queue().await.ok();
 
-                let (lib_res, pl_res, fav_res, queue_res) = tokio::join!(
-                    tokio::task::spawn_blocking(move || reader::Library::load(&lib_path_c)),
-                    tokio::task::spawn_blocking(move || reader::PlaylistStore::load(
-                        &playlist_path_c
-                    )),
-                    tokio::task::spawn_blocking(move || FavoritesStore::load(&favorites_path_c)),
-                    tokio::task::spawn_blocking(move || {
-                        PersistedQueueState::load(&queue_state_path_c)
-                    }),
-                );
-
-                if let Ok(Ok(loaded)) = lib_res {
-                    library.set(loaded.clone());
-                }
+                library.set(lib_loaded);
                 let cfg_loaded =
                     cfg_loaded.unwrap_or_else(|| config::AppConfig::load(&config_path_fallback));
                 {
@@ -1646,10 +1610,10 @@ fn App() -> Element {
                     player.write().set_equalizer(loaded.equalizer.clone());
                     i18n::set_locale(&loaded.language);
                 }
-                if let Ok(Ok(loaded)) = pl_res {
+                if let Some(loaded) = pl_loaded {
                     playlist_store.set(loaded);
                 }
-                if let Ok(Ok(loaded)) = fav_res {
+                if let Some(loaded) = fav_loaded {
                     favorites_store.set(loaded);
                 }
 
@@ -1668,8 +1632,15 @@ fn App() -> Element {
                     }
                 }
 
-                if let Ok(Ok(loaded_queue_state)) = queue_res
-                    && let Some(queue_state) = sanitize_queue_state(loaded_queue_state)
+                if let Some(snap) = queue_loaded
+                    && let Some(queue_state) = sanitize_queue_state(PersistedQueueState {
+                        version: snap.version,
+                        queue: snap.queue,
+                        current_queue_index: snap.current_queue_index,
+                        progress_secs: snap.progress_secs,
+                        shuffle_order: snap.shuffle_order,
+                        shuffle_enabled: snap.shuffle_enabled,
+                    })
                 {
                     ctrl.restore_queue_state(
                         queue_state.queue,
@@ -1762,7 +1733,6 @@ fn App() -> Element {
         }
     });
 
-    let db_for_scan = db.clone();
     use_effect(move || {
         if !*initial_load_done.read() {
             return;
@@ -1790,8 +1760,6 @@ fn App() -> Element {
         }
         last_scan_key.set(Some(scan_key));
 
-        let db = db_for_scan.clone();
-        let gens = generations;
         #[cfg(not(target_arch = "wasm32"))]
         spawn(async move {
             let configured_dirs = configured_dirs;
@@ -1860,44 +1828,9 @@ fn App() -> Element {
                     .albums
                     .retain(|a| valid_album_ids.contains(&a.id));
 
-                // Show the library immediately — before any cover fetching.
+                // Show the library immediately — before any cover fetching. The
+                // library save effect persists it to the DB (upsert + prune).
                 library.set(current_lib.clone());
-                let _ = current_lib.save(&lib_path());
-
-                // Mirror the scanned local library into the DB in batches (the
-                // streaming-write target). The UI still reads the in-memory
-                // signal until the sweep; this keeps the DB current — upserts
-                // are idempotent, and prune drops tracks whose files are gone.
-                {
-                    let db = db.clone();
-                    let tracks = current_lib.tracks.clone();
-                    let albums = current_lib.albums.clone();
-                    let roots: Vec<String> = scannable_dirs
-                        .iter()
-                        .map(|d| d.to_string_lossy().into_owned())
-                        .collect();
-                    spawn(async move {
-                        for chunk in tracks.chunks(100) {
-                            if db.upsert_tracks(&db::Source::Local, chunk).await.is_ok() {
-                                gens.bump_coalesced(hooks::db_reactivity::Table::Tracks);
-                            }
-                        }
-                        if db.upsert_albums(&db::Source::Local, &albums).await.is_ok() {
-                            gens.bump_coalesced(hooks::db_reactivity::Table::Albums);
-                        }
-                        let keep: Vec<String> =
-                            tracks.iter().map(|t| t.id.key().into_owned()).collect();
-                        for root in &roots {
-                            match db.prune_local_tracks(root, &keep).await {
-                                Ok(n) if n > 0 => {
-                                    tracing::info!(removed = n, root = %root, "db: pruned deleted local tracks")
-                                }
-                                _ => {}
-                            }
-                        }
-                        gens.bump(hooks::db_reactivity::Table::Tracks);
-                    });
-                }
 
                 if fetch_covers {
                     // Fetch missing covers in the background so the UI stays responsive.
@@ -1944,9 +1877,9 @@ fn App() -> Element {
                             changed.then(|| current.clone())
                         };
 
-                        if let Some(merged_lib) = merged_lib {
-                            let _ = merged_lib.save(&lib_path());
-                        }
+                        // The `library.write()` above triggers the library save
+                        // effect, which persists the merged covers to the DB.
+                        let _ = merged_lib;
                     }.instrument(tracing::info_span!("library.fetch_covers")));
                 } else {
                     // No cover fetching — drop the callback so the progress bar closes.
@@ -1957,7 +1890,6 @@ fn App() -> Element {
                 current_lib.albums.clear();
                 current_lib.root_paths.clear();
                 library.set(current_lib.clone());
-                let _ = current_lib.save(&lib_path());
             }
         }.instrument(tracing::info_span!("library.rescan")));
     });
