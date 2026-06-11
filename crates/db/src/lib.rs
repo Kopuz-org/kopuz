@@ -290,6 +290,37 @@ pub fn default_db_path() -> std::path::PathBuf {
     config_dir().join(name)
 }
 
+/// Blocking pre-boot read of the config blob — for the few values needed before
+/// the app (and its async runtime/log subscriber) exists: the tracing toggle and
+/// the titlebar mode. Opens the DB read-only without running migrations; `None`
+/// if the DB or blob doesn't exist yet (first launch). Server/creds fields are
+/// NOT hydrated — blob fields only.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn peek_config(db_path: &std::path::Path) -> Option<config::AppConfig> {
+    if !db_path.exists() {
+        return None;
+    }
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .ok()?;
+    rt.block_on(async {
+        let opts = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(db_path)
+            .create_if_missing(false)
+            .read_only(true);
+        use sqlx::ConnectOptions;
+        let mut conn = opts.connect().await.ok()?;
+        let json: Option<String> =
+            sqlx::query_scalar("SELECT json FROM app_config WHERE id = 1")
+                .fetch_optional(&mut conn)
+                .await
+                .ok()
+                .flatten();
+        json.and_then(|j| serde_json::from_str(&j).ok())
+    })
+}
+
 /// `<config_dir>` for kopuz (matches the legacy JSON store location).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn config_dir() -> std::path::PathBuf {

@@ -25,6 +25,10 @@ pub async fn load_config(pool: &SqlitePool) -> Result<Option<AppConfig>, DbError
     };
 
     let mut cfg: AppConfig = serde_json::from_str(&json)?;
+    // The in-memory shape migrations the legacy file load used to run.
+    cfg.migrate_home_sections();
+    cfg.migrate_sidebar_order();
+    cfg.migrate_registry_paths();
 
     // Hydrate servers from their table (creds included for the active one).
     let rows = sqlx::query!(

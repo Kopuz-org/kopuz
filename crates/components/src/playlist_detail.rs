@@ -356,10 +356,6 @@ pub fn PlaylistDetail(
                             && std::fs::remove_file(del_path).is_ok()
                         {
                             library.write().remove_track(&t.id);
-                            let lib_path = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
-                                .map(|d| d.config_dir().join("library.json"))
-                                .unwrap_or_else(|| PathBuf::from("./config/library.json"));
-                            let _ = library.read().save(&lib_path);
                         }
                     }
                 }

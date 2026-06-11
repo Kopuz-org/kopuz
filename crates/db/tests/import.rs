@@ -126,11 +126,9 @@ async fn imports_synthetic_fixture() {
     assert_eq!(report.favorites, 3, "1 local + 2 server favorites");
     assert_eq!(report.servers, 1);
 
-    // Import leaves the JSONs in place (a half-migrated build still reads them);
-    // only the sentinel is written.
+    // Import leaves the JSONs in place; only finalize moves them aside.
     assert!(dir.join("config.json").exists());
     assert!(!dir.join("config.json.bak").exists());
-    assert!(dir.join(".db_migrated").exists());
 
     let mut conn = open(&db_path).await;
 
@@ -203,15 +201,24 @@ async fn imports_synthetic_fixture() {
     .unwrap();
     assert_eq!(n, 1);
 
-    // Re-running is a no-op (sentinel present).
+    // Re-running is a no-op (this DB already has data).
     let again = db.import_legacy_json(&dir).await.unwrap();
     assert!(!again.ran);
 
-    // Finalize renames the JSONs aside (the point of no return).
+    // Finalize renames the JSONs aside (kept as .bak for downgrade).
     let renamed = db.finalize_migration(&dir).await.unwrap();
     assert_eq!(renamed, 5);
     assert!(!dir.join("config.json").exists());
     assert!(dir.join("config.json.bak").exists());
+
+    // A SECOND database (the debug/release split) finds only the .bak files and
+    // still imports — the gate is per-DB emptiness, not a shared sentinel.
+    let db2_path = dir.join("kopuz-second.db");
+    let db2 = db::init(&db2_path).await.unwrap();
+    let second = db2.import_legacy_json(&dir).await.unwrap();
+    assert!(second.ran, "second DB must import from the .bak files");
+    assert_eq!(second.tracks, 2);
+    assert_eq!(second.favorites, 3);
 
     let _ = std::fs::remove_dir_all(&dir);
 }

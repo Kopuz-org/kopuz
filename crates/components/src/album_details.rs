@@ -23,13 +23,9 @@ pub fn AlbumDetails(
     let album_artist = album.artist.clone();
     let cover_url = utils::format_artwork_url(album.cover_path.as_ref());
     let current_cover = album.cover_path.clone();
-    let current_manual = album.manual_cover;
     let cover_cache = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
         .map(|d| d.cache_dir().join("covers"))
         .unwrap_or_else(|| PathBuf::from("./cache/covers"));
-    let lib_path = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
-        .map(|d| d.config_dir().join("library.json"))
-        .unwrap_or_else(|| PathBuf::from("./config/library.json"));
 
     let mut tracks: Vec<_> = lib
         .tracks
@@ -52,10 +48,8 @@ pub fn AlbumDetails(
     let aid = album_id.clone();
     let cover_reset_action = if current_cover.is_some() {
         let aid = aid.clone();
-        let rollback_cover = current_cover.clone();
         let delete_cover = current_cover.clone();
         let cover_cache = cover_cache.clone();
-        let lib_path = lib_path.clone();
         Some(rsx! {
             button {
                 class: "inline-flex items-center justify-center h-9 w-9 rounded-full text-sm font-medium transition-colors border border-white/12 hover:bg-white/10",
@@ -65,10 +59,7 @@ pub fn AlbumDetails(
                 onclick: move |_| {
                     let aid = aid.clone();
                     let delete_cover = delete_cover.clone();
-                    let rollback_cover = rollback_cover.clone();
                     let cover_cache = cover_cache.clone();
-                    let lib_path = lib_path.clone();
-                    let current_manual = current_manual;
                     spawn(async move {
                         let old_cover = delete_cover;
                         {
@@ -79,17 +70,10 @@ pub fn AlbumDetails(
                             }
                         }
 
-                        if library.read().save(&lib_path).is_ok() {
-                            if let Some(path) = old_cover
-                                && path.starts_with(&cover_cache) {
-                                    let _ = tokio::fs::remove_file(&path).await;
-                                }
-                        } else {
-                            let mut lib = library.write();
-                            if let Some(album) = lib.albums.iter_mut().find(|a| a.id == aid) {
-                                album.cover_path = rollback_cover;
-                                album.manual_cover = current_manual;
-                            }
+                        if let Some(path) = old_cover
+                            && path.starts_with(&cover_cache)
+                        {
+                            let _ = tokio::fs::remove_file(&path).await;
                         }
                     });
                 },
@@ -142,40 +126,11 @@ pub fn AlbumDetails(
                                 &cover_cache,
                             ) {
                                 let mut lib = library.write();
-                                let prev = if let Some(album) = lib
-                                    .albums
-                                    .iter_mut()
-                                    .find(|a| a.id == aid)
+                                if let Some(album) =
+                                    lib.albums.iter_mut().find(|a| a.id == aid)
                                 {
-                                    let old_cover = album.cover_path.clone();
-                                    let old_manual = album.manual_cover;
                                     album.cover_path = Some(saved.clone());
                                     album.manual_cover = true;
-                                    Some((old_cover, old_manual))
-                                } else {
-                                    None
-                                };
-                                drop(lib);
-                                let lib_path = directories::ProjectDirs::from(
-                                        "com",
-                                        "temidaradev",
-                                        "kopuz",
-                                    )
-                                    .map(|d| d.config_dir().join("library.json"))
-                                    .unwrap_or_else(|| PathBuf::from("./config/library.json"));
-                                if library.read().save(&lib_path).is_err() {
-                                    if let Some((old_cover, old_manual)) = prev {
-                                        let mut lib = library.write();
-                                        if let Some(album) = lib
-                                            .albums
-                                            .iter_mut()
-                                            .find(|a| a.id == aid)
-                                        {
-                                            album.cover_path = old_cover;
-                                            album.manual_cover = old_manual;
-                                        }
-                                    }
-                                    let _ = tokio::fs::remove_file(&saved).await;
                                 }
                             }
                         }
@@ -189,14 +144,6 @@ pub fn AlbumDetails(
                             && std::fs::remove_file(track_path).is_ok()
                         {
                             library.write().remove_track(&t.id);
-                            let lib_path = directories::ProjectDirs::from(
-                                    "com",
-                                    "temidaradev",
-                                    "kopuz",
-                                )
-                                .map(|d| d.config_dir().join("library.json"))
-                                .unwrap_or_else(|| PathBuf::from("./config/library.json"));
-                            let _ = library.read().save(&lib_path);
                         }
                     }
                 },
@@ -210,10 +157,6 @@ pub fn AlbumDetails(
                                     .remove_track(&reader::models::TrackId::Local(path.clone()));
                             }
                         }
-                        let lib_path = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
-                            .map(|d| d.config_dir().join("library.json"))
-                            .unwrap_or_else(|| PathBuf::from("./config/library.json"));
-                        let _ = library.read().save(&lib_path);
                     }
                 },
             }

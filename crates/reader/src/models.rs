@@ -1,5 +1,4 @@
 use serde::{Deserialize, Deserializer, Serialize};
-use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -223,33 +222,6 @@ impl Library {
         }
     }
 
-    #[tracing::instrument(name = "library.load", skip_all)]
-    pub fn load(path: &Path) -> std::io::Result<Self> {
-        if !path.exists() {
-            return Ok(Self::default());
-        }
-        let data = fs::read_to_string(path)?;
-        let library: Self = serde_json::from_str(&data)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-        tracing::debug!(
-            bytes = data.len(),
-            tracks = library.tracks.len(),
-            "library loaded from disk"
-        );
-        Ok(library)
-    }
-
-    #[tracing::instrument(name = "library.save", skip_all, fields(tracks = self.tracks.len()))]
-    pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let data = serde_json::to_string(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-        tracing::debug!(bytes = data.len(), "writing library to disk");
-        fs::write(path, data)
-    }
-
     pub fn add_track(&mut self, track: Track) {
         if let Some(index) = self.tracks.iter().position(|t| t.id == track.id) {
             self.tracks[index] = track;
@@ -339,30 +311,6 @@ pub struct PlaylistStore {
     pub folders: Vec<PlaylistFolder>,
 }
 
-impl PlaylistStore {
-    #[tracing::instrument(name = "playlists.load", skip_all)]
-    pub fn load(path: &Path) -> std::io::Result<Self> {
-        if !path.exists() {
-            return Ok(Self::default());
-        }
-        let data = fs::read_to_string(path)?;
-        let store: Self = serde_json::from_str(&data)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-        tracing::debug!(bytes = data.len(), playlists = store.playlists.len(), "playlists loaded");
-        Ok(store)
-    }
-
-    #[tracing::instrument(name = "playlists.save", skip_all, fields(playlists = self.playlists.len()))]
-    pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let data = serde_json::to_string(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-        tracing::debug!(bytes = data.len(), "writing playlists to disk");
-        fs::write(path, data)
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct FavoritesStore {
@@ -373,33 +321,6 @@ pub struct FavoritesStore {
 }
 
 impl FavoritesStore {
-    #[tracing::instrument(name = "favorites.load", skip_all)]
-    pub fn load(path: &Path) -> std::io::Result<Self> {
-        if !path.exists() {
-            return Ok(Self::default());
-        }
-        let data = fs::read_to_string(path)?;
-        let store: Self = serde_json::from_str(&data)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-        tracing::debug!(
-            bytes = data.len(),
-            local = store.local_favorites.len(),
-            remote = store.jellyfin_favorites.len(),
-            "favorites loaded"
-        );
-        Ok(store)
-    }
-
-    #[tracing::instrument(name = "favorites.save", skip_all)]
-    pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let data = serde_json::to_string_pretty(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-        fs::write(path, data)
-    }
-
     pub fn is_local_favorite(&self, path: &Path) -> bool {
         self.local_favorites.iter().any(|p| p == path)
     }

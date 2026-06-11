@@ -1,10 +1,3 @@
-#[cfg(target_arch = "wasm32")]
-use crate::web_storage::{
-    clear_web_queue_state, load_web_config, load_web_favorites, load_web_library,
-    load_web_playlists, load_web_queue_state, load_web_ui_state, save_web_config,
-    save_web_favorites, save_web_library, save_web_playlists, save_web_queue_state,
-    save_web_ui_state,
-};
 use components::{
     bottombar::Bottombar, download_overlay::DownloadOverlay, fullscreen::Fullscreen,
     rightbar::Rightbar, sidebar::Sidebar, titlebar::Titlebar,
@@ -39,7 +32,6 @@ mod logging;
 #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
 mod pot_minter;
 mod queue_state;
-mod web_storage;
 #[cfg(target_os = "windows")]
 mod windows_titlebar;
 
@@ -195,18 +187,12 @@ async fn fetch_available_update() -> Option<AvailableUpdate> {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn persist_config_snapshot(db: db::Db, config_snapshot: config::AppConfig) {
     spawn(async move {
         if let Err(e) = db.save_config(&config_snapshot).await {
             tracing::error!("Failed to save config: {}", e);
         }
     }.instrument(tracing::info_span!("config.persist")));
-}
-
-#[cfg(target_arch = "wasm32")]
-fn persist_config_snapshot(_db: db::Db, config_snapshot: config::AppConfig) {
-    save_web_config(&config_snapshot);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -242,7 +228,6 @@ async fn run_rotation(mut config: Signal<config::AppConfig>) {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 async fn persist_queue_state_snapshot(db: db::Db, queue_state: Option<PersistedQueueState>) {
     let snap = queue_state.map(queue_snapshot).unwrap_or_default();
     if let Err(e) = db.save_queue(&snap).await {
@@ -250,7 +235,6 @@ async fn persist_queue_state_snapshot(db: db::Db, queue_state: Option<PersistedQ
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn queue_snapshot(q: PersistedQueueState) -> db::QueueSnapshot {
     db::QueueSnapshot {
         version: q.version,
@@ -259,15 +243,6 @@ fn queue_snapshot(q: PersistedQueueState) -> db::QueueSnapshot {
         progress_secs: q.progress_secs,
         shuffle_order: q.shuffle_order,
         shuffle_enabled: q.shuffle_enabled,
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-async fn persist_queue_state_snapshot(_db: db::Db, queue_state: Option<PersistedQueueState>) {
-    if let Some(queue_state) = queue_state {
-        save_web_queue_state(&queue_state);
-    } else {
-        clear_web_queue_state();
     }
 }
 
@@ -407,10 +382,7 @@ fn build_queue_state_snapshot(
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 fn read_titlebar_mode_from_disk() -> config::TitlebarMode {
-    directories::ProjectDirs::from("com", "temidaradev", "kopuz")
-        .map(|d| d.config_dir().join("config.json"))
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|s| serde_json::from_str::<config::AppConfig>(&s).ok())
+    db::peek_config(&db::default_db_path())
         .map(|c| c.titlebar_mode)
         .unwrap_or_default()
 }
@@ -505,6 +477,15 @@ fn init_db_blocking() -> db::Db {
             Ok(_) => {}
             Err(e) => tracing::error!(error = %e, "kopuz: legacy JSON import failed"),
         }
+        // Nothing reads or writes the legacy JSONs anymore — move them aside as
+        // *.json.bak (kept for downgrade; never deleted).
+        match handle.finalize_migration(&db::config_dir()).await {
+            Ok(n) if n > 0 => {
+                tracing::info!(files = n, "kopuz: legacy *.json renamed to *.json.bak")
+            }
+            Ok(_) => {}
+            Err(e) => tracing::warn!(error = %e, "kopuz: legacy json backup rename failed"),
+        }
         handle
     })
 }
@@ -517,12 +498,11 @@ fn main() {
             .unwrap_or_else(|| std::path::PathBuf::from("logs"));
         let _ = std::fs::create_dir_all(&log_dir);
 
-        // Read the persisted tracing toggle from config.json before the app
-        // (and its config Signal) exists — the subscriber is built once here,
-        // so the setting is applied at startup. Same path the settings UI
-        // writes to. Missing/unreadable config defaults to off.
-        let config_tracing_enabled = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
-            .map(|dirs| config::AppConfig::load(&dirs.config_dir().join("config.json")).tracing_enabled)
+        // Read the persisted tracing toggle from the DB before the app (and its
+        // config Signal) exists — the subscriber is built once here, so the
+        // setting is applied at startup. Missing DB/blob defaults to off.
+        let config_tracing_enabled = db::peek_config(&db::default_db_path())
+            .map(|c| c.tracing_enabled)
             .unwrap_or(false);
 
         // Guards live in a global inside `logging`; flushed by
@@ -974,31 +954,6 @@ fn App() -> Element {
         #[cfg(target_arch = "wasm32")]
         std::path::PathBuf::from("./cache")
     });
-    let config_dir = use_memo(move || {
-        #[cfg(target_os = "android")]
-        {
-            let mut path = player::systemint::get_files_dir()
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join("config");
-            if std::fs::create_dir_all(&path).is_err() {
-                path = std::path::PathBuf::from("./config");
-                let _ = std::fs::create_dir_all(&path);
-            }
-            path
-        }
-        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-        {
-            let path = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
-                .map(|dirs| dirs.config_dir().to_path_buf())
-                .unwrap_or_else(|| std::path::Path::new("./config").to_path_buf());
-            let _ = std::fs::create_dir_all(&path);
-            path
-        }
-        #[cfg(target_arch = "wasm32")]
-        std::path::PathBuf::from("./config")
-    });
-    let config_path = use_memo(move || config_dir().join("config.json"));
     let mut config = use_signal(config::AppConfig::default);
     let db = DB_HANDLE
         .get()
@@ -1381,19 +1336,12 @@ fn App() -> Element {
             return;
         }
         let store_snapshot = playlist_store.read().clone();
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let db = db_for_pl_save.clone();
-            spawn(async move {
-                if let Err(e) = db.save_playlists(&store_snapshot).await {
-                    tracing::error!("Failed to save playlists: {}", e);
-                }
-            }.instrument(tracing::info_span!("playlists.persist")));
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            save_web_playlists(&store_snapshot);
-        }
+        let db = db_for_pl_save.clone();
+        spawn(async move {
+            if let Err(e) = db.save_playlists(&store_snapshot).await {
+                tracing::error!("Failed to save playlists: {}", e);
+            }
+        }.instrument(tracing::info_span!("playlists.persist")));
     });
 
     let db_for_lib_save = db.clone();
@@ -1402,19 +1350,12 @@ fn App() -> Element {
             return;
         }
         let lib_snapshot = library.read().clone();
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let db = db_for_lib_save.clone();
-            spawn(async move {
-                if let Err(e) = db.save_library(&lib_snapshot).await {
-                    tracing::error!("Failed to save library: {}", e);
-                }
-            }.instrument(tracing::info_span!("library.persist")));
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            save_web_library(&lib_snapshot);
-        }
+        let db = db_for_lib_save.clone();
+        spawn(async move {
+            if let Err(e) = db.save_library(&lib_snapshot).await {
+                tracing::error!("Failed to save library: {}", e);
+            }
+        }.instrument(tracing::info_span!("library.persist")));
     });
 
     let db_for_fav_save = db.clone();
@@ -1423,19 +1364,12 @@ fn App() -> Element {
             return;
         }
         let store_snapshot = favorites_store.read().clone();
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let db = db_for_fav_save.clone();
-            spawn(async move {
-                if let Err(e) = db.save_favorites_store(&store_snapshot).await {
-                    tracing::error!("Failed to save favorites: {}", e);
-                }
-            }.instrument(tracing::info_span!("favorites.persist")));
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            save_web_favorites(&store_snapshot);
-        }
+        let db = db_for_fav_save.clone();
+        spawn(async move {
+            if let Err(e) = db.save_favorites_store(&store_snapshot).await {
+                tracing::error!("Failed to save favorites: {}", e);
+            }
+        }.instrument(tracing::info_span!("favorites.persist")));
     });
 
     use_effect(move || {
@@ -1572,14 +1506,13 @@ fn App() -> Element {
     use_hook(move || {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let config_path_fallback = config_path();
             let db = db_for_load;
             let mut ctrl = ctrl;
 
             spawn(async move {
-                // Everything loads from the DB now — the converted source of
-                // truth. The legacy JSON files are no longer read or written.
-                // Config falls back to the file only on a fresh DB (no blob yet).
+                // Everything loads from the DB — the converted source of truth.
+                // The legacy JSON files are never read or written; a fresh DB
+                // with no blob yet just yields the default config.
                 let cfg_loaded = match db.load_config().await {
                     Ok(Some(c)) => Some(c),
                     Ok(None) => None,
@@ -1597,8 +1530,7 @@ fn App() -> Element {
                 let queue_loaded = db.load_queue().await.ok();
 
                 library.set(lib_loaded);
-                let cfg_loaded =
-                    cfg_loaded.unwrap_or_else(|| config::AppConfig::load(&config_path_fallback));
+                let cfg_loaded = cfg_loaded.unwrap_or_default();
                 {
                     let loaded = cfg_loaded;
                     config.set(loaded.clone());
@@ -1654,82 +1586,12 @@ fn App() -> Element {
                 initial_load_done.set(true);
             }.instrument(tracing::info_span!("startup.load")));
         }
+        // wasm: the stub Db yields defaults (web is not a shipped target); just
+        // unblock the save effects.
         #[cfg(target_arch = "wasm32")]
         {
-            let mut ctrl = ctrl;
-            let mut loaded = load_web_config().unwrap_or_default();
-            if loaded.server.is_none() {
-                loaded.active_source = config::MusicSource::Server;
-            }
-            let loaded_volume = loaded.volume;
-            let loaded_language = loaded.language.clone();
-            configured_music_dirs.set(loaded.music_directory.clone());
-            config.set(loaded);
-            volume.set(loaded_volume);
-            persisted_volume.set(loaded_volume);
-            player.write().set_volume(loaded_volume);
-            player.write().set_channel_mode(config.read().channel_mode);
-            player
-                .write()
-                .set_equalizer(config.read().equalizer.clone());
-            i18n::set_locale(&loaded_language);
-
-            if let Some((
-                route,
-                saved_album_id,
-                saved_playlist_id,
-                saved_artist_name,
-                saved_search_query,
-            )) = load_web_ui_state()
-            {
-                current_route.set(route);
-                selected_album_id.set(saved_album_id);
-                selected_playlist_id.set(saved_playlist_id);
-                selected_artist_name.set(saved_artist_name);
-                search_query.set(saved_search_query);
-            }
-
-            if let Some(loaded_library) = load_web_library() {
-                library.set(loaded_library);
-            }
-            if let Some(loaded_playlists) = load_web_playlists() {
-                playlist_store.set(loaded_playlists);
-            }
-            if let Some(loaded_favorites) = load_web_favorites() {
-                favorites_store.set(loaded_favorites);
-            }
-            if let Some(loaded_queue_state) = load_web_queue_state() {
-                if let Some(queue_state) = sanitize_queue_state(loaded_queue_state) {
-                    ctrl.restore_queue_state(
-                        queue_state.queue,
-                        queue_state.current_queue_index,
-                        queue_state.progress_secs,
-                        queue_state.shuffle_order,
-                        queue_state.shuffle_enabled,
-                    );
-                }
-            }
-
+            config.write().active_source = config::MusicSource::Server;
             initial_load_done.set(true);
-        }
-    });
-
-    use_effect(move || {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let route = *current_route.read();
-            let album_id = selected_album_id.read().clone();
-            let playlist_id = selected_playlist_id.read().clone();
-            let artist_name = selected_artist_name.read().clone();
-            let query = search_query.read().clone();
-
-            save_web_ui_state(
-                route,
-                &album_id,
-                playlist_id.as_deref(),
-                &artist_name,
-                &query,
-            );
         }
     });
 

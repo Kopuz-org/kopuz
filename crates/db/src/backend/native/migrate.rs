@@ -19,7 +19,6 @@ use sqlx::SqlitePool;
 use crate::{DbError, ImportReport};
 use reader::models::{Track, TrackId};
 
-const SENTINEL: &str = ".db_migrated";
 const LEGACY_FILES: [&str; 5] = [
     "config.json",
     "library.json",
@@ -28,25 +27,56 @@ const LEGACY_FILES: [&str; 5] = [
     "queue_state.json",
 ];
 
+/// The on-disk source for one legacy store: the plain `X.json` if it's still
+/// there, else the `X.json.bak` a previous finalize moved it to. The fallback
+/// matters because debug (`kopuz-debug.db`) and release (`kopuz.db`) are
+/// separate databases — whichever imports second finds only the `.bak`s.
+fn legacy_source(config_dir: &Path, name: &str) -> Option<std::path::PathBuf> {
+    let plain = config_dir.join(name);
+    if plain.exists() {
+        return Some(plain);
+    }
+    let bak = config_dir.join(format!("{name}.bak"));
+    bak.exists().then_some(bak)
+}
+
 pub async fn run_json_import(
     pool: &SqlitePool,
     config_dir: &Path,
 ) -> Result<ImportReport, DbError> {
-    let sentinel = config_dir.join(SENTINEL);
-    if sentinel.exists() || db_has_data(pool).await? {
+    // Gate on THIS database being empty — no shared sentinel, so each DB
+    // (debug/release) imports once on its own.
+    if db_has_data(pool).await? {
         return Ok(ImportReport::default());
     }
-    if !LEGACY_FILES.iter().any(|f| config_dir.join(f).exists()) {
-        write_sentinel(&sentinel);
+    if !LEGACY_FILES
+        .iter()
+        .any(|f| legacy_source(config_dir, f).is_some())
+    {
         return Ok(ImportReport::default());
     }
 
-    let cfg_val: serde_json::Value =
-        read_value(&config_dir.join("config.json"))?.unwrap_or(serde_json::Value::Null);
-    let lib: LegacyLibrary = read_json(&config_dir.join("library.json"))?;
-    let plists: LegacyPlaylists = read_json(&config_dir.join("playlists.json"))?;
-    let favs: LegacyFavorites = read_json(&config_dir.join("favorites.json"))?;
-    let queue: LegacyQueue = read_json(&config_dir.join("queue_state.json"))?;
+    let read_src = |name: &str| legacy_source(config_dir, name);
+    let cfg_val: serde_json::Value = match read_src("config.json") {
+        Some(p) => read_value(&p)?.unwrap_or(serde_json::Value::Null),
+        None => serde_json::Value::Null,
+    };
+    let lib: LegacyLibrary = match read_src("library.json") {
+        Some(p) => read_json(&p)?,
+        None => LegacyLibrary::default(),
+    };
+    let plists: LegacyPlaylists = match read_src("playlists.json") {
+        Some(p) => read_json(&p)?,
+        None => LegacyPlaylists::default(),
+    };
+    let favs: LegacyFavorites = match read_src("favorites.json") {
+        Some(p) => read_json(&p)?,
+        None => LegacyFavorites::default(),
+    };
+    let queue: LegacyQueue = match read_src("queue_state.json") {
+        Some(p) => read_json(&p)?,
+        None => LegacyQueue::default(),
+    };
 
     let now = now_secs();
     let mut tx = pool.begin().await?;
@@ -161,11 +191,6 @@ pub async fn run_json_import(
 
     tx.commit().await?;
 
-    // Drop the sentinel so this never re-imports. The legacy JSONs are left in
-    // place — they're only renamed aside by `finalize_migration`, once every
-    // domain reads from the DB, so a half-migrated build still has them to read.
-    write_sentinel(&sentinel);
-
     let report = ImportReport {
         ran: true,
         tracks: count(pool, "SELECT COUNT(*) FROM tracks").await,
@@ -185,12 +210,13 @@ pub async fn run_json_import(
     Ok(report)
 }
 
-/// Point of no return: once every domain reads from the DB, rename each
-/// imported `X.json` → `X.json.bak` (kept for downgrade; never deleted). Gated
-/// on the sentinel + a non-empty DB, so it only fires after a real import and is
-/// idempotent. Returns how many files were renamed.
+/// Rename each remaining plain `X.json` → `X.json.bak` (kept for downgrade;
+/// never deleted, never overwritten). Gated on a non-empty DB so it only fires
+/// after a real import. Idempotent. Also drops the obsolete `.db_migrated`
+/// sentinel from earlier builds (per-DB emptiness is the gate now). Returns how
+/// many files were renamed.
 pub async fn finalize_migration(pool: &SqlitePool, config_dir: &Path) -> Result<usize, DbError> {
-    if !config_dir.join(SENTINEL).exists() || !db_has_data(pool).await? {
+    if !db_has_data(pool).await? {
         return Ok(0);
     }
     let mut renamed = 0;
@@ -201,6 +227,7 @@ pub async fn finalize_migration(pool: &SqlitePool, config_dir: &Path) -> Result<
             renamed += 1;
         }
     }
+    let _ = std::fs::remove_file(config_dir.join(".db_migrated"));
     Ok(renamed)
 }
 
@@ -649,12 +676,6 @@ fn backup_aside(src: &Path) {
     }
     if let Err(e) = std::fs::rename(src, &dst) {
         tracing::warn!(error = %e, src = %src.display(), "db: could not back up legacy json");
-    }
-}
-
-fn write_sentinel(path: &Path) {
-    if let Err(e) = std::fs::write(path, b"") {
-        tracing::warn!(error = %e, "db: could not write migration sentinel");
     }
 }
 
