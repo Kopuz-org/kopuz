@@ -39,4 +39,28 @@ impl Storage for Stub {
     async fn finalize_migration(&self, _config_dir: &std::path::Path) -> Result<usize, DbError> {
         Ok(0)
     }
+
+    async fn tracks_page(
+        &self,
+        _filter: &crate::TrackFilter,
+        _page: crate::Page,
+    ) -> Result<Vec<reader::Track>, DbError> {
+        Ok(Vec::new())
+    }
+
+    async fn tracks_count(&self, _filter: &crate::TrackFilter) -> Result<u32, DbError> {
+        Ok(0)
+    }
+
+    async fn albums(&self, _source: &crate::Source) -> Result<Vec<reader::Album>, DbError> {
+        Ok(Vec::new())
+    }
+
+    async fn favorites(&self, _server_id: &str) -> Result<Vec<String>, DbError> {
+        Ok(Vec::new())
+    }
+
+    async fn is_favorite(&self, _server_id: &str, _ref_: &str) -> Result<bool, DbError> {
+        Ok(false)
+    }
 }

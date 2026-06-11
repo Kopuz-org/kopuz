@@ -15,6 +15,8 @@ use crate::{DbError, Storage};
 
 mod cfg_store;
 mod migrate;
+mod queries;
+mod rows;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
@@ -136,5 +138,29 @@ impl Storage for Native {
 
     async fn finalize_migration(&self, config_dir: &Path) -> Result<usize, DbError> {
         migrate::finalize_migration(&self.pool(), config_dir).await
+    }
+
+    async fn tracks_page(
+        &self,
+        filter: &crate::TrackFilter,
+        page: crate::Page,
+    ) -> Result<Vec<reader::Track>, DbError> {
+        queries::tracks_page(&self.pool(), filter, page).await
+    }
+
+    async fn tracks_count(&self, filter: &crate::TrackFilter) -> Result<u32, DbError> {
+        queries::tracks_count(&self.pool(), filter).await
+    }
+
+    async fn albums(&self, source: &crate::Source) -> Result<Vec<reader::Album>, DbError> {
+        queries::albums(&self.pool(), source).await
+    }
+
+    async fn favorites(&self, server_id: &str) -> Result<Vec<String>, DbError> {
+        queries::favorites(&self.pool(), server_id).await
+    }
+
+    async fn is_favorite(&self, server_id: &str, ref_: &str) -> Result<bool, DbError> {
+        queries::is_favorite(&self.pool(), server_id, ref_).await
     }
 }

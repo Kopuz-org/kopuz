@@ -3331,6 +3331,7 @@ name = "hooks"
 version = "0.6.7"
 dependencies = [
  "config",
+ "db",
  "dioxus",
  "discord-presence",
  "player",

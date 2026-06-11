@@ -51,6 +51,39 @@ pub struct Page {
     pub limit: u32,
 }
 
+/// Sort order for a track listing — maps to an indexed `ORDER BY`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TrackSort {
+    /// Artist → album → disc → track (the natural library order).
+    #[default]
+    ArtistAlbum,
+    Title,
+    Artist,
+    Album,
+    /// Most-recently-added first (insertion order).
+    DateAdded,
+}
+
+/// What a track listing selects: which source, how it's sorted, and an optional
+/// case-insensitive search across title/artist/album. Drives `WHERE`/`ORDER BY`
+/// so only the visible window is materialized.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TrackFilter {
+    pub source: Source,
+    pub sort: TrackSort,
+    pub search: String,
+}
+
+impl TrackFilter {
+    pub fn new(source: Source) -> Self {
+        Self {
+            source,
+            sort: TrackSort::default(),
+            search: String::new(),
+        }
+    }
+}
+
 /// Errors surfaced by the storage layer. String-wrapped so the type is identical
 /// on native and wasm (sqlx isn't compiled for wasm).
 #[derive(Debug, Clone)]
@@ -116,6 +149,26 @@ pub trait Storage: Send + Sync {
     /// downgrade). Call only once every domain reads from the DB. Idempotent;
     /// no-op until a real import has happened. Returns how many files moved.
     async fn finalize_migration(&self, config_dir: &std::path::Path) -> Result<usize, DbError>;
+
+    /// One window of a track listing (sorted + filtered in SQL — only this slice
+    /// is materialized).
+    async fn tracks_page(
+        &self,
+        filter: &TrackFilter,
+        page: Page,
+    ) -> Result<Vec<reader::Track>, DbError>;
+
+    /// Total rows a `tracks_page` filter matches (for the scroll spacer).
+    async fn tracks_count(&self, filter: &TrackFilter) -> Result<u32, DbError>;
+
+    /// All albums for a source, ordered by artist then title.
+    async fn albums(&self, source: &Source) -> Result<Vec<reader::Album>, DbError>;
+
+    /// The favorite refs (`track_key`s) for a server (`"local"` for filesystem).
+    async fn favorites(&self, server_id: &str) -> Result<Vec<String>, DbError>;
+
+    /// Whether `ref_` is favorited under `server_id`.
+    async fn is_favorite(&self, server_id: &str, ref_: &str) -> Result<bool, DbError>;
 }
 
 /// Cheap-`Clone` handle to the active storage backend, shared via Dioxus context.
