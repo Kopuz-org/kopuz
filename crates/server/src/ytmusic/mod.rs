@@ -159,6 +159,7 @@ impl YouTubeMusicClient {
     /// so the UI can populate incrementally instead of waiting for the
     /// whole library to download. Walks `continuationItemRenderer`
     /// tokens until exhausted.
+    #[tracing::instrument(name = "yt.liked_stream", skip_all)]
     pub async fn stream_liked_songs<F>(&self, mut on_page: F) -> Result<(), String>
     where
         F: FnMut(Vec<Track>),
@@ -257,6 +258,7 @@ impl YouTubeMusicClient {
     /// `/browse?browseId=VLLM` (Liked Music) is the canonical probe: it
     /// returns a `signInEndpoint`-bearing message renderer for anonymous
     /// callers and real playlist content for signed-in ones.
+    #[tracing::instrument(name = "yt.validate", skip_all)]
     pub async fn validate_cookies(&self) -> Result<(), String> {
         // Anonymous mode has no cookies to validate — succeed silently
         // so callers (settings probe, keepalive) treat it as healthy.

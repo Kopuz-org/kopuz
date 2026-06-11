@@ -24,6 +24,7 @@ pub struct YtPlaylistSummary {
 /// List the signed-in user's playlists (everything under
 /// "Library → Playlists"). Returns just metadata — call
 /// [`get_playlist_entries`] to fetch each one's tracks lazily.
+#[tracing::instrument(name = "yt.list_playlists", skip(cookies))]
 pub async fn list_playlists(cookies: &str) -> Result<Vec<YtPlaylistSummary>, String> {
     let resp: Value = innertube::browse("FEmusic_liked_playlists", cookies).await?;
     if has_sign_in_endpoint(&resp) {
