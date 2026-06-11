@@ -57,9 +57,7 @@ static MUSIXMATCH_TOKEN: OnceLock<Mutex<Option<MusixmatchToken>>> = OnceLock::ne
 
 macro_rules! lyrics_debug {
     ($($arg:tt)*) => {
-        if lyrics_terminal_debug_enabled() {
-            eprintln!("[lyrics] {}", format_args!($($arg)*));
-        }
+        tracing::debug!(target: "kopuz::lyrics", $($arg)*);
     };
 }
 
@@ -391,11 +389,6 @@ where
             log_lyrics_key_hash(&cache_key),
             lyrics_kind(cached.as_ref())
         );
-        lyrics_debug!(
-            "cache hit key_hash={} kind={}",
-            cache_key_hash,
-            lyrics_kind(cached.as_ref())
-        );
         return cached;
     }
 
@@ -475,11 +468,6 @@ where
             started.elapsed().as_millis(),
             lyrics_kind(local.as_ref())
         );
-        lyrics_debug!(
-            "provider=local_lrc elapsed_ms={} kind={}",
-            started.elapsed().as_millis(),
-            lyrics_kind(local.as_ref())
-        );
         if let Some(lyrics) = local {
             if has_word_timestamps(&lyrics) {
                 if let Ok(mut cache) = lyrics_cache().lock() {
@@ -489,12 +477,6 @@ where
                     target: "kopuz::lyrics",
                     "selected key_hash={} source=local_lrc kind={} total_ms={}",
                     log_lyrics_key_hash(&cache_key),
-                    lyrics_kind(Some(&lyrics)),
-                    total_start.elapsed().as_millis()
-                );
-                lyrics_debug!(
-                    "selected source=local_lrc key_hash={} kind={} total_ms={}",
-                    cache_key_hash,
                     lyrics_kind(Some(&lyrics)),
                     total_start.elapsed().as_millis()
                 );
@@ -512,12 +494,6 @@ where
             target: "kopuz::lyrics",
             "selected key_hash={} source=prefer_local kind={} total_ms={}",
             log_lyrics_key_hash(&cache_key),
-            lyrics_kind(fallback.as_ref()),
-            total_start.elapsed().as_millis()
-        );
-        lyrics_debug!(
-            "selected source=prefer_local key_hash={} kind={} total_ms={}",
-            cache_key_hash,
             lyrics_kind(fallback.as_ref()),
             total_start.elapsed().as_millis()
         );
@@ -539,11 +515,6 @@ where
                     started.elapsed().as_millis(),
                     lyrics_kind(server_lyrics.as_ref())
                 );
-                lyrics_debug!(
-                    "provider=jellyfin elapsed_ms={} kind={}",
-                    started.elapsed().as_millis(),
-                    lyrics_kind(server_lyrics.as_ref())
-                );
                 if let Some(lyrics) = server_lyrics {
                     if has_word_timestamps(&lyrics) {
                         if let Ok(mut cache) = lyrics_cache().lock() {
@@ -553,12 +524,6 @@ where
                             target: "kopuz::lyrics",
                             "selected key_hash={} source=jellyfin kind={} total_ms={}",
                             log_lyrics_key_hash(&cache_key),
-                            lyrics_kind(Some(&lyrics)),
-                            total_start.elapsed().as_millis()
-                        );
-                        lyrics_debug!(
-                            "selected source=jellyfin key_hash={} kind={} total_ms={}",
-                            cache_key_hash,
                             lyrics_kind(Some(&lyrics)),
                             total_start.elapsed().as_millis()
                         );
@@ -589,11 +554,6 @@ where
                     started.elapsed().as_millis(),
                     lyrics_kind(server_lyrics.as_ref())
                 );
-                lyrics_debug!(
-                    "provider=subsonic elapsed_ms={} kind={}",
-                    started.elapsed().as_millis(),
-                    lyrics_kind(server_lyrics.as_ref())
-                );
                 if let Some(lyrics) = server_lyrics {
                     if has_word_timestamps(&lyrics) {
                         if let Ok(mut cache) = lyrics_cache().lock() {
@@ -603,12 +563,6 @@ where
                             target: "kopuz::lyrics",
                             "selected key_hash={} source=subsonic kind={} total_ms={}",
                             log_lyrics_key_hash(&cache_key),
-                            lyrics_kind(Some(&lyrics)),
-                            total_start.elapsed().as_millis()
-                        );
-                        lyrics_debug!(
-                            "selected source=subsonic key_hash={} kind={} total_ms={}",
-                            cache_key_hash,
                             lyrics_kind(Some(&lyrics)),
                             total_start.elapsed().as_millis()
                         );
@@ -668,11 +622,6 @@ where
                     apple_started.elapsed().as_millis(),
                     lyrics_kind(result.as_ref())
                 );
-                lyrics_debug!(
-                    "provider=paxsenix_apple elapsed_ms={} kind={}",
-                    apple_started.elapsed().as_millis(),
-                    lyrics_kind(result.as_ref())
-                );
                 if let Some(lyrics) = result {
                     let should_replace = fallback
                         .as_ref()
@@ -698,11 +647,6 @@ where
                     target: "kopuz::lyrics",
                     "paxsenix_youtube key_hash={} elapsed_ms={} kind={}",
                     log_lyrics_key_hash(&cache_key),
-                    youtube_started.elapsed().as_millis(),
-                    lyrics_kind(result.as_ref())
-                );
-                lyrics_debug!(
-                    "provider=paxsenix_youtube elapsed_ms={} kind={}",
                     youtube_started.elapsed().as_millis(),
                     lyrics_kind(result.as_ref())
                 );
@@ -734,11 +678,6 @@ where
                     musixmatch_started.elapsed().as_millis(),
                     lyrics_kind(result.as_ref())
                 );
-                lyrics_debug!(
-                    "provider=musixmatch elapsed_ms={} kind={}",
-                    musixmatch_started.elapsed().as_millis(),
-                    lyrics_kind(result.as_ref())
-                );
                 if let Some(lyrics) = result
                 {
                     musixmatch_candidate = Some(lyrics);
@@ -750,11 +689,6 @@ where
                     target: "kopuz::lyrics",
                     "lrclib key_hash={} elapsed_ms={} kind={}",
                     log_lyrics_key_hash(&cache_key),
-                    lrclib_started.elapsed().as_millis(),
-                    lyrics_kind(result.as_ref())
-                );
-                lyrics_debug!(
-                    "provider=lrclib elapsed_ms={} kind={}",
                     lrclib_started.elapsed().as_millis(),
                     lyrics_kind(result.as_ref())
                 );
@@ -797,12 +731,6 @@ where
         target: "kopuz::lyrics",
         "selected key_hash={} source=final kind={} total_ms={}",
         log_lyrics_key_hash(&cache_key),
-        lyrics_kind(fetched.as_ref()),
-        total_start.elapsed().as_millis()
-    );
-    lyrics_debug!(
-        "selected source=final key_hash={} kind={} total_ms={}",
-        cache_key_hash,
         lyrics_kind(fetched.as_ref()),
         total_start.elapsed().as_millis()
     );
@@ -906,18 +834,6 @@ fn log_lyrics_key_hash(key: &str) -> String {
     let mut hasher = DefaultHasher::new();
     key.trim().hash(&mut hasher);
     format!("{:016x}", hasher.finish())
-}
-
-fn lyrics_terminal_debug_enabled() -> bool {
-    #[cfg(target_arch = "wasm32")]
-    {
-        false
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        std::env::var_os("KOPUZ_LYRICS_DEBUG").is_some()
-    }
 }
 
 fn lyrics_cache() -> &'static Mutex<LyricsCache> {
@@ -1317,7 +1233,6 @@ async fn fetch_from_musixmatch_enhanced(artist: &str, title: &str) -> Option<Lyr
             target: "kopuz::lyrics",
             "musixmatch track.search status={status}"
         );
-        lyrics_debug!("musixmatch track.search status={status}");
         return None;
     }
 
@@ -1327,11 +1242,6 @@ async fn fetch_from_musixmatch_enhanced(artist: &str, title: &str) -> Option<Lyr
             target: "kopuz::lyrics",
             "musixmatch no_match query={query:?} candidates={}",
             tracks.len()
-        );
-        lyrics_debug!(
-            "musixmatch no_match candidates={} query={:?}",
-            tracks.len(),
-            query
         );
         return None;
     };
@@ -1360,7 +1270,6 @@ async fn fetch_from_musixmatch_enhanced(artist: &str, title: &str) -> Option<Lyr
             target: "kopuz::lyrics",
             "musixmatch richsync status={status}"
         );
-        lyrics_debug!("musixmatch richsync status={status}");
         return None;
     }
 
@@ -1568,11 +1477,6 @@ async fn fetch_from_paxsenix_apple_music(
             target: "kopuz::lyrics",
             "paxsenix_apple no_match query={query:?} candidates={}",
             search.results.len()
-        );
-        lyrics_debug!(
-            "paxsenix_apple no_match candidates={} query={:?}",
-            search.results.len(),
-            query
         );
         return None;
     };

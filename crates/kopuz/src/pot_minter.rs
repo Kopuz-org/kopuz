@@ -227,7 +227,7 @@ pub fn install_if_wanted<T: 'static>(target: &EventLoopWindowTarget<T>) {
             // the full JS stack, so a broken minter shows up in logs as more
             // than "Function@[native code]".
             if let Some(diag) = v.get("diag").and_then(|d| d.as_str()) {
-                eprintln!("[pot-minter] {diag}");
+                tracing::warn!("pot-minter: {diag}");
                 return;
             }
             let Some(id) = v.get("id").and_then(|i| i.as_u64()) else {
@@ -241,7 +241,7 @@ pub fn install_if_wanted<T: 'static>(target: &EventLoopWindowTarget<T>) {
                         .and_then(|e| e.as_str())
                         .unwrap_or("mint failed")
                         .to_string();
-                    eprintln!("[pot-minter] mint error: {err}");
+                    tracing::error!(error = %err, "pot-minter mint failed");
                     Err(err)
                 }
             };
