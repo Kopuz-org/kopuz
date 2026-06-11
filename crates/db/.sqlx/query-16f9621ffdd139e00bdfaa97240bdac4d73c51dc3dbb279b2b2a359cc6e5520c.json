@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT COUNT(*) FROM favorites WHERE server_id = ?1 AND ref = ?2",
+  "query": "SELECT COUNT(*) FROM favorites WHERE server_id = ?1 AND ref = ?2 AND dirty != 2",
   "describe": {
     "columns": [
       {
@@ -16,5 +16,5 @@
       false
     ]
   },
-  "hash": "1ec31a6b74109f31893556771b699e0ffede2b8bc3f73077ffddc56b44380ce1"
+  "hash": "16f9621ffdd139e00bdfaa97240bdac4d73c51dc3dbb279b2b2a359cc6e5520c"
 }

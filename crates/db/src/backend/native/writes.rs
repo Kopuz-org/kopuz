@@ -112,6 +112,7 @@ pub async fn set_favorite(
     on: bool,
 ) -> Result<(), DbError> {
     if on {
+        // A re-like of a pending-unlike tombstone resurrects it as pending-like.
         sqlx::query!(
             "INSERT INTO favorites (server_id, ref, dirty) VALUES (?1, ?2, 1) \
              ON CONFLICT(server_id, ref) DO UPDATE SET dirty = 1",
@@ -121,13 +122,24 @@ pub async fn set_favorite(
         .execute(pool)
         .await?;
     } else {
+        let mut tx = pool.begin().await?;
+        // A never-pushed like just disappears; a synced (clean) row becomes a
+        // pending-unlike tombstone so the removal survives until pushed.
         sqlx::query!(
-            "DELETE FROM favorites WHERE server_id = ?1 AND ref = ?2",
+            "DELETE FROM favorites WHERE server_id = ?1 AND ref = ?2 AND dirty = 1",
             server_id,
             ref_
         )
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
+        sqlx::query!(
+            "UPDATE favorites SET dirty = 2 WHERE server_id = ?1 AND ref = ?2 AND dirty = 0",
+            server_id,
+            ref_
+        )
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
     }
     Ok(())
 }
@@ -141,18 +153,36 @@ pub async fn dirty_favorites(pool: &SqlitePool, server_id: &str) -> Result<Vec<S
     .await?)
 }
 
+pub async fn dirty_unlikes(pool: &SqlitePool, server_id: &str) -> Result<Vec<String>, DbError> {
+    Ok(sqlx::query_scalar!(
+        "SELECT ref FROM favorites WHERE server_id = ?1 AND dirty = 2",
+        server_id
+    )
+    .fetch_all(pool)
+    .await?)
+}
+
 pub async fn clear_favorite_dirty(
     pool: &SqlitePool,
     server_id: &str,
     ref_: &str,
 ) -> Result<(), DbError> {
+    let mut tx = pool.begin().await?;
     sqlx::query!(
-        "UPDATE favorites SET dirty = 0 WHERE server_id = ?1 AND ref = ?2",
+        "DELETE FROM favorites WHERE server_id = ?1 AND ref = ?2 AND dirty = 2",
         server_id,
         ref_
     )
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+    sqlx::query!(
+        "UPDATE favorites SET dirty = 0 WHERE server_id = ?1 AND ref = ?2 AND dirty = 1",
+        server_id,
+        ref_
+    )
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
     Ok(())
 }
 
@@ -395,6 +425,39 @@ pub async fn save_favorites_store(
     if let Some(id) = super::dump::active_server_id(pool).await {
         replace_favorites_clean(pool, &id, &store.jellyfin_favorites).await?;
     }
+    Ok(())
+}
+
+pub async fn meta_get(
+    pool: &SqlitePool,
+    cache_key: &str,
+    kind: &str,
+) -> Result<Option<String>, DbError> {
+    Ok(sqlx::query_scalar!(
+        "SELECT payload FROM metadata_cache WHERE cache_key = ?1 AND kind = ?2",
+        cache_key,
+        kind
+    )
+    .fetch_optional(pool)
+    .await?
+    .flatten())
+}
+
+pub async fn meta_put(
+    pool: &SqlitePool,
+    cache_key: &str,
+    kind: &str,
+    payload: &str,
+) -> Result<(), DbError> {
+    sqlx::query!(
+        "INSERT INTO metadata_cache (cache_key, kind, payload) VALUES (?1, ?2, ?3) \
+         ON CONFLICT(cache_key, kind) DO UPDATE SET payload = ?3, fetched_at = unixepoch()",
+        cache_key,
+        kind,
+        payload
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 

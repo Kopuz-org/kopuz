@@ -127,6 +127,22 @@ impl Storage for Stub {
         Ok(Vec::new())
     }
 
+    async fn dirty_unlikes(&self, _server_id: &str) -> Result<Vec<String>, DbError> {
+        Ok(Vec::new())
+    }
+
+    async fn load_server(&self, _id: &str) -> Result<Option<config::MusicServer>, DbError> {
+        Ok(None)
+    }
+
+    async fn meta_get(&self, _cache_key: &str, _kind: &str) -> Result<Option<String>, DbError> {
+        Ok(None)
+    }
+
+    async fn meta_put(&self, _cache_key: &str, _kind: &str, _payload: &str) -> Result<(), DbError> {
+        Ok(())
+    }
+
     async fn clear_favorite_dirty(&self, _server_id: &str, _ref_: &str) -> Result<(), DbError> {
         Ok(())
     }

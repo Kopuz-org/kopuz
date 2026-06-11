@@ -189,17 +189,18 @@ pub async fn load_playlists(pool: &SqlitePool) -> Result<PlaylistStore, DbError>
 }
 
 pub async fn load_favorites_store(pool: &SqlitePool) -> Result<FavoritesStore, DbError> {
-    let local: Vec<String> =
-        sqlx::query_scalar!("SELECT ref FROM favorites WHERE server_id = 'local'")
-            .fetch_all(pool)
-            .await?;
+    let local: Vec<String> = sqlx::query_scalar!(
+        "SELECT ref FROM favorites WHERE server_id = 'local' AND dirty != 2"
+    )
+    .fetch_all(pool)
+    .await?;
     let jellyfin_favorites = match active_server_id(pool).await {
-        Some(id) => {
-            sqlx::query_scalar::<_, String>("SELECT ref FROM favorites WHERE server_id = ?1")
-                .bind(id)
-                .fetch_all(pool)
-                .await?
-        }
+        Some(id) => sqlx::query_scalar::<_, String>(
+            "SELECT ref FROM favorites WHERE server_id = ?1 AND dirty != 2",
+        )
+        .bind(id)
+        .fetch_all(pool)
+        .await?,
         None => Vec::new(),
     };
     Ok(FavoritesStore {

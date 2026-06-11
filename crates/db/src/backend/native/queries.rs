@@ -79,11 +79,12 @@ pub async fn albums(pool: &SqlitePool, source: &Source) -> Result<Vec<Album>, Db
 }
 
 pub async fn favorites(pool: &SqlitePool, server_id: &str) -> Result<Vec<String>, DbError> {
-    Ok(
-        sqlx::query_scalar!("SELECT ref FROM favorites WHERE server_id = ?1", server_id)
-            .fetch_all(pool)
-            .await?,
+    Ok(sqlx::query_scalar!(
+        "SELECT ref FROM favorites WHERE server_id = ?1 AND dirty != 2",
+        server_id
     )
+    .fetch_all(pool)
+    .await?)
 }
 
 pub async fn is_favorite(
@@ -92,7 +93,7 @@ pub async fn is_favorite(
     ref_: &str,
 ) -> Result<bool, DbError> {
     let n: i64 = sqlx::query_scalar!(
-        "SELECT COUNT(*) FROM favorites WHERE server_id = ?1 AND ref = ?2",
+        "SELECT COUNT(*) FROM favorites WHERE server_id = ?1 AND ref = ?2 AND dirty != 2",
         server_id,
         ref_
     )

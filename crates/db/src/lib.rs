@@ -208,21 +208,38 @@ pub trait Storage: Send + Sync {
     /// Persist the queue/progress snapshot to the single `queue_state` row.
     async fn save_queue(&self, snap: &QueueSnapshot) -> Result<(), DbError>;
 
+    /// Hydrate one server row (creds included) into the in-memory shape — used
+    /// by server switching so stored creds are reused instead of re-prompting.
+    async fn load_server(&self, id: &str) -> Result<Option<config::MusicServer>, DbError>;
+
+    /// Generic metadata-cache read (`metadata_cache` table): the `payload` for
+    /// `(cache_key, kind)`, if cached.
+    async fn meta_get(&self, cache_key: &str, kind: &str) -> Result<Option<String>, DbError>;
+
+    /// Generic metadata-cache write (upsert of `payload` for `(cache_key, kind)`).
+    async fn meta_put(&self, cache_key: &str, kind: &str, payload: &str) -> Result<(), DbError>;
+
     /// The favorite refs (`track_key`s) for a server (`"local"` for filesystem).
     async fn favorites(&self, server_id: &str) -> Result<Vec<String>, DbError>;
 
     /// Whether `ref_` is favorited under `server_id`.
     async fn is_favorite(&self, server_id: &str, ref_: &str) -> Result<bool, DbError>;
 
-    /// Toggle a favorite locally and mark it `dirty` (an optimistic change not yet
-    /// pushed to the server). `on` adds the row, `!on` removes it. Works while
-    /// unauthenticated — the reconciler flushes dirty rows once a server is active.
+    /// Toggle a favorite locally, optimistically. `on` upserts the row as a
+    /// pending-like (`dirty=1`). `!on` deletes a never-pushed like outright and
+    /// turns a synced row into a pending-unlike tombstone (`dirty=2`) so the
+    /// removal can be pushed later. Works while unauthenticated — the reconciler
+    /// flushes pending rows once a server is active.
     async fn set_favorite(&self, server_id: &str, ref_: &str, on: bool) -> Result<(), DbError>;
 
-    /// Refs whose local favorite state hasn't been pushed to the server yet.
+    /// Pending-like refs (`dirty=1`) not yet pushed to the server.
     async fn dirty_favorites(&self, server_id: &str) -> Result<Vec<String>, DbError>;
 
-    /// Clear the `dirty` flag for a ref after a successful remote push.
+    /// Pending-unlike tombstones (`dirty=2`) not yet pushed to the server.
+    async fn dirty_unlikes(&self, server_id: &str) -> Result<Vec<String>, DbError>;
+
+    /// Resolve a ref after a successful remote push: a pending-like becomes
+    /// clean, a pending-unlike tombstone is deleted.
     async fn clear_favorite_dirty(&self, server_id: &str, ref_: &str) -> Result<(), DbError>;
 
     /// Replace a server's favorites with the remote set (a sync pull): rows not in

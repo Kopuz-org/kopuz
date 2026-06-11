@@ -229,6 +229,22 @@ impl Storage for Native {
         writes::dirty_favorites(&self.pool(), server_id).await
     }
 
+    async fn dirty_unlikes(&self, server_id: &str) -> Result<Vec<String>, DbError> {
+        writes::dirty_unlikes(&self.pool(), server_id).await
+    }
+
+    async fn load_server(&self, id: &str) -> Result<Option<config::MusicServer>, DbError> {
+        cfg_store::load_server(&self.pool(), id).await
+    }
+
+    async fn meta_get(&self, cache_key: &str, kind: &str) -> Result<Option<String>, DbError> {
+        writes::meta_get(&self.pool(), cache_key, kind).await
+    }
+
+    async fn meta_put(&self, cache_key: &str, kind: &str, payload: &str) -> Result<(), DbError> {
+        writes::meta_put(&self.pool(), cache_key, kind, payload).await
+    }
+
     async fn clear_favorite_dirty(&self, server_id: &str, ref_: &str) -> Result<(), DbError> {
         writes::clear_favorite_dirty(&self.pool(), server_id, ref_).await
     }

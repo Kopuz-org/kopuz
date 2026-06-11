@@ -6,9 +6,6 @@
 //! `#[tracing::instrument]`. Callers pass plain connection params (this crate
 //! stays free of Dioxus) and keep their own Signal write-backs.
 
-use crate::jellyfin::JellyfinClient;
-use crate::subsonic::SubsonicClient;
-use crate::ytmusic::YouTubeMusicClient;
 use config::MusicService;
 
 /// Resolved server credentials for a single request batch.
@@ -64,39 +61,9 @@ pub async fn add_tracks_to_playlist(
     playlist_id: &str,
     item_ids: &[String],
 ) -> Vec<String> {
-    let mut added = Vec::new();
-    match conn.service {
-        MusicService::Jellyfin => {
-            let remote = JellyfinClient::new(
-                &conn.url,
-                Some(&conn.token),
-                &conn.device_id,
-                Some(&conn.user_id),
-            );
-            for id in item_ids {
-                if remote.add_to_playlist(playlist_id, id).await.is_ok() {
-                    added.push(id.clone());
-                }
-            }
-        }
-        MusicService::Subsonic | MusicService::Custom => {
-            let remote = SubsonicClient::new(&conn.url, &conn.user_id, &conn.token);
-            for id in item_ids {
-                if remote.add_to_playlist(playlist_id, id).await.is_ok() {
-                    added.push(id.clone());
-                }
-            }
-        }
-        MusicService::YtMusic => {
-            let yt = YouTubeMusicClient::with_cookies(conn.token.clone());
-            for id in item_ids {
-                if yt.add_to_playlist(playlist_id, id).await.is_ok() {
-                    added.push(id.clone());
-                }
-            }
-        }
-    }
-    added
+    crate::client::client_for(conn)
+        .add_to_playlist(playlist_id, item_ids)
+        .await
 }
 
 /// Create a playlist on the server seeded with `item_ids`, returning its new id.
@@ -110,26 +77,9 @@ pub async fn create_server_playlist(
     name: &str,
     item_ids: &[String],
 ) -> Result<String, String> {
-    let id_refs: Vec<&str> = item_ids.iter().map(|s| s.as_str()).collect();
-    match conn.service {
-        MusicService::Jellyfin => {
-            let remote = JellyfinClient::new(
-                &conn.url,
-                Some(&conn.token),
-                &conn.device_id,
-                Some(&conn.user_id),
-            );
-            remote.create_playlist(name, &id_refs).await
-        }
-        MusicService::Subsonic | MusicService::Custom => {
-            let remote = SubsonicClient::new(&conn.url, &conn.user_id, &conn.token);
-            remote.create_playlist(name, &id_refs).await
-        }
-        MusicService::YtMusic => {
-            let yt = YouTubeMusicClient::with_cookies(conn.token.clone());
-            yt.create_playlist(name, "", &id_refs).await
-        }
-    }
+    crate::client::client_for(conn)
+        .create_playlist(name, item_ids)
+        .await
 }
 
 /// Star/unstar (or like/unlike) one or more tracks on the server. Attempts
@@ -145,51 +95,13 @@ pub async fn set_tracks_favorite(
     item_ids: &[String],
     favorite: bool,
 ) -> Result<(), String> {
+    let client = crate::client::client_for(conn);
     let mut first_err: Option<String> = None;
-    macro_rules! record {
-        ($res:expr) => {
-            if let Err(e) = $res {
-                if first_err.is_none() {
-                    first_err = Some(e);
-                }
-            }
-        };
-    }
-    match conn.service {
-        MusicService::Jellyfin => {
-            let remote = JellyfinClient::new(
-                &conn.url,
-                Some(&conn.token),
-                &conn.device_id,
-                Some(&conn.user_id),
-            );
-            for id in item_ids {
-                if favorite {
-                    record!(remote.mark_favorite(id).await);
-                } else {
-                    record!(remote.unmark_favorite(id).await);
-                }
-            }
-        }
-        MusicService::Subsonic | MusicService::Custom => {
-            let remote = SubsonicClient::new(&conn.url, &conn.user_id, &conn.token);
-            for id in item_ids {
-                if favorite {
-                    record!(remote.star(id).await);
-                } else {
-                    record!(remote.unstar(id).await);
-                }
-            }
-        }
-        MusicService::YtMusic => {
-            let yt = YouTubeMusicClient::with_cookies(conn.token.clone());
-            for id in item_ids {
-                if favorite {
-                    record!(yt.like_video(id).await);
-                } else {
-                    record!(yt.unlike_video(id).await);
-                }
-            }
+    for id in item_ids {
+        if let Err(e) = client.set_favorite(id, favorite).await
+            && first_err.is_none()
+        {
+            first_err = Some(e);
         }
     }
     match first_err {

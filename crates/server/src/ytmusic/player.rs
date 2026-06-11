@@ -90,6 +90,9 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
     let mut decipher_fallback: Option<YtStreamInfo> = None;
     if let Some(c) = cookies {
         let uid = super::derive_user_id(c);
+        if let Some(u) = &uid {
+            seed_tier_from_db(u).await;
+        }
         // Skip the Premium decipher attempt for accounts already known to be
         // non-Premium — but only when a pot can actually be minted (the decipher
         // stream is our fallback when it can't). Saves a /player round-trip per
@@ -187,13 +190,22 @@ fn is_premium_itag(itag: Option<u32>) -> bool {
     matches!(itag, Some(774))
 }
 
-/// Premium-tier memo, keyed by Google user id (so switching accounts re-learns).
+/// Premium-tier memo, keyed by Google user id (so switching accounts re-learns)
+/// and PERSISTED through the metadata cache so a restart doesn't re-probe.
 /// Lets us skip the redundant Premium decipher attempt for accounts already
-/// known to be non-Premium. The "free" verdict carries a timestamp and expires
-/// so that an account upgraded free→Premium (same id, no re-sign-in) is
-/// re-checked rather than pinned to ANDROID_VR for the session.
+/// known to be non-Premium. The "free" verdict expires daily so an account
+/// upgraded free→Premium (same id, no re-sign-in) is re-checked rather than
+/// pinned to ANDROID_VR forever; "premium" is trusted until an itag contradicts
+/// it (remember_tier overwrites).
 static ACCOUNT_PREMIUM: OnceLock<Mutex<HashMap<String, (Instant, bool)>>> = OnceLock::new();
-const TIER_TTL: Duration = Duration::from_secs(5 * 60);
+static TIER_DB: OnceLock<db::Db> = OnceLock::new();
+const FREE_TIER_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+const TIER_META_KIND: &str = "yt_tier";
+
+/// Register the database used to persist account tiers. Called once at startup.
+pub fn init_tier_store(handle: db::Db) {
+    let _ = TIER_DB.set(handle);
+}
 
 fn account_premium() -> &'static Mutex<HashMap<String, (Instant, bool)>> {
     ACCOUNT_PREMIUM.get_or_init(|| Mutex::new(HashMap::new()))
@@ -202,13 +214,58 @@ fn account_premium() -> &'static Mutex<HashMap<String, (Instant, bool)>> {
 fn known_non_premium(user_id: &str) -> bool {
     matches!(
         account_premium().lock().ok().and_then(|m| m.get(user_id).copied()),
-        Some((at, false)) if at.elapsed() < TIER_TTL
+        Some((at, false)) if at.elapsed() < FREE_TIER_TTL
     )
+}
+
+/// Warm the in-memory memo from the persisted tier, if this account hasn't been
+/// seen this session. `"premium:<ts>"` seeds fresh; `"free:<ts>"` seeds with its
+/// real age so the daily re-check still happens on schedule.
+async fn seed_tier_from_db(user_id: &str) {
+    {
+        let Ok(m) = account_premium().lock() else { return };
+        if m.contains_key(user_id) {
+            return;
+        }
+    }
+    let Some(handle) = TIER_DB.get() else { return };
+    let Ok(Some(payload)) = handle.meta_get(user_id, TIER_META_KIND).await else {
+        return;
+    };
+    let (verdict, ts) = match payload.split_once(':') {
+        Some((v, t)) => (v.to_string(), t.parse::<u64>().unwrap_or(0)),
+        None => (payload, 0),
+    };
+    let premium = verdict == "premium";
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let age = Duration::from_secs(now.saturating_sub(ts));
+    if !premium && age >= FREE_TIER_TTL {
+        return; // stale free verdict — let the probe re-learn
+    }
+    let seeded_at = Instant::now().checked_sub(age).unwrap_or_else(Instant::now);
+    if let Ok(mut m) = account_premium().lock() {
+        m.entry(user_id.to_string()).or_insert((seeded_at, premium));
+    }
 }
 
 fn remember_tier(user_id: &str, premium: bool) {
     if let Ok(mut m) = account_premium().lock() {
         m.insert(user_id.to_string(), (Instant::now(), premium));
+    }
+    if let Some(handle) = TIER_DB.get() {
+        let handle = handle.clone();
+        let uid = user_id.to_string();
+        tokio::spawn(async move {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let payload = format!("{}:{now}", if premium { "premium" } else { "free" });
+            let _ = handle.meta_put(&uid, TIER_META_KIND, &payload).await;
+        });
     }
 }
 

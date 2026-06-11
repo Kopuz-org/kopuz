@@ -486,6 +486,7 @@ fn init_db_blocking() -> db::Db {
             Ok(_) => {}
             Err(e) => tracing::warn!(error = %e, "kopuz: legacy json backup rename failed"),
         }
+        server::ytmusic::player::init_tier_store(handle.clone());
         handle
     })
 }
@@ -980,6 +981,7 @@ fn App() -> Element {
     });
     let mut playlist_store = use_signal(reader::PlaylistStore::default);
     let mut favorites_store = use_signal(FavoritesStore::default);
+    hooks::use_sync_task::use_sync_task(config, favorites_store);
     let mut initial_load_done = use_signal(|| false);
     #[allow(unused_variables)]
     let cover_cache = use_memo(move || cache_dir().join("covers"));

@@ -192,6 +192,28 @@ pub async fn save_config(pool: &SqlitePool, cfg: &AppConfig) -> Result<(), DbErr
     Ok(())
 }
 
+/// Hydrate one server row (creds included) — the server-switch path, so stored
+/// creds are reused instead of re-prompting sign-in.
+pub async fn load_server(pool: &SqlitePool, id: &str) -> Result<Option<MusicServer>, DbError> {
+    let row = sqlx::query!(
+        "SELECT id, name, url, service, access_token, user_id, yt_browser, yt_anonymous \
+         FROM servers WHERE id = ?1",
+        id
+    )
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|r| MusicServer {
+        name: r.name,
+        url: r.url,
+        service: parse_service(&r.service),
+        access_token: r.access_token,
+        user_id: r.user_id,
+        id: Some(r.id),
+        yt_browser: parse_browser(r.yt_browser.as_deref()),
+        yt_anonymous: r.yt_anonymous != 0,
+    }))
+}
+
 /// Increment one track's play count (1-row upsert — no whole-blob rewrite).
 // Wired to the player's scrobble path when it moves off the in-memory config.
 #[allow(dead_code)]

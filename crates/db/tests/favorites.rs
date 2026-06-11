@@ -34,9 +34,36 @@ async fn favorites_dirty_and_reconcile() {
     assert!(db.dirty_favorites("local").await.unwrap().is_empty());
     assert!(db.is_favorite("local", "/music/a.flac").await.unwrap());
 
-    // Unlike removes it.
+    // Unlike of a SYNCED favorite hides it immediately but leaves a
+    // pending-unlike tombstone for the reconciler to push.
     db.set_favorite("local", "/music/a.flac", false).await.unwrap();
     assert!(!db.is_favorite("local", "/music/a.flac").await.unwrap());
+    assert!(!db.favorites("local").await.unwrap().contains(&"/music/a.flac".to_string()));
+    assert_eq!(
+        db.dirty_unlikes("local").await.unwrap(),
+        vec!["/music/a.flac".to_string()]
+    );
+    // Pushing the unlike resolves the tombstone away.
+    db.clear_favorite_dirty("local", "/music/a.flac").await.unwrap();
+    assert!(db.dirty_unlikes("local").await.unwrap().is_empty());
+
+    // Unlike of a NEVER-PUSHED like just disappears (nothing to push).
+    db.set_favorite("local", "/music/x.flac", true).await.unwrap();
+    db.set_favorite("local", "/music/x.flac", false).await.unwrap();
+    assert!(db.dirty_unlikes("local").await.unwrap().is_empty());
+    assert!(db.dirty_favorites("local").await.unwrap().is_empty());
+
+    // Re-like of a tombstone resurrects it as a pending-like.
+    db.set_favorite("local", "/music/y.flac", true).await.unwrap();
+    db.clear_favorite_dirty("local", "/music/y.flac").await.unwrap(); // synced
+    db.set_favorite("local", "/music/y.flac", false).await.unwrap(); // tombstone
+    db.set_favorite("local", "/music/y.flac", true).await.unwrap(); // re-like
+    assert!(db.is_favorite("local", "/music/y.flac").await.unwrap());
+    assert_eq!(
+        db.dirty_favorites("local").await.unwrap(),
+        vec!["/music/y.flac".to_string()]
+    );
+    db.set_favorite("local", "/music/y.flac", false).await.unwrap();
 
     // Per-server isolation: a YT like doesn't touch local.
     db.set_favorite("srv-1", "VID9", true).await.unwrap();
