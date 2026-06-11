@@ -381,6 +381,7 @@ artist_photo = Zdjęcie artysty
 album_cover = Okładka albumu
 auto_fetch_covers = Automatyczne pobieranie okładek albumów
 prefer_local_lyrics = Preferuj lokalne teksty (.lrc / osadzone, bez rezerwy online)
+enable_musixmatch_lyrics = Użyj Musixmatch jako zapasowego źródła tekstów
 cover_fetch_strategy = Strategia pobierania okładek
 musicbrainz_first = MusicBrainz najpierw
 lastfm_first = Last.fm najpierw

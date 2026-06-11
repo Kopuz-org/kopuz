@@ -386,6 +386,7 @@ back_behavior_always_prev = LUÔN VỀ BÀI TRƯỚC
 metadata = Siêu dữ liệu
 auto_fetch_covers = Tự động tải bìa album
 prefer_local_lyrics = Ưu tiên lời bài hát cục bộ (.lrc / nhúng, không dùng nguồn trực tuyến dự phòng)
+enable_musixmatch_lyrics = Dùng Musixmatch làm nguồn lời bài hát dự phòng
 cover_fetch_strategy = Cách tải bìa
 musicbrainz_first = Ưu tiên MusicBrainz
 lastfm_first = Ưu tiên Last.fm

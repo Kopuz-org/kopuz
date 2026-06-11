@@ -306,7 +306,7 @@ pub fn LyricsView(
                     lineEl?.querySelectorAll('[data-lyric-chunk]').forEach((word, index) => {{
                         if (activeChunkIndex >= 0 && index <= activeChunkIndex) {{
                             word.style.opacity = '1';
-                            word.style.textShadow = '0 0 12px rgba(255,255,255,0.72)';
+                            word.style.textShadow = '0 0 6px rgba(255,255,255,0.35)';
                         }} else {{
                             word.style.opacity = '0.45';
                             word.style.textShadow = '';
