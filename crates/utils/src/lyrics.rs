@@ -281,6 +281,69 @@ pub async fn fetch_lyrics(
     server_user_id: Option<&str>,
     prefer_local: bool,
 ) -> Option<Lyrics> {
+    fetch_lyrics_with_progress(
+        artist,
+        title,
+        album,
+        duration,
+        track_path,
+        server_url,
+        server_token,
+        server_user_id,
+        prefer_local,
+        true,
+        |_| {},
+    )
+    .await
+}
+
+pub async fn fetch_lyrics_progressive<F>(
+    artist: &str,
+    title: &str,
+    album: &str,
+    duration: u64,
+    track_path: &str,
+    server_url: Option<&str>,
+    server_token: Option<&str>,
+    server_user_id: Option<&str>,
+    prefer_local: bool,
+    on_progress: F,
+) -> Option<Lyrics>
+where
+    F: FnMut(Lyrics),
+{
+    fetch_lyrics_with_progress(
+        artist,
+        title,
+        album,
+        duration,
+        track_path,
+        server_url,
+        server_token,
+        server_user_id,
+        prefer_local,
+        false,
+        on_progress,
+    )
+    .await
+}
+
+async fn fetch_lyrics_with_progress<F>(
+    artist: &str,
+    title: &str,
+    album: &str,
+    duration: u64,
+    track_path: &str,
+    server_url: Option<&str>,
+    server_token: Option<&str>,
+    server_user_id: Option<&str>,
+    prefer_local: bool,
+    allow_lrclib: bool,
+    mut on_progress: F,
+) -> Option<Lyrics>
+where
+    F: FnMut(Lyrics),
+{
     let cache_key = lyrics_cache_key(artist, title, album, duration, track_path);
     let cache_key_hash = log_lyrics_key_hash(&cache_key);
     let total_start = Instant::now();
@@ -532,119 +595,117 @@ pub async fn fetch_lyrics(
         }
     }
 
-    // 3. Paxsenix Apple Music can provide syllable/line-synced lyrics.
-    let started = Instant::now();
-    let paxsenix_apple = fetch_from_paxsenix_apple_music(artist, title, duration).await;
-    tracing::info!(
-        target: "kopuz::lyrics",
-        "paxsenix_apple key_hash={} elapsed_ms={} kind={}",
-        log_lyrics_key_hash(&cache_key),
-        started.elapsed().as_millis(),
-        lyrics_kind(paxsenix_apple.as_ref())
-    );
-    lyrics_debug!(
-        "provider=paxsenix_apple elapsed_ms={} kind={}",
-        started.elapsed().as_millis(),
-        lyrics_kind(paxsenix_apple.as_ref())
-    );
-    if let Some(lyrics) = paxsenix_apple {
-        if has_word_timestamps(&lyrics) {
-            if let Ok(mut cache) = lyrics_cache().lock() {
-                cache.put(cache_key.clone(), Some(lyrics.clone()));
+    // 3/4. Apple Music and Musixmatch are independent remote lookups, so run
+    // them together. Progressive callers can display the first useful result
+    // and then upgrade if a better/equal Apple result arrives.
+    let apple_started = Instant::now();
+    let musixmatch_started = Instant::now();
+    let apple = fetch_from_paxsenix_apple_music(artist, title, duration);
+    let musixmatch = fetch_from_musixmatch_enhanced(artist, title);
+    tokio::pin!(apple);
+    tokio::pin!(musixmatch);
+
+    let mut apple_done = false;
+    let mut musixmatch_done = false;
+    let mut progressed: Option<Lyrics> = None;
+
+    while !apple_done || !musixmatch_done {
+        tokio::select! {
+            result = &mut apple, if !apple_done => {
+                apple_done = true;
+                tracing::info!(
+                    target: "kopuz::lyrics",
+                    "paxsenix_apple key_hash={} elapsed_ms={} kind={}",
+                    log_lyrics_key_hash(&cache_key),
+                    apple_started.elapsed().as_millis(),
+                    lyrics_kind(result.as_ref())
+                );
+                lyrics_debug!(
+                    "provider=paxsenix_apple elapsed_ms={} kind={}",
+                    apple_started.elapsed().as_millis(),
+                    lyrics_kind(result.as_ref())
+                );
+                if let Some(lyrics) = result {
+                    let should_replace = fallback
+                        .as_ref()
+                        .map(|current| lyrics_quality(&lyrics) >= lyrics_quality(current))
+                        .unwrap_or(true);
+                    if should_replace {
+                        fallback = Some(lyrics.clone());
+                    }
+                    let should_progress = progressed
+                        .as_ref()
+                        .map(|current| lyrics_quality(&lyrics) >= lyrics_quality(current))
+                        .unwrap_or(true);
+                    if should_progress {
+                        progressed = Some(lyrics.clone());
+                        on_progress(lyrics);
+                    }
+                }
             }
-            tracing::info!(
-                target: "kopuz::lyrics",
-                "selected key_hash={} source=paxsenix_apple kind={} total_ms={}",
-                log_lyrics_key_hash(&cache_key),
-                lyrics_kind(Some(&lyrics)),
-                total_start.elapsed().as_millis()
-            );
-            lyrics_debug!(
-                "selected source=paxsenix_apple key_hash={} kind={} total_ms={}",
-                cache_key_hash,
-                lyrics_kind(Some(&lyrics)),
-                total_start.elapsed().as_millis()
-            );
-            return Some(lyrics);
+            result = &mut musixmatch, if !musixmatch_done => {
+                musixmatch_done = true;
+                tracing::info!(
+                    target: "kopuz::lyrics",
+                    "musixmatch_enhanced key_hash={} elapsed_ms={} kind={}",
+                    log_lyrics_key_hash(&cache_key),
+                    musixmatch_started.elapsed().as_millis(),
+                    lyrics_kind(result.as_ref())
+                );
+                lyrics_debug!(
+                    "provider=musixmatch elapsed_ms={} kind={}",
+                    musixmatch_started.elapsed().as_millis(),
+                    lyrics_kind(result.as_ref())
+                );
+                if let Some(lyrics) = result {
+                    let should_replace = fallback
+                        .as_ref()
+                        .map(|current| lyrics_quality(&lyrics) > lyrics_quality(current))
+                        .unwrap_or(true);
+                    if should_replace {
+                        fallback = Some(lyrics.clone());
+                    }
+                    let should_progress = progressed
+                        .as_ref()
+                        .map(|current| lyrics_quality(&lyrics) > lyrics_quality(current))
+                        .unwrap_or(true);
+                    if should_progress {
+                        progressed = Some(lyrics.clone());
+                        on_progress(lyrics);
+                    }
+                }
+            }
         }
-        // Apple line-synced lyrics carry richer Apple metadata than generic
-        // line LRC, so keep them as the preferred line-level fallback.
-        fallback = Some(lyrics);
     }
 
-    // 4. Musixmatch richsync can provide enhanced word-by-word timestamps.
-    let started = Instant::now();
-    let musixmatch = fetch_from_musixmatch_enhanced(artist, title).await;
-    tracing::info!(
-        target: "kopuz::lyrics",
-        "musixmatch_enhanced key_hash={} elapsed_ms={} kind={}",
-        log_lyrics_key_hash(&cache_key),
-        started.elapsed().as_millis(),
-        lyrics_kind(musixmatch.as_ref())
-    );
-    lyrics_debug!(
-        "provider=musixmatch elapsed_ms={} kind={}",
-        started.elapsed().as_millis(),
-        lyrics_kind(musixmatch.as_ref())
-    );
-    if let Some(lyrics) = musixmatch {
-        if has_word_timestamps(&lyrics) {
-            if let Ok(mut cache) = lyrics_cache().lock() {
-                cache.put(cache_key.clone(), Some(lyrics.clone()));
-            }
-            tracing::info!(
-                target: "kopuz::lyrics",
-                "selected key_hash={} source=musixmatch kind={} total_ms={}",
-                log_lyrics_key_hash(&cache_key),
-                lyrics_kind(Some(&lyrics)),
-                total_start.elapsed().as_millis()
-            );
-            lyrics_debug!(
-                "selected source=musixmatch key_hash={} kind={} total_ms={}",
-                cache_key_hash,
-                lyrics_kind(Some(&lyrics)),
-                total_start.elapsed().as_millis()
-            );
-            return Some(lyrics);
-        }
-        fallback.get_or_insert(lyrics);
-    }
-
-    // 5. lrclib fallback
-    let started = Instant::now();
-    let lrclib = fetch_from_lrclib(artist, title, album, duration).await;
-    tracing::info!(
-        target: "kopuz::lyrics",
-        "lrclib key_hash={} elapsed_ms={} kind={}",
-        log_lyrics_key_hash(&cache_key),
-        started.elapsed().as_millis(),
-        lyrics_kind(lrclib.as_ref())
-    );
-    lyrics_debug!(
-        "provider=lrclib elapsed_ms={} kind={}",
-        started.elapsed().as_millis(),
-        lyrics_kind(lrclib.as_ref())
-    );
-    if let Some(lyrics) = lrclib.clone()
-        && has_word_timestamps(&lyrics)
-    {
-        if let Ok(mut cache) = lyrics_cache().lock() {
-            cache.put(cache_key.clone(), Some(lyrics.clone()));
-        }
+    let lrclib = if allow_lrclib {
+        let started = Instant::now();
+        let lrclib = fetch_from_lrclib(artist, title, album, duration).await;
         tracing::info!(
             target: "kopuz::lyrics",
-            "selected key_hash={} source=lrclib kind={} total_ms={}",
+            "lrclib key_hash={} elapsed_ms={} kind={}",
             log_lyrics_key_hash(&cache_key),
-            lyrics_kind(Some(&lyrics)),
-            total_start.elapsed().as_millis()
+            started.elapsed().as_millis(),
+            lyrics_kind(lrclib.as_ref())
         );
         lyrics_debug!(
-            "selected source=lrclib key_hash={} kind={} total_ms={}",
-            cache_key_hash,
-            lyrics_kind(Some(&lyrics)),
-            total_start.elapsed().as_millis()
+            "provider=lrclib elapsed_ms={} kind={}",
+            started.elapsed().as_millis(),
+            lyrics_kind(lrclib.as_ref())
         );
-        return Some(lyrics);
+        lrclib
+    } else {
+        lyrics_debug!("provider=lrclib skipped reason=progressive_fetch");
+        None
+    };
+
+    if let Some(lyrics) = lrclib.clone()
+        && fallback
+            .as_ref()
+            .map(|current| lyrics_quality(&lyrics) > lyrics_quality(current))
+            .unwrap_or(true)
+    {
+        fallback = Some(lyrics);
     }
 
     let fetched = fallback.or(lrclib);
@@ -685,6 +746,14 @@ fn has_word_timestamps(lyrics: &Lyrics) -> bool {
     match lyrics {
         Lyrics::Synced(lines) => lines.iter().any(|line| line.chunks.len() > 1),
         Lyrics::Plain(_) => false,
+    }
+}
+
+fn lyrics_quality(lyrics: &Lyrics) -> u8 {
+    match lyrics {
+        Lyrics::Synced(lines) if lines.iter().any(|line| line.chunks.len() > 1) => 2,
+        Lyrics::Synced(_) => 1,
+        Lyrics::Plain(_) => 0,
     }
 }
 

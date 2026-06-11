@@ -93,7 +93,7 @@ pub fn Rightbar(
         lyrics.set(None);
 
         spawn(async move {
-            let result = utils::lyrics::fetch_lyrics(
+            let result = utils::lyrics::fetch_lyrics_progressive(
                 &artist,
                 &title,
                 &album,
@@ -103,6 +103,11 @@ pub fn Rightbar(
                 server_token.as_deref(),
                 server_user_id.as_deref(),
                 prefer_local,
+                |partial| {
+                    if *fetch_gen.peek() == fetch_id {
+                        lyrics.set(Some(Some(partial)));
+                    }
+                },
             )
             .await;
             if *fetch_gen.peek() == fetch_id {
