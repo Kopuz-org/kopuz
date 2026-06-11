@@ -487,6 +487,7 @@ fn init_db_blocking() -> db::Db {
             Err(e) => tracing::warn!(error = %e, "kopuz: legacy json backup rename failed"),
         }
         server::ytmusic::player::init_tier_store(handle.clone());
+        utils::db_cache::init(handle.clone());
         handle
     })
 }

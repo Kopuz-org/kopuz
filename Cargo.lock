@@ -2090,6 +2090,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+ "utils",
 ]
 
 [[package]]
@@ -8668,6 +8669,7 @@ version = "0.6.7"
 dependencies = [
  "base64 0.22.1",
  "color-thief",
+ "db",
  "gloo-timers 0.4.0",
  "hex",
  "image",

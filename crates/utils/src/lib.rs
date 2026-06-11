@@ -1,4 +1,5 @@
 pub mod color;
+pub mod db_cache;
 pub mod jellyfin_image;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod logs;

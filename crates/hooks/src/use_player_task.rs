@@ -513,7 +513,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                             let album_c = album.clone();
                             let song_key_for_spawn = song_key.clone();
                             spawn(async move {
-                                let resolved = cover_art::resolve_cover_art_url(
+                                let resolved = cover_art::resolve_cover_art_url_cached(
                                     mbid.as_deref(),
                                     &artist_c,
                                     &album_c,
