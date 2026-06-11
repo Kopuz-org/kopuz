@@ -1,8 +1,8 @@
+use crate::NavigationController;
 use crate::lyrics_view::LyricsView;
 use crate::queue_list_view::QueueListView;
 use crate::shared::fmt_time;
 use crate::titlebar::Titlebar;
-use crate::NavigationController;
 use config::AppConfig;
 use dioxus::prelude::*;
 use hooks::use_player_controller::{LoopMode, PlayerController};
@@ -457,6 +457,7 @@ pub fn Fullscreen(
         lyrics.set(None);
 
         spawn(async move {
+            let mut last_displayed: Option<utils::lyrics::Lyrics> = None;
             let result = utils::lyrics::fetch_lyrics_progressive(
                 &artist,
                 &title,
@@ -468,7 +469,8 @@ pub fn Fullscreen(
                 server_user_id.as_deref(),
                 prefer_local,
                 |partial| {
-                    if *fetch_gen.peek() == fetch_id {
+                    if *fetch_gen.peek() == fetch_id && last_displayed.as_ref() != Some(&partial) {
+                        last_displayed = Some(partial.clone());
                         lyrics.set(Some(Some(partial)));
                     }
                 },
@@ -480,7 +482,9 @@ pub fn Fullscreen(
                         i18n::t("lyrics_not_found").to_string(),
                     ))
                 });
-                lyrics.set(Some(display));
+                if display.as_ref() != last_displayed.as_ref() {
+                    lyrics.set(Some(display));
+                }
             }
         });
     });

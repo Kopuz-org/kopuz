@@ -1897,9 +1897,15 @@ fn parse_lrc(lrc_text: &str) -> Vec<LyricLine> {
 
     let mut merged: Vec<LyricLine> = Vec::new();
 
-    for line in lines {
+    for mut line in lines {
         if let Some(last) = merged.last_mut() {
             if last.start_time == line.start_time {
+                if last.chunks.is_empty() && !line.chunks.is_empty() {
+                    last.chunks = std::mem::take(&mut line.chunks);
+                }
+                if last.end_time.is_none() {
+                    last.end_time = line.end_time;
+                }
                 append_line_translation(last, &line.text);
                 continue;
             }
@@ -2029,6 +2035,19 @@ mod tests {
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].start_time, 10.0);
         assert_eq!(lines[0].text, "Hello world");
+        assert_eq!(lines[0].chunks.len(), 2);
+        assert_eq!(lines[0].chunks[0].start_time, 10.1);
+        assert_eq!(lines[0].chunks[0].text, "Hello ");
+        assert_eq!(lines[0].chunks[1].start_time, 10.6);
+        assert_eq!(lines[0].chunks[1].text, "world");
+    }
+
+    #[test]
+    fn duplicate_lrc_timestamps_preserve_chunks() {
+        let lines = parse_lrc("[00:10.00]Translation\n[00:10.00]<00:10.10>Hello <00:10.60>world");
+
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].text, "Translation\n(Hello world)");
         assert_eq!(lines[0].chunks.len(), 2);
         assert_eq!(lines[0].chunks[0].start_time, 10.1);
         assert_eq!(lines[0].chunks[0].text, "Hello ");
