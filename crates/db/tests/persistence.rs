@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use config::{AppConfig, MusicServer, MusicService, SavedServer};
-use db::QueueSnapshot;
+use db::{QueueSnapshot, Source};
 use reader::models::{
     Album, FavoritesStore, JellyfinPlaylist, Library, Playlist, PlaylistFolder, PlaylistStore,
     Track, TrackId,
@@ -132,7 +132,7 @@ async fn library_round_trips_without_loss() {
     seed_active_server(&db).await;
 
     let lib = sample_library();
-    db.save_library(&lib).await.unwrap();
+    db.save_library(&lib, Some("srv-1")).await.unwrap();
 
     let loaded = db.load_library().await.unwrap();
     assert_eq!(loaded.tracks.len(), 2, "local tracks");
@@ -155,7 +155,7 @@ async fn library_round_trips_without_loss() {
     assert!(matches!(yt.id, TrackId::Server { .. }));
 
     // Saving the freshly-loaded library prunes nothing.
-    db.save_library(&loaded).await.unwrap();
+    db.save_library(&loaded, Some("srv-1")).await.unwrap();
     let again = db.load_library().await.unwrap();
     assert_eq!(again.tracks.len(), 2);
     assert_eq!(again.jellyfin_tracks.len(), 2);
@@ -163,8 +163,77 @@ async fn library_round_trips_without_loss() {
     // Dropping a track then saving prunes exactly it.
     let mut shrunk = again;
     shrunk.tracks.retain(|t| t.title == "A");
-    db.save_library(&shrunk).await.unwrap();
+    db.save_library(&shrunk, Some("srv-1")).await.unwrap();
     assert_eq!(db.load_library().await.unwrap().tracks.len(), 1);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn saves_never_touch_other_servers_rows() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    seed_active_server(&db).await; // active = srv-1
+
+    // Seed ANOTHER server's cache directly.
+    let other = Source::Server("srv-other".into());
+    db.upsert_tracks(&other, &[server_track("OV1", "Other One")])
+        .await
+        .unwrap();
+    let other_pl = PlaylistStore {
+        playlists: Vec::new(),
+        jellyfin_playlists: vec![JellyfinPlaylist {
+            id: "OPL".into(),
+            name: "Other List".into(),
+            tracks: vec!["OV1".into()],
+            image_tag: None,
+            cover_path: None,
+        }],
+        folders: Vec::new(),
+    };
+    db.save_playlists(&other_pl, Some("srv-other")).await.unwrap();
+    db.set_favorite("srv-other", "OV1", true).await.unwrap();
+
+    // A full save cycle for the ACTIVE server (srv-1)...
+    db.save_library(&sample_library(), Some("srv-1")).await.unwrap();
+    db.save_playlists(
+        &PlaylistStore {
+            playlists: Vec::new(),
+            jellyfin_playlists: vec![JellyfinPlaylist {
+                id: "LM".into(),
+                name: "Liked".into(),
+                tracks: vec!["VID1".into()],
+                image_tag: None,
+                cover_path: None,
+            }],
+            folders: Vec::new(),
+        },
+        Some("srv-1"),
+    )
+    .await
+    .unwrap();
+    db.save_favorites_store(
+        &FavoritesStore {
+            local_favorites: Vec::new(),
+            jellyfin_favorites: vec!["VID1".into()],
+        },
+        Some("srv-1"),
+    )
+    .await
+    .unwrap();
+
+    // ...must leave srv-other's rows completely intact.
+    let (tracks, _albums, playlists, favorites) =
+        db.load_server_cache("srv-other").await.unwrap();
+    assert_eq!(tracks.len(), 1, "other server's tracks survived");
+    assert_eq!(playlists.len(), 1, "other server's playlists survived");
+    assert_eq!(playlists[0].id, "OPL");
+    assert_eq!(favorites, vec!["OV1"], "other server's favorites survived");
+
+    // And load_playlists (whole-store load) only sees local + ACTIVE rows.
+    let store = db.load_playlists().await.unwrap();
+    assert_eq!(store.jellyfin_playlists.len(), 1);
+    assert_eq!(store.jellyfin_playlists[0].id, "LM");
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }
@@ -195,7 +264,7 @@ async fn playlists_favorites_queue_round_trip() {
             playlist_ids: vec!["pl-1".into()],
         }],
     };
-    db.save_playlists(&store).await.unwrap();
+    db.save_playlists(&store, Some("srv-1")).await.unwrap();
     let pl = db.load_playlists().await.unwrap();
     assert_eq!(pl.playlists.len(), 1);
     assert_eq!(pl.playlists[0].tracks.len(), 2);
@@ -208,7 +277,7 @@ async fn playlists_favorites_queue_round_trip() {
         local_favorites: vec![PathBuf::from("/music/a.flac")],
         jellyfin_favorites: vec!["VID1".into(), "VID2".into()],
     };
-    db.save_favorites_store(&favs).await.unwrap();
+    db.save_favorites_store(&favs, Some("srv-1")).await.unwrap();
     let loaded = db.load_favorites_store().await.unwrap();
     assert_eq!(loaded.local_favorites, vec![PathBuf::from("/music/a.flac")]);
     let mut jf = loaded.jellyfin_favorites;

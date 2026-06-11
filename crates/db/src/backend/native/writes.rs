@@ -251,9 +251,13 @@ async fn prune_full(pool: &SqlitePool, table_key: &str, source: &str, keep: &[St
 
 /// Full sync of the in-memory `Library` to the DB (the persistence side of the
 /// reactive save effect — replaces the legacy whole-file `Library::save`).
-pub async fn save_library(pool: &SqlitePool, lib: &Library) -> Result<(), DbError> {
-    let active = super::dump::active_server_id(pool).await;
-
+/// Prunes are scoped to `'local'` + the passed active server; other servers'
+/// rows are never touched.
+pub async fn save_library(
+    pool: &SqlitePool,
+    lib: &Library,
+    active: Option<&str>,
+) -> Result<(), DbError> {
     upsert_tracks(pool, &Source::Local, &lib.tracks).await?;
     upsert_albums(pool, &Source::Local, &lib.albums).await?;
     let local_track_keys: Vec<String> = lib.tracks.iter().map(|t| t.id.key().into_owned()).collect();
@@ -261,8 +265,8 @@ pub async fn save_library(pool: &SqlitePool, lib: &Library) -> Result<(), DbErro
     prune_full(pool, "tracks", "local", &local_track_keys).await?;
     prune_full(pool, "albums", "local", &local_album_keys).await?;
 
-    if let Some(id) = &active {
-        let src = Source::Server(id.clone());
+    if let Some(id) = active {
+        let src = Source::Server(id.to_string());
         upsert_tracks(pool, &src, &lib.jellyfin_tracks).await?;
         upsert_albums(pool, &src, &lib.jellyfin_albums).await?;
         let server_track_keys: Vec<String> = lib
@@ -308,27 +312,39 @@ pub async fn save_library(pool: &SqlitePool, lib: &Library) -> Result<(), DbErro
         .await?;
     }
 
-    let last_sync = lib.last_yt_sync_at.map(|v| v as i64);
-    let last_pl = lib.last_yt_playlists_sync_at.map(|v| v as i64);
-    sqlx::query!(
-        "UPDATE app_config SET json = json_set(json, '$.last_yt_sync_at', ?1, \
-         '$.last_yt_playlists_sync_at', ?2) WHERE id = 1",
-        last_sync,
-        last_pl
-    )
-    .execute(&mut *tx)
-    .await?;
     tx.commit().await?;
+
+    // The YT sync timestamps live in the metadata cache, NOT the config blob —
+    // save_config rewrites the blob from AppConfig (which has no such fields),
+    // so blob-resident timestamps would be erased by any config save.
+    let stamps = serde_json::json!({
+        "last_yt_sync_at": lib.last_yt_sync_at,
+        "last_yt_playlists_sync_at": lib.last_yt_playlists_sync_at,
+    })
+    .to_string();
+    meta_put(pool, "yt_sync", "timestamps", &stamps).await?;
     Ok(())
 }
 
-/// Replace the persisted playlists/folders with the in-memory store.
-pub async fn save_playlists(pool: &SqlitePool, store: &PlaylistStore) -> Result<(), DbError> {
-    let server_src = super::dump::active_server_id(pool)
-        .await
-        .unwrap_or_else(|| "server".to_string());
+/// Replace the persisted playlists/folders for `'local'` + the active server
+/// with the in-memory store. SCOPED: other servers' playlist rows are never
+/// deleted or re-stamped — the store only ever holds the active server's
+/// playlists, so a full DELETE would destroy every other server's cache on
+/// each save (and a server switch would wipe them all).
+pub async fn save_playlists(
+    pool: &SqlitePool,
+    store: &PlaylistStore,
+    active: Option<&str>,
+) -> Result<(), DbError> {
     let mut tx = pool.begin().await?;
-    sqlx::query!("DELETE FROM playlists").execute(&mut *tx).await?;
+    sqlx::query!("DELETE FROM playlists WHERE source = 'local'")
+        .execute(&mut *tx)
+        .await?;
+    if let Some(id) = active {
+        sqlx::query!("DELETE FROM playlists WHERE source = ?1", id)
+            .execute(&mut *tx)
+            .await?;
+    }
     sqlx::query!("DELETE FROM folders").execute(&mut *tx).await?;
 
     for (i, p) in store.playlists.iter().enumerate() {
@@ -358,31 +374,35 @@ pub async fn save_playlists(pool: &SqlitePool, store: &PlaylistStore) -> Result<
         }
     }
 
-    for (i, p) in store.jellyfin_playlists.iter().enumerate() {
-        let pos = i as i64;
-        let cover = p.cover_path.as_ref().map(|c| c.to_string_lossy().into_owned());
-        let rec = sqlx::query!(
-            "INSERT INTO playlists (source, source_pl_id, name, cover_path, image_tag, position) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6) RETURNING rowid_pk",
-            server_src,
-            p.id,
-            p.name,
-            cover,
-            p.image_tag,
-            pos
-        )
-        .fetch_one(&mut *tx)
-        .await?;
-        for (j, tref) in p.tracks.iter().enumerate() {
-            let jp = j as i64;
-            sqlx::query!(
-                "INSERT INTO playlist_tracks (playlist_pk, position, track_ref) VALUES (?1, ?2, ?3)",
-                rec.rowid_pk,
-                jp,
-                tref
+    // Server playlists are written only when an active server id exists to
+    // attribute them to; otherwise they'd be stamped with a bogus source.
+    if let Some(server_src) = active {
+        for (i, p) in store.jellyfin_playlists.iter().enumerate() {
+            let pos = i as i64;
+            let cover = p.cover_path.as_ref().map(|c| c.to_string_lossy().into_owned());
+            let rec = sqlx::query!(
+                "INSERT INTO playlists (source, source_pl_id, name, cover_path, image_tag, position) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6) RETURNING rowid_pk",
+                server_src,
+                p.id,
+                p.name,
+                cover,
+                p.image_tag,
+                pos
             )
-            .execute(&mut *tx)
+            .fetch_one(&mut *tx)
             .await?;
+            for (j, tref) in p.tracks.iter().enumerate() {
+                let jp = j as i64;
+                sqlx::query!(
+                    "INSERT INTO playlist_tracks (playlist_pk, position, track_ref) VALUES (?1, ?2, ?3)",
+                    rec.rowid_pk,
+                    jp,
+                    tref
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
         }
     }
 
@@ -415,6 +435,7 @@ pub async fn save_playlists(pool: &SqlitePool, store: &PlaylistStore) -> Result<
 pub async fn save_favorites_store(
     pool: &SqlitePool,
     store: &FavoritesStore,
+    active: Option<&str>,
 ) -> Result<(), DbError> {
     let local: Vec<String> = store
         .local_favorites
@@ -422,8 +443,8 @@ pub async fn save_favorites_store(
         .map(|p| p.to_string_lossy().into_owned())
         .collect();
     replace_favorites_clean(pool, "local", &local).await?;
-    if let Some(id) = super::dump::active_server_id(pool).await {
-        replace_favorites_clean(pool, &id, &store.jellyfin_favorites).await?;
+    if let Some(id) = active {
+        replace_favorites_clean(pool, id, &store.jellyfin_favorites).await?;
     }
     Ok(())
 }

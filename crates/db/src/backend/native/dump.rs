@@ -66,8 +66,22 @@ pub async fn load_library(pool: &SqlitePool) -> Result<Library, DbError> {
         .unwrap_or(serde_json::Value::Null);
 
     let active_id = cfg.get("active_server_id").and_then(|v| v.as_str());
-    let last_yt_sync_at = cfg.get("last_yt_sync_at").and_then(|v| v.as_u64());
-    let last_yt_playlists_sync_at = cfg.get("last_yt_playlists_sync_at").and_then(|v| v.as_u64());
+    // YT sync timestamps: the metadata cache is the durable home (save_library
+    // writes there); fall back to blob keys for a DB imported before that
+    // change (the importer stamped them into the blob).
+    let stamps: Option<serde_json::Value> = super::writes::meta_get(pool, "yt_sync", "timestamps")
+        .await
+        .ok()
+        .flatten()
+        .and_then(|p| serde_json::from_str(&p).ok());
+    let stamp = |key: &str| {
+        stamps
+            .as_ref()
+            .and_then(|s| s.get(key).and_then(|v| v.as_u64()))
+            .or_else(|| cfg.get(key).and_then(|v| v.as_u64()))
+    };
+    let last_yt_sync_at = stamp("last_yt_sync_at");
+    let last_yt_playlists_sync_at = stamp("last_yt_playlists_sync_at");
     let root_paths: Vec<PathBuf> = cfg
         .get("music_directory")
         .and_then(|v| v.as_array())
@@ -129,9 +143,15 @@ async fn artist_images(pool: &SqlitePool) -> Result<ArtistImages, DbError> {
 }
 
 pub async fn load_playlists(pool: &SqlitePool) -> Result<PlaylistStore, DbError> {
+    // Scoped to local + the ACTIVE server, mirroring load_library /
+    // load_favorites_store: the in-memory store only ever represents the
+    // active server, and the save side is scoped the same way — so other
+    // servers' rows are invisible to the whole-store round-trip.
+    let active = active_server_id(pool).await.unwrap_or_default();
     let rows = sqlx::query!(
         "SELECT rowid_pk, source, source_pl_id, name, cover_path, image_tag \
-         FROM playlists ORDER BY position"
+         FROM playlists WHERE source = 'local' OR source = ?1 ORDER BY position",
+        active
     )
     .fetch_all(pool)
     .await?;
@@ -186,6 +206,58 @@ pub async fn load_playlists(pool: &SqlitePool) -> Result<PlaylistStore, DbError>
         jellyfin_playlists,
         folders,
     })
+}
+
+/// One server's full cached state — the server-SWITCH load. The in-memory
+/// caches are replaced with this (instead of cleared), so switching reuses the
+/// DB cache and never destroys another server's rows.
+pub async fn load_server_cache(
+    pool: &SqlitePool,
+    server_id: &str,
+) -> Result<
+    (
+        Vec<Track>,
+        Vec<Album>,
+        Vec<JellyfinPlaylist>,
+        Vec<String>,
+    ),
+    DbError,
+> {
+    let tracks = all_tracks(pool, server_id).await?;
+    let albums = all_albums(pool, server_id).await?;
+
+    let rows = sqlx::query!(
+        "SELECT rowid_pk, source_pl_id, name, cover_path, image_tag \
+         FROM playlists WHERE source = ?1 ORDER BY position",
+        server_id
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut playlists = Vec::new();
+    for r in rows {
+        let tracks: Vec<String> = sqlx::query_scalar!(
+            "SELECT track_ref FROM playlist_tracks WHERE playlist_pk = ?1 ORDER BY position",
+            r.rowid_pk
+        )
+        .fetch_all(pool)
+        .await?;
+        playlists.push(JellyfinPlaylist {
+            id: r.source_pl_id,
+            name: r.name,
+            tracks,
+            image_tag: r.image_tag,
+            cover_path: r.cover_path.map(PathBuf::from),
+        });
+    }
+
+    let favorites: Vec<String> = sqlx::query_scalar!(
+        "SELECT ref FROM favorites WHERE server_id = ?1 AND dirty != 2",
+        server_id
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok((tracks, albums, playlists, favorites))
 }
 
 pub async fn load_favorites_store(pool: &SqlitePool) -> Result<FavoritesStore, DbError> {

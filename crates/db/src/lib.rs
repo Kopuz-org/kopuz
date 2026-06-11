@@ -185,25 +185,60 @@ pub trait Storage: Send + Sync {
     /// Reconstruct the queue/progress snapshot from the `queue_state` row.
     async fn load_queue(&self) -> Result<QueueSnapshot, DbError>;
 
-    /// Reconstruct the in-memory `PlaylistStore` (local + server playlists +
-    /// folders) from the DB.
+    /// Reconstruct the in-memory `PlaylistStore` (local + ACTIVE-server
+    /// playlists + folders) from the DB. Other servers' playlists stay in their
+    /// rows, untouched — same per-server scoping as the library/favorites loads.
     async fn load_playlists(&self) -> Result<reader::PlaylistStore, DbError>;
 
     /// Reconstruct the in-memory `FavoritesStore` (local + active-server
     /// favorites) from the DB.
     async fn load_favorites_store(&self) -> Result<reader::FavoritesStore, DbError>;
 
-    /// Persist the whole in-memory `Library` to the DB: upsert local + active
-    /// server tracks/albums, prune rows no longer present, replace artist images,
-    /// and stamp the YT sync timestamps into the config blob.
-    async fn save_library(&self, lib: &reader::Library) -> Result<(), DbError>;
+    /// Persist the whole in-memory `Library` to the DB: upsert local +
+    /// `active_server_id` tracks/albums, prune rows no longer present (scoped to
+    /// local + that server only), replace artist images, and store the YT sync
+    /// timestamps. The active id is passed by the caller (a consistent snapshot
+    /// from the in-memory config) rather than re-read from the blob, so a
+    /// concurrent server switch can't mis-scope the prune.
+    async fn save_library(
+        &self,
+        lib: &reader::Library,
+        active_server_id: Option<&str>,
+    ) -> Result<(), DbError>;
 
-    /// Replace the persisted playlists/folders with the in-memory store.
-    async fn save_playlists(&self, store: &reader::PlaylistStore) -> Result<(), DbError>;
+    /// Replace the persisted playlists/folders for `'local'` + the active
+    /// server with the in-memory store. Other servers' playlist rows are NEVER
+    /// touched (the store only holds the active server's playlists).
+    async fn save_playlists(
+        &self,
+        store: &reader::PlaylistStore,
+        active_server_id: Option<&str>,
+    ) -> Result<(), DbError>;
 
     /// Sync the in-memory favorites to the DB (local + active server).
-    async fn save_favorites_store(&self, store: &reader::FavoritesStore)
-    -> Result<(), DbError>;
+    async fn save_favorites_store(
+        &self,
+        store: &reader::FavoritesStore,
+        active_server_id: Option<&str>,
+    ) -> Result<(), DbError>;
+
+    /// The active server's tracks, albums, playlists, and favorites, freshly
+    /// loaded for a server SWITCH: the in-memory caches are replaced with this
+    /// instead of being cleared, so switching never destroys a server's cached
+    /// rows and the previous server's cache survives for switching back.
+    #[allow(clippy::type_complexity)]
+    async fn load_server_cache(
+        &self,
+        server_id: &str,
+    ) -> Result<
+        (
+            Vec<reader::Track>,
+            Vec<reader::Album>,
+            Vec<reader::models::JellyfinPlaylist>,
+            Vec<String>,
+        ),
+        DbError,
+    >;
 
     /// Persist the queue/progress snapshot to the single `queue_state` row.
     async fn save_queue(&self, snap: &QueueSnapshot) -> Result<(), DbError>;

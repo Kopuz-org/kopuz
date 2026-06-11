@@ -173,19 +173,43 @@ impl Storage for Native {
         dump::load_favorites_store(&self.pool()).await
     }
 
-    async fn save_library(&self, lib: &reader::Library) -> Result<(), DbError> {
-        writes::save_library(&self.pool(), lib).await
+    async fn save_library(
+        &self,
+        lib: &reader::Library,
+        active_server_id: Option<&str>,
+    ) -> Result<(), DbError> {
+        writes::save_library(&self.pool(), lib, active_server_id).await
     }
 
-    async fn save_playlists(&self, store: &reader::PlaylistStore) -> Result<(), DbError> {
-        writes::save_playlists(&self.pool(), store).await
+    async fn save_playlists(
+        &self,
+        store: &reader::PlaylistStore,
+        active_server_id: Option<&str>,
+    ) -> Result<(), DbError> {
+        writes::save_playlists(&self.pool(), store, active_server_id).await
     }
 
     async fn save_favorites_store(
         &self,
         store: &reader::FavoritesStore,
+        active_server_id: Option<&str>,
     ) -> Result<(), DbError> {
-        writes::save_favorites_store(&self.pool(), store).await
+        writes::save_favorites_store(&self.pool(), store, active_server_id).await
+    }
+
+    async fn load_server_cache(
+        &self,
+        server_id: &str,
+    ) -> Result<
+        (
+            Vec<reader::Track>,
+            Vec<reader::Album>,
+            Vec<reader::models::JellyfinPlaylist>,
+            Vec<String>,
+        ),
+        DbError,
+    > {
+        dump::load_server_cache(&self.pool(), server_id).await
     }
 
     async fn save_queue(&self, snap: &crate::QueueSnapshot) -> Result<(), DbError> {

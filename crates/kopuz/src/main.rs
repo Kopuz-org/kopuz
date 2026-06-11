@@ -462,9 +462,28 @@ fn init_db_blocking() -> db::Db {
         .build()
         .expect("tokio runtime for db init");
     rt.block_on(async {
-        let handle = db::init(&db::default_db_path())
-            .await
-            .expect("open kopuz database");
+        let db_path = db::default_db_path();
+        let handle = match db::init(&db_path).await {
+            Ok(h) => h,
+            Err(e) => {
+                // A corrupt/unopenable DB must not brick the app before a
+                // window exists. Move it aside (kept for inspection) and
+                // recreate — the importer below repopulates from *.json.bak.
+                tracing::error!(error = %e, "kopuz database failed to open — moving it aside and recreating");
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                for ext in ["", "-wal", "-shm"] {
+                    let mut src = db_path.as_os_str().to_os_string();
+                    src.push(ext);
+                    let mut dst = db_path.as_os_str().to_os_string();
+                    dst.push(format!(".corrupt-{ts}{ext}"));
+                    let _ = std::fs::rename(src, dst);
+                }
+                db::init(&db_path).await.expect("recreate kopuz database")
+            }
+        };
         match handle.import_legacy_json(&db::config_dir()).await {
             Ok(r) if r.ran => tracing::info!(
                 tracks = r.tracks,
@@ -1017,6 +1036,48 @@ fn App() -> Element {
     let mut pending_queue_state_snapshot = use_signal(|| None::<PersistedQueueState>);
     let mut pending_queue_state_revision = use_signal(|| 0u64);
 
+    // tao calls process::exit() after CloseRequested, killing the debounced
+    // queue-flush loop — without this, the last ~1.2s of queue/progress changes
+    // were lost on every quit. Persist the pending snapshot synchronously (a
+    // throwaway current-thread runtime; the sqlx pool works across runtimes,
+    // same as init_db_blocking). Idempotent across CloseRequested/LoopDestroyed.
+    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+    dioxus::desktop::use_wry_event_handler(move |event, _| {
+        use dioxus::desktop::tao::event::{Event, WindowEvent};
+        if matches!(
+            event,
+            Event::LoopDestroyed
+                | Event::WindowEvent {
+                    event: WindowEvent::CloseRequested,
+                    ..
+                }
+        ) {
+            let snapshot = pending_queue_state_snapshot.peek().clone();
+            if let (Some(db), Some(snap)) = (DB_HANDLE.get(), snapshot)
+                && let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+            {
+                let db = db.clone();
+                rt.block_on(async move {
+                    if let Err(e) = db.save_queue(&queue_snapshot(snap)).await {
+                        tracing::warn!(error = %e, "queue flush on close failed");
+                    }
+                });
+            }
+        }
+    });
+
+    // Per-domain "loaded successfully" flags. The save effects are FULL-REPLACE
+    // (prune/delete-and-reinsert), so persisting a default value that exists
+    // only because its LOAD FAILED would commit a wipe of real rows. A save may
+    // only run once its domain demonstrably loaded; a legitimately fresh/empty
+    // DB still counts as loaded.
+    let mut config_loaded_ok = use_signal(|| false);
+    let mut library_loaded_ok = use_signal(|| false);
+    let mut playlists_loaded_ok = use_signal(|| false);
+    let mut favorites_loaded_ok = use_signal(|| false);
+
     #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
     use_effect(move || {
         let _ = dioxus::document::eval(
@@ -1174,6 +1235,7 @@ fn App() -> Element {
         config,
     );
 
+    let db_for_switch_reload = db.clone();
     use_effect(move || {
         if !*initial_load_done.read() {
             return;
@@ -1202,13 +1264,34 @@ fn App() -> Element {
         if *last_server_playlist_key.read() != current_server_key {
             last_server_playlist_key.set(current_server_key);
             selected_playlist_id.set(None);
-            playlist_store.write().jellyfin_playlists.clear();
-            {
-                let mut lib = library.write();
-                lib.jellyfin_tracks.clear();
-                lib.jellyfin_albums.clear();
-            }
             ctrl.reset_for_backend_switch();
+            // Switching servers RELOADS the new server's cached rows from the
+            // DB instead of clearing the in-memory caches: clearing + the
+            // full-replace save effects would prune the cached library/
+            // playlists/favorites of whichever server the save raced to —
+            // destroying the per-server cache the schema exists to keep.
+            // (The remote sync still refreshes afterwards as before.)
+            let new_active = config.peek().active_server_id.clone();
+            let db = db_for_switch_reload.clone();
+            spawn(async move {
+                let (tracks, albums, playlists, favorites) = match &new_active {
+                    Some(id) => match db.load_server_cache(id).await {
+                        Ok(c) => c,
+                        Err(e) => {
+                            tracing::error!(error = %e, "failed to load server cache on switch");
+                            return;
+                        }
+                    },
+                    None => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
+                };
+                {
+                    let mut lib = library.write();
+                    lib.jellyfin_tracks = tracks;
+                    lib.jellyfin_albums = albums;
+                }
+                playlist_store.write().jellyfin_playlists = playlists;
+                favorites_store.write().jellyfin_favorites = favorites;
+            }.instrument(tracing::info_span!("server.switch_reload")));
         }
     });
 
@@ -1240,7 +1323,7 @@ fn App() -> Element {
 
     let db_for_cfg_save = db.clone();
     use_effect(move || {
-        if !*initial_load_done.read() {
+        if !*initial_load_done.read() || !*config_loaded_ok.read() {
             return;
         }
         let mut config_snapshot = config.read().clone();
@@ -1250,7 +1333,7 @@ fn App() -> Element {
 
     let db_for_vol_save = db.clone();
     use_effect(move || {
-        if !*initial_load_done.read() {
+        if !*initial_load_done.read() || !*config_loaded_ok.read() {
             return;
         }
 
@@ -1335,13 +1418,17 @@ fn App() -> Element {
 
     let db_for_pl_save = db.clone();
     use_effect(move || {
-        if !*initial_load_done.read() {
+        if !*initial_load_done.read() || !*playlists_loaded_ok.read() {
             return;
         }
         let store_snapshot = playlist_store.read().clone();
+        // The active id is snapshotted from the in-memory config (not re-read
+        // from the DB blob inside the save) so a concurrent server switch
+        // can't mis-attribute the scoped delete/insert.
+        let active = config.peek().active_server_id.clone();
         let db = db_for_pl_save.clone();
         spawn(async move {
-            if let Err(e) = db.save_playlists(&store_snapshot).await {
+            if let Err(e) = db.save_playlists(&store_snapshot, active.as_deref()).await {
                 tracing::error!("Failed to save playlists: {}", e);
             }
         }.instrument(tracing::info_span!("playlists.persist")));
@@ -1349,13 +1436,14 @@ fn App() -> Element {
 
     let db_for_lib_save = db.clone();
     use_effect(move || {
-        if !*initial_load_done.read() {
+        if !*initial_load_done.read() || !*library_loaded_ok.read() {
             return;
         }
         let lib_snapshot = library.read().clone();
+        let active = config.peek().active_server_id.clone();
         let db = db_for_lib_save.clone();
         spawn(async move {
-            if let Err(e) = db.save_library(&lib_snapshot).await {
+            if let Err(e) = db.save_library(&lib_snapshot, active.as_deref()).await {
                 tracing::error!("Failed to save library: {}", e);
             }
         }.instrument(tracing::info_span!("library.persist")));
@@ -1363,13 +1451,14 @@ fn App() -> Element {
 
     let db_for_fav_save = db.clone();
     use_effect(move || {
-        if !*initial_load_done.read() {
+        if !*initial_load_done.read() || !*favorites_loaded_ok.read() {
             return;
         }
         let store_snapshot = favorites_store.read().clone();
+        let active = config.peek().active_server_id.clone();
         let db = db_for_fav_save.clone();
         spawn(async move {
-            if let Err(e) = db.save_favorites_store(&store_snapshot).await {
+            if let Err(e) = db.save_favorites_store(&store_snapshot, active.as_deref()).await {
                 tracing::error!("Failed to save favorites: {}", e);
             }
         }.instrument(tracing::info_span!("favorites.persist")));
@@ -1516,20 +1605,50 @@ fn App() -> Element {
                 // Everything loads from the DB — the converted source of truth.
                 // The legacy JSON files are never read or written; a fresh DB
                 // with no blob yet just yields the default config.
+                // Each domain marks itself loaded ONLY on success. On error the
+                // signal keeps its default for display, but the corresponding
+                // save effect stays disarmed for the whole session — a read
+                // failure must never become a committed wipe.
                 let cfg_loaded = match db.load_config().await {
-                    Ok(Some(c)) => Some(c),
-                    Ok(None) => None,
+                    Ok(c) => {
+                        config_loaded_ok.set(true);
+                        c
+                    }
                     Err(e) => {
-                        tracing::error!(error = %e, "failed to load config from db");
+                        tracing::error!(error = %e, "failed to load config from db — config saves disabled this session");
                         None
                     }
                 };
-                let lib_loaded = db.load_library().await.unwrap_or_else(|e| {
-                    tracing::error!(error = %e, "failed to load library from db");
-                    reader::Library::default()
-                });
-                let pl_loaded = db.load_playlists().await.ok();
-                let fav_loaded = db.load_favorites_store().await.ok();
+                let lib_loaded = match db.load_library().await {
+                    Ok(l) => {
+                        library_loaded_ok.set(true);
+                        l
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "failed to load library from db — library saves disabled this session");
+                        reader::Library::default()
+                    }
+                };
+                let pl_loaded = match db.load_playlists().await {
+                    Ok(p) => {
+                        playlists_loaded_ok.set(true);
+                        Some(p)
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "failed to load playlists from db — playlist saves disabled this session");
+                        None
+                    }
+                };
+                let fav_loaded = match db.load_favorites_store().await {
+                    Ok(f) => {
+                        favorites_loaded_ok.set(true);
+                        Some(f)
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "failed to load favorites from db — favorite saves disabled this session");
+                        None
+                    }
+                };
                 let queue_loaded = db.load_queue().await.ok();
 
                 library.set(lib_loaded);
@@ -1587,6 +1706,10 @@ fn App() -> Element {
                 }
 
                 initial_load_done.set(true);
+                // Kick one reconcile shortly after startup so pending offline
+                // likes from the previous session push now, not on the first
+                // multi-minute interval.
+                hooks::use_sync_task::nudge();
             }.instrument(tracing::info_span!("startup.load")));
         }
         // wasm: the stub Db yields defaults (web is not a shipped target); just
@@ -1594,12 +1717,19 @@ fn App() -> Element {
         #[cfg(target_arch = "wasm32")]
         {
             config.write().active_source = config::MusicSource::Server;
+            config_loaded_ok.set(true);
+            library_loaded_ok.set(true);
+            playlists_loaded_ok.set(true);
+            favorites_loaded_ok.set(true);
             initial_load_done.set(true);
         }
     });
 
     use_effect(move || {
-        if !*initial_load_done.read() {
+        // config_loaded_ok matters here: a defaulted config (load failure) has
+        // an empty music_directory, and the no-dirs branch below clears the
+        // library signal — which must never happen off phantom state.
+        if !*initial_load_done.read() || !*config_loaded_ok.read() {
             return;
         }
         let configured_dirs = configured_music_dirs.read().clone();
