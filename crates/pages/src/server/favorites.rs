@@ -112,42 +112,40 @@ pub fn JellyfinFavorites(
                     let yt =
                         ::server::ytmusic::YouTubeMusicClient::with_cookies(token);
 
-                    let mut accumulated: Vec<reader::models::Track> = Vec::new();
+                    // Each page is upserted and DROPPED — nothing accumulates in
+                    // memory. Only the lightweight identities survive the stream
+                    // (for the end-of-sync prune + Liked Songs membership).
+                    let mut ids: Vec<String> = Vec::new();
+                    let mut keep_albums: Vec<String> = Vec::new();
+                    let mut first_cover: Option<String> = None;
                     let result = yt
                         .stream_liked_songs(|page| {
-                            accumulated.extend(page.iter().cloned());
-                            let albums = synthesize_albums(&accumulated);
-                            synced_so_far.set(accumulated.len());
+                            if first_cover.is_none() {
+                                first_cover = page.first().and_then(|t| t.cover.clone());
+                            }
+                            ids.extend(page.iter().filter_map(|t| {
+                                let k = t.id.key();
+                                (!k.is_empty()).then(|| k.to_string())
+                            }));
+                            keep_albums.extend(page.iter().map(|t| t.album_id.clone()));
+                            let albums = synthesize_albums(&page);
+                            synced_so_far.set(ids.len());
                             let db = db.clone();
                             let source = Source::Server(sid.clone());
                             spawn(async move {
                                 for chunk in page.chunks(100) {
                                     let _ = db.upsert_tracks(&source, chunk).await;
                                 }
-                                for chunk in albums.chunks(100) {
-                                    let _ = db.upsert_albums(&source, chunk).await;
-                                }
+                                let _ = db.upsert_albums(&source, &albums).await;
                                 gens.bump_coalesced(Table::Tracks);
-                                gens.bump_coalesced(Table::Albums);
                             });
                         })
                         .await;
 
                     match result {
                         Ok(()) => {
-                            let ids: Vec<String> = accumulated
-                                .iter()
-                                .filter_map(|t| {
-                                    let k = t.id.key();
-                                    (!k.is_empty()).then(|| k.to_string())
-                                })
-                                .collect();
                             // Full stream completed — drop YT rows no longer
                             // liked remotely (replaces the legacy clear).
-                            let mut keep_albums: Vec<String> = accumulated
-                                .iter()
-                                .map(|t| t.album_id.clone())
-                                .collect();
                             keep_albums.sort();
                             keep_albums.dedup();
                             let _ = db.prune_source(&source, &ids, &keep_albums).await;
@@ -166,16 +164,13 @@ pub fn JellyfinFavorites(
                             let _ = db
                                 .meta_put("yt_sync", "timestamps", &stamps.to_string())
                                 .await;
-                            let liked_cover =
-                                accumulated.first().and_then(|t| t.cover.as_deref()).map(
-                                    |c| {
-                                        if c.starts_with("http://") || c.starts_with("https://") {
-                                            utils::jellyfin_image::encode_cover_url(c)
-                                        } else {
-                                            c.to_string()
-                                        }
-                                    },
-                                );
+                            let liked_cover = first_cover.as_deref().map(|c| {
+                                if c.starts_with("http://") || c.starts_with("https://") {
+                                    utils::jellyfin_image::encode_cover_url(c)
+                                } else {
+                                    c.to_string()
+                                }
+                            });
                             if db
                                 .upsert_playlist_meta(
                                     &source,
