@@ -127,25 +127,27 @@ pub async fn tracks_by_keys(
 }
 
 pub async fn artists(pool: &SqlitePool, source: &Source) -> Result<Vec<(String, u32)>, DbError> {
-    let rows: Vec<(String, i64)> = sqlx::query_as(
-        "SELECT artist, COUNT(*) FROM tracks WHERE source = ?1 AND artist != '' \
-         GROUP BY artist ORDER BY artist COLLATE NOCASE",
+    let src = source.as_str();
+    let rows = sqlx::query!(
+        r#"SELECT artist, COUNT(*) AS "cnt!: i64" FROM tracks WHERE source = ?1 AND artist != ''
+         GROUP BY artist ORDER BY artist COLLATE NOCASE"#,
+        src
     )
-    .bind(source.as_str())
     .fetch_all(pool)
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(a, n)| (a, n.max(0) as u32))
+        .map(|r| (r.artist, r.cnt.max(0) as u32))
         .collect())
 }
 
 pub async fn genres(pool: &SqlitePool, source: &Source) -> Result<Vec<String>, DbError> {
-    Ok(sqlx::query_scalar(
+    let src = source.as_str();
+    Ok(sqlx::query_scalar!(
         "SELECT DISTINCT genre FROM albums WHERE source = ?1 AND genre != '' \
          ORDER BY genre COLLATE NOCASE",
+        src
     )
-    .bind(source.as_str())
     .fetch_all(pool)
     .await?)
 }
@@ -155,23 +157,27 @@ pub async fn album(
     source: &Source,
     album_id: &str,
 ) -> Result<Option<Album>, DbError> {
-    let row = sqlx::query_as::<_, AlbumRow>(
+    let src = source.as_str();
+    let row = sqlx::query_as!(
+        AlbumRow,
         "SELECT source_album_id, title, artist, genre, year, cover_path, manual_cover \
          FROM albums WHERE source = ?1 AND source_album_id = ?2",
+        src,
+        album_id
     )
-    .bind(source.as_str())
-    .bind(album_id)
     .fetch_optional(pool)
     .await?;
     Ok(row.map(Into::into))
 }
 
 pub async fn albums(pool: &SqlitePool, source: &Source) -> Result<Vec<Album>, DbError> {
-    let rows = sqlx::query_as::<_, AlbumRow>(
+    let src = source.as_str();
+    let rows = sqlx::query_as!(
+        AlbumRow,
         "SELECT source_album_id, title, artist, genre, year, cover_path, manual_cover \
          FROM albums WHERE source = ?1 ORDER BY artist COLLATE NOCASE, title COLLATE NOCASE",
+        src
     )
-    .bind(source.as_str())
     .fetch_all(pool)
     .await?;
     Ok(rows.into_iter().map(Into::into).collect())

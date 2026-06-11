@@ -16,6 +16,7 @@ fn service_str(s: config::MusicService) -> &'static str {
     }
 }
 
+#[tracing::instrument(skip_all, fields(count = tracks.len(), source = %source.as_str()))]
 pub async fn upsert_tracks(
     pool: &SqlitePool,
     source: &Source,
@@ -70,6 +71,7 @@ pub async fn upsert_tracks(
     Ok(())
 }
 
+#[tracing::instrument(skip_all, fields(count = albums.len(), source = %source.as_str()))]
 pub async fn upsert_albums(
     pool: &SqlitePool,
     source: &Source,
@@ -193,12 +195,12 @@ pub async fn replace_favorites_clean(
     let keep_json = serde_json::to_string(refs)?;
     let mut tx = pool.begin().await?;
     // Drop clean rows the remote no longer has (dirty rows survive — not pushed yet).
-    sqlx::query(
+    sqlx::query!(
         "DELETE FROM favorites WHERE server_id = ?1 AND dirty = 0 \
          AND ref NOT IN (SELECT value FROM json_each(?2))",
+        server_id,
+        keep_json
     )
-    .bind(server_id)
-    .bind(&keep_json)
     .execute(&mut *tx)
     .await?;
     // Add the remote set as clean rows (leave a dirty row's flag intact).
@@ -222,12 +224,13 @@ pub async fn prune_local_tracks(
     keep: &[String],
 ) -> Result<u64, DbError> {
     let keep_json = serde_json::to_string(keep)?;
-    let res = sqlx::query(
+    let like = format!("{root}%");
+    let res = sqlx::query!(
         "DELETE FROM tracks WHERE source = 'local' AND path LIKE ?1 \
          AND track_key NOT IN (SELECT value FROM json_each(?2))",
+        like,
+        keep_json
     )
-    .bind(format!("{root}%"))
-    .bind(keep_json)
     .execute(pool)
     .await?;
     Ok(res.rows_affected())
@@ -248,6 +251,7 @@ async fn prune_full(pool: &SqlitePool, table_key: &str, source: &str, keep: &[St
     Ok(())
 }
 
+#[tracing::instrument(skip_all, fields(count = keys.len(), source = %source.as_str()))]
 pub async fn delete_tracks(
     pool: &SqlitePool,
     source: &Source,
@@ -257,12 +261,13 @@ pub async fn delete_tracks(
         return Ok(0);
     }
     let keys_json = serde_json::to_string(keys)?;
-    let res = sqlx::query(
+    let src = source.as_str();
+    let res = sqlx::query!(
         "DELETE FROM tracks WHERE source = ?1 \
          AND track_key IN (SELECT value FROM json_each(?2))",
+        src,
+        keys_json
     )
-    .bind(source.as_str())
-    .bind(keys_json)
     .execute(pool)
     .await?;
     Ok(res.rows_affected())
@@ -270,6 +275,7 @@ pub async fn delete_tracks(
 
 /// Drop a source's tracks/albums not present in the keep-sets (post-sync
 /// reconcile — the replacement for clear-and-repopulate).
+#[tracing::instrument(skip_all, fields(source = %source.as_str()))]
 pub async fn prune_source(
     pool: &SqlitePool,
     source: &Source,
@@ -401,6 +407,7 @@ pub async fn delete_playlist(
 
 /// Replace ONE playlist's membership (creating the playlist row if absent) —
 /// playlist-scoped, never the whole store.
+#[tracing::instrument(skip_all, fields(count = refs.len(), source = %source.as_str(), pl_id))]
 pub async fn set_playlist_tracks(
     pool: &SqlitePool,
     source: &Source,
@@ -489,17 +496,21 @@ pub async fn set_offline_track(
     let key = format!("$.offline_tracks.\"{}\"", id.replace('"', ""));
     match path {
         Some(p) => {
-            sqlx::query("UPDATE app_config SET json = json_set(json, ?1, ?2) WHERE id = 1")
-                .bind(key)
-                .bind(p)
-                .execute(pool)
-                .await?;
+            sqlx::query!(
+                "UPDATE app_config SET json = json_set(json, ?1, ?2) WHERE id = 1",
+                key,
+                p
+            )
+            .execute(pool)
+            .await?;
         }
         None => {
-            sqlx::query("UPDATE app_config SET json = json_remove(json, ?1) WHERE id = 1")
-                .bind(key)
-                .execute(pool)
-                .await?;
+            sqlx::query!(
+                "UPDATE app_config SET json = json_remove(json, ?1) WHERE id = 1",
+                key
+            )
+            .execute(pool)
+            .await?;
         }
     }
     Ok(())

@@ -450,7 +450,7 @@ pub fn peek_config(db_path: &std::path::Path) -> Option<config::AppConfig> {
         use sqlx::ConnectOptions;
         let mut conn = opts.connect().await.ok()?;
         let json: Option<String> =
-            sqlx::query_scalar("SELECT json FROM app_config WHERE id = 1")
+            sqlx::query_scalar!("SELECT json FROM app_config WHERE id = 1")
                 .fetch_optional(&mut conn)
                 .await
                 .ok()

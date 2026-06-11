@@ -40,6 +40,7 @@ fn legacy_source(config_dir: &Path, name: &str) -> Option<std::path::PathBuf> {
     bak.exists().then_some(bak)
 }
 
+#[tracing::instrument(skip_all)]
 pub async fn run_json_import(
     pool: &SqlitePool,
     config_dir: &Path,

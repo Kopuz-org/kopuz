@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE app_config SET json = json_set(json, ?1, ?2) WHERE id = 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "5d226623a6b711d5299008d95bf5178f5c588fd791257eb70e3c966b7eacd8fb"
+}
