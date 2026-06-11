@@ -1,16 +1,12 @@
 use config::{AppConfig, MusicSource, UiStyle};
 use dioxus::prelude::*;
-use reader::{FavoritesStore, Library, PlaylistStore};
 
 use crate::local::favorites::LocalFavorites;
 use crate::server::favorites::ServerFavorites;
 
 #[component]
 pub fn FavoritesPage(
-    favorites_store: Signal<FavoritesStore>,
-    library: Signal<Library>,
     config: Signal<AppConfig>,
-    playlist_store: Signal<PlaylistStore>,
     player: Signal<player::player::Player>,
     mut is_playing: Signal<bool>,
     mut current_playing: Signal<u64>,
@@ -51,18 +47,12 @@ pub fn FavoritesPage(
 
             if is_server {
                 ServerFavorites {
-                    favorites_store,
-                    library,
                     config,
-                    playlist_store,
                     queue,
                 }
             } else {
                 LocalFavorites {
-                    favorites_store,
-                    library,
                     config,
-                    playlist_store,
                     queue,
                 }
             }

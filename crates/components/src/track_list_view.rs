@@ -3,7 +3,7 @@ use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::use_playlists;
 use hooks::use_player_controller::PlayerController;
-use reader::{Library, PlaylistStore, Track};
+use reader::Track;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -14,8 +14,6 @@ pub struct TrackListViewProps {
     pub cover_url: Option<utils::CoverUrl>,
     pub back_label: String,
     pub tracks: Vec<Track>,
-    pub library: Signal<Library>,
-    pub playlist_store: Signal<PlaylistStore>,
     #[props(default = false)]
     pub is_album: bool,
     pub on_close: EventHandler<()>,
@@ -94,7 +92,6 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                 description: props.description.clone(),
                 cover_url: props.cover_url.clone(),
                 tracks: props.tracks.clone(),
-                library: props.library,
                 is_album: props.is_album,
                 is_selection_mode: is_selection_mode(),
                 selected_tracks: selected_tracks.read().clone(),
@@ -264,7 +261,6 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
 
             if *show_playlist_modal.read() {
                 crate::playlist_modal::PlaylistModal {
-                    playlist_store: props.playlist_store,
                     is_jellyfin: false,
                     on_close: move |_| {
                         show_playlist_modal.set(false);

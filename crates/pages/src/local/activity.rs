@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 use hooks::use_db_queries::{use_albums, use_all_tracks};
 use hooks::use_player_controller::PlayerController;
 use kopuz_route::Route;
-use reader::{Library, Track};
+use reader::Track;
 use std::collections::HashMap;
 use utils::CoverUrl;
 
@@ -15,7 +15,7 @@ fn format_duration(seconds: u64) -> String {
 }
 
 #[component]
-pub fn LocalLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Element {
+pub fn LocalLogs(config: Signal<AppConfig>) -> Element {
     let mut ctrl = use_context::<PlayerController>();
 
     let source = use_memo(|| Source::Local);

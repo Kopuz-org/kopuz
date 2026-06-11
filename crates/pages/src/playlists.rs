@@ -6,7 +6,6 @@ use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_playlists, use_tracks_by_keys};
-use reader::{Library, PlaylistStore};
 
 use crate::local::playlists::LocalPlaylists;
 use crate::server::download_manager::{DownloadQueue, DownloadStatus, queue_downloads};
@@ -15,8 +14,6 @@ use crate::server::playlists::ServerPlaylists;
 #[component]
 #[tracing::instrument(name = "render.playlists_page", skip_all)]
 pub fn PlaylistsPage(
-    playlist_store: Signal<PlaylistStore>,
-    library: Signal<Library>,
     config: Signal<AppConfig>,
     mut selected_playlist_id: Signal<Option<String>>,
 ) -> Element {
@@ -132,8 +129,6 @@ pub fn PlaylistsPage(
             if let Some(folder_path) = selected_folder.read().clone() {
                 FolderDetail {
                     folder_path,
-                    library,
-                    playlist_store,
                     config,
                     on_close: move |_| selected_folder.set(None),
                 }
@@ -169,8 +164,6 @@ pub fn PlaylistsPage(
                     rsx! {
                         PlaylistDetail {
                             playlist_id: pid,
-                            playlist_store,
-                            library,
                             config,
                             on_close: move |_| selected_playlist_id.set(None),
                             is_downloading_all,
@@ -376,16 +369,12 @@ pub fn PlaylistsPage(
 
                 if is_server {
                     ServerPlaylists {
-                        playlist_store,
-                        library,
                         config,
                         selected_playlist_id,
                         refresh_trigger: playlist_refresh_trigger,
                     }
                 } else {
                     LocalPlaylists {
-                        playlist_store,
-                        library,
                         config,
                         selected_playlist_id,
                         on_select_folder: move |path| selected_folder.set(Some(path)),

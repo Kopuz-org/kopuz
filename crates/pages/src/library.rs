@@ -1,16 +1,13 @@
 use config::{AppConfig, MusicSource};
 use dioxus::prelude::*;
 use player::player;
-use reader::Library;
 
 use crate::local::library::LocalLibrary;
 use crate::server::library::ServerLibrary;
 
 #[component]
 pub fn LibraryPage(
-    library: Signal<Library>,
     config: Signal<AppConfig>,
-    playlist_store: Signal<reader::PlaylistStore>,
     on_rescan: EventHandler,
     player: Signal<player::Player>,
     mut is_playing: Signal<bool>,
@@ -28,16 +25,12 @@ pub fn LibraryPage(
     rsx! {
         if is_server {
             ServerLibrary {
-                library,
                 config,
-                playlist_store,
                 queue,
             }
         } else {
             LocalLibrary {
-                library,
                 config,
-                playlist_store,
                 on_rescan,
                 queue,
             }

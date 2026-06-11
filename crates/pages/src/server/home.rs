@@ -5,7 +5,7 @@ use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_albums, use_all_tracks, use_favorites, use_playlists};
 use rand::rng;
 use rand::seq::SliceRandom;
-use reader::{Album, FavoritesStore, Library, PlaylistStore, Track};
+use reader::{Album, Track};
 use std::collections::HashMap;
 
 type AlbumCard = (String, String, String, Option<String>);
@@ -73,9 +73,6 @@ fn track_cover_url(conf: &AppConfig, track: &Track) -> Option<String> {
 
 #[component]
 pub fn JellyfinHome(
-    library: Signal<Library>,
-    playlist_store: Signal<PlaylistStore>,
-    favorites_store: Signal<FavoritesStore>,
     edit_mode: Signal<bool>,
     on_select_album: EventHandler<String>,
     on_play_album: EventHandler<String>,
@@ -102,7 +99,7 @@ pub fn JellyfinHome(
     let mut fetch_jellyfin = move || {
         has_fetched.set(true);
         spawn(async move {
-            let _ = crate::server::subsonic_sync::sync_server_library(library, config, false).await;
+            let _ = crate::server::subsonic_sync::sync_server_library(config, false).await;
         });
     };
 
@@ -572,8 +569,6 @@ pub fn JellyfinHome(
                                 }
                                 {render_server_section(
                                     &key_for_render,
-                                    library,
-                                    favorites_store,
                                     config,
                                     edit,
                                     is_modern,
@@ -605,8 +600,6 @@ pub fn JellyfinHome(
 #[allow(clippy::too_many_arguments)]
 fn render_server_section(
     key: &str,
-    library: Signal<Library>,
-    favorites_store: Signal<FavoritesStore>,
     config: Signal<AppConfig>,
     edit: bool,
     is_modern: bool,
@@ -629,8 +622,6 @@ fn render_server_section(
     match key {
         "hero" => rsx! {
             ServerHeroBanner {
-                library,
-                favorites_store,
                 config,
                 edit,
                 is_modern,
@@ -693,7 +684,6 @@ fn render_server_section(
             scroll_container,
         ),
         "playlists" => render_playlists(
-            library,
             config,
             is_modern,
             recent_playlists,
@@ -706,8 +696,6 @@ fn render_server_section(
 
 #[component]
 fn ServerHeroBanner(
-    library: Signal<Library>,
-    favorites_store: Signal<FavoritesStore>,
     mut config: Signal<AppConfig>,
     edit: bool,
     is_modern: bool,
@@ -857,7 +845,6 @@ fn ServerHeroBanner(
                                 "w-11 h-11 rounded-full bg-white/10 border border-white/20 flex items-center justify-center text-white hover:bg-white/20 transition-all"
                             };
                             let hero_heart_icon = if jelly_hero_fav { "fa-solid fa-heart" } else { "fa-regular fa-heart" };
-                            let mut favorites_store = favorites_store;
                             rsx! {
                                 button {
                                     class: "{hero_heart_class}",
@@ -868,12 +855,6 @@ fn ServerHeroBanner(
                                             hero_tracks_res.read().clone().unwrap_or_default()
                                         };
                                         let new_fav = !jelly_hero_fav;
-                                        for track in &tracks {
-                                            let id = track.id.key();
-                                            if !id.is_empty() {
-                                                favorites_store.write().set_jellyfin(id.to_string(), new_fav);
-                                            }
-                                        }
                                         let track_ids: Vec<String> = tracks.iter().filter_map(|t| {
                                             let id = t.id.key();
                                             (!id.is_empty()).then(|| id.to_string())
@@ -1243,7 +1224,6 @@ fn render_albums_row(
 }
 
 fn render_playlists(
-    _library: Signal<Library>,
     _config: Signal<AppConfig>,
     is_modern: bool,
     recent_playlists: Vec<(String, String, usize, Option<String>)>,

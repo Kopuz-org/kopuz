@@ -15,7 +15,6 @@ use reader::Library;
 pub fn JellyfinSearch(
     library: Signal<Library>,
     config: Signal<AppConfig>,
-    playlist_store: Signal<reader::PlaylistStore>,
     search_query: Signal<String>,
     player: Signal<player::Player>,
     is_playing: Signal<bool>,
@@ -96,7 +95,6 @@ pub fn JellyfinSearch(
 
             if *show_playlist_modal.read() {
                 PlaylistModal {
-                    playlist_store: playlist_store,
                     is_jellyfin: true,
                     on_close: move |_| show_playlist_modal.set(false),
                     on_add_to_playlist: move |playlist_id: String| {
@@ -160,8 +158,6 @@ pub fn JellyfinSearch(
                     genre_tracks: genre_tracks.read().clone(),
                     genres: (data.genres)().clone(),
                     on_back: move |_| selected_genre.set(None),
-                    library,
-                    playlist_store,
                     player,
                     is_playing,
                     current_song_cover_url,
@@ -183,8 +179,6 @@ pub fn JellyfinSearch(
                         search_query: data.search_query.read().clone(),
                         tracks: tracks.clone(),
                         albums: albums.clone(),
-                        library,
-                        playlist_store,
                         player,
                         is_playing,
                         current_song_cover_url,

@@ -11,17 +11,13 @@ use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_favorites, use_tracks_by_keys};
 use hooks::use_player_controller::PlayerController;
-use reader::{FavoritesStore, Library, PlaylistStore};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use tracing::Instrument;
 
 #[component]
 pub fn JellyfinFavorites(
-    favorites_store: Signal<FavoritesStore>,
-    library: Signal<Library>,
     config: Signal<AppConfig>,
-    playlist_store: Signal<PlaylistStore>,
     mut queue: Signal<Vec<reader::models::Track>>,
 ) -> Element {
     let mut ctrl = use_context::<PlayerController>();
@@ -98,7 +94,7 @@ pub fn JellyfinFavorites(
             let url = server.url.clone();
             let source = Source::Server(sid.clone());
 
-            let ids: Vec<String> = match server.service {
+            let _ids: Vec<String> = match server.service {
                 MusicService::Jellyfin => {
                     let remote =
                         JellyfinClient::new(&url, Some(&token), &device_id, Some(&user_id));
@@ -206,9 +202,6 @@ pub fn JellyfinFavorites(
                 }
             };
 
-            // Kept until W3 converts the shared favorites consumers; the DB
-            // favorites list is pulled by the reconciler.
-            favorites_store.write().jellyfin_favorites = ids;
             is_syncing.set(false);
         }.instrument(tracing::info_span!("favorites.sync")));
     });
@@ -356,7 +349,6 @@ pub fn JellyfinFavorites(
         div {
             if *show_playlist_modal.read() {
                 PlaylistModal {
-                    playlist_store,
                     is_jellyfin: true,
                     on_close: move |_| {
                         show_playlist_modal.set(false);

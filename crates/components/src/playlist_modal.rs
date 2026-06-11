@@ -1,13 +1,11 @@
 use dioxus::prelude::*;
 use hooks::use_db_queries::use_playlists;
-use reader::PlaylistStore;
 
 const DEFAULT_OVERLAY_CLASS: &str =
     "fixed inset-0 bg-black/80 flex items-center justify-center z-50";
 
 #[derive(PartialEq, Clone, Props)]
 pub struct PlaylistModalProps {
-    pub playlist_store: Signal<PlaylistStore>,
     pub is_jellyfin: bool,
     pub on_close: EventHandler,
     pub on_add_to_playlist: EventHandler<String>,

@@ -6,7 +6,6 @@ use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 use player::player;
-use reader::Library;
 use reader::models::Track;
 
 #[component]
@@ -15,8 +14,6 @@ pub fn SearchGenreDetail(
     genre_tracks: Vec<(Track, Option<utils::CoverUrl>)>,
     genres: Vec<(String, Option<utils::CoverUrl>)>,
     on_back: EventHandler<()>,
-    library: Signal<Library>,
-    playlist_store: Signal<reader::PlaylistStore>,
     player: Signal<player::Player>,
     mut is_playing: Signal<bool>,
     mut current_song_cover_url: Signal<String>,

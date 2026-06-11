@@ -3,17 +3,14 @@ use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_albums, use_all_tracks, use_tracks_window};
-use reader::{Library, PlaylistStore};
 
 use crate::local::album::LocalAlbum;
 use crate::server::album::{ServerAlbum, ServerAlbumDetails};
 
 #[component]
 pub fn Album(
-    library: Signal<Library>,
     config: Signal<AppConfig>,
     album_id: Signal<String>,
-    playlist_store: Signal<PlaylistStore>,
     mut queue: Signal<Vec<reader::models::Track>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
@@ -58,7 +55,7 @@ pub fn Album(
     let mut fetch_jellyfin = move || {
         has_fetched_jellyfin.set(true);
         spawn(async move {
-            let _ = crate::server::subsonic_sync::sync_server_library(library, config, false).await;
+            let _ = crate::server::subsonic_sync::sync_server_library(config, false).await;
         });
     };
 
@@ -89,10 +86,8 @@ pub fn Album(
 
                     if is_server {
                         ServerAlbum {
-                            library,
                             config,
                             album_id,
-                            playlist_store,
                             queue,
                             open_album_menu,
                             show_album_playlist_modal,
@@ -100,9 +95,7 @@ pub fn Album(
                         }
                     } else {
                         LocalAlbum {
-                            library,
                             album_id,
-                            playlist_store,
                             queue,
                             open_album_menu,
                             show_album_playlist_modal,
@@ -112,7 +105,6 @@ pub fn Album(
 
                     if *show_album_playlist_modal.read() {
                         components::playlist_modal::PlaylistModal {
-                            playlist_store,
                             is_jellyfin: is_server,
                             on_close: move |_| show_album_playlist_modal.set(false),
                             on_add_to_playlist: move |playlist_id: String| {
@@ -338,17 +330,13 @@ pub fn Album(
                 if is_server {
                     ServerAlbumDetails {
                         album_jellyfin_id: album_id.read().clone(),
-                        library,
                         config,
-                        playlist_store,
                         queue,
                         on_close: move |_| album_id.set(String::new()),
                     }
                 } else {
                     components::album_details::AlbumDetails {
                         album_id: album_id.read().clone(),
-                        library,
-                        playlist_store,
                         on_close: move |_| album_id.set(String::new()),
                     }
                 }

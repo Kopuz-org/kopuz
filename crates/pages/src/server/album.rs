@@ -9,16 +9,13 @@ use db::{Source, TrackFilter};
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_album, use_albums, use_all_tracks};
-use reader::{Library, PlaylistStore};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
 #[component]
 pub fn JellyfinAlbum(
-    library: Signal<Library>,
     config: Signal<AppConfig>,
     mut album_id: Signal<String>,
-    playlist_store: Signal<PlaylistStore>,
     mut queue: Signal<Vec<reader::models::Track>>,
     mut open_album_menu: Signal<Option<String>>,
     mut show_album_playlist_modal: Signal<bool>,
@@ -248,9 +245,7 @@ pub fn JellyfinAlbum(
 #[component]
 pub fn JellyfinAlbumDetails(
     album_jellyfin_id: String,
-    library: Signal<Library>,
     config: Signal<AppConfig>,
-    playlist_store: Signal<PlaylistStore>,
     mut queue: Signal<Vec<reader::models::Track>>,
     on_close: EventHandler<()>,
 ) -> Element {
@@ -408,7 +403,6 @@ pub fn JellyfinAlbumDetails(
 
             if *show_playlist_modal.read() {
                 PlaylistModal {
-                    playlist_store,
                     is_jellyfin: true,
                     on_close: move |_| {
                         show_playlist_modal.set(false);
@@ -937,10 +931,8 @@ pub fn JellyfinAlbumDetails(
 
 #[component]
 pub fn ServerAlbum(
-    library: Signal<Library>,
     config: Signal<AppConfig>,
     album_id: Signal<String>,
-    playlist_store: Signal<PlaylistStore>,
     queue: Signal<Vec<reader::models::Track>>,
     open_album_menu: Signal<Option<String>>,
     show_album_playlist_modal: Signal<bool>,
@@ -954,10 +946,8 @@ pub fn ServerAlbum(
     match service {
         MusicService::Jellyfin => rsx! {
             JellyfinAlbum {
-                library,
                 config,
                 album_id,
-                playlist_store,
                 queue,
                 open_album_menu,
                 show_album_playlist_modal,
@@ -966,10 +956,8 @@ pub fn ServerAlbum(
         },
         MusicService::Subsonic => rsx! {
             SubsonicAlbum {
-                library,
                 config,
                 album_id,
-                playlist_store,
                 queue,
                 open_album_menu,
                 show_album_playlist_modal,
@@ -978,10 +966,8 @@ pub fn ServerAlbum(
         },
         MusicService::Custom | MusicService::YtMusic => rsx! {
             CustomAlbum {
-                library,
                 config,
                 album_id,
-                playlist_store,
                 queue,
                 open_album_menu,
                 show_album_playlist_modal,
@@ -993,10 +979,8 @@ pub fn ServerAlbum(
 
 #[component]
 pub fn SubsonicAlbum(
-    library: Signal<Library>,
     config: Signal<AppConfig>,
     album_id: Signal<String>,
-    playlist_store: Signal<PlaylistStore>,
     queue: Signal<Vec<reader::models::Track>>,
     open_album_menu: Signal<Option<String>>,
     show_album_playlist_modal: Signal<bool>,
@@ -1004,10 +988,8 @@ pub fn SubsonicAlbum(
 ) -> Element {
     rsx! {
         JellyfinAlbum {
-            library,
             config,
             album_id,
-            playlist_store,
             queue,
             open_album_menu,
             show_album_playlist_modal,
@@ -1018,10 +1000,8 @@ pub fn SubsonicAlbum(
 
 #[component]
 pub fn CustomAlbum(
-    library: Signal<Library>,
     config: Signal<AppConfig>,
     album_id: Signal<String>,
-    playlist_store: Signal<PlaylistStore>,
     queue: Signal<Vec<reader::models::Track>>,
     open_album_menu: Signal<Option<String>>,
     show_album_playlist_modal: Signal<bool>,
@@ -1029,10 +1009,8 @@ pub fn CustomAlbum(
 ) -> Element {
     rsx! {
         JellyfinAlbum {
-            library,
             config,
             album_id,
-            playlist_store,
             queue,
             open_album_menu,
             show_album_playlist_modal,
@@ -1044,9 +1022,7 @@ pub fn CustomAlbum(
 #[component]
 pub fn ServerAlbumDetails(
     album_jellyfin_id: String,
-    library: Signal<Library>,
     config: Signal<AppConfig>,
-    playlist_store: Signal<PlaylistStore>,
     queue: Signal<Vec<reader::models::Track>>,
     on_close: EventHandler<()>,
 ) -> Element {
@@ -1059,9 +1035,7 @@ pub fn ServerAlbumDetails(
         MusicService::Jellyfin => rsx! {
             JellyfinAlbumDetails {
                 album_jellyfin_id,
-                library,
                 config,
-                playlist_store,
                 queue,
                 on_close,
             }
@@ -1069,9 +1043,7 @@ pub fn ServerAlbumDetails(
         MusicService::Subsonic => rsx! {
             SubsonicAlbumDetails {
                 album_jellyfin_id,
-                library,
                 config,
-                playlist_store,
                 queue,
                 on_close,
             }
@@ -1079,9 +1051,7 @@ pub fn ServerAlbumDetails(
         MusicService::Custom | MusicService::YtMusic => rsx! {
             CustomAlbumDetails {
                 album_jellyfin_id,
-                library,
                 config,
-                playlist_store,
                 queue,
                 on_close,
             }
@@ -1092,18 +1062,14 @@ pub fn ServerAlbumDetails(
 #[component]
 pub fn SubsonicAlbumDetails(
     album_jellyfin_id: String,
-    library: Signal<Library>,
     config: Signal<AppConfig>,
-    playlist_store: Signal<PlaylistStore>,
     queue: Signal<Vec<reader::models::Track>>,
     on_close: EventHandler<()>,
 ) -> Element {
     rsx! {
         JellyfinAlbumDetails {
             album_jellyfin_id,
-            library,
             config,
-            playlist_store,
             queue,
             on_close,
         }
@@ -1113,18 +1079,14 @@ pub fn SubsonicAlbumDetails(
 #[component]
 pub fn CustomAlbumDetails(
     album_jellyfin_id: String,
-    library: Signal<Library>,
     config: Signal<AppConfig>,
-    playlist_store: Signal<PlaylistStore>,
     queue: Signal<Vec<reader::models::Track>>,
     on_close: EventHandler<()>,
 ) -> Element {
     rsx! {
         JellyfinAlbumDetails {
             album_jellyfin_id,
-            library,
             config,
-            playlist_store,
             queue,
             on_close,
         }

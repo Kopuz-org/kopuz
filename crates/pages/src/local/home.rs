@@ -7,7 +7,7 @@ use hooks::use_db_queries::{
 };
 use rand::rng;
 use rand::seq::SliceRandom;
-use reader::{Album, FavoritesStore, Library, PlaylistStore, Track};
+use reader::{Album, Track};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -42,9 +42,6 @@ fn section_label(key: &str) -> String {
 
 #[component]
 pub fn LocalHome(
-    library: Signal<Library>,
-    playlist_store: Signal<PlaylistStore>,
-    favorites_store: Signal<FavoritesStore>,
     edit_mode: Signal<bool>,
     on_select_album: EventHandler<String>,
     on_play_album: EventHandler<String>,
@@ -420,8 +417,6 @@ pub fn LocalHome(
                                 }
                                 {render_local_section(
                                     &key_for_render,
-                                    library,
-                                    favorites_store,
                                     config,
                                     edit,
                                     is_modern,
@@ -453,8 +448,6 @@ pub fn LocalHome(
 #[allow(clippy::too_many_arguments)]
 fn render_local_section(
     key: &str,
-    library: Signal<Library>,
-    favorites_store: Signal<FavoritesStore>,
     config: Signal<AppConfig>,
     edit: bool,
     is_modern: bool,
@@ -477,8 +470,6 @@ fn render_local_section(
     match key {
         "hero" => rsx! {
             LocalHeroBanner {
-                library,
-                favorites_store,
                 config,
                 edit,
                 is_modern,
@@ -540,8 +531,6 @@ fn render_local_section(
 
 #[component]
 fn LocalHeroBanner(
-    library: Signal<Library>,
-    favorites_store: Signal<FavoritesStore>,
     mut config: Signal<AppConfig>,
     edit: bool,
     is_modern: bool,
@@ -690,7 +679,6 @@ fn LocalHeroBanner(
                                 "w-11 h-11 rounded-full bg-white/10 border border-white/20 flex items-center justify-center text-white hover:bg-white/20 transition-all"
                             };
                             let heart_icon = if local_hero_fav { "fa-solid fa-heart" } else { "fa-regular fa-heart" };
-                            let mut favorites_store = favorites_store;
                             rsx! {
                                 button {
                                     class: "{heart_class}",
@@ -698,19 +686,11 @@ fn LocalHeroBanner(
                                         if local_hero_album_id.is_some() {
                                             let tracks = album_tracks_res.read().clone().unwrap_or_default();
                                             let new_fav = !local_hero_fav;
-                                            // favorites_store mirror stays until W3 converts shared.rs
-                                            let mut changed: Vec<String> = Vec::new();
-                                            for track in tracks {
-                                                let currently = favorites_store.read().is_local_favorite(&track.id.uid_path());
-                                                if new_fav != currently {
-                                                    favorites_store.write().toggle_local(track.id.uid_path());
-                                                    changed.push(track.id.uid());
-                                                }
-                                            }
-                                            if !changed.is_empty() {
+                                            let refs: Vec<String> = tracks.iter().map(|t| t.id.uid()).collect();
+                                            if !refs.is_empty() {
                                                 let db = consume_context::<db::Db>();
                                                 spawn(async move {
-                                                    for r in &changed {
+                                                    for r in &refs {
                                                         let _ = db.set_favorite("local", r, new_fav).await;
                                                     }
                                                     gens.bump(Table::Favorites);

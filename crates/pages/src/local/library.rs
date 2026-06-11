@@ -12,7 +12,6 @@ use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_albums, use_all_tracks, use_artists, use_playlists};
 use hooks::use_player_controller::PlayerController;
 use kopuz_route::Route;
-use reader::Library;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -20,9 +19,7 @@ const ITEM_HEIGHT: f64 = 60.0; // 60px: p-2 padding (16px*2=32) + content height
 
 #[component]
 pub fn LocalLibrary(
-    library: Signal<Library>,
     config: Signal<AppConfig>,
-    playlist_store: Signal<reader::PlaylistStore>,
     on_rescan: EventHandler,
     mut queue: Signal<Vec<reader::models::Track>>,
 ) -> Element {
@@ -215,7 +212,6 @@ pub fn LocalLibrary(
             class: if cfg!(target_os = "android") { "px-3 pt-3 absolute inset-0 flex flex-col overflow-x-hidden" } else if is_modern { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
             if *show_playlist_modal.read() {
                 PlaylistModal {
-                    playlist_store,
                     is_jellyfin: false,
                     on_close: move |_| {
                         show_playlist_modal.set(false);

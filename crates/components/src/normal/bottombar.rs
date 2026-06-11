@@ -3,14 +3,11 @@ use config::PlayerBarPosition;
 use dioxus::prelude::*;
 use hooks::use_player_controller::{LoopMode, PlayerController};
 use player::player::Player;
-use reader::{FavoritesStore, Library};
 
 use crate::shared::{fmt_time, toggle_favorite};
 
 #[component]
 pub fn BottombarNormal(
-    library: Signal<Library>,
-    favorites_store: Signal<FavoritesStore>,
     mut config: Signal<config::AppConfig>,
     mut player: Signal<Player>,
     mut is_playing: Signal<bool>,
@@ -181,7 +178,7 @@ pub fn BottombarNormal(
                 button {
                     class: "{heart_class}",
                     title: if is_favorite { i18n::t("remove_from_favorites").to_string() } else { i18n::t("add_to_favorites").to_string() },
-                    onclick: move |_| toggle_favorite(ctrl.current_track_snapshot.read().clone(), favorites_store, config),
+                    onclick: move |_| toggle_favorite(ctrl.current_track_snapshot.read().clone(), config),
                     i { class: "{heart_icon}" }
                 }
             }

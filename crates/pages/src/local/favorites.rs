@@ -10,16 +10,12 @@ use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_albums, use_favorites, use_playlists, use_tracks_by_keys};
 use hooks::use_player_controller::PlayerController;
-use reader::{FavoritesStore, Library, PlaylistStore};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
 #[component]
 pub fn LocalFavorites(
-    favorites_store: Signal<FavoritesStore>,
-    library: Signal<Library>,
     config: Signal<AppConfig>,
-    playlist_store: Signal<PlaylistStore>,
     mut queue: Signal<Vec<reader::models::Track>>,
 ) -> Element {
     let mut ctrl = use_context::<PlayerController>();
@@ -202,7 +198,6 @@ pub fn LocalFavorites(
         div {
             if *show_playlist_modal.read() {
                 PlaylistModal {
-                    playlist_store,
                     is_jellyfin: false,
                     on_close: move |_| {
                         show_playlist_modal.set(false);

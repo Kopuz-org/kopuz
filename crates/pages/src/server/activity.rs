@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 use hooks::use_db_queries::{use_albums, use_all_tracks};
 use hooks::use_player_controller::PlayerController;
 use kopuz_route::Route;
-use reader::{Library, Track};
+use reader::Track;
 use std::collections::HashMap;
 
 fn format_duration(seconds: u64) -> String {
@@ -14,7 +14,7 @@ fn format_duration(seconds: u64) -> String {
 }
 
 #[component]
-pub fn JellyfinLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Element {
+pub fn JellyfinLogs(config: Signal<AppConfig>) -> Element {
     let mut ctrl = use_context::<PlayerController>();
 
     let active_server_id = use_memo(move || {
@@ -267,7 +267,7 @@ pub fn JellyfinLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Elem
 }
 
 #[component]
-pub fn ServerLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Element {
+pub fn ServerLogs(config: Signal<AppConfig>) -> Element {
     let service = config
         .read()
         .active_service()
@@ -275,7 +275,7 @@ pub fn ServerLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Elemen
 
     match service {
         MusicService::Jellyfin | MusicService::Subsonic | MusicService::Custom | MusicService::YtMusic => rsx! {
-            JellyfinLogs { library, config }
+            JellyfinLogs { config }
         },
     }
 }

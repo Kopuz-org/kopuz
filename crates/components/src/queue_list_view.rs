@@ -2,7 +2,6 @@ use config::AppConfig;
 use dioxus::document::eval;
 use dioxus::prelude::*;
 use hooks::PlayerController;
-use reader::Library;
 use serde_json::Value;
 use std::fmt;
 
@@ -213,7 +212,6 @@ const FULLSCREEN_ITEM_HEIGHT: f64 = 76.0;
 #[component]
 pub fn QueueListView(
     items: Vec<reader::Track>,
-    library: Signal<Library>,
     config: Signal<AppConfig>,
     current_queue_index: Signal<usize>,
     layout: LayoutMode,

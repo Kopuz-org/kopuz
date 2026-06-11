@@ -3,7 +3,6 @@ use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_albums, use_playlists, use_tracks_by_keys};
-use reader::{Library, PlaylistStore};
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use rfd::AsyncFileDialog;
 use std::path::PathBuf;
@@ -13,8 +12,6 @@ use tracing::Instrument;
 #[tracing::instrument(name = "render.playlist_detail", skip_all)]
 pub fn PlaylistDetail(
     playlist_id: String,
-    mut playlist_store: Signal<PlaylistStore>,
-    mut library: Signal<Library>,
     config: Signal<config::AppConfig>,
     on_close: EventHandler<()>,
     on_download_all: Option<EventHandler<()>>,
@@ -345,8 +342,6 @@ pub fn PlaylistDetail(
             cover_url: playlist_cover,
             back_label: i18n::t("back_to_playlists").to_string(),
             tracks: tracks_val,
-            library,
-            playlist_store,
             on_close,
             enable_metadata: !is_jellyfin,
             on_cover_click: move |_| {

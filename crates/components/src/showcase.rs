@@ -1,6 +1,6 @@
 use config::AppConfig;
 use dioxus::prelude::*;
-use reader::{Library, Track};
+use reader::Track;
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -109,7 +109,6 @@ pub struct ShowcaseProps {
     pub description: String,
     pub cover_url: Option<utils::CoverUrl>,
     pub tracks: Vec<Track>,
-    pub library: Signal<Library>,
     pub on_play_all: EventHandler<()>,
     pub on_play: EventHandler<usize>,
     pub on_queue: Option<EventHandler<usize>>,

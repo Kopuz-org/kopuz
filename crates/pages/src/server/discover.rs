@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use config::{AppConfig, MusicService};
 use dioxus::prelude::*;
-use reader::models::{Library, Track};
+use reader::models::Track;
 use server::ytmusic::discover::{DiscoverHome, DiscoverItem, DiscoverShelf, YtArtist};
 use components::track_row::TrackRow;
 use std::path::PathBuf;
@@ -31,7 +31,6 @@ pub struct DiscoverPrefetchCache(pub Signal<HashMap<String, Vec<Track>>>);
 #[component]
 #[tracing::instrument(name = "render.discover_home", skip_all)]
 pub fn DiscoverPage(
-    library: Signal<Library>,
     on_select_album: EventHandler<String>,
     on_select_playlist: EventHandler<(String, String)>,
     on_open_artist: EventHandler<(String, String)>,

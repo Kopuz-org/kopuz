@@ -1,14 +1,12 @@
 use db::Source;
 use dioxus::prelude::*;
 use hooks::use_db_queries::{use_albums, use_all_tracks};
-use reader::{Library, PlaylistStore, models::Track};
+use reader::models::Track;
 use std::path::PathBuf;
 
 #[component]
 pub fn FolderDetail(
     folder_path: String,
-    library: Signal<Library>,
-    mut playlist_store: Signal<PlaylistStore>,
     config: Signal<config::AppConfig>,
     on_close: EventHandler<()>,
 ) -> Element {
@@ -54,8 +52,6 @@ pub fn FolderDetail(
             cover_url,
             back_label: i18n::t("back_to_playlists").to_string(),
             tracks: folder_tracks,
-            library,
-            playlist_store,
             on_close,
             enable_metadata: true,
         }

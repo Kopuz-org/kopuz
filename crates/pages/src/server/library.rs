@@ -10,7 +10,6 @@ use dioxus::prelude::*;
 use hooks::use_db_queries::{use_albums, use_all_tracks, use_artists, use_playlists};
 use hooks::use_player_controller::PlayerController;
 use kopuz_route::Route;
-use reader::Library;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -18,9 +17,7 @@ const ITEM_HEIGHT: f64 = 60.0;
 
 #[component]
 pub fn JellyfinLibrary(
-    mut library: Signal<Library>,
     mut config: Signal<AppConfig>,
-    playlist_store: Signal<reader::PlaylistStore>,
     mut queue: Signal<Vec<reader::models::Track>>,
 ) -> Element {
     let mut ctrl = use_context::<PlayerController>();
@@ -80,7 +77,7 @@ pub fn JellyfinLibrary(
         spawn(async move {
             if *fetch_generation.read() == current_gen {
                 let _ =
-                    crate::server::subsonic_sync::sync_server_library(library, config, true).await;
+                    crate::server::subsonic_sync::sync_server_library(config, true).await;
                 if *fetch_generation.read() == current_gen {
                     is_loading.set(false);
                 }
@@ -272,7 +269,6 @@ pub fn JellyfinLibrary(
             class: if cfg!(target_os = "android") { "px-3 pt-3 absolute inset-0 flex flex-col overflow-x-hidden" } else if is_modern { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
             if *show_playlist_modal.read() {
                 PlaylistModal {
-                    playlist_store,
                     is_jellyfin: true,
                     on_close: move |_| {
                         show_playlist_modal.set(false);

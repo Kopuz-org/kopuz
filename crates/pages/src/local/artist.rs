@@ -7,7 +7,6 @@ use db::{Source, TrackFilter};
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_albums, use_all_tracks, use_artist_images, use_playlists};
-use reader::{Library, PlaylistStore};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
@@ -17,10 +16,8 @@ fn normalize_artist_key(value: &str) -> String {
 
 #[component]
 pub fn LocalArtist(
-    library: Signal<Library>,
     config: Signal<AppConfig>,
     artist_name: Signal<String>,
-    playlist_store: Signal<PlaylistStore>,
     on_navigate: EventHandler<String>,
     mut queue: Signal<Vec<reader::models::Track>>,
     mut current_queue_index: Signal<usize>,
@@ -300,7 +297,6 @@ pub fn LocalArtist(
                     class: "relative flex-1 min-h-0 flex flex-col",
                     if *show_playlist_modal.read() {
                         PlaylistModal {
-                            playlist_store,
                             is_jellyfin: false,
                             overlay_class: Some("absolute inset-0 bg-black/80 flex items-center justify-center z-50".to_string()),
                             on_close: move |_| {
@@ -422,7 +418,6 @@ pub fn LocalArtist(
                     if *sort_order.read() == ArtistViewOrder::Albums {
                         if *show_album_playlist_modal.read() {
                             PlaylistModal {
-                                playlist_store,
                                 is_jellyfin: false,
                                 overlay_class: Some("absolute inset-0 bg-black/80 flex items-center justify-center z-50".to_string()),
                                 on_close: move |_| show_album_playlist_modal.set(false),
@@ -594,7 +589,6 @@ pub fn LocalArtist(
                                 description: String::new(),
                                 cover_url: artist_cover(),
                                 tracks: artist_tracks(),
-                                library,
                                 on_cover_click: move |_| {
                                     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
                                     {

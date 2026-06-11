@@ -5,12 +5,9 @@ use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_albums, use_playlists, use_tracks_by_keys};
-use reader::{Library, PlaylistStore};
 
 #[component]
 pub fn LocalPlaylists(
-    mut playlist_store: Signal<PlaylistStore>,
-    library: Signal<Library>,
     config: Signal<AppConfig>,
     mut selected_playlist_id: Signal<Option<String>>,
     on_select_folder: EventHandler<String>,
@@ -113,7 +110,6 @@ pub fn LocalPlaylists(
         div {
             if let Some(target_id) = move_target_id.read().clone() {
                 FolderPickerModal {
-                    playlist_store,
                     playlist_id: target_id,
                     on_close: move |_| move_target_id.set(None),
                 }

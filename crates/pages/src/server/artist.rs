@@ -7,7 +7,6 @@ use db::{Source, TrackFilter};
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_albums, use_all_tracks, use_artist_images};
-use reader::{Library, PlaylistStore};
 use server::jellyfin::JellyfinClient;
 use server::subsonic::SubsonicClient;
 use std::collections::{HashMap, HashSet};
@@ -16,10 +15,8 @@ use tracing::Instrument;
 
 #[component]
 pub fn JellyfinArtist(
-    library: Signal<Library>,
     config: Signal<AppConfig>,
     artist_name: Signal<String>,
-    playlist_store: Signal<PlaylistStore>,
     on_navigate: EventHandler<String>,
     mut queue: Signal<Vec<reader::models::Track>>,
     mut current_queue_index: Signal<usize>,
@@ -397,7 +394,6 @@ pub fn JellyfinArtist(
                     class: "relative flex-1 min-h-0 flex flex-col",
                     if *show_playlist_modal.read() {
                         PlaylistModal {
-                            playlist_store,
                             is_jellyfin: true,
                             overlay_class: Some("absolute inset-0 bg-black/80 flex items-center justify-center z-50".to_string()),
                             on_close: move |_| {
@@ -520,7 +516,6 @@ pub fn JellyfinArtist(
                     if *sort_order.read() == ArtistViewOrder::Albums {
                         if *show_album_playlist_modal.read() {
                             PlaylistModal {
-                                playlist_store,
                                 is_jellyfin: true,
                                 overlay_class: Some("absolute inset-0 bg-black/80 flex items-center justify-center z-50".to_string()),
                                 on_close: move |_| show_album_playlist_modal.set(false),
@@ -754,7 +749,6 @@ pub fn JellyfinArtist(
                                 description: String::new(),
                                 cover_url: artist_cover(),
                                 tracks: artist_tracks(),
-                                library,
                                 on_cover_click: move |_| {
                                     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
                                     {
@@ -941,10 +935,8 @@ fn SortOrderToggle(mut sort_order: Signal<ArtistViewOrder>) -> Element {
 
 #[component]
 pub fn ServerArtist(
-    library: Signal<Library>,
     config: Signal<AppConfig>,
     artist_name: Signal<String>,
-    playlist_store: Signal<PlaylistStore>,
     on_navigate: EventHandler<String>,
     queue: Signal<Vec<reader::models::Track>>,
     current_queue_index: Signal<usize>,
@@ -957,10 +949,8 @@ pub fn ServerArtist(
     match service {
         MusicService::Jellyfin => rsx! {
             JellyfinArtist {
-                library,
                 config,
                 artist_name,
-                playlist_store,
                 on_navigate,
                 queue,
                 current_queue_index,
@@ -968,10 +958,8 @@ pub fn ServerArtist(
         },
         MusicService::Subsonic => rsx! {
             SubsonicArtist {
-                library,
                 config,
                 artist_name,
-                playlist_store,
                 on_navigate,
                 queue,
                 current_queue_index,
@@ -979,10 +967,8 @@ pub fn ServerArtist(
         },
         MusicService::Custom | MusicService::YtMusic => rsx! {
             CustomArtist {
-                library,
                 config,
                 artist_name,
-                playlist_store,
                 on_navigate,
                 queue,
                 current_queue_index,
@@ -993,20 +979,16 @@ pub fn ServerArtist(
 
 #[component]
 pub fn SubsonicArtist(
-    library: Signal<Library>,
     config: Signal<AppConfig>,
     artist_name: Signal<String>,
-    playlist_store: Signal<PlaylistStore>,
     on_navigate: EventHandler<String>,
     queue: Signal<Vec<reader::models::Track>>,
     current_queue_index: Signal<usize>,
 ) -> Element {
     rsx! {
         JellyfinArtist {
-            library,
             config,
             artist_name,
-            playlist_store,
             on_navigate,
             queue,
             current_queue_index,
@@ -1016,20 +998,16 @@ pub fn SubsonicArtist(
 
 #[component]
 pub fn CustomArtist(
-    library: Signal<Library>,
     config: Signal<AppConfig>,
     artist_name: Signal<String>,
-    playlist_store: Signal<PlaylistStore>,
     on_navigate: EventHandler<String>,
     queue: Signal<Vec<reader::models::Track>>,
     current_queue_index: Signal<usize>,
 ) -> Element {
     rsx! {
         JellyfinArtist {
-            library,
             config,
             artist_name,
-            playlist_store,
             on_navigate,
             queue,
             current_queue_index,

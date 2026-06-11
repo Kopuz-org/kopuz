@@ -4,7 +4,6 @@ use config::{AppConfig, MusicService};
 use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
-use reader::Library;
 use reader::models::{Album, Track};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -31,7 +30,6 @@ pub struct SubsonicLibraryData {
 
 #[tracing::instrument(name = "library.sync", skip_all, fields(clear_first = clear_first))]
 pub async fn sync_server_library(
-    _library: Signal<Library>,
     config: Signal<AppConfig>,
     clear_first: bool,
 ) -> Result<(), String> {

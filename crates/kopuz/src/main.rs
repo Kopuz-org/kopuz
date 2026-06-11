@@ -2282,8 +2282,6 @@ fn App() -> Element {
 
             if config.read().player_bar_position == config::PlayerBarPosition::Top {
                 Bottombar {
-                    library: library,
-                    favorites_store,
                     config,
                     current_song_cover_url: current_song_cover_url,
                     current_song_title: current_song_title,
@@ -2400,9 +2398,6 @@ fn App() -> Element {
                     match *current_route.read() {
                         Route::Home => rsx! {
                             pages::home::Home {
-                                library,
-                                playlist_store,
-                                favorites_store,
                                 on_select_album: move |id: String| {
                                     selected_album_id.set(id);
                                     current_route.set(Route::Album);
@@ -2445,7 +2440,6 @@ fn App() -> Element {
                         },
                         Route::Discover => rsx! {
                             pages::server::discover::DiscoverPage {
-                                library: library,
                                 on_select_album: move |id: String| {
                                     selected_album_id.set(id);
                                     current_route.set(Route::Album);
@@ -2483,7 +2477,6 @@ fn App() -> Element {
                             pages::search::Search {
                                 library: library,
                                 config: config,
-                                playlist_store: playlist_store,
                                 search_query: search_query,
                                 player: player,
                                 is_playing: is_playing,
@@ -2503,9 +2496,7 @@ fn App() -> Element {
                         },
                         Route::Library => rsx! {
                             pages::library::LibraryPage {
-                                library: library,
                                 config: config,
-                                playlist_store: playlist_store,
                                 on_rescan: move |_| *trigger_rescan.write() += 1,
                                 player: player,
                                 is_playing: is_playing,
@@ -2521,10 +2512,8 @@ fn App() -> Element {
                         },
                         Route::Album => rsx! {
                             pages::album::Album {
-                                library: library,
                                 config: config,
                                 album_id: selected_album_id,
-                                playlist_store: playlist_store,
                                 queue: queue,
                                 current_queue_index: current_queue_index,
                             }
@@ -2580,10 +2569,8 @@ fn App() -> Element {
                             } else {
                                 rsx! {
                                     pages::artist::Artist {
-                                        library: library,
                                         config: config,
                                         artist_name: selected_artist_name,
-                                        playlist_store: playlist_store,
                                         player: player,
                                         on_navigate: move |album_id| {
                                             selected_album_id.set(album_id);
@@ -2604,10 +2591,7 @@ fn App() -> Element {
                         },
                         Route::Favorites => rsx! {
                             pages::favorites::FavoritesPage {
-                                favorites_store,
-                                library,
                                 config,
-                                playlist_store,
                                 player,
                                 is_playing,
                                 current_playing,
@@ -2622,15 +2606,12 @@ fn App() -> Element {
                         },
                         Route::Playlists => rsx! {
                             pages::playlists::PlaylistsPage {
-                                playlist_store: playlist_store,
-                                library: library,
                                 config: config,
                                 selected_playlist_id: selected_playlist_id,
                             }
                         },
                         Route::Activity => rsx! {
                           pages::activity::Activity {
-                              library: library,
                               config: config,
                           }
                         },
@@ -2650,7 +2631,6 @@ fn App() -> Element {
                     }
                 }
                 Rightbar {
-                    library: library,
                     is_rightbar_open: is_rightbar_open,
                     width: rightbar_width,
                     current_song_duration: current_song_duration,
@@ -2663,7 +2643,6 @@ fn App() -> Element {
                 }
             }
             Fullscreen {
-                library: library,
                 player: player,
                 is_playing: is_playing,
                 is_fullscreen: is_fullscreen,
@@ -2683,8 +2662,6 @@ fn App() -> Element {
             DownloadOverlay { queue: download_queue }
             if config.read().player_bar_position == config::PlayerBarPosition::Bottom {
                 Bottombar {
-                    library: library,
-                    favorites_store,
                     config,
                     current_song_cover_url: current_song_cover_url,
                     current_song_title: current_song_title,

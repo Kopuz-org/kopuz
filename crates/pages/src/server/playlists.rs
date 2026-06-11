@@ -6,14 +6,11 @@ use db::{Source, TrackFilter};
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_all_tracks, use_playlists};
-use reader::{Library, PlaylistStore};
 use tracing::Instrument;
 
 #[component]
 #[tracing::instrument(name = "render.jellyfin_playlists", skip_all)]
 pub fn JellyfinPlaylists(
-    playlist_store: Signal<PlaylistStore>,
-    library: Signal<Library>,
     config: Signal<AppConfig>,
     mut selected_playlist_id: Signal<Option<String>>,
     #[props(default)] refresh_trigger: Signal<u64>,

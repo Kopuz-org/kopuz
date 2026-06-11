@@ -2,14 +2,11 @@ use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_album, use_all_tracks};
-use reader::Library;
 use std::path::PathBuf;
 
 #[component]
 pub fn AlbumDetails(
     album_id: String,
-    library: Signal<Library>,
-    playlist_store: Signal<reader::PlaylistStore>,
     on_close: EventHandler<()>,
 ) -> Element {
     let gens = hooks::db_reactivity::use_generations();
@@ -100,8 +97,6 @@ pub fn AlbumDetails(
                 is_album: true,
                 back_label: i18n::t("back_to_albums").to_string(),
                 tracks,
-                library,
-                playlist_store,
                 on_close,
                 enable_metadata: true,
                 on_cover_click: move |_| {

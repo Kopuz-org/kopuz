@@ -1,11 +1,9 @@
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::use_playlists;
-use reader::PlaylistStore;
 
 #[component]
 pub fn FolderPickerModal(
-    mut playlist_store: Signal<PlaylistStore>,
     playlist_id: String,
     on_close: EventHandler<()>,
 ) -> Element {

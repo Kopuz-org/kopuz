@@ -7,7 +7,6 @@ use config::AppConfig;
 use dioxus::prelude::*;
 use hooks::use_player_controller::{LoopMode, PlayerController};
 use player::player::Player;
-use reader::Library;
 
 #[component]
 fn ProgressBarControl(
@@ -307,7 +306,6 @@ fn TrackMetadata(
 
 #[component]
 fn Tabs(
-    library: Signal<Library>,
     config: Signal<AppConfig>,
     items: Vec<reader::Track>,
     current_queue_index: Signal<usize>,
@@ -346,7 +344,6 @@ fn Tabs(
             if *active_tab.read() == 0 {
                 QueueListView {
                     items,
-                    library,
                     config,
                     current_queue_index,
                     layout: crate::queue_list_view::LayoutMode::Fullscreen,
@@ -365,7 +362,6 @@ fn Tabs(
 
 #[component]
 pub fn Fullscreen(
-    library: Signal<Library>,
     mut player: Signal<Player>,
     mut is_playing: Signal<bool>,
     mut is_fullscreen: Signal<bool>,
@@ -562,7 +558,6 @@ pub fn Fullscreen(
                 } else if tab == 1 {
                     QueueListView {
                         items,
-                        library,
                         config,
                         current_queue_index,
                         layout: crate::queue_list_view::LayoutMode::Fullscreen,
@@ -629,7 +624,6 @@ pub fn Fullscreen(
                 }
 
                 Tabs {
-                    library,
                     config,
                     items,
                     current_queue_index,

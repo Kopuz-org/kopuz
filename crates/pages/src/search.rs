@@ -10,7 +10,6 @@ use crate::server::search::ServerSearch;
 pub fn Search(
     library: Signal<Library>,
     config: Signal<AppConfig>,
-    playlist_store: Signal<reader::PlaylistStore>,
     search_query: Signal<String>,
     player: Signal<player::Player>,
     is_playing: Signal<bool>,
@@ -31,7 +30,6 @@ pub fn Search(
             ServerSearch {
                 library,
                 config,
-                playlist_store,
                 search_query,
                 player,
                 is_playing,
@@ -49,7 +47,6 @@ pub fn Search(
             LocalSearch {
                 library,
                 config,
-                playlist_store,
                 search_query,
                 player,
                 is_playing,

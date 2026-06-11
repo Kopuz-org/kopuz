@@ -3,13 +3,10 @@ use db::{Source, TrackFilter};
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::use_albums;
-use reader::{Library, PlaylistStore};
 
 #[component]
 pub fn LocalAlbum(
-    library: Signal<Library>,
     album_id: Signal<String>,
-    playlist_store: Signal<PlaylistStore>,
     mut queue: Signal<Vec<reader::models::Track>>,
     mut open_album_menu: Signal<Option<String>>,
     mut show_album_playlist_modal: Signal<bool>,
