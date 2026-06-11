@@ -94,7 +94,7 @@ pub async fn sync_server_library(
                             title: album_item.name,
                             artist: album_item
                                 .album_artist
-                                .or_else(|| album_item.artists.as_ref().map(|a| a.join(", ")))
+                                .or_else(|| album_item.artists.as_ref().and_then(|a| a.first().cloned()))
                                 .unwrap_or_default(),
                             genre: album_item
                                 .genres
@@ -150,7 +150,7 @@ pub async fn sync_server_library(
                             artist: item
                                 .album_artist
                                 .clone()
-                                .or_else(|| item.artists.as_ref().map(|a| a.join(", ")))
+                                .or_else(|| item.artists.as_ref().and_then(|a| a.first().cloned()))
                                 .unwrap_or_default(),
                             album: item.album.unwrap_or_default(),
                             duration: item.run_time_ticks.unwrap_or(0) / 10_000_000,

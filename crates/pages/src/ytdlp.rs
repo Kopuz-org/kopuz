@@ -2,7 +2,7 @@ use config::{AppConfig, YtdlpOptions};
 use dioxus::prelude::*;
 use std::fs::{self, OpenOptions};
 use std::io::BufRead;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DownloadJob {
@@ -199,6 +199,7 @@ fn build_command(
     out: &str,
     fmt: AudioFormat,
     opts: &YtdlpOptions,
+    artists_manifest: Option<&Path>,
 ) -> std::process::Command {
     let binary = find_ytdlp();
     let mut cmd = std::process::Command::new(&binary);
@@ -242,6 +243,15 @@ fn build_command(
 
     if opts.embed_metadata {
         cmd.arg("--embed-metadata");
+        // yt-dlp embeds multiple artists as one comma-joined string, which the
+        // library scanner can't split safely (a comma may be part of a name).
+        // Record the structured artists list per finished file so we can
+        // rewrite the tag unambiguously afterwards (issue #314).
+        if let Some(manifest) = artists_manifest {
+            cmd.arg("--print-to-file")
+                .arg("after_move:%(artists)j\t%(filepath)s")
+                .arg(manifest);
+        }
     }
     if opts.embed_thumbnail {
         cmd.arg("--embed-thumbnail");
@@ -320,6 +330,42 @@ fn build_command(
         .stderr(std::process::Stdio::piped());
 
     cmd
+}
+
+/// One manifest line per downloaded file, printed by yt-dlp after the final
+/// move: `<artists as JSON array>\t<filepath>`. JSON escapes raw tabs, so
+/// splitting on the first tab is unambiguous. Returns `None` for files whose
+/// extractor exposes no structured artists list (the JSON side is `null`/`NA`).
+fn parse_artist_manifest_line(line: &str) -> Option<(Vec<String>, PathBuf)> {
+    let (json_part, path_part) = line.split_once('\t')?;
+    let artists: Vec<String> = serde_json::from_str(json_part).ok()?;
+    if path_part.trim().is_empty() {
+        return None;
+    }
+    Some((artists, PathBuf::from(path_part)))
+}
+
+/// Rewrite the artist tag of each downloaded file from the structured artists
+/// list recorded in the manifest (issue #314). yt-dlp embeds multiple artists
+/// as one comma-joined string; rejoining the structured list with `;` lets the
+/// library scanner split it without guessing, so a single artist whose name
+/// contains a comma (e.g. "Tyler, The Creator") is left untouched.
+/// Best-effort: a failed rewrite only logs, the file keeps yt-dlp's own tag.
+fn apply_artist_manifest(manifest: &Path) {
+    let Ok(content) = fs::read_to_string(manifest) else {
+        return;
+    };
+    for line in content.lines() {
+        let Some((artists, file)) = parse_artist_manifest_line(line) else {
+            continue;
+        };
+        if artists.len() < 2 {
+            continue;
+        }
+        if let Err(e) = reader::set_artist_tag(&file, &artists) {
+            tracing::warn!(file = %file.display(), error = %e, "multi-artist tag rewrite failed");
+        }
+    }
 }
 
 enum LineInfo {
@@ -465,9 +511,13 @@ pub fn YtdlpPage(config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) -
             }
 
             let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<LineInfo>();
+            let blocking_job_id = job_id.clone();
 
             tokio::task::spawn_blocking(move || {
-                let mut cmd = build_command(&url, &out, fmt, &opts);
+                let artists_manifest = opts.embed_metadata.then(|| {
+                    std::env::temp_dir().join(format!("kopuz-ytdlp-artists-{blocking_job_id}.tsv"))
+                });
+                let mut cmd = build_command(&url, &out, fmt, &opts, artists_manifest.as_deref());
 
                 let mut child = match cmd.spawn() {
                     Ok(c) => c,
@@ -501,6 +551,9 @@ pub fn YtdlpPage(config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) -
                 }
                 match child.wait() {
                     Ok(s) if s.success() => {
+                        if let Some(manifest) = &artists_manifest {
+                            apply_artist_manifest(manifest);
+                        }
                         let _ = tx.send(LineInfo::Done);
                     }
                     Ok(s) => {
@@ -512,6 +565,9 @@ pub fn YtdlpPage(config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) -
                     Err(e) => {
                         let _ = tx.send(LineInfo::Error(e.to_string()));
                     }
+                }
+                if let Some(manifest) = &artists_manifest {
+                    let _ = fs::remove_file(manifest);
                 }
             });
 
@@ -1049,5 +1105,66 @@ fn JobRow(props: JobRowProps) -> Element {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn manifest_line_parses_artists_and_path() {
+        let line = "[\"Kero Kero Bonito\", \"Douglas Lobban\"]\t/music/Album/song.opus";
+        let (artists, path) = parse_artist_manifest_line(line).expect("should parse");
+        assert_eq!(artists, vec!["Kero Kero Bonito", "Douglas Lobban"]);
+        assert_eq!(path, PathBuf::from("/music/Album/song.opus"));
+    }
+
+    #[test]
+    fn manifest_line_without_structured_artists_is_skipped() {
+        // Extractors without an artists list print null/NA on the JSON side.
+        assert!(parse_artist_manifest_line("null\t/music/x.opus").is_none());
+        assert!(parse_artist_manifest_line("NA\t/music/x.opus").is_none());
+        assert!(parse_artist_manifest_line("no tab here").is_none());
+        assert!(parse_artist_manifest_line("[\"A\", \"B\"]\t").is_none());
+    }
+
+    #[test]
+    fn apply_manifest_rewrites_multi_artist_tag() {
+        use lofty::file::TaggedFileExt;
+        use lofty::probe::Probe;
+        use lofty::tag::Accessor;
+
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../reader/tests/fixtures/comma.opus");
+        let dir = std::env::temp_dir().join(format!("kopuz-ytdlp-test-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let media = dir.join("comma.opus");
+        fs::copy(&fixture, &media).unwrap();
+
+        let manifest = dir.join("artists.tsv");
+        fs::write(
+            &manifest,
+            format!(
+                "[\"Kero Kero Bonito\", \"Douglas Lobban\", \"Sarah Perry\"]\t{}\n\
+                 [\"Tyler, The Creator\"]\t{}\n",
+                media.display(),
+                media.display()
+            ),
+        )
+        .unwrap();
+
+        apply_artist_manifest(&manifest);
+
+        let tagged = Probe::open(&media).unwrap().read().unwrap();
+        let artist = tagged.primary_tag().and_then(|t| t.artist().map(|a| a.to_string()));
+        // Multi-artist line rewrites with ';'; the single-artist (comma-in-name)
+        // line must NOT rewrite, so the ';'-joined value survives it.
+        assert_eq!(
+            artist.as_deref(),
+            Some("Kero Kero Bonito;Douglas Lobban;Sarah Perry")
+        );
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }
