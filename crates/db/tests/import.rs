@@ -184,6 +184,20 @@ async fn imports_synthetic_fixture() {
     assert!(v.get("listen_counts").is_none());
     assert!(!blob.contains("SECRET_COOKIE"), "no token leaked into the blob");
 
+    // YT sync stamps land in the metadata cache (where the runtime reads them —
+    // blob-only stamps caused a full YT re-stream on first favorites open).
+    let stamp: Option<String> = sqlx::query_scalar(
+        "SELECT payload FROM metadata_cache WHERE cache_key = 'yt_sync' AND kind = 'timestamps'",
+    )
+    .fetch_optional(&mut conn)
+    .await
+    .unwrap();
+    let stamp: serde_json::Value = serde_json::from_str(&stamp.expect("yt_sync stamp")).unwrap();
+    assert_eq!(
+        stamp.get("last_yt_sync_at").and_then(|v| v.as_u64()),
+        Some(1_700_000_000)
+    );
+
     // listen_counts keyed by uid (cover dropped from the legacy key).
     let c: i64 = sqlx::query_scalar("SELECT count FROM listen_counts WHERE track_key = 'ytmusic:VID1'")
         .fetch_one(&mut conn)

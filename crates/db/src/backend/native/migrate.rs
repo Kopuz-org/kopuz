@@ -89,6 +89,25 @@ pub async fn run_json_import(
     import_config_blob(&mut tx, &cfg_val, &active_server_id, &lib).await?;
     import_listen_counts(&mut tx, &cfg_val).await?;
 
+    // The YT sync timestamps ALSO go to the metadata cache — that's where the
+    // runtime reads them ("yt_sync"/"timestamps"); blob keys alone would make
+    // the favorites page think it never synced and re-stream the whole liked
+    // library from YT on first open after a migration.
+    if lib.last_yt_sync_at.is_some() || lib.last_yt_playlists_sync_at.is_some() {
+        let stamps = serde_json::json!({
+            "last_yt_sync_at": lib.last_yt_sync_at,
+            "last_yt_playlists_sync_at": lib.last_yt_playlists_sync_at,
+        })
+        .to_string();
+        sqlx::query!(
+            "INSERT INTO metadata_cache (cache_key, kind, payload) VALUES ('yt_sync', 'timestamps', ?1) \
+             ON CONFLICT(cache_key, kind) DO UPDATE SET payload = ?1",
+            stamps
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
+
     // --- albums (local + server) ------------------------------------------
     for a in &lib.albums {
         insert_album(&mut tx, "local", a).await?;
