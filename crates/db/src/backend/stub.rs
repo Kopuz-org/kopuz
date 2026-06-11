@@ -35,4 +35,8 @@ impl Storage for Stub {
     ) -> Result<crate::ImportReport, DbError> {
         Ok(crate::ImportReport::default())
     }
+
+    async fn finalize_migration(&self, _config_dir: &std::path::Path) -> Result<usize, DbError> {
+        Ok(0)
+    }
 }

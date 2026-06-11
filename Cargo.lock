@@ -4001,6 +4001,7 @@ dependencies = [
  "components",
  "config",
  "ctrlc",
+ "db",
  "dioxus",
  "directories",
  "discord-presence",

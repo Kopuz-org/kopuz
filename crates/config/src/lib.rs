@@ -507,6 +507,13 @@ pub struct AppConfig {
     pub server: Option<MusicServer>,
     #[serde(default)]
     pub servers: Vec<SavedServer>,
+    /// Id of the active server (`servers.id`), or `None` for local. The DB-backed
+    /// source of truth for "which server is active"; `server`/`servers` above are
+    /// hydrated from the `servers` table around it. (`server` stays for now so the
+    /// ~90 existing `config.server` readers keep working — they migrate to id-based
+    /// resolution with the auth-gate work.)
+    #[serde(default)]
+    pub active_server_id: Option<String>,
     #[serde(default)]
     pub active_source: MusicSource,
     #[serde(default)]
@@ -839,6 +846,7 @@ impl Default for AppConfig {
         Self {
             server: None,
             servers: Vec::new(),
+            active_server_id: None,
             active_source: MusicSource::Local,
             source_explicitly_set: false,
             music_directory: vec![music_directory],

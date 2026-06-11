@@ -13,6 +13,7 @@ use sqlx::sqlite::{
 
 use crate::{DbError, Storage};
 
+mod cfg_store;
 mod migrate;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
@@ -119,27 +120,11 @@ fn backup_name(path: &Path, stamp: i64, suffix: &str) -> std::path::PathBuf {
 #[async_trait::async_trait]
 impl Storage for Native {
     async fn load_config(&self) -> Result<Option<config::AppConfig>, DbError> {
-        let pool = self.pool();
-        let json: Option<String> = sqlx::query_scalar!("SELECT json FROM app_config WHERE id = 1")
-            .fetch_optional(&*pool)
-            .await?;
-        match json {
-            Some(j) => Ok(Some(serde_json::from_str(&j)?)),
-            None => Ok(None),
-        }
+        cfg_store::load_config(&self.pool()).await
     }
 
     async fn save_config(&self, cfg: &config::AppConfig) -> Result<(), DbError> {
-        let json = serde_json::to_string(cfg)?;
-        let pool = self.pool();
-        sqlx::query!(
-            "INSERT INTO app_config (id, json) VALUES (1, ?1) \
-             ON CONFLICT(id) DO UPDATE SET json = ?1",
-            json
-        )
-        .execute(&*pool)
-        .await?;
-        Ok(())
+        cfg_store::save_config(&self.pool(), cfg).await
     }
 
     async fn import_legacy_json(
@@ -147,5 +132,9 @@ impl Storage for Native {
         config_dir: &Path,
     ) -> Result<crate::ImportReport, DbError> {
         migrate::run_json_import(&self.pool(), config_dir).await
+    }
+
+    async fn finalize_migration(&self, config_dir: &Path) -> Result<usize, DbError> {
+        migrate::finalize_migration(&self.pool(), config_dir).await
     }
 }

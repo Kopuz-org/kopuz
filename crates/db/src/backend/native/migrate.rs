@@ -161,13 +161,9 @@ pub async fn run_json_import(
 
     tx.commit().await?;
 
-    // Post-commit, best-effort: rename imported files aside and drop the sentinel.
-    for f in LEGACY_FILES {
-        let src = config_dir.join(f);
-        if src.exists() {
-            backup_aside(&src);
-        }
-    }
+    // Drop the sentinel so this never re-imports. The legacy JSONs are left in
+    // place — they're only renamed aside by `finalize_migration`, once every
+    // domain reads from the DB, so a half-migrated build still has them to read.
     write_sentinel(&sentinel);
 
     let report = ImportReport {
@@ -187,6 +183,25 @@ pub async fn run_json_import(
         "db: legacy JSON import complete"
     );
     Ok(report)
+}
+
+/// Point of no return: once every domain reads from the DB, rename each
+/// imported `X.json` → `X.json.bak` (kept for downgrade; never deleted). Gated
+/// on the sentinel + a non-empty DB, so it only fires after a real import and is
+/// idempotent. Returns how many files were renamed.
+pub async fn finalize_migration(pool: &SqlitePool, config_dir: &Path) -> Result<usize, DbError> {
+    if !config_dir.join(SENTINEL).exists() || !db_has_data(pool).await? {
+        return Ok(0);
+    }
+    let mut renamed = 0;
+    for f in LEGACY_FILES {
+        let src = config_dir.join(f);
+        if src.exists() {
+            backup_aside(&src);
+            renamed += 1;
+        }
+    }
+    Ok(renamed)
 }
 
 // ---------------------------------------------------------------------------

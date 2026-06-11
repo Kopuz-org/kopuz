@@ -196,19 +196,16 @@ async fn fetch_available_update() -> Option<AvailableUpdate> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn persist_config_snapshot(config_snapshot: config::AppConfig, path: std::path::PathBuf) {
+fn persist_config_snapshot(db: db::Db, config_snapshot: config::AppConfig) {
     spawn(async move {
-        let result = tokio::task::spawn_blocking(move || config_snapshot.save(&path)).await;
-        match result {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => tracing::error!("Failed to save config: {}", e),
-            Err(e) => tracing::error!("Failed to join config save task: {}", e),
+        if let Err(e) = db.save_config(&config_snapshot).await {
+            tracing::error!("Failed to save config: {}", e);
         }
     }.instrument(tracing::info_span!("config.persist")));
 }
 
 #[cfg(target_arch = "wasm32")]
-fn persist_config_snapshot(config_snapshot: config::AppConfig, _path: std::path::PathBuf) {
+fn persist_config_snapshot(_db: db::Db, config_snapshot: config::AppConfig) {
     save_web_config(&config_snapshot);
 }
 
@@ -490,6 +487,39 @@ fn make_hq_image(raw: &[u8], cache_path: &std::path::Path) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// Process-wide database handle. Opened (and the legacy JSON migrated) once in
+/// `main` before the UI mounts, then provided to the app via context.
+static DB_HANDLE: std::sync::OnceLock<db::Db> = std::sync::OnceLock::new();
+
+/// Open the DB and run the one-shot legacy import, blocking. sqlx-sqlite does its
+/// work on dedicated connection threads, so the throwaway runtime here is safe to
+/// drop — the pool keeps working under the app's runtime afterwards.
+#[cfg(not(target_arch = "wasm32"))]
+fn init_db_blocking() -> db::Db {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime for db init");
+    rt.block_on(async {
+        let handle = db::init(&db::default_db_path())
+            .await
+            .expect("open kopuz database");
+        match handle.import_legacy_json(&db::config_dir()).await {
+            Ok(r) if r.ran => tracing::info!(
+                tracks = r.tracks,
+                albums = r.albums,
+                playlists = r.playlists,
+                favorites = r.favorites,
+                servers = r.servers,
+                "kopuz: migrated legacy JSON store into SQLite"
+            ),
+            Ok(_) => {}
+            Err(e) => tracing::error!(error = %e, "kopuz: legacy JSON import failed"),
+        }
+        handle
+    })
+}
+
 fn main() {
     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
     {
@@ -511,6 +541,8 @@ fn main() {
         logging::init(&log_dir, config_tracing_enabled);
 
         migrate_legacy_locations();
+
+        let _ = DB_HANDLE.set(init_db_blocking());
 
         let presence: Option<Arc<Presence>> = match Presence::new("1470087339639443658") {
             Ok(p) => {
@@ -772,6 +804,8 @@ fn main() {
         // OnceLock), but doing it up front means the session exists before first playback.
         player::systemint::init();
 
+        let _ = DB_HANDLE.set(init_db_blocking());
+
         let config = dioxus::mobile::Config::new()
             .with_background_color((0, 0, 0, 255))
             // artwork://local?p=<percent-encoded-absolute-path> — the Android WebView mostly
@@ -844,6 +878,7 @@ fn main() {
 
     #[cfg(target_arch = "wasm32")]
     {
+        let _ = DB_HANDLE.set(db::init_stub());
         dioxus::launch(App);
     }
 }
@@ -977,6 +1012,11 @@ fn App() -> Element {
     let lib_path = use_memo(move || config_dir().join("library.json"));
     let config_path = use_memo(move || config_dir().join("config.json"));
     let mut config = use_signal(config::AppConfig::default);
+    let db = DB_HANDLE
+        .get()
+        .cloned()
+        .expect("db initialized in main before launch");
+    use_context_provider(|| db.clone());
     // Start the PoToken minter whenever a YouTube Music server is active — not
     // just anon. A *signed-in but non-Premium* account streams the same 251 as
     // anon and also needs a content pot for deep ranges; only true Premium
@@ -1256,15 +1296,17 @@ fn App() -> Element {
         }.instrument(tracing::info_span!("app.update_check")));
     });
 
+    let db_for_cfg_save = db.clone();
     use_effect(move || {
         if !*initial_load_done.read() {
             return;
         }
         let mut config_snapshot = config.read().clone();
         config_snapshot.volume = *volume.peek();
-        persist_config_snapshot(config_snapshot, config_path());
+        persist_config_snapshot(db_for_cfg_save.clone(), config_snapshot);
     });
 
+    let db_for_vol_save = db.clone();
     use_effect(move || {
         if !*initial_load_done.read() {
             return;
@@ -1273,7 +1315,7 @@ fn App() -> Element {
         let committed_volume = *persisted_volume.read();
         let mut config_snapshot = config.peek().clone();
         config_snapshot.volume = committed_volume;
-        persist_config_snapshot(config_snapshot, config_path());
+        persist_config_snapshot(db_for_vol_save.clone(), config_snapshot);
     });
 
     // Keepalive is rearm-on-account-change, not rearm-on-every-config-
@@ -1544,6 +1586,7 @@ fn App() -> Element {
         }
     });
 
+    let db_for_load = db.clone();
     use_hook(move || {
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -1552,18 +1595,31 @@ fn App() -> Element {
             let playlist_path = playlist_path();
             let favorites_path = favorites_path();
             let queue_state_path = queue_state_path();
+            let db = db_for_load;
             let mut ctrl = ctrl;
 
+            let config_path_fallback = config_path.clone();
             spawn(async move {
                 let lib_path_c = lib_path.clone();
-                let config_path_c = config_path.clone();
                 let playlist_path_c = playlist_path.clone();
                 let favorites_path_c = favorites_path.clone();
                 let queue_state_path_c = queue_state_path.clone();
 
-                let (lib_res, cfg_res, pl_res, fav_res, queue_res) = tokio::join!(
+                // Config is the source of truth in SQLite now (creds in the
+                // servers table, counts in listen_counts — all hydrated by
+                // load_config). Fall back to the legacy file only if the DB has
+                // no blob yet (a fresh install where the import found nothing).
+                let cfg_loaded = match db.load_config().await {
+                    Ok(Some(c)) => Some(c),
+                    Ok(None) => None,
+                    Err(e) => {
+                        tracing::error!(error = %e, "failed to load config from db");
+                        None
+                    }
+                };
+
+                let (lib_res, pl_res, fav_res, queue_res) = tokio::join!(
                     tokio::task::spawn_blocking(move || reader::Library::load(&lib_path_c)),
-                    tokio::task::spawn_blocking(move || config::AppConfig::load(&config_path_c)),
                     tokio::task::spawn_blocking(move || reader::PlaylistStore::load(
                         &playlist_path_c
                     )),
@@ -1576,7 +1632,10 @@ fn App() -> Element {
                 if let Ok(Ok(loaded)) = lib_res {
                     library.set(loaded.clone());
                 }
-                if let Ok(loaded) = cfg_res {
+                let cfg_loaded =
+                    cfg_loaded.unwrap_or_else(|| config::AppConfig::load(&config_path_fallback));
+                {
+                    let loaded = cfg_loaded;
                     config.set(loaded.clone());
                     configured_music_dirs.set(loaded.music_directory.clone());
                     volume.set(loaded.volume);

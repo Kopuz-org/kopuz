@@ -44,6 +44,7 @@ player = { workspace = true }
 components = { workspace = true }
 reader = { workspace = true }
 config = { workspace = true }
+db = { workspace = true }
 pages = { workspace = true }
 server = { workspace = true }
 kopuz_route = { workspace = true }

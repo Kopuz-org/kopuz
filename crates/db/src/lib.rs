@@ -111,6 +111,11 @@ pub trait Storage: Send + Sync {
         &self,
         config_dir: &std::path::Path,
     ) -> Result<ImportReport, DbError>;
+
+    /// Point of no return: rename each imported `X.json` → `X.json.bak` (kept for
+    /// downgrade). Call only once every domain reads from the DB. Idempotent;
+    /// no-op until a real import has happened. Returns how many files moved.
+    async fn finalize_migration(&self, config_dir: &std::path::Path) -> Result<usize, DbError>;
 }
 
 /// Cheap-`Clone` handle to the active storage backend, shared via Dioxus context.

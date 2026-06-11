@@ -126,9 +126,10 @@ async fn imports_synthetic_fixture() {
     assert_eq!(report.favorites, 3, "1 local + 2 server favorites");
     assert_eq!(report.servers, 1);
 
-    // Legacy files were renamed aside; the sentinel was written.
-    assert!(!dir.join("config.json").exists());
-    assert!(dir.join("config.json.bak").exists());
+    // Import leaves the JSONs in place (a half-migrated build still reads them);
+    // only the sentinel is written.
+    assert!(dir.join("config.json").exists());
+    assert!(!dir.join("config.json.bak").exists());
     assert!(dir.join(".db_migrated").exists());
 
     let mut conn = open(&db_path).await;
@@ -205,6 +206,12 @@ async fn imports_synthetic_fixture() {
     // Re-running is a no-op (sentinel present).
     let again = db.import_legacy_json(&dir).await.unwrap();
     assert!(!again.ran);
+
+    // Finalize renames the JSONs aside (the point of no return).
+    let renamed = db.finalize_migration(&dir).await.unwrap();
+    assert_eq!(renamed, 5);
+    assert!(!dir.join("config.json").exists());
+    assert!(dir.join("config.json.bak").exists());
 
     let _ = std::fs::remove_dir_all(&dir);
 }
