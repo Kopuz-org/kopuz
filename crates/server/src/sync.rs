@@ -10,6 +10,10 @@
 use crate::client::{AuthOutcome, client_for};
 use crate::server_ops::ServerConn;
 
+/// Minimum age of the last remote pull before a non-Manual reconcile pulls
+/// again. Pushes are never gated — only the expensive full fetch is.
+const PULL_MIN_SECS: u64 = 30 * 60;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncReason {
     Activate,
@@ -91,15 +95,33 @@ pub async fn reconcile_favorites(
     }
 
     // Pull: the remote set becomes the clean baseline; still-pending local rows
-    // survive.
-    let remote = client
-        .fetch_favorites()
+    // survive. fetch_favorites is EXPENSIVE for YT (a full liked-library browse
+    // stream), so the pull is staleness-gated: Manual always pulls; everything
+    // else only when the last pull is old. Pushes above always run.
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let last_pull: u64 = db
+        .meta_get("fav_pull", server_id)
         .await
-        .map_err(SyncError::Unreachable)?;
-    report.pulled = remote.len();
-    db.replace_favorites_clean(server_id, &remote)
-        .await
-        .map_err(|e| SyncError::Unreachable(e.to_string()))?;
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let should_pull =
+        matches!(reason, SyncReason::Manual) || now.saturating_sub(last_pull) >= PULL_MIN_SECS;
+    if should_pull {
+        let remote = client
+            .fetch_favorites()
+            .await
+            .map_err(SyncError::Unreachable)?;
+        report.pulled = remote.len();
+        db.replace_favorites_clean(server_id, &remote)
+            .await
+            .map_err(|e| SyncError::Unreachable(e.to_string()))?;
+        let _ = db.meta_put("fav_pull", server_id, &now.to_string()).await;
+    }
 
     tracing::info!(
         pushed_likes = report.pushed_likes,
