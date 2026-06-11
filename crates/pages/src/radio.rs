@@ -14,6 +14,7 @@ pub struct RadioProps {
 
 #[component]
 pub fn Radio(props: RadioProps) -> Element {
+    let _ = &props;
     let mut ctrl = use_context::<PlayerController>();
     let config = use_context::<Signal<config::AppConfig>>();
     let is_modern = config.read().ui_style == UiStyle::Modern;

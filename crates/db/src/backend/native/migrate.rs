@@ -100,12 +100,15 @@ pub async fn run_json_import(
 
     // --- tracks (local + server) ------------------------------------------
     for lt in &lib.tracks {
-        insert_track(&mut tx, "local", &legacy_to_track(lt)).await?;
+        if let Some(t) = legacy_to_track(lt) {
+            insert_track(&mut tx, "local", &t).await?;
+        }
     }
     for lt in &lib.jellyfin_tracks {
-        let t = legacy_to_track(lt);
-        let src = track_source(&t, &server_src);
-        insert_track(&mut tx, &src, &t).await?;
+        if let Some(t) = legacy_to_track(lt) {
+            let src = track_source(&t, &server_src);
+            insert_track(&mut tx, &src, &t).await?;
+        }
     }
 
     // --- artist images -----------------------------------------------------
@@ -166,7 +169,7 @@ pub async fn run_json_import(
     }
 
     // --- queue snapshot ----------------------------------------------------
-    let queue_tracks: Vec<Track> = queue.queue.iter().map(legacy_to_track).collect();
+    let queue_tracks: Vec<Track> = queue.queue.iter().filter_map(legacy_to_track).collect();
     let queue_json = serde_json::to_string(&queue_tracks)?;
     let shuffle_json = serde_json::to_string(&queue.shuffle_order)?;
     let cqi = queue.current_queue_index;
@@ -539,10 +542,21 @@ async fn insert_favorite(
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn legacy_to_track(l: &LegacyTrack) -> Track {
-    Track {
-        id: TrackId::from_legacy_path(&l.path),
-        cover: split_legacy_cover(&l.path),
+/// Convert a mirrored track to the typed shape. Tolerates BOTH on-disk forms:
+/// the legacy `"path"` string AND the new `"id"`+`"cover"` (a file rewritten by
+/// an intermediate build carries the new shape). Returns `None` for an entry
+/// with neither — skipped rather than failing the whole import.
+fn legacy_to_track(l: &LegacyTrack) -> Option<Track> {
+    let (id, cover) = if let Some(id) = &l.id {
+        (id.clone(), l.cover.clone())
+    } else if let Some(path) = &l.path {
+        (TrackId::from_legacy_path(path), split_legacy_cover(path))
+    } else {
+        return None;
+    };
+    Some(Track {
+        id,
+        cover,
         album_id: l.album_id.clone(),
         title: l.title.clone(),
         artist: l.artist.clone(),
@@ -557,7 +571,7 @@ fn legacy_to_track(l: &LegacyTrack) -> Track {
         musicbrainz_track_id: l.musicbrainz_track_id.clone(),
         playlist_item_id: l.playlist_item_id.clone(),
         artists: l.artists.clone(),
-    }
+    })
 }
 
 /// The cover smuggled as the legacy path's 3rd `:` segment (`service:id:cover`),
@@ -686,7 +700,14 @@ fn backup_aside(src: &Path) {
 
 #[derive(Deserialize)]
 struct LegacyTrack {
-    path: String,
+    /// Legacy form: the overloaded `"service:id[:cover]"` / filesystem path.
+    #[serde(default)]
+    path: Option<String>,
+    /// New form (a file rewritten by an intermediate build): the typed id.
+    #[serde(default)]
+    id: Option<TrackId>,
+    #[serde(default)]
+    cover: Option<String>,
     #[serde(default)]
     album_id: String,
     #[serde(default)]
