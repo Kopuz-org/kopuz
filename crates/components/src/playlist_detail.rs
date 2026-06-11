@@ -123,12 +123,10 @@ pub fn PlaylistDetail(
                                     for item in items {
                                         let duration_secs =
                                             item.run_time_ticks.unwrap_or(0) / 10_000_000;
-                                        let mut path_str = format!("jellyfin:{}", item.id);
-                                        if let Some(tags) = &item.image_tags {
-                                            if let Some(tag) = tags.get("Primary") {
-                                                path_str.push_str(&format!(":{}", tag));
-                                            }
-                                        }
+                                        let cover = item
+                                            .image_tags
+                                            .as_ref()
+                                            .and_then(|tags| tags.get("Primary").cloned());
                                         let bitrate_kbps = item.bitrate.unwrap_or(0) / 1000;
                                         let bitrate_u16 = bitrate_kbps.min(u16::MAX as u32) as u16;
                                         let artist_str = item
@@ -137,8 +135,11 @@ pub fn PlaylistDetail(
                                             .or_else(|| item.artists.as_ref().map(|a| a.join(", ")))
                                             .unwrap_or_default();
                                         new_tracks.push(reader::models::Track {
-                                            id: reader::models::TrackId::from_legacy_path(&path_str),
-                                            cover: None,
+                                            id: reader::models::TrackId::Server {
+                                                service: MusicService::Jellyfin,
+                                                item_id: item.id.clone(),
+                                            },
+                                            cover,
                                             album_id: item
                                                 .album_id
                                                 .map(|id| format!("jellyfin:{}", id))
@@ -180,11 +181,6 @@ pub fn PlaylistDetail(
                                                 }
                                                 format!("urlhex_{}", hex)
                                             });
-                                        let path = if let Some(tag) = &cover_tag {
-                                            PathBuf::from(format!("jellyfin:{}:{}", item.id, tag))
-                                        } else {
-                                            PathBuf::from(format!("jellyfin:{}", item.id))
-                                        };
                                         let album_id = item
                                             .album_id
                                             .as_ref()
@@ -199,8 +195,19 @@ pub fn PlaylistDetail(
                                                 format!("jellyfin:{}:none", item.id)
                                             });
                                         new_tracks.push(reader::models::Track {
-                                            id: reader::models::TrackId::from_legacy_path(&path.to_string_lossy()),
-                                            cover: None,
+                                            id: reader::models::TrackId::Server {
+                                                service,
+                                                item_id: item.id.clone(),
+                                            },
+                                            // "none" (not None) deliberately: it marks
+                                            // an explicit no-cover so the resolver
+                                            // doesn't fall through to a bogus remote
+                                            // guess — same convention as subsonic_sync.
+                                            cover: Some(
+                                                cover_tag
+                                                    .clone()
+                                                    .unwrap_or_else(|| "none".to_string()),
+                                            ),
                                             album_id,
                                             title: item.title,
                                             artist: item.artist.clone().unwrap_or_default(),
