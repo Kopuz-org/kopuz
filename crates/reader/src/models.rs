@@ -14,9 +14,107 @@ pub struct Album {
     pub manual_cover: bool,
 }
 
+/// Typed track identity — replaces the old `Track.path` synthetic-string hack.
+/// Local tracks are a filesystem path; server tracks are a service + item id.
+/// The cover reference is a separate `Track.cover` field, NOT part of identity.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum TrackId {
+    Local(PathBuf),
+    Server {
+        service: config::MusicService,
+        item_id: String,
+    },
+}
+
+impl TrackId {
+    /// The bare key within its source — the file-path string (local) or the
+    /// item/video id (server). This is the DB `track_key`.
+    pub fn key(&self) -> std::borrow::Cow<'_, str> {
+        match self {
+            TrackId::Local(p) => p.to_string_lossy(),
+            TrackId::Server { item_id, .. } => std::borrow::Cow::Borrowed(item_id),
+        }
+    }
+
+    /// The filesystem path, if this is a local track.
+    pub fn local_path(&self) -> Option<&Path> {
+        match self {
+            TrackId::Local(p) => Some(p),
+            TrackId::Server { .. } => None,
+        }
+    }
+
+    /// The media service, if this is a server track.
+    pub fn service(&self) -> Option<config::MusicService> {
+        match self {
+            TrackId::Server { service, .. } => Some(*service),
+            TrackId::Local(_) => None,
+        }
+    }
+
+    pub fn is_server(&self) -> bool {
+        matches!(self, TrackId::Server { .. })
+    }
+
+    pub fn is_local(&self) -> bool {
+        matches!(self, TrackId::Local(_))
+    }
+
+    /// A stable, source-qualified identity string (no cover): the file path for
+    /// local, or `"<service-prefix>:<item_id>"` for server. For logging /
+    /// cross-source string keys.
+    pub fn uid(&self) -> String {
+        match self {
+            TrackId::Local(p) => p.to_string_lossy().into_owned(),
+            TrackId::Server { service, item_id } => {
+                format!("{}:{}", service_prefix(*service), item_id)
+            }
+        }
+    }
+
+    /// The [`uid`](Self::uid) wrapped in a `PathBuf` — for the still-`PathBuf`-keyed
+    /// selection/menu collections during the migration. (Transitional.)
+    pub fn uid_path(&self) -> PathBuf {
+        PathBuf::from(self.uid())
+    }
+
+    /// Parse a legacy `Track.path` string (`"service:id[:cover]"` or a real
+    /// path). Used ONLY by the migration importer; the 3rd cover segment is
+    /// dropped here (the importer sets `Track.cover` separately).
+    pub fn from_legacy_path(s: &str) -> Self {
+        for (prefix, svc) in [
+            ("ytmusic", config::MusicService::YtMusic),
+            ("jellyfin", config::MusicService::Jellyfin),
+            ("subsonic", config::MusicService::Subsonic),
+            ("custom", config::MusicService::Custom),
+        ] {
+            if let Some(rest) = s.strip_prefix(prefix).and_then(|r| r.strip_prefix(':')) {
+                let item_id = rest.split(':').next().unwrap_or("").to_string();
+                return TrackId::Server {
+                    service: svc,
+                    item_id,
+                };
+            }
+        }
+        TrackId::Local(PathBuf::from(s))
+    }
+}
+
+fn service_prefix(s: config::MusicService) -> &'static str {
+    match s {
+        config::MusicService::YtMusic => "ytmusic",
+        config::MusicService::Jellyfin => "jellyfin",
+        config::MusicService::Subsonic => "subsonic",
+        config::MusicService::Custom => "custom",
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Track {
-    pub path: PathBuf,
+    pub id: TrackId,
+    /// Cover art reference (URL for server, path for local) — out of identity.
+    #[serde(default)]
+    pub cover: Option<String>,
     pub album_id: String,
     pub title: String,
     pub artist: String,
@@ -153,7 +251,7 @@ impl Library {
     }
 
     pub fn add_track(&mut self, track: Track) {
-        if let Some(index) = self.tracks.iter().position(|t| t.path == track.path) {
+        if let Some(index) = self.tracks.iter().position(|t| t.id == track.id) {
             self.tracks[index] = track;
         } else {
             self.tracks.push(track);
@@ -176,8 +274,8 @@ impl Library {
         }
     }
 
-    pub fn remove_track(&mut self, path: &Path) {
-        self.tracks.retain(|t| t.path != path);
+    pub fn remove_track(&mut self, id: &TrackId) {
+        self.tracks.retain(|t| &t.id != id);
     }
 
     pub fn remove_album(&mut self, album_id: &str) {

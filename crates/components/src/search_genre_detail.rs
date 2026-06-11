@@ -40,7 +40,7 @@ pub fn SearchGenreDetail(
         sorted_genre_tracks.iter().map(|(t, _)| t.clone()).collect();
     let currently_playing_path = {
         let idx = *ctrl.current_queue_index.read();
-        ctrl.get_track_at(idx).map(|track| track.path.clone())
+        ctrl.get_track_at(idx).map(|track| track.id.uid_path())
     };
     let current_song_title = ctrl.current_song_title.read().clone();
     let current_song_artist = ctrl.current_song_artist.read().clone();
@@ -188,13 +188,13 @@ pub fn SearchGenreDetail(
                          for (idx, (track, cover_url)) in sorted_genre_tracks.iter().enumerate().skip(scroll_info.start_index).take(scroll_info.items_to_render) {
                          {
                              let track = track.clone();
-                             let track_key = track.path.display().to_string();
+                             let track_key = track.id.uid();
                              let track_menu = track.clone();
                              let track_add = track.clone();
                              let track_queue = track.clone();
                              let track_delete = track.clone();
                              let queue_source = genre_tracks_list.clone();
-                             let matches_current_path = currently_playing_path.as_ref() == Some(&track.path);
+                             let matches_current_path = currently_playing_path.as_ref() == Some(&track.id.uid_path());
                              let matches_current_metadata = currently_playing_path.is_none()
                                  && !current_song_title.is_empty()
                                  && track.title == current_song_title
@@ -202,9 +202,9 @@ pub fn SearchGenreDetail(
                                  && track.album == current_song_album
                                  && track.duration == current_song_duration;
                              let is_currently_playing: bool = matches_current_path || matches_current_metadata;
-                             let is_menu_open = active_menu_track.read().as_ref() == Some(&track.path);
+                             let is_menu_open = active_menu_track.read().as_ref() == Some(&track.id.uid_path());
                              let item_id: Option<String> = {
-                                 let s = track.path.to_string_lossy();
+                                 let s = track.id.uid();
                                  if s.starts_with("jellyfin:") {
                                      s.split(':').nth(1).map(|id| id.to_string())
                                  } else { None }
@@ -230,14 +230,14 @@ pub fn SearchGenreDetail(
                                      is_downloaded: is_downloaded,
                                      is_currently_playing,
                                      on_click_menu: move |_| {
-                                         if active_menu_track.read().as_ref() == Some(&track_menu.path) {
+                                         if active_menu_track.read().as_ref() == Some(&track_menu.id.uid_path()) {
                                              active_menu_track.set(None);
                                          } else {
-                                             active_menu_track.set(Some(track_menu.path.clone()));
+                                             active_menu_track.set(Some(track_menu.id.uid_path()));
                                          }
                                      },
                                      on_add_to_playlist: move |_| {
-                                         selected_track_for_playlist.set(Some(track_add.path.clone()));
+                                         selected_track_for_playlist.set(Some(track_add.id.uid_path()));
                                          show_playlist_modal.set(true);
                                          active_menu_track.set(None);
                                      },
@@ -248,8 +248,10 @@ pub fn SearchGenreDetail(
                                      on_close_menu: move |_| active_menu_track.set(None),
                                      on_delete: move |_| {
                                          active_menu_track.set(None);
-                                         if std::fs::remove_file(&track_delete.path).is_ok() {
-                                             library.write().remove_track(&track_delete.path);
+                                         if let Some(del_path) = track_delete.id.local_path()
+                                             && std::fs::remove_file(del_path).is_ok()
+                                         {
+                                             library.write().remove_track(&track_delete.id);
                                              let lib_path = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
                                                  .map(|d| d.config_dir().join("library.json"))
                                                  .unwrap_or_else(|| std::path::PathBuf::from("./config/library.json"));

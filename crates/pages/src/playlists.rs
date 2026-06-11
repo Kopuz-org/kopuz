@@ -162,7 +162,7 @@ pub fn PlaylistsPage(
                                                     let meta = lib
                                                         .jellyfin_tracks
                                                         .iter()
-                                                        .find(|t| t.path.to_string_lossy().contains(tid.as_str()));
+                                                        .find(|t| t.id.uid().contains(tid.as_str()));
                                                     (
                                                         tid.clone(),
                                                         meta.map(|t| t.title.clone()).unwrap_or_default(),
@@ -216,7 +216,7 @@ pub fn PlaylistsPage(
                                             if let Some(meta) = lib
                                                 .jellyfin_tracks
                                                 .iter()
-                                                .find(|t| t.path.to_string_lossy().contains(tid.as_str()))
+                                                .find(|t| t.id.uid().contains(tid.as_str()))
                                             {
                                                 track_title = meta.title.clone();
                                                 track_artist = meta.artist.clone();
@@ -317,8 +317,8 @@ pub fn PlaylistsPage(
                                 .read()
                                 .tracks
                                 .iter()
-                                .filter(|track| track.path.starts_with(&folder_path_buf))
-                                .map(|track| track.path.clone())
+                                .filter(|track| track.id.local_path().is_some_and(|p| p.starts_with(&folder_path_buf)))
+                                .map(|track| track.id.uid_path())
                                 .collect();
 
                             playlist_store

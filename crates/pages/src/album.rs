@@ -87,7 +87,7 @@ pub fn Album(
                                             lib.jellyfin_tracks
                                                 .iter()
                                                 .filter(|t| t.album_id == aid)
-                                                .map(|t| t.path.clone())
+                                                .map(|t| t.id.uid_path())
                                                 .collect()
                                         } else {
                                             let album_title = lib
@@ -99,7 +99,7 @@ pub fn Album(
                                                 lib.tracks
                                                     .iter()
                                                     .filter(|t| t.album == title)
-                                                    .map(|t| t.path.clone())
+                                                    .map(|t| t.id.uid_path())
                                                     .collect()
                                             } else {
                                                 Vec::new()
@@ -191,7 +191,7 @@ pub fn Album(
                                             lib.jellyfin_tracks
                                                 .iter()
                                                 .filter(|t| t.album_id == aid)
-                                                .map(|t| t.path.clone())
+                                                .map(|t| t.id.uid_path())
                                                 .collect()
                                         } else {
                                             let album_title = lib
@@ -203,7 +203,7 @@ pub fn Album(
                                                 lib.tracks
                                                     .iter()
                                                     .filter(|t| t.album == title)
-                                                    .map(|t| t.path.clone())
+                                                    .map(|t| t.id.uid_path())
                                                     .collect()
                                             } else {
                                                 Vec::new()

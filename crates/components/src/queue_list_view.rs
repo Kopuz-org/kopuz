@@ -390,11 +390,11 @@ pub fn QueueListView(
 
         if is_server_track {
             if let Some(server) = &conf.server {
-                let path_str = track.path.to_string_lossy();
                 let url = match server.service {
                     config::MusicService::Jellyfin => {
-                        utils::jellyfin_image::track_cover_url_with_album_fallback(
-                            &path_str,
+                        utils::jellyfin_image::resolve_track_cover(
+                            track.cover.as_deref(),
+                            &track.id.key(),
                             &track.album_id,
                             &server.url,
                             server.access_token.as_deref(),
@@ -403,8 +403,12 @@ pub fn QueueListView(
                         )
                     }
                     config::MusicService::Subsonic | config::MusicService::Custom => {
+                        let subsonic_path = match track.cover.as_deref() {
+                            Some(c) => format!("{}:{}", track.id.uid(), c),
+                            None => track.id.uid(),
+                        };
                         utils::subsonic_image::subsonic_image_url_from_path(
-                            &path_str,
+                            &subsonic_path,
                             &server.url,
                             server.access_token.as_deref(),
                             cover_max_width,
@@ -412,8 +416,9 @@ pub fn QueueListView(
                         )
                     }
                     config::MusicService::YtMusic => {
-                        utils::jellyfin_image::track_cover_url_with_album_fallback(
-                            &path_str,
+                        utils::jellyfin_image::resolve_track_cover(
+                            track.cover.as_deref(),
+                            &track.id.key(),
                             &track.album_id,
                             "",
                             None,

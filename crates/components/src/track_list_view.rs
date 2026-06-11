@@ -94,13 +94,13 @@ pub fn TrackListView(mut props: TrackListViewProps) -> Element {
                 is_selection_mode: is_selection_mode(),
                 selected_tracks: selected_tracks.read().clone(),
                 all_selected: !props.tracks.is_empty()
-                    && props.tracks.iter().all(|t| selected_tracks.read().contains(&t.path)),
+                    && props.tracks.iter().all(|t| selected_tracks.read().contains(&t.id.uid_path())),
                 on_cover_click: props.on_cover_click,
                 actions: props.actions,
                 on_select_all: move |selected: bool| {
                     if selected {
                         selected_tracks
-                            .set(tracks_select_all.iter().map(|t| t.path.clone()).collect());
+                            .set(tracks_select_all.iter().map(|t| t.id.uid_path()).collect());
                         is_selection_mode.set(true);
                     }
                     else {
@@ -111,16 +111,16 @@ pub fn TrackListView(mut props: TrackListViewProps) -> Element {
                 on_long_press: move |idx: usize| {
                     if let Some(t) = tracks_long_press.get(idx) {
                         is_selection_mode.set(true);
-                        selected_tracks.write().insert(t.path.clone());
+                        selected_tracks.write().insert(t.id.uid_path());
                     }
                 },
                 on_select: move |(idx, sel): (usize, bool)| {
                     if let Some(t) = tracks_select.get(idx) {
                         if sel {
                             is_selection_mode.set(true);
-                            selected_tracks.write().insert(t.path.clone());
+                            selected_tracks.write().insert(t.id.uid_path());
                         } else {
-                            selected_tracks.write().remove(&t.path);
+                            selected_tracks.write().remove(&t.id.uid_path());
                             if selected_tracks.read().is_empty() {
                                 is_selection_mode.set(false);
                             }
@@ -141,7 +141,7 @@ pub fn TrackListView(mut props: TrackListViewProps) -> Element {
                 },
                 on_add_to_playlist: move |idx: usize| {
                     if let Some(t) = tracks_add.get(idx) {
-                        selected_track_for_playlist.set(Some(t.path.clone()));
+                        selected_track_for_playlist.set(Some(t.id.uid_path()));
                         show_playlist_modal.set(true);
                         active_menu_track.set(None);
                     }
@@ -155,10 +155,10 @@ pub fn TrackListView(mut props: TrackListViewProps) -> Element {
                 active_track: active_menu_track.read().clone(),
                 on_click_menu: move |idx: usize| {
                     if let Some(t) = tracks_menu.get(idx) {
-                        if active_menu_track.read().as_ref() == Some(&t.path) {
+                        if active_menu_track.read().as_ref() == Some(&t.id.uid_path()) {
                             active_menu_track.set(None);
                         } else {
-                            active_menu_track.set(Some(t.path.clone()));
+                            active_menu_track.set(Some(t.id.uid_path()));
                         }
                     }
                 },
@@ -186,7 +186,7 @@ pub fn TrackListView(mut props: TrackListViewProps) -> Element {
                         }
                         let tracks: Vec<_> = tracks_sel_queue
                             .iter()
-                            .filter(|t| selected.contains(&t.path))
+                            .filter(|t| selected.contains(&t.id.uid_path()))
                             .cloned()
                             .collect();
                         if !tracks.is_empty() {
@@ -199,8 +199,8 @@ pub fn TrackListView(mut props: TrackListViewProps) -> Element {
                     on_delete: move |_| {
                         let paths: Vec<PathBuf> = tracks_sel_delete
                             .iter()
-                            .filter(|t| selected_tracks.read().contains(&t.path))
-                            .map(|t| t.path.clone())
+                            .filter(|t| selected_tracks.read().contains(&t.id.uid_path()))
+                            .map(|t| t.id.uid_path())
                             .collect();
                         if let Some(ref h) = props.on_selection_delete {
                             h.call(paths);
@@ -220,11 +220,13 @@ pub fn TrackListView(mut props: TrackListViewProps) -> Element {
                     track: track.clone(),
                     on_close: move |_| metadata_track.set(None),
                     on_save: move |edits: reader::models::TrackEdits| {
-                        let path = track.path.clone();
+                        let Some(path) = track.id.local_path().map(|p| p.to_path_buf()) else {
+                            return;
+                        };
                         match reader::write_tags(&path, &edits) {
                             Ok(()) => {
                                 let mut lib = props.library.write();
-                                if let Some(t) = lib.tracks.iter_mut().find(|t| t.path == path) {
+                                if let Some(t) = lib.tracks.iter_mut().find(|t| t.id == track.id) {
                                     t.title = edits.title.trim().to_string();
                                     t.artist = edits.artist.trim().to_string();
                                     t.artists = edits

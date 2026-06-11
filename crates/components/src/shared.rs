@@ -15,20 +15,13 @@ pub fn get_favorite(
     favorites_store: &Signal<FavoritesStore>,
 ) -> bool {
     if let Some(track) = current_track {
-        let path_str = track.path.to_string_lossy();
-        if path_str.starts_with("jellyfin:")
-            || path_str.starts_with("subsonic:")
-            || path_str.starts_with("custom:")
-            || path_str.starts_with("ytmusic:")
-        {
-            let parts: Vec<&str> = path_str.split(':').collect();
-            if parts.len() >= 2 && !parts[1].trim().is_empty() {
-                favorites_store.read().is_jellyfin_favorite(parts[1])
-            } else {
-                false
-            }
+        if track.id.is_server() {
+            let item_id = track.id.key();
+            !item_id.trim().is_empty() && favorites_store.read().is_jellyfin_favorite(&item_id)
+        } else if let Some(p) = track.id.local_path() {
+            favorites_store.read().is_local_favorite(p)
         } else {
-            favorites_store.read().is_local_favorite(&track.path)
+            false
         }
     } else {
         false
@@ -41,15 +34,9 @@ pub fn toggle_favorite(
     config: Signal<config::AppConfig>,
 ) {
     if let Some(track) = current_track {
-        let path_str = track.path.to_string_lossy().to_string();
-        let is_server_item = path_str.starts_with("jellyfin:")
-            || path_str.starts_with("subsonic:")
-            || path_str.starts_with("custom:")
-            || path_str.starts_with("ytmusic:");
-        if is_server_item {
-            let parts: Vec<String> = path_str.split(':').map(|s| s.to_string()).collect();
-            if parts.len() >= 2 && !parts[1].trim().is_empty() {
-                let item_id = parts[1].clone();
+        if track.id.is_server() {
+            let item_id = track.id.key().to_string();
+            if !item_id.trim().is_empty() {
                 let currently_fav = favorites_store.read().is_jellyfin_favorite(&item_id);
                 let new_fav = !currently_fav;
                 favorites_store
@@ -77,8 +64,8 @@ pub fn toggle_favorite(
                     }
                 });
             }
-        } else {
-            favorites_store.write().toggle_local(track.path.clone());
+        } else if let Some(p) = track.id.local_path() {
+            favorites_store.write().toggle_local(p.to_path_buf());
         }
     }
 }

@@ -177,9 +177,8 @@ pub fn JellyfinArtist(
                     if t.artist.to_lowercase() != artist.to_lowercase() {
                         return false;
                     }
-                    let s = t.path.to_string_lossy();
-                    let id = s.split(':').nth(1).unwrap_or(&s);
-                    if let Some(path_str) = conf.offline_tracks.get(id) {
+                    let id = t.id.key();
+                    if let Some(path_str) = conf.offline_tracks.get(id.as_ref()) {
                         std::path::Path::new(path_str).exists()
                     } else {
                         false
@@ -206,9 +205,8 @@ pub fn JellyfinArtist(
                 if !offline {
                     return true;
                 }
-                let s = t.path.to_string_lossy();
-                let id = s.split(':').nth(1).unwrap_or(&s);
-                if let Some(path_str) = conf.offline_tracks.get(id) {
+                let id = t.id.key();
+                if let Some(path_str) = conf.offline_tracks.get(id.as_ref()) {
                     std::path::Path::new(path_str).exists()
                 } else {
                     false
@@ -279,9 +277,8 @@ pub fn JellyfinArtist(
                     if t.album_id != a.id {
                         return false;
                     }
-                    let s = t.path.to_string_lossy();
-                    let id = s.split(':').nth(1).unwrap_or(&s);
-                    if let Some(path_str) = conf.offline_tracks.get(id) {
+                    let id = t.id.key();
+                    if let Some(path_str) = conf.offline_tracks.get(id.as_ref()) {
                         std::path::Path::new(path_str).exists()
                     } else {
                         false
@@ -309,7 +306,7 @@ pub fn JellyfinArtist(
             .jellyfin_tracks
             .iter()
             .filter(|t| t.album_id == album_id)
-            .map(|t| t.path.clone())
+            .map(|t| t.id.uid_path())
             .collect()
     };
 
@@ -472,7 +469,7 @@ pub fn JellyfinArtist(
                                 }
                                 let tracks: Vec<_> = artist_tracks()
                                     .iter()
-                                    .filter(|t| selected.contains(&t.path))
+                                    .filter(|t| selected.contains(&t.id.uid_path()))
                                     .cloned()
                                     .collect();
                                 if !tracks.is_empty() {
@@ -589,9 +586,8 @@ pub fn JellyfinArtist(
                                                     let aid = album.id.clone();
                                                     let tracks: Vec<_> = lib.jellyfin_tracks.iter().filter(|t| t.album_id == aid).collect();
                                                     !tracks.is_empty() && tracks.iter().all(|t| {
-                                                        let s = t.path.to_string_lossy();
-                                                        let tid = s.split(':').nth(1).unwrap_or(&s);
-                                                        if let Some(path_str) = conf.offline_tracks.get(tid) {
+                                                        let tid = t.id.key();
+                                                        if let Some(path_str) = conf.offline_tracks.get(tid.as_ref()) {
                                                             std::path::Path::new(path_str).exists()
                                                         } else {
                                                             false
@@ -683,8 +679,8 @@ pub fn JellyfinArtist(
                                                                                         .iter()
                                                                                         .filter(|t| t.album_id == album_id)
                                                                                         .filter_map(|t| {
-                                                                                            let s = t.path.to_string_lossy().to_string();
-                                                                                            s.split(':').nth(1).map(|id| id.to_string())
+                                                                                            let k = t.id.key();
+                                                                                            (!k.is_empty()).then(|| k.to_string())
                                                                                         })
                                                                                         .collect()
                                                                                 };
@@ -697,8 +693,8 @@ pub fn JellyfinArtist(
                                                                                         .iter()
                                                                                         .filter(|t| t.album_id == album_id)
                                                                                         .filter_map(|t| {
-                                                                                            let s = t.path.to_string_lossy().to_string();
-                                                                                            s.split(':').nth(1).map(|id| (id.to_string(), t.title.clone(), t.artist.clone()))
+                                                                                            let k = t.id.key();
+                                                                                            (!k.is_empty()).then(|| (k.to_string(), t.title.clone(), t.artist.clone()))
                                                                                         })
                                                                                         .collect()
                                                                                 };
@@ -754,10 +750,10 @@ pub fn JellyfinArtist(
                                 active_track: active_menu_track.read().clone(),
                                 is_selection_mode: is_selection_mode(),
                                 selected_tracks: selected_tracks.read().clone(),
-                                all_selected: !artist_tracks().is_empty() && artist_tracks().iter().all(|track| selected_tracks.read().contains(&track.path)),
+                                all_selected: !artist_tracks().is_empty() && artist_tracks().iter().all(|track| selected_tracks.read().contains(&track.id.uid_path())),
                                 on_select_all: move |selected: bool| {
                                     if selected {
-                                        selected_tracks.set(artist_tracks().into_iter().map(|track| track.path).collect());
+                                        selected_tracks.set(artist_tracks().into_iter().map(|track| track.id.uid_path()).collect());
                                         is_selection_mode.set(true);
                                     } else {
                                         selected_tracks.write().clear();
@@ -767,16 +763,16 @@ pub fn JellyfinArtist(
                                 on_long_press: move |idx: usize| {
                                     if let Some(track) = artist_tracks().get(idx) {
                                         is_selection_mode.set(true);
-                                        selected_tracks.write().insert(track.path.clone());
+                                        selected_tracks.write().insert(track.id.uid_path());
                                     }
                                 },
                                 on_select: move |(idx, selected): (usize, bool)| {
                                     if let Some(track) = artist_tracks().get(idx) {
                                         if selected {
                                             is_selection_mode.set(true);
-                                            selected_tracks.write().insert(track.path.clone());
+                                            selected_tracks.write().insert(track.id.uid_path());
                                         } else {
-                                            selected_tracks.write().remove(&track.path);
+                                            selected_tracks.write().remove(&track.id.uid_path());
                                             if selected_tracks.read().is_empty() {
                                                 is_selection_mode.set(false);
                                             }
@@ -799,17 +795,17 @@ pub fn JellyfinArtist(
                                 },
                                 on_click_menu: move |idx: usize| {
                                     if let Some(track) = artist_tracks().get(idx) {
-                                        if active_menu_track.read().as_ref() == Some(&track.path) {
+                                        if active_menu_track.read().as_ref() == Some(&track.id.uid_path()) {
                                             active_menu_track.set(None);
                                         } else {
-                                            active_menu_track.set(Some(track.path.clone()));
+                                            active_menu_track.set(Some(track.id.uid_path()));
                                         }
                                     }
                                 },
                                 on_close_menu: move |_| active_menu_track.set(None),
                                 on_add_to_playlist: move |idx: usize| {
                                     if let Some(track) = artist_tracks().get(idx) {
-                                        selected_track_for_playlist.set(Some(track.path.clone()));
+                                        selected_track_for_playlist.set(Some(track.id.uid_path()));
                                         show_playlist_modal.set(true);
                                         active_menu_track.set(None);
                                     }
@@ -823,8 +819,9 @@ pub fn JellyfinArtist(
                                 on_delete_track: move |_| active_menu_track.set(None),
                                 on_download_track: move |idx: usize| {
                                     if let Some(track) = artist_tracks().get(idx) {
-                                        let s = track.path.to_string_lossy();
-                                        if let Some(item_id) = s.split(':').nth(1) {
+                                        let item_id = track.id.key();
+                                        if !item_id.is_empty() {
+                                            let item_id = item_id.as_ref();
                                             let is_downloaded = if let Some(path_str) = config.read().offline_tracks.get(item_id) {
                                                 std::path::Path::new(path_str).exists()
                                             } else {
@@ -851,8 +848,8 @@ pub fn JellyfinArtist(
                                     let requests: Vec<(String, String, String)> = artist_tracks()
                                         .iter()
                                         .filter_map(|t| {
-                                            let s = t.path.to_string_lossy().to_string();
-                                            s.split(':').nth(1).map(|id| (id.to_string(), t.title.clone(), t.artist.clone()))
+                                            let k = t.id.key();
+                                            (!k.is_empty()).then(|| (k.to_string(), t.title.clone(), t.artist.clone()))
                                         })
                                         .collect();
                                     queue_downloads(requests, config, download_queue);
@@ -861,8 +858,8 @@ pub fn JellyfinArtist(
                                     let ids: Vec<String> = artist_tracks()
                                         .iter()
                                         .filter_map(|t| {
-                                            let s = t.path.to_string_lossy().to_string();
-                                            s.split(':').nth(1).map(|id| id.to_string())
+                                            let k = t.id.key();
+                                            (!k.is_empty()).then(|| k.to_string())
                                         })
                                         .collect();
                                     crate::server::download_manager::delete_downloads(ids, config, download_queue);

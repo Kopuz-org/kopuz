@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use reader::models::Track;
 use serde_json::{Value, json};
 
@@ -238,12 +236,7 @@ fn walk_tracks(resp: &Value) -> Vec<Track> {
 }
 
 fn track_id(t: &Track) -> String {
-    t.path
-        .to_string_lossy()
-        .split(':')
-        .nth(1)
-        .unwrap_or("")
-        .to_string()
+    t.id.key().into_owned()
 }
 
 fn parse_card_shelf(card: &Value) -> Option<ParsedRow> {
@@ -420,17 +413,11 @@ fn parsed_to_track(p: ParsedRow) -> Track {
         Some(id) => format!("{SOURCE_PREFIX}:album:{id}"),
         None => synthesize_album_id(&album, &primary_artist),
     };
-    let path = match p.thumbnail_url {
-        Some(ref url) if !url.is_empty() => PathBuf::from(format!(
-            "{SOURCE_PREFIX}:{}:{}",
-            p.video_id,
-            encode_url_tag(url)
-        )),
-        _ => PathBuf::from(format!("{SOURCE_PREFIX}:{}", p.video_id)),
-    };
+    let cover = p.thumbnail_url.filter(|u| !u.is_empty());
 
     Track {
-        path,
+        id: super::yt_id(p.video_id),
+        cover,
         album_id,
         title: p.title,
         artist: primary_artist,
@@ -627,10 +614,6 @@ fn normalize_yt_thumbnail(url: &str) -> String {
         return format!("{}=w544-h544-l90-rj", &url[..idx]);
     }
     url.to_string()
-}
-
-pub(crate) fn encode_url_tag(url: &str) -> String {
-    format!("urlhex_{}", hex::encode(url.as_bytes()))
 }
 
 pub(crate) fn synthesize_album_id(album: &str, artist: &str) -> String {

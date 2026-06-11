@@ -57,9 +57,9 @@ fn album_cover_url(conf: &AppConfig, album: &Album) -> Option<String> {
 
 fn track_cover_url(conf: &AppConfig, track: &Track) -> Option<String> {
     let server = conf.server.as_ref()?;
-    let path_str = track.path.to_string_lossy();
-    utils::jellyfin_image::track_cover_url_with_album_fallback(
-        &path_str,
+    utils::jellyfin_image::resolve_track_cover(
+        track.cover.as_deref(),
+        &track.id.key(),
         &track.album_id,
         &server.url,
         server.access_token.as_deref(),
@@ -122,9 +122,8 @@ pub fn JellyfinHome(
             lib.jellyfin_tracks
                 .iter()
                 .filter(|t| {
-                    let id = t.path.to_string_lossy();
-                    let id_str = id.split(':').nth(1).unwrap_or(&id);
-                    if let Some(path_str) = conf.offline_tracks.get(id_str) {
+                    let id_str = t.id.key();
+                    if let Some(path_str) = conf.offline_tracks.get(id_str.as_ref()) {
                         std::path::Path::new(path_str).exists()
                     } else {
                         false
@@ -241,7 +240,7 @@ pub fn JellyfinHome(
         let track_by_id: HashMap<String, &Track> = lib
             .jellyfin_tracks
             .iter()
-            .filter_map(|t| server_track_id(&t.path.to_string_lossy()).map(|id| (id, t)))
+            .filter_map(|t| server_track_id(&t.id.uid()).map(|id| (id, t)))
             .collect();
         let album_by_id: HashMap<&str, &Album> = lib
             .jellyfin_albums
@@ -284,7 +283,7 @@ pub fn JellyfinHome(
         let track_by_id: HashMap<String, &Track> = lib
             .jellyfin_tracks
             .iter()
-            .filter_map(|t| server_track_id(&t.path.to_string_lossy()).map(|id| (id, t)))
+            .filter_map(|t| server_track_id(&t.id.uid()).map(|id| (id, t)))
             .collect();
         let album_by_id: HashMap<&str, &Album> = lib
             .jellyfin_albums
@@ -315,7 +314,7 @@ pub fn JellyfinHome(
             .map(|a| (a.id.as_str(), a.genre.as_str()))
             .collect();
         for track in &lib.jellyfin_tracks {
-            let path = track.path.to_string_lossy().to_string();
+            let path = track.id.uid();
             let plays = conf.listen_counts.get(&path).copied().unwrap_or(0);
             if plays == 0 {
                 continue;
@@ -368,9 +367,8 @@ pub fn JellyfinHome(
         let offline = *is_offline.read();
         for track in &lib.jellyfin_tracks {
             if offline {
-                let s = track.path.to_string_lossy();
-                let id = s.split(':').nth(1).unwrap_or(&s);
-                let is_downloaded = if let Some(path_str) = conf.offline_tracks.get(id) {
+                let id = track.id.key();
+                let is_downloaded = if let Some(path_str) = conf.offline_tracks.get(id.as_ref()) {
                     std::path::Path::new(path_str).exists()
                 } else {
                     false
@@ -794,9 +792,8 @@ fn ServerHeroBanner(
                                     .filter(|t| album_id_hero.as_deref() == Some(t.album_id.as_str()))
                                     .collect();
                                 !tracks.is_empty() && tracks.iter().all(|t| {
-                                    let path_str = t.path.to_string_lossy();
-                                    let parts: Vec<&str> = path_str.split(':').collect();
-                                    parts.len() >= 2 && store.is_jellyfin_favorite(parts[1])
+                                    let id = t.id.key();
+                                    !id.is_empty() && store.is_jellyfin_favorite(id.as_ref())
                                 })
                             };
                             let hero_heart_class = if jelly_hero_fav {
@@ -819,16 +816,14 @@ fn ServerHeroBanner(
                                         };
                                         let new_fav = !jelly_hero_fav;
                                         for track in &tracks {
-                                            let path_str = track.path.to_string_lossy().to_string();
-                                            let parts: Vec<&str> = path_str.split(':').collect();
-                                            if parts.len() >= 2 {
-                                                favorites_store.write().set_jellyfin(parts[1].to_string(), new_fav);
+                                            let id = track.id.key();
+                                            if !id.is_empty() {
+                                                favorites_store.write().set_jellyfin(id.to_string(), new_fav);
                                             }
                                         }
                                         let track_ids: Vec<String> = tracks.iter().filter_map(|t| {
-                                            let path_str = t.path.to_string_lossy().to_string();
-                                            let parts: Vec<&str> = path_str.split(':').collect();
-                                            if parts.len() >= 2 { Some(parts[1].to_string()) } else { None }
+                                            let id = t.id.key();
+                                            (!id.is_empty()).then(|| id.to_string())
                                         }).collect();
                                         spawn(async move {
                                             let Some(conn) =
@@ -916,7 +911,7 @@ fn render_continue_listening(
                         let album_id_opt = album_opt.as_ref().map(|a| a.id.clone());
                         let album_id_click = album_id_opt.clone();
                         let album_id_play = album_id_opt.clone();
-                        let key = track.path.to_string_lossy().to_string();
+                        let key = track.id.uid();
                         rsx! {
                             div {
                                 key: "{key}",
@@ -1231,15 +1226,15 @@ fn render_playlists(
                             lib.jellyfin_tracks
                                 .iter()
                                 .find(|t| {
-                                    let s = t.path.to_string_lossy();
-                                    s.split(':').nth(1).map(|id| id == tid).unwrap_or(false)
+                                    let id = t.id.key();
+                                    !id.is_empty() && id.as_ref() == tid.as_str()
                                 })
                                 .and_then(|t| {
                                     let conf = config.peek();
                                     if let Some(server) = &conf.server {
-                                        let path_str = t.path.to_string_lossy();
-                                        utils::jellyfin_image::track_cover_url_with_album_fallback(
-                                            &path_str,
+                                        utils::jellyfin_image::resolve_track_cover(
+                                            t.cover.as_deref(),
+                                            &t.id.key(),
                                             &t.album_id,
                                             &server.url,
                                             server.access_token.as_deref(),

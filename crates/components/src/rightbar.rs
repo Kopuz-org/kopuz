@@ -38,7 +38,7 @@ pub fn Rightbar(
                 track.artist,
                 track.album,
                 track.duration,
-                track.path.to_string_lossy().into_owned(),
+                track.id.uid(),
             )
         } else {
             (

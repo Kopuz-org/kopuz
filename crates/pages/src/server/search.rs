@@ -54,10 +54,10 @@ pub fn JellyfinSearch(
             for track in &lib.jellyfin_tracks {
                 if valid_album_ids.contains(&track.album_id) {
                     let cover = if let Some(server) = &config.read().server {
-                        let path_str = track.path.to_string_lossy();
                         utils::map_cover_url(
-                            utils::jellyfin_image::track_cover_url_with_album_fallback(
-                                &path_str,
+                            utils::jellyfin_image::resolve_track_cover(
+                                track.cover.as_deref(),
+                                &track.id.key(),
                                 &track.album_id,
                                 &server.url,
                                 server.access_token.as_deref(),

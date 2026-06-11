@@ -174,7 +174,7 @@ pub fn LocalHome(
         let track_by_path: HashMap<String, &Track> = lib
             .tracks
             .iter()
-            .map(|t| (t.path.to_string_lossy().to_string(), t))
+            .map(|t| (t.id.uid(), t))
             .collect();
         let album_by_id: HashMap<&str, &Album> =
             lib.albums.iter().map(|a| (a.id.as_str(), a)).collect();
@@ -213,7 +213,7 @@ pub fn LocalHome(
         let track_by_path: HashMap<String, &Track> = lib
             .tracks
             .iter()
-            .map(|t| (t.path.to_string_lossy().to_string(), t))
+            .map(|t| (t.id.uid(), t))
             .collect();
         let album_by_id: HashMap<&str, &Album> =
             lib.albums.iter().map(|a| (a.id.as_str(), a)).collect();
@@ -240,7 +240,7 @@ pub fn LocalHome(
             .map(|a| (a.id.as_str(), a.genre.as_str()))
             .collect();
         for track in &lib.tracks {
-            let path = track.path.to_string_lossy().to_string();
+            let path = track.id.uid();
             let plays = conf.listen_counts.get(&path).copied().unwrap_or(0);
             if plays == 0 {
                 continue;
@@ -640,7 +640,7 @@ fn LocalHeroBanner(
                                 let tracks: Vec<_> = lib.tracks.iter()
                                     .filter(|t| local_hero_album_id.as_deref() == Some(t.album_id.as_str()))
                                     .collect();
-                                !tracks.is_empty() && tracks.iter().all(|t| store.is_local_favorite(&t.path))
+                                !tracks.is_empty() && tracks.iter().all(|t| store.is_local_favorite(&t.id.uid_path()))
                             };
                             let heart_class = if local_hero_fav {
                                 "w-11 h-11 rounded-full bg-white/10 border border-white/20 flex items-center justify-center text-red-400 hover:bg-white/20 transition-all"
@@ -663,11 +663,11 @@ fn LocalHeroBanner(
                                             };
                                             let new_fav = !local_hero_fav;
                                             for track in tracks {
-                                                let currently = favorites_store.read().is_local_favorite(&track.path);
+                                                let currently = favorites_store.read().is_local_favorite(&track.id.uid_path());
                                                 if new_fav && !currently {
-                                                    favorites_store.write().toggle_local(track.path);
+                                                    favorites_store.write().toggle_local(track.id.uid_path());
                                                 } else if !new_fav && currently {
-                                                    favorites_store.write().toggle_local(track.path);
+                                                    favorites_store.write().toggle_local(track.id.uid_path());
                                                 }
                                             }
                                         }
@@ -749,7 +749,7 @@ fn render_continue_listening(
                         let album_id_opt = album_opt.as_ref().map(|a| a.id.clone());
                         let title = track.title.clone();
                         let artist = track.artist.clone();
-                        let key = track.path.to_string_lossy().to_string();
+                        let key = track.id.uid();
                         let album_id_click = album_id_opt.clone();
                         let album_id_play = album_id_opt.clone();
                         rsx! {
@@ -1099,7 +1099,7 @@ fn render_playlists(
                             let lib = library.peek();
                             lib.tracks
                                 .iter()
-                                .find(|t| t.path.to_string_lossy() == track_path)
+                                .find(|t| t.id.uid() == track_path)
                                 .and_then(|t| {
                                     lib.albums
                                         .iter()

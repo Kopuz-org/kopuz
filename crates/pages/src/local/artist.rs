@@ -205,7 +205,7 @@ pub fn LocalArtist(
             .tracks
             .iter()
             .filter(|t| t.album_id == album_id)
-            .map(|t| t.path.clone())
+            .map(|t| t.id.uid_path())
             .collect()
     };
 
@@ -299,11 +299,13 @@ pub fn LocalArtist(
                             track: track.clone(),
                             on_close: move |_| metadata_track.set(None),
                             on_save: move |edits: reader::models::TrackEdits| {
-                                let path = track.path.clone();
+                                let Some(path) = track.id.local_path().map(|p| p.to_path_buf()) else {
+                                    return;
+                                };
                                 match reader::write_tags(&path, &edits) {
                                     Ok(()) => {
                                         let mut lib = library.write();
-                                        if let Some(t) = lib.tracks.iter_mut().find(|t| t.path == path) {
+                                        if let Some(t) = lib.tracks.iter_mut().find(|t| t.id.uid_path() == path) {
                                             t.title = edits.title.trim().to_string();
                                             t.artist = edits.artist.trim().to_string();
                                             t.artists = edits
@@ -342,7 +344,7 @@ pub fn LocalArtist(
                                 }
                                 let tracks: Vec<_> = artist_tracks()
                                     .iter()
-                                    .filter(|t| selected.contains(&t.path))
+                                    .filter(|t| selected.contains(&t.id.uid_path()))
                                     .cloned()
                                     .collect();
 
@@ -356,7 +358,7 @@ pub fn LocalArtist(
                                 let paths: Vec<_> = selected_tracks.read().iter().cloned().collect();
                                 for path in &paths {
                                     if std::fs::remove_file(path).is_ok() {
-                                        library.write().remove_track(path);
+                                        library.write().remove_track(&reader::models::TrackId::Local(path.clone()));
                                     }
                                 }
                                 clear_selection(&mut is_selection_mode, &mut selected_tracks);
@@ -504,7 +506,7 @@ pub fn LocalArtist(
                                                                                     .tracks
                                                                                     .iter()
                                                                                     .filter(|t| t.album == title)
-                                                                                    .map(|t| t.path.clone())
+                                                                                    .filter_map(|t| t.id.local_path().map(|p| p.to_path_buf()))
                                                                                     .collect();
 
                                                                                 for path in &tracks_to_delete {
@@ -567,10 +569,10 @@ pub fn LocalArtist(
                                 active_track: active_menu_track.read().clone(),
                                 is_selection_mode: is_selection_mode(),
                                 selected_tracks: selected_tracks.read().clone(),
-                                all_selected: !artist_tracks().is_empty() && artist_tracks().iter().all(|track| selected_tracks.read().contains(&track.path)),
+                                all_selected: !artist_tracks().is_empty() && artist_tracks().iter().all(|track| selected_tracks.read().contains(&track.id.uid_path())),
                                 on_select_all: move |selected: bool| {
                                     if selected {
-                                        selected_tracks.set(artist_tracks().into_iter().map(|track| track.path).collect());
+                                        selected_tracks.set(artist_tracks().into_iter().map(|track| track.id.uid_path()).collect());
                                         is_selection_mode.set(true);
                                     } else {
                                         selected_tracks.write().clear();
@@ -580,16 +582,16 @@ pub fn LocalArtist(
                                 on_long_press: move |idx: usize| {
                                     if let Some(track) = artist_tracks().get(idx) {
                                         is_selection_mode.set(true);
-                                        selected_tracks.write().insert(track.path.clone());
+                                        selected_tracks.write().insert(track.id.uid_path());
                                     }
                                 },
                                 on_select: move |(idx, selected): (usize, bool)| {
                                     if let Some(track) = artist_tracks().get(idx) {
                                         if selected {
                                             is_selection_mode.set(true);
-                                            selected_tracks.write().insert(track.path.clone());
+                                            selected_tracks.write().insert(track.id.uid_path());
                                         } else {
-                                            selected_tracks.write().remove(&track.path);
+                                            selected_tracks.write().remove(&track.id.uid_path());
                                             if selected_tracks.read().is_empty() {
                                                 is_selection_mode.set(false);
                                             }
@@ -612,15 +614,15 @@ pub fn LocalArtist(
                                 },
                                 on_click_menu: move |idx: usize| {
                                     if let Some(track) = artist_tracks().get(idx) {
-                                        let path = &track.path;
-                                        let already_open = active_menu_track.read().as_ref() == Some(path);
+                                        let path = track.id.uid_path();
+                                        let already_open = active_menu_track.read().as_ref() == Some(&path);
                                         active_menu_track.set((!already_open).then(|| path.clone()));
                                     }
                                 },
                                 on_close_menu: move |_| active_menu_track.set(None),
                                 on_add_to_playlist: move |idx: usize| {
                                     if let Some(track) = artist_tracks().get(idx) {
-                                        selected_track_for_playlist.set(Some(track.path.clone()));
+                                        selected_track_for_playlist.set(Some(track.id.uid_path()));
                                         show_playlist_modal.set(true);
                                         active_menu_track.set(None);
                                     }
@@ -639,8 +641,10 @@ pub fn LocalArtist(
                                 },
                                 on_delete_track: move |idx: usize| {
                                     if let Some(track) = artist_tracks().get(idx) {
-                                        if std::fs::remove_file(&track.path).is_ok() {
-                                            library.write().remove_track(&track.path);
+                                        if let Some(p) = track.id.local_path() {
+                                            if std::fs::remove_file(p).is_ok() {
+                                                library.write().remove_track(&track.id);
+                                            }
                                         }
                                     }
                                     active_menu_track.set(None);

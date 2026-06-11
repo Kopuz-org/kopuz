@@ -85,7 +85,7 @@ pub fn LocalPlaylists(
             .and_then(|path| utils::format_artwork_url(Some(path)))
             .or_else(|| {
                 let first_path = playlist.tracks.first()?;
-                let track = lib.tracks.iter().find(|t| t.path == *first_path)?;
+                let track = lib.tracks.iter().find(|t| t.id.uid_path() == *first_path)?;
                 let album = lib.albums.iter().find(|a| a.id == track.album_id)?;
 
                 utils::format_artwork_url(album.cover_path.as_ref())

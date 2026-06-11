@@ -185,8 +185,10 @@ pub fn AlbumDetails(
                 on_delete_track: move |idx: usize| {
                     if let Some(t) = tracks_for_delete.get(idx) {
                         #[cfg(not(target_arch = "wasm32"))]
-                        if std::fs::remove_file(&t.path).is_ok() {
-                            library.write().remove_track(&t.path);
+                        if let Some(track_path) = t.id.local_path()
+                            && std::fs::remove_file(track_path).is_ok()
+                        {
+                            library.write().remove_track(&t.id);
                             let lib_path = directories::ProjectDirs::from(
                                     "com",
                                     "temidaradev",
@@ -203,7 +205,9 @@ pub fn AlbumDetails(
                     {
                         for path in &paths {
                             if std::fs::remove_file(path).is_ok() {
-                                library.write().remove_track(path);
+                                library
+                                    .write()
+                                    .remove_track(&reader::models::TrackId::Local(path.clone()));
                             }
                         }
                         let lib_path = directories::ProjectDirs::from("com", "temidaradev", "kopuz")

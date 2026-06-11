@@ -64,7 +64,7 @@ pub fn PlaylistDetail(
     if !is_jellyfin {
         let local_tracks: Vec<_> = local_tracks_paths
             .iter()
-            .filter_map(|path| lib.tracks.iter().find(|t| t.path == *path).cloned())
+            .filter_map(|path| lib.tracks.iter().find(|t| t.id.uid_path() == *path).cloned())
             .collect();
         let local_tracks_for_effect = local_tracks.clone();
         use_effect(move || {
@@ -137,7 +137,8 @@ pub fn PlaylistDetail(
                                             .or_else(|| item.artists.as_ref().map(|a| a.join(", ")))
                                             .unwrap_or_default();
                                         new_tracks.push(reader::models::Track {
-                                            path: PathBuf::from(path_str),
+                                            id: reader::models::TrackId::from_legacy_path(&path_str),
+                                            cover: None,
                                             album_id: item
                                                 .album_id
                                                 .map(|id| format!("jellyfin:{}", id))
@@ -198,7 +199,8 @@ pub fn PlaylistDetail(
                                                 format!("jellyfin:{}:none", item.id)
                                             });
                                         new_tracks.push(reader::models::Track {
-                                            path,
+                                            id: reader::models::TrackId::from_legacy_path(&path.to_string_lossy()),
+                                            cover: None,
                                             album_id,
                                             title: item.title,
                                             artist: item.artist.clone().unwrap_or_default(),
@@ -259,9 +261,9 @@ pub fn PlaylistDetail(
             ))
         } else {
             tracks_val.first().and_then(|t| {
-                let path_str = t.path.to_string_lossy();
-                utils::jellyfin_image::track_cover_url_with_album_fallback(
-                    &path_str,
+                utils::jellyfin_image::resolve_track_cover(
+                    t.cover.as_deref(),
+                    &t.id.key(),
                     &t.album_id,
                     &server.url,
                     server.access_token.as_deref(),
@@ -350,8 +352,10 @@ pub fn PlaylistDetail(
                 if !is_jellyfin {
                     if let Some(t) = tracks.read().get(idx).cloned() {
                         #[cfg(not(target_arch = "wasm32"))]
-                        if std::fs::remove_file(&t.path).is_ok() {
-                            library.write().remove_track(&t.path);
+                        if let Some(del_path) = t.id.local_path()
+                            && std::fs::remove_file(del_path).is_ok()
+                        {
+                            library.write().remove_track(&t.id);
                             let lib_path = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
                                 .map(|d| d.config_dir().join("library.json"))
                                 .unwrap_or_else(|| PathBuf::from("./config/library.json"));
@@ -365,7 +369,9 @@ pub fn PlaylistDetail(
                     #[cfg(not(target_arch = "wasm32"))]
                     for path in &paths {
                         if std::fs::remove_file(path).is_ok() {
-                            library.write().remove_track(path);
+                            library
+                                .write()
+                                .remove_track(&reader::models::TrackId::Local(path.clone()));
                         }
                     }
                 }
@@ -377,17 +383,15 @@ pub fn PlaylistDetail(
                         if let Some(playlist) =
                             store.playlists.iter_mut().find(|p| p.id == pid_for_remove)
                         {
-                            playlist.tracks.retain(|p| p != &t.path);
+                            playlist.tracks.retain(|p| p != &t.id.uid_path());
                         }
                     } else {
                         let pid_clone = pid_for_remove.clone();
                         let entry_id_opt = t.playlist_item_id.clone();
-                        let track_video_id = t
-                            .path
-                            .to_string_lossy()
-                            .split(':')
-                            .nth(1)
-                            .map(|s| s.to_string());
+                        let track_video_id = {
+                            let k = t.id.key();
+                            (!k.is_empty()).then(|| k.to_string())
+                        };
                         let remove_idx = idx;
                         spawn(async move {
                             let conf = config.peek();
@@ -495,7 +499,7 @@ pub fn PlaylistDetail(
                                         let ids: Vec<String> = track_list
                                             .iter()
                                             .filter_map(|t| {
-                                                let s = t.path.to_string_lossy();
+                                                let s = t.id.uid();
                                                 let parts: Vec<&str> = s.split(':').collect();
                                                 if parts.len() >= 2 {
                                                     Some(parts[1].to_string())
@@ -562,7 +566,7 @@ pub fn PlaylistDetail(
                                         let ids: Vec<String> = track_list
                                             .iter()
                                             .filter_map(|t| {
-                                                let s = t.path.to_string_lossy();
+                                                let s = t.id.uid();
                                                 let parts: Vec<&str> = s.split(':').collect();
                                                 if parts.len() >= 2 {
                                                     Some(parts[1].to_string())

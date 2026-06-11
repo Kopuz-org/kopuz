@@ -109,11 +109,8 @@ pub fn JellyfinFavorites(
                             let ids: Vec<String> = accumulated
                                 .iter()
                                 .filter_map(|t| {
-                                    t.path
-                                        .to_string_lossy()
-                                        .split(':')
-                                        .nth(1)
-                                        .map(|s| s.to_string())
+                                    let k = t.id.key();
+                                    (!k.is_empty()).then(|| k.to_string())
                                 })
                                 .collect();
                             let now = std::time::SystemTime::now()
@@ -121,16 +118,16 @@ pub fn JellyfinFavorites(
                                 .map(|d| d.as_secs())
                                 .unwrap_or(0);
                             library.write().last_yt_sync_at = Some(now);
-                            let liked_cover = accumulated
-                                .first()
-                                .and_then(|t| {
-                                    t.path
-                                        .to_string_lossy()
-                                        .split(':')
-                                        .nth(2)
-                                        .filter(|s| s.starts_with("urlhex_"))
-                                        .map(|s| s.to_string())
-                                });
+                            let liked_cover =
+                                accumulated.first().and_then(|t| t.cover.as_deref()).map(
+                                    |c| {
+                                        if c.starts_with("http://") || c.starts_with("https://") {
+                                            utils::jellyfin_image::encode_cover_url(c)
+                                        } else {
+                                            c.to_string()
+                                        }
+                                    },
+                                );
                             let liked_entry = reader::models::JellyfinPlaylist {
                                 id: "LM".to_string(),
                                 name: "Liked Songs".to_string(),
@@ -179,19 +176,15 @@ pub fn JellyfinFavorites(
         lib.jellyfin_tracks
             .iter()
             .filter(|t| {
-                let path_str = t.path.to_string_lossy();
-                path_str
-                    .split(':')
-                    .nth(1)
-                    .map(|id| fav_set.contains(id))
-                    .unwrap_or(false)
+                let id = t.id.key();
+                fav_set.contains(id.as_ref())
             })
             .map(|t| {
                 let cover_url = if let Some(ref srv) = server_ref {
-                    let path_str = t.path.to_string_lossy();
                     utils::map_cover_url(
-                        utils::jellyfin_image::track_cover_url_with_album_fallback(
-                            &path_str,
+                        utils::jellyfin_image::resolve_track_cover(
+                            t.cover.as_deref(),
+                            &t.id.key(),
                             &t.album_id,
                             &srv.url,
                             srv.access_token.as_deref(),
@@ -217,7 +210,7 @@ pub fn JellyfinFavorites(
 
     let currently_playing_path = {
         let idx = *ctrl.current_queue_index.read();
-        ctrl.get_track_at(idx).map(|track| track.path.clone())
+        ctrl.get_track_at(idx).map(|track| track.id.uid_path())
     };
 
     let displayed_tracks_for_selection = sorted_displayed_tracks.clone();
@@ -230,18 +223,17 @@ pub fn JellyfinFavorites(
         .enumerate()
         .map(|(idx, (track, cover_url))| {
             let track_menu = track.clone();
-            let track_path = track.path.clone();
-            let track_select = track.path.clone();
+            let track_path = track.id.uid_path();
+            let track_select = track.id.uid_path();
             let track_add = track.clone();
             let track_queue = track.clone();
             let queue_source = queue_tracks.clone();
-            let track_key = format!("{}-{}", track.path.display(), idx);
-            let is_menu_open = active_menu_track.read().as_ref() == Some(&track.path);
+            let track_key = format!("{}-{}", track.id.uid(), idx);
+            let is_menu_open = active_menu_track.read().as_ref() == Some(&track.id.uid_path());
             let is_selected = selected_tracks.read().contains(&track_path);
-            let matches_current_path = currently_playing_path.as_ref() == Some(&track.path);
+            let matches_current_path = currently_playing_path.as_ref() == Some(&track.id.uid_path());
 
-            let path_str = track.path.to_string_lossy().to_string();
-            let item_id: String = path_str.split(':').nth(1).unwrap_or("").to_string();
+            let item_id: String = track.id.key().to_string();
             let is_downloaded = if let Some(path_str) = config.read().offline_tracks.get(&item_id) {
                 std::path::Path::new(path_str).exists()
             } else {
@@ -281,14 +273,14 @@ pub fn JellyfinFavorites(
                         }
                     },
                     on_click_menu: move |_| {
-                        if active_menu_track.read().as_ref() == Some(&track_menu.path) {
+                        if active_menu_track.read().as_ref() == Some(&track_menu.id.uid_path()) {
                             active_menu_track.set(None);
                         } else {
-                            active_menu_track.set(Some(track_menu.path.clone()));
+                            active_menu_track.set(Some(track_menu.id.uid_path()));
                         }
                     },
                     on_add_to_playlist: move |_| {
-                        selected_track_for_playlist.set(Some(track_add.path.clone()));
+                        selected_track_for_playlist.set(Some(track_add.id.uid_path()));
                         show_playlist_modal.set(true);
                         active_menu_track.set(None);
                     },
@@ -416,7 +408,7 @@ pub fn JellyfinFavorites(
                         }
                         let tracks: Vec<_> = displayed_tracks_for_selection
                             .iter()
-                            .filter(|(t, _)| selected.contains(&t.path))
+                            .filter(|(t, _)| selected.contains(&t.id.uid_path()))
                             .map(|(track, _)| track.clone())
                             .collect();
                         if !tracks.is_empty() {
@@ -537,23 +529,23 @@ pub fn JellyfinFavorites(
                 div {
                     class: "flex items-center gap-3 mb-4 px-2 text-sm font-medium text-slate-500 uppercase tracking-wider",
                     button {
-                        class: if displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.path)) {
+                        class: if displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.id.uid_path())) {
                             "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
                         } else {
                             "w-4 h-4 rounded border border-white/20 bg-white/5 hover:border-white/50 transition-colors"
                         },
                         aria_label: i18n::t("select_all_tracks"),
                         onclick: move |_| {
-                            let all_selected = !displayed_tracks.is_empty() && displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.path));
+                            let all_selected = !displayed_tracks.is_empty() && displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.id.uid_path()));
                             if all_selected {
                                 selected_tracks.write().clear();
                                 is_selection_mode.set(false);
                             } else {
-                                selected_tracks.set(displayed_tracks.iter().map(|(track, _)| track.path.clone()).collect());
+                                selected_tracks.set(displayed_tracks.iter().map(|(track, _)| track.id.uid_path()).collect());
                                 is_selection_mode.set(true);
                             }
                         },
-                        if displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.path)) {
+                        if displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.id.uid_path())) {
                             i { class: "fa-solid fa-check", style: "font-size: 9px;" }
                         }
                     }
@@ -626,17 +618,16 @@ fn synthesize_albums(tracks: &[reader::models::Track]) -> Vec<reader::models::Al
     by_album
         .into_iter()
         .map(|(album_id, t)| {
-            // Reuse the first track's encoded thumbnail (3rd segment of
-            // its path: `ytmusic:VID:urlhex_HEX`) as the album cover.
-            // `jellyfin_image_url_from_path` will decode the embedded
-            // URL out of this PathBuf the same way it does for tracks.
-            let cover_path = t
-                .path
-                .to_string_lossy()
-                .split(':')
-                .nth(2)
-                .filter(|s| s.starts_with("urlhex_"))
-                .map(|tag| PathBuf::from(format!("ytmusic:_:{tag}")));
+            // Reuse the first track's thumbnail as the album cover, in the
+            // form `jellyfin_image_url_from_path` decodes: a raw URL via the
+            // `directurl:` prefix, an already-embedded tag via `ytmusic:_:`.
+            let cover_path = t.cover.as_deref().map(|c| {
+                if c.starts_with("http://") || c.starts_with("https://") {
+                    PathBuf::from(format!("directurl:{c}"))
+                } else {
+                    PathBuf::from(format!("ytmusic:_:{c}"))
+                }
+            });
             reader::models::Album {
                 id: album_id,
                 title: if t.album.is_empty() {

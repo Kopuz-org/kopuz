@@ -37,12 +37,12 @@ pub fn LocalLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Element
         all_tracks.sort_by(|a, b| {
             let a_plays = conf
                 .listen_counts
-                .get(&a.path.to_string_lossy().to_string())
+                .get(&a.id.uid())
                 .copied()
                 .unwrap_or(0);
             let b_plays = conf
                 .listen_counts
-                .get(&b.path.to_string_lossy().to_string())
+                .get(&b.id.uid())
                 .copied()
                 .unwrap_or(0);
 
@@ -55,7 +55,7 @@ pub fn LocalLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Element
         all_tracks
             .into_iter()
             .map(|track| {
-                let track_id = track.path.to_string_lossy().to_string();
+                let track_id = track.id.uid();
                 let plays = conf.listen_counts.get(&track_id).copied().unwrap_or(0);
                 let (genre, cover_url) =
                     album_map.get(&track.album_id).cloned().unwrap_or_default();
@@ -164,7 +164,7 @@ pub fn LocalLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Element
                     } else {
                         for (idx, track, plays, genre, cover_url) in visible_tracks {
                             {
-                                let track_id = track.path.to_string_lossy().to_string();
+                                let track_id = track.id.uid();
                                 let queue = std::sync::Arc::clone(&*queue_tracks.read());
                                 rsx! {
                                     div { key: "{track_id}", style: "height: {ITEM_HEIGHT}px;",

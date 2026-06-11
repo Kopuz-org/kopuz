@@ -32,7 +32,7 @@ pub fn JellyfinLibrary(
         .get(&Route::Library)
         .copied()
         .unwrap_or(0.0);
-    let mut scroll_stat = use_signal(move || saved_scroll);
+    let scroll_stat = use_signal(move || saved_scroll);
     use_effect(move || {
         let curr = sort_order.read().clone();
         if config.peek().sort_order != curr {
@@ -109,10 +109,10 @@ pub fn JellyfinLibrary(
             .into_iter()
             .map(|t| {
                 let cover_url = if let Some(server) = &conf.server {
-                    let path_str = t.path.to_string_lossy();
                     utils::map_cover_url(
-                        utils::jellyfin_image::track_cover_url_with_album_fallback(
-                            &path_str,
+                        utils::jellyfin_image::resolve_track_cover(
+                            t.cover.as_deref(),
+                            &t.id.key(),
                             &t.album_id,
                             &server.url,
                             server.access_token.as_deref(),
@@ -156,7 +156,7 @@ pub fn JellyfinLibrary(
         let queue = ctrl.queue.read();
         let q_idx = *ctrl.current_queue_index.read();
         let qt = queue_tracks.read();
-        if queue.len() == qt.len() && queue.iter().zip(qt.iter()).all(|(q, t)| q.path == t.path) {
+        if queue.len() == qt.len() && queue.iter().zip(qt.iter()).all(|(q, t)| q.id == t.id) {
             Some(q_idx)
         } else {
             None
@@ -172,16 +172,15 @@ pub fn JellyfinLibrary(
             let track_menu = track.clone();
             let track_add = track.clone();
             let track_queue = track.clone();
-            let track_path = track.path.clone();
+            let track_path = track.id.uid_path();
             let is_currently_playing = currently_playing_idx == Some(idx);
-            let track_select = track.path.clone();
+            let track_select = track.id.uid_path();
             let queue_arc = queue_source.read().clone();
-            let track_key = format!("{}-{}", track.path.display(), idx);
-            let is_menu_open = active_menu_track.read().as_ref() == Some(&track.path);
+            let track_key = format!("{}-{}", track.id.uid(), idx);
+            let is_menu_open = active_menu_track.read().as_ref() == Some(&track.id.uid_path());
             let is_selected = selected_tracks.read().contains(&track_path);
 
-            let path_str = track.path.to_string_lossy().to_string();
-            let item_id: String = path_str.split(':').nth(1).unwrap_or("").to_string();
+            let item_id: String = track.id.key().to_string();
             let is_downloaded = if let Some(path_str) = config.read().offline_tracks.get(&item_id) {
                 std::path::Path::new(path_str).exists()
             } else {
@@ -227,14 +226,14 @@ pub fn JellyfinLibrary(
                             }
                         },
                         on_click_menu: move |_| {
-                            if active_menu_track.read().as_ref() == Some(&track_menu.path) {
+                            if active_menu_track.read().as_ref() == Some(&track_menu.id.uid_path()) {
                                 active_menu_track.set(None);
                             } else {
-                                active_menu_track.set(Some(track_menu.path.clone()));
+                                active_menu_track.set(Some(track_menu.id.uid_path()));
                             }
                         },
                         on_add_to_playlist: move |_| {
-                            selected_track_for_playlist.set(Some(track_add.path.clone()));
+                            selected_track_for_playlist.set(Some(track_add.id.uid_path()));
                             show_playlist_modal.set(true);
                             active_menu_track.set(None);
                         },
@@ -371,7 +370,7 @@ pub fn JellyfinLibrary(
                         let tracks: Vec<_> = displayed_tracks
                             .read()
                             .iter()
-                            .filter(|(t, _)| selected.contains(&t.path))
+                            .filter(|(t, _)| selected.contains(&t.id.uid_path()))
                             .map(|(track, _)| track.clone())
                             .collect();
                         if !tracks.is_empty() {
@@ -462,7 +461,7 @@ pub fn JellyfinLibrary(
                             && displayed_tracks
                                 .read()
                                 .iter()
-                                .all(|(track, _)| selected_tracks.read().contains(&track.path))
+                                .all(|(track, _)| selected_tracks.read().contains(&track.id.uid_path()))
                         {
                             "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
                         } else {
@@ -475,13 +474,13 @@ pub fn JellyfinLibrary(
                             let all_selected = !tracks.is_empty()
                                 && tracks
                                     .iter()
-                                    .all(|(track, _)| selected_tracks.read().contains(&track.path));
+                                    .all(|(track, _)| selected_tracks.read().contains(&track.id.uid_path()));
                             if all_selected {
                                 selected_tracks.write().clear();
                                 is_selection_mode.set(false);
                             } else {
                                 selected_tracks
-                                    .set(tracks.iter().map(|(track, _)| track.path.clone()).collect());
+                                    .set(tracks.iter().map(|(track, _)| track.id.uid_path()).collect());
                                 is_selection_mode.set(true);
                             }
                         },
@@ -489,7 +488,7 @@ pub fn JellyfinLibrary(
                             && displayed_tracks
                                 .read()
                                 .iter()
-                                .all(|(track, _)| selected_tracks.read().contains(&track.path))
+                                .all(|(track, _)| selected_tracks.read().contains(&track.id.uid_path()))
                         {
                             i { class: "fa-solid fa-check", style: "font-size: 9px;" }
                         }

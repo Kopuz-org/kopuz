@@ -130,18 +130,20 @@ pub async fn sync_server_library(
                     let count = items.len();
 
                     for item in items {
-                        let mut path_str = format!("jellyfin:{}", item.id);
-                        if let Some(tags) = &item.image_tags {
-                            if let Some(tag) = tags.get("Primary") {
-                                path_str.push_str(&format!(":{}", tag));
-                            }
-                        }
+                        let cover = item
+                            .image_tags
+                            .as_ref()
+                            .and_then(|tags| tags.get("Primary").cloned());
 
                         let bitrate_kbps = item.bitrate.unwrap_or(0) / 1000;
                         let bitrate_u16 = bitrate_kbps.min(u16::MAX as u32) as u16;
 
                         out_tracks.push(Track {
-                            path: PathBuf::from(path_str),
+                            id: reader::models::TrackId::Server {
+                                service: MusicService::Jellyfin,
+                                item_id: item.id.clone(),
+                            },
+                            cover,
                             album_id: item
                                 .album_id
                                 .map(|id| format!("jellyfin:{}", id))
@@ -250,7 +252,7 @@ pub async fn sync_server_library(
                 if !lib_write
                     .jellyfin_tracks
                     .iter()
-                    .any(|t| t.path == track.path)
+                    .any(|t| t.id == track.id)
                 {
                     lib_write.jellyfin_tracks.push(track);
                 }
@@ -328,7 +330,7 @@ pub async fn sync_server_library(
                 if !lib_write
                     .jellyfin_tracks
                     .iter()
-                    .any(|t| t.path == track.path)
+                    .any(|t| t.id == track.id)
                 {
                     lib_write.jellyfin_tracks.push(track);
                 }
@@ -446,14 +448,12 @@ pub async fn fetch_subsonic_library(
                     .and_then(|cover_art_id| remote.cover_art_url(cover_art_id, Some(512)).ok())
                     .map(|url| encode_cover_url_tag(&url));
 
-                let song_path = if let Some(tag) = &song_cover_tag {
-                    format!("{}:{}:{}", provider_prefix, song.id, tag)
-                } else {
-                    format!("{}:{}:none", provider_prefix, song.id)
-                };
-
                 tracks_out.push(Track {
-                    path: PathBuf::from(song_path),
+                    id: reader::models::TrackId::Server {
+                        service,
+                        item_id: song.id.clone(),
+                    },
+                    cover: Some(song_cover_tag.unwrap_or_else(|| "none".to_string())),
                     album_id: album_id_prefixed.clone(),
                     title: song.title,
                     artist: song.artist.clone().unwrap_or_else(|| album_artist.clone()),

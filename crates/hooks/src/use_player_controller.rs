@@ -82,7 +82,7 @@ pub struct PendingCrossfadeUiState {
 
 impl PlayerController {
     fn track_key(track: &Track) -> String {
-        track.path.to_string_lossy().to_string()
+        track.id.uid().to_string()
     }
 
     fn shift_indices_at_or_after(indices: &mut [usize], at: usize, by: usize) {
@@ -134,8 +134,9 @@ impl PlayerController {
                 .server
                 .as_ref()
                 .and_then(|server| {
-                    utils::jellyfin_image::track_cover_url_with_album_fallback(
-                        &path_str,
+                    utils::jellyfin_image::resolve_track_cover(
+                        track.cover.as_deref(),
+                        &track.id.key(),
                         &track.album_id,
                         &server.url,
                         server.access_token.as_deref(),
@@ -150,8 +151,12 @@ impl PlayerController {
                 .server
                 .as_ref()
                 .and_then(|server| {
+                    let subsonic_path = match track.cover.as_deref() {
+                        Some(c) => format!("{}:{}", track.id.uid(), c),
+                        None => track.id.uid(),
+                    };
                     utils::subsonic_image::subsonic_image_url_from_path(
-                        &path_str,
+                        &subsonic_path,
                         &server.url,
                         server.access_token.as_deref(),
                         800,
@@ -159,22 +164,16 @@ impl PlayerController {
                     )
                 })
                 .unwrap_or_default(),
-            "ytmusic" => {
-                // YT tracks carry their thumbnail in album_id as
-                // `ytmusic:_:urlhex_HEX`. Pass empty server_url so
-                // `track_cover_url_with_album_fallback` skips its
-                // jellyfin-URL fallback path and only returns the
-                // embedded URL via decode_embedded_cover_url.
-                utils::jellyfin_image::track_cover_url_with_album_fallback(
-                    &path_str,
-                    &track.album_id,
-                    "",
-                    None,
-                    800,
-                    90,
-                )
-                .unwrap_or_default()
-            }
+            "ytmusic" => utils::jellyfin_image::resolve_track_cover(
+                track.cover.as_deref(),
+                &track.id.key(),
+                &track.album_id,
+                "",
+                None,
+                800,
+                90,
+            )
+            .unwrap_or_default(),
             _ => self
                 .library
                 .read()
@@ -408,7 +407,7 @@ impl PlayerController {
         self.cancel_radio_task();
 
         if let Some(track) = self.get_track_at(idx) {
-            let path_str = track.path.to_string_lossy().to_string();
+            let path_str = track.id.uid().to_string();
             let (restore_seek_secs, clear_pending_resume_on_success) =
                 self.pending_resume_seek(&track);
             let use_crossfade = allow_crossfade
@@ -569,18 +568,17 @@ impl PlayerController {
                                     stream_url.push_str(&format!("&api_key={}", token));
                                 }
 
-                                let cover_url = {
-                                    let path_str = track.path.to_string_lossy();
-                                    utils::jellyfin_image::track_cover_url_with_album_fallback(
-                                        &path_str,
+                                let cover_url =
+                                    utils::jellyfin_image::resolve_track_cover(
+                                        track.cover.as_deref(),
+                                        &track.id.key(),
                                         &track.album_id,
                                         &server.url,
                                         server.access_token.as_deref(),
                                         800,
                                         90,
                                     )
-                                    .unwrap_or_default()
-                                };
+                                    .unwrap_or_default();
 
                                 (stream_url, cover_url)
                             }
@@ -595,9 +593,13 @@ impl PlayerController {
                                             password,
                                         );
                                         let stream_url = remote.stream_url(&id).unwrap_or_default();
+                                        let subsonic_path = match track.cover.as_deref() {
+                                            Some(c) => format!("{}:{}", track.id.uid(), c),
+                                            None => track.id.uid(),
+                                        };
                                         let cover_url =
                                             utils::subsonic_image::subsonic_image_url_from_path(
-                                                &path_str,
+                                                &subsonic_path,
                                                 &server.url,
                                                 server.access_token.as_deref(),
                                                 800,
@@ -622,8 +624,9 @@ impl PlayerController {
                             // bottombar shows artwork immediately on click.
                             MusicService::YtMusic => {
                                 let cover_url =
-                                    utils::jellyfin_image::track_cover_url_with_album_fallback(
-                                        &path_str,
+                                    utils::jellyfin_image::resolve_track_cover(
+                                        track.cover.as_deref(),
+                                        &track.id.key(),
                                         &track.album_id,
                                         "",
                                         None,
@@ -680,7 +683,7 @@ impl PlayerController {
 
                     self.is_loading.set(true);
 
-                    let is_radio = track.path.to_string_lossy().starts_with("radio:");
+                    let is_radio = track.id.uid().starts_with("radio:");
 
                     #[cfg(not(target_arch = "wasm32"))]
                     spawn(async move {
@@ -849,8 +852,8 @@ impl PlayerController {
                                 skip_in_progress.set(false);
 
                                 let is_radio_item =
-                                    track.path.to_string_lossy().starts_with("radio:");
-                                let path_lossy = track.path.to_string_lossy().to_string();
+                                    track.id.uid().starts_with("radio:");
+                                let path_lossy = track.id.uid().to_string();
                                 let parts: Vec<&str> = path_lossy.split(':').collect();
                                 let (station_id, stream_id) = if is_radio_item {
                                     (
@@ -1498,7 +1501,9 @@ impl PlayerController {
                     return;
                 } // local files not supported on web
                 #[cfg(not(target_arch = "wasm32"))]
-                if let Ok((source, hint)) = decoder::open_file(&track.path) {
+                if let Some(track_path) = track.id.local_path()
+                    && let Ok((source, hint)) = decoder::open_file(track_path)
+                {
                     {
                         let artwork = {
                             let lib = self.library.peek();
@@ -1925,7 +1930,8 @@ impl PlayerController {
     pub fn play_radio(&mut self, station_id: &str, stream_id: &str) {
         let path = format!("radio:{}:{}", station_id, stream_id);
         let track = Track {
-            path: std::path::PathBuf::from(path),
+            id: reader::models::TrackId::Local(std::path::PathBuf::from(path)),
+            cover: None,
             album_id: "".to_string(),
             title: stream_id.to_string(),
             artist: station_id.to_string(),
@@ -1984,7 +1990,7 @@ impl PlayerController {
         let idx = *self.current_queue_index.peek();
         let is_radio = self
             .get_track_at(idx)
-            .is_some_and(|t| t.path.to_string_lossy().starts_with("radio:"));
+            .is_some_and(|t| t.id.uid().starts_with("radio:"));
 
         if is_radio {
             self.player.write().stop_for_transition();
@@ -1998,7 +2004,7 @@ impl PlayerController {
         let idx = *self.current_queue_index.peek();
         let is_radio = self
             .get_track_at(idx)
-            .is_some_and(|t| t.path.to_string_lossy().starts_with("radio:"));
+            .is_some_and(|t| t.id.uid().starts_with("radio:"));
 
         if is_radio || !self.player.peek().can_resume() {
             if let Some(track) = self.get_track_at(idx) {

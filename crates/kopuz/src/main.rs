@@ -288,8 +288,8 @@ async fn persist_queue_state_snapshot(
 fn is_server_queue_track(track: &reader::Track) -> bool {
     matches!(
         track
-            .path
-            .to_string_lossy()
+            .id
+            .uid()
             .split(':')
             .next()
             .unwrap_or_default()
@@ -301,7 +301,7 @@ fn is_server_queue_track(track: &reader::Track) -> bool {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn is_restorable_queue_track(track: &reader::Track) -> bool {
-    is_server_queue_track(track) || track.path.exists()
+    is_server_queue_track(track) || track.id.local_path().is_some_and(|p| p.exists())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1777,10 +1777,15 @@ fn App() -> Element {
                 }
 
                 current_lib.tracks.retain(|t| {
-                    let in_configured_root = configured_dirs.iter().any(|d| t.path.starts_with(d));
-                    let in_scannable_root = scannable_dirs.iter().any(|d| t.path.starts_with(d));
+                    let in_configured_root = configured_dirs
+                        .iter()
+                        .any(|d| t.id.local_path().is_some_and(|p| p.starts_with(d)));
+                    let in_scannable_root = scannable_dirs
+                        .iter()
+                        .any(|d| t.id.local_path().is_some_and(|p| p.starts_with(d)));
 
-                    in_configured_root && (!in_scannable_root || t.path.exists())
+                    in_configured_root
+                        && (!in_scannable_root || t.id.local_path().is_some_and(|p| p.exists()))
                 });
 
                 let valid_album_ids: std::collections::HashSet<_> = current_lib

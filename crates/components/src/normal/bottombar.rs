@@ -331,7 +331,7 @@ pub fn BottombarNormal(
                     title: i18n::t("share_musicbrainz").to_string(),
                     onclick: move |_| {
                         if let Some(t) = ctrl.current_track_snapshot.read().clone() {
-                            let path = t.path.to_string_lossy();
+                            let path = t.id.uid();
                             if let Some(vid) = path
                                 .strip_prefix("ytmusic:")
                                 .and_then(|rest| rest.split(':').next())

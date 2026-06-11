@@ -81,11 +81,11 @@ fn search_server(
         .take(100)
         .map(|t| {
             let cover_url = server.as_ref().and_then(|srv| {
-                let path_str = t.path.to_string_lossy();
                 let url = match active_service {
                     Some(MusicService::Jellyfin) => {
-                        utils::jellyfin_image::track_cover_url_with_album_fallback(
-                            &path_str,
+                        utils::jellyfin_image::resolve_track_cover(
+                            t.cover.as_deref(),
+                            &t.id.key(),
                             &t.album_id,
                             &srv.url,
                             srv.access_token.as_deref(),
@@ -94,28 +94,21 @@ fn search_server(
                         )
                     }
                     Some(MusicService::Subsonic) | Some(MusicService::Custom) => {
+                        let subsonic_path = match t.cover.as_deref() {
+                            Some(c) => format!("{}:{}", t.id.uid(), c),
+                            None => t.id.uid(),
+                        };
                         utils::subsonic_image::subsonic_image_url_from_path(
-                            &path_str,
+                            &subsonic_path,
                             &srv.url,
                             srv.access_token.as_deref(),
                             80,
                             80,
                         )
                     }
-                    Some(MusicService::YtMusic) => {
-                        // YT thumbnails are urlhex-encoded into album_id;
-                        // pass empty server_url so the fallback function
-                        // skips its Jellyfin URL constructor and only
-                        // returns the embedded URL via decode.
-                        utils::jellyfin_image::track_cover_url_with_album_fallback(
-                            &path_str,
-                            &t.album_id,
-                            "",
-                            None,
-                            80,
-                            80,
-                        )
-                    }
+                    // YT thumbnail now lives in Track.cover (no longer encoded
+                    // into the synthetic path).
+                    Some(MusicService::YtMusic) => t.cover.clone(),
                     None => None,
                 };
                 utils::map_cover_url(url)
@@ -213,10 +206,10 @@ async fn search_ytmusic(query: &str, cookies: Option<String>) -> Option<(TrackRe
     let result_tracks: TrackRes = tracks
         .into_iter()
         .map(|t| {
-            let path_str = t.path.to_string_lossy();
             let cover_url = utils::map_cover_url(
-                utils::jellyfin_image::track_cover_url_with_album_fallback(
-                    &path_str,
+                utils::jellyfin_image::resolve_track_cover(
+                    t.cover.as_deref(),
+                    &t.id.key(),
                     &t.album_id,
                     "",
                     None,

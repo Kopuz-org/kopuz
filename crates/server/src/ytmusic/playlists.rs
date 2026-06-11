@@ -176,12 +176,6 @@ fn has_sign_in_endpoint(v: &Value) -> bool {
 }
 
 fn keep_unique(t: &Track, seen: &mut std::collections::HashSet<String>) -> bool {
-    let id = t
-        .path
-        .to_string_lossy()
-        .split(':')
-        .nth(1)
-        .unwrap_or("")
-        .to_string();
+    let id = t.id.key().to_string();
     !id.is_empty() && seen.insert(id)
 }

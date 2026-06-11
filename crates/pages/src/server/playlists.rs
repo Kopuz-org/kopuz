@@ -237,11 +237,8 @@ pub fn JellyfinPlaylists(
                         let track_ids: Vec<String> = tracks
                             .iter()
                             .filter_map(|t| {
-                                t.path
-                                    .to_string_lossy()
-                                    .split(':')
-                                    .nth(1)
-                                    .map(|s| s.to_string())
+                                let k = t.id.key();
+                                (!k.is_empty()).then(|| k.to_string())
                             })
                             .collect();
                         {
@@ -255,7 +252,7 @@ pub fn JellyfinPlaylists(
                             }
                         }
                         for t in tracks {
-                            if seen_paths.insert(t.path.clone()) {
+                            if seen_paths.insert(t.id.uid_path()) {
                                 accumulated.push(t);
                             }
                         }
@@ -272,10 +269,10 @@ pub fn JellyfinPlaylists(
                     let mut existing: std::collections::HashSet<std::path::PathBuf> = lib
                         .jellyfin_tracks
                         .iter()
-                        .map(|t| t.path.clone())
+                        .map(|t| t.id.uid_path())
                         .collect();
                     for t in accumulated {
-                        if existing.insert(t.path.clone()) {
+                        if existing.insert(t.id.uid_path()) {
                             lib.jellyfin_tracks.push(t);
                         }
                     }
@@ -420,11 +417,11 @@ pub fn JellyfinPlaylists(
                                     let lib = library.peek();
                                     lib.jellyfin_tracks
                                         .iter()
-                                        .find(|t| t.path.to_string_lossy().contains(first_track_id.as_str()))
+                                        .find(|t| t.id.key().contains(first_track_id.as_str()))
                                         .and_then(|t| {
-                                            let path_str = t.path.to_string_lossy();
-                                            utils::map_cover_url(utils::jellyfin_image::track_cover_url_with_album_fallback(
-                                                &path_str,
+                                            utils::map_cover_url(utils::jellyfin_image::resolve_track_cover(
+                                                t.cover.as_deref(),
+                                                &t.id.key(),
                                                 &t.album_id,
                                                 &server.url,
                                                 server.access_token.as_deref(),
@@ -445,7 +442,7 @@ pub fn JellyfinPlaylists(
                             let lib = library.peek();
                             playlist.tracks.iter().map(|tid| {
                                 let meta = lib.jellyfin_tracks.iter()
-                                    .find(|t| t.path.to_string_lossy().contains(tid.as_str()));
+                                    .find(|t| t.id.key().contains(tid.as_str()));
                                 (
                                     tid.clone(),
                                     meta.map(|t| t.title.clone()).unwrap_or_default(),

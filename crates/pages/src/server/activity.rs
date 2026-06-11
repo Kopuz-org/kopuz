@@ -35,12 +35,12 @@ pub fn JellyfinLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Elem
         all_tracks.sort_by(|a, b| {
             let a_plays = conf
                 .listen_counts
-                .get(&a.path.to_string_lossy().to_string())
+                .get(&a.id.uid())
                 .copied()
                 .unwrap_or(0);
             let b_plays = conf
                 .listen_counts
-                .get(&b.path.to_string_lossy().to_string())
+                .get(&b.id.uid())
                 .copied()
                 .unwrap_or(0);
 
@@ -53,7 +53,7 @@ pub fn JellyfinLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Elem
         all_tracks
             .into_iter()
             .map(|track| {
-                let track_id = track.path.to_string_lossy().to_string();
+                let track_id = track.id.uid();
                 let plays = conf.listen_counts.get(&track_id).copied().unwrap_or(0);
                 let genre = album_genre_map
                     .get(&track.album_id)
@@ -61,8 +61,9 @@ pub fn JellyfinLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Elem
                     .unwrap_or_default();
                 let cover_url = if let Some((ref base_url, ref token)) = cover_url_base {
                     utils::map_cover_url(
-                        utils::jellyfin_image::track_cover_url_with_album_fallback(
-                            &track.path.to_string_lossy(),
+                        utils::jellyfin_image::resolve_track_cover(
+                            track.cover.as_deref(),
+                            &track.id.key(),
                             &track.album_id,
                             base_url,
                             token.as_deref(),
@@ -176,7 +177,7 @@ pub fn JellyfinLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Elem
                     } else {
                         for (idx, track, plays, genre, cover_url) in visible_tracks {
                             {
-                                let track_id = track.path.to_string_lossy().to_string();
+                                let track_id = track.id.uid();
                                 let queue = std::sync::Arc::clone(&*queue_tracks.read());
                                 rsx! {
                                     div { key: "{track_id}", style: "height: {ITEM_HEIGHT}px;",

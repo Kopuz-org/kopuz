@@ -273,7 +273,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                     let current_path: Option<String> = {
                         let idx = *ctrl.current_queue_index.read();
                         ctrl.get_track_at(idx)
-                            .map(|t| t.path.to_string_lossy().to_string())
+                            .map(|t| t.id.uid().to_string())
                     };
                     if let Some(path) = current_path
                         && is_playing
@@ -298,7 +298,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                 };
 
                 if let Some(next_track) = lyrics_prefetch {
-                    let next_track_key = next_track.path.to_string_lossy().to_string();
+                    let next_track_key = next_track.id.uid().to_string();
                     if last_lyrics_prefetch_track.as_ref() != Some(&next_track_key) {
                         last_lyrics_prefetch_track = Some(next_track_key);
                         let (server_url, server_token, server_user_id, prefer_local) = {
@@ -317,7 +317,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                         };
 
                         spawn(async move {
-                            let next_track_path = next_track.path.to_string_lossy().into_owned();
+                            let next_track_path = next_track.id.uid();
                             let _ = utils::lyrics::fetch_lyrics(
                                 &next_track.artist,
                                 &next_track.title,
@@ -407,7 +407,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                     };
 
                     if let Some(track) = track {
-                        let path_str = track.path.to_string_lossy();
+                        let path_str = track.id.uid();
                         if path_str.starts_with("jellyfin:") {
                             let parts: Vec<&str> = path_str.split(':').collect();
                             if let Some(id) = parts.get(1) {
@@ -573,7 +573,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                             let mut config_write = config.write();
                             let idx = *ctrl.current_queue_index.peek();
                             if let Some(track) = ctrl.get_track_at(idx) {
-                                let track_id = track.path.to_string_lossy().to_string();
+                                let track_id = track.id.uid().to_string();
                                 *config_write.listen_counts.entry(track_id).or_insert(0) += 1;
                             }
                         }
@@ -607,7 +607,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                             let _q = ctrl.queue.peek();
                             let idx = *ctrl.current_queue_index.peek();
                             if let Some(track) = ctrl.get_track_at(idx) {
-                                let track_id = track.path.to_string_lossy().to_string();
+                                let track_id = track.id.uid().to_string();
                                 *config_write.listen_counts.entry(track_id).or_insert(0) += 1;
                             }
                         }

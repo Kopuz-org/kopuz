@@ -20,7 +20,7 @@ pub fn FolderDetail(
     let mut folder_tracks: Vec<Track> = lib
         .tracks
         .iter()
-        .filter(|t| t.path.starts_with(&folder_path_buf))
+        .filter(|t| t.id.local_path().is_some_and(|p| p.starts_with(&folder_path_buf)))
         .cloned()
         .collect();
     folder_tracks.sort_by(|a, b| {

@@ -1,4 +1,4 @@
-use reader::models::Track;
+use reader::models::{Track, TrackId};
 use serde_json::Value;
 
 pub mod botguard;
@@ -18,6 +18,14 @@ pub mod verify_session_keepalive;
 pub use player::YtStreamInfo;
 
 pub const SOURCE_PREFIX: &str = "ytmusic";
+
+/// Build the typed id for a YouTube Music track (video id).
+pub(crate) fn yt_id(video_id: impl Into<String>) -> TrackId {
+    TrackId::Server {
+        service: config::MusicService::YtMusic,
+        item_id: video_id.into(),
+    }
+}
 
 /// Surfaced by auth-only operations (like/unlike, add-to-playlist,
 /// liked-songs sync) when the YT backend is in anonymous mode.
@@ -173,13 +181,7 @@ impl YouTubeMusicClient {
         let dedup = |page: Vec<Track>, seen: &mut std::collections::HashSet<String>| -> Vec<Track> {
             page.into_iter()
                 .filter(|t| {
-                    let id = t
-                        .path
-                        .to_string_lossy()
-                        .split(':')
-                        .nth(1)
-                        .unwrap_or("")
-                        .to_string();
+                    let id = t.id.key().to_string();
                     !id.is_empty() && seen.insert(id)
                 })
                 .collect()

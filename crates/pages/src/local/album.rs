@@ -143,7 +143,7 @@ pub fn LocalAlbum(
                                                                 .tracks
                                                                 .iter()
                                                                 .filter(|t| t.album == title)
-                                                                .map(|t| t.path.clone())
+                                                                .filter_map(|t| t.id.local_path().map(|p| p.to_path_buf()))
                                                                 .collect();
                                                             for path in &tracks_to_delete {
                                                                 let _ = std::fs::remove_file(path);
