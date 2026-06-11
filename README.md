@@ -14,10 +14,10 @@
   <img src="https://github.com/Kopuz-org/kopuz/actions/workflows/build.yml/badge.svg" alt="Build">
   <img src="https://github.com/user-attachments/assets/2b12ec40-2fcb-45e9-969e-ef99b4654957" alt="Kopuz">
 
-  <br/>
+<br/>
   <br/>
   <p>
-    <b>English</b> | <a href="README-TR.md">Türkçe</a>
+    <b>English</b> | <a href="docs/README-TR.md">Türkçe</a>
   </p>
 </div>
 
