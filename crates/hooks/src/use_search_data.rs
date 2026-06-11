@@ -243,16 +243,34 @@ pub fn use_search_data(
     search_query: Signal<String>,
     config: Signal<AppConfig>,
 ) -> SearchData {
+    let _ = library;
+    let db = use_context::<db::Db>();
+    let source = use_memo(move || {
+        let conf = config.read();
+        if conf.active_source == MusicSource::Server {
+            let sid = conf
+                .active_server_id
+                .clone()
+                .or_else(|| conf.server.as_ref().and_then(|s| s.id.clone()))
+                .unwrap_or_default();
+            db::Source::Server(sid)
+        } else {
+            db::Source::Local
+        }
+    });
+    let albums_res = crate::use_db_queries::use_albums(source);
+    let gens = crate::db_reactivity::use_generations();
+
     let genres = use_memo(move || {
         let conf = config.read();
         let active_source = conf.active_source.clone();
         let active_service = conf.active_service();
         let server = conf.server.clone();
-        let lib = library.read();
+        let albums = albums_res.read().clone().unwrap_or_default();
 
         if active_source == MusicSource::Server {
             let mut genre_items = std::collections::HashMap::new();
-            for album in &lib.jellyfin_albums {
+            for album in &albums {
                 for g in album.genre.split(['/', ';', ',']) {
                     let g = g.trim();
                     if !g.is_empty() && !genre_items.contains_key(g) {
@@ -297,7 +315,7 @@ pub fn use_search_data(
         let mut genre_covers: std::collections::HashMap<String, Vec<std::path::PathBuf>> =
             std::collections::HashMap::new();
 
-        for album in &lib.albums {
+        for album in &albums {
             let genre = album.genre.trim();
             if !genre.is_empty() {
                 if let Some(cover) = &album.cover_path {
@@ -330,6 +348,8 @@ pub fn use_search_data(
     });
 
     let search_results = use_resource(move || {
+        let _ = gens.generation(crate::db_reactivity::Table::Tracks);
+        let _ = gens.generation(crate::db_reactivity::Table::Albums);
         let query = search_query.read().to_lowercase();
         let (active_source, active_service, server) = {
             let conf = config.read();
@@ -339,18 +359,16 @@ pub fn use_search_data(
                 conf.server.clone(),
             )
         };
-        let (tracks, albums) = {
-            let lib = library.read();
-            match &active_source {
-                MusicSource::Local => (lib.tracks.clone(), lib.albums.clone()),
-                MusicSource::Server => (lib.jellyfin_tracks.clone(), lib.jellyfin_albums.clone()),
-            }
-        };
+        let src = source();
+        let db = db.clone();
 
         async move {
             if query.trim().is_empty() {
                 return None;
             }
+            let filter = db::TrackFilter::new(src.clone());
+            let tracks = db.tracks_all(&filter).await.unwrap_or_default();
+            let albums = db.albums(&src).await.unwrap_or_default();
             run_search(query, tracks, albums, active_source, active_service, server).await
         }
     });

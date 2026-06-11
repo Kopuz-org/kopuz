@@ -1,4 +1,6 @@
+use db::Source;
 use dioxus::prelude::*;
+use hooks::use_db_queries::{use_albums, use_all_tracks};
 use reader::{Library, PlaylistStore, models::Track};
 use std::path::PathBuf;
 
@@ -16,12 +18,17 @@ pub fn FolderDetail(
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| folder_path.clone());
 
-    let lib = library.read();
-    let mut folder_tracks: Vec<Track> = lib
-        .tracks
-        .iter()
+    let source = use_memo(|| Source::Local);
+    let filter = use_memo(|| db::TrackFilter::new(Source::Local));
+    let tracks_res = use_all_tracks(filter);
+    let albums_res = use_albums(source);
+
+    let mut folder_tracks: Vec<Track> = tracks_res
+        .read()
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
         .filter(|t| t.id.local_path().is_some_and(|p| p.starts_with(&folder_path_buf)))
-        .cloned()
         .collect();
     folder_tracks.sort_by(|a, b| {
         a.disc_number
@@ -31,13 +38,12 @@ pub fn FolderDetail(
     });
 
     let cover_url = folder_tracks.first().and_then(|t| {
-        lib.albums
-            .iter()
-            .find(|a| a.id == t.album_id)
+        albums_res
+            .read()
+            .as_ref()
+            .and_then(|albums| albums.iter().find(|a| a.id == t.album_id))
             .and_then(|a| utils::format_artwork_url(a.cover_path.as_ref()))
     });
-
-    drop(lib);
 
     let _ = config;
 

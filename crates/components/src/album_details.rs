@@ -1,4 +1,7 @@
+use db::Source;
 use dioxus::prelude::*;
+use hooks::db_reactivity::Table;
+use hooks::use_db_queries::{use_album, use_all_tracks};
 use reader::Library;
 use std::path::PathBuf;
 
@@ -9,10 +12,20 @@ pub fn AlbumDetails(
     playlist_store: Signal<reader::PlaylistStore>,
     on_close: EventHandler<()>,
 ) -> Element {
-    let lib = library.read();
-    let album = match lib.albums.iter().find(|a| a.id == album_id) {
+    let gens = hooks::db_reactivity::use_generations();
+    let source = use_memo(|| Source::Local);
+    let album_id_memo = use_memo(use_reactive!(|album_id| album_id));
+    let album_res = use_album(source, album_id_memo);
+    let filter = use_memo(move || db::TrackFilter::album(Source::Local, album_id_memo()));
+    let tracks_res = use_all_tracks(filter);
+
+    let album_loading = album_res.read().is_none();
+    let album = match album_res.read().clone().flatten() {
         Some(a) => a,
         None => {
+            if album_loading {
+                return rsx! { div {} };
+            }
             return rsx! {
                 div { "{i18n::t(\"album_not_found\")}" }
             };
@@ -27,12 +40,7 @@ pub fn AlbumDetails(
         .map(|d| d.cache_dir().join("covers"))
         .unwrap_or_else(|| PathBuf::from("./cache/covers"));
 
-    let mut tracks: Vec<_> = lib
-        .tracks
-        .iter()
-        .filter(|t| t.album_id == album_id)
-        .cloned()
-        .collect();
+    let mut tracks: Vec<_> = tracks_res.read().clone().unwrap_or_default();
 
     tracks.sort_by(|a, b| {
         a.disc_number.cmp(&b.disc_number).then_with(|| {
@@ -41,8 +49,6 @@ pub fn AlbumDetails(
                 .then_with(|| a.title.cmp(&b.title))
         })
     });
-
-    drop(lib);
 
     let tracks_for_delete = tracks.clone();
     let aid = album_id.clone();
@@ -60,14 +66,15 @@ pub fn AlbumDetails(
                     let aid = aid.clone();
                     let delete_cover = delete_cover.clone();
                     let cover_cache = cover_cache.clone();
+                    let db = consume_context::<db::Db>();
                     spawn(async move {
                         let old_cover = delete_cover;
+                        if db
+                            .update_album_cover(&Source::Local, &aid, None, false)
+                            .await
+                            .is_ok()
                         {
-                            let mut lib = library.write();
-                            if let Some(album) = lib.albums.iter_mut().find(|a| a.id == aid) {
-                                album.cover_path = None;
-                                album.manual_cover = false;
-                            }
+                            gens.bump(Table::Albums);
                         }
 
                         if let Some(path) = old_cover
@@ -101,6 +108,8 @@ pub fn AlbumDetails(
                     let aid = aid.clone();
                     let _ = &aid;
                     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+                    let db = consume_context::<db::Db>();
+                    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
                     spawn(async move {
                         let file = rfd::AsyncFileDialog::new()
                             .add_filter("Images", &["jpg", "jpeg", "png", "webp"])
@@ -125,12 +134,18 @@ pub fn AlbumDetails(
                                 path.extension().and_then(|e| e.to_str()),
                                 &cover_cache,
                             ) {
-                                let mut lib = library.write();
-                                if let Some(album) =
-                                    lib.albums.iter_mut().find(|a| a.id == aid)
+                                let saved_str = saved.to_string_lossy().into_owned();
+                                if db
+                                    .update_album_cover(
+                                        &Source::Local,
+                                        &aid,
+                                        Some(&saved_str),
+                                        true,
+                                    )
+                                    .await
+                                    .is_ok()
                                 {
-                                    album.cover_path = Some(saved.clone());
-                                    album.manual_cover = true;
+                                    gens.bump(Table::Albums);
                                 }
                             }
                         }
@@ -143,19 +158,32 @@ pub fn AlbumDetails(
                         if let Some(track_path) = t.id.local_path()
                             && std::fs::remove_file(track_path).is_ok()
                         {
-                            library.write().remove_track(&t.id);
+                            let db = consume_context::<db::Db>();
+                            let key = t.id.key().into_owned();
+                            spawn(async move {
+                                if db.delete_tracks(&Source::Local, &[key]).await.is_ok() {
+                                    gens.bump(Table::Tracks);
+                                }
+                            });
                         }
                     }
                 },
                 on_selection_delete: move |paths: Vec<PathBuf>| {
                     #[cfg(not(target_arch = "wasm32"))]
                     {
+                        let mut keys = Vec::new();
                         for path in &paths {
                             if std::fs::remove_file(path).is_ok() {
-                                library
-                                    .write()
-                                    .remove_track(&reader::models::TrackId::Local(path.clone()));
+                                keys.push(path.to_string_lossy().into_owned());
                             }
+                        }
+                        if !keys.is_empty() {
+                            let db = consume_context::<db::Db>();
+                            spawn(async move {
+                                if db.delete_tracks(&Source::Local, &keys).await.is_ok() {
+                                    gens.bump(Table::Tracks);
+                                }
+                            });
                         }
                     }
                 },

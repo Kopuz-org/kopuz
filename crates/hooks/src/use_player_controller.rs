@@ -174,6 +174,8 @@ impl PlayerController {
                 90,
             )
             .unwrap_or_default(),
+            // SWEEP-TODO(sync album-cover lookup: cover_url_for_track is called
+            // from synchronous hydrate paths, no async db call possible here — W4)
             _ => self
                 .library
                 .read()
@@ -1505,6 +1507,8 @@ impl PlayerController {
                     && let Ok((source, hint)) = decoder::open_file(track_path)
                 {
                     {
+                        // SWEEP-TODO(sync album-cover lookup: NowPlayingMeta is
+                        // built inline before the synchronous player.play call — W4)
                         let artwork = {
                             let lib = self.library.peek();
                             lib.albums

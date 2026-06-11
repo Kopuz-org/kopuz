@@ -1,4 +1,7 @@
+use db::Source;
 use dioxus::prelude::*;
+use hooks::db_reactivity::Table;
+use hooks::use_db_queries::use_playlists;
 use hooks::use_player_controller::PlayerController;
 use reader::{Library, PlaylistStore, Track};
 use std::collections::HashSet;
@@ -39,7 +42,7 @@ pub struct TrackListViewProps {
 }
 
 #[component]
-pub fn TrackListView(mut props: TrackListViewProps) -> Element {
+pub fn TrackListView(props: TrackListViewProps) -> Element {
     let mut ctrl = use_context::<PlayerController>();
     let mut active_menu_track = use_signal(|| None::<PathBuf>);
     let mut show_playlist_modal = use_signal(|| false);
@@ -47,6 +50,8 @@ pub fn TrackListView(mut props: TrackListViewProps) -> Element {
     let mut is_selection_mode = use_signal(|| false);
     let mut selected_tracks = use_signal(HashSet::<PathBuf>::new);
     let mut metadata_track = use_signal(|| None::<Track>);
+    let gens = hooks::db_reactivity::use_generations();
+    let playlists_res = use_playlists();
 
     let view_metadata_handler = if props.enable_metadata {
         let tracks_meta = props.tracks.clone();
@@ -225,25 +230,28 @@ pub fn TrackListView(mut props: TrackListViewProps) -> Element {
                         };
                         match reader::write_tags(&path, &edits) {
                             Ok(()) => {
-                                let mut lib = props.library.write();
-                                if let Some(t) = lib.tracks.iter_mut().find(|t| t.id == track.id) {
-                                    t.title = edits.title.trim().to_string();
-                                    t.artist = edits.artist.trim().to_string();
-                                    t.artists = edits
-                                        .artist
-                                        .split([';', ','])
-                                        .map(|a| a.trim().to_string())
-                                        .filter(|s| !s.is_empty())
-                                        .collect();
-                                    t.album = edits.album.trim().to_string();
-                                    t.track_number = edits.track_number;
-                                    t.disc_number = edits.disc_number;
-                                    t.album_id = reader::metadata::make_album_id(
-                                        edits.album.trim(),
-                                        edits.artist.trim(),
-                                    );
-                                }
-                                drop(lib);
+                                let mut t = track.clone();
+                                t.title = edits.title.trim().to_string();
+                                t.artist = edits.artist.trim().to_string();
+                                t.artists = edits
+                                    .artist
+                                    .split([';', ','])
+                                    .map(|a| a.trim().to_string())
+                                    .filter(|s| !s.is_empty())
+                                    .collect();
+                                t.album = edits.album.trim().to_string();
+                                t.track_number = edits.track_number;
+                                t.disc_number = edits.disc_number;
+                                t.album_id = reader::metadata::make_album_id(
+                                    edits.album.trim(),
+                                    edits.artist.trim(),
+                                );
+                                let db = consume_context::<db::Db>();
+                                spawn(async move {
+                                    if db.upsert_tracks(&Source::Local, &[t]).await.is_ok() {
+                                        gens.bump(Table::Tracks);
+                                    }
+                                });
                                 metadata_track.set(None);
                             }
                             Err(e) => {
@@ -273,13 +281,28 @@ pub fn TrackListView(mut props: TrackListViewProps) -> Element {
                             paths.push(path);
                         }
                         if !paths.is_empty() {
-                            let mut store = props.playlist_store.write();
-                            if let Some(pl) = store.playlists.iter_mut().find(|p| p.id == playlist_id) {
+                            let store = playlists_res.read().clone().unwrap_or_default();
+                            if let Some(pl) = store.playlists.iter().find(|p| p.id == playlist_id) {
+                                let mut tracks = pl.tracks.clone();
                                 for path in paths {
-                                    if !pl.tracks.contains(&path) {
-                                        pl.tracks.push(path);
+                                    if !tracks.contains(&path) {
+                                        tracks.push(path);
                                     }
                                 }
+                                let refs: Vec<String> = tracks
+                                    .iter()
+                                    .map(|p| p.to_string_lossy().into_owned())
+                                    .collect();
+                                let db = consume_context::<db::Db>();
+                                spawn(async move {
+                                    if db
+                                        .set_playlist_tracks(&Source::Local, &playlist_id, &refs)
+                                        .await
+                                        .is_ok()
+                                    {
+                                        gens.bump(Table::Playlists);
+                                    }
+                                });
                             }
                         }
                         show_playlist_modal.set(false);
@@ -294,15 +317,25 @@ pub fn TrackListView(mut props: TrackListViewProps) -> Element {
                             paths.push(path);
                         }
                         if !paths.is_empty() {
-                            let mut store = props.playlist_store.write();
-                            store
-                                .playlists
-                                .push(reader::models::Playlist {
-                                    id: uuid::Uuid::new_v4().to_string(),
-                                    name,
-                                    tracks: paths,
-                                    cover_path: None,
-                                });
+                            let refs: Vec<String> = paths
+                                .iter()
+                                .map(|p| p.to_string_lossy().into_owned())
+                                .collect();
+                            let id = uuid::Uuid::new_v4().to_string();
+                            let db = consume_context::<db::Db>();
+                            spawn(async move {
+                                if db
+                                    .upsert_playlist_meta(&Source::Local, &id, &name, None, None)
+                                    .await
+                                    .is_ok()
+                                    && db
+                                        .set_playlist_tracks(&Source::Local, &id, &refs)
+                                        .await
+                                        .is_ok()
+                                {
+                                    gens.bump(Table::Playlists);
+                                }
+                            });
                         }
                         show_playlist_modal.set(false);
                         is_selection_mode.set(false);

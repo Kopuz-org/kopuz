@@ -32,6 +32,7 @@ pub fn SearchResults(
 ) -> Element {
     let mut ctrl = use_context::<PlayerController>();
     let config = use_context::<Signal<AppConfig>>();
+    let gens = hooks::db_reactivity::use_generations();
     let offline_tracks = config.read().offline_tracks.clone();
     let is_modern = config.read().ui_style == UiStyle::Modern;
     let sort_state = use_signal(|| None);
@@ -181,7 +182,17 @@ pub fn SearchResults(
                                             if let Some(del_path) = track_delete.id.local_path()
                                                 && std::fs::remove_file(del_path).is_ok()
                                             {
-                                                library.write().remove_track(&track_delete.id);
+                                                let db = consume_context::<db::Db>();
+                                                let key = track_delete.id.key().into_owned();
+                                                spawn(async move {
+                                                    if db
+                                                        .delete_tracks(&db::Source::Local, &[key])
+                                                        .await
+                                                        .is_ok()
+                                                    {
+                                                        gens.bump(hooks::db_reactivity::Table::Tracks);
+                                                    }
+                                                });
                                             }
                                         },
                                         on_play: move |_| {

@@ -1,5 +1,8 @@
 use config::MusicService;
+use db::Source;
 use dioxus::prelude::*;
+use hooks::db_reactivity::Table;
+use hooks::use_db_queries::{use_albums, use_playlists, use_tracks_by_keys};
 use reader::{Library, PlaylistStore};
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use rfd::AsyncFileDialog;
@@ -19,9 +22,39 @@ pub fn PlaylistDetail(
     on_download_track: Option<EventHandler<usize>>,
     #[props(default = false)] is_downloading_all: bool,
 ) -> Element {
-    let store = playlist_store.read();
     let mut tracks = use_signal(Vec::<reader::models::Track>::new);
     let mut has_loaded_jellyfin_tracks = use_signal(|| false);
+    let gens = hooks::db_reactivity::use_generations();
+    let playlists_res = use_playlists();
+    let source_local = use_memo(|| Source::Local);
+    let albums_res = use_albums(source_local);
+
+    let pid_for_seed = playlist_id.clone();
+    let seed_refs = use_memo(move || {
+        let store = playlists_res.read().clone().unwrap_or_default();
+        if let Some(p) = store.playlists.iter().find(|p| p.id == pid_for_seed) {
+            (
+                false,
+                p.tracks
+                    .iter()
+                    .map(|pb| pb.to_string_lossy().into_owned())
+                    .collect::<Vec<String>>(),
+            )
+        } else if let Some(p) = store
+            .jellyfin_playlists
+            .iter()
+            .find(|p| p.id == pid_for_seed)
+        {
+            (true, p.tracks.clone())
+        } else {
+            (false, Vec::new())
+        }
+    });
+    let local_seed_refs = use_memo(move || {
+        let (is_j, refs) = seed_refs.read().clone();
+        if is_j { Vec::new() } else { refs }
+    });
+    let local_tracks_res = use_tracks_by_keys(source_local, local_seed_refs);
 
     // YT Music's InnerTube has no playlist-reorder mutation, so reorder
     // affordances need to be hidden / no-op on YT playlists. Doing the
@@ -34,81 +67,54 @@ pub fn PlaylistDetail(
         .map(|s| s.service == MusicService::YtMusic)
         .unwrap_or(false);
 
-    let (
-        playlist_name,
-        local_tracks_paths,
-        server_track_refs,
-        is_jellyfin,
-        playlist_custom_cover,
-        playlist_image_tag,
-    ) = if let Some(p) = store.playlists.iter().find(|p| p.id == playlist_id) {
-        (
-            p.name.clone(),
-            p.tracks.clone(),
-            vec![],
-            false,
-            p.cover_path.clone(),
-            None::<String>,
-        )
-    } else if let Some(p) = store
-        .jellyfin_playlists
-        .iter()
-        .find(|p| p.id == playlist_id)
-    {
-        (
-            p.name.clone(),
-            vec![],
-            p.tracks.clone(),
-            true,
-            p.cover_path.clone(),
-            p.image_tag.clone(),
-        )
-    } else {
-        return rsx! { div { "{i18n::t(\"playlist_not_found\")}" } };
-    };
-
-    let lib = library.read();
-
     // Initial tracks WITHOUT any network round-trip: local playlists resolve
-    // their paths against the local library; server playlists resolve their
-    // track refs against the in-memory server library (both DB-backed since
-    // the SQLite migration). For server playlists this is a SEED — the network
-    // fetch below still runs once in the background and replaces it.
-    // Previously the page sat empty until the whole remote walk finished
+    // their refs through the tracks-by-keys hook; server playlists seed from
+    // the cached server rows in the DB. For server playlists this is a SEED —
+    // the network fetch below still runs once in the background and replaces
+    // it. Previously the page sat empty until the whole remote walk finished
     // (837 liked songs = many sequential continuation requests).
-    let initial_tracks: Vec<reader::models::Track> = if !is_jellyfin {
-        local_tracks_paths
-            .iter()
-            .filter_map(|path| lib.tracks.iter().find(|t| t.id.uid_path() == *path).cloned())
-            .collect()
-    } else {
-        let by_key: std::collections::HashMap<&str, &reader::models::Track> = lib
-            .jellyfin_tracks
-            .iter()
-            .map(|t| {
-                let key: &str = match &t.id {
-                    reader::models::TrackId::Server { item_id, .. } => item_id.as_str(),
-                    reader::models::TrackId::Local(_) => "",
-                };
-                (key, t)
-            })
-            .collect();
-        server_track_refs
-            .iter()
-            .filter_map(|r| by_key.get(r.as_str()).map(|t| (*t).clone()))
-            .collect()
-    };
     // One unconditional effect for both kinds, so the hook order can't change
     // if this component instance is re-rendered with the other playlist kind.
-    let seed = initial_tracks;
-    let seed_is_jellyfin = is_jellyfin;
     use_effect(move || {
-        if !seed_is_jellyfin {
-            tracks.set(seed.clone());
-        } else if !*has_loaded_jellyfin_tracks.read() && !seed.is_empty() {
-            tracks.set(seed.clone());
+        let (is_j, refs) = seed_refs.read().clone();
+        if !is_j {
+            tracks.set(local_tracks_res.read().clone().unwrap_or_default());
+        } else if !*has_loaded_jellyfin_tracks.read() && !refs.is_empty() {
+            let db = consume_context::<db::Db>();
+            let server_id = {
+                let conf = config.peek();
+                conf.active_server_id
+                    .clone()
+                    .or_else(|| conf.server.as_ref().and_then(|s| s.id.clone()))
+            };
+            spawn(async move {
+                let Some(sid) = server_id else { return };
+                if let Ok(seed) = db.tracks_by_keys(&Source::Server(sid), &refs).await
+                    && !seed.is_empty()
+                    && !*has_loaded_jellyfin_tracks.peek()
+                {
+                    tracks.set(seed);
+                }
+            });
         }
     });
+
+    let store_loading = playlists_res.read().is_none();
+    let store = playlists_res.read().clone().unwrap_or_default();
+    let (playlist_name, is_jellyfin, playlist_custom_cover, playlist_image_tag) =
+        if let Some(p) = store.playlists.iter().find(|p| p.id == playlist_id) {
+            (p.name.clone(), false, p.cover_path.clone(), None::<String>)
+        } else if let Some(p) = store
+            .jellyfin_playlists
+            .iter()
+            .find(|p| p.id == playlist_id)
+        {
+            (p.name.clone(), true, p.cover_path.clone(), p.image_tag.clone())
+        } else if store_loading {
+            return rsx! { div {} };
+        } else {
+            return rsx! { div { "{i18n::t(\"playlist_not_found\")}" } };
+        };
 
     if is_jellyfin {
         let pid = playlist_id.clone();
@@ -285,9 +291,10 @@ pub fn PlaylistDetail(
             .and_then(|p| utils::format_artwork_url(Some(p)))
             .or_else(|| {
                 tracks_val.first().and_then(|t| {
-                    lib.albums
-                        .iter()
-                        .find(|a| a.id == t.album_id)
+                    albums_res
+                        .read()
+                        .as_ref()
+                        .and_then(|albums| albums.iter().find(|a| a.id == t.album_id))
                         .and_then(|a| utils::format_artwork_url(a.cover_path.as_ref()))
                 })
             })
@@ -328,6 +335,8 @@ pub fn PlaylistDetail(
     let pid_for_move_up = playlist_id.clone();
     let pid_for_move_down = playlist_id.clone();
     let pid_for_cover = playlist_id.clone();
+    let name_for_cover = playlist_name.clone();
+    let tag_for_cover = playlist_image_tag.clone();
 
     rsx! {
         crate::track_list_view::TrackListView {
@@ -342,9 +351,14 @@ pub fn PlaylistDetail(
             enable_metadata: !is_jellyfin,
             on_cover_click: move |_| {
                 let _ = &pid_for_cover;
+                let _ = &name_for_cover;
+                let _ = &tag_for_cover;
                 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
                 {
                     let pid = pid_for_cover.clone();
+                    let pl_name = name_for_cover.clone();
+                    let pl_tag = tag_for_cover.clone();
+                    let db = consume_context::<db::Db>();
                     spawn(async move {
                         let file = AsyncFileDialog::new()
                             .add_filter("Images", &["jpg", "jpeg", "png", "webp"])
@@ -352,7 +366,7 @@ pub fn PlaylistDetail(
                             .await;
                         if let Some(file) = file {
                             let path = file.path().to_path_buf();
-                            if is_jellyfin {
+                            let src = if is_jellyfin {
                                 let conf = config.peek();
                                 if let Some(server) = &conf.server {
                                     if let (Some(token), Some(user_id)) =
@@ -379,17 +393,32 @@ pub fn PlaylistDetail(
                                         }
                                     }
                                 }
-                                let mut store = playlist_store.write();
-                                if let Some(p) =
-                                    store.jellyfin_playlists.iter_mut().find(|p| p.id == pid)
-                                {
-                                    p.cover_path = Some(path);
-                                }
+                                let sid = {
+                                    let conf = config.peek();
+                                    conf.active_server_id
+                                        .clone()
+                                        .or_else(|| {
+                                            conf.server.as_ref().and_then(|s| s.id.clone())
+                                        })
+                                        .unwrap_or_default()
+                                };
+                                Source::Server(sid)
                             } else {
-                                let mut store = playlist_store.write();
-                                if let Some(p) = store.playlists.iter_mut().find(|p| p.id == pid) {
-                                    p.cover_path = Some(path);
-                                }
+                                Source::Local
+                            };
+                            let cover_str = path.to_string_lossy().into_owned();
+                            if db
+                                .upsert_playlist_meta(
+                                    &src,
+                                    &pid,
+                                    &pl_name,
+                                    Some(&cover_str),
+                                    pl_tag.as_deref(),
+                                )
+                                .await
+                                .is_ok()
+                            {
+                                gens.bump(Table::Playlists);
                             }
                         }
                     });
@@ -402,7 +431,13 @@ pub fn PlaylistDetail(
                         if let Some(del_path) = t.id.local_path()
                             && std::fs::remove_file(del_path).is_ok()
                         {
-                            library.write().remove_track(&t.id);
+                            let db = consume_context::<db::Db>();
+                            let key = t.id.key().into_owned();
+                            spawn(async move {
+                                if db.delete_tracks(&Source::Local, &[key]).await.is_ok() {
+                                    gens.bump(Table::Tracks);
+                                }
+                            });
                         }
                     }
                 }
@@ -410,11 +445,20 @@ pub fn PlaylistDetail(
             on_selection_delete: move |paths: Vec<PathBuf>| {
                 if !is_jellyfin {
                     #[cfg(not(target_arch = "wasm32"))]
-                    for path in &paths {
-                        if std::fs::remove_file(path).is_ok() {
-                            library
-                                .write()
-                                .remove_track(&reader::models::TrackId::Local(path.clone()));
+                    {
+                        let mut keys = Vec::new();
+                        for path in &paths {
+                            if std::fs::remove_file(path).is_ok() {
+                                keys.push(path.to_string_lossy().into_owned());
+                            }
+                        }
+                        if !keys.is_empty() {
+                            let db = consume_context::<db::Db>();
+                            spawn(async move {
+                                if db.delete_tracks(&Source::Local, &keys).await.is_ok() {
+                                    gens.bump(Table::Tracks);
+                                }
+                            });
                         }
                     }
                 }
@@ -422,11 +466,28 @@ pub fn PlaylistDetail(
             on_remove_from_playlist: move |idx: usize| {
                 if let Some(t) = tracks.read().get(idx).cloned() {
                     if !is_jellyfin {
-                        let mut store = playlist_store.write();
+                        let store = playlists_res.read().clone().unwrap_or_default();
                         if let Some(playlist) =
-                            store.playlists.iter_mut().find(|p| p.id == pid_for_remove)
+                            store.playlists.iter().find(|p| p.id == pid_for_remove)
                         {
-                            playlist.tracks.retain(|p| p != &t.id.uid_path());
+                            let removed = t.id.uid_path();
+                            let refs: Vec<String> = playlist
+                                .tracks
+                                .iter()
+                                .filter(|p| **p != removed)
+                                .map(|p| p.to_string_lossy().into_owned())
+                                .collect();
+                            let pid = pid_for_remove.clone();
+                            let db = consume_context::<db::Db>();
+                            spawn(async move {
+                                if db
+                                    .set_playlist_tracks(&Source::Local, &pid, &refs)
+                                    .await
+                                    .is_ok()
+                                {
+                                    gens.bump(Table::Playlists);
+                                }
+                            });
                         }
                     } else {
                         let pid_clone = pid_for_remove.clone();
@@ -501,11 +562,28 @@ pub fn PlaylistDetail(
                 if idx == 0 || active_service_is_ytmusic { return; }
                 tracks.write().swap(idx - 1, idx);
                 if !is_jellyfin {
-                    let mut store = playlist_store.write();
+                    let store = playlists_res.read().clone().unwrap_or_default();
                     if let Some(pl) =
-                        store.playlists.iter_mut().find(|p| p.id == pid_for_move_up)
+                        store.playlists.iter().find(|p| p.id == pid_for_move_up)
+                        && idx < pl.tracks.len()
                     {
-                        pl.tracks.swap(idx - 1, idx);
+                        let mut order = pl.tracks.clone();
+                        order.swap(idx - 1, idx);
+                        let refs: Vec<String> = order
+                            .iter()
+                            .map(|p| p.to_string_lossy().into_owned())
+                            .collect();
+                        let pid = pid_for_move_up.clone();
+                        let db = consume_context::<db::Db>();
+                        spawn(async move {
+                            if db
+                                .set_playlist_tracks(&Source::Local, &pid, &refs)
+                                .await
+                                .is_ok()
+                            {
+                                gens.bump(Table::Playlists);
+                            }
+                        });
                     }
                 } else {
                     let track_list = tracks.read().clone();
@@ -568,11 +646,28 @@ pub fn PlaylistDetail(
                 if idx + 1 >= len || active_service_is_ytmusic { return; }
                 tracks.write().swap(idx, idx + 1);
                 if !is_jellyfin {
-                    let mut store = playlist_store.write();
+                    let store = playlists_res.read().clone().unwrap_or_default();
                     if let Some(pl) =
-                        store.playlists.iter_mut().find(|p| p.id == pid_for_move_down)
+                        store.playlists.iter().find(|p| p.id == pid_for_move_down)
+                        && idx + 1 < pl.tracks.len()
                     {
-                        pl.tracks.swap(idx, idx + 1);
+                        let mut order = pl.tracks.clone();
+                        order.swap(idx, idx + 1);
+                        let refs: Vec<String> = order
+                            .iter()
+                            .map(|p| p.to_string_lossy().into_owned())
+                            .collect();
+                        let pid = pid_for_move_down.clone();
+                        let db = consume_context::<db::Db>();
+                        spawn(async move {
+                            if db
+                                .set_playlist_tracks(&Source::Local, &pid, &refs)
+                                .await
+                                .is_ok()
+                            {
+                                gens.bump(Table::Playlists);
+                            }
+                        });
                     }
                 } else {
                     let track_list = tracks.read().clone();

@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use hooks::use_db_queries::use_playlists;
 use reader::PlaylistStore;
 
 const DEFAULT_OVERLAY_CLASS: &str =
@@ -18,7 +19,8 @@ pub struct PlaylistModalProps {
 #[component]
 pub fn PlaylistModal(props: PlaylistModalProps) -> Element {
     let mut new_playlist_name = use_signal(String::new);
-    let store = props.playlist_store.read();
+    let playlists_res = use_playlists();
+    let store = playlists_res.read().clone().unwrap_or_default();
     let add_to_playlist_text = i18n::t("add_to_playlist").to_string();
     let no_playlists_found_text = i18n::t("no_playlists_found").to_string();
     let create_new_playlist_text = i18n::t("create_new_playlist").to_string();

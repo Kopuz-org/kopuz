@@ -16,7 +16,9 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     let total_seconds: u64 = props.tracks.iter().map(|t| t.duration).sum();
     let duration_min = total_seconds / 60;
 
-    let lib = props.library.read();
+    let source_local = use_memo(|| db::Source::Local);
+    let albums_res = hooks::use_db_queries::use_albums(source_local);
+    let local_albums = albums_res.read().clone().unwrap_or_default();
     let is_server_source = config.read().active_source == MusicSource::Server;
 
     let offline_tracks = config.read().offline_tracks.clone();
@@ -251,7 +253,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                      utils::map_cover_url(url)
                                  } else { None }
                              } else {
-                                 lib.albums.iter()
+                                 local_albums.iter()
                                     .find(|a| a.id == track.album_id)
                                     .and_then(|a| utils::format_artwork_url(a.cover_path.as_ref()))
                              };

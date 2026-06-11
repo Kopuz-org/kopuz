@@ -19,6 +19,9 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
     let duration_min = total_seconds / 60;
 
     let offline_tracks = config.read().offline_tracks.clone();
+    let source_local = use_memo(|| db::Source::Local);
+    let albums_res = hooks::use_db_queries::use_albums(source_local);
+    let local_albums = albums_res.read().clone().unwrap_or_default();
     let _fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
     let sort_state = use_signal(|| None);
     let indexed_tracks: Vec<_> = props
@@ -283,8 +286,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                         );
                                         Some(url.map_or_else(utils::default_cover_url, |u| std::sync::Arc::from(u.as_str())))
                                     } else {
-                                        let lib = props.library.read();
-                                        lib.albums
+                                        local_albums
                                             .iter()
                                             .find(|a| a.id == track.album_id)
                                             .and_then(|a| utils::format_artwork_url(a.cover_path.as_ref()))
