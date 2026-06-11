@@ -14,7 +14,7 @@ struct LrcLibResponse {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct LyricWord {
+pub struct LyricChunk {
     /// A timed lyric chunk. Most providers use whole words; Apple Music can
     /// return smaller syllable-level chunks.
     pub start_time: f64,
@@ -26,7 +26,8 @@ pub struct LyricLine {
     pub start_time: f64,
     pub end_time: Option<f64>,
     pub text: String,
-    pub words: Vec<LyricWord>,
+    pub chunks: Vec<LyricChunk>,
+    pub parent_line_index: Option<usize>,
     pub background: bool,
     pub opposite_turn: bool,
 }
@@ -566,7 +567,9 @@ pub async fn fetch_lyrics(
             );
             return Some(lyrics);
         }
-        fallback.get_or_insert(lyrics);
+        // Apple line-synced lyrics carry richer Apple metadata than generic
+        // line LRC, so keep them as the preferred line-level fallback.
+        fallback = Some(lyrics);
     }
 
     // 4. Musixmatch richsync can provide enhanced word-by-word timestamps.
@@ -622,7 +625,29 @@ pub async fn fetch_lyrics(
         started.elapsed().as_millis(),
         lyrics_kind(lrclib.as_ref())
     );
-    let fetched = lrclib.or(fallback);
+    if let Some(lyrics) = lrclib.clone()
+        && has_word_timestamps(&lyrics)
+    {
+        if let Ok(mut cache) = lyrics_cache().lock() {
+            cache.put(cache_key.clone(), Some(lyrics.clone()));
+        }
+        tracing::info!(
+            target: "kopuz::lyrics",
+            "selected key_hash={} source=lrclib kind={} total_ms={}",
+            log_lyrics_key_hash(&cache_key),
+            lyrics_kind(Some(&lyrics)),
+            total_start.elapsed().as_millis()
+        );
+        lyrics_debug!(
+            "selected source=lrclib key_hash={} kind={} total_ms={}",
+            cache_key_hash,
+            lyrics_kind(Some(&lyrics)),
+            total_start.elapsed().as_millis()
+        );
+        return Some(lyrics);
+    }
+
+    let fetched = fallback.or(lrclib);
     if let Ok(mut cache) = lyrics_cache().lock() {
         cache.put(cache_key.clone(), fetched.clone());
     }
@@ -658,14 +683,14 @@ pub fn cached_lyrics(
 
 fn has_word_timestamps(lyrics: &Lyrics) -> bool {
     match lyrics {
-        Lyrics::Synced(lines) => lines.iter().any(|line| !line.words.is_empty()),
+        Lyrics::Synced(lines) => lines.iter().any(|line| line.chunks.len() > 1),
         Lyrics::Plain(_) => false,
     }
 }
 
 fn lyrics_kind(lyrics: Option<&Lyrics>) -> &'static str {
     match lyrics {
-        Some(Lyrics::Synced(lines)) if lines.iter().any(|line| !line.words.is_empty()) => {
+        Some(Lyrics::Synced(lines)) if lines.iter().any(|line| line.chunks.len() > 1) => {
             "synced_word"
         }
         Some(Lyrics::Synced(_)) => "synced_line",
@@ -675,11 +700,11 @@ fn lyrics_kind(lyrics: Option<&Lyrics>) -> &'static str {
 }
 
 fn timed_line_count(lines: &[LyricLine]) -> usize {
-    lines.iter().filter(|line| !line.words.is_empty()).count()
+    lines.iter().filter(|line| !line.chunks.is_empty()).count()
 }
 
 fn timed_part_count(lines: &[LyricLine]) -> usize {
-    lines.iter().map(|line| line.words.len()).sum()
+    lines.iter().map(|line| line.chunks.len()).sum()
 }
 
 fn log_lyrics_key_hash(key: &str) -> String {
@@ -865,7 +890,8 @@ async fn fetch_jellyfin_lyrics(item_id: &str, server_url: &str, token: &str) -> 
                     start_time: ticks as f64 / 10_000_000.0,
                     end_time: None,
                     text: l.text.clone(),
-                    words: Vec::new(),
+                    chunks: Vec::new(),
+                    parent_line_index: None,
                     background: false,
                     opposite_turn: false,
                 })
@@ -972,7 +998,8 @@ async fn subsonic_get_by_id(
                     start_time: ms as f64 / 1000.0,
                     end_time: None,
                     text: l.value.clone(),
-                    words: Vec::new(),
+                    chunks: Vec::new(),
+                    parent_line_index: None,
                     background: false,
                     opposite_turn: false,
                 })
@@ -1136,7 +1163,7 @@ async fn fetch_from_musixmatch_enhanced(artist: &str, title: &str) -> Option<Lyr
         .as_str()?;
     let enhanced_lrc = musixmatch_richsync_to_lrc(body)?;
     let parsed = parse_lrc(&enhanced_lrc);
-    if parsed.iter().any(|line| !line.words.is_empty()) {
+    if parsed.iter().any(|line| !line.chunks.is_empty()) {
         lyrics_debug!(
             "musixmatch richsync parsed lines={} timed_lines={} timed_parts={}",
             parsed.len(),
@@ -1313,15 +1340,20 @@ fn paxsenix_apple_to_lines(rows: Vec<PaxsenixAppleLyricLine>) -> Option<Vec<Lyri
         let opposite_turn = row.opposite_turn;
         let row_has_background_text = !row.background_text.is_empty();
         let main_line_is_background = row.background && !row_has_background_text;
+        let mut parent_line_index = None;
 
         if let Some(line) = paxsenix_apple_parts_to_line(
             row.text,
             row_start_time,
             row_end_time,
+            None,
             main_line_is_background,
             opposite_turn,
         ) {
             lines.push(line);
+            if !main_line_is_background {
+                parent_line_index = lines.len().checked_sub(1);
+            }
         }
 
         let background_start_time = row
@@ -1335,6 +1367,7 @@ fn paxsenix_apple_to_lines(rows: Vec<PaxsenixAppleLyricLine>) -> Option<Vec<Lyri
             row.background_text,
             background_start_time,
             row_end_time,
+            parent_line_index,
             true,
             opposite_turn,
         ) {
@@ -1349,11 +1382,12 @@ fn paxsenix_apple_parts_to_line(
     parts: Vec<PaxsenixAppleLyricPart>,
     start_time: f64,
     end_time: Option<f64>,
+    parent_line_index: Option<usize>,
     background: bool,
     opposite_turn: bool,
 ) -> Option<LyricLine> {
     let mut text = String::new();
-    let mut words = Vec::new();
+    let mut chunks = Vec::new();
     let mut previous_part_continues = false;
 
     for part in parts {
@@ -1370,7 +1404,7 @@ fn paxsenix_apple_parts_to_line(
 
         text.push_str(&display_text);
         if let Some(timestamp) = part.timestamp {
-            words.push(LyricWord {
+            chunks.push(LyricChunk {
                 start_time: timestamp as f64 / 1000.0,
                 text: display_text,
             });
@@ -1383,7 +1417,8 @@ fn paxsenix_apple_parts_to_line(
         start_time,
         end_time,
         text,
-        words,
+        chunks,
+        parent_line_index,
         background,
         opposite_turn,
     })
@@ -1755,7 +1790,8 @@ fn parse_lrc(lrc_text: &str) -> Vec<LyricLine> {
                     start_time: words[0].start_time,
                     end_time: None,
                     text,
-                    words,
+                    chunks: words,
+                    parent_line_index: None,
                     background: false,
                     opposite_turn: false,
                 });
@@ -1776,7 +1812,8 @@ fn parse_lrc(lrc_text: &str) -> Vec<LyricLine> {
                 start_time,
                 end_time: None,
                 text: text.clone(),
-                words: words.clone(),
+                chunks: words.clone(),
+                parent_line_index: None,
                 background: false,
                 opposite_turn: false,
             });
@@ -1832,7 +1869,7 @@ fn extract_line_timestamps(line: &str) -> (Vec<f64>, &str) {
     (timestamps, rest)
 }
 
-fn parse_enhanced_words(content: &str) -> (String, Vec<LyricWord>) {
+fn parse_enhanced_words(content: &str) -> (String, Vec<LyricChunk>) {
     let mut words = Vec::new();
     let mut text = String::new();
     let mut rest = content;
@@ -1844,7 +1881,7 @@ fn parse_enhanced_words(content: &str) -> (String, Vec<LyricWord>) {
         if let Some(start_time) = pending_time.take()
             && !before.is_empty()
         {
-            words.push(LyricWord {
+            words.push(LyricChunk {
                 start_time,
                 text: before.to_string(),
             });
@@ -1873,7 +1910,7 @@ fn parse_enhanced_words(content: &str) -> (String, Vec<LyricWord>) {
     if let Some(start_time) = pending_time
         && !rest.is_empty()
     {
-        words.push(LyricWord {
+        words.push(LyricChunk {
             start_time,
             text: rest.to_string(),
         });
@@ -1911,7 +1948,7 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0].start_time, 1.0);
         assert_eq!(lines[0].text, "Hello");
-        assert!(lines[0].words.is_empty());
+        assert!(lines[0].chunks.is_empty());
         assert_eq!(lines[1].start_time, 2.5);
         assert_eq!(lines[1].text, "World");
     }
@@ -1923,19 +1960,21 @@ mod tests {
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].start_time, 10.0);
         assert_eq!(lines[0].text, "Hello world");
-        assert_eq!(lines[0].words.len(), 2);
-        assert_eq!(lines[0].words[0].start_time, 10.1);
-        assert_eq!(lines[0].words[0].text, "Hello ");
-        assert_eq!(lines[0].words[1].start_time, 10.6);
-        assert_eq!(lines[0].words[1].text, "world");
+        assert_eq!(lines[0].chunks.len(), 2);
+        assert_eq!(lines[0].chunks[0].start_time, 10.1);
+        assert_eq!(lines[0].chunks[0].text, "Hello ");
+        assert_eq!(lines[0].chunks[1].start_time, 10.6);
+        assert_eq!(lines[0].chunks[1].text, "world");
     }
 
     #[test]
     fn detects_word_timed_lyrics() {
         let line_only = Lyrics::Synced(parse_lrc("[00:01.00]Hello"));
-        let word_timed = Lyrics::Synced(parse_lrc("[00:01.00]<00:01.10>Hello"));
+        let single_chunk = Lyrics::Synced(parse_lrc("[00:01.00]<00:01.10>Hello"));
+        let word_timed = Lyrics::Synced(parse_lrc("[00:01.00]<00:01.10>Hello <00:01.50>world"));
 
         assert!(!has_word_timestamps(&line_only));
+        assert!(!has_word_timestamps(&single_chunk));
         assert!(has_word_timestamps(&word_timed));
     }
 
@@ -1958,11 +1997,11 @@ mod tests {
 
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0].start_time, 10.0);
-        assert_eq!(parsed[0].words.len(), 2);
-        assert_eq!(parsed[0].words[0].start_time, 10.1);
-        assert_eq!(parsed[0].words[0].text, "Hello ");
-        assert_eq!(parsed[0].words[1].start_time, 10.6);
-        assert_eq!(parsed[0].words[1].text, "world ");
+        assert_eq!(parsed[0].chunks.len(), 2);
+        assert_eq!(parsed[0].chunks[0].start_time, 10.1);
+        assert_eq!(parsed[0].chunks[0].text, "Hello ");
+        assert_eq!(parsed[0].chunks[1].start_time, 10.6);
+        assert_eq!(parsed[0].chunks[1].text, "world ");
     }
 
     #[test]
@@ -2005,11 +2044,11 @@ mod tests {
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].start_time, 10.0);
         assert_eq!(lines[0].text, "Hello world");
-        assert_eq!(lines[0].words.len(), 3);
-        assert_eq!(lines[0].words[0].start_time, 10.1);
-        assert_eq!(lines[0].words[0].text, "Hel");
-        assert_eq!(lines[0].words[2].start_time, 10.6);
-        assert_eq!(lines[0].words[2].text, " world");
+        assert_eq!(lines[0].chunks.len(), 3);
+        assert_eq!(lines[0].chunks[0].start_time, 10.1);
+        assert_eq!(lines[0].chunks[0].text, "Hel");
+        assert_eq!(lines[0].chunks[2].start_time, 10.6);
+        assert_eq!(lines[0].chunks[2].text, " world");
     }
 
     #[test]
@@ -2066,11 +2105,14 @@ mod tests {
         assert_eq!(lines[0].text, "Looking for");
         assert!(!lines[0].background);
         assert!(lines[0].opposite_turn);
+        assert_eq!(lines[0].parent_line_index, None);
         assert_eq!(lines[1].text, "Echo");
         assert!(lines[1].background);
         assert!(lines[1].opposite_turn);
+        assert_eq!(lines[1].parent_line_index, Some(0));
         assert_eq!(lines[1].start_time, 10.8);
         assert_eq!(lines[2].text, "Next");
+        assert_eq!(lines[2].parent_line_index, None);
     }
 
     #[test]

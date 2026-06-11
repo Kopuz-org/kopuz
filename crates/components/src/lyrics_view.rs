@@ -18,15 +18,14 @@ const FULLSCREEN_ACTIVE_CENTER_LYRIC_CLASS: &str = "text-white text-2xl font-sem
 const RIGHTBAR_CENTER_LYRIC_CLASS: &str = "text-white/40 text-lg font-semibold transition-colors duration-300 hover:text-white/60 cursor-pointer whitespace-pre-wrap text-center w-full";
 const RIGHTBAR_ACTIVE_CENTER_LYRIC_CLASS: &str = "text-white text-lg font-semibold transition-colors duration-300 whitespace-pre-wrap text-center w-full";
 const LYRIC_STYLE: &str = "box-sizing: border-box; overflow-wrap: normal; word-break: normal; transform: scale(1); transition: color 300ms, transform 300ms, opacity 180ms, max-height 180ms, margin-top 180ms;";
-const HIDDEN_BACKGROUND_LYRIC_STYLE: &str = "box-sizing: border-box; overflow-wrap: normal; word-break: normal; overflow: hidden; pointer-events: none; opacity: 0; max-height: 0px; margin-top: 0px; transform: scale(1); transition: color 300ms, transform 300ms, opacity 180ms, max-height 180ms, margin-top 180ms;";
-const FULLSCREEN_BACKGROUND_LYRIC_CLASS: &str = "text-white/25 text-xl font-medium transition-colors duration-300 whitespace-pre-wrap text-left w-full -mt-3 pl-6 leading-snug";
-const FULLSCREEN_ACTIVE_BACKGROUND_LYRIC_CLASS: &str = "text-white/70 text-xl font-medium transition-colors duration-300 whitespace-pre-wrap text-left w-full -mt-3 pl-6 leading-snug";
-const RIGHTBAR_BACKGROUND_LYRIC_CLASS: &str = "text-white/25 text-sm font-medium transition-colors duration-300 whitespace-pre-wrap text-left w-full -mt-3 pl-4 leading-snug";
-const RIGHTBAR_ACTIVE_BACKGROUND_LYRIC_CLASS: &str = "text-white/70 text-sm font-medium transition-colors duration-300 whitespace-pre-wrap text-left w-full -mt-3 pl-4 leading-snug";
-const FULLSCREEN_BACKGROUND_OPPOSITE_LYRIC_CLASS: &str = "text-white/25 text-xl font-medium transition-colors duration-300 whitespace-pre-wrap text-right w-full -mt-3 pr-6 leading-snug";
-const FULLSCREEN_ACTIVE_BACKGROUND_OPPOSITE_LYRIC_CLASS: &str = "text-white/70 text-xl font-medium transition-colors duration-300 whitespace-pre-wrap text-right w-full -mt-3 pr-6 leading-snug";
-const RIGHTBAR_BACKGROUND_OPPOSITE_LYRIC_CLASS: &str = "text-white/25 text-sm font-medium transition-colors duration-300 whitespace-pre-wrap text-right w-full -mt-3 pr-4 leading-snug";
-const RIGHTBAR_ACTIVE_BACKGROUND_OPPOSITE_LYRIC_CLASS: &str = "text-white/70 text-sm font-medium transition-colors duration-300 whitespace-pre-wrap text-right w-full -mt-3 pr-4 leading-snug";
+const FULLSCREEN_BACKGROUND_LYRIC_CLASS: &str = "text-white/25 text-xl font-medium transition-colors duration-300 whitespace-pre-wrap text-left w-full pl-6 leading-snug";
+const FULLSCREEN_ACTIVE_BACKGROUND_LYRIC_CLASS: &str = "text-white/70 text-xl font-medium transition-colors duration-300 whitespace-pre-wrap text-left w-full pl-6 leading-snug";
+const RIGHTBAR_BACKGROUND_LYRIC_CLASS: &str = "text-white/25 text-sm font-medium transition-colors duration-300 whitespace-pre-wrap text-left w-full pl-4 leading-snug";
+const RIGHTBAR_ACTIVE_BACKGROUND_LYRIC_CLASS: &str = "text-white/70 text-sm font-medium transition-colors duration-300 whitespace-pre-wrap text-left w-full pl-4 leading-snug";
+const FULLSCREEN_BACKGROUND_OPPOSITE_LYRIC_CLASS: &str = "text-white/25 text-xl font-medium transition-colors duration-300 whitespace-pre-wrap text-right w-full pr-6 leading-snug";
+const FULLSCREEN_ACTIVE_BACKGROUND_OPPOSITE_LYRIC_CLASS: &str = "text-white/70 text-xl font-medium transition-colors duration-300 whitespace-pre-wrap text-right w-full pr-6 leading-snug";
+const RIGHTBAR_BACKGROUND_OPPOSITE_LYRIC_CLASS: &str = "text-white/25 text-sm font-medium transition-colors duration-300 whitespace-pre-wrap text-right w-full pr-4 leading-snug";
+const RIGHTBAR_ACTIVE_BACKGROUND_OPPOSITE_LYRIC_CLASS: &str = "text-white/70 text-sm font-medium transition-colors duration-300 whitespace-pre-wrap text-right w-full pr-4 leading-snug";
 const FULLSCREEN_OPPOSITE_LYRIC_CLASS: &str = "text-white/40 text-2xl italic font-semibold transition-colors duration-300 hover:text-white/60 cursor-pointer whitespace-pre-wrap text-right w-full";
 const FULLSCREEN_ACTIVE_OPPOSITE_LYRIC_CLASS: &str = "text-white text-2xl italic font-semibold transition-colors duration-300 whitespace-pre-wrap text-right w-full";
 const RIGHTBAR_OPPOSITE_LYRIC_CLASS: &str = "text-white/40 text-lg italic font-semibold transition-colors duration-300 hover:text-white/60 cursor-pointer whitespace-pre-wrap text-right w-full";
@@ -115,21 +114,25 @@ fn lyric_line_transform_origin(
     }
 }
 
-fn lyric_line_max_width(line: &utils::lyrics::LyricLine, has_opposite_turn: bool) -> &'static str {
-    if line.opposite_turn || has_opposite_turn {
-        "90%"
-    } else {
-        "100%"
+fn lyric_line_max_width(
+    layout: LayoutMode,
+    line: &utils::lyrics::LyricLine,
+    has_opposite_turn: bool,
+) -> &'static str {
+    match (layout, line.opposite_turn || has_opposite_turn) {
+        (LayoutMode::Fullscreen, true) => "min(90%, 34rem)",
+        (LayoutMode::Fullscreen, false) => "min(100%, 38rem)",
+        (LayoutMode::Rightbar, true) => "min(90%, 18rem)",
+        (LayoutMode::Rightbar, false) => "min(100%, 20rem)",
     }
 }
 
-fn lyric_line_style(line: &utils::lyrics::LyricLine, has_opposite_turn: bool) -> String {
-    let base_style = if line.background {
-        HIDDEN_BACKGROUND_LYRIC_STYLE
-    } else {
-        LYRIC_STYLE
-    };
-    let max_width = lyric_line_max_width(line, has_opposite_turn);
+fn lyric_line_style(
+    layout: LayoutMode,
+    line: &utils::lyrics::LyricLine,
+    has_opposite_turn: bool,
+) -> String {
+    let max_width = lyric_line_max_width(layout, line, has_opposite_turn);
     let margin_style = if line.opposite_turn {
         "margin-left: auto; margin-right: 0;"
     } else if has_opposite_turn {
@@ -138,7 +141,7 @@ fn lyric_line_style(line: &utils::lyrics::LyricLine, has_opposite_turn: bool) ->
         "margin-left: auto; margin-right: auto;"
     };
 
-    format!("{base_style} width: {max_width}; max-width: {max_width}; {margin_style}")
+    format!("{LYRIC_STYLE} width: {max_width}; max-width: {max_width}; {margin_style}")
 }
 
 fn main_line_indices(lines: &[utils::lyrics::LyricLine]) -> Vec<usize> {
@@ -154,14 +157,6 @@ fn main_line_indices(lines: &[utils::lyrics::LyricLine]) -> Vec<usize> {
     (0..lines.len()).collect()
 }
 
-fn background_parent_index(lines: &[utils::lyrics::LyricLine], index: usize) -> Option<usize> {
-    if !lines.get(index)?.background {
-        return None;
-    }
-
-    (0..index).rev().find(|&index| !lines[index].background)
-}
-
 fn active_secondary_lines(
     lines: &[utils::lyrics::LyricLine],
     current_time: f64,
@@ -173,17 +168,17 @@ fn active_secondary_lines(
         .filter(|(index, line)| {
             *index != main_line_index
                 && line.background
-                && background_parent_index(lines, *index) == Some(main_line_index)
+                && line.parent_line_index == Some(main_line_index)
         })
-        .map(|(index, line)| format!("[{},{}]", index, active_word_index(line, current_time)))
+        .map(|(index, line)| format!("[{},{}]", index, active_chunk_index(line, current_time)))
         .collect::<Vec<_>>()
         .join(",");
 
     format!("[{}]", entries)
 }
 
-fn active_word_index(line: &utils::lyrics::LyricLine, current_time: f64) -> i64 {
-    line.words
+fn active_chunk_index(line: &utils::lyrics::LyricLine, current_time: f64) -> i64 {
+    line.chunks
         .partition_point(|word| word.start_time <= current_time)
         .checked_sub(1)
         .map(|index| index as i64)
@@ -221,15 +216,15 @@ pub fn LyricsView(
                 let inactiveClass = "{inactive_class}";
 
                 const resetWords = (lineEl) => {{
-                    lineEl?.querySelectorAll('[data-lyric-word]').forEach((word) => {{
+                    lineEl?.querySelectorAll('[data-lyric-chunk]').forEach((word) => {{
                         word.style.opacity = '';
                         word.style.textShadow = '';
                     }});
                 }};
 
-                const updateWords = (lineEl, activeWordIndex) => {{
-                    lineEl?.querySelectorAll('[data-lyric-word]').forEach((word, index) => {{
-                        if (activeWordIndex >= 0 && index <= activeWordIndex) {{
+                const updateWords = (lineEl, activeChunkIndex) => {{
+                    lineEl?.querySelectorAll('[data-lyric-chunk]').forEach((word, index) => {{
+                        if (activeChunkIndex >= 0 && index <= activeChunkIndex) {{
                             word.style.opacity = '1';
                             word.style.textShadow = '0 0 12px rgba(255,255,255,0.72)';
                         }} else {{
@@ -243,7 +238,6 @@ pub fn LyricsView(
                 const activeFor = (lineEl) => lineEl?.dataset?.activeClass || activeClass;
                 const activeScaleFor = (lineEl) => lineEl?.dataset?.activeScale || '1.06';
                 const maxWidthFor = (lineEl) => lineEl?.dataset?.maxLineWidth || '100%';
-                const isBackgroundLine = (lineEl) => lineEl?.dataset?.backgroundLine === 'true';
 
                 const applyLineLayout = (lineEl) => {{
                     if (!lineEl) return;
@@ -264,24 +258,6 @@ pub fn LyricsView(
                         lineEl.style.marginLeft = 'auto';
                         lineEl.style.marginRight = 'auto';
                     }}
-                }};
-
-                const hideBackgroundLine = (lineEl) => {{
-                    if (!isBackgroundLine(lineEl)) return;
-                    lineEl.style.overflow = 'hidden';
-                    lineEl.style.pointerEvents = 'none';
-                    lineEl.style.opacity = '0';
-                    lineEl.style.maxHeight = '0px';
-                    lineEl.style.marginTop = '0px';
-                }};
-
-                const showBackgroundLine = (lineEl) => {{
-                    if (!isBackgroundLine(lineEl)) return;
-                    lineEl.style.overflow = 'hidden';
-                    lineEl.style.pointerEvents = '';
-                    lineEl.style.opacity = '';
-                    lineEl.style.maxHeight = '96px';
-                    lineEl.style.marginTop = '';
                 }};
 
                 const scrollLineIntoComfortView = (lineEl) => {{
@@ -332,24 +308,22 @@ pub fn LyricsView(
                     applyLineLayout(lineEl);
                     lineEl.style.transform = 'scale(1)';
                     resetWords(lineEl);
-                    hideBackgroundLine(lineEl);
                 }};
 
-                const activateLine = (lineEl, wordIndex, scale = null) => {{
+                const activateLine = (lineEl, chunkIndex, scale = null) => {{
                     if (!lineEl) return;
                     const scaleValue = scale || activeScaleFor(lineEl);
                     const origin = lineEl.dataset.transformOrigin || 'center';
-                    showBackgroundLine(lineEl);
                     lineEl.className = activeFor(lineEl);
                     lineEl.style.transformOrigin = origin;
                     applyLineLayout(lineEl);
                     lineEl.style.transform = `scale(${{scaleValue}})`;
-                    if (lineEl.querySelector('[data-lyric-word]')) {{
-                        updateWords(lineEl, wordIndex);
+                    if (lineEl.querySelector('[data-lyric-chunk]')) {{
+                        updateWords(lineEl, chunkIndex);
                     }}
                 }};
 
-                window.__{layout}_updateLyrics = (nextIndex, nextWordIndex, activeLinesJson = '[]') => {{
+                window.__{layout}_updateLyrics = (nextIndex, nextChunkIndex, activeLinesJson = '[]') => {{
                     let nextEl = document.getElementById(`{layout}-lyrics-${{nextIndex}}`)
                     let nextSecondary = new Map(JSON.parse(activeLinesJson));
                     for (const lineEl of activeSecondaryEls) {{
@@ -366,7 +340,7 @@ pub fn LyricsView(
                         }}
 
                         if (nextEl) {{
-                            activateLine(nextEl, nextWordIndex);
+                            activateLine(nextEl, nextChunkIndex);
                             fadeLineIn(nextEl);
                             scrollLineIntoComfortView(nextEl);
                         }}
@@ -375,13 +349,13 @@ pub fn LyricsView(
                     }}
 
                     if (nextEl) {{
-                        activateLine(nextEl, nextWordIndex);
+                        activateLine(nextEl, nextChunkIndex);
                     }}
 
-                    for (const [idx, wordIndex] of nextSecondary.entries()) {{
+                    for (const [idx, chunkIndex] of nextSecondary.entries()) {{
                         const lineEl = document.getElementById(`{layout}-lyrics-${{idx}}`);
                         if (!lineEl || lineEl === nextEl) continue;
-                        activateLine(lineEl, wordIndex);
+                        activateLine(lineEl, chunkIndex);
                         activeSecondaryEls.add(lineEl);
                     }}
                 }}
@@ -420,12 +394,12 @@ pub fn LyricsView(
                             n => main_line_indices.get(n - 1).copied(),
                         }
                     {
-                        let current_word_index =
-                            active_word_index(&lines[current_line_index], current_time);
+                        let current_chunk_index =
+                            active_chunk_index(&lines[current_line_index], current_time);
                         let active_secondary_lines =
                             active_secondary_lines(&lines, current_time, current_line_index);
                         let _ = eval(&format!(
-                            "window.__{layout}_updateLyrics({current_line_index}, {current_word_index}, '{}')",
+                            "window.__{layout}_updateLyrics({current_line_index}, {current_chunk_index}, '{}')",
                             active_secondary_lines
                         ));
 
@@ -481,13 +455,13 @@ pub fn LyricsView(
                                     "data-lyric-line": "true",
                                     "data-lyric-index": "{i}",
                                     "data-background-line": "{line.background}",
-                                    "data-max-line-width": "{lyric_line_max_width(line, has_opposite_turn)}",
+                                    "data-max-line-width": "{lyric_line_max_width(layout, line, has_opposite_turn)}",
                                     "data-inactive-class": "{lyric_line_class(layout, line, false, has_opposite_turn)}",
                                     "data-active-class": "{lyric_line_class(layout, line, true, has_opposite_turn)}",
                                     "data-active-scale": "{lyric_line_active_scale(line, has_opposite_turn)}",
                                     "data-transform-origin": "{lyric_line_transform_origin(line, has_opposite_turn)}",
                                     class: "{lyric_line_class(layout, line, false, has_opposite_turn)}",
-                                    style: lyric_line_style(line, has_opposite_turn),
+                                    style: lyric_line_style(layout, line, has_opposite_turn),
                                     onclick: {
                                         let st = line.start_time;
                                         move |_| {
@@ -495,14 +469,14 @@ pub fn LyricsView(
                                             current_song_progress.set(st as u64);
                                         }
                                     },
-                                    if line.words.is_empty() {
+                                    if line.chunks.is_empty() {
                                         "{line.text}"
                                     } else {
-                                        for (word_i, word) in line.words.iter().enumerate() {
+                                        for (chunk_i, word) in line.chunks.iter().enumerate() {
                                             span {
-                                                key: "{word_i}",
-                                                id: "{layout}-lyrics-{i}-word-{word_i}",
-                                                "data-lyric-word": "true",
+                                                key: "{chunk_i}",
+                                                id: "{layout}-lyrics-{i}-word-{chunk_i}",
+                                                "data-lyric-chunk": "true",
                                                 class: "transition-opacity duration-150",
                                                 "{word.text}"
                                             }
