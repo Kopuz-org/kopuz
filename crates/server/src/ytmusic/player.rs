@@ -187,7 +187,15 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
 /// lesser itag (251, etc.) — even from a signed-in account — needs a content
 /// pot for deep ranges, exactly like anonymous.
 fn is_premium_itag(itag: Option<u32>) -> bool {
-    matches!(itag, Some(774))
+    // Formats only a paid subscription unlocks: 774 (Opus ~256k), 141 (AAC
+    // 256k), 256/258 (AAC 192/384k). A free/anon account never sees these — it
+    // caps at 251/140 (~128k) — so any of them proves the account is Premium
+    // and the deciphered stream is served directly, no content pot. Only the
+    // free-tier itags fall through to the ANDROID_VR + pot path. (Crucially:
+    // without 141 here, a Premium user playing a video that has no Opus format
+    // gets mis-tagged as free, poisoning the per-account tier cache — and with
+    // a flaky minter that breaks playback for the whole 5-min TTL window.)
+    matches!(itag, Some(774 | 141 | 256 | 258))
 }
 
 /// Premium-tier memo, keyed by Google user id (so switching accounts re-learns)

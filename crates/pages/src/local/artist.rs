@@ -175,8 +175,6 @@ pub fn LocalArtist(
     });
 
     let name = artist_name.read().clone();
-    let page_container_class = crate::layout::page_container_class(&config.read().ui_style);
-
     let mut add_tracks_to_playlist = move |playlist_id: String, paths: Vec<PathBuf>| {
         let mut store = playlist_store.write();
         if let Some(playlist) = store.playlists.iter_mut().find(|p| p.id == playlist_id) {
@@ -217,7 +215,7 @@ pub fn LocalArtist(
 
     rsx! {
         div {
-            class: page_container_class,
+            class: "flex-1 min-h-0 flex flex-col",
             if name.is_empty() {
                 div { class: "flex-1 min-h-0 overflow-y-auto pb-20",
                     div { class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-8",
