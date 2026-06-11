@@ -419,18 +419,20 @@ pub fn Fullscreen(
             return;
         }
         last_key.set(new_key);
-        let (server_url, server_token, server_user_id, prefer_local) = {
+        let (server_url, server_token, server_user_id, prefer_local, enable_musixmatch) = {
             let conf = config.peek();
             let prefer_local = conf.prefer_local_lyrics;
+            let enable_musixmatch = conf.enable_musixmatch_lyrics;
             if let Some(server) = &conf.server {
                 (
                     Some(server.url.clone()),
                     server.access_token.clone(),
                     server.user_id.clone(),
                     prefer_local,
+                    enable_musixmatch,
                 )
             } else {
-                (None, None, None, prefer_local)
+                (None, None, None, prefer_local, enable_musixmatch)
             }
         };
 
@@ -442,9 +444,14 @@ pub fn Fullscreen(
             return;
         }
 
-        if let Some(cached) =
-            utils::lyrics::cached_lyrics(&artist, &title, &album, duration, &track_path)
-        {
+        if let Some(cached) = utils::lyrics::cached_lyrics(
+            &artist,
+            &title,
+            &album,
+            duration,
+            &track_path,
+            enable_musixmatch,
+        ) {
             let display = cached.or_else(|| {
                 Some(utils::lyrics::Lyrics::Plain(
                     i18n::t("lyrics_not_found").to_string(),
@@ -468,6 +475,7 @@ pub fn Fullscreen(
                 server_token.as_deref(),
                 server_user_id.as_deref(),
                 prefer_local,
+                enable_musixmatch,
                 |partial| {
                     if *fetch_gen.peek() == fetch_id && last_displayed.as_ref() != Some(&partial) {
                         last_displayed = Some(partial.clone());

@@ -197,7 +197,7 @@ pub fn LyricsView(
     // Clear functions when the component is dropped
     use_drop(move || {
         let _cleanup = eval(&format!(
-            "if (window.__{layout}_updateLyrics) delete window.__{layout}_updateLyrics"
+            "if (window.__{layout}_updateLyrics) delete window.__{layout}_updateLyrics; if (window.__{layout}_resetLyrics) delete window.__{layout}_resetLyrics"
         ));
     });
 
@@ -359,6 +359,19 @@ pub fn LyricsView(
                         activeSecondaryEls.add(lineEl);
                     }}
                 }}
+
+                window.__{layout}_resetLyrics = () => {{
+                    if (scrollAnimationFrame) {{
+                        cancelAnimationFrame(scrollAnimationFrame);
+                        scrollAnimationFrame = null;
+                    }}
+                    document
+                        .getElementById('{layout}-lyrics-content')
+                        ?.querySelectorAll('[data-lyric-line]')
+                        .forEach((lineEl) => deactivateLine(lineEl));
+                    currEl = null;
+                    activeSecondaryEls = new Set();
+                }}
             "#,
         ));
     });
@@ -368,7 +381,7 @@ pub fn LyricsView(
 
         // scroll to top on lyrics change
         let _scroll_to_top = eval(&format!(
-            "document.getElementById('{layout}-lyrics-content')?.scrollTo({{ top: 0, left: 0, behavior: 'smooth' }});"
+            "window.__{layout}_resetLyrics?.(); document.getElementById('{layout}-lyrics-content')?.scrollTo({{ top: 0, left: 0 }});"
         ));
 
         async move {
@@ -450,7 +463,7 @@ pub fn LyricsView(
                         rsx! {
                             for (i, line) in lines.iter().enumerate() {
                                 div {
-                                    key: "{i}",
+                                    key: "{i}-{line.start_time}-{line.text}",
                                     id: "{layout}-lyrics-{i}",
                                     "data-lyric-line": "true",
                                     "data-lyric-index": "{i}",
