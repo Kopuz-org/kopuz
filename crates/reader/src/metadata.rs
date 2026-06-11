@@ -90,6 +90,11 @@ pub fn extract_metadata(
         })
         .unwrap_or_else(|| vec![artist.clone()]);
 
+    // The singular field carries the primary (first) credited artist; keeping
+    // the joined "A;B;C" string here would leak into the album-artist fallback
+    // and show up as a phantom artist in the library (issue #314).
+    let artist = artists.first().cloned().unwrap_or(artist);
+
     let album_title = tag.and_then(|t| t.album().map(|a| a.to_string()));
 
     let album_artist = tag
@@ -312,6 +317,41 @@ pub fn write_tags(track_path: &Path, edits: &TrackEdits) -> Result<(), String> {
             tag.push_picture(picture);
         }
     }
+
+    tagged
+        .save_to_path(track_path, WriteOptions::default())
+        .map_err(|e| e.to_string())
+}
+
+/// Rewrite the artist tag of a downloaded file from a structured artist list,
+/// joining with `;` so the scanner splits it back into individual artists.
+/// Used by the yt-dlp download fix-up (issue #314): yt-dlp embeds multiple
+/// artists as one comma-joined string, which is ambiguous (a comma may be part
+/// of a real name), while the structured list is not.
+pub fn set_artist_tag(track_path: &Path, artists: &[String]) -> Result<(), String> {
+    use lofty::config::WriteOptions;
+    use lofty::file::AudioFile;
+
+    if artists.is_empty() {
+        return Ok(());
+    }
+
+    let mut tagged = Probe::open(track_path)
+        .map_err(|e| e.to_string())?
+        .read()
+        .map_err(|e| e.to_string())?;
+
+    if tagged.primary_tag().is_none() {
+        let tag_type = tagged.primary_tag_type();
+        tagged.insert_tag(Tag::new(tag_type));
+    }
+    let tag = tagged
+        .primary_tag_mut()
+        .ok_or_else(|| "no writable tag for this format".to_string())?;
+
+    tag.set_artist(artists.join(";"));
+    // Stale structured values would win over the artist field on scan.
+    tag.remove_key(ItemKey::TrackArtists);
 
     tagged
         .save_to_path(track_path, WriteOptions::default())
