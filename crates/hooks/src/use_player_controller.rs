@@ -1782,6 +1782,10 @@ impl PlayerController {
         }
     }
 
+    /// Rebuilds `shuffle_order` as a full permutation of the queue: the
+    /// currently playing track at position 0, every other track after it
+    /// shuffled as a single pool. Resets `current_queue_index` to 0, which
+    /// acts as a pointer into `shuffle_order` while shuffle is on.
     fn rebuild_shuffle_order(&mut self) {
         use rand::seq::SliceRandom;
         let queue_len = self.queue.peek().len();
