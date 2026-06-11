@@ -34,6 +34,7 @@ const FULLSCREEN_OPPOSITE_LYRIC_CLASS: &str = "text-white/40 text-2xl italic fon
 const FULLSCREEN_ACTIVE_OPPOSITE_LYRIC_CLASS: &str = "text-white text-2xl italic font-semibold transition-colors duration-300 whitespace-pre-wrap text-right w-full";
 const RIGHTBAR_OPPOSITE_LYRIC_CLASS: &str = "text-white/40 text-lg italic font-semibold transition-colors duration-300 hover:text-white/60 cursor-pointer whitespace-pre-wrap text-right w-full";
 const RIGHTBAR_ACTIVE_OPPOSITE_LYRIC_CLASS: &str = "text-white text-lg italic font-semibold transition-colors duration-300 whitespace-pre-wrap text-right w-full";
+const LYRIC_SEAMLESS_GAP_SECONDS: f64 = 3.0;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LayoutMode {
     Rightbar,
@@ -172,14 +173,42 @@ fn main_line_indices(lines: &[utils::lyrics::LyricLine]) -> Vec<usize> {
     (0..lines.len()).collect()
 }
 
-fn line_active_at(line: &utils::lyrics::LyricLine, current_time: f64) -> bool {
+fn next_main_line_start(
+    lines: &[utils::lyrics::LyricLine],
+    main_line_indices: &[usize],
+    line_index: usize,
+) -> Option<f64> {
+    main_line_indices
+        .iter()
+        .position(|&index| index == line_index)
+        .and_then(|position| main_line_indices.get(position.saturating_add(1)))
+        .map(|&next_index| lines[next_index].start_time)
+}
+
+fn line_active_at(
+    line: &utils::lyrics::LyricLine,
+    current_time: f64,
+    next_main_start: Option<f64>,
+) -> bool {
     if current_time < line.start_time {
         return false;
     }
 
-    line.end_time
-        .map(|end_time| current_time <= end_time)
-        .unwrap_or(true)
+    let Some(end_time) = line.end_time else {
+        return next_main_start
+            .map(|next_start| current_time < next_start)
+            .unwrap_or(true);
+    };
+
+    if current_time <= end_time {
+        return true;
+    }
+
+    next_main_start
+        .filter(|&next_start| {
+            next_start > end_time && next_start - end_time <= LYRIC_SEAMLESS_GAP_SECONDS
+        })
+        .is_some_and(|next_start| current_time < next_start)
 }
 
 fn active_main_line_index(
@@ -191,12 +220,19 @@ fn active_main_line_index(
         .iter()
         .copied()
         .take_while(|&index| lines[index].start_time <= current_time)
-        .filter(|&index| line_active_at(&lines[index], current_time))
+        .filter(|&index| {
+            line_active_at(
+                &lines[index],
+                current_time,
+                next_main_line_start(lines, main_line_indices, index),
+            )
+        })
         .last()
 }
 
 fn active_secondary_lines(
     lines: &[utils::lyrics::LyricLine],
+    main_line_indices: &[usize],
     current_time: f64,
     main_line_index: usize,
 ) -> String {
@@ -204,7 +240,10 @@ fn active_secondary_lines(
         .iter()
         .enumerate()
         .filter(|(index, line)| {
-            if *index == main_line_index || !line_active_at(line, current_time) {
+            let next_start = (!line.background)
+                .then(|| next_main_line_start(lines, main_line_indices, *index))
+                .flatten();
+            if *index == main_line_index || !line_active_at(line, current_time, next_start) {
                 return false;
             }
 
@@ -438,8 +477,12 @@ pub fn LyricsView(
                     {
                         let current_chunk_index =
                             active_chunk_index(&lines[current_line_index], current_time);
-                        let active_secondary_lines =
-                            active_secondary_lines(&lines, current_time, current_line_index);
+                        let active_secondary_lines = active_secondary_lines(
+                            &lines,
+                            &main_line_indices,
+                            current_time,
+                            current_line_index,
+                        );
                         let _ = eval(&format!(
                             "window.__{layout}_updateLyrics({current_line_index}, {current_chunk_index}, '{}')",
                             active_secondary_lines
@@ -458,8 +501,12 @@ pub fn LyricsView(
                             .unwrap_or(50);
                     } else {
                         // we are before the first line, invalidate current line
-                        let active_secondary_lines =
-                            active_secondary_lines(&lines, current_time, usize::MAX);
+                        let active_secondary_lines = active_secondary_lines(
+                            &lines,
+                            &main_line_indices,
+                            current_time,
+                            usize::MAX,
+                        );
                         let _ = eval(&format!(
                             "window.__{layout}_updateLyrics(-1, -1, '{}')",
                             active_secondary_lines
