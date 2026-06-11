@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO app_config (id, json) VALUES (1, ?1) ON CONFLICT(id) DO UPDATE SET json = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "17d10865e8e3eabbb7804bc4635588047df93afefbdc37bf619c393e11c33187"
+}

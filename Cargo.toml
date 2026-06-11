@@ -9,6 +9,7 @@ members = [
    "crates/server",
    "crates/utils",
    "crates/config",
+   "crates/db",
    "crates/kopuz_route",
    "crates/discord-presence",
    "crates/scrobble",
@@ -66,6 +67,7 @@ hooks = { path = "./crates/hooks" }
 pages = { path = "./crates/pages" }
 utils = { path = "./crates/utils" }
 config = { path = "./crates/config" }
+db = { path = "./crates/db" }
 kopuz = { path = "./crates/kopuz" }
 server = { path = "./crates/server" }
 kopuz_route = { path = "./crates/kopuz_route" }
