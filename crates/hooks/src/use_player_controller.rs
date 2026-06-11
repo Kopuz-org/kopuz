@@ -1793,25 +1793,19 @@ impl PlayerController {
             return;
         }
 
-        // Tracks that come after the current position (play these first).
-        let mut ahead: Vec<usize> = (current_idx..queue_len).collect();
-        ahead.shuffle(&mut rand::rng());
-        // move current played track to the front
-        let pos = ahead
-            .iter()
-            .position(|&i| i == current_idx)
-            .expect("cannot find current index in shuffle order");
-        ahead.swap(pos, 0);
+        // The current track keeps playing at position 0; every other track is
+        // shuffled as a single pool so the ones before and after it mix freely
+        // instead of playing as two separate groups (issue #362).
+        let mut order: Vec<usize> = Vec::with_capacity(queue_len);
+        order.push(current_idx);
+        let mut rest: Vec<usize> = (0..queue_len).filter(|&i| i != current_idx).collect();
+        rest.shuffle(&mut rand::rng());
+        order.extend(rest);
 
-        // Tracks that wrap around from the beginning (play after the ahead group).
-        let mut wrapped: Vec<usize> = (0..current_idx).collect();
-        wrapped.shuffle(&mut rand::rng());
-
-        ahead.extend(wrapped);
         // reset current queue index to match the currently played track (now moved at pos 0)
         // will be used as a pointer to the retrieve the current track in the shuffled order
         self.current_queue_index.set(0);
-        self.shuffle_order.set(ahead);
+        self.shuffle_order.set(order);
     }
 
     pub fn play_queue_shuffled(&mut self, tracks: Vec<Track>) {
