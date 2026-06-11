@@ -54,10 +54,17 @@ async fn config_round_trips_with_creds_in_servers_table() {
     });
     cfg.active_server_id = Some("srv-b".into());
     cfg.theme = "midnight".into();
-    cfg.listen_counts.insert("ytmusic:VID1".into(), 7);
-    cfg.listen_counts.insert("/music/a.flac".into(), 3);
 
     db.save_config(&cfg).await.unwrap();
+
+    // Play counts are written ONLY through bump_listen_count (a per-play
+    // 1-row upsert), never by save_config — but load_config hydrates them.
+    for _ in 0..7 {
+        db.bump_listen_count("ytmusic:VID1").await.unwrap();
+    }
+    for _ in 0..3 {
+        db.bump_listen_count("/music/a.flac").await.unwrap();
+    }
 
     let loaded = db.load_config().await.unwrap().expect("config present");
     assert_eq!(loaded.theme, "midnight");

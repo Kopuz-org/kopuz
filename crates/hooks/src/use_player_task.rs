@@ -40,6 +40,20 @@ static BG_CMD_RX: std::sync::OnceLock<std::sync::Mutex<std::sync::mpsc::Receiver
     std::sync::OnceLock::new();
 static BG_NOTIFY: std::sync::OnceLock<tokio::sync::Notify> = std::sync::OnceLock::new();
 
+/// Persist a play-count increment as a single-row upsert. The in-memory
+/// `config.listen_counts` is bumped by the caller for live views; this is the
+/// durable side (no whole-config rewrite on the play hot path).
+fn bump_listen_count_db(track_uid: String) {
+    let Some(db) = try_consume_context::<db::Db>() else {
+        return;
+    };
+    spawn(async move {
+        if let Err(e) = db.bump_listen_count(&track_uid).await {
+            tracing::warn!(error = %e, "listen count persist failed");
+        }
+    });
+}
+
 fn init_bg_channel() {
     BG_CMD_TX.get_or_init(|| {
         let (tx, rx) = std::sync::mpsc::channel::<BgCmd>();
@@ -574,7 +588,9 @@ pub fn use_player_task(ctrl: PlayerController) {
                             let idx = *ctrl.current_queue_index.peek();
                             if let Some(track) = ctrl.get_track_at(idx) {
                                 let track_id = track.id.uid().to_string();
-                                *config_write.listen_counts.entry(track_id).or_insert(0) += 1;
+                                *config_write.listen_counts.entry(track_id.clone()).or_insert(0) += 1;
+                                drop(config_write);
+                                bump_listen_count_db(track_id);
                             }
                         }
                         ctrl.play_next_with_crossfade();
@@ -608,7 +624,9 @@ pub fn use_player_task(ctrl: PlayerController) {
                             let idx = *ctrl.current_queue_index.peek();
                             if let Some(track) = ctrl.get_track_at(idx) {
                                 let track_id = track.id.uid().to_string();
-                                *config_write.listen_counts.entry(track_id).or_insert(0) += 1;
+                                *config_write.listen_counts.entry(track_id.clone()).or_insert(0) += 1;
+                                drop(config_write);
+                                bump_listen_count_db(track_id);
                             }
                         }
                         ctrl.play_next();

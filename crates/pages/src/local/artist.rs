@@ -3,7 +3,10 @@ use components::metadata_modal::MetadataModal;
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
 use config::{AppConfig, ArtistPhotoSource, ArtistViewOrder};
+use db::{Source, TrackFilter};
 use dioxus::prelude::*;
+use hooks::db_reactivity::Table;
+use hooks::use_db_queries::{use_albums, use_all_tracks, use_artist_images, use_playlists};
 use reader::{Library, PlaylistStore};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -22,6 +25,13 @@ pub fn LocalArtist(
     mut queue: Signal<Vec<reader::models::Track>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
+    let gens = hooks::db_reactivity::use_generations();
+    let source = use_memo(|| Source::Local);
+    let albums_res = use_albums(source);
+    let all_tracks_filter = use_memo(|| TrackFilter::new(Source::Local));
+    let all_tracks_res = use_all_tracks(all_tracks_filter);
+    let artist_images_res = use_artist_images();
+    let playlists_res = use_playlists();
     let sort_order = use_signal(move || config.read().artist_view_order.clone());
     use_effect(move || {
         let curr = sort_order.read().clone();
@@ -46,17 +56,19 @@ pub fn LocalArtist(
     let mut pending_album_id_for_playlist = use_signal(|| None::<String>);
 
     let local_artists = use_memo(move || {
-        let lib = library.read();
+        let albums = albums_res.read().clone().unwrap_or_default();
+        let tracks = all_tracks_res.read().clone().unwrap_or_default();
+        let (_, local_artist_images, custom_artist_images) =
+            artist_images_res.read().clone().unwrap_or_default();
         let use_artist_photo = config.read().artist_photo_source == ArtistPhotoSource::ArtistPhoto;
         let mut artist_map: HashMap<String, (String, Option<std::path::PathBuf>)> = HashMap::new();
-        for album in &lib.albums {
+        for album in &albums {
             artist_map
                 .entry(normalize_artist_key(&album.artist))
                 .or_insert_with(|| (album.artist.clone(), album.cover_path.clone()));
         }
-        for track in &lib.tracks {
-            let cover = lib
-                .albums
+        for track in &tracks {
+            let cover = albums
                 .iter()
                 .find(|a| a.id == track.album_id)
                 .and_then(|a| a.cover_path.clone());
@@ -67,7 +79,7 @@ pub fn LocalArtist(
             }
         }
         if use_artist_photo {
-            for (artist, image_path) in &lib.local_artist_images {
+            for (artist, image_path) in &local_artist_images {
                 let normalized = normalize_artist_key(artist);
                 let display_name = artist_map
                     .get(&normalized)
@@ -77,7 +89,7 @@ pub fn LocalArtist(
             }
         }
         // Custom artist photos override both album cover and local_artist_images.
-        for (artist, image_path) in &lib.custom_artist_images {
+        for (artist, image_path) in &custom_artist_images {
             let normalized = normalize_artist_key(artist);
             let display_name = artist_map
                 .get(&normalized)
@@ -91,19 +103,19 @@ pub fn LocalArtist(
     });
 
     let artist_tracks = use_memo(move || {
-        let lib = library.read();
+        let tracks = all_tracks_res.read().clone().unwrap_or_default();
+        let albums = albums_res.read().clone().unwrap_or_default();
         let artist = artist_name.read();
         if artist.is_empty() {
             return Vec::new();
         }
         let artist_lc = artist.to_lowercase();
-        let artist_album_ids: HashSet<String> = lib
-            .albums
+        let artist_album_ids: HashSet<String> = albums
             .iter()
             .filter(|a| a.artist.to_lowercase() == artist_lc)
             .map(|a| a.id.clone())
             .collect();
-        lib.tracks
+        tracks
             .iter()
             .filter(|t| {
                 t.artists.iter().any(|a| a.to_lowercase() == artist_lc)
@@ -114,7 +126,9 @@ pub fn LocalArtist(
     });
 
     let artist_cover = use_memo(move || {
-        let lib = library.read();
+        let albums = albums_res.read().clone().unwrap_or_default();
+        let (_, local_artist_images, custom_artist_images) =
+            artist_images_res.read().clone().unwrap_or_default();
         let use_artist_photo = config.read().artist_photo_source == ArtistPhotoSource::ArtistPhoto;
         let artist = artist_name.read();
         if artist.is_empty() {
@@ -122,8 +136,7 @@ pub fn LocalArtist(
         }
         let artist_lc = artist.to_lowercase();
         // Custom artist photo overrides every other source, regardless of config.
-        if let Some(url) = lib
-            .custom_artist_images
+        if let Some(url) = custom_artist_images
             .iter()
             .find(|(name, _)| name.to_lowercase() == artist_lc)
             .and_then(|(_, path)| utils::format_artwork_url(Some(path)))
@@ -131,19 +144,19 @@ pub fn LocalArtist(
             return Some(url);
         }
         if use_artist_photo {
-            lib.local_artist_images
+            local_artist_images
                 .iter()
                 .find(|(name, _)| name.to_lowercase() == artist_lc)
                 .map(|(_, path)| path)
                 .and_then(|path| utils::format_artwork_url(Some(path)))
                 .or_else(|| {
-                    lib.albums
+                    albums
                         .iter()
                         .find(|a| a.artist.to_lowercase() == artist_lc)
                         .and_then(|album| utils::format_artwork_url(album.cover_path.as_ref()))
                 })
         } else {
-            lib.albums
+            albums
                 .iter()
                 .find(|a| a.artist.to_lowercase() == artist_lc)
                 .and_then(|album| utils::format_artwork_url(album.cover_path.as_ref()))
@@ -151,14 +164,13 @@ pub fn LocalArtist(
     });
 
     let artist_albums = use_memo(move || {
-        let lib = library.read();
+        let all_albums = albums_res.read().clone().unwrap_or_default();
         let artist = artist_name.read();
         if artist.is_empty() {
             return Vec::new();
         }
         let artist_lc = artist.to_lowercase();
-        let mut albums: Vec<_> = lib
-            .albums
+        let mut albums: Vec<_> = all_albums
             .iter()
             .filter(|a| a.artist.to_lowercase() == artist_lc)
             .cloned()
@@ -175,32 +187,60 @@ pub fn LocalArtist(
     });
 
     let name = artist_name.read().clone();
-    let mut add_tracks_to_playlist = move |playlist_id: String, paths: Vec<PathBuf>| {
-        let mut store = playlist_store.write();
-        if let Some(playlist) = store.playlists.iter_mut().find(|p| p.id == playlist_id) {
-            for path in paths {
-                if !playlist.tracks.contains(&path) {
-                    playlist.tracks.push(path);
-                }
+    let add_tracks_to_playlist = move |playlist_id: String, paths: Vec<PathBuf>| {
+        let store = playlists_res.read().clone().unwrap_or_default();
+        let Some(playlist) = store.playlists.iter().find(|p| p.id == playlist_id) else {
+            return;
+        };
+        let mut tracks = playlist.tracks.clone();
+        for path in paths {
+            if !tracks.contains(&path) {
+                tracks.push(path);
             }
         }
+        let refs: Vec<String> = tracks
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        let db = consume_context::<db::Db>();
+        spawn(async move {
+            if db
+                .set_playlist_tracks(&Source::Local, &playlist_id, &refs)
+                .await
+                .is_ok()
+            {
+                gens.bump(Table::Playlists);
+            }
+        });
     };
 
-    let mut create_playlist = move |playlist_name: String, paths: Vec<PathBuf>| {
-        playlist_store
-            .write()
-            .playlists
-            .push(reader::models::Playlist {
-                id: uuid::Uuid::new_v4().to_string(),
-                name: playlist_name,
-                tracks: paths,
-                cover_path: None,
-            });
+    let create_playlist = move |playlist_name: String, paths: Vec<PathBuf>| {
+        let refs: Vec<String> = paths
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
+        let id = uuid::Uuid::new_v4().to_string();
+        let db = consume_context::<db::Db>();
+        spawn(async move {
+            if db
+                .upsert_playlist_meta(&Source::Local, &id, &playlist_name, None, None)
+                .await
+                .is_ok()
+                && db
+                    .set_playlist_tracks(&Source::Local, &id, &refs)
+                    .await
+                    .is_ok()
+            {
+                gens.bump(Table::Playlists);
+            }
+        });
     };
 
-    let tracks_for_album = |library: &Library, album_id: &str| -> Vec<PathBuf> {
-        library
-            .tracks
+    let tracks_for_album = move |album_id: &str| -> Vec<PathBuf> {
+        all_tracks_res
+            .read()
+            .clone()
+            .unwrap_or_default()
             .iter()
             .filter(|t| t.album_id == album_id)
             .map(|t| t.id.uid_path())
@@ -302,25 +342,28 @@ pub fn LocalArtist(
                                 };
                                 match reader::write_tags(&path, &edits) {
                                     Ok(()) => {
-                                        let mut lib = library.write();
-                                        if let Some(t) = lib.tracks.iter_mut().find(|t| t.id.uid_path() == path) {
-                                            t.title = edits.title.trim().to_string();
-                                            t.artist = edits.artist.trim().to_string();
-                                            t.artists = edits
-                                                .artist
-                                                .split([';', ','])
-                                                .map(|a| a.trim().to_string())
-                                                .filter(|s| !s.is_empty())
-                                                .collect();
-                                            t.album = edits.album.trim().to_string();
-                                            t.track_number = edits.track_number;
-                                            t.disc_number = edits.disc_number;
-                                            t.album_id = reader::metadata::make_album_id(
-                                                edits.album.trim(),
-                                                edits.artist.trim(),
-                                            );
-                                        }
-                                        drop(lib);
+                                        let mut t = track.clone();
+                                        t.title = edits.title.trim().to_string();
+                                        t.artist = edits.artist.trim().to_string();
+                                        t.artists = edits
+                                            .artist
+                                            .split([';', ','])
+                                            .map(|a| a.trim().to_string())
+                                            .filter(|s| !s.is_empty())
+                                            .collect();
+                                        t.album = edits.album.trim().to_string();
+                                        t.track_number = edits.track_number;
+                                        t.disc_number = edits.disc_number;
+                                        t.album_id = reader::metadata::make_album_id(
+                                            edits.album.trim(),
+                                            edits.artist.trim(),
+                                        );
+                                        let db = consume_context::<db::Db>();
+                                        spawn(async move {
+                                            if db.upsert_tracks(&Source::Local, &[t]).await.is_ok() {
+                                                gens.bump(Table::Tracks);
+                                            }
+                                        });
                                         metadata_track.set(None);
                                     }
                                     Err(e) => {
@@ -354,10 +397,19 @@ pub fn LocalArtist(
                             on_add_to_playlist: move |_| show_playlist_modal.set(true),
                             on_delete: move |_| {
                                 let paths: Vec<_> = selected_tracks.read().iter().cloned().collect();
+                                let mut keys = Vec::new();
                                 for path in &paths {
                                     if std::fs::remove_file(path).is_ok() {
-                                        library.write().remove_track(&reader::models::TrackId::Local(path.clone()));
+                                        keys.push(path.to_string_lossy().into_owned());
                                     }
+                                }
+                                if !keys.is_empty() {
+                                    let db = consume_context::<db::Db>();
+                                    spawn(async move {
+                                        if db.delete_tracks(&Source::Local, &keys).await.is_ok() {
+                                            gens.bump(Table::Tracks);
+                                        }
+                                    });
                                 }
                                 clear_selection(&mut is_selection_mode, &mut selected_tracks);
                             },
@@ -376,9 +428,7 @@ pub fn LocalArtist(
                                 on_close: move |_| show_album_playlist_modal.set(false),
                                 on_add_to_playlist: move |playlist_id: String| {
                                     if let Some(album_id) = pending_album_id_for_playlist.read().clone() {
-                                        let lib = library.read();
-                                        let paths = tracks_for_album(&lib, &album_id);
-                                        drop(lib);
+                                        let paths = tracks_for_album(&album_id);
                                         add_tracks_to_playlist(playlist_id, paths);
                                     }
                                     show_album_playlist_modal.set(false);
@@ -388,10 +438,7 @@ pub fn LocalArtist(
                                     let paths = pending_album_id_for_playlist
                                         .read()
                                         .as_deref()
-                                        .map(|id| {
-                                            let lib = library.read();
-                                            tracks_for_album(&lib, id)
-                                        })
+                                        .map(tracks_for_album)
                                         .unwrap_or_default();
                                     create_playlist(playlist_name, paths);
                                     show_album_playlist_modal.set(false);
@@ -478,12 +525,12 @@ pub fn LocalArtist(
                                                                         open_album_menu.set(None);
                                                                         match idx {
                                                                             0 => {
-                                                                                let mut tracks_for_queue: Vec<_> = library
+                                                                                let mut tracks_for_queue: Vec<_> = all_tracks_res
                                                                                     .read()
-                                                                                    .tracks
-                                                                                    .iter()
+                                                                                    .clone()
+                                                                                    .unwrap_or_default()
+                                                                                    .into_iter()
                                                                                     .filter(|t| t.album_id == id)
-                                                                                    .cloned()
                                                                                     .collect();
 
                                                                                 tracks_for_queue.sort_by(|a, b| {
@@ -499,22 +546,32 @@ pub fn LocalArtist(
                                                                                 show_album_playlist_modal.set(true);
                                                                             }
                                                                             2 => {
-                                                                                let tracks_to_delete: Vec<_> = library
+                                                                                let tracks_to_delete: Vec<_> = all_tracks_res
                                                                                     .read()
-                                                                                    .tracks
-                                                                                    .iter()
+                                                                                    .clone()
+                                                                                    .unwrap_or_default()
+                                                                                    .into_iter()
                                                                                     .filter(|t| t.album == title)
-                                                                                    .filter_map(|t| t.id.local_path().map(|p| p.to_path_buf()))
                                                                                     .collect();
 
-                                                                                for path in &tracks_to_delete {
-                                                                                    let _ = std::fs::remove_file(path);
+                                                                                let mut keys = Vec::new();
+                                                                                for track in &tracks_to_delete {
+                                                                                    if let Some(path) = track.id.local_path() {
+                                                                                        let _ = std::fs::remove_file(path);
+                                                                                    }
+                                                                                    keys.push(track.id.key().into_owned());
                                                                                 }
 
-                                                                                let mut lib = library.write();
-
-                                                                                lib.albums.retain(|a| a.title != title);
-                                                                                lib.tracks.retain(|t| t.album != title);
+                                                                                // SWEEP-TODO(no delete-album API — the albums row for this title is not removed)
+                                                                                if !keys.is_empty() {
+                                                                                    let db = consume_context::<db::Db>();
+                                                                                    spawn(async move {
+                                                                                        if db.delete_tracks(&Source::Local, &keys).await.is_ok() {
+                                                                                            gens.bump(Table::Tracks);
+                                                                                            gens.bump(Table::Albums);
+                                                                                        }
+                                                                                    });
+                                                                                }
                                                                             }
 
                                                                             _ => {}
@@ -559,6 +616,7 @@ pub fn LocalArtist(
                                             if let Some(file) = file {
                                                 let path = file.path().to_path_buf();
                                                 let key = normalize_artist_key(&artist);
+                                                // SWEEP-TODO(no targeted custom_artist_images write API)
                                                 library.write().custom_artist_images.insert(key, path);
                                             }
                                         });
@@ -641,7 +699,13 @@ pub fn LocalArtist(
                                     if let Some(track) = artist_tracks().get(idx) {
                                         if let Some(p) = track.id.local_path() {
                                             if std::fs::remove_file(p).is_ok() {
-                                                library.write().remove_track(&track.id);
+                                                let db = consume_context::<db::Db>();
+                                                let key = track.id.key().into_owned();
+                                                spawn(async move {
+                                                    if db.delete_tracks(&Source::Local, &[key]).await.is_ok() {
+                                                        gens.bump(Table::Tracks);
+                                                    }
+                                                });
                                             }
                                         }
                                     }

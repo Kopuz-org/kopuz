@@ -1,5 +1,7 @@
 use config::{AppConfig, UiStyle};
+use db::{Source, TrackFilter};
 use dioxus::prelude::*;
+use hooks::use_db_queries::{use_albums, use_all_tracks};
 use hooks::use_player_controller::PlayerController;
 use kopuz_route::Route;
 use reader::{Library, Track};
@@ -16,12 +18,16 @@ fn format_duration(seconds: u64) -> String {
 pub fn LocalLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Element {
     let mut ctrl = use_context::<PlayerController>();
 
+    let source = use_memo(|| Source::Local);
+    let albums_res = use_albums(source);
+    let tracks_filter = use_memo(|| TrackFilter::new(Source::Local));
+    let tracks_res = use_all_tracks(tracks_filter);
+
     let track_data = use_memo(move || {
-        let lib = library.read();
+        let albums = albums_res.read().clone().unwrap_or_default();
         let conf = config.read();
 
-        let album_map: HashMap<String, (String, Option<CoverUrl>)> = lib
-            .albums
+        let album_map: HashMap<String, (String, Option<CoverUrl>)> = albums
             .iter()
             .map(|a| {
                 let cover = a
@@ -32,7 +38,7 @@ pub fn LocalLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Element
             })
             .collect();
 
-        let mut all_tracks = lib.tracks.clone();
+        let mut all_tracks = tracks_res.read().clone().unwrap_or_default();
 
         all_tracks.sort_by(|a, b| {
             let a_plays = conf

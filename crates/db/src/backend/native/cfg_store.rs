@@ -158,18 +158,9 @@ pub async fn save_config(pool: &SqlitePool, cfg: &AppConfig) -> Result<(), DbErr
         }
     }
 
-    // Sync play counts (counts only grow; no deletes).
-    for (key, count) in &cfg.listen_counts {
-        let c = *count as i64;
-        sqlx::query!(
-            "INSERT INTO listen_counts (track_key, count) VALUES (?1, ?2) \
-             ON CONFLICT(track_key) DO UPDATE SET count = ?2",
-            key,
-            c
-        )
-        .execute(&mut *tx)
-        .await?;
-    }
+    // Play counts are NOT synced here: `bump_listen_count` is their sole writer
+    // (a per-play 1-row upsert). Looping the whole map made every config save
+    // cost hundreds of statements — the downloads-stutter bug.
 
     // Store the blob, stripped of creds/servers/counts, stamped with the active id.
     let mut blob = serde_json::to_value(cfg)?;

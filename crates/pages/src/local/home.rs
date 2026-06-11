@@ -1,5 +1,10 @@
 use config::{AppConfig, ArtistPhotoSource, ListenNowStyle, UiStyle};
+use db::{Source, TrackFilter, TrackSort};
 use dioxus::prelude::*;
+use hooks::db_reactivity::Table;
+use hooks::use_db_queries::{
+    use_albums, use_all_tracks, use_artist_images, use_favorites, use_playlists,
+};
 use rand::rng;
 use rand::seq::SliceRandom;
 use reader::{Album, FavoritesStore, Library, PlaylistStore, Track};
@@ -47,15 +52,33 @@ pub fn LocalHome(
     on_search_artist: EventHandler<String>,
 ) -> Element {
     let mut config = use_context::<Signal<AppConfig>>();
+    let source = use_memo(|| Source::Local);
+    let albums_res = use_albums(source);
+    let tracks_filter = use_memo(|| TrackFilter {
+        source: Source::Local,
+        sort: TrackSort::DateAdded,
+        ..Default::default()
+    });
+    let tracks_res = use_all_tracks(tracks_filter);
+    let artist_images_res = use_artist_images();
+    let playlists_res = use_playlists();
 
+    // tracks_res is DateAdded-sorted, so first-seen album ids give newest-first
+    // (the old code relied on lib.albums insertion order, which SQL doesn't keep).
     let recent_albums = use_memo(move || {
-        let lib = library.read();
+        let albums = albums_res.read().clone().unwrap_or_default();
+        let tracks = tracks_res.read().clone().unwrap_or_default();
+        let album_by_id: HashMap<&str, &Album> =
+            albums.iter().map(|a| (a.id.as_str(), a)).collect();
         let mut unique_albums = Vec::new();
         let mut seen_titles = std::collections::HashSet::new();
-        for album in lib.albums.iter().rev() {
+        for track in &tracks {
+            let Some(album) = album_by_id.get(track.album_id.as_str()) else {
+                continue;
+            };
             let title_key = album.title.trim().to_lowercase();
             if seen_titles.insert(title_key) {
-                unique_albums.push(album.clone());
+                unique_albums.push((*album).clone());
             }
             if unique_albums.len() >= 10 {
                 break;
@@ -65,8 +88,7 @@ pub fn LocalHome(
     });
 
     let new_release_albums = use_memo(move || {
-        let lib = library.read();
-        let mut albums = lib.albums.clone();
+        let mut albums = albums_res.read().clone().unwrap_or_default();
         albums.sort_by(|a, b| b.year.cmp(&a.year));
         let mut unique_albums = Vec::new();
         let mut seen_titles = std::collections::HashSet::new();
@@ -86,7 +108,9 @@ pub fn LocalHome(
     });
 
     let recent_playlists = use_memo(move || {
-        let store = playlist_store.read();
+        let store = playlists_res.read().clone().unwrap_or_default();
+        let tracks = tracks_res.read().clone().unwrap_or_default();
+        let albums = albums_res.read().clone().unwrap_or_default();
         store
             .playlists
             .iter()
@@ -94,30 +118,31 @@ pub fn LocalHome(
             .take(10)
             .cloned()
             .map(|p| {
-                (
-                    p.id,
-                    p.name,
-                    p.tracks.len(),
-                    p.tracks
-                        .first()
-                        .and_then(|p| p.to_str())
-                        .map(|s| s.to_string()),
-                )
+                let cover_url = p.tracks.first().and_then(|path| {
+                    tracks.iter().find(|t| t.id.uid_path() == *path).and_then(|t| {
+                        albums
+                            .iter()
+                            .find(|a| a.id == t.album_id)
+                            .and_then(|a| a.cover_path.as_ref())
+                            .and_then(|cp| utils::format_artwork_url(Some(cp)))
+                    })
+                });
+                (p.id, p.name, p.tracks.len(), cover_url)
             })
             .collect::<Vec<_>>()
     });
 
     let artists = use_memo(move || {
-        let lib = library.read();
+        let albums = albums_res.read().clone().unwrap_or_default();
+        let (_, local_artist_images, _) = artist_images_res.read().clone().unwrap_or_default();
         let use_artist_photo = config.read().artist_photo_source == ArtistPhotoSource::ArtistPhoto;
-        let normalized_local_artist_images: HashMap<String, PathBuf> = lib
-            .local_artist_images
+        let normalized_local_artist_images: HashMap<String, PathBuf> = local_artist_images
             .iter()
             .map(|(artist, path)| (normalize_artist_key(artist), path.clone()))
             .collect();
         let mut unique_artists = std::collections::HashSet::new();
         let mut artist_list = Vec::new();
-        for album in &lib.albums {
+        for album in &albums {
             if is_unknown_artist(&album.artist) {
                 continue;
             }
@@ -138,7 +163,7 @@ pub fn LocalHome(
             }
         }
         if use_artist_photo {
-            for (artist, image_path) in &lib.local_artist_images {
+            for (artist, image_path) in &local_artist_images {
                 if unique_artists.insert(normalize_artist_key(artist)) {
                     artist_list.push((artist.clone(), Some(image_path.clone())));
                 }
@@ -151,10 +176,10 @@ pub fn LocalHome(
     });
 
     let local_shuffled = use_memo(move || {
-        let lib = library.read();
+        let albums = albums_res.read().clone().unwrap_or_default();
         let mut unique_albums = Vec::new();
         let mut seen_titles = std::collections::HashSet::new();
-        for album in &lib.albums {
+        for album in &albums {
             let title_key = album.title.trim().to_lowercase();
             if seen_titles.insert(title_key) {
                 unique_albums.push(album.clone());
@@ -169,15 +194,13 @@ pub fn LocalHome(
     });
 
     let continue_listening = use_memo(move || {
-        let lib = library.read();
+        let tracks = tracks_res.read().clone().unwrap_or_default();
+        let albums = albums_res.read().clone().unwrap_or_default();
         let conf = config.read();
-        let track_by_path: HashMap<String, &Track> = lib
-            .tracks
-            .iter()
-            .map(|t| (t.id.uid(), t))
-            .collect();
+        let track_by_path: HashMap<String, &Track> =
+            tracks.iter().map(|t| (t.id.uid(), t)).collect();
         let album_by_id: HashMap<&str, &Album> =
-            lib.albums.iter().map(|a| (a.id.as_str(), a)).collect();
+            albums.iter().map(|a| (a.id.as_str(), a)).collect();
         let mut out: Vec<(Track, Option<Album>)> = Vec::new();
         let mut seen_albums = std::collections::HashSet::new();
         for path in conf.recently_played.iter() {
@@ -208,15 +231,13 @@ pub fn LocalHome(
     });
 
     let hero_entry = use_memo(move || {
-        let lib = library.read();
+        let tracks = tracks_res.read().clone().unwrap_or_default();
+        let albums = albums_res.read().clone().unwrap_or_default();
         let conf = config.read();
-        let track_by_path: HashMap<String, &Track> = lib
-            .tracks
-            .iter()
-            .map(|t| (t.id.uid(), t))
-            .collect();
+        let track_by_path: HashMap<String, &Track> =
+            tracks.iter().map(|t| (t.id.uid(), t)).collect();
         let album_by_id: HashMap<&str, &Album> =
-            lib.albums.iter().map(|a| (a.id.as_str(), a)).collect();
+            albums.iter().map(|a| (a.id.as_str(), a)).collect();
 
         for path in conf.recently_played.iter() {
             if let Some(track) = track_by_path.get(path) {
@@ -231,15 +252,15 @@ pub fn LocalHome(
     });
 
     let made_for_you = use_memo(move || {
-        let lib = library.read();
+        let tracks = tracks_res.read().clone().unwrap_or_default();
+        let all_albums = albums_res.read().clone().unwrap_or_default();
         let conf = config.read();
         let mut genre_scores: HashMap<String, u64> = HashMap::new();
-        let album_genre: HashMap<&str, &str> = lib
-            .albums
+        let album_genre: HashMap<&str, &str> = all_albums
             .iter()
             .map(|a| (a.id.as_str(), a.genre.as_str()))
             .collect();
-        for track in &lib.tracks {
+        for track in &tracks {
             let path = track.id.uid();
             let plays = conf.listen_counts.get(&path).copied().unwrap_or(0);
             if plays == 0 {
@@ -259,8 +280,7 @@ pub fn LocalHome(
         let Some(top_genre) = top_genre else {
             return (String::new(), Vec::<Album>::new());
         };
-        let mut albums: Vec<Album> = lib
-            .albums
+        let mut albums: Vec<Album> = all_albums
             .iter()
             .filter(|a| {
                 a.genre == top_genre && !is_unknown_album(&a.title) && !is_unknown_artist(&a.artist)
@@ -274,15 +294,21 @@ pub fn LocalHome(
     });
 
     let recently_added = use_memo(move || {
-        let lib = library.read();
+        let albums = albums_res.read().clone().unwrap_or_default();
+        let tracks = tracks_res.read().clone().unwrap_or_default();
+        let album_by_id: HashMap<&str, &Album> =
+            albums.iter().map(|a| (a.id.as_str(), a)).collect();
         let mut unique = Vec::new();
         let mut seen = std::collections::HashSet::new();
-        for album in lib.albums.iter().rev() {
+        for track in &tracks {
+            let Some(album) = album_by_id.get(track.album_id.as_str()) else {
+                continue;
+            };
             if is_unknown_album(&album.title) || is_unknown_artist(&album.artist) {
                 continue;
             }
             if seen.insert(album.title.trim().to_lowercase()) {
-                unique.push(album.clone());
+                unique.push((*album).clone());
             }
             if unique.len() >= 12 {
                 break;
@@ -441,7 +467,7 @@ fn render_local_section(
     made_for_you: (String, Vec<Album>),
     recently_added: Vec<Album>,
     _recent_albums: Vec<Album>,
-    recent_playlists: Vec<(String, String, usize, Option<String>)>,
+    recent_playlists: Vec<(String, String, usize, Option<utils::CoverUrl>)>,
     on_select_album: EventHandler<String>,
     on_play_album: EventHandler<String>,
     on_select_playlist: EventHandler<String>,
@@ -503,7 +529,6 @@ fn render_local_section(
             scroll_container,
         ),
         "playlists" => render_playlists(
-            library,
             is_modern,
             recent_playlists,
             on_select_playlist,
@@ -523,6 +548,19 @@ fn LocalHeroBanner(
     hero_entry: Option<(Track, Option<Album>)>,
     on_play_album: EventHandler<String>,
 ) -> Element {
+    let gens = hooks::db_reactivity::use_generations();
+    let hero_album_id = hero_entry
+        .as_ref()
+        .and_then(|(_, a)| a.as_ref().map(|a| a.id.clone()));
+    let fav_filter = use_memo(use_reactive!(|hero_album_id| TrackFilter {
+        source: Source::Local,
+        // empty-id sentinel: no album means no tracks, not the whole library
+        album_id: Some(hero_album_id.unwrap_or_default()),
+        ..Default::default()
+    }));
+    let album_tracks_res = use_all_tracks(fav_filter);
+    let local_sid = use_memo(|| "local".to_string());
+    let favorites_res = use_favorites(local_sid);
     let mut is_resizing = use_signal(|| false);
     let mut start_y = use_signal(|| 0.0_f64);
     let mut start_h = use_signal(|| 0_u32);
@@ -635,12 +673,16 @@ fn LocalHeroBanner(
                         {
                             let local_hero_album_id = hero_entry.as_ref().and_then(|(_, a)| a.as_ref().map(|a| a.id.clone()));
                             let local_hero_fav = {
-                                let lib = library.read();
-                                let store = favorites_store.read();
-                                let tracks: Vec<_> = lib.tracks.iter()
-                                    .filter(|t| local_hero_album_id.as_deref() == Some(t.album_id.as_str()))
+                                let tracks = album_tracks_res.read().clone().unwrap_or_default();
+                                let favs: std::collections::HashSet<String> = favorites_res
+                                    .read()
+                                    .clone()
+                                    .unwrap_or_default()
+                                    .into_iter()
                                     .collect();
-                                !tracks.is_empty() && tracks.iter().all(|t| store.is_local_favorite(&t.id.uid_path()))
+                                local_hero_album_id.is_some()
+                                    && !tracks.is_empty()
+                                    && tracks.iter().all(|t| favs.contains(&t.id.uid()))
                             };
                             let heart_class = if local_hero_fav {
                                 "w-11 h-11 rounded-full bg-white/10 border border-white/20 flex items-center justify-center text-red-400 hover:bg-white/20 transition-all"
@@ -653,22 +695,26 @@ fn LocalHeroBanner(
                                 button {
                                     class: "{heart_class}",
                                     onclick: move |_| {
-                                        if let Some(ref album_id) = local_hero_album_id {
-                                            let tracks: Vec<_> = {
-                                                let lib = library.read();
-                                                lib.tracks.iter()
-                                                    .filter(|t| &t.album_id == album_id)
-                                                    .cloned()
-                                                    .collect()
-                                            };
+                                        if local_hero_album_id.is_some() {
+                                            let tracks = album_tracks_res.read().clone().unwrap_or_default();
                                             let new_fav = !local_hero_fav;
+                                            // favorites_store mirror stays until W3 converts shared.rs
+                                            let mut changed: Vec<String> = Vec::new();
                                             for track in tracks {
                                                 let currently = favorites_store.read().is_local_favorite(&track.id.uid_path());
-                                                if new_fav && !currently {
+                                                if new_fav != currently {
                                                     favorites_store.write().toggle_local(track.id.uid_path());
-                                                } else if !new_fav && currently {
-                                                    favorites_store.write().toggle_local(track.id.uid_path());
+                                                    changed.push(track.id.uid());
                                                 }
+                                            }
+                                            if !changed.is_empty() {
+                                                let db = consume_context::<db::Db>();
+                                                spawn(async move {
+                                                    for r in &changed {
+                                                        let _ = db.set_favorite("local", r, new_fav).await;
+                                                    }
+                                                    gens.bump(Table::Favorites);
+                                                });
                                             }
                                         }
                                     },
@@ -1054,9 +1100,8 @@ fn render_made_for_you(
 }
 
 fn render_playlists(
-    library: Signal<Library>,
     is_modern: bool,
-    recent_playlists: Vec<(String, String, usize, Option<String>)>,
+    recent_playlists: Vec<(String, String, usize, Option<utils::CoverUrl>)>,
     on_select_playlist: EventHandler<String>,
     scroll_container: impl Fn(&str, i32) + Copy + 'static,
 ) -> Element {
@@ -1088,27 +1133,12 @@ fn render_playlists(
             div {
                 id: "playlists-scroll",
                 class: "flex overflow-x-auto gap-6 pb-6 pt-2 scrollbar-hide scroll-smooth -mx-2 px-2",
-                for (id, name, track_count, first_track) in recent_playlists {
+                for (id, name, track_count, cover_url) in recent_playlists {
                     {
                         let track_count_text = if track_count == 1 {
                             i18n::t("track_count_singular").to_string()
                         } else {
                             i18n::t_with("track_count", &[("count", track_count.to_string())])
-                        };
-                        let cover_url = if let Some(track_path) = first_track {
-                            let lib = library.peek();
-                            lib.tracks
-                                .iter()
-                                .find(|t| t.id.uid() == track_path)
-                                .and_then(|t| {
-                                    lib.albums
-                                        .iter()
-                                        .find(|a| a.id == t.album_id)
-                                        .and_then(|a| a.cover_path.as_ref())
-                                        .and_then(|cp| utils::format_artwork_url(Some(cp)))
-                                })
-                        } else {
-                            None
                         };
                         rsx! {
                             div {

@@ -202,10 +202,17 @@ async fn download_worker(
         .await
         {
             Ok(path) => {
+                let path_str = path.to_string_lossy().into_owned();
+                // Durable FIRST as a single json_set (the whole-config save per
+                // completed song was the audio-stutter bug), then the in-memory
+                // mirror for live reads.
+                if let Some(db) = try_consume_context::<db::Db>() {
+                    let _ = db.set_offline_track(&id, Some(&path_str)).await;
+                }
                 config
                     .write()
                     .offline_tracks
-                    .insert(id.clone(), path.to_string_lossy().into_owned());
+                    .insert(id.clone(), path_str);
                 if let Some(item) = queue.write().items.iter_mut().find(|i| i.id == id) {
                     item.status = DownloadStatus::Done;
                 }
@@ -228,6 +235,7 @@ pub fn delete_downloads(
     mut config: Signal<AppConfig>,
     mut queue: Signal<DownloadQueue>,
 ) {
+    let db = try_consume_context::<db::Db>();
     let mut conf = config.write();
     let mut q = queue.write();
 
@@ -237,6 +245,12 @@ pub fn delete_downloads(
             if path.exists() {
                 let _ = std::fs::remove_file(path);
             }
+        }
+        if let Some(db) = db.clone() {
+            let id = id.clone();
+            spawn(async move {
+                let _ = db.set_offline_track(&id, None).await;
+            });
         }
         q.items.retain(|i| i.id != id);
     }

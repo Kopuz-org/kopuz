@@ -6,8 +6,10 @@ use components::stat_card::StatCard;
 use components::track_row::TrackRow;
 use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use config::{AppConfig, UiStyle};
+use db::{Source, TrackFilter, TrackSort};
 use dioxus::prelude::*;
-use hooks::use_library_items::use_library_items;
+use hooks::db_reactivity::Table;
+use hooks::use_db_queries::{use_albums, use_all_tracks, use_artists, use_playlists};
 use hooks::use_player_controller::PlayerController;
 use kopuz_route::Route;
 use reader::Library;
@@ -24,8 +26,23 @@ pub fn LocalLibrary(
     on_rescan: EventHandler,
     mut queue: Signal<Vec<reader::models::Track>>,
 ) -> Element {
-    let items = use_library_items(library);
-    let mut sort_order = items.sort_order;
+    let gens = hooks::db_reactivity::use_generations();
+    let initial_sort_order = config.read().sort_order.clone();
+    let mut sort_order = use_signal(move || initial_sort_order);
+    let filter = use_memo(move || TrackFilter {
+        source: Source::Local,
+        sort: match *sort_order.read() {
+            config::SortOrder::Title => TrackSort::Title,
+            config::SortOrder::Artist => TrackSort::Artist,
+            config::SortOrder::Album => TrackSort::Album,
+        },
+        ..Default::default()
+    });
+    let tracks_res = use_all_tracks(filter);
+    let source = use_memo(|| Source::Local);
+    let albums_res = use_albums(source);
+    let artists_res = use_artists(source);
+    let playlists_res = use_playlists();
     let mut scroll_positions = use_context::<Signal<std::collections::HashMap<Route, f64>>>();
     let saved_scroll = scroll_positions
         .peek()
@@ -47,8 +64,23 @@ pub fn LocalLibrary(
     let mut metadata_track = use_signal(|| None::<reader::models::Track>);
     let mut is_selection_mode = use_signal(|| false);
     let mut selected_tracks = use_signal(|| HashSet::<PathBuf>::new());
-    let displayed_tracks = use_memo(move || (items.all_tracks)());
-    let album_covers = use_memo(move || (items.album_covers)());
+    let displayed_tracks = use_memo(move || tracks_res.read().clone().unwrap_or_default());
+    let album_covers = use_memo(move || {
+        albums_res
+            .read()
+            .clone()
+            .unwrap_or_default()
+            .iter()
+            .map(|a| {
+                (
+                    a.id.clone(),
+                    a.cover_path
+                        .as_ref()
+                        .and_then(|p| utils::format_artwork_url(Some(p))),
+                )
+            })
+            .collect::<std::collections::HashMap<String, Option<utils::CoverUrl>>>()
+    });
     let cover_urls_memo = use_memo(move || std::sync::Arc::new(album_covers()));
     let cover_urls = cover_urls_memo();
     let (total_tracks, is_empty) = {
@@ -157,7 +189,13 @@ pub fn LocalLibrary(
                                 active_menu_track.set(None);
                                 if let Some(p) = track_delete.id.local_path() {
                                     if std::fs::remove_file(p).is_ok() {
-                                        library.write().remove_track(&track_delete.id);
+                                        let db = consume_context::<db::Db>();
+                                        let key = track_delete.id.key().into_owned();
+                                        spawn(async move {
+                                            if db.delete_tracks(&Source::Local, &[key]).await.is_ok() {
+                                                gens.bump(Table::Tracks);
+                                            }
+                                        });
                                     }
                                 }
                             },
@@ -187,19 +225,30 @@ pub fn LocalLibrary(
                         }
                     },
                     on_add_to_playlist: move |playlist_id: String| {
-                        let mut store = playlist_store.write();
-                        if let Some(playlist) = store.playlists.iter_mut().find(|p| p.id == playlist_id) {
+                        let store = playlists_res.read().clone().unwrap_or_default();
+                        if let Some(playlist) = store.playlists.iter().find(|p| p.id == playlist_id) {
+                            let mut tracks = playlist.tracks.clone();
                             if is_selection_mode() {
                                 for path in selected_tracks.read().iter() {
-                                    if !playlist.tracks.contains(path) {
-                                        playlist.tracks.push(path.clone());
+                                    if !tracks.contains(path) {
+                                        tracks.push(path.clone());
                                     }
                                 }
                             } else if let Some(path) = selected_track_for_playlist.read().clone() {
-                                if !playlist.tracks.contains(&path) {
-                                    playlist.tracks.push(path);
+                                if !tracks.contains(&path) {
+                                    tracks.push(path);
                                 }
                             }
+                            let refs: Vec<String> = tracks
+                                .iter()
+                                .map(|p| p.to_string_lossy().into_owned())
+                                .collect();
+                            let db = consume_context::<db::Db>();
+                            spawn(async move {
+                                if db.set_playlist_tracks(&Source::Local, &playlist_id, &refs).await.is_ok() {
+                                    gens.bump(Table::Playlists);
+                                }
+                            });
                         }
                         show_playlist_modal.set(false);
                         active_menu_track.set(None);
@@ -213,12 +262,18 @@ pub fn LocalLibrary(
                         } else if let Some(path) = selected_track_for_playlist.read().clone() {
                             tracks.push(path);
                         }
-                        let mut store = playlist_store.write();
-                        store.playlists.push(reader::models::Playlist {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            name,
-                            tracks,
-                            cover_path: None,
+                        let refs: Vec<String> = tracks
+                            .iter()
+                            .map(|p| p.to_string_lossy().into_owned())
+                            .collect();
+                        let id = uuid::Uuid::new_v4().to_string();
+                        let db = consume_context::<db::Db>();
+                        spawn(async move {
+                            if db.upsert_playlist_meta(&Source::Local, &id, &name, None, None).await.is_ok()
+                                && db.set_playlist_tracks(&Source::Local, &id, &refs).await.is_ok()
+                            {
+                                gens.bump(Table::Playlists);
+                            }
                         });
                         show_playlist_modal.set(false);
                         active_menu_track.set(None);
@@ -237,25 +292,28 @@ pub fn LocalLibrary(
                         };
                         match reader::write_tags(&path, &edits) {
                             Ok(()) => {
-                                let mut lib = library.write();
-                                if let Some(t) = lib.tracks.iter_mut().find(|t| t.id.uid_path() == path) {
-                                    t.title = edits.title.trim().to_string();
-                                    t.artist = edits.artist.trim().to_string();
-                                    t.artists = edits
-                                        .artist
-                                        .split([';', ','])
-                                        .map(|a| a.trim().to_string())
-                                        .filter(|s| !s.is_empty())
-                                        .collect();
-                                    t.album = edits.album.trim().to_string();
-                                    t.track_number = edits.track_number;
-                                    t.disc_number = edits.disc_number;
-                                    t.album_id = reader::metadata::make_album_id(
-                                        edits.album.trim(),
-                                        edits.artist.trim(),
-                                    );
-                                }
-                                drop(lib);
+                                let mut t = track.clone();
+                                t.title = edits.title.trim().to_string();
+                                t.artist = edits.artist.trim().to_string();
+                                t.artists = edits
+                                    .artist
+                                    .split([';', ','])
+                                    .map(|a| a.trim().to_string())
+                                    .filter(|s| !s.is_empty())
+                                    .collect();
+                                t.album = edits.album.trim().to_string();
+                                t.track_number = edits.track_number;
+                                t.disc_number = edits.disc_number;
+                                t.album_id = reader::metadata::make_album_id(
+                                    edits.album.trim(),
+                                    edits.artist.trim(),
+                                );
+                                let db = consume_context::<db::Db>();
+                                spawn(async move {
+                                    if db.upsert_tracks(&Source::Local, &[t]).await.is_ok() {
+                                        gens.bump(Table::Tracks);
+                                    }
+                                });
                                 metadata_track.set(None);
                             }
                             Err(e) => {
@@ -290,10 +348,19 @@ pub fn LocalLibrary(
                     },
                     on_delete: move |_| {
                         let paths: Vec<_> = selected_tracks.read().iter().cloned().collect();
+                        let mut keys = Vec::new();
                         for path in paths {
                             if std::fs::remove_file(&path).is_ok() {
-                                library.write().remove_track(&reader::models::TrackId::Local(path.clone()));
+                                keys.push(path.to_string_lossy().into_owned());
                             }
+                        }
+                        if !keys.is_empty() {
+                            let db = consume_context::<db::Db>();
+                            spawn(async move {
+                                if db.delete_tracks(&Source::Local, &keys).await.is_ok() {
+                                    gens.bump(Table::Tracks);
+                                }
+                            });
                         }
                         selected_tracks.write().clear();
                         is_selection_mode.set(false);
@@ -327,20 +394,27 @@ pub fn LocalLibrary(
             div {
                 class: if cfg!(target_os = "android") { "grid grid-cols-4 gap-2 mb-4" } else { "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-12" },
                 {
-                    let lib = library.read();
-                    let album_count = lib
-                        .albums
+                    let album_count = albums_res
+                        .read()
+                        .clone()
+                        .unwrap_or_default()
                         .iter()
                         .map(|a| a.title.to_lowercase())
                         .collect::<std::collections::HashSet<_>>()
                         .len();
+                    let artist_count = artists_res.read().as_ref().map(|a| a.len()).unwrap_or(0);
+                    let playlist_count = playlists_res
+                        .read()
+                        .as_ref()
+                        .map(|s| s.playlists.len())
+                        .unwrap_or(0);
                     rsx! {
-                        StatCard { label: i18n::t("tracks").to_string(), value: "{lib.tracks.len()}", icon: "fa-music" }
+                        StatCard { label: i18n::t("tracks").to_string(), value: "{total_tracks}", icon: "fa-music" }
                         StatCard { label: i18n::t("albums").to_string(), value: "{album_count}", icon: "fa-compact-disc" }
-                        StatCard { label: i18n::t("artists").to_string(), value: "{(items.artist_count)()}", icon: "fa-user" }
+                        StatCard { label: i18n::t("artists").to_string(), value: "{artist_count}", icon: "fa-user" }
                         StatCard {
                             label: i18n::t("playlists").to_string(),
-                            value: "{playlist_store.read().playlists.len()}",
+                            value: "{playlist_count}",
                             icon: "fa-list",
                         }
                     }
