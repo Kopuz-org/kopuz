@@ -1017,6 +1017,7 @@ fn App() -> Element {
         .cloned()
         .expect("db initialized in main before launch");
     use_context_provider(|| db.clone());
+    hooks::db_reactivity::use_generations_provider();
     // Start the PoToken minter whenever a YouTube Music server is active — not
     // just anon. A *signed-in but non-Premium* account streams the same 251 as
     // anon and also needs a content pot for deep ranges; only true Premium
