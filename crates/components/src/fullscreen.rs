@@ -2,6 +2,7 @@ use crate::lyrics_view::LyricsView;
 use crate::queue_list_view::QueueListView;
 use crate::shared::fmt_time;
 use crate::titlebar::Titlebar;
+use crate::NavigationController;
 use config::AppConfig;
 use dioxus::prelude::*;
 use hooks::use_player_controller::{LoopMode, PlayerController};
@@ -217,12 +218,17 @@ fn PlaybackControl(mut is_playing: Signal<bool>) -> Element {
 
 #[component]
 fn TrackMetadata(
+    mut is_fullscreen: Signal<bool>,
     current_song_cover_url: Signal<String>,
     current_song_title: Signal<String>,
     current_song_artist: Signal<String>,
     current_song_album: Signal<String>,
     current_song_bitrate: Signal<u16>,
 ) -> Element {
+    let ctrl = use_context::<PlayerController>();
+    let nav_ctrl = use_context::<NavigationController>();
+    let current_track_snapshot = ctrl.current_track_snapshot.read().clone();
+
     rsx! {
         div {
             class: "rounded-2xl overflow-hidden mb-8 shadow-2xl",
@@ -258,9 +264,34 @@ fn TrackMetadata(
             h1 { class: "text-3xl font-bold text-white mb-2 line-clamp-1", "{current_song_title}" }
             div {
                 class: "flex items-center gap-2",
-                h2 { class: "text-xl text-white/70 font-medium line-clamp-1", "{current_song_artist}" }
+                button {
+                    class: "text-xl text-white/70 font-medium line-clamp-1 hover:text-white hover:underline text-left transition-colors",
+                    onclick: move |_| {
+                        let artist = current_song_artist.read().clone();
+                        if artist.is_empty() {
+                            return;
+                        }
+                        is_fullscreen.set(false);
+                        nav_ctrl.navigate_to_artist(artist);
+                    },
+                    "{current_song_artist}"
+                }
                 span { class: "text-white/30", "•" }
-                h3 { class: "text-lg text-white/50 line-clamp-1", "{current_song_album}" }
+                button {
+                    class: "text-lg text-white/50 line-clamp-1 hover:text-white/80 hover:underline text-left transition-colors",
+                    onclick: move |_| {
+                        let album_id = current_track_snapshot
+                            .as_ref()
+                            .map(|track| track.album_id.clone())
+                            .unwrap_or_default();
+                        if album_id.is_empty() {
+                            return;
+                        }
+                        is_fullscreen.set(false);
+                        nav_ctrl.navigate_to_album(album_id);
+                    },
+                    "{current_song_album}"
+                }
             }
         }
 
@@ -465,11 +496,11 @@ pub fn Fullscreen(
             ctrl.shuffle_order
                 .read()
                 .iter()
-                .filter_map(|&qi| q.get(qi).cloned().map(|t| t))
+                .filter_map(|&qi| q.get(qi).cloned())
                 .collect::<Vec<_>>()
         } else {
             (0..q.len())
-                .filter_map(|qi| q.get(qi).cloned().map(|t| t))
+                .filter_map(|qi| q.get(qi).cloned())
                 .collect::<Vec<_>>()
         }
     };
@@ -477,7 +508,11 @@ pub fn Fullscreen(
     let mut active_tab = use_signal(|| 0usize);
     if cfg!(target_os = "android") {
         let tab = *active_tab.read();
-        let tab_btn = |idx: usize, icon: &'static str, label: &'static str| {
+        let close_text = i18n::t("close").to_string();
+        let music_text = i18n::t("music").to_string();
+        let up_next_text = i18n::t("up_next").to_string();
+        let lyrics_text = i18n::t("lyrics").to_string();
+        let tab_btn = |idx: usize, icon: &'static str, label: String| {
             let cls = if tab == idx {
                 "flex-1 h-10 flex items-center justify-center text-white border-b-2 border-white"
             } else {
@@ -498,14 +533,14 @@ pub fn Fullscreen(
                     class: "flex items-center gap-2 px-3 pt-[env(safe-area-inset-top)] pb-1 shrink-0",
                     button {
                         class: "w-10 h-10 flex items-center justify-center text-white/60 active:scale-95 transition-all shrink-0",
-                        "aria-label": "Close",
+                        "aria-label": "{close_text}",
                         onclick: move |_| is_fullscreen.set(false),
                         i { class: "fa-solid fa-chevron-down text-xl", "aria-hidden": "true" }
                     }
                     div { class: "flex flex-1 items-center",
-                        {tab_btn(0, "fa-solid fa-compact-disc", "Music tab")}
-                        {tab_btn(1, "fa-solid fa-list", "Queue tab")}
-                        {tab_btn(2, "fa-solid fa-align-left", "Lyrics tab")}
+                        {tab_btn(0, "fa-solid fa-compact-disc", music_text.clone())}
+                        {tab_btn(1, "fa-solid fa-list", up_next_text.clone())}
+                        {tab_btn(2, "fa-solid fa-align-left", lyrics_text.clone())}
                     }
                 }
 
@@ -513,6 +548,7 @@ pub fn Fullscreen(
                     div {
                         class: "flex-1 overflow-y-auto flex flex-col items-center justify-center px-6 pb-[calc(env(safe-area-inset-bottom)_+_1.5rem)]",
                         TrackMetadata {
+                            is_fullscreen,
                             current_song_cover_url,
                             current_song_title,
                             current_song_artist,
@@ -560,6 +596,7 @@ pub fn Fullscreen(
                     style: "width: 50%; max-width: 600px;",
 
                     TrackMetadata {
+                        is_fullscreen,
                         current_song_cover_url,
                         current_song_title,
                         current_song_artist,
