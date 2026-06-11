@@ -62,12 +62,17 @@ impl ScrobbleQueue {
             .unwrap_or_default()
     }
 
+    /// Write-to-temp-then-rename so an interrupted write can't leave a
+    /// truncated file behind; `load` treats corrupt JSON as an empty queue,
+    /// which would silently drop the whole backlog.
     pub fn save(&self, path: &Path) -> Result<(), String> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         let json = serde_json::to_string(self).map_err(|e| e.to_string())?;
-        std::fs::write(path, json).map_err(|e| e.to_string())
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, json).map_err(|e| e.to_string())?;
+        std::fs::rename(&tmp, path).map_err(|e| e.to_string())
     }
 
     /// Append a scrobble, dropping the oldest entries beyond the cap.
@@ -156,8 +161,9 @@ pub async fn enqueue(
 
 /// Resubmit queued scrobbles. Per service, the first transient failure skips
 /// that service for the rest of this run (still unreachable); a permanent
-/// failure drops the service from that entry. The queue is saved after every
-/// change so an interrupted drain loses at most nothing.
+/// failure drops the service from that entry. Progress is checkpointed to
+/// disk after every entry, so an interrupted drain re-sends at most the one
+/// in-flight item instead of replaying everything already delivered.
 pub async fn drain(path: &Path, creds: &Credentials) {
     let _guard = QUEUE_LOCK.lock().await;
     let mut queue = ScrobbleQueue::load(path);
@@ -168,13 +174,14 @@ pub async fn drain(path: &Path, creds: &Credentials) {
 
     let mut give_up: Vec<Service> = Vec::new();
 
-    for item in &mut queue.items {
+    for idx in 0..queue.items.len() {
+        let item = queue.items[idx].clone();
         let mut done: Vec<Service> = Vec::new();
         for &service in &item.pending {
             if give_up.contains(&service) {
                 continue;
             }
-            match submit_one(service, item, creds).await {
+            match submit_one(service, &item, creds).await {
                 Outcome::Sent => {
                     tracing::info!(
                         service = service.label(),
@@ -203,7 +210,12 @@ pub async fn drain(path: &Path, creds: &Credentials) {
                 }
             }
         }
-        item.pending.retain(|s| !done.contains(s));
+        if !done.is_empty() {
+            queue.items[idx].pending.retain(|s| !done.contains(s));
+            if let Err(e) = queue.save(path) {
+                tracing::warn!(error = %e, "failed to checkpoint scrobble queue");
+            }
+        }
     }
 
     queue.items.retain(|i| !i.pending.is_empty());
@@ -226,7 +238,8 @@ async fn submit_one(service: Service, item: &QueuedScrobble, creds: &Credentials
             let Some((key, secret, session)) = &creds.lastfm else {
                 return Outcome::NoCredentials;
             };
-            let scrobble = lastfm::make_scrobble_at(&item.artist, &item.title, album, item.timestamp);
+            let scrobble =
+                lastfm::make_scrobble_at(&item.artist, &item.title, album, item.timestamp);
             lastfm::submit_scrobble(key, secret, session, &scrobble)
                 .await
                 .map(|_| ())
@@ -235,7 +248,8 @@ async fn submit_one(service: Service, item: &QueuedScrobble, creds: &Credentials
             let Some(session) = &creds.librefm_session_key else {
                 return Outcome::NoCredentials;
             };
-            let scrobble = librefm::make_scrobble_at(&item.artist, &item.title, album, item.timestamp);
+            let scrobble =
+                librefm::make_scrobble_at(&item.artist, &item.title, album, item.timestamp);
             librefm::submit_scrobble(librefm::API_KEY, librefm::API_SECRET, session, &scrobble)
                 .await
                 .map(|_| ())
@@ -249,13 +263,8 @@ async fn submit_one(service: Service, item: &QueuedScrobble, creds: &Credentials
             } else {
                 format!("Token {token}")
             };
-            let listen = musicbrainz::make_listen_at(
-                &item.artist,
-                &item.title,
-                album,
-                None,
-                item.timestamp,
-            );
+            let listen =
+                musicbrainz::make_listen_at(&item.artist, &item.title, album, None, item.timestamp);
             musicbrainz::submit_listens(&auth, vec![listen], "import")
                 .await
                 .map(|_| ())
@@ -302,7 +311,11 @@ mod tests {
     fn save_and_load_roundtrip() {
         let path = temp_path("roundtrip.json");
         let mut q = ScrobbleQueue::default();
-        q.push(entry("song", 1700000000, vec![Service::LibreFm, Service::ListenBrainz]));
+        q.push(entry(
+            "song",
+            1700000000,
+            vec![Service::LibreFm, Service::ListenBrainz],
+        ));
         q.save(&path).unwrap();
 
         let loaded = ScrobbleQueue::load(&path);
@@ -332,7 +345,15 @@ mod tests {
         let _ = std::fs::remove_file(&path);
 
         enqueue(&path, Service::LastFm, "Artist", "Song", Some("Album"), 42).await;
-        enqueue(&path, Service::ListenBrainz, "Artist", "Song", Some("Album"), 42).await;
+        enqueue(
+            &path,
+            Service::ListenBrainz,
+            "Artist",
+            "Song",
+            Some("Album"),
+            42,
+        )
+        .await;
         // Duplicate service on the same listen must not double up.
         enqueue(&path, Service::LastFm, "Artist", "Song", Some("Album"), 42).await;
 
