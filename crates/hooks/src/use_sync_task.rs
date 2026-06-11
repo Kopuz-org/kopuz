@@ -26,10 +26,7 @@ pub fn nudge() {
     nudge_handle().notify_one();
 }
 
-pub fn use_sync_task(
-    config: Signal<config::AppConfig>,
-    mut favorites_store: Signal<reader::FavoritesStore>,
-) {
+pub fn use_sync_task(config: Signal<config::AppConfig>) {
     let db = use_context::<Db>();
     let gens = use_generations();
 
@@ -38,7 +35,7 @@ pub fn use_sync_task(
         async move {
             #[cfg(target_arch = "wasm32")]
             {
-                let _ = (&db, &gens, &mut favorites_store);
+                let _ = (&db, &gens);
             }
             #[cfg(not(target_arch = "wasm32"))]
             {
@@ -88,9 +85,6 @@ pub fn use_sync_task(
                         Ok(report) => {
                             consecutive_failures = 0;
                             if report.pushed_likes + report.pushed_unlikes + report.pulled > 0 {
-                                if let Ok(store) = db.load_favorites_store().await {
-                                    favorites_store.set(store);
-                                }
                                 gens.bump(Table::Favorites);
                             }
                         }

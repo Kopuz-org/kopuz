@@ -4,7 +4,7 @@ use config::MusicService;
 use dioxus::logger::tracing::Instrument;
 use dioxus::{logger::tracing, prelude::*};
 use player::player::{NowPlayingMeta, Player};
-use reader::{Library, Track};
+use reader::Track;
 use scrobble;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -52,7 +52,9 @@ pub struct PlayerController {
     pub current_song_cover_url: Signal<String>,
     pub current_track_snapshot: Signal<Option<Track>>,
     pub volume: Signal<f32>,
-    pub library: Signal<Library>,
+    /// Local albums snapshot, hydrated from the DB by the host (a slim stand-in
+    /// for the old whole-Library signal — only the sync cover lookups need it).
+    pub local_albums: Signal<Vec<reader::Album>>,
     pub config: Signal<AppConfig>,
     pub play_generation: Signal<usize>,
     pending_resume: Signal<Option<PendingResumeState>>,
@@ -174,12 +176,9 @@ impl PlayerController {
                 90,
             )
             .unwrap_or_default(),
-            // SWEEP-TODO(sync album-cover lookup: cover_url_for_track is called
-            // from synchronous hydrate paths, no async db call possible here — W4)
             _ => self
-                .library
+                .local_albums
                 .read()
-                .albums
                 .iter()
                 .find(|album| album.id == track.album_id)
                 .and_then(|album| utils::format_artwork_url(album.cover_path.as_ref()))
@@ -1507,11 +1506,9 @@ impl PlayerController {
                     && let Ok((source, hint)) = decoder::open_file(track_path)
                 {
                     {
-                        // SWEEP-TODO(sync album-cover lookup: NowPlayingMeta is
-                        // built inline before the synchronous player.play call — W4)
                         let artwork = {
-                            let lib = self.library.peek();
-                            lib.albums
+                            let albums = self.local_albums.peek();
+                            albums
                                 .iter()
                                 .find(|a| a.id == track.album_id)
                                 .and_then(|a| {
@@ -2178,7 +2175,7 @@ pub fn use_player_controller(
     current_song_cover_url: Signal<String>,
     current_track_snapshot: Signal<Option<Track>>,
     volume: Signal<f32>,
-    library: Signal<Library>,
+    local_albums: Signal<Vec<reader::Album>>,
     config: Signal<AppConfig>,
 ) -> PlayerController {
     let play_generation = use_signal(|| 0);
@@ -2215,7 +2212,7 @@ pub fn use_player_controller(
         current_song_cover_url,
         current_track_snapshot,
         volume,
-        library,
+        local_albums,
         config,
         play_generation,
         pending_resume,

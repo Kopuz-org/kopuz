@@ -1,6 +1,5 @@
 use config::{AppConfig, MusicService, MusicSource};
 use dioxus::prelude::*;
-use reader::Library;
 use reader::models::{Album, Track};
 
 type TrackRes = Vec<(Track, Option<utils::CoverUrl>)>;
@@ -238,12 +237,7 @@ async fn run_search(
     }
 }
 
-pub fn use_search_data(
-    library: Signal<Library>,
-    search_query: Signal<String>,
-    config: Signal<AppConfig>,
-) -> SearchData {
-    let _ = library;
+pub fn use_search_data(search_query: Signal<String>, config: Signal<AppConfig>) -> SearchData {
     let db = use_context::<db::Db>();
     let source = use_memo(move || {
         let conf = config.read();

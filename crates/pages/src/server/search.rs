@@ -9,11 +9,9 @@ use dioxus::prelude::*;
 use hooks::use_db_queries::{use_albums, use_all_tracks};
 use hooks::use_search_data::use_search_data;
 use player::player;
-use reader::Library;
 
 #[component]
 pub fn JellyfinSearch(
-    library: Signal<Library>,
     config: Signal<AppConfig>,
     search_query: Signal<String>,
     player: Signal<player::Player>,
@@ -28,7 +26,7 @@ pub fn JellyfinSearch(
     current_queue_index: Signal<usize>,
     on_select_album: EventHandler<String>,
 ) -> Element {
-    let data = use_search_data(library, search_query, config);
+    let data = use_search_data(search_query, config);
     let mut selected_genre = use_signal(|| None::<String>);
 
     let mut active_menu_track = use_signal(|| None::<std::path::PathBuf>);

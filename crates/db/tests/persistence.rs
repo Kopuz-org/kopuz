@@ -1,16 +1,12 @@
-//! Full in-memory ↔ DB round-trips (issue #347): the runtime now loads/saves
-//! Library, PlaylistStore, FavoritesStore, and the queue through the DB instead
-//! of JSON. A save of a freshly-loaded value must not lose or prune anything.
+//! Targeted persistence ops (issue #347): playlists, favorites, and the queue
+//! are written through scoped ops and read back, and active-server writes
+//! never touch another server's rows.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use config::{AppConfig, MusicServer, MusicService, SavedServer};
-use db::{QueueSnapshot, Source};
-use reader::models::{
-    Album, FavoritesStore, JellyfinPlaylist, Library, Playlist, PlaylistFolder, PlaylistStore,
-    Track, TrackId,
-};
+use db::{QueueSnapshot, Source, TrackFilter};
+use reader::models::{PlaylistFolder, Track, TrackId};
 
 fn unique_db() -> PathBuf {
     let nanos = std::time::SystemTime::now()
@@ -20,27 +16,6 @@ fn unique_db() -> PathBuf {
     let dir = std::env::temp_dir().join(format!("kopuz-persist-{nanos}"));
     std::fs::create_dir_all(&dir).unwrap();
     dir.join("kopuz.db")
-}
-
-fn local_track(path: &str, title: &str) -> Track {
-    Track {
-        id: TrackId::Local(PathBuf::from(path)),
-        cover: None,
-        album_id: "alb-local".into(),
-        title: title.into(),
-        artist: "Loc".into(),
-        album: "L".into(),
-        duration: 100,
-        khz: 44100,
-        bitrate: 900,
-        track_number: Some(1),
-        disc_number: None,
-        musicbrainz_release_id: None,
-        musicbrainz_recording_id: None,
-        musicbrainz_track_id: None,
-        playlist_item_id: None,
-        artists: vec!["Loc".into()],
-    }
 }
 
 fn server_track(id: &str, title: &str) -> Track {
@@ -67,10 +42,10 @@ fn server_track(id: &str, title: &str) -> Track {
     }
 }
 
-async fn seed_active_server(db: &db::Db) {
+async fn seed_active_server(db: &db::Db, id: &str) {
     let mut cfg = AppConfig::default();
     cfg.servers = vec![SavedServer {
-        id: "srv-1".into(),
+        id: id.into(),
         name: "yt".into(),
         url: "https://music.youtube.com".into(),
         service: MusicService::YtMusic,
@@ -83,206 +58,91 @@ async fn seed_active_server(db: &db::Db) {
         service: MusicService::YtMusic,
         access_token: Some("cookie".into()),
         user_id: None,
-        id: Some("srv-1".into()),
+        id: Some(id.into()),
         yt_browser: None,
         yt_anonymous: false,
     });
-    cfg.active_server_id = Some("srv-1".into());
+    cfg.active_server_id = Some(id.into());
     db.save_config(&cfg).await.unwrap();
 }
 
-fn sample_library() -> Library {
-    let mut server_artist_images = HashMap::new();
-    server_artist_images.insert("art".to_string(), "https://img/art.jpg".to_string());
-    Library {
-        root_paths: vec![PathBuf::from("/music")],
-        tracks: vec![local_track("/music/a.flac", "A"), local_track("/music/b.flac", "B")],
-        albums: vec![Album {
-            id: "alb-local".into(),
-            title: "L".into(),
-            artist: "Loc".into(),
-            genre: "Rock".into(),
-            year: 2020,
-            cover_path: Some(PathBuf::from("/cache/l.png")),
-            manual_cover: false,
-        }],
-        jellyfin_tracks: vec![server_track("VID1", "Yt One"), server_track("VID2", "Yt Two")],
-        jellyfin_albums: vec![Album {
-            id: "ytmusic:album:A".into(),
-            title: "YA".into(),
-            artist: "Art".into(),
-            genre: String::new(),
-            year: 0,
-            cover_path: None,
-            manual_cover: false,
-        }],
-        jellyfin_genres: Vec::new(),
-        last_yt_sync_at: Some(1_700_000_000),
-        last_yt_playlists_sync_at: Some(1_700_000_500),
-        server_artist_images,
-        local_artist_images: HashMap::new(),
-        custom_artist_images: HashMap::new(),
-    }
-}
-
 #[tokio::test]
-async fn library_round_trips_without_loss() {
+async fn playlists_round_trip() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();
-    seed_active_server(&db).await;
+    seed_active_server(&db, "srv-1").await;
 
-    let lib = sample_library();
-    db.save_library(&lib, Some("srv-1")).await.unwrap();
-
-    let loaded = db.load_library().await.unwrap();
-    assert_eq!(loaded.tracks.len(), 2, "local tracks");
-    assert_eq!(loaded.jellyfin_tracks.len(), 2, "server tracks");
-    assert_eq!(loaded.albums.len(), 1);
-    assert_eq!(loaded.jellyfin_albums.len(), 1);
-    assert_eq!(loaded.last_yt_sync_at, Some(1_700_000_000));
-    assert_eq!(loaded.last_yt_playlists_sync_at, Some(1_700_000_500));
-    assert_eq!(
-        loaded.server_artist_images.get("art").map(String::as_str),
-        Some("https://img/art.jpg")
-    );
-    // Server track kept its cover + typed identity.
-    let yt = loaded
-        .jellyfin_tracks
-        .iter()
-        .find(|t| t.title == "Yt One")
-        .unwrap();
-    assert_eq!(yt.cover.as_deref(), Some("https://img/x.jpg"));
-    assert!(matches!(yt.id, TrackId::Server { .. }));
-
-    // Saving the freshly-loaded library prunes nothing.
-    db.save_library(&loaded, Some("srv-1")).await.unwrap();
-    let again = db.load_library().await.unwrap();
-    assert_eq!(again.tracks.len(), 2);
-    assert_eq!(again.jellyfin_tracks.len(), 2);
-
-    // Dropping a track then saving prunes exactly it.
-    let mut shrunk = again;
-    shrunk.tracks.retain(|t| t.title == "A");
-    db.save_library(&shrunk, Some("srv-1")).await.unwrap();
-    assert_eq!(db.load_library().await.unwrap().tracks.len(), 1);
-
-    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
-}
-
-#[tokio::test]
-async fn saves_never_touch_other_servers_rows() {
-    let db_path = unique_db();
-    let db = db::init(&db_path).await.unwrap();
-    seed_active_server(&db).await; // active = srv-1
-
-    // Seed ANOTHER server's cache directly.
-    let other = Source::Server("srv-other".into());
-    db.upsert_tracks(&other, &[server_track("OV1", "Other One")])
+    db.upsert_playlist_meta(&Source::Local, "pl-1", "Mine", None, None)
         .await
         .unwrap();
-    let other_pl = PlaylistStore {
-        playlists: Vec::new(),
-        jellyfin_playlists: vec![JellyfinPlaylist {
-            id: "OPL".into(),
-            name: "Other List".into(),
-            tracks: vec!["OV1".into()],
-            image_tag: None,
-            cover_path: None,
-        }],
-        folders: Vec::new(),
-    };
-    db.save_playlists(&other_pl, Some("srv-other")).await.unwrap();
-    db.set_favorite("srv-other", "OV1", true).await.unwrap();
-
-    // A full save cycle for the ACTIVE server (srv-1)...
-    db.save_library(&sample_library(), Some("srv-1")).await.unwrap();
-    db.save_playlists(
-        &PlaylistStore {
-            playlists: Vec::new(),
-            jellyfin_playlists: vec![JellyfinPlaylist {
-                id: "LM".into(),
-                name: "Liked".into(),
-                tracks: vec!["VID1".into()],
-                image_tag: None,
-                cover_path: None,
-            }],
-            folders: Vec::new(),
-        },
-        Some("srv-1"),
-    )
-    .await
-    .unwrap();
-    db.save_favorites_store(
-        &FavoritesStore {
-            local_favorites: Vec::new(),
-            jellyfin_favorites: vec!["VID1".into()],
-        },
-        Some("srv-1"),
+    db.set_playlist_tracks(
+        &Source::Local,
+        "pl-1",
+        &["/music/a.flac".into(), "/music/b.flac".into()],
     )
     .await
     .unwrap();
 
-    // ...must leave srv-other's rows completely intact.
-    let (tracks, _albums, playlists, favorites) =
-        db.load_server_cache("srv-other").await.unwrap();
-    assert_eq!(tracks.len(), 1, "other server's tracks survived");
-    assert_eq!(playlists.len(), 1, "other server's playlists survived");
-    assert_eq!(playlists[0].id, "OPL");
-    assert_eq!(favorites, vec!["OV1"], "other server's favorites survived");
+    let srv = Source::Server("srv-1".into());
+    db.upsert_playlist_meta(&srv, "LM", "Liked", None, Some("urlhex_ab"))
+        .await
+        .unwrap();
+    db.set_playlist_tracks(&srv, "LM", &["VID1".into(), "VID2".into()])
+        .await
+        .unwrap();
 
-    // And load_playlists (whole-store load) only sees local + ACTIVE rows.
+    db.set_folders(&[PlaylistFolder {
+        id: "f1".into(),
+        name: "Folder".into(),
+        playlist_ids: vec!["pl-1".into()],
+    }])
+    .await
+    .unwrap();
+
     let store = db.load_playlists().await.unwrap();
+    assert_eq!(store.playlists.len(), 1);
+    assert_eq!(store.playlists[0].id, "pl-1");
+    assert_eq!(store.playlists[0].name, "Mine");
+    assert_eq!(
+        store.playlists[0].tracks,
+        vec![PathBuf::from("/music/a.flac"), PathBuf::from("/music/b.flac")]
+    );
     assert_eq!(store.jellyfin_playlists.len(), 1);
     assert_eq!(store.jellyfin_playlists[0].id, "LM");
+    assert_eq!(store.jellyfin_playlists[0].name, "Liked");
+    assert_eq!(store.jellyfin_playlists[0].tracks, vec!["VID1", "VID2"]);
+    assert_eq!(
+        store.jellyfin_playlists[0].image_tag.as_deref(),
+        Some("urlhex_ab")
+    );
+    assert_eq!(store.folders.len(), 1);
+    assert_eq!(store.folders[0].playlist_ids, vec!["pl-1"]);
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }
 
 #[tokio::test]
-async fn playlists_favorites_queue_round_trip() {
+async fn favorites_round_trip() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();
-    seed_active_server(&db).await;
+    seed_active_server(&db, "srv-1").await;
 
-    let store = PlaylistStore {
-        playlists: vec![Playlist {
-            id: "pl-1".into(),
-            name: "Mine".into(),
-            tracks: vec![PathBuf::from("/music/a.flac"), PathBuf::from("/music/b.flac")],
-            cover_path: None,
-        }],
-        jellyfin_playlists: vec![JellyfinPlaylist {
-            id: "LM".into(),
-            name: "Liked".into(),
-            tracks: vec!["VID1".into(), "VID2".into()],
-            image_tag: Some("urlhex_ab".into()),
-            cover_path: None,
-        }],
-        folders: vec![PlaylistFolder {
-            id: "f1".into(),
-            name: "Folder".into(),
-            playlist_ids: vec!["pl-1".into()],
-        }],
-    };
-    db.save_playlists(&store, Some("srv-1")).await.unwrap();
-    let pl = db.load_playlists().await.unwrap();
-    assert_eq!(pl.playlists.len(), 1);
-    assert_eq!(pl.playlists[0].tracks.len(), 2);
-    assert_eq!(pl.jellyfin_playlists.len(), 1);
-    assert_eq!(pl.jellyfin_playlists[0].tracks, vec!["VID1", "VID2"]);
-    assert_eq!(pl.folders.len(), 1);
-    assert_eq!(pl.folders[0].playlist_ids, vec!["pl-1"]);
+    db.set_favorite("local", "/music/a.flac", true).await.unwrap();
+    db.set_favorite("srv-1", "VID1", true).await.unwrap();
 
-    let favs = FavoritesStore {
-        local_favorites: vec![PathBuf::from("/music/a.flac")],
-        jellyfin_favorites: vec!["VID1".into(), "VID2".into()],
-    };
-    db.save_favorites_store(&favs, Some("srv-1")).await.unwrap();
-    let loaded = db.load_favorites_store().await.unwrap();
-    assert_eq!(loaded.local_favorites, vec![PathBuf::from("/music/a.flac")]);
-    let mut jf = loaded.jellyfin_favorites;
-    jf.sort();
-    assert_eq!(jf, vec!["VID1", "VID2"]);
+    assert_eq!(db.favorites("local").await.unwrap(), vec!["/music/a.flac"]);
+    assert_eq!(db.favorites("srv-1").await.unwrap(), vec!["VID1"]);
+    assert!(db.is_favorite("local", "/music/a.flac").await.unwrap());
+    assert!(db.is_favorite("srv-1", "VID1").await.unwrap());
+    assert!(!db.is_favorite("srv-1", "VID2").await.unwrap());
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn queue_round_trips() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
 
     let snap = QueueSnapshot {
         version: 1,
@@ -298,6 +158,79 @@ async fn playlists_favorites_queue_round_trip() {
     assert_eq!(q.queue[0].title, "Yt One");
     assert_eq!(q.progress_secs, 42);
     assert!(q.shuffle_enabled);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn active_server_writes_never_touch_other_servers_rows() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    seed_active_server(&db, "srv-1").await;
+
+    // Seed ANOTHER server's cache directly.
+    let other = Source::Server("srv-other".into());
+    db.upsert_tracks(&other, &[server_track("OV1", "Other One")])
+        .await
+        .unwrap();
+    db.upsert_playlist_meta(&other, "OPL", "Other List", None, None)
+        .await
+        .unwrap();
+    db.set_playlist_tracks(&other, "OPL", &["OV1".into()])
+        .await
+        .unwrap();
+    db.set_favorite("srv-other", "OV1", true).await.unwrap();
+
+    // A full sync-style write cycle for the ACTIVE server (srv-1)...
+    let active = Source::Server("srv-1".into());
+    db.upsert_tracks(
+        &active,
+        &[server_track("VID1", "Yt One"), server_track("VID2", "Yt Two")],
+    )
+    .await
+    .unwrap();
+    db.prune_source(&active, &["VID1".into(), "VID2".into()], &[])
+        .await
+        .unwrap();
+    db.upsert_playlist_meta(&active, "LM", "Liked", None, None)
+        .await
+        .unwrap();
+    db.set_playlist_tracks(&active, "LM", &["VID1".into()])
+        .await
+        .unwrap();
+    db.upsert_playlist_meta(&active, "TMP", "Scratch", None, None)
+        .await
+        .unwrap();
+    db.delete_playlist(&active, "TMP").await.unwrap();
+
+    // ...must leave srv-other's rows completely intact.
+    let other_count = db
+        .tracks_count(&TrackFilter::new(Source::Server("srv-other".into())))
+        .await
+        .unwrap();
+    assert_eq!(other_count, 1, "other server's tracks survived");
+    assert_eq!(
+        db.favorites("srv-other").await.unwrap(),
+        vec!["OV1"],
+        "other server's favorites survived"
+    );
+
+    // load_playlists only sees local + ACTIVE rows: srv-1 first...
+    let store = db.load_playlists().await.unwrap();
+    assert_eq!(store.jellyfin_playlists.len(), 1);
+    assert_eq!(store.jellyfin_playlists[0].id, "LM");
+    assert_eq!(store.jellyfin_playlists[0].tracks, vec!["VID1"]);
+
+    // ...then switch the active server to srv-other to see its playlist survived.
+    seed_active_server(&db, "srv-other").await;
+    let store = db.load_playlists().await.unwrap();
+    assert_eq!(
+        store.jellyfin_playlists.len(),
+        1,
+        "other server's playlists survived"
+    );
+    assert_eq!(store.jellyfin_playlists[0].id, "OPL");
+    assert_eq!(store.jellyfin_playlists[0].tracks, vec!["OV1"]);
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }

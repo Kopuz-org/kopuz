@@ -1,14 +1,12 @@
 use config::{AppConfig, MusicSource};
 use dioxus::prelude::*;
 use player::player;
-use reader::Library;
 
 use crate::local::search::LocalSearch;
 use crate::server::search::ServerSearch;
 
 #[component]
 pub fn Search(
-    library: Signal<Library>,
     config: Signal<AppConfig>,
     search_query: Signal<String>,
     player: Signal<player::Player>,
@@ -28,7 +26,6 @@ pub fn Search(
     rsx! {
         if is_server {
             ServerSearch {
-                library,
                 config,
                 search_query,
                 player,
@@ -45,7 +42,6 @@ pub fn Search(
             }
         } else {
             LocalSearch {
-                library,
                 config,
                 search_query,
                 player,

@@ -20,7 +20,6 @@ use kopuz_route::Route;
 use pages::server::download_manager::DownloadQueue;
 use player::player::Player;
 use queue_state::PersistedQueueState;
-use reader::FavoritesStore;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
@@ -190,14 +189,6 @@ async fn fetch_available_update() -> Option<AvailableUpdate> {
     } else {
         None
     }
-}
-
-fn persist_config_snapshot(db: db::Db, config_snapshot: config::AppConfig) {
-    spawn(async move {
-        if let Err(e) = db.save_config(&config_snapshot).await {
-            tracing::error!("Failed to save config: {}", e);
-        }
-    }.instrument(tracing::info_span!("config.persist")));
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -952,7 +943,10 @@ fn App() -> Element {
         });
     });
 
-    let mut library = use_signal(reader::Library::default);
+    // The whole-Library signal is GONE — pages/components read the DB through
+    // query hooks. The player controller's synchronous cover lookups get this
+    // slim local-albums snapshot, kept fresh off the Albums generation.
+    let mut local_albums = use_signal(Vec::<reader::Album>::new);
     let mut current_route = use_signal(|| Route::Home);
     let mut scroll_positions: Signal<std::collections::HashMap<Route, f64>> =
         use_signal(std::collections::HashMap::new);
@@ -1011,9 +1005,7 @@ fn App() -> Element {
             crate::pot_minter::request();
         }
     });
-    let mut playlist_store = use_signal(reader::PlaylistStore::default);
-    let mut favorites_store = use_signal(FavoritesStore::default);
-    hooks::use_sync_task::use_sync_task(config, favorites_store);
+    hooks::use_sync_task::use_sync_task(config);
     let mut initial_load_done = use_signal(|| false);
     #[allow(unused_variables)]
     let cover_cache = use_memo(move || cache_dir().join("covers"));
@@ -1045,15 +1037,12 @@ fn App() -> Element {
     let is_rightbar_open = use_signal(|| false);
     let rightbar_width = use_signal(|| 320usize);
     let mut palette = use_signal(|| Option::<Vec<utils::color::Color>>::None);
-    // Per-domain "loaded successfully" flags. The save effects are FULL-REPLACE
-    // (prune/delete-and-reinsert), so persisting a default value that exists
-    // only because its LOAD FAILED would commit a wipe of real rows. A save may
-    // only run once its domain demonstrably loaded; a legitimately fresh/empty
-    // DB still counts as loaded.
+    // Config is the one remaining whole-value save: persisting a default that
+    // exists only because the LOAD FAILED would wipe real settings/servers, so
+    // its save stays disarmed unless the load demonstrably succeeded (a fresh
+    // empty DB still counts). Library/playlists/favorites have no such flag
+    // anymore — they're targeted per-row writes, never full-replace.
     let mut config_loaded_ok = use_signal(|| false);
-    let mut library_loaded_ok = use_signal(|| false);
-    let mut playlists_loaded_ok = use_signal(|| false);
-    let mut favorites_loaded_ok = use_signal(|| false);
 
     let mut pending_queue_state_snapshot = use_signal(|| None::<PersistedQueueState>);
     let mut pending_queue_state_revision = use_signal(|| 0u64);
@@ -1082,35 +1071,18 @@ fn App() -> Element {
             ) {
                 let db = db.clone();
                 let queue_snap = pending_queue_state_snapshot.peek().clone();
-                let active = config.peek().active_server_id.clone();
                 rt.block_on(async move {
                     if let Some(snap) = queue_snap
                         && let Err(e) = db.save_queue(&queue_snapshot(snap)).await
                     {
                         tracing::warn!(error = %e, "queue flush on close failed");
                     }
+                    // Library/playlists/favorites need no flush — every mutation
+                    // already committed as a targeted write when it happened.
                     if *config_loaded_ok.peek() {
                         let mut cfg = config.peek().clone();
                         cfg.volume = *volume.peek();
                         let _ = db.save_config(&cfg).await;
-                    }
-                    if *library_loaded_ok.peek() {
-                        let _ = db
-                            .save_library(&library.peek().clone(), active.as_deref())
-                            .await;
-                    }
-                    if *playlists_loaded_ok.peek() {
-                        let _ = db
-                            .save_playlists(&playlist_store.peek().clone(), active.as_deref())
-                            .await;
-                    }
-                    if *favorites_loaded_ok.peek() {
-                        let _ = db
-                            .save_favorites_store(
-                                &favorites_store.peek().clone(),
-                                active.as_deref(),
-                            )
-                            .await;
                     }
                 });
             }
@@ -1270,18 +1242,31 @@ fn App() -> Element {
         current_song_cover_url,
         current_track_snapshot,
         volume,
-        library,
+        local_albums,
         config,
     );
 
-    let db_for_switch_reload = db.clone();
+    // Hydrate the controller's slim local-albums snapshot from the DB,
+    // re-querying when the albums table changes.
+    let gens_for_albums = hooks::db_reactivity::use_generations();
+    let db_for_albums = db.clone();
+    use_effect(move || {
+        let _ = gens_for_albums.generation(hooks::db_reactivity::Table::Albums);
+        let db = db_for_albums.clone();
+        spawn(async move {
+            if let Ok(albums) = db.albums(&db::Source::Local).await {
+                local_albums.set(albums);
+            }
+        });
+    });
+
     use_effect(move || {
         if !*initial_load_done.read() {
             return;
         }
 
         // Server identity excludes access_token: tokens rotate without making it a
-        // different account, but their rotation would otherwise wipe synced playlists.
+        // different account, but their rotation would otherwise reset playback.
         let current_server_key = {
             let conf = config.read();
             conf.server.as_ref().map(|server| {
@@ -1304,33 +1289,8 @@ fn App() -> Element {
             last_server_playlist_key.set(current_server_key);
             selected_playlist_id.set(None);
             ctrl.reset_for_backend_switch();
-            // Switching servers RELOADS the new server's cached rows from the
-            // DB instead of clearing the in-memory caches: clearing + the
-            // full-replace save effects would prune the cached library/
-            // playlists/favorites of whichever server the save raced to —
-            // destroying the per-server cache the schema exists to keep.
-            // (The remote sync still refreshes afterwards as before.)
-            let new_active = config.peek().active_server_id.clone();
-            let db = db_for_switch_reload.clone();
-            spawn(async move {
-                let (tracks, albums, playlists, favorites) = match &new_active {
-                    Some(id) => match db.load_server_cache(id).await {
-                        Ok(c) => c,
-                        Err(e) => {
-                            tracing::error!(error = %e, "failed to load server cache on switch");
-                            return;
-                        }
-                    },
-                    None => (Vec::new(), Vec::new(), Vec::new(), Vec::new()),
-                };
-                {
-                    let mut lib = library.write();
-                    lib.jellyfin_tracks = tracks;
-                    lib.jellyfin_albums = albums;
-                }
-                playlist_store.write().jellyfin_playlists = playlists;
-                favorites_store.write().jellyfin_favorites = favorites;
-            }.instrument(tracing::info_span!("server.switch_reload")));
+            // Nothing to reload: pages query by source, so switching servers is
+            // just a key change — every hook re-queries the new server's rows.
         }
     });
 
@@ -1478,95 +1438,8 @@ fn App() -> Element {
         windows_titlebar::set_custom_titlebar_enabled(mode == config::TitlebarMode::Custom);
     });
 
-    let mut playlists_dirty = use_signal(|| 0u64);
-    use_effect(move || {
-        if !*initial_load_done.read() || !*playlists_loaded_ok.read() {
-            return;
-        }
-        let _ = playlist_store.read();
-        playlists_dirty += 1;
-    });
-    let db_for_pl_save = db.clone();
-    use_future(move || {
-        let db = db_for_pl_save.clone();
-        async move {
-            let mut flushed = 0u64;
-            loop {
-                if *playlists_dirty.peek() == flushed {
-                    utils::sleep(std::time::Duration::from_millis(250)).await;
-                    continue;
-                }
-                utils::sleep(std::time::Duration::from_millis(STORE_SAVE_SETTLE_MS)).await;
-                flushed = *playlists_dirty.peek();
-                let snapshot = playlist_store.peek().clone();
-                let active = config.peek().active_server_id.clone();
-                if let Err(e) = db.save_playlists(&snapshot, active.as_deref()).await {
-                    tracing::error!("Failed to save playlists: {}", e);
-                }
-                utils::sleep(std::time::Duration::from_millis(STORE_SAVE_COOLDOWN_MS)).await;
-            }
-        }
-    });
-
-    let mut library_dirty = use_signal(|| 0u64);
-    use_effect(move || {
-        if !*initial_load_done.read() || !*library_loaded_ok.read() {
-            return;
-        }
-        let _ = library.read();
-        library_dirty += 1;
-    });
-    let db_for_lib_save = db.clone();
-    use_future(move || {
-        let db = db_for_lib_save.clone();
-        async move {
-            let mut flushed = 0u64;
-            loop {
-                if *library_dirty.peek() == flushed {
-                    utils::sleep(std::time::Duration::from_millis(250)).await;
-                    continue;
-                }
-                utils::sleep(std::time::Duration::from_millis(STORE_SAVE_SETTLE_MS)).await;
-                flushed = *library_dirty.peek();
-                let snapshot = library.peek().clone();
-                let active = config.peek().active_server_id.clone();
-                if let Err(e) = db.save_library(&snapshot, active.as_deref()).await {
-                    tracing::error!("Failed to save library: {}", e);
-                }
-                utils::sleep(std::time::Duration::from_millis(STORE_SAVE_COOLDOWN_MS)).await;
-            }
-        }
-    });
-
-    let mut favorites_dirty = use_signal(|| 0u64);
-    use_effect(move || {
-        if !*initial_load_done.read() || !*favorites_loaded_ok.read() {
-            return;
-        }
-        let _ = favorites_store.read();
-        favorites_dirty += 1;
-    });
-    let db_for_fav_save = db.clone();
-    use_future(move || {
-        let db = db_for_fav_save.clone();
-        async move {
-            let mut flushed = 0u64;
-            loop {
-                if *favorites_dirty.peek() == flushed {
-                    utils::sleep(std::time::Duration::from_millis(250)).await;
-                    continue;
-                }
-                utils::sleep(std::time::Duration::from_millis(STORE_SAVE_SETTLE_MS)).await;
-                flushed = *favorites_dirty.peek();
-                let snapshot = favorites_store.peek().clone();
-                let active = config.peek().active_server_id.clone();
-                if let Err(e) = db.save_favorites_store(&snapshot, active.as_deref()).await {
-                    tracing::error!("Failed to save favorites: {}", e);
-                }
-                utils::sleep(std::time::Duration::from_millis(STORE_SAVE_COOLDOWN_MS)).await;
-            }
-        }
-    });
+    // Library/playlists/favorites have no save loops anymore — every mutation
+    // commits as a targeted write at the call site and bumps a generation.
 
     use_effect(move || {
         if !*initial_load_done.read() {
@@ -1709,10 +1582,11 @@ fn App() -> Element {
                 // Everything loads from the DB — the converted source of truth.
                 // The legacy JSON files are never read or written; a fresh DB
                 // with no blob yet just yields the default config.
-                // Each domain marks itself loaded ONLY on success. On error the
-                // signal keeps its default for display, but the corresponding
-                // save effect stays disarmed for the whole session — a read
-                // failure must never become a committed wipe.
+                // Startup loads ONLY config + queue — everything else is queried
+                // on demand by the page hooks. Config marks itself loaded ONLY
+                // on success: its save is the one remaining whole-value write,
+                // and persisting a default born of a read failure would wipe
+                // real settings/servers.
                 let cfg_loaded = match db.load_config().await {
                     Ok(c) => {
                         config_loaded_ok.set(true);
@@ -1723,39 +1597,8 @@ fn App() -> Element {
                         None
                     }
                 };
-                let lib_loaded = match db.load_library().await {
-                    Ok(l) => {
-                        library_loaded_ok.set(true);
-                        l
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, "failed to load library from db — library saves disabled this session");
-                        reader::Library::default()
-                    }
-                };
-                let pl_loaded = match db.load_playlists().await {
-                    Ok(p) => {
-                        playlists_loaded_ok.set(true);
-                        Some(p)
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, "failed to load playlists from db — playlist saves disabled this session");
-                        None
-                    }
-                };
-                let fav_loaded = match db.load_favorites_store().await {
-                    Ok(f) => {
-                        favorites_loaded_ok.set(true);
-                        Some(f)
-                    }
-                    Err(e) => {
-                        tracing::error!(error = %e, "failed to load favorites from db — favorite saves disabled this session");
-                        None
-                    }
-                };
                 let queue_loaded = db.load_queue().await.ok();
 
-                library.set(lib_loaded);
                 let cfg_loaded = cfg_loaded.unwrap_or_default();
                 {
                     let loaded = cfg_loaded;
@@ -1768,16 +1611,14 @@ fn App() -> Element {
                     player.write().set_equalizer(loaded.equalizer.clone());
                     i18n::set_locale(&loaded.language);
                 }
-                if let Some(loaded) = pl_loaded {
-                    playlist_store.set(loaded);
-                }
-                if let Some(loaded) = fav_loaded {
-                    favorites_store.set(loaded);
-                }
 
                 {
+                    let no_local_tracks = db
+                        .tracks_count(&db::TrackFilter::new(db::Source::Local))
+                        .await
+                        .map(|n| n == 0)
+                        .unwrap_or(false);
                     let cfg = config.peek();
-                    let no_local_tracks = library.peek().tracks.is_empty();
                     let server_connected = cfg
                         .server
                         .as_ref()
@@ -1822,17 +1663,16 @@ fn App() -> Element {
         {
             config.write().active_source = config::MusicSource::Server;
             config_loaded_ok.set(true);
-            library_loaded_ok.set(true);
-            playlists_loaded_ok.set(true);
-            favorites_loaded_ok.set(true);
             initial_load_done.set(true);
         }
     });
 
+    let db_for_rescan = db.clone();
+    let db_for_play_album = db.clone();
     use_effect(move || {
         // config_loaded_ok matters here: a defaulted config (load failure) has
-        // an empty music_directory, and the no-dirs branch below clears the
-        // library signal — which must never happen off phantom state.
+        // an empty music_directory, and the no-dirs branch below prunes the
+        // local library — which must never happen off phantom state.
         if !*initial_load_done.read() || !*config_loaded_ok.read() {
             return;
         }
@@ -1859,29 +1699,31 @@ fn App() -> Element {
         }
         last_scan_key.set(Some(scan_key));
 
+        let db_scan = db_for_rescan.clone();
+        let gens_scan = gens_for_albums;
         #[cfg(not(target_arch = "wasm32"))]
         spawn(async move {
+            let db = db_scan;
+            let gens = gens_scan;
             let configured_dirs = configured_dirs;
             let scannable_dirs: Vec<PathBuf> = configured_dirs
                 .iter()
                 .filter(|d| d.exists())
                 .cloned()
                 .collect();
-            let mut current_lib = library.peek().clone();
-
-            let current_roots: std::collections::HashSet<_> =
-                current_lib.root_paths.iter().cloned().collect();
-            let new_roots: std::collections::HashSet<_> = configured_dirs.iter().cloned().collect();
-
-            if current_roots != new_roots {
-                current_lib.root_paths = configured_dirs.clone();
-                current_lib.tracks.clear();
-                current_lib.albums.clear();
-                library.set(current_lib.clone());
-            }
+            // Seed the scan working set from the DB (the scanner skips files it
+            // already knows; album-merge keeps manual covers).
+            let mut current_lib = reader::Library {
+                root_paths: configured_dirs.clone(),
+                tracks: db
+                    .tracks_all(&db::TrackFilter::new(db::Source::Local))
+                    .await
+                    .unwrap_or_default(),
+                albums: db.albums(&db::Source::Local).await.unwrap_or_default(),
+                ..Default::default()
+            };
 
             if !configured_dirs.is_empty() {
-                current_lib.local_artist_images.clear();
                 scan_current_file.set(Some(String::new()));
 
                 let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
@@ -1927,15 +1769,39 @@ fn App() -> Element {
                     .albums
                     .retain(|a| valid_album_ids.contains(&a.id));
 
-                // Show the library immediately — before any cover fetching. The
-                // library save effect persists it to the DB (upsert + prune).
-                library.set(current_lib.clone());
+                // Persist the scan directly: chunked upserts, prune what's gone,
+                // bump so the page hooks re-query. No in-memory mirror.
+                for chunk in current_lib.tracks.chunks(100) {
+                    let _ = db.upsert_tracks(&db::Source::Local, chunk).await;
+                    gens.bump_coalesced(hooks::db_reactivity::Table::Tracks);
+                }
+                let _ = db.upsert_albums(&db::Source::Local, &current_lib.albums).await;
+                let keep_keys: Vec<String> = current_lib
+                    .tracks
+                    .iter()
+                    .map(|t| t.id.key().into_owned())
+                    .collect();
+                let keep_albums: Vec<String> =
+                    current_lib.albums.iter().map(|a| a.id.clone()).collect();
+                let _ = db
+                    .prune_source(&db::Source::Local, &keep_keys, &keep_albums)
+                    .await;
+                for (artist, img) in &current_lib.local_artist_images {
+                    let p = img.to_string_lossy().into_owned();
+                    let _ = db.set_artist_image(artist, "local", Some(&p)).await;
+                }
+                gens.bump(hooks::db_reactivity::Table::Tracks);
+                gens.bump(hooks::db_reactivity::Table::Albums);
 
                 if fetch_covers {
                     // Fetch missing covers in the background so the UI stays responsive.
                     // Passing `progress_cb` into the task keeps the scan-progress bar
                     // alive during fetching; it disappears automatically when the task ends.
+                    // Albums that HAD no cover before the fetch get the fetched one
+                    // written straight to the DB (manual covers were never in the
+                    // missing set, so they can't be overwritten).
                     let lib_for_fetch = current_lib;
+                    let db = db.clone();
                     spawn(async move {
                         let fetcher = reader::cover_fetcher::CoverFetcher::new(
                             cover_cache(),
@@ -1944,6 +1810,12 @@ fn App() -> Element {
                             progress_cb,
                         );
                         let mut lib = lib_for_fetch;
+                        let missing_before: std::collections::HashSet<String> = lib
+                            .albums
+                            .iter()
+                            .filter(|a| a.cover_path.is_none() && !a.manual_cover)
+                            .map(|a| a.id.clone())
+                            .collect();
                         let report = fetcher.fetch_missing_covers(&mut lib).await;
                         tracing::info!(
                             "Cover auto-fetch: {} found, {} missing, {} errors",
@@ -1951,44 +1823,36 @@ fn App() -> Element {
                             report.missing,
                             report.errors,
                         );
-                        let merged_lib = {
-                            let mut current = library.write();
-                            let mut changed = false;
-
-                            for fetched_album in lib.albums.iter() {
-                                let Some(fetched_cover) = fetched_album.cover_path.clone() else {
-                                    continue;
-                                };
-
-                                let Some(current_album) =
-                                    current.albums.iter_mut().find(|a| a.id == fetched_album.id)
-                                else {
-                                    continue;
-                                };
-
-                                if current_album.cover_path.is_none() && !current_album.manual_cover
-                                {
-                                    current_album.cover_path = Some(fetched_cover);
-                                    changed = true;
-                                }
+                        let mut changed = false;
+                        for album in lib.albums.iter() {
+                            if !missing_before.contains(&album.id) {
+                                continue;
                             }
-
-                            changed.then(|| current.clone())
-                        };
-
-                        // The `library.write()` above triggers the library save
-                        // effect, which persists the merged covers to the DB.
-                        let _ = merged_lib;
+                            let Some(cover) = album.cover_path.as_ref() else {
+                                continue;
+                            };
+                            let p = cover.to_string_lossy().into_owned();
+                            if db
+                                .update_album_cover(&db::Source::Local, &album.id, Some(&p), false)
+                                .await
+                                .is_ok()
+                            {
+                                changed = true;
+                            }
+                        }
+                        if changed {
+                            gens.bump(hooks::db_reactivity::Table::Albums);
+                        }
                     }.instrument(tracing::info_span!("library.fetch_covers")));
                 } else {
                     // No cover fetching — drop the callback so the progress bar closes.
                     drop(progress_cb);
                 }
             } else {
-                current_lib.tracks.clear();
-                current_lib.albums.clear();
-                current_lib.root_paths.clear();
-                library.set(current_lib.clone());
+                // No music directories configured: the local library is empty.
+                let _ = db.prune_source(&db::Source::Local, &[], &[]).await;
+                gens.bump(hooks::db_reactivity::Table::Tracks);
+                gens.bump(hooks::db_reactivity::Table::Albums);
             }
         }.instrument(tracing::info_span!("library.rescan")));
     });
@@ -2405,26 +2269,37 @@ fn App() -> Element {
                                 on_play_album: move |id: String| {
                                     selected_album_id.set(id.clone());
 
-                                    let lib = library.peek();
                                     let is_jelly = id.starts_with("jellyfin:");
-                                    let mut tracks: Vec<reader::Track> = if is_jelly {
-                                        lib.jellyfin_tracks.iter().filter(|t| t.album_id == id).cloned().collect()
+                                    let source = if is_jelly {
+                                        let c = config.peek();
+                                        db::Source::Server(
+                                            c.active_server_id
+                                                .clone()
+                                                .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
+                                                .unwrap_or_default(),
+                                        )
                                     } else {
-                                        lib.tracks.iter().filter(|t| t.album_id == id).cloned().collect()
+                                        db::Source::Local
                                     };
-
-                                    if !tracks.is_empty() {
-                                        tracks.sort_by(|a, b| {
-                                            let disc_cmp = a.disc_number.unwrap_or(1).cmp(&b.disc_number.unwrap_or(1));
-                                            if disc_cmp == std::cmp::Ordering::Equal {
-                                                a.track_number.unwrap_or(0).cmp(&b.track_number.unwrap_or(0))
-                                            } else {
-                                                disc_cmp
-                                            }
-                                        });
-                                        queue.set(tracks);
-                                        ctrl.play_track(0);
-                                    }
+                                    let db = db_for_play_album.clone();
+                                    spawn(async move {
+                                        let mut tracks = db
+                                            .tracks_all(&db::TrackFilter::album(source, id))
+                                            .await
+                                            .unwrap_or_default();
+                                        if !tracks.is_empty() {
+                                            tracks.sort_by(|a, b| {
+                                                let disc_cmp = a.disc_number.unwrap_or(1).cmp(&b.disc_number.unwrap_or(1));
+                                                if disc_cmp == std::cmp::Ordering::Equal {
+                                                    a.track_number.unwrap_or(0).cmp(&b.track_number.unwrap_or(0))
+                                                } else {
+                                                    disc_cmp
+                                                }
+                                            });
+                                            queue.set(tracks);
+                                            ctrl.play_track(0);
+                                        }
+                                    });
                                     current_route.set(Route::Album);
                                 },
                                 on_select_playlist: move |id: String| {
@@ -2475,7 +2350,6 @@ fn App() -> Element {
                         },
                         Route::Search => rsx! {
                             pages::search::Search {
-                                library: library,
                                 config: config,
                                 search_query: search_query,
                                 player: player,
