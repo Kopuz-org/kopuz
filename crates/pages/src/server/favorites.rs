@@ -72,11 +72,15 @@ pub fn JellyfinFavorites(
                     .ok()
                     .flatten()
                     .and_then(|s| serde_json::from_str(&s).ok());
+                // Stamp present, OR favorites rows already exist for this
+                // server (covers DBs migrated before the stamp was written) —
+                // either proves a prior sync; the reconciler keeps it fresh.
                 let already_synced = stamps
                     .as_ref()
                     .and_then(|v| v.get("last_yt_sync_at"))
                     .and_then(|v| v.as_u64())
-                    .is_some();
+                    .is_some()
+                    || !db.favorites(&sid).await.unwrap_or_default().is_empty();
                 if already_synced {
                     return;
                 }

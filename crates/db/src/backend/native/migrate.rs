@@ -186,6 +186,20 @@ pub async fn run_json_import(
         for r in &favs.jellyfin_favorites {
             insert_favorite(&mut tx, sid, r, now).await?;
         }
+        // The imported set IS the pull baseline — stamp it so the first
+        // reconcile after migration doesn't immediately re-fetch the whole
+        // remote favorites list (a full browse stream on YT).
+        if !favs.jellyfin_favorites.is_empty() {
+            let now_s = now.to_string();
+            sqlx::query!(
+                "INSERT INTO metadata_cache (cache_key, kind, payload) VALUES ('fav_pull', ?1, ?2) \
+                 ON CONFLICT(cache_key, kind) DO UPDATE SET payload = ?2",
+                sid,
+                now_s
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
     }
 
     // --- queue snapshot ----------------------------------------------------

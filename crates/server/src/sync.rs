@@ -47,6 +47,34 @@ pub async fn reconcile_favorites(
     server_id: &str,
     reason: SyncReason,
 ) -> Result<SyncReport, SyncError> {
+    // Decide what there is to do BEFORE any network call — a reconcile with no
+    // pending pushes and a fresh pull must be a complete no-op (not even the
+    // validate request). The DB is the only thing consulted on the quiet path.
+    let likes = db
+        .dirty_favorites(server_id)
+        .await
+        .map_err(|e| SyncError::Unreachable(e.to_string()))?;
+    let unlikes = db
+        .dirty_unlikes(server_id)
+        .await
+        .map_err(|e| SyncError::Unreachable(e.to_string()))?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let last_pull: u64 = db
+        .meta_get("fav_pull", server_id)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let should_pull =
+        matches!(reason, SyncReason::Manual) || now.saturating_sub(last_pull) >= PULL_MIN_SECS;
+    if likes.is_empty() && unlikes.is_empty() && !should_pull {
+        return Ok(SyncReport::default());
+    }
+
     let client = client_for(conn);
 
     match client.validate().await {
@@ -61,10 +89,6 @@ pub async fn reconcile_favorites(
 
     // Push pending likes, then pending unlikes (each resolved on success only,
     // so a failure is retried next cycle).
-    let likes = db
-        .dirty_favorites(server_id)
-        .await
-        .map_err(|e| SyncError::Unreachable(e.to_string()))?;
     for r in likes {
         match client.set_favorite(&r, true).await {
             Ok(()) => {
@@ -77,10 +101,6 @@ pub async fn reconcile_favorites(
             }
         }
     }
-    let unlikes = db
-        .dirty_unlikes(server_id)
-        .await
-        .map_err(|e| SyncError::Unreachable(e.to_string()))?;
     for r in unlikes {
         match client.set_favorite(&r, false).await {
             Ok(()) => {
@@ -96,21 +116,8 @@ pub async fn reconcile_favorites(
 
     // Pull: the remote set becomes the clean baseline; still-pending local rows
     // survive. fetch_favorites is EXPENSIVE for YT (a full liked-library browse
-    // stream), so the pull is staleness-gated: Manual always pulls; everything
-    // else only when the last pull is old. Pushes above always run.
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let last_pull: u64 = db
-        .meta_get("fav_pull", server_id)
-        .await
-        .ok()
-        .flatten()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
-    let should_pull =
-        matches!(reason, SyncReason::Manual) || now.saturating_sub(last_pull) >= PULL_MIN_SECS;
+    // stream), so the pull is staleness-gated (computed up top): Manual always
+    // pulls; everything else only when the last pull is old.
     if should_pull {
         let remote = client
             .fetch_favorites()
