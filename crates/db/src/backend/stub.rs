@@ -28,4 +28,11 @@ impl Storage for Stub {
         *self.config.lock().unwrap() = Some(cfg.clone());
         Ok(())
     }
+
+    async fn import_legacy_json(
+        &self,
+        _config_dir: &std::path::Path,
+    ) -> Result<crate::ImportReport, DbError> {
+        Ok(crate::ImportReport::default())
+    }
 }

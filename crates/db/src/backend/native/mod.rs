@@ -13,6 +13,8 @@ use sqlx::sqlite::{
 
 use crate::{DbError, Storage};
 
+mod migrate;
+
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
 pub struct Native {
@@ -138,5 +140,12 @@ impl Storage for Native {
         .execute(&*pool)
         .await?;
         Ok(())
+    }
+
+    async fn import_legacy_json(
+        &self,
+        config_dir: &Path,
+    ) -> Result<crate::ImportReport, DbError> {
+        migrate::run_json_import(&self.pool(), config_dir).await
     }
 }

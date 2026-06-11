@@ -13,6 +13,18 @@ use std::sync::Arc;
 
 mod backend;
 
+/// What a one-shot legacy-JSON import did. `ran == false` means it was skipped
+/// (already migrated, or no legacy JSON present); the counts are then all zero.
+#[derive(Debug, Default, Clone)]
+pub struct ImportReport {
+    pub ran: bool,
+    pub tracks: usize,
+    pub albums: usize,
+    pub playlists: usize,
+    pub favorites: usize,
+    pub servers: usize,
+}
+
 /// Where a track/playlist/favorite comes from: the local filesystem, or a
 /// specific media server (by its `servers.id`).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
@@ -90,6 +102,15 @@ pub trait Storage: Send + Sync {
 
     /// Persist the whole `AppConfig` as the single-row JSON blob.
     async fn save_config(&self, cfg: &config::AppConfig) -> Result<(), DbError>;
+
+    /// One-shot import of the legacy `*.json` store at `config_dir` into the DB,
+    /// then rename each imported file to `*.json.bak` and drop a sentinel. No-op
+    /// if the DB already holds data or the sentinel exists. Idempotent; safe to
+    /// call on every launch. (Native only; the wasm stub no-ops.)
+    async fn import_legacy_json(
+        &self,
+        config_dir: &std::path::Path,
+    ) -> Result<ImportReport, DbError>;
 }
 
 /// Cheap-`Clone` handle to the active storage backend, shared via Dioxus context.

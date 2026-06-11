@@ -1459,6 +1459,7 @@ dependencies = [
  "async-trait",
  "config",
  "directories",
+ "reader",
  "serde",
  "serde_json",
  "sqlx",
