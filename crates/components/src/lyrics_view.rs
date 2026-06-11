@@ -22,6 +22,10 @@ const FULLSCREEN_BACKGROUND_LYRIC_CLASS: &str = "text-white/25 text-xl font-medi
 const FULLSCREEN_ACTIVE_BACKGROUND_LYRIC_CLASS: &str = "text-white/70 text-xl font-medium transition-colors duration-300 whitespace-pre-wrap text-left w-full pl-6 leading-snug";
 const RIGHTBAR_BACKGROUND_LYRIC_CLASS: &str = "text-white/25 text-sm font-medium transition-colors duration-300 whitespace-pre-wrap text-left w-full pl-4 leading-snug";
 const RIGHTBAR_ACTIVE_BACKGROUND_LYRIC_CLASS: &str = "text-white/70 text-sm font-medium transition-colors duration-300 whitespace-pre-wrap text-left w-full pl-4 leading-snug";
+const FULLSCREEN_BACKGROUND_CENTER_LYRIC_CLASS: &str = "text-white/25 text-xl font-medium transition-colors duration-300 whitespace-pre-wrap text-center w-full leading-snug";
+const FULLSCREEN_ACTIVE_BACKGROUND_CENTER_LYRIC_CLASS: &str = "text-white/70 text-xl font-medium transition-colors duration-300 whitespace-pre-wrap text-center w-full leading-snug";
+const RIGHTBAR_BACKGROUND_CENTER_LYRIC_CLASS: &str = "text-white/25 text-sm font-medium transition-colors duration-300 whitespace-pre-wrap text-center w-full leading-snug";
+const RIGHTBAR_ACTIVE_BACKGROUND_CENTER_LYRIC_CLASS: &str = "text-white/70 text-sm font-medium transition-colors duration-300 whitespace-pre-wrap text-center w-full leading-snug";
 const FULLSCREEN_BACKGROUND_OPPOSITE_LYRIC_CLASS: &str = "text-white/25 text-xl font-medium transition-colors duration-300 whitespace-pre-wrap text-right w-full pr-6 leading-snug";
 const FULLSCREEN_ACTIVE_BACKGROUND_OPPOSITE_LYRIC_CLASS: &str = "text-white/70 text-xl font-medium transition-colors duration-300 whitespace-pre-wrap text-right w-full pr-6 leading-snug";
 const RIGHTBAR_BACKGROUND_OPPOSITE_LYRIC_CLASS: &str = "text-white/25 text-sm font-medium transition-colors duration-300 whitespace-pre-wrap text-right w-full pr-4 leading-snug";
@@ -30,7 +34,6 @@ const FULLSCREEN_OPPOSITE_LYRIC_CLASS: &str = "text-white/40 text-2xl italic fon
 const FULLSCREEN_ACTIVE_OPPOSITE_LYRIC_CLASS: &str = "text-white text-2xl italic font-semibold transition-colors duration-300 whitespace-pre-wrap text-right w-full";
 const RIGHTBAR_OPPOSITE_LYRIC_CLASS: &str = "text-white/40 text-lg italic font-semibold transition-colors duration-300 hover:text-white/60 cursor-pointer whitespace-pre-wrap text-right w-full";
 const RIGHTBAR_ACTIVE_OPPOSITE_LYRIC_CLASS: &str = "text-white text-lg italic font-semibold transition-colors duration-300 whitespace-pre-wrap text-right w-full";
-
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LayoutMode {
     Rightbar,
@@ -59,10 +62,22 @@ fn lyric_line_class(
         has_opposite_turn,
         active,
     ) {
-        (LayoutMode::Fullscreen, true, false, _, false) => FULLSCREEN_BACKGROUND_LYRIC_CLASS,
-        (LayoutMode::Fullscreen, true, false, _, true) => FULLSCREEN_ACTIVE_BACKGROUND_LYRIC_CLASS,
-        (LayoutMode::Rightbar, true, false, _, false) => RIGHTBAR_BACKGROUND_LYRIC_CLASS,
-        (LayoutMode::Rightbar, true, false, _, true) => RIGHTBAR_ACTIVE_BACKGROUND_LYRIC_CLASS,
+        (LayoutMode::Fullscreen, true, false, true, false) => FULLSCREEN_BACKGROUND_LYRIC_CLASS,
+        (LayoutMode::Fullscreen, true, false, true, true) => {
+            FULLSCREEN_ACTIVE_BACKGROUND_LYRIC_CLASS
+        }
+        (LayoutMode::Rightbar, true, false, true, false) => RIGHTBAR_BACKGROUND_LYRIC_CLASS,
+        (LayoutMode::Rightbar, true, false, true, true) => RIGHTBAR_ACTIVE_BACKGROUND_LYRIC_CLASS,
+        (LayoutMode::Fullscreen, true, false, false, false) => {
+            FULLSCREEN_BACKGROUND_CENTER_LYRIC_CLASS
+        }
+        (LayoutMode::Fullscreen, true, false, false, true) => {
+            FULLSCREEN_ACTIVE_BACKGROUND_CENTER_LYRIC_CLASS
+        }
+        (LayoutMode::Rightbar, true, false, false, false) => RIGHTBAR_BACKGROUND_CENTER_LYRIC_CLASS,
+        (LayoutMode::Rightbar, true, false, false, true) => {
+            RIGHTBAR_ACTIVE_BACKGROUND_CENTER_LYRIC_CLASS
+        }
         (LayoutMode::Fullscreen, true, true, _, false) => {
             FULLSCREEN_BACKGROUND_OPPOSITE_LYRIC_CLASS
         }
@@ -157,6 +172,29 @@ fn main_line_indices(lines: &[utils::lyrics::LyricLine]) -> Vec<usize> {
     (0..lines.len()).collect()
 }
 
+fn line_active_at(line: &utils::lyrics::LyricLine, current_time: f64) -> bool {
+    if current_time < line.start_time {
+        return false;
+    }
+
+    line.end_time
+        .map(|end_time| current_time <= end_time)
+        .unwrap_or(true)
+}
+
+fn active_main_line_index(
+    lines: &[utils::lyrics::LyricLine],
+    main_line_indices: &[usize],
+    current_time: f64,
+) -> Option<usize> {
+    main_line_indices
+        .iter()
+        .copied()
+        .take_while(|&index| lines[index].start_time <= current_time)
+        .filter(|&index| line_active_at(&lines[index], current_time))
+        .last()
+}
+
 fn active_secondary_lines(
     lines: &[utils::lyrics::LyricLine],
     current_time: f64,
@@ -166,9 +204,12 @@ fn active_secondary_lines(
         .iter()
         .enumerate()
         .filter(|(index, line)| {
-            *index != main_line_index
-                && line.background
-                && line.parent_line_index == Some(main_line_index)
+            if *index == main_line_index || !line_active_at(line, current_time) {
+                return false;
+            }
+
+            (line.background && line.parent_line_index == Some(main_line_index))
+                || (!line.background && main_line_index != usize::MAX)
         })
         .map(|(index, line)| format!("[{},{}]", index, active_chunk_index(line, current_time)))
         .collect::<Vec<_>>()
@@ -389,23 +430,11 @@ pub fn LyricsView(
                 let mut sleep_duration_ms: u64;
 
                 let main_line_indices = main_line_indices(&lines);
-                let main_times = main_line_indices
-                    .iter()
-                    .map(|&i| lines[i].start_time)
-                    .collect::<Vec<_>>();
 
                 loop {
                     let current_time = ctrl.displayed_progress_secs_f64();
-                    // Binary search to find the active line.
-                    // `partition_point(|t| t <= current_time)` returns the index of the first
-                    // timestamp greater than `current_time`.
-                    // Therefore `n - 1` is the last timestamp less than or equal to it.
-                    // If the result is 0, we are before the first line.
                     if let Some(current_line_index) =
-                        match main_times.partition_point(|&t| t <= current_time) {
-                            0 => None,
-                            n => main_line_indices.get(n - 1).copied(),
-                        }
+                        active_main_line_index(&lines, &main_line_indices, current_time)
                     {
                         let current_chunk_index =
                             active_chunk_index(&lines[current_line_index], current_time);
@@ -420,10 +449,11 @@ pub fn LyricsView(
                             .iter()
                             .position(|&index| index == current_line_index)
                             .unwrap_or(0);
-                        sleep_duration_ms = main_times
+                        sleep_duration_ms = main_line_indices
                             .get(active_main_position.saturating_add(1))
+                            .map(|&next_index| lines[next_index].start_time)
                             .map(|next_time| {
-                                ((*next_time - current_time) * 1000.0).max(16.0).min(50.0) as u64
+                                ((next_time - current_time) * 1000.0).max(16.0).min(50.0) as u64
                             })
                             .unwrap_or(50);
                     } else {
