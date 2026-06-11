@@ -497,13 +497,20 @@ fn init_db_blocking() -> db::Db {
             Err(e) => tracing::error!(error = %e, "kopuz: legacy JSON import failed"),
         }
         // Nothing reads or writes the legacy JSONs anymore — move them aside as
-        // *.json.bak (kept for downgrade; never deleted).
-        match handle.finalize_migration(&db::config_dir()).await {
-            Ok(n) if n > 0 => {
-                tracing::info!(files = n, "kopuz: legacy *.json renamed to *.json.bak")
+        // *.json.bak (kept for downgrade; never deleted). RELEASE only: debug
+        // builds leave them in place so deleting kopuz-debug.db re-tests the
+        // migration without restoring anything (the import is gated on the DB
+        // being empty, so the lingering JSONs are otherwise inert).
+        if cfg!(debug_assertions) {
+            tracing::info!("kopuz: debug build — leaving legacy *.json in place for re-testing");
+        } else {
+            match handle.finalize_migration(&db::config_dir()).await {
+                Ok(n) if n > 0 => {
+                    tracing::info!(files = n, "kopuz: legacy *.json renamed to *.json.bak")
+                }
+                Ok(_) => {}
+                Err(e) => tracing::warn!(error = %e, "kopuz: legacy json backup rename failed"),
             }
-            Ok(_) => {}
-            Err(e) => tracing::warn!(error = %e, "kopuz: legacy json backup rename failed"),
         }
         server::ytmusic::player::init_tier_store(handle.clone());
         utils::db_cache::init(handle.clone());

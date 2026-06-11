@@ -34,43 +34,83 @@ pub fn PlaylistDetail(
         .map(|s| s.service == MusicService::YtMusic)
         .unwrap_or(false);
 
-    let (playlist_name, local_tracks_paths, is_jellyfin, playlist_custom_cover, playlist_image_tag) =
-        if let Some(p) = store.playlists.iter().find(|p| p.id == playlist_id) {
-            (
-                p.name.clone(),
-                p.tracks.clone(),
-                false,
-                p.cover_path.clone(),
-                None::<String>,
-            )
-        } else if let Some(p) = store
-            .jellyfin_playlists
-            .iter()
-            .find(|p| p.id == playlist_id)
-        {
-            (
-                p.name.clone(),
-                vec![],
-                true,
-                p.cover_path.clone(),
-                p.image_tag.clone(),
-            )
-        } else {
-            return rsx! { div { "{i18n::t(\"playlist_not_found\")}" } };
-        };
+    let (
+        playlist_name,
+        local_tracks_paths,
+        server_track_refs,
+        is_jellyfin,
+        playlist_custom_cover,
+        playlist_image_tag,
+    ) = if let Some(p) = store.playlists.iter().find(|p| p.id == playlist_id) {
+        (
+            p.name.clone(),
+            p.tracks.clone(),
+            vec![],
+            false,
+            p.cover_path.clone(),
+            None::<String>,
+        )
+    } else if let Some(p) = store
+        .jellyfin_playlists
+        .iter()
+        .find(|p| p.id == playlist_id)
+    {
+        (
+            p.name.clone(),
+            vec![],
+            p.tracks.clone(),
+            true,
+            p.cover_path.clone(),
+            p.image_tag.clone(),
+        )
+    } else {
+        return rsx! { div { "{i18n::t(\"playlist_not_found\")}" } };
+    };
 
     let lib = library.read();
 
-    if !is_jellyfin {
-        let local_tracks: Vec<_> = local_tracks_paths
+    // Initial tracks WITHOUT any network round-trip: local playlists resolve
+    // their paths against the local library; server playlists resolve their
+    // track refs against the in-memory server library (both DB-backed since
+    // the SQLite migration). For server playlists this is a SEED — the network
+    // fetch below still runs once in the background and replaces it.
+    // Previously the page sat empty until the whole remote walk finished
+    // (837 liked songs = many sequential continuation requests).
+    let initial_tracks: Vec<reader::models::Track> = if !is_jellyfin {
+        local_tracks_paths
             .iter()
             .filter_map(|path| lib.tracks.iter().find(|t| t.id.uid_path() == *path).cloned())
-            .collect();
-        let local_tracks_for_effect = local_tracks.clone();
-        use_effect(move || {
-            tracks.set(local_tracks_for_effect.clone());
-        });
+            .collect()
     } else {
+        let by_key: std::collections::HashMap<&str, &reader::models::Track> = lib
+            .jellyfin_tracks
+            .iter()
+            .map(|t| {
+                let key: &str = match &t.id {
+                    reader::models::TrackId::Server { item_id, .. } => item_id.as_str(),
+                    reader::models::TrackId::Local(_) => "",
+                };
+                (key, t)
+            })
+            .collect();
+        server_track_refs
+            .iter()
+            .filter_map(|r| by_key.get(r.as_str()).map(|t| (*t).clone()))
+            .collect()
+    };
+    // One unconditional effect for both kinds, so the hook order can't change
+    // if this component instance is re-rendered with the other playlist kind.
+    let seed = initial_tracks;
+    let seed_is_jellyfin = is_jellyfin;
+    use_effect(move || {
+        if !seed_is_jellyfin {
+            tracks.set(seed.clone());
+        } else if !*has_loaded_jellyfin_tracks.read() && !seed.is_empty() {
+            tracks.set(seed.clone());
+        }
+    });
+
+    if is_jellyfin {
         let pid = playlist_id.clone();
         use_effect(move || {
             if !*has_loaded_jellyfin_tracks.read() {
