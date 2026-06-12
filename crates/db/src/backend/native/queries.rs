@@ -114,9 +114,16 @@ pub async fn artist_tracks(
     source: &Source,
     artist: &str,
 ) -> Result<Vec<Track>, DbError> {
+    // Match like the old in-memory derivation did: the primary artist column,
+    // secondary credits (artists_json — featured artists get their own tiles),
+    // and tracks on albums credited to the artist; all case-insensitively.
     let sql = format!(
-        "SELECT {TRACK_COLUMNS} FROM tracks WHERE source = ?1 AND artist = ?2 \
-         ORDER BY album COLLATE NOCASE, disc_number, track_number, title COLLATE NOCASE"
+        "SELECT {TRACK_COLUMNS_T} FROM tracks t WHERE t.source = ?1 AND ( \
+            t.artist = ?2 COLLATE NOCASE \
+            OR EXISTS (SELECT 1 FROM json_each(t.artists_json) WHERE value = ?2 COLLATE NOCASE) \
+            OR t.source_album_id IN \
+               (SELECT source_album_id FROM albums WHERE source = ?1 AND artist = ?2 COLLATE NOCASE) \
+         ) ORDER BY t.album COLLATE NOCASE, t.disc_number, t.track_number, t.title COLLATE NOCASE"
     );
     let rows = sqlx::query_as::<_, TrackRow>(&sql)
         .bind(source.as_str())

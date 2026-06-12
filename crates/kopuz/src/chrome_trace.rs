@@ -4,12 +4,14 @@
 //! tracing id — but tracing-subscriber recycles ids as soon as a span
 //! closes, so two visits to the same page yield two same-named roots
 //! with the SAME id and trace viewers fuse them into one giant slice
-//! bridging the gap. Here every root gets a process-unique monotonic
-//! instance id that its whole subtree inherits, and every span is
-//! named by its full lineage path ("favorites.reconcile › yt.validate
-//! › yt.browse"), so no viewer grouping rule (by name, by id, or
-//! both) can merge unrelated trees — and the alphabetically sorted
-//! track list reads as the span hierarchy.
+//! bridging the gap. Sharing one id across a subtree has the same
+//! flaw in miniature: viewers pair b/e by (cat, id, name), so two
+//! concurrently-open same-named siblings cross their begin/end pairs
+//! and swap durations. Here every span instance gets its own
+//! process-unique id (pairing can never cross), and the hierarchy
+//! lives in the name instead — each span is labeled with its full
+//! lineage path ("favorites.reconcile › yt.validate › yt.browse"),
+//! so the alphabetically sorted track list reads as the span tree.
 
 use std::{
     fs::File,
@@ -37,7 +39,7 @@ enum Msg {
 pub struct ChromeTraceLayer {
     tx: Mutex<Sender<Msg>>,
     start: Instant,
-    next_root: AtomicU64,
+    next_id: AtomicU64,
 }
 
 /// Finalizes the JSON array on drop — hold it for the app's lifetime.
@@ -65,13 +67,10 @@ impl Drop for FlushGuard {
     }
 }
 
-/// Process-unique instance number, stored on each root span's extensions.
-struct RootInstance(u64);
-
 /// Computed once at span creation; read back at close.
 struct SpanInfo {
     path: String,
-    root: u64,
+    id: u64,
     args: Map<String, Value>,
 }
 
@@ -104,7 +103,7 @@ impl ChromeTraceLayer {
         let layer = Self {
             tx: Mutex::new(tx.clone()),
             start: Instant::now(),
-            next_root: AtomicU64::new(1),
+            next_id: AtomicU64::new(1),
         };
         let guard = FlushGuard {
             tx,
@@ -156,34 +155,19 @@ where
             path.push_str(ancestor.name());
         }
 
-        let root = {
-            let root_ref = span
-                .scope()
-                .from_root()
-                .next()
-                .expect("scope contains at least self");
-            let mut exts = root_ref.extensions_mut();
-            match exts.get_mut::<RootInstance>() {
-                Some(inst) => inst.0,
-                None => {
-                    let n = self.next_root.fetch_add(1, Ordering::Relaxed);
-                    exts.insert(RootInstance(n));
-                    n
-                }
-            }
-        };
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
 
         let mut args = Map::new();
         attrs.record(&mut JsonVisitor(&mut args));
 
         let mut entry = self.entry("b", &path, span.metadata());
-        entry["id"] = root.into();
+        entry["id"] = id.into();
         if !args.is_empty() {
             entry["args"] = Value::Object(args.clone());
         }
         self.send(entry);
 
-        span.extensions_mut().insert(SpanInfo { path, root, args });
+        span.extensions_mut().insert(SpanInfo { path, id, args });
     }
 
     fn on_record(&self, id: &span::Id, values: &span::Record<'_>, ctx: Context<'_, S>) {
@@ -212,7 +196,7 @@ where
             return;
         };
         let mut entry = self.entry("e", &info.path, span.metadata());
-        entry["id"] = info.root.into();
+        entry["id"] = info.id.into();
         if !info.args.is_empty() {
             entry["args"] = Value::Object(info.args.clone());
         }
@@ -281,12 +265,13 @@ mod tests {
             ]
         );
 
-        // Children inherit their root's instance id…
-        assert_eq!(begins[0]["id"], begins[1]["id"]);
-        assert_eq!(begins[2]["id"], begins[3]["id"]);
-        // …and the two visits never share one, even though tracing
-        // recycles the underlying span ids.
-        assert_ne!(begins[0]["id"], begins[2]["id"]);
+        // Every span instance has its own id — b/e pairing can never cross,
+        // even for same-named concurrent siblings or recycled tracing ids.
+        let ids: std::collections::HashSet<u64> = begins
+            .iter()
+            .map(|e| e["id"].as_u64().unwrap())
+            .collect();
+        assert_eq!(ids.len(), begins.len());
 
         assert_eq!(begins[1]["args"]["browse_id"], "VLLM");
         // Every begin closed with a matching end.
