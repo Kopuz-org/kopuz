@@ -75,6 +75,7 @@ pub async fn load_config(pool: &SqlitePool) -> Result<Option<AppConfig>, DbError
     Ok(Some(cfg))
 }
 
+#[tracing::instrument(name = "config.save", skip_all)]
 pub async fn save_config(pool: &SqlitePool, cfg: &AppConfig) -> Result<(), DbError> {
     let now = now_secs();
     let mut tx = pool.begin().await?;

@@ -3,6 +3,7 @@ use std::io::{Error as IoError, ErrorKind, Read, Result as IoResult, Seek, SeekF
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, Notify};
+use tracing::Instrument;
 
 // Architecture:
 // - A background download task (tokio::spawn) fetches audio chunks via HTTP
@@ -165,7 +166,7 @@ impl StreamBuffer {
                     notify.notify_waiters();
                 }
             }
-        });
+        }.instrument(tracing::info_span!("player.stream_buffer")));
 
         Self { state, pos: 0 }
     }

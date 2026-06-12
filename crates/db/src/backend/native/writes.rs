@@ -106,6 +106,7 @@ pub async fn upsert_albums(
     Ok(())
 }
 
+#[tracing::instrument(skip_all, fields(server_id = %server_id, on))]
 pub async fn set_favorite(
     pool: &SqlitePool,
     server_id: &str,
@@ -163,6 +164,7 @@ pub async fn dirty_unlikes(pool: &SqlitePool, server_id: &str) -> Result<Vec<Str
     .await?)
 }
 
+#[tracing::instrument(skip_all, fields(server_id = %server_id))]
 pub async fn clear_favorite_dirty(
     pool: &SqlitePool,
     server_id: &str,
@@ -187,6 +189,7 @@ pub async fn clear_favorite_dirty(
     Ok(())
 }
 
+#[tracing::instrument(skip_all, fields(server_id = %server_id, count = refs.len()))]
 pub async fn replace_favorites_clean(
     pool: &SqlitePool,
     server_id: &str,
@@ -287,6 +290,7 @@ pub async fn prune_source(
     Ok(())
 }
 
+#[tracing::instrument(skip_all, fields(album_id = %album_id, source = %source.as_str()))]
 pub async fn delete_album(
     pool: &SqlitePool,
     source: &Source,
@@ -312,6 +316,7 @@ pub async fn delete_album(
     Ok(())
 }
 
+#[tracing::instrument(skip_all, fields(artist_norm = %artist_norm, kind = %kind))]
 pub async fn set_artist_image(
     pool: &SqlitePool,
     artist_norm: &str,
@@ -343,6 +348,7 @@ pub async fn set_artist_image(
     Ok(())
 }
 
+#[tracing::instrument(skip_all, fields(album_id = %album_id, source = %source.as_str()))]
 pub async fn update_album_cover(
     pool: &SqlitePool,
     source: &Source,
@@ -365,6 +371,7 @@ pub async fn update_album_cover(
     Ok(())
 }
 
+#[tracing::instrument(skip_all, fields(pl_id = %pl_id, source = %source.as_str()))]
 pub async fn upsert_playlist_meta(
     pool: &SqlitePool,
     source: &Source,
@@ -389,6 +396,7 @@ pub async fn upsert_playlist_meta(
     Ok(())
 }
 
+#[tracing::instrument(skip_all, fields(pl_id = %pl_id, source = %source.as_str()))]
 pub async fn delete_playlist(
     pool: &SqlitePool,
     source: &Source,
@@ -455,6 +463,7 @@ pub async fn set_playlist_tracks(
     Ok(())
 }
 
+#[tracing::instrument(skip_all, fields(count = folders.len()))]
 pub async fn set_folders(
     pool: &SqlitePool,
     folders: &[reader::models::PlaylistFolder],
@@ -488,6 +497,7 @@ pub async fn set_folders(
 
 /// One `json_set`/`json_remove` on the config blob — the downloads hot path
 /// must not rewrite the whole config per finished song.
+#[tracing::instrument(skip_all, fields(id = %id))]
 pub async fn set_offline_track(
     pool: &SqlitePool,
     id: &str,
@@ -531,6 +541,7 @@ pub async fn meta_get(
     .flatten())
 }
 
+#[tracing::instrument(skip_all, fields(cache_key = %cache_key, kind = %kind))]
 pub async fn meta_put(
     pool: &SqlitePool,
     cache_key: &str,
@@ -549,6 +560,7 @@ pub async fn meta_put(
     Ok(())
 }
 
+#[tracing::instrument(name = "queue.save", skip_all)]
 pub async fn save_queue(pool: &SqlitePool, snap: &QueueSnapshot) -> Result<(), DbError> {
     let queue_json = serde_json::to_string(&snap.queue)?;
     let shuffle_json = serde_json::to_string(&snap.shuffle_order)?;

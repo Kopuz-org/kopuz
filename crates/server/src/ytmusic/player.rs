@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use tokio::sync::OnceCell;
+use tracing::Instrument;
 
 use super::botguard;
 use super::clients::{ANDROID_VR_1_61_48, STREAM_FALLBACK_CLIENTS, WEB_REMIX, YouTubeClient};
@@ -286,7 +287,7 @@ fn remember_tier(user_id: &str, premium: bool) {
                 .unwrap_or(0);
             let payload = format!("{}:{now}", if premium { "premium" } else { "free" });
             let _ = handle.meta_put(&uid, TIER_META_KIND, &payload).await;
-        });
+        }.instrument(tracing::info_span!("yt.tier_persist")));
     }
 }
 

@@ -1240,7 +1240,7 @@ impl PlayerController {
                                                 player.write().update_metadata(new_meta);
                                             }
                                         }
-                                    });
+                                    }.instrument(tracing::info_span!("player.cover_fetch")));
                                 }
                             }
                         } else {
@@ -1725,7 +1725,7 @@ impl PlayerController {
                                         }
                                     }
                                 }
-                            });
+                            }.instrument(tracing::info_span!("scrobble.submit")));
                         }
                     }
                 }

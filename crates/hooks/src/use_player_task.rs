@@ -1,6 +1,7 @@
 use crate::use_player_controller::PlayerController;
 use config::AppConfig;
 use config::MusicService;
+use dioxus::logger::tracing::Instrument;
 use dioxus::prelude::*;
 use server::jellyfin::JellyfinClient;
 use std::sync::Arc;
@@ -411,7 +412,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                         let remote = remote.clone();
                         spawn(async move {
                             let _ = remote.ping().await;
-                        });
+                        }.instrument(tracing::info_span!("jellyfin.keepalive")));
                         last_ping = web_time::Instant::now();
                     }
 
@@ -437,14 +438,14 @@ pub fn use_player_task(ctrl: PlayerController) {
                                                     pos.as_micros() as u64 * 10,
                                                 )
                                                 .await;
-                                        });
+                                        }.instrument(tracing::info_span!("playback.report")));
                                     }
                                     let remote = remote.clone();
                                     let current_id_clone = current_id.clone();
                                     spawn(async move {
                                         let _ =
                                             remote.report_playback_start(&current_id_clone).await;
-                                    });
+                                    }.instrument(tracing::info_span!("playback.report")));
                                     last_jellyfin_id = Some(current_id.clone());
                                 }
 
@@ -462,7 +463,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                                                 !is_playing,
                                             )
                                             .await;
-                                    });
+                                    }.instrument(tracing::info_span!("playback.report")));
                                     last_progress_report = web_time::Instant::now();
                                 }
                             }
@@ -472,7 +473,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                                 let _ = remote
                                     .report_playback_stopped(&old_id, pos.as_micros() as u64 * 10)
                                     .await;
-                            });
+                            }.instrument(tracing::info_span!("playback.report")));
                         }
                     } else if let Some(old_id) = last_jellyfin_id.take() {
                         let remote = remote.clone();
@@ -480,7 +481,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                             let _ = remote
                                 .report_playback_stopped(&old_id, pos.as_micros() as u64 * 10)
                                 .await;
-                        });
+                        }.instrument(tracing::info_span!("playback.report")));
                     }
                 }
 
@@ -536,7 +537,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                                 if *discord_cover_resolving_for.peek() == song_key_for_spawn {
                                     discord_cover_url.set(resolved);
                                 }
-                            });
+                            }.instrument(tracing::info_span!("presence.cover_resolve")));
                         }
 
                         if discord_enabled {

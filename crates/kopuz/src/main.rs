@@ -1357,7 +1357,11 @@ fn App() -> Element {
                 flushed = *config_dirty.peek();
                 let mut snapshot = config.peek().clone();
                 snapshot.volume = *volume.peek();
-                if let Err(e) = db.save_config(&snapshot).await {
+                if let Err(e) = db
+                    .save_config(&snapshot)
+                    .instrument(tracing::info_span!("config.persist"))
+                    .await
+                {
                     tracing::error!("Failed to save config: {}", e);
                 }
                 utils::sleep(std::time::Duration::from_millis(STORE_SAVE_COOLDOWN_MS)).await;
@@ -1489,7 +1493,9 @@ fn App() -> Element {
                 }
 
                 let snapshot = pending_queue_state_snapshot.read().clone();
-                persist_queue_state_snapshot(db.clone(), snapshot).await;
+                persist_queue_state_snapshot(db.clone(), snapshot)
+                    .instrument(tracing::info_span!("queue.persist"))
+                    .await;
                 flushed_revision = latest_revision;
             }
         }
@@ -1536,6 +1542,7 @@ fn App() -> Element {
             let reachable = client
                 .get(&ping_url)
                 .send()
+                .instrument(tracing::info_span!("net.probe"))
                 .await
                 .map(|r| r.status().as_u16() < 500)
                 .unwrap_or(false);
