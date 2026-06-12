@@ -1,6 +1,14 @@
 /* App-wide styling */
 
 /* Themed scrollbars — uses CSS vars so all themes apply automatically */
+
+/* Standard css-scrollbars-1 form (blitz; inherited from the root).
+   Transparent track == the black ::-webkit-scrollbar-track below on the
+   app's black background. */
+html {
+    scrollbar-color: var(--color-slate-500, #64748b) transparent;
+}
+
 ::-webkit-scrollbar {
     width: 6px;
     height: 6px;

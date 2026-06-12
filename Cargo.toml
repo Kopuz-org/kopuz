@@ -108,3 +108,5 @@ panic = "abort"
 # Local taffy with the block-layout available-space fix (MinContent ->
 # MaxContent for in-flow children) — see ~/projects/taffy-fix; engine TDD loop.
 taffy = { path = "/home/umceko/projects/taffy-fix" }
+# Local stylo enabling css-scrollbars-1 properties (scrollbar-color/width)
+stylo = { path = "/home/umceko/projects/stylo-fix" }
