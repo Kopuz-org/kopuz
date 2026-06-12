@@ -212,13 +212,18 @@ fn is_premium_itag(itag: Option<u32>) -> bool {
 /// Premium-tier memo, keyed by Google user id (so switching accounts re-learns)
 /// and PERSISTED through the metadata cache so a restart doesn't re-probe.
 /// Lets us skip the redundant Premium decipher attempt for accounts already
-/// known to be non-Premium. The "free" verdict expires daily so an account
-/// upgraded free→Premium (same id, no re-sign-in) is re-checked rather than
-/// pinned to ANDROID_VR forever; "premium" is trusted until an itag contradicts
-/// it (remember_tier overwrites).
+/// known to be non-Premium.
+///
+/// Trust is asymmetric, because the free signal is weak: ONE non-premium itag
+/// can mean a free account — but also a track with no premium encodes, or a
+/// /player response served unauthenticated by a transient cookie hiccup. So a
+/// premium verdict survives contradictions (a real downgrade just costs one
+/// extra /player attempt per track until tiers re-learn at sign-in), and the
+/// free pin is short — a mis-pinned Premium account recovers in minutes,
+/// while a truly free account merely re-pays one probe per window.
 static ACCOUNT_PREMIUM: OnceLock<Mutex<HashMap<String, (Instant, bool)>>> = OnceLock::new();
 static TIER_DB: OnceLock<db::Db> = OnceLock::new();
-const FREE_TIER_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+const FREE_TIER_TTL: Duration = Duration::from_secs(30 * 60);
 // v2: "yt_tier" rows were poisoned by the 774-only is_premium_itag (a Premium
 // account deciphering an AAC-only track got a persisted "free" verdict, pinning
 // it to anonymous 251 for a day). New kind orphans those rows.
@@ -274,6 +279,22 @@ async fn seed_tier_from_db(user_id: &str) {
 }
 
 fn remember_tier(user_id: &str, premium: bool) {
+    if !premium {
+        // Asymmetric trust (see ACCOUNT_PREMIUM): a known-premium account is
+        // never downgraded by a single non-premium itag — the track may just
+        // lack premium encodes. The pot path still serves THIS stream fine.
+        let was_premium = account_premium()
+            .lock()
+            .ok()
+            .and_then(|m| m.get(user_id).map(|(_, p)| *p))
+            .unwrap_or(false);
+        if was_premium {
+            tracing::info!(
+                "yt: non-premium itag from a known-Premium account — keeping the premium verdict (track without premium encodes, or a transient auth hiccup)"
+            );
+            return;
+        }
+    }
     if let Ok(mut m) = account_premium().lock() {
         m.insert(user_id.to_string(), (Instant::now(), premium));
     }
