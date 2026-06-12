@@ -12,6 +12,12 @@ pub struct Album {
     pub cover_path: Option<PathBuf>,
     #[serde(default)]
     pub manual_cover: bool,
+    /// Unix timestamp (seconds) when this album was added to the library.
+    /// Local: newest member track's file mtime. Jellyfin: `DateCreated`.
+    /// Subsonic: `created`. `None` when the source provides no date
+    /// (e.g. YT Music) — sorts last under "Date Added".
+    #[serde(default)]
+    pub date_added: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -37,6 +43,12 @@ pub struct Track {
     pub playlist_item_id: Option<String>,
     #[serde(default)]
     pub artists: Vec<String>,
+    /// Unix timestamp (seconds) when this track was added to the library.
+    /// Local: file mtime. Jellyfin: `DateCreated`. Subsonic: `created`.
+    /// `None` when the source provides no date (e.g. YT Music) — sorts
+    /// last under "Date Added".
+    #[serde(default)]
+    pub date_added: Option<i64>,
 }
 
 /// What to do with the track's embedded front-cover picture on save.
@@ -131,14 +143,44 @@ impl Library {
             return Ok(Self::default());
         }
         let data = fs::read_to_string(path)?;
-        let library: Self = serde_json::from_str(&data)
+        let mut library: Self = serde_json::from_str(&data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+        library.backfill_local_dates();
         tracing::debug!(
             bytes = data.len(),
             tracks = library.tracks.len(),
             "library loaded from disk"
         );
         Ok(library)
+    }
+
+    /// Populate `date_added` for local tracks/albums that lack it, from file
+    /// modification times. Caches written before `date_added` existed
+    /// deserialize every entry to `None`, which would make the "Date Added"
+    /// sort inert; the incremental scanner skips files already in the library,
+    /// so a normal rescan never backfills them. This migrates them on load
+    /// instead. Self-disabling once the values are populated and saved, and a
+    /// no-op for remote sources (their stored paths are not real files, so
+    /// `file_mtime_secs` yields `None`).
+    fn backfill_local_dates(&mut self) {
+        for track in self.tracks.iter_mut() {
+            if track.date_added.is_none() {
+                track.date_added = crate::metadata::file_mtime_secs(&track.path);
+            }
+        }
+        // Derive each undated album's date from one of its member tracks.
+        let mut album_dates: std::collections::HashMap<&str, i64> =
+            std::collections::HashMap::new();
+        for track in self.tracks.iter() {
+            if let Some(date) = track.date_added {
+                album_dates.entry(track.album_id.as_str()).or_insert(date);
+            }
+        }
+        for album in self.albums.iter_mut() {
+            if album.date_added.is_none() {
+                album.date_added = album_dates.get(album.id.as_str()).copied();
+            }
+        }
     }
 
     #[tracing::instrument(name = "library.save", skip_all, fields(tracks = self.tracks.len()))]
@@ -203,6 +245,54 @@ mod tests {
 
         assert_eq!(library.root_paths, vec![PathBuf::from("/music")]);
     }
+
+    #[test]
+    fn backfill_fills_local_dates_from_file_mtime() {
+        use super::{Album, Track};
+
+        // Arrange — a real local file (so mtime exists) and a remote-style
+        // path that does not, both lacking a stored `date_added`.
+        let file = std::env::temp_dir().join(format!("kopuz-backfill-{}.mp3", std::process::id()));
+        std::fs::write(&file, b"x").unwrap();
+        let mut library = Library::default();
+        library.tracks.push(Track {
+            path: file.clone(),
+            album_id: "local-album".into(),
+            title: "Local".into(),
+            artist: "A".into(),
+            artists: vec![],
+            album: "Album".into(),
+            duration: 0,
+            khz: 0,
+            bitrate: 0,
+            track_number: None,
+            disc_number: None,
+            musicbrainz_release_id: None,
+            musicbrainz_recording_id: None,
+            musicbrainz_track_id: None,
+            playlist_item_id: None,
+            date_added: None,
+        });
+        library.albums.push(Album {
+            id: "local-album".into(),
+            title: "Album".into(),
+            artist: "A".into(),
+            genre: String::new(),
+            year: 0,
+            cover_path: None,
+            manual_cover: false,
+            date_added: None,
+        });
+
+        // Act
+        library.backfill_local_dates();
+
+        // Assert — local track and its album both gained a date.
+        assert!(library.tracks[0].date_added.is_some());
+        assert_eq!(library.albums[0].date_added, library.tracks[0].date_added);
+
+        let _ = std::fs::remove_file(&file);
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -250,7 +340,11 @@ impl PlaylistStore {
         let data = fs::read_to_string(path)?;
         let store: Self = serde_json::from_str(&data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-        tracing::debug!(bytes = data.len(), playlists = store.playlists.len(), "playlists loaded");
+        tracing::debug!(
+            bytes = data.len(),
+            playlists = store.playlists.len(),
+            "playlists loaded"
+        );
         Ok(store)
     }
 

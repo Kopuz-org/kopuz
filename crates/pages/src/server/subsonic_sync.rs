@@ -107,6 +107,10 @@ pub async fn sync_server_library(
                                 .unwrap_or(0),
                             cover_path,
                             manual_cover: false,
+                            date_added: album_item
+                                .date_created
+                                .as_deref()
+                                .and_then(utils::datetime::parse_iso8601_to_unix_secs),
                         });
                     }
 
@@ -162,6 +166,10 @@ pub async fn sync_server_library(
                             musicbrainz_recording_id: None,
                             musicbrainz_track_id: None,
                             playlist_item_id: None,
+                            date_added: item
+                                .date_created
+                                .as_deref()
+                                .and_then(utils::datetime::parse_iso8601_to_unix_secs),
                             artists: item
                                 .artists
                                 .unwrap_or_else(|| item.album_artist.into_iter().collect()),
@@ -418,6 +426,10 @@ pub async fn fetch_subsonic_library(
                 year: album.year.unwrap_or(0),
                 cover_path: Some(PathBuf::from(album_id_prefixed.clone())),
                 manual_cover: false,
+                date_added: album
+                    .created
+                    .as_deref()
+                    .and_then(utils::datetime::parse_iso8601_to_unix_secs),
             });
 
             let songs = remote.get_album_songs(&album.id).await.map_err(|e| {
@@ -468,6 +480,10 @@ pub async fn fetch_subsonic_library(
                     musicbrainz_track_id: None,
                     playlist_item_id: None,
                     artists: vec![song.artist.unwrap_or_else(|| album_artist.clone())],
+                    date_added: song
+                        .created
+                        .as_deref()
+                        .and_then(utils::datetime::parse_iso8601_to_unix_secs),
                 });
             }
         }

@@ -1,21 +1,24 @@
-use config::{AppConfig, SortOrder};
+use config::{AppConfig, SortCriterion, TrackSortField};
 use dioxus::prelude::*;
 use reader::Library;
 use reader::models::Track;
+use reader::sort;
 use std::collections::HashMap;
 
 pub struct LibraryItems {
     pub all_tracks: Memo<Vec<Track>>,
     pub album_covers: Memo<HashMap<String, Option<utils::CoverUrl>>>,
     pub artist_count: Memo<usize>,
-    pub sort_order: Signal<SortOrder>,
+    /// Multi-priority sort for the Tracks tab. Seeded from config; the view
+    /// mirrors changes back into config for persistence.
+    pub track_sort: Signal<Vec<SortCriterion<TrackSortField>>>,
 }
 
 pub fn use_library_items(library: Signal<Library>) -> LibraryItems {
     let config = use_context::<Signal<AppConfig>>();
 
-    let initial_sort_order = config.read().sort_order.clone();
-    let sort_order = use_signal(move || initial_sort_order);
+    let initial_sort = config.read().track_sort.clone();
+    let track_sort = use_signal(move || initial_sort);
 
     let artist_count = use_memo(move || {
         let lib = library.read();
@@ -47,37 +50,16 @@ pub fn use_library_items(library: Signal<Library>) -> LibraryItems {
 
     let all_tracks = use_memo(move || {
         let lib = library.read();
+        let conf = config.read();
+        let criteria = track_sort.read();
 
         let mut tracks: Vec<Track> = lib.tracks.to_vec();
-
-        match *sort_order.read() {
-            SortOrder::Title => tracks.sort_by_cached_key(|a| {
-                (
-                    a.title.to_lowercase(),
-                    a.artist.to_lowercase(),
-                    a.album.to_lowercase(),
-                    a.disc_number,
-                    a.track_number,
-                )
-            }),
-            SortOrder::Artist => tracks.sort_by_cached_key(|a| {
-                (
-                    a.artist.to_lowercase(),
-                    a.album.to_lowercase(),
-                    a.disc_number,
-                    a.track_number,
-                    a.title.to_lowercase(),
-                )
-            }),
-            SortOrder::Album => tracks.sort_by_cached_key(|a| {
-                (
-                    a.album.to_lowercase(),
-                    a.disc_number,
-                    a.track_number,
-                    a.title.to_lowercase(),
-                )
-            }),
-        }
+        let album_years = sort::album_year_map(&lib.albums);
+        let ctx = sort::TrackSortContext {
+            listen_counts: Some(&conf.listen_counts),
+            album_years: Some(&album_years),
+        };
+        sort::sort_tracks(&mut tracks, &criteria, ctx);
 
         tracks
     });
@@ -86,6 +68,6 @@ pub fn use_library_items(library: Signal<Library>) -> LibraryItems {
         all_tracks,
         album_covers,
         artist_count,
-        sort_order,
+        track_sort,
     }
 }

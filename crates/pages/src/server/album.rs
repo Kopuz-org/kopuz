@@ -22,6 +22,17 @@ pub fn JellyfinAlbum(
     mut pending_album_id_for_playlist: Signal<Option<String>>,
 ) -> Element {
     let is_offline = use_context::<Signal<bool>>();
+    let album_sort = use_signal(|| config.peek().album_sort.clone());
+    use_effect(move || {
+        let curr = album_sort.read().clone();
+        if config.peek().album_sort != curr {
+            config.write().album_sort = curr;
+        }
+    });
+    // Sort fields to offer, derived from the data actually loaded so YT Music
+    // (no year / date added) doesn't show dead options.
+    let available_sort_fields =
+        use_memo(move || reader::sort::available_album_fields(&library.read().jellyfin_albums));
     let jellyfin_albums = use_memo(move || {
         let lib = library.read();
         let conf = config.read();
@@ -65,6 +76,13 @@ pub fn JellyfinAlbum(
             }
         }
 
+        let play_counts =
+            reader::sort::album_play_count_map(&lib.jellyfin_tracks, &conf.listen_counts);
+        let ctx = reader::sort::AlbumSortContext {
+            play_counts: Some(&play_counts),
+        };
+        reader::sort::sort_albums(&mut unique_albums, &album_sort.read(), ctx);
+
         unique_albums
             .into_iter()
             .map(|album| {
@@ -106,6 +124,12 @@ pub fn JellyfinAlbum(
 
     rsx! {
         div {
+            div { class: "flex items-center justify-end mb-4",
+                components::sort_control::SortControl::<config::AlbumSortField> {
+                    criteria: album_sort,
+                    available: available_sort_fields(),
+                }
+            }
             if jellyfin_albums().is_empty() {
                 p { class: "text-slate-500", "{i18n::t(\"no_albums_found\")}" }
             } else {

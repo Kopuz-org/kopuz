@@ -450,3 +450,18 @@ add_photo = Foto hinzufügen
 change_photo = Foto ändern
 remove_photo = Foto entfernen
 metadata_edit_warning = Leere Felder entfernen das Tag. Wird direkt in die Datei geschrieben — kein Rückgängig.
+# Multi-criteria sorting (library & album tabs)
+# TODO: translate (English fallback)
+sort_by = Sort by
+sort_then = then
+sort_none = No sorting applied
+sort_add_criterion = Add criterion
+sort_remove = Remove
+sort_ascending = Ascending
+sort_descending = Descending
+sort_field_title = Title
+sort_field_artist = Artist
+sort_field_album = Album
+sort_field_year = Year
+sort_field_play_count = Play count
+sort_field_date_added = Date added

@@ -1940,6 +1940,7 @@ impl PlayerController {
             musicbrainz_track_id: None,
             playlist_item_id: None,
             artists: vec![],
+            date_added: None,
         };
 
         let mut q = self.queue.write();

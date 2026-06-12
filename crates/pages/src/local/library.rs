@@ -25,7 +25,7 @@ pub fn LocalLibrary(
     mut queue: Signal<Vec<reader::models::Track>>,
 ) -> Element {
     let items = use_library_items(library);
-    let mut sort_order = items.sort_order;
+    let track_sort = items.track_sort;
     let mut scroll_positions = use_context::<Signal<std::collections::HashMap<Route, f64>>>();
     let saved_scroll = scroll_positions
         .peek()
@@ -35,9 +35,9 @@ pub fn LocalLibrary(
     let scroll_stat = use_signal(move || saved_scroll);
     let container_height = use_signal(|| 0.0_f64);
     use_effect(move || {
-        let curr = sort_order.read().clone();
-        if config.peek().sort_order != curr {
-            config.write().sort_order = curr;
+        let curr = track_sort.read().clone();
+        if config.peek().track_sort != curr {
+            config.write().track_sort = curr;
         }
     });
     let mut ctrl = use_context::<PlayerController>();
@@ -48,6 +48,12 @@ pub fn LocalLibrary(
     let mut is_selection_mode = use_signal(|| false);
     let mut selected_tracks = use_signal(|| HashSet::<PathBuf>::new());
     let displayed_tracks = use_memo(move || (items.all_tracks)());
+    // Sort fields to offer, derived from the data actually loaded.
+    let available_sort_fields = use_memo(move || {
+        let lib = library.read();
+        let album_years = reader::sort::album_year_map(&lib.albums);
+        reader::sort::available_track_fields(&lib.tracks, &album_years)
+    });
     let album_covers = use_memo(move || (items.album_covers)());
     let cover_urls_memo = use_memo(move || std::sync::Arc::new(album_covers()));
     let cover_urls = cover_urls_memo();
@@ -370,35 +376,9 @@ pub fn LocalLibrary(
                     }
                     h2 { class: "text-xl font-semibold text-white/80", "{i18n::t(\"tracks\")}" }
                 }
-                div {
-                    class: "flex space-x-1 bg-white/5 border border-white/5 p-1 rounded-lg",
-                    button {
-                        class: if *sort_order.read() == config::SortOrder::Title {
-                            "px-3 py-1 text-xs rounded-md bg-white/10 text-white font-medium transition-all"
-                        } else {
-                            "px-3 py-1 text-xs rounded-md text-white/40 hover:text-white/80 transition-all"
-                        },
-                        onclick: move |_| sort_order.set(config::SortOrder::Title),
-                        "{i18n::t(\"title\")}"
-                    }
-                    button {
-                        class: if *sort_order.read() == config::SortOrder::Artist {
-                            "px-3 py-1 text-xs rounded-md bg-white/10 text-white font-medium transition-all"
-                        } else {
-                            "px-3 py-1 text-xs rounded-md text-white/40 hover:text-white/80 transition-all"
-                        },
-                        onclick: move |_| sort_order.set(config::SortOrder::Artist),
-                        "{i18n::t(\"artist\")}"
-                    }
-                    button {
-                        class: if *sort_order.read() == config::SortOrder::Album {
-                            "px-3 py-1 text-xs rounded-md bg-white/10 text-white font-medium transition-all"
-                        } else {
-                            "px-3 py-1 text-xs rounded-md text-white/40 hover:text-white/80 transition-all"
-                        },
-                        onclick: move |_| sort_order.set(config::SortOrder::Album),
-                        "{i18n::t(\"album\")}"
-                    }
+                components::sort_control::SortControl::<config::TrackSortField> {
+                    criteria: track_sort,
+                    available: available_sort_fields(),
                 }
             }
             Header { is_modern: is_modern, is_album: false }

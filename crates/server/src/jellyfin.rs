@@ -124,6 +124,8 @@ pub struct Item {
     pub container: Option<String>,
     pub bitrate: Option<u32>,
     pub sample_rate: Option<u32>,
+    #[serde(default)]
+    pub date_created: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -137,6 +139,8 @@ pub struct AlbumItem {
     pub genres: Option<Vec<String>>,
     pub image_tags: Option<std::collections::HashMap<String, String>>,
     pub child_count: Option<u32>,
+    #[serde(default)]
+    pub date_created: Option<String>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -589,7 +593,7 @@ impl JellyfinClient {
             ("IncludeItemTypes", "MusicAlbum"),
             (
                 "Fields",
-                "ImageTags,Genres,ProductionYear,AlbumArtist,ChildCount",
+                "ImageTags,Genres,ProductionYear,AlbumArtist,ChildCount,DateCreated",
             ),
             ("SortBy", "SortName"),
             ("SortOrder", "Ascending"),

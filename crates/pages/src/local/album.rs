@@ -1,4 +1,5 @@
 use components::dots_menu::{DotsMenu, MenuAction};
+use config::AppConfig;
 use dioxus::prelude::*;
 use reader::{Library, PlaylistStore};
 
@@ -12,23 +13,40 @@ pub fn LocalAlbum(
     mut show_album_playlist_modal: Signal<bool>,
     mut pending_album_id_for_playlist: Signal<Option<String>>,
 ) -> Element {
-    let local_albums = use_memo(move || {
-        let mut albums = library.read().albums.clone();
-        albums.sort_by(|a, b| {
-            a.title
-                .trim()
-                .to_lowercase()
-                .cmp(&b.title.trim().to_lowercase())
-        });
+    let mut config = use_context::<Signal<AppConfig>>();
+    let album_sort = use_signal(|| config.peek().album_sort.clone());
+    use_effect(move || {
+        let curr = album_sort.read().clone();
+        if config.peek().album_sort != curr {
+            config.write().album_sort = curr;
+        }
+    });
 
+    // Sort fields to offer, derived from the data actually loaded.
+    let available_sort_fields =
+        use_memo(move || reader::sort::available_album_fields(&library.read().albums));
+
+    let local_albums = use_memo(move || {
+        let lib = library.read();
+        let conf = config.read();
+
+        // De-duplicate by title (keep first occurrence in library order),
+        // then apply the user's multi-criteria sort.
         let mut unique_albums = Vec::new();
         let mut seen_titles = std::collections::HashSet::new();
-        for album in albums {
+        for album in lib.albums.iter() {
             let title_key = album.title.trim().to_lowercase();
             if seen_titles.insert(title_key) {
-                unique_albums.push(album);
+                unique_albums.push(album.clone());
             }
         }
+
+        let play_counts = reader::sort::album_play_count_map(&lib.tracks, &conf.listen_counts);
+        let ctx = reader::sort::AlbumSortContext {
+            play_counts: Some(&play_counts),
+        };
+        reader::sort::sort_albums(&mut unique_albums, &album_sort.read(), ctx);
+
         unique_albums
     });
 
@@ -46,6 +64,12 @@ pub fn LocalAlbum(
 
     rsx! {
         div {
+            div { class: "flex items-center justify-end mb-4",
+                components::sort_control::SortControl::<config::AlbumSortField> {
+                    criteria: album_sort,
+                    available: available_sort_fields(),
+                }
+            }
             if local_albums().is_empty() {
                 p { class: "text-slate-500", "{i18n::t(\"no_albums_found\")}" }
             } else {

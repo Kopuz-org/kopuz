@@ -177,6 +177,85 @@ pub enum SortOrder {
     Album,
 }
 
+/// Direction for a single library/album sort criterion.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum SortDirection {
+    #[default]
+    Asc,
+    Desc,
+}
+
+/// A sortable field for the Tracks/Library tab. Backed by data available on
+/// every source (local, Jellyfin, Subsonic, YT Music). `DateAdded` is `None`
+/// where the source has no date (e.g. YT Music) and sorts last.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TrackSortField {
+    Title,
+    Artist,
+    Album,
+    Year,
+    PlayCount,
+    DateAdded,
+}
+
+/// A sortable field for the Albums tab.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AlbumSortField {
+    Title,
+    Artist,
+    Year,
+    PlayCount,
+    DateAdded,
+}
+
+/// One ordered sort criterion: which field, sorted in which direction.
+/// A list of these expresses a multi-priority sort (e.g. Artist, then Year).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SortCriterion<F> {
+    pub field: F,
+    pub direction: SortDirection,
+}
+
+impl<F> SortCriterion<F> {
+    pub fn new(field: F, direction: SortDirection) -> Self {
+        Self { field, direction }
+    }
+}
+
+/// Shared behaviour for a tab's sort-field enum so a single UI component can
+/// render the field picker for any tab. The selectable fields are derived per
+/// dataset (see `reader::sort::available_track_fields`), not from the enum, so
+/// sources without certain data (e.g. YT Music) don't show dead options.
+pub trait LibrarySortField: Copy + PartialEq + 'static {
+    /// i18n key for this field's display label.
+    fn label_key(&self) -> &'static str;
+}
+
+impl LibrarySortField for TrackSortField {
+    fn label_key(&self) -> &'static str {
+        match self {
+            Self::Title => "sort_field_title",
+            Self::Artist => "sort_field_artist",
+            Self::Album => "sort_field_album",
+            Self::Year => "sort_field_year",
+            Self::PlayCount => "sort_field_play_count",
+            Self::DateAdded => "sort_field_date_added",
+        }
+    }
+}
+
+impl LibrarySortField for AlbumSortField {
+    fn label_key(&self) -> &'static str {
+        match self {
+            Self::Title => "sort_field_title",
+            Self::Artist => "sort_field_artist",
+            Self::Year => "sort_field_year",
+            Self::PlayCount => "sort_field_play_count",
+            Self::DateAdded => "sort_field_date_added",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ArtistViewOrder {
     Tracks,
@@ -523,6 +602,13 @@ pub struct AppConfig {
     pub discord_presence_paused: Option<bool>,
     #[serde(default = "default_sort_order")]
     pub sort_order: SortOrder,
+    /// Multi-priority sort for the Tracks/Library tab. Empty/default seeds a
+    /// single Title-ascending criterion, reproducing legacy behaviour.
+    #[serde(default = "default_track_sort")]
+    pub track_sort: Vec<SortCriterion<TrackSortField>>,
+    /// Multi-priority sort for the Albums tab.
+    #[serde(default = "default_album_sort")]
+    pub album_sort: Vec<SortCriterion<AlbumSortField>>,
     #[serde(default = "default_artist_view_order")]
     pub artist_view_order: ArtistViewOrder,
     #[serde(default)]
@@ -774,6 +860,20 @@ fn default_sort_order() -> SortOrder {
     SortOrder::Title
 }
 
+fn default_track_sort() -> Vec<SortCriterion<TrackSortField>> {
+    vec![SortCriterion::new(
+        TrackSortField::Title,
+        SortDirection::Asc,
+    )]
+}
+
+fn default_album_sort() -> Vec<SortCriterion<AlbumSortField>> {
+    vec![SortCriterion::new(
+        AlbumSortField::Title,
+        SortDirection::Asc,
+    )]
+}
+
 fn default_artist_view_order() -> ArtistViewOrder {
     ArtistViewOrder::Tracks
 }
@@ -849,6 +949,8 @@ impl Default for AppConfig {
             discord_presence: Some(true),
             discord_presence_paused: Some(true),
             sort_order: default_sort_order(),
+            track_sort: default_track_sort(),
+            album_sort: default_album_sort(),
             artist_view_order: default_artist_view_order(),
             listen_counts: HashMap::new(),
             musicbrainz_token: String::new(),
@@ -1102,5 +1204,43 @@ mod tests {
             config.music_directory,
             vec![PathBuf::from("/music"), PathBuf::from("/archive")]
         );
+    }
+
+    #[test]
+    fn legacy_config_without_sort_fields_seeds_title_ascending() {
+        use super::{AlbumSortField, SortDirection, TrackSortField};
+
+        // Arrange — a config saved before multi-criteria sorting existed.
+        let json = r#"{ "music_directory": "/music" }"#;
+
+        // Act
+        let config: AppConfig = serde_json::from_str(json).unwrap();
+
+        // Assert — both tabs default to a single Title-ascending criterion.
+        assert_eq!(config.track_sort.len(), 1);
+        assert_eq!(config.track_sort[0].field, TrackSortField::Title);
+        assert_eq!(config.track_sort[0].direction, SortDirection::Asc);
+        assert_eq!(config.album_sort.len(), 1);
+        assert_eq!(config.album_sort[0].field, AlbumSortField::Title);
+        assert_eq!(config.album_sort[0].direction, SortDirection::Asc);
+    }
+
+    #[test]
+    fn sort_criteria_round_trip_through_json() {
+        use super::{SortCriterion, SortDirection, TrackSortField};
+
+        // Arrange
+        let mut config = AppConfig::default();
+        config.track_sort = vec![
+            SortCriterion::new(TrackSortField::Artist, SortDirection::Asc),
+            SortCriterion::new(TrackSortField::Year, SortDirection::Desc),
+        ];
+
+        // Act — serialize then deserialize.
+        let json = serde_json::to_string(&config).unwrap();
+        let restored: AppConfig = serde_json::from_str(&json).unwrap();
+
+        // Assert
+        assert_eq!(restored.track_sort, config.track_sort);
     }
 }

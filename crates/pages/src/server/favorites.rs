@@ -43,7 +43,12 @@ pub fn JellyfinFavorites(
     use_effect(move || {
         let nonce = *refresh_nonce.read();
 
-        let token = match config.peek().server.as_ref().and_then(|s| s.access_token.clone()) {
+        let token = match config
+            .peek()
+            .server
+            .as_ref()
+            .and_then(|s| s.access_token.clone())
+        {
             Some(t) => t,
             None => return,
         };
@@ -56,74 +61,72 @@ pub fn JellyfinFavorites(
 
         is_syncing.set(true);
         synced_so_far.set(0);
-        spawn(async move {
-            let device_id = config.peek().device_id.clone();
-            let server_snapshot = config.peek().server.clone();
-            let Some(server) = server_snapshot else {
-                is_syncing.set(false);
-                return;
-            };
-            let user_id = server.user_id.clone().unwrap_or_default();
-            let url = server.url.clone();
+        spawn(
+            async move {
+                let device_id = config.peek().device_id.clone();
+                let server_snapshot = config.peek().server.clone();
+                let Some(server) = server_snapshot else {
+                    is_syncing.set(false);
+                    return;
+                };
+                let user_id = server.user_id.clone().unwrap_or_default();
+                let url = server.url.clone();
 
-            let ids: Vec<String> = match server.service {
-                MusicService::Jellyfin => {
-                    let remote =
-                        JellyfinClient::new(&url, Some(&token), &device_id, Some(&user_id));
-                    remote
-                        .get_favorite_items()
-                        .await
-                        .map(|items| items.into_iter().map(|i| i.id).collect())
-                        .unwrap_or_default()
-                }
-                MusicService::Subsonic | MusicService::Custom => {
-                    let remote = SubsonicClient::new(&url, &user_id, &token);
-                    remote.get_starred_song_ids().await.unwrap_or_default()
-                }
-                MusicService::YtMusic => {
-                    let yt =
-                        ::server::ytmusic::YouTubeMusicClient::with_cookies(token);
-
-                    {
-                        let mut lib = library.write();
-                        lib.jellyfin_tracks.clear();
-                        lib.jellyfin_albums.clear();
+                let ids: Vec<String> = match server.service {
+                    MusicService::Jellyfin => {
+                        let remote =
+                            JellyfinClient::new(&url, Some(&token), &device_id, Some(&user_id));
+                        remote
+                            .get_favorite_items()
+                            .await
+                            .map(|items| items.into_iter().map(|i| i.id).collect())
+                            .unwrap_or_default()
                     }
+                    MusicService::Subsonic | MusicService::Custom => {
+                        let remote = SubsonicClient::new(&url, &user_id, &token);
+                        remote.get_starred_song_ids().await.unwrap_or_default()
+                    }
+                    MusicService::YtMusic => {
+                        let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(token);
 
-                    let mut accumulated: Vec<reader::models::Track> = Vec::new();
-                    let result = yt
-                        .stream_liked_songs(|page| {
-                            accumulated.extend(page.iter().cloned());
-                            let albums = synthesize_albums(&accumulated);
-                            {
-                                let mut lib = library.write();
-                                lib.jellyfin_tracks.extend(page);
-                                lib.jellyfin_albums = albums;
-                            }
-                            synced_so_far.set(accumulated.len());
-                        })
-                        .await;
+                        {
+                            let mut lib = library.write();
+                            lib.jellyfin_tracks.clear();
+                            lib.jellyfin_albums.clear();
+                        }
 
-                    match result {
-                        Ok(()) => {
-                            let ids: Vec<String> = accumulated
-                                .iter()
-                                .filter_map(|t| {
-                                    t.path
-                                        .to_string_lossy()
-                                        .split(':')
-                                        .nth(1)
-                                        .map(|s| s.to_string())
-                                })
-                                .collect();
-                            let now = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_secs())
-                                .unwrap_or(0);
-                            library.write().last_yt_sync_at = Some(now);
-                            let liked_cover = accumulated
-                                .first()
-                                .and_then(|t| {
+                        let mut accumulated: Vec<reader::models::Track> = Vec::new();
+                        let result = yt
+                            .stream_liked_songs(|page| {
+                                accumulated.extend(page.iter().cloned());
+                                let albums = synthesize_albums(&accumulated);
+                                {
+                                    let mut lib = library.write();
+                                    lib.jellyfin_tracks.extend(page);
+                                    lib.jellyfin_albums = albums;
+                                }
+                                synced_so_far.set(accumulated.len());
+                            })
+                            .await;
+
+                        match result {
+                            Ok(()) => {
+                                let ids: Vec<String> = accumulated
+                                    .iter()
+                                    .filter_map(|t| {
+                                        t.path
+                                            .to_string_lossy()
+                                            .split(':')
+                                            .nth(1)
+                                            .map(|s| s.to_string())
+                                    })
+                                    .collect();
+                                let now = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_secs())
+                                    .unwrap_or(0);
+                                library.write().last_yt_sync_at = Some(now);
+                                let liked_cover = accumulated.first().and_then(|t| {
                                     t.path
                                         .to_string_lossy()
                                         .split(':')
@@ -131,38 +134,38 @@ pub fn JellyfinFavorites(
                                         .filter(|s| s.starts_with("urlhex_"))
                                         .map(|s| s.to_string())
                                 });
-                            let liked_entry = reader::models::JellyfinPlaylist {
-                                id: "LM".to_string(),
-                                name: "Liked Songs".to_string(),
-                                tracks: ids.clone(),
-                                image_tag: liked_cover,
-                                cover_path: None,
-                            };
-                            {
-                                let mut ps = playlist_store.write();
-                                if let Some(existing) = ps
-                                    .jellyfin_playlists
-                                    .iter_mut()
-                                    .find(|p| p.id == "LM")
+                                let liked_entry = reader::models::JellyfinPlaylist {
+                                    id: "LM".to_string(),
+                                    name: "Liked Songs".to_string(),
+                                    tracks: ids.clone(),
+                                    image_tag: liked_cover,
+                                    cover_path: None,
+                                };
                                 {
-                                    *existing = liked_entry;
-                                } else {
-                                    ps.jellyfin_playlists.insert(0, liked_entry);
+                                    let mut ps = playlist_store.write();
+                                    if let Some(existing) =
+                                        ps.jellyfin_playlists.iter_mut().find(|p| p.id == "LM")
+                                    {
+                                        *existing = liked_entry;
+                                    } else {
+                                        ps.jellyfin_playlists.insert(0, liked_entry);
+                                    }
                                 }
+                                ids
                             }
-                            ids
-                        }
-                        Err(e) => {
-                            tracing::warn!(error = %e, "YT favorites sync failed");
-                            Vec::new()
+                            Err(e) => {
+                                tracing::warn!(error = %e, "YT favorites sync failed");
+                                Vec::new()
+                            }
                         }
                     }
-                }
-            };
+                };
 
-            favorites_store.write().jellyfin_favorites = ids;
-            is_syncing.set(false);
-        }.instrument(tracing::info_span!("favorites.sync")));
+                favorites_store.write().jellyfin_favorites = ids;
+                is_syncing.set(false);
+            }
+            .instrument(tracing::info_span!("favorites.sync")),
+        );
     });
 
     let displayed_tracks: Vec<(reader::models::Track, Option<utils::CoverUrl>)> = {
@@ -649,6 +652,7 @@ fn synthesize_albums(tracks: &[reader::models::Track]) -> Vec<reader::models::Al
                 year: 0,
                 cover_path,
                 manual_cover: false,
+                date_added: None,
             }
         })
         .collect()

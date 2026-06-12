@@ -25,18 +25,18 @@ pub fn JellyfinLibrary(
     let mut is_loading = use_signal(|| false);
     let mut has_fetched = use_signal(|| false);
     let mut fetch_generation = use_signal(|| 0usize);
-    let mut sort_order = use_signal(|| config.peek().sort_order.clone());
+    let track_sort = use_signal(|| config.peek().track_sort.clone());
     let mut scroll_positions = use_context::<Signal<std::collections::HashMap<Route, f64>>>();
     let saved_scroll = scroll_positions
         .peek()
         .get(&Route::Library)
         .copied()
         .unwrap_or(0.0);
-    let mut scroll_stat = use_signal(move || saved_scroll);
+    let scroll_stat = use_signal(move || saved_scroll);
     use_effect(move || {
-        let curr = sort_order.read().clone();
-        if config.peek().sort_order != curr {
-            config.write().sort_order = curr;
+        let curr = track_sort.read().clone();
+        if config.peek().track_sort != curr {
+            config.write().track_sort = curr;
         }
     });
 
@@ -75,36 +75,16 @@ pub fn JellyfinLibrary(
     });
 
     let displayed_tracks = use_memo(move || {
-        let mut tracks = library.read().jellyfin_tracks.clone();
-        match *sort_order.read() {
-            config::SortOrder::Title => tracks.sort_by_cached_key(|a| {
-                (
-                    a.title.to_lowercase(),
-                    a.artist.to_lowercase(),
-                    a.album.to_lowercase(),
-                    a.disc_number,
-                    a.track_number,
-                )
-            }),
-            config::SortOrder::Artist => tracks.sort_by_cached_key(|a| {
-                (
-                    a.artist.to_lowercase(),
-                    a.album.to_lowercase(),
-                    a.disc_number,
-                    a.track_number,
-                    a.title.to_lowercase(),
-                )
-            }),
-            config::SortOrder::Album => tracks.sort_by_cached_key(|a| {
-                (
-                    a.album.to_lowercase(),
-                    a.disc_number,
-                    a.track_number,
-                    a.title.to_lowercase(),
-                )
-            }),
-        }
+        let lib = library.read();
         let conf = config.read();
+        let mut tracks = lib.jellyfin_tracks.clone();
+        let criteria = track_sort.read();
+        let album_years = reader::sort::album_year_map(&lib.jellyfin_albums);
+        let ctx = reader::sort::TrackSortContext {
+            listen_counts: Some(&conf.listen_counts),
+            album_years: Some(&album_years),
+        };
+        reader::sort::sort_tracks(&mut tracks, &criteria, ctx);
         tracks
             .into_iter()
             .map(|t| {
@@ -126,6 +106,14 @@ pub fn JellyfinLibrary(
                 (t, cover_url)
             })
             .collect::<Vec<_>>()
+    });
+
+    // Sort fields to offer, derived from the data actually loaded so YT Music
+    // (no year / date added) doesn't show dead options.
+    let available_sort_fields = use_memo(move || {
+        let lib = library.read();
+        let album_years = reader::sort::album_year_map(&lib.jellyfin_albums);
+        reader::sort::available_track_fields(&lib.jellyfin_tracks, &album_years)
     });
 
     let queue_tracks = use_memo(move || {
@@ -496,34 +484,9 @@ pub fn JellyfinLibrary(
                     }
                     h2 { class: "text-xl font-semibold text-white/80", "{i18n::t(\"tracks\")}" }
                 }
-                div { class: "flex space-x-1 bg-white/5 border border-white/5 p-1 rounded-lg",
-                    button {
-                        class: if *sort_order.read() == config::SortOrder::Title {
-                            "px-3 py-1 text-xs rounded-md bg-white/10 text-white font-medium transition-all"
-                        } else {
-                            "px-3 py-1 text-xs rounded-md text-white/40 hover:text-white/80 transition-all"
-                        },
-                        onclick: move |_| sort_order.set(config::SortOrder::Title),
-                        "Title"
-                    }
-                    button {
-                        class: if *sort_order.read() == config::SortOrder::Artist {
-                            "px-3 py-1 text-xs rounded-md bg-white/10 text-white font-medium transition-all"
-                        } else {
-                            "px-3 py-1 text-xs rounded-md text-white/40 hover:text-white/80 transition-all"
-                        },
-                        onclick: move |_| sort_order.set(config::SortOrder::Artist),
-                        "Artist"
-                    }
-                    button {
-                        class: if *sort_order.read() == config::SortOrder::Album {
-                            "px-3 py-1 text-xs rounded-md bg-white/10 text-white font-medium transition-all"
-                        } else {
-                            "px-3 py-1 text-xs rounded-md text-white/40 hover:text-white/80 transition-all"
-                        },
-                        onclick: move |_| sort_order.set(config::SortOrder::Album),
-                        "Album"
-                    }
+                components::sort_control::SortControl::<config::TrackSortField> {
+                    criteria: track_sort,
+                    available: available_sort_fields(),
                 }
             }
 

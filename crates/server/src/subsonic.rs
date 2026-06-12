@@ -42,6 +42,8 @@ pub struct SubsonicAlbum {
     pub genre: Option<String>,
     pub year: Option<u16>,
     pub cover_art: Option<String>,
+    #[serde(default)]
+    pub created: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -59,6 +61,8 @@ pub struct SubsonicSong {
     pub disc_number: Option<u32>,
     pub genre: Option<String>,
     pub cover_art: Option<String>,
+    #[serde(default)]
+    pub created: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

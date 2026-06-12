@@ -12,6 +12,17 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::{MetadataOptions, RawValue, StandardTag, Tag as SymphoniaTag};
 use symphonia::core::units::Timestamp;
 
+/// File modification time as a Unix timestamp (seconds), used as the
+/// "date added" for locally-scanned tracks. `None` if the time is
+/// unavailable or predates the Unix epoch.
+pub fn file_mtime_secs(path: &Path) -> Option<i64> {
+    std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64)
+}
+
 fn slugify_album_key(value: &str) -> String {
     value
         .to_lowercase()
@@ -149,6 +160,7 @@ pub fn extract_metadata(
         musicbrainz_recording_id,
         musicbrainz_track_id,
         playlist_item_id: None,
+        date_added: file_mtime_secs(track_path),
     }
 }
 
@@ -217,6 +229,7 @@ pub fn read(track_path: &Path, cover_cache: &Path, library: &mut Library) -> Opt
             year,
             cover_path: cover,
             manual_cover: false,
+            date_added: track.date_added,
         });
     }
 
@@ -303,8 +316,7 @@ pub fn write_tags(track_path: &Path, edits: &TrackEdits) -> Result<(), String> {
             }
         }
         CoverChange::Set(bytes) => {
-            let mut picture =
-                Picture::from_reader(&mut &bytes[..]).map_err(|e| e.to_string())?;
+            let mut picture = Picture::from_reader(&mut &bytes[..]).map_err(|e| e.to_string())?;
             picture.set_pic_type(PictureType::CoverFront);
             while !tag.pictures().is_empty() {
                 tag.remove_picture(0);
@@ -408,7 +420,13 @@ fn read_with_symphonia(
         if let Some(track_info) = format
             .tracks()
             .iter()
-            .find(|track| track.codec_params.as_ref().and_then(|p| p.audio()).is_some())
+            .find(|track| {
+                track
+                    .codec_params
+                    .as_ref()
+                    .and_then(|p| p.audio())
+                    .is_some()
+            })
             .or_else(|| format.tracks().first())
         {
             if let Some(audio) = track_info.codec_params.as_ref().and_then(|p| p.audio()) {
@@ -447,14 +465,18 @@ fn read_with_symphonia(
         .or(parent_path.as_deref())
         .unwrap_or(&artist);
 
-    let title = find_symphonia_tag(&tags, |t| matches!(t, StandardTag::TrackTitle(_)), &["TITLE"])
-        .and_then(symphonia_tag_to_string)
-        .or_else(|| {
-            track_path
-                .file_stem()
-                .map(|stem| stem.to_string_lossy().into_owned())
-        })
-        .unwrap_or_else(|| "Unknown Title".to_string());
+    let title = find_symphonia_tag(
+        &tags,
+        |t| matches!(t, StandardTag::TrackTitle(_)),
+        &["TITLE"],
+    )
+    .and_then(symphonia_tag_to_string)
+    .or_else(|| {
+        track_path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+    })
+    .unwrap_or_else(|| "Unknown Title".to_string());
 
     let bitrate_kbps = (file_size * 8)
         .checked_div(duration)
@@ -504,6 +526,7 @@ fn read_with_symphonia(
         )
         .and_then(symphonia_tag_to_string),
         playlist_item_id: None,
+        date_added: file_mtime_secs(track_path),
     };
 
     let album_id = track.album_id.clone();
@@ -538,8 +561,8 @@ fn read_with_symphonia(
             &["DATE", "YEAR"],
         )
         .and_then(symphonia_tag_to_string)
-            .and_then(|value| value.get(..4).and_then(|prefix| prefix.parse::<u16>().ok()))
-            .unwrap_or(0);
+        .and_then(|value| value.get(..4).and_then(|prefix| prefix.parse::<u16>().ok()))
+        .unwrap_or(0);
 
         library.add_album(Album {
             id: album_id.clone(),
@@ -549,6 +572,7 @@ fn read_with_symphonia(
             year,
             cover_path: cover,
             manual_cover: false,
+            date_added: track.date_added,
         });
     }
 

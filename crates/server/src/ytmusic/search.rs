@@ -54,10 +54,7 @@ struct ParsedRow {
 }
 
 #[tracing::instrument(name = "yt.search", skip(cookies), fields(query = %query))]
-pub async fn music_search_tracks(
-    query: &str,
-    cookies: Option<&str>,
-) -> Result<Vec<Track>, String> {
+pub async fn music_search_tracks(query: &str, cookies: Option<&str>) -> Result<Vec<Track>, String> {
     let http = super::innertube::http_client();
     let (top, songs, videos) = tokio::join!(
         do_search(http, query, None, cookies),
@@ -157,10 +154,14 @@ async fn do_search_raw(
         "query": query,
     });
     if let Some(p) = params {
-        body.as_object_mut().unwrap().insert("params".into(), json!(p));
+        body.as_object_mut()
+            .unwrap()
+            .insert("params".into(), json!(p));
     }
     let mut req = http
-        .post(format!("{ORIGIN_YT_MUSIC}/youtubei/v1/search?prettyPrint=false"))
+        .post(format!(
+            "{ORIGIN_YT_MUSIC}/youtubei/v1/search?prettyPrint=false"
+        ))
         .header("Content-Type", "application/json")
         .header("X-YouTube-Client-Name", client.client_id)
         .header("X-YouTube-Client-Version", client.client_version)
@@ -248,7 +249,10 @@ fn track_id(t: &Track) -> String {
 
 fn parse_card_shelf(card: &Value) -> Option<ParsedRow> {
     let endpoint = card.pointer("/onTap/watchEndpoint")?;
-    let video_id = endpoint.get("videoId").and_then(|v| v.as_str())?.to_string();
+    let video_id = endpoint
+        .get("videoId")
+        .and_then(|v| v.as_str())?
+        .to_string();
     let mvt = endpoint
         .pointer("/watchEndpointMusicSupportedConfigs/watchEndpointMusicConfig/musicVideoType")
         .and_then(|v| v.as_str())
@@ -288,7 +292,10 @@ fn parse_card_shelf(card: &Value) -> Option<ParsedRow> {
     let thumbnail_url = card
         .pointer("/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails")
         .and_then(|v| v.as_array())
-        .and_then(|arr| arr.iter().max_by_key(|t| t.get("width").and_then(|v| v.as_u64()).unwrap_or(0)))
+        .and_then(|arr| {
+            arr.iter()
+                .max_by_key(|t| t.get("width").and_then(|v| v.as_u64()).unwrap_or(0))
+        })
         .and_then(|t| t.get("url"))
         .and_then(|u| u.as_str())
         .map(normalize_yt_thumbnail);
@@ -323,7 +330,13 @@ fn parse_row(item: &Value) -> Option<ParsedRow> {
     // " • " runs. The shapes are visually distinct in the JSON so we
     // dispatch on presence, not on guesswork.
     if row.get("fixedColumns").is_some() {
-        Some(parse_playlist_track(row, video_id, title, mvt, thumbnail_url))
+        Some(parse_playlist_track(
+            row,
+            video_id,
+            title,
+            mvt,
+            thumbnail_url,
+        ))
     } else {
         Some(parse_search_row(row, video_id, title, mvt, thumbnail_url))
     }
@@ -387,11 +400,7 @@ fn parse_search_row(
     // duration is always last; the slot before it is album OR view-count
     // depending on mvt. We dispatch on mvt — no view-count text sniffing.
     let mut tokens = pick_all_runs(row, 1);
-    let duration = tokens
-        .pop()
-        .as_deref()
-        .and_then(parse_mm_ss)
-        .unwrap_or(0);
+    let duration = tokens.pop().as_deref().and_then(parse_mm_ss).unwrap_or(0);
     let second_last = tokens.pop();
     let (album, artists) = if mvt.has_album() {
         let album = second_last.filter(|s| !s.is_empty());
@@ -444,6 +453,7 @@ fn parsed_to_track(p: ParsedRow) -> Track {
         musicbrainz_recording_id: None,
         musicbrainz_track_id: None,
         playlist_item_id: None,
+        date_added: None,
         artists: p.artists,
     }
 }
@@ -452,7 +462,11 @@ fn pick_run(row: &Value, col: usize, run: usize) -> String {
     row.get("flexColumns")
         .and_then(|c| c.as_array())
         .and_then(|cs| cs.get(col))
-        .and_then(|c| c.pointer(&format!("/musicResponsiveListItemFlexColumnRenderer/text/runs/{run}/text")))
+        .and_then(|c| {
+            c.pointer(&format!(
+                "/musicResponsiveListItemFlexColumnRenderer/text/runs/{run}/text"
+            ))
+        })
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string()
