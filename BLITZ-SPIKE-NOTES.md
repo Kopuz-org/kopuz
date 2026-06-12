@@ -207,3 +207,8 @@ live in kopuz. No kopuz-side workarounds for engine bugs anymore.
   branch in one place), centralize remaining blitz conditionals.
 - Local-file covers: serve over localhost HTTP instead of artwork:// (works
   for both renderers, deletes the wry protocol).
+
+18. **Button text left-aligned → UA stylesheet gap** (blitz 925926d): every
+    browser's UA sheet has `button { text-align: center }`; blitz's
+    default.css didn't. One line + a centering test (probe = inline-block
+    embedded box position; plain inline spans get no box assigned).
