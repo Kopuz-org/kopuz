@@ -1,4 +1,9 @@
 @import "tailwindcss";
+/* Plain :hover, not Tailwind v4's default `@media (hover: hover)` wrapper:
+   the blitz/native renderer's media device doesn't claim hover capability,
+   so the wrapped rules all evaluate false and every hover style drops.
+   Webview behavior is unchanged (it matched the media query anyway). */
+@custom-variant hover (&:hover);
 @source "./crates/kopuz/**/*.rs";
 @source "./crates/components/**/*.rs";
 @source "./crates/pages/**/*.rs";
