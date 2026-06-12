@@ -26,7 +26,21 @@ discord-presence = { workspace = true }
 dioxus = { workspace = true, features = ["desktop"] }
 # Local blitz checkout (~/projects/blitz, git main line) instead of dioxus's
 # bundled "native" feature: engine fixes show up live in kopuz on rebuild.
-dioxus-native = { path = "../../../blitz/packages/dioxus-native" }
+# Default features minus "vello-hybrid" (panics on kopuz's 0-alpha paints —
+# vello_hybrid schedule.rs "reserved for clipping") and minus "incremental"
+# (suspected missed-damage on dynamic subtree swaps: blank pages, stuck hover).
+dioxus-native = { path = "../../../blitz/packages/dioxus-native", default-features = false, features = [
+    "accessibility",
+    "hot-reload",
+    "net",
+    "html",
+    "svg",
+    "system-fonts",
+    "clipboard",
+    "file_dialog",
+    "vello",
+    "woff",
+] }
 discord-rich-presence = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
