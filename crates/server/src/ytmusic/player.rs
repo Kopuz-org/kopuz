@@ -60,6 +60,12 @@ pub struct YtStreamInfo {
     pub bitrate: Option<u32>,
     /// YouTube format id of the chosen stream.
     pub itag: Option<u32>,
+    /// Whether arbitrary HTTP range requests are safe on this URL. False for
+    /// the no-pot decipher fallback: googlevideo 403s deep ranges without a
+    /// content pot, and symphonia's probe reads the webm tail (Cues) before
+    /// playing — a range-backed source would fail outright instead of playing
+    /// sequentially (issue #386).
+    pub range_safe: bool,
 }
 
 /// Process-wide anonymous visitor_data cache (the ANDROID_VR + pot path).
@@ -176,8 +182,12 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
             Err(e) => last_err = format!("{}: {e}", client.client_name),
         }
     }
-    if let Some(info) = decipher_fallback {
-        tracing::warn!("no content pot available (minter not running?) — using the non-Premium decipher stream; deep seeks may 403");
+    if let Some(mut info) = decipher_fallback {
+        tracing::warn!(
+            "no content pot available (minter not running?) — using the non-Premium decipher \
+             stream sequentially (range requests 403 without a pot, so seeking is disabled)"
+        );
+        info.range_safe = false;
         return Ok(info);
     }
     Err(format!("all stream paths failed; last error: {last_err}"))
@@ -400,6 +410,7 @@ fn pick_plain_format(json: &Value, client: YouTubeClient) -> Option<YtStreamInfo
         duration_secs,
         bitrate: Some(bitrate as u32),
         itag,
+        range_safe: true,
     })
 }
 
@@ -457,6 +468,7 @@ fn stream_info_from(
         duration_secs,
         bitrate,
         itag,
+        range_safe: true,
     })
 }
 

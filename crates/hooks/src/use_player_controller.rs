@@ -742,7 +742,11 @@ impl PlayerController {
                                             current_song_bitrate_for_yt.set(kbps);
                                         }
                                     }
-                                    (info.url, Some(info.format), Some(info.user_agent))
+                                    (
+                                        info.url,
+                                        Some((info.format, info.range_safe)),
+                                        Some(info.user_agent),
+                                    )
                                 }
                                 Err(e) => {
                                     // Same guard: a stale error must NOT post a banner
@@ -774,19 +778,39 @@ impl PlayerController {
                                 );
                                 let (source, hint) = decoder::from_stream_with_hint(stream, "ogg");
                                 Ok::<_, std::io::Error>((source, hint))
-                            } else if let Some(fmt) = yt_format_for_blocking {
-                                // YT: HTTP Range-backed source. Symphonia
-                                // can seek freely (Matroska Cues at the
-                                // end, scrub anywhere) and startup probes
-                                // only fetch the ~512 KiB they need.
-                                let range = utils::range_source::RangeStreamSource::new(
-                                    stream_url_for_blocking,
-                                    yt_ua_for_blocking,
-                                )?;
-                                let len = Some(range.total_size());
-                                let (source, mut hint) = decoder::from_stream_with_len(range, len);
-                                hint.with_extension(fmt.extension());
-                                Ok::<_, std::io::Error>((source, hint))
+                            } else if let Some((fmt, range_safe)) = yt_format_for_blocking {
+                                if range_safe {
+                                    // YT: HTTP Range-backed source. Symphonia
+                                    // can seek freely (Matroska Cues at the
+                                    // end, scrub anywhere) and startup probes
+                                    // only fetch the ~512 KiB they need.
+                                    let range = utils::range_source::RangeStreamSource::new(
+                                        stream_url_for_blocking,
+                                        yt_ua_for_blocking,
+                                    )?;
+                                    let len = Some(range.total_size());
+                                    let (source, mut hint) =
+                                        decoder::from_stream_with_len(range, len);
+                                    hint.with_extension(fmt.extension());
+                                    Ok::<_, std::io::Error>((source, hint))
+                                } else {
+                                    // No-pot fallback: googlevideo 403s deep
+                                    // ranges, and the probe reads the webm tail
+                                    // — stream sequentially instead of failing
+                                    // outright (issue #386). No scrubbing.
+                                    let stream =
+                                        utils::stream_buffer::StreamBuffer::with_user_agent(
+                                            stream_url_for_blocking,
+                                            false,
+                                            yt_ua_for_blocking,
+                                        );
+                                    stream.wait_for_total_size();
+                                    let len = stream.known_total_size();
+                                    let (source, mut hint) =
+                                        decoder::from_stream_with_len(stream, len);
+                                    hint.with_extension(fmt.extension());
+                                    Ok::<_, std::io::Error>((source, hint))
+                                }
                             } else {
                                 let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
                                     stream_url_for_blocking,
