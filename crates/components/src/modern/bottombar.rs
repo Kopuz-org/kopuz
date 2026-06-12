@@ -101,22 +101,12 @@ pub fn BottombarModern(
                     button {
                         class: if fav { "w-10 h-10 flex items-center justify-center text-red-400 active:scale-90 transition-transform" } else { "w-10 h-10 flex items-center justify-center text-slate-400 active:scale-90 transition-transform" },
                         onclick: move |evt| { evt.stop_propagation(); toggle_favorite(ctrl.current_track_snapshot.read().clone(), config); },
-                        // Separate elements, not a class swap: blitz doesn't
-                        // re-resolve the FontAwesome glyph when a class changes.
-                        if fav {
-                            i { class: "fa-solid fa-heart text-sm" }
-                        } else {
-                            i { class: "fa-regular fa-heart text-sm" }
-                        }
+                        i { class: if fav { "fa-solid fa-heart text-sm" } else { "fa-regular fa-heart text-sm" } }
                     }
                     button {
                         class: "w-11 h-11 flex items-center justify-center text-white text-xl active:scale-90 transition-transform",
                         onclick: move |evt| { evt.stop_propagation(); ctrl.toggle(); },
-                        if *is_playing.read() {
-                            i { class: "fa-solid fa-pause" }
-                        } else {
-                            i { class: "fa-solid fa-play ml-1" }
-                        }
+                        i { class: if *is_playing.read() { "fa-solid fa-pause" } else { "fa-solid fa-play ml-1" } }
                     }
                     button {
                         class: "w-11 h-11 flex items-center justify-center text-white text-lg active:scale-90 transition-transform",
@@ -171,11 +161,7 @@ pub fn BottombarModern(
                 button {
                     class: "w-8 h-8 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-all active:scale-95",
                     onclick: move |_| ctrl.toggle(),
-                    if *is_playing.read() {
-                        i { class: "fa-solid fa-pause text-xs" }
-                    } else {
-                        i { class: "fa-solid fa-play text-xs ml-0.5" }
-                    }
+                    i { class: if *is_playing.read() { "fa-solid fa-pause text-xs" } else { "fa-solid fa-play text-xs ml-0.5" } }
                 }
                 button {
                     class: "w-7 h-7 flex items-center justify-center text-slate-400 hover:text-white transition-all active:scale-90",
@@ -251,46 +237,25 @@ pub fn BottombarModern(
                             class: "absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 bg-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none -translate-x-1/2",
                             style: "left: {progress_percent}%",
                         }
-                        // range inputs are inert under blitz; click-to-seek
-                        // segments stand in for the invisible slider.
-                        if crate::blitz_active() {
-                            if !is_radio {
-                                crate::slider_overlay::BlitzSliderOverlay {
-                                    segments: 40,
-                                    on_set: move |f: f64| {
-                                        let duration = *current_song_duration.peek();
-                                        if duration == 0 || duration == u64::MAX {
-                                            return;
-                                        }
-                                        let val = (f * duration as f64) as u64;
-                                        player.write().seek(std::time::Duration::from_secs(val));
-                                        current_song_progress.set(val);
-                                        drag_progress.set(val);
-                                        is_dragging.set(false);
-                                    },
+                        input {
+                            r#type: "range",
+                            min: "0",
+                            max: "{*current_song_duration.read()}",
+                            value: "{display_progress}",
+                            class: format!("absolute top-0 left-0 w-full h-full opacity-0 z-10 {}", if is_radio { "pointer-events-none" } else { "cursor-pointer" }),
+                            disabled: is_radio,
+                            onchange: move |evt| {
+                                if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
+                                    player.write().seek(std::time::Duration::from_secs(val));
+                                    current_song_progress.set(val);
+                                    drag_progress.set(val);
+                                    is_dragging.set(false);
                                 }
-                            }
-                        } else {
-                            input {
-                                r#type: "range",
-                                min: "0",
-                                max: "{*current_song_duration.read()}",
-                                value: "{display_progress}",
-                                class: format!("absolute top-0 left-0 w-full h-full opacity-0 z-10 {}", if is_radio { "pointer-events-none" } else { "cursor-pointer" }),
-                                disabled: is_radio,
-                                onchange: move |evt| {
-                                    if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
-                                        player.write().seek(std::time::Duration::from_secs(val));
-                                        current_song_progress.set(val);
-                                        drag_progress.set(val);
-                                        is_dragging.set(false);
-                                    }
-                                },
-                                oninput: move |evt| {
-                                    if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
-                                        is_dragging.set(true);
-                                        drag_progress.set(val);
-                                    }
+                            },
+                            oninput: move |evt| {
+                                if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
+                                    is_dragging.set(true);
+                                    drag_progress.set(val);
                                 }
                             }
                         }
@@ -329,11 +294,7 @@ pub fn BottombarModern(
                                 is_muted.set(true);
                             }
                         },
-                        if *is_muted.read() {
-                            i { class: "fa-solid fa-volume-xmark text-[10px]" }
-                        } else {
-                            i { class: "fa-solid fa-volume-high text-[10px]" }
-                        }
+                        i { class: if *is_muted.read() { "fa-solid fa-volume-xmark text-[10px]" } else { "fa-solid fa-volume-high text-[10px]" } }
                     }
                     div {
                         class: "w-20 h-[3px] bg-white/10 rounded-full group/vol cursor-pointer relative",
@@ -363,42 +324,26 @@ pub fn BottombarModern(
                             class: "absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 bg-white rounded-full opacity-0 group-hover/vol:opacity-100 transition-opacity pointer-events-none -translate-x-1/2",
                             style: "left: {volume_percent}%",
                         }
-                        if crate::blitz_active() {
-                            crate::slider_overlay::BlitzSliderOverlay {
-                                segments: 20,
-                                on_set: move |f: f64| {
-                                    let val = f as f32;
+                        input {
+                            r#type: "range",
+                            min: "0",
+                            max: "1",
+                            step: "0.01",
+                            value: "{*volume.read()}",
+                            class: "absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer z-10",
+                            onchange: move |evt| {
+                                if let Ok(val) = evt.value().parse::<f32>() {
+                                    persisted_volume.set(val);
+                                    is_muted.set(val == 0.0);
+                                }
+                            },
+                            oninput: move |evt| {
+                                if let Ok(val) = evt.value().parse::<f32>() {
                                     player.write().set_volume(val);
                                     volume.set(val);
-                                    persisted_volume.set(val);
                                     is_muted.set(val == 0.0);
                                     if val > f32::EPSILON {
                                         volume_before_mute.set(val);
-                                    }
-                                },
-                            }
-                        } else {
-                            input {
-                                r#type: "range",
-                                min: "0",
-                                max: "1",
-                                step: "0.01",
-                                value: "{*volume.read()}",
-                                class: "absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer z-10",
-                                onchange: move |evt| {
-                                    if let Ok(val) = evt.value().parse::<f32>() {
-                                        persisted_volume.set(val);
-                                        is_muted.set(val == 0.0);
-                                    }
-                                },
-                                oninput: move |evt| {
-                                    if let Ok(val) = evt.value().parse::<f32>() {
-                                        player.write().set_volume(val);
-                                        volume.set(val);
-                                        is_muted.set(val == 0.0);
-                                        if val > f32::EPSILON {
-                                            volume_before_mute.set(val);
-                                        }
                                     }
                                 }
                             }

@@ -765,9 +765,7 @@ fn ServerHeroBanner(
                         div { class: "absolute inset-0 bg-gradient-to-r from-black/90 via-black/40 to-transparent" }
                     }
                 }
-                // Explicit z-index: blitz doesn't paint a positioned z-auto
-                // sibling above an earlier abspos layer; no-op in the webview.
-                div { class: "relative z-10 h-full flex flex-col justify-center p-8 md:p-12",
+                div { class: "relative h-full flex flex-col justify-center p-8 md:p-12",
                     span { class: "text-indigo-400 font-bold tracking-widest uppercase text-[10px] mb-3 flex items-center gap-2",
                         i { class: "fa-solid fa-star text-[8px]" }
                         "{i18n::t(\"featured_album\")}"
@@ -1018,14 +1016,7 @@ fn render_listen_now(
                 div { class: "grid grid-cols-[repeat(auto-fill,minmax(350px,1fr))] gap-4",
                     for (album_id, title, artist, cover_url) in jellyfin_shuffled.iter().skip(1).take(8).cloned() {
                         div {
-                            // overflow-hidden collapses the row to zero height under
-                            // blitz (a hidden-overflow flex container contributes no
-                            // content size to its grid track).
-                            class: if components::blitz_active() {
-                                "flex items-center bg-white/5 hover:bg-white/10 border border-white/5 rounded-2xl cursor-pointer transition-all duration-300 group pr-4"
-                            } else {
-                                "flex items-center bg-white/5 hover:bg-white/10 border border-white/5 rounded-2xl cursor-pointer transition-all duration-300 group overflow-hidden pr-4"
-                            },
+                            class: "flex items-center bg-white/5 hover:bg-white/10 border border-white/5 rounded-2xl cursor-pointer transition-all duration-300 group overflow-hidden pr-4",
                             onclick: {
                                 let id = album_id.clone();
                                 move |_| on_select_album.call(id.clone())

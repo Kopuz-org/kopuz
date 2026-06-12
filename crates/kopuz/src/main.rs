@@ -2077,20 +2077,6 @@ fn App() -> Element {
         document::Link { rel: "stylesheet", href: THEME_CSS }
         document::Link { rel: "stylesheet", href: TAILWIND_CSS }
         document::Link { rel: "stylesheet", href: REDUCED_ANIMATIONS_CSS }
-        if blitz_enabled() {
-            // Blitz doesn't restyle descendants when an ancestor gains :hover,
-            // so every group-hover reveal is unreachable (and `hidden
-            // group-hover:flex` buttons aren't even hit-testable). Pin those
-            // controls to their hovered state: reveals always on, the paired
-            // hide-on-hover row numbers off.
-            document::Style {
-                r#".group-hover\:opacity-100, .group-hover\/vol\:opacity-100 {{ opacity: 1 !important; }}
-                .group-hover\:flex {{ display: flex !important; }}
-                .group-hover\:inline-block {{ display: inline-block !important; }}
-                .group-hover\:hidden {{ display: none !important; }}
-                .group-hover\:opacity-0 {{ opacity: 0 !important; }}"#
-            }
-        }
         WindowsToolbarIconAssets {}
         // Font stylesheets injected declaratively rather than via a
         // document::Script: a Script is processed once but App re-renders
