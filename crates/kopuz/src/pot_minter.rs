@@ -92,7 +92,7 @@ window.__kopuzMinting = null;
 // throwing "Function@[native code]" on some webview setups).
 window.__kopuzDiag = function(m) {{ try {{ window.ipc.postMessage(JSON.stringify({{diag: '' + m}})); }} catch(e) {{}} }};
 
-window.__kopuzEnsureMinter = function() {{
+window.__kopuzEnsureMinter = function(quiet) {{
   var now = Date.now();
   if (window.__kopuzMinter && now < window.__kopuzMinterExp) return Promise.resolve(window.__kopuzMinter);
   if (window.__kopuzMinting) return window.__kopuzMinting;
@@ -140,7 +140,8 @@ window.__kopuzEnsureMinter = function() {{
     window.__kopuzDiag('integrity token negotiated (ttl=' + ttl + 's)');
     return minter;
     }} catch (e) {{
-      window.__kopuzDiag('ensureMinter FAILED at step=' + step + ' :: ' + ((e && e.stack) ? e.stack : ('' + e)));
+      var label = quiet ? 'ensureMinter warmup failed (will retry)' : 'ensureMinter FAILED';
+      window.__kopuzDiag(label + ' at step=' + step + ' :: ' + ((e && e.stack) ? e.stack : ('' + e)));
       throw e;
     }}
   }})();
@@ -177,7 +178,10 @@ setTimeout(function() {{
 // first track doesn't pay the negotiation. Best-effort, backs off, then stops.
 (function warm(n) {{
   if (!window.__KOPUZ_BGX || !window.__KOPUZ_BGX.BG) {{ if (n > 0) setTimeout(function() {{ warm(n - 1); }}, 500); return; }}
-  window.__kopuzEnsureMinter().catch(function() {{ if (n > 0) setTimeout(function() {{ warm(n - 1); }}, 2000); }});
+  // quiet while retries remain: the first snapshot right after page load is
+  // flaky, and a self-healing attempt shouldn't read as a failure. The LAST
+  // attempt (and every on-demand mint) reports loudly.
+  window.__kopuzEnsureMinter(n > 0).catch(function() {{ if (n > 0) setTimeout(function() {{ warm(n - 1); }}, 2000); }});
 }})(20);
 "#
     )
@@ -227,10 +231,17 @@ pub fn install_if_wanted<T: 'static>(target: &EventLoopWindowTarget<T>) {
             // the full JS stack, so a broken minter shows up in logs as more
             // than "Function@[native code]".
             if let Some(diag) = v.get("diag").and_then(|d| d.as_str()) {
-                // Failures at WARN; env dumps and success milestones (e.g.
-                // "integrity token negotiated") are routine — DEBUG.
+                // Real failures at WARN; the negotiation success at INFO so a
+                // boot whose first warmup attempt failed (the BotGuard
+                // snapshot is flaky right after page load) visibly resolves
+                // instead of ending on a scary warning; self-healing warmup
+                // retries and env dumps are routine — DEBUG.
                 if diag.contains("FAILED") || diag.contains("error") {
                     tracing::warn!(%diag, "pot-minter diagnostic");
+                } else if diag.contains("will retry") {
+                    tracing::debug!(%diag, "pot-minter diagnostic");
+                } else if diag.contains("integrity token negotiated") {
+                    tracing::info!(%diag, "pot-minter diagnostic");
                 } else {
                     tracing::debug!(%diag, "pot-minter diagnostic");
                 }
