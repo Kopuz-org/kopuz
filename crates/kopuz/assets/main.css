@@ -1,38 +1,5 @@
 /* App-wide styling */
 
-/* The blitz/native renderer's Stylo build treats ::file-selector-button as an
-   invalid selector, and one invalid selector drops the WHOLE selector list —
-   which kills Tailwind preflight's universal reset and form-control reset
-   (every button/input renders with UA chrome, margins/borders go unreset).
-   Re-state those resets with clean selectors, in the same @layer base slot,
-   so utility classes still override them exactly like the originals. Under
-   the webview these are identical duplicates — harmless. */
-@layer base {
-    *, ::after, ::before, ::backdrop {
-        box-sizing: border-box;
-        margin: 0;
-        padding: 0;
-        border: 0 solid;
-    }
-    button, input, select, optgroup, textarea {
-        font: inherit;
-        font-feature-settings: inherit;
-        font-variation-settings: inherit;
-        letter-spacing: inherit;
-        color: inherit;
-        border-radius: 0;
-        background-color: transparent;
-        opacity: 1;
-    }
-    button, input:where([type="button"], [type="reset"], [type="submit"]) {
-        appearance: button;
-    }
-    /* Browsers' UA sheets center button text; blitz's doesn't. */
-    button {
-        text-align: center;
-    }
-}
-
 /* Themed scrollbars — uses CSS vars so all themes apply automatically */
 ::-webkit-scrollbar {
     width: 6px;
