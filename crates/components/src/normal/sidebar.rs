@@ -344,10 +344,7 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
                         div {
                             class: "bg-white/5 p-1 rounded-xl flex relative h-10 items-center border border-white/5",
                             div {
-                                // top-1: explicit centering (h-8 in h-10) —
-                                // blitz mis-resolves an abspos auto-top static
-                                // position inside a centered flex row.
-                                class: "absolute top-1 h-8 bg-white/10 rounded-lg transition-all duration-300 ease-out",
+                                class: "absolute h-8 bg-white/10 rounded-lg transition-all duration-300 ease-out",
                                 style: "{slider_style}"
                             }
                             button {
