@@ -758,20 +758,20 @@ pub fn EqualizerPanel(
     let curve_stroke_style = if enabled {
         if highlighted_band.is_some() {
             if reduce_animations {
-                "stroke: rgb(129,140,248);".to_string()
+                "stroke: var(--color-indigo-400);".to_string()
             } else {
-                "stroke: rgb(129,140,248); transition: stroke 140ms ease-out;".to_string()
+                "stroke: var(--color-indigo-400); transition: stroke 140ms ease-out;".to_string()
             }
         } else if reduce_animations {
-            "stroke: rgb(99,102,241);".to_string()
+            "stroke: var(--color-indigo-500);".to_string()
         } else {
-            "stroke: rgb(99,102,241); transition: stroke 140ms ease-out;".to_string()
+            "stroke: var(--color-indigo-500); transition: stroke 140ms ease-out;".to_string()
         }
     } else if reduce_animations {
-        "stroke: rgb(123,131,214);"
+        "stroke: color-mix(in oklab, var(--color-indigo-500) 52%, var(--color-slate-400));"
             .to_string()
     } else {
-        "stroke: rgb(123,131,214); transition: stroke 180ms ease-out;"
+        "stroke: color-mix(in oklab, var(--color-indigo-500) 52%, var(--color-slate-400)); transition: stroke 180ms ease-out;"
             .to_string()
     };
 
@@ -940,11 +940,6 @@ pub fn EqualizerPanel(
                         dragging_band.set(None);
                         hovered_band.set(None);
                     },
-                    // SVG paints are resolved literals, not var()/color-mix():
-                    // the native renderer hands SVG attributes to usvg, which
-                    // can't evaluate CSS custom properties — every themed
-                    // paint fell back to black (and these parse on each
-                    // drag-frame redraw). Values = the default theme palette.
                     defs {
                         linearGradient {
                             id: "eq-curve-fill",
@@ -954,11 +949,11 @@ pub fn EqualizerPanel(
                             y2: "1",
                             stop {
                                 offset: "0%",
-                                style: "stop-color: rgba(129,140,248,0.34); stop-opacity: 1;",
+                                style: "stop-color: color-mix(in oklab, var(--color-indigo-400) 34%, transparent); stop-opacity: 1;",
                             }
                             stop {
                                 offset: "100%",
-                                style: "stop-color: rgba(99,102,241,0.03); stop-opacity: 1;",
+                                style: "stop-color: color-mix(in oklab, var(--color-indigo-500) 3%, transparent); stop-opacity: 1;",
                             }
                         }
                     }
@@ -971,9 +966,9 @@ pub fn EqualizerPanel(
                             stroke_width: if db == 0.0 { "1.5" } else { "1" },
                             stroke_dasharray: if db == 0.0 { "0" } else { "4 6" },
                             style: if db == 0.0 {
-                                "stroke: rgba(255,255,255,0.22);"
+                                "stroke: color-mix(in oklab, var(--color-white) 22%, transparent);"
                             } else {
-                                "stroke: rgba(148,163,184,0.16);"
+                                "stroke: color-mix(in oklab, var(--color-slate-400) 16%, transparent);"
                             },
                         }
                         text {
@@ -981,7 +976,7 @@ pub fn EqualizerPanel(
                             y: "{eq_gain_to_y(db as f32) + 4.0}",
                             font_size: "10",
                             font_family: "JetBrains Mono, monospace",
-                            style: "fill: rgba(148,163,184,0.72);",
+                            style: "fill: color-mix(in oklab, var(--color-slate-400) 72%, transparent);",
                             {format!("{:+.0}", db)}
                         }
                     }
@@ -992,7 +987,7 @@ pub fn EqualizerPanel(
                             y1: "{EQ_GRAPH_PAD_TOP}",
                             y2: "{EQ_GRAPH_HEIGHT - EQ_GRAPH_PAD_BOTTOM}",
                             stroke_width: "1",
-                            style: "stroke: rgba(100,116,139,0.34);",
+                            style: "stroke: color-mix(in oklab, var(--color-slate-500) 34%, transparent);",
                         }
                         text {
                             x: "{eq_band_x(index, BAND_LABELS.len())}",
@@ -1000,7 +995,7 @@ pub fn EqualizerPanel(
                             text_anchor: "middle",
                             font_size: "11",
                             font_family: "JetBrains Mono, monospace",
-                            style: "fill: rgba(255,255,255,0.58);",
+                            style: "fill: color-mix(in oklab, var(--color-white) 58%, transparent);",
                             "{label}"
                         }
                     }
@@ -1016,9 +1011,9 @@ pub fn EqualizerPanel(
                             y2: "{EQ_GRAPH_HEIGHT - EQ_GRAPH_PAD_BOTTOM}",
                             stroke_width: "1.5",
                             style: if reduce_animations {
-                                "stroke: rgba(129,140,248,0.34);"
+                                "stroke: color-mix(in oklab, var(--color-indigo-400) 34%, transparent);"
                             } else {
-                                "stroke: rgba(129,140,248,0.34); transition: stroke 140ms ease-out;"
+                                "stroke: color-mix(in oklab, var(--color-indigo-400) 34%, transparent); transition: stroke 140ms ease-out;"
                             },
                         }
                     }
@@ -1046,20 +1041,20 @@ pub fn EqualizerPanel(
                                     },
                                     style: if active_drag_band == Some(index) {
                                         if reduce_animations {
-                                            "fill: rgb(129,140,248);"
+                                            "fill: var(--color-indigo-400);"
                                         } else {
-                                            "fill: rgb(129,140,248); transition: r 140ms ease-out, fill 140ms ease-out;"
+                                            "fill: var(--color-indigo-400); transition: r 140ms ease-out, fill 140ms ease-out;"
                                         }
                                     } else if is_highlighted {
                                         if reduce_animations {
-                                            "fill: rgb(129,140,248);"
+                                            "fill: var(--color-indigo-400);"
                                         } else {
-                                            "fill: rgb(129,140,248); transition: r 140ms ease-out, fill 140ms ease-out;"
+                                            "fill: var(--color-indigo-400); transition: r 140ms ease-out, fill 140ms ease-out;"
                                         }
                                     } else if reduce_animations {
-                                        "fill: #ffffff;"
+                                        "fill: var(--color-white);"
                                     } else {
-                                        "fill: #ffffff; transition: r 140ms ease-out, fill 140ms ease-out;"
+                                        "fill: var(--color-white); transition: r 140ms ease-out, fill 140ms ease-out;"
                                     },
                                 }
                                 circle {
@@ -1070,20 +1065,20 @@ pub fn EqualizerPanel(
                                     stroke_width: "1",
                                     style: if active_drag_band == Some(index) {
                                         if reduce_animations {
-                                            "stroke: rgba(129,140,248,0.40);"
+                                            "stroke: color-mix(in oklab, var(--color-indigo-400) 40%, transparent);"
                                         } else {
-                                            "stroke: rgba(129,140,248,0.40); transition: r 140ms ease-out, stroke 140ms ease-out;"
+                                            "stroke: color-mix(in oklab, var(--color-indigo-400) 40%, transparent); transition: r 140ms ease-out, stroke 140ms ease-out;"
                                         }
                                     } else if is_highlighted {
                                         if reduce_animations {
-                                            "stroke: rgba(129,140,248,0.28);"
+                                            "stroke: color-mix(in oklab, var(--color-indigo-400) 28%, transparent);"
                                         } else {
-                                            "stroke: rgba(129,140,248,0.28); transition: r 140ms ease-out, stroke 140ms ease-out;"
+                                            "stroke: color-mix(in oklab, var(--color-indigo-400) 28%, transparent); transition: r 140ms ease-out, stroke 140ms ease-out;"
                                         }
                                     } else if reduce_animations {
-                                        "stroke: rgba(255,255,255,0.10);"
+                                        "stroke: color-mix(in oklab, var(--color-white) 10%, transparent);"
                                     } else {
-                                        "stroke: rgba(255,255,255,0.10); transition: r 140ms ease-out, stroke 140ms ease-out;"
+                                        "stroke: color-mix(in oklab, var(--color-white) 10%, transparent); transition: r 140ms ease-out, stroke 140ms ease-out;"
                                     },
                                 }
                             }
@@ -1102,7 +1097,7 @@ pub fn EqualizerPanel(
                                     ry: "10",
                                     width: "68",
                                     height: "24",
-                                    style: "fill: rgba(23,23,23,0.92); stroke: rgba(129,140,248,0.26);",
+                                    style: "fill: color-mix(in oklab, var(--color-neutral-900) 92%, transparent); stroke: color-mix(in oklab, var(--color-indigo-400) 26%, transparent);",
                                     stroke_width: "1",
                                 }
                                 text {
@@ -1112,7 +1107,7 @@ pub fn EqualizerPanel(
                                     font_size: "11",
                                     font_family: "JetBrains Mono, monospace",
                                     font_weight: "700",
-                                    style: "fill: #ffffff;",
+                                    style: "fill: var(--color-white);",
                                     {format!("{gain:+.1} dB")}
                                 }
                             }
