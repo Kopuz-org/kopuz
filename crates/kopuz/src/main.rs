@@ -980,7 +980,11 @@ fn App() -> Element {
         #[cfg(target_arch = "wasm32")]
         std::path::PathBuf::from("./cache")
     });
-    let mut config = use_signal(config::AppConfig::default);
+    // ROOT-owned: detached tasks (download workers, close-flush) read/write
+    // these after the spawning page — and in principle this component — is
+    // gone; owning them at ROOT keeps Dioxus's cross-scope lint honest.
+    let mut config =
+        use_hook(|| Signal::new_in_scope(config::AppConfig::default(), ScopeId::ROOT));
     let db = DB_HANDLE
         .get()
         .cloned()
@@ -1010,8 +1014,10 @@ fn App() -> Element {
     let cover_cache = use_memo(move || cache_dir().join("covers"));
     #[cfg(not(target_arch = "wasm32"))]
     let _ = std::fs::create_dir_all(cover_cache());
-    let download_queue = use_signal(DownloadQueue::default);
-    let download_progress = use_signal(::server::DownloadProgress::default);
+    let download_queue =
+        use_hook(|| Signal::new_in_scope(DownloadQueue::default(), ScopeId::ROOT));
+    let download_progress =
+        use_hook(|| Signal::new_in_scope(::server::DownloadProgress::default(), ScopeId::ROOT));
     pages::server::download_manager::register_progress_signal(download_progress);
     let mut trigger_rescan = use_signal(|| 0);
     // Applies detached yt-dlp completions (history + rescan) in this scope —
