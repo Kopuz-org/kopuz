@@ -185,9 +185,17 @@ live in kopuz. No kopuz-side workarounds for engine bugs anymore.
     Diagnosed with taffy's "debug" feature (algorithm trace) + pure-taffy
     repro at /tmp/taffy-repro.
 
-## Open in-app issues
-- Favorites list doesn't wheel-scroll (page-level Home scroll works);
-  VirtualScrollView inner scroller — not yet diagnosed.
+17. **Favorites wouldn't scroll → abspos hoisted through contents was
+    content-sized** (blitz a63f0a1): the all_out_of_flow early-return in
+    collect_layout_children wasn't contents-transparent (pushed the
+    contents node as a layout box; the abspos page laid out against it at
+    0x50517 — no scroll capacity anywhere), and the classification cleared
+    all_out_of_flow for contents children (transparency = no vote; the
+    recursion already visits their children). Extracted
+    push_hoisted_children_and_pseudos, reused in the Contents arm (which
+    gained ::before/::after support). WPT grid+flexbox: 1154 passes before
+    and after. Favorites/Library windowed lists scroll under blitz with
+    the ORIGINAL markup.
 
 ## Next experiments
 - File the still-broken findings (F9, F11, F12, F1, truncate, glyph swap)
