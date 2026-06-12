@@ -164,7 +164,10 @@ pub fn Album(
                                                 .await;
                                                 if !added.is_empty() {
                                                     let db = consume_context::<db::Db>();
-                                                    let store = db.load_playlists().await.unwrap_or_default();
+                                                    let store = db
+                                                        .load_playlists(Some(sid.as_str()))
+                                                        .await
+                                                        .unwrap_or_default();
                                                     if let Some(pl) = store
                                                         .jellyfin_playlists
                                                         .iter()
@@ -194,7 +197,7 @@ pub fn Album(
                                     } else {
                                         let db = consume_context::<db::Db>();
                                         spawn(async move {
-                                            let store = db.load_playlists().await.unwrap_or_default();
+                                            let store = db.load_playlists(None).await.unwrap_or_default();
                                             if let Some(playlist) =
                                                 store.playlists.iter().find(|p| p.id == playlist_id)
                                             {

@@ -1,7 +1,7 @@
 use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
-use hooks::use_db_queries::use_playlists;
+use hooks::use_db_queries::{use_active_server_id, use_playlists};
 use hooks::use_player_controller::PlayerController;
 use reader::Track;
 use std::collections::HashSet;
@@ -49,7 +49,8 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
     let mut selected_tracks = use_signal(HashSet::<PathBuf>::new);
     let mut metadata_track = use_signal(|| None::<Track>);
     let gens = hooks::db_reactivity::use_generations();
-    let playlists_res = use_playlists();
+    let active_server_id = use_active_server_id();
+    let playlists_res = use_playlists(active_server_id);
 
     let view_metadata_handler = if props.enable_metadata {
         let tracks_meta = props.tracks.clone();

@@ -27,7 +27,6 @@ pub fn PlaylistsPage(
     let mut playlist_refresh_trigger = use_signal(|| 0u64);
 
     let gens = hooks::db_reactivity::use_generations();
-    let playlists_res = use_playlists();
     let active_server_id = use_memo(move || {
         let c = config.read();
         c.active_server_id
@@ -35,6 +34,9 @@ pub fn PlaylistsPage(
             .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
             .unwrap_or_default()
     });
+    let playlists_server_id =
+        use_memo(move || Some(active_server_id()).filter(|id| !id.is_empty()));
+    let playlists_res = use_playlists(playlists_server_id);
     let server_source = use_memo(move || Source::Server(active_server_id()));
     let sel_server_refs = use_memo(move || {
         let store = playlists_res.read().clone().unwrap_or_default();

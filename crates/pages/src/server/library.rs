@@ -87,7 +87,9 @@ pub fn JellyfinLibrary(
     });
     let albums_res = use_albums(source);
     let artists_res = use_artists(source);
-    let playlists_res = use_playlists();
+    let playlists_server_id =
+        use_memo(move || Some(active_server_id()).filter(|id| !id.is_empty()));
+    let playlists_res = use_playlists(playlists_server_id);
 
     let mut fetch_jellyfin = move || {
         has_fetched.set(true);
@@ -118,7 +120,7 @@ pub fn JellyfinLibrary(
     });
 
     let displayed_tracks = use_memo(move || {
-        let tracks = window.rows.read().clone().unwrap_or_default();
+        let tracks = window.rows.read().clone().unwrap_or_default().rows;
         let conf = config.read();
         tracks
             .into_iter()
@@ -145,7 +147,13 @@ pub fn JellyfinLibrary(
 
     let total_tracks = *total_items.read();
     let is_empty = total_tracks == 0;
-    let row_offset = page().offset as usize;
+    let all_selected = !is_empty && selected_tracks.read().len() >= *total_items.read();
+    let row_offset = window
+        .rows
+        .read()
+        .as_ref()
+        .map(|w| w.offset)
+        .unwrap_or(0) as usize;
 
     let scroll_info = use_virtual_scroll(
         *scroll_stat.read(),
@@ -475,12 +483,7 @@ pub fn JellyfinLibrary(
             div { class: "flex items-center justify-between mb-4",
                 div { class: "flex items-center gap-3",
                     button {
-                        class: if !is_empty
-                            && displayed_tracks
-                                .read()
-                                .iter()
-                                .all(|(track, _)| selected_tracks.read().contains(&track.id.uid_path()))
-                        {
+                        class: if all_selected {
                             "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
                         } else {
                             "w-4 h-4 rounded border border-white/20 bg-white/5 hover:border-white/50 transition-colors"
@@ -488,8 +491,6 @@ pub fn JellyfinLibrary(
                         aria_label: "Select all tracks",
                         disabled: is_empty,
                         onclick: move |_| {
-                            let all_selected = !is_empty
-                                && selected_tracks.read().len() >= *total_items.read();
                             if all_selected {
                                 selected_tracks.write().clear();
                                 is_selection_mode.set(false);
@@ -508,7 +509,7 @@ pub fn JellyfinLibrary(
                                 });
                             }
                         },
-                        if !is_empty && selected_tracks.read().len() >= *total_items.read() {
+                        if all_selected {
                             i { class: "fa-solid fa-check", style: "font-size: 9px;" }
                         }
                     }

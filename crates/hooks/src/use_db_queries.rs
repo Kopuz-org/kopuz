@@ -17,11 +17,21 @@ use tracing::Instrument;
 
 use crate::db_reactivity::{Table, use_generations};
 
+/// One resolved window: the rows together with the offset they were queried
+/// at. The pairing matters — a `Resource` keeps its previous value while
+/// re-running, so rows labeled with the CURRENT page offset would briefly
+/// mislabel (and mis-play) the old window during a scroll.
+#[derive(Clone, Default, PartialEq)]
+pub struct WindowRows {
+    pub offset: u32,
+    pub rows: Vec<reader::Track>,
+}
+
 /// A windowed track listing: the visible `rows` plus the `total` match count
 /// (for the virtual-scroll spacer). Both are `Resource`s — `None` while loading.
 #[derive(Clone, Copy)]
 pub struct TracksWindow {
-    pub rows: Resource<Vec<reader::Track>>,
+    pub rows: Resource<WindowRows>,
     pub total: Resource<u32>,
 }
 
@@ -46,7 +56,10 @@ pub fn use_tracks_window(filter: Memo<TrackFilter>, page: Memo<Page>) -> TracksW
             async move {
                 let rows = db.tracks_page(&f, p).await.unwrap_or_default();
                 tracing::Span::current().record("rows", rows.len());
-                rows
+                WindowRows {
+                    offset: p.offset,
+                    rows,
+                }
             }
             .instrument(span)
         }
@@ -299,16 +312,36 @@ pub fn use_artists(source: Memo<Source>) -> Resource<Vec<(String, u32)>> {
     })
 }
 
-/// The playlist store (local + active server), re-queried on a playlists bump.
-pub fn use_playlists() -> Resource<reader::PlaylistStore> {
+/// The in-memory active server id, straight from the config signal in
+/// context — the persisted copy lags a server switch by the debounced save.
+pub fn use_active_server_id() -> Memo<Option<String>> {
+    let config = use_context::<Signal<config::AppConfig>>();
+    use_memo(move || {
+        let c = config.read();
+        c.active_server_id
+            .clone()
+            .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
+    })
+}
+
+/// The playlist store (local + the given active server), re-queried on a
+/// playlists bump or a server switch. `server_id` must be the IN-MEMORY
+/// active id (see [`use_active_server_id`]) — the persisted one lags a
+/// switch by the debounced config save.
+pub fn use_playlists(server_id: Memo<Option<String>>) -> Resource<reader::PlaylistStore> {
     let db = use_context::<Db>();
     let gens = use_generations();
     use_resource(move || {
         let _ = gens.generation(Table::Playlists);
         let _ = gens.generation(Table::Folders);
-        let db = db.clone();
-        let span = tracing::info_span!("query.playlists");
-        async move { db.load_playlists().await.unwrap_or_default() }.instrument(span)
+        let (db, sid) = (db.clone(), server_id());
+        let span = tracing::info_span!("query.playlists", server_id = ?sid);
+        async move {
+            db.load_playlists(sid.as_deref())
+                .await
+                .unwrap_or_default()
+        }
+        .instrument(span)
     })
 }
 

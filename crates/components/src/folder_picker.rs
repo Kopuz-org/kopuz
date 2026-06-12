@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
-use hooks::use_db_queries::use_playlists;
+use hooks::use_db_queries::{use_active_server_id, use_playlists};
 
 #[component]
 pub fn FolderPickerModal(
@@ -10,7 +10,8 @@ pub fn FolderPickerModal(
     let mut new_folder_name = use_signal(String::new);
     let mut show_create = use_signal(|| false);
     let gens = hooks::db_reactivity::use_generations();
-    let playlists_res = use_playlists();
+    let active_server_id = use_active_server_id();
+    let playlists_res = use_playlists(active_server_id);
 
     let folders = playlists_res
         .read()

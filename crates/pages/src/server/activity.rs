@@ -40,7 +40,7 @@ pub fn JellyfinLogs(config: Signal<AppConfig>) -> Element {
         .copied()
         .unwrap_or(0.0);
 
-    let scroll_stat = use_signal(|| 0.0_f64);
+    let scroll_stat = use_signal(move || saved_scroll);
     let container_height = use_signal(|| 0.0_f64);
     const ITEM_HEIGHT: f64 = 60.0;
 
@@ -81,12 +81,10 @@ pub fn JellyfinLogs(config: Signal<AppConfig>) -> Element {
             .as_ref()
             .map(|s| (s.url.clone(), s.access_token.clone()));
 
-        let offset = page().offset as usize;
-        window
+        let window_rows = window.rows.read().clone().unwrap_or_default();
+        let offset = window_rows.offset as usize;
+        window_rows
             .rows
-            .read()
-            .clone()
-            .unwrap_or_default()
             .into_iter()
             .enumerate()
             .map(|(i, track)| {

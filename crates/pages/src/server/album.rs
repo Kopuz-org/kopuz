@@ -256,10 +256,7 @@ pub fn JellyfinAlbumDetails(
     let mut selected_tracks = use_signal(|| HashSet::<PathBuf>::new());
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
-    let mut album_id_sig = use_signal(|| album_jellyfin_id.clone());
-    use_effect(move || {
-        album_id_sig.set(album_jellyfin_id.clone());
-    });
+    let album_id_memo = use_memo(use_reactive!(|album_jellyfin_id| album_jellyfin_id));
 
     let scroll_stat = use_signal(|| 0.0_f64);
     let container_height = use_signal(|| 0.0_f64);
@@ -273,7 +270,6 @@ pub fn JellyfinAlbumDetails(
             .unwrap_or_default()
     });
     let server_source = use_memo(move || Source::Server(active_server_id()));
-    let album_id_memo = use_memo(move || album_id_sig.read().clone());
     let album_res = use_album(server_source, album_id_memo);
     let albums_res = use_albums(server_source);
 

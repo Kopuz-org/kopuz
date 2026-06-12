@@ -31,7 +31,9 @@ pub fn JellyfinPlaylists(
             .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
             .unwrap_or_default()
     });
-    let playlists_res = use_playlists();
+    let playlists_server_id =
+        use_memo(move || Some(active_server_id()).filter(|id| !id.is_empty()));
+    let playlists_res = use_playlists(playlists_server_id);
     let server_source = use_memo(move || Source::Server(active_server_id()));
     let cover_keys = use_memo(move || -> Vec<String> {
         let store = playlists_res.read().clone().unwrap_or_default();
@@ -98,7 +100,7 @@ pub fn JellyfinPlaylists(
             }
 
             let has_cached = !db
-                .load_playlists()
+                .load_playlists(Some(sid.as_str()))
                 .await
                 .unwrap_or_default()
                 .jellyfin_playlists
@@ -218,7 +220,7 @@ pub fn JellyfinPlaylists(
 
                     {
                         let existing = db
-                            .load_playlists()
+                            .load_playlists(Some(sid.as_str()))
                             .await
                             .unwrap_or_default()
                             .jellyfin_playlists;
@@ -314,7 +316,7 @@ pub fn JellyfinPlaylists(
             }
 
             let existing = db
-                .load_playlists()
+                .load_playlists(Some(sid.as_str()))
                 .await
                 .unwrap_or_default()
                 .jellyfin_playlists;

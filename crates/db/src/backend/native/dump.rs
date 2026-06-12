@@ -57,11 +57,20 @@ pub async fn artist_images(pool: &SqlitePool) -> Result<ArtistImages, DbError> {
     Ok((server, local, custom))
 }
 
-pub async fn load_playlists(pool: &SqlitePool) -> Result<PlaylistStore, DbError> {
+pub async fn load_playlists(
+    pool: &SqlitePool,
+    active_server: Option<&str>,
+) -> Result<PlaylistStore, DbError> {
     // Scoped to local + the ACTIVE server: the in-memory store only ever
     // represents the active server, and the write side is scoped the same
-    // way — so other servers' rows are invisible to this load.
-    let active = active_server_id(pool).await.unwrap_or_default();
+    // way — so other servers' rows are invisible to this load. The caller
+    // passes the IN-MEMORY active id — the persisted blob lags a server
+    // switch by the debounced config save, which would briefly show the
+    // previous server's playlists under the new identity.
+    let active = match active_server {
+        Some(s) => s.to_owned(),
+        None => active_server_id(pool).await.unwrap_or_default(),
+    };
     let rows = sqlx::query!(
         "SELECT rowid_pk, source, source_pl_id, name, cover_path, image_tag \
          FROM playlists WHERE source = 'local' OR source = ?1 ORDER BY position",

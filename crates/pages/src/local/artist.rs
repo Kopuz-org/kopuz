@@ -7,7 +7,8 @@ use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{
-    use_albums, use_artist_images, use_artist_sample_tracks, use_artist_tracks, use_playlists,
+    use_active_server_id, use_albums, use_artist_images, use_artist_sample_tracks,
+    use_artist_tracks, use_playlists,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -31,7 +32,8 @@ pub fn LocalArtist(
     let artist_memo = use_memo(move || artist_name.read().clone());
     let artist_tracks_res = use_artist_tracks(source, artist_memo);
     let artist_images_res = use_artist_images();
-    let playlists_res = use_playlists();
+    let active_server_id = use_active_server_id();
+    let playlists_res = use_playlists(active_server_id);
     let sort_order = use_signal(move || config.read().artist_view_order.clone());
     use_effect(move || {
         let curr = sort_order.read().clone();

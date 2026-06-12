@@ -8,7 +8,9 @@ use config::{AppConfig, UiStyle};
 use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
-use hooks::use_db_queries::{use_albums, use_favorites, use_playlists, use_tracks_by_keys};
+use hooks::use_db_queries::{
+    use_active_server_id, use_albums, use_favorites, use_playlists, use_tracks_by_keys,
+};
 use hooks::use_player_controller::PlayerController;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -36,7 +38,8 @@ pub fn LocalFavorites(
     let favorites_res = use_favorites(local_sid);
     let fav_keys = use_memo(move || favorites_res.read().clone().unwrap_or_default());
     let fav_tracks_res = use_tracks_by_keys(source, fav_keys);
-    let playlists_res = use_playlists();
+    let active_server_id = use_active_server_id();
+    let playlists_res = use_playlists(active_server_id);
 
     let displayed_tracks: Vec<(reader::models::Track, Option<utils::CoverUrl>)> = {
         let album_covers: std::collections::HashMap<String, Option<utils::CoverUrl>> = albums_res

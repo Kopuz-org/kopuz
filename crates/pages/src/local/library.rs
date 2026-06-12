@@ -9,7 +9,9 @@ use config::{AppConfig, UiStyle};
 use db::{Page, Source, TrackFilter, TrackSort};
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
-use hooks::use_db_queries::{use_albums, use_artists, use_playlists, use_tracks_window};
+use hooks::use_db_queries::{
+    use_active_server_id, use_albums, use_artists, use_playlists, use_tracks_window,
+};
 use hooks::use_player_controller::PlayerController;
 use kopuz_route::Route;
 use std::collections::HashSet;
@@ -38,7 +40,8 @@ pub fn LocalLibrary(
     let source = use_memo(|| Source::Local);
     let albums_res = use_albums(source);
     let artists_res = use_artists(source);
-    let playlists_res = use_playlists();
+    let active_server_id = use_active_server_id();
+    let playlists_res = use_playlists(active_server_id);
     let mut scroll_positions = use_context::<Signal<std::collections::HashMap<Route, f64>>>();
     let saved_scroll = scroll_positions
         .peek()
@@ -113,12 +116,14 @@ pub fn LocalLibrary(
             .filter(|_| ctrl.queue.read().len() == total_tracks)
     };
     let tracks_nodes = {
-        let visible_tracks = window.rows.read().clone().unwrap_or_default();
-        visible_tracks
+        let window_rows = window.rows.read().clone().unwrap_or_default();
+        let row_offset = window_rows.offset as usize;
+        window_rows
+            .rows
             .into_iter()
             .enumerate()
             .map(|(i, track)| {
-                let idx = scroll_info.start_index + i;
+                let idx = row_offset + i;
                 let track_menu = track.clone();
                 let track_add = track.clone();
                 let track_queue = track.clone();
@@ -517,7 +522,13 @@ pub fn LocalLibrary(
                     scroll_positions.write().insert(Route::Library, scroll);
                 },
                 if is_empty {
-                    p { class: "text-slate-500 italic", "{i18n::t(\"no_tracks_found\")}" }
+                    if window.total.read().is_none() {
+                        div { class: "flex items-center justify-center py-12",
+                            i { class: "fa-solid fa-spinner fa-spin text-3xl text-white/20" }
+                        }
+                    } else {
+                        p { class: "text-slate-500 italic", "{i18n::t(\"no_tracks_found\")}" }
+                    }
                 } else {
                     {tracks_nodes.into_iter()}
                 }

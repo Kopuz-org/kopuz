@@ -65,24 +65,45 @@ pub fn JellyfinFavorites(
         let db = consume_context::<db::Db>();
         let sid = active_server_id();
         spawn(async move {
-            if is_ytmusic && nonce == 0 {
-                let stamps: Option<serde_json::Value> = db
-                    .meta_get("yt_sync", "timestamps")
-                    .await
-                    .ok()
-                    .flatten()
-                    .and_then(|s| serde_json::from_str(&s).ok());
-                // Stamp present, OR favorites rows already exist for this
-                // server (covers DBs migrated before the stamp was written) —
-                // either proves a prior sync; the reconciler keeps it fresh.
-                let already_synced = stamps
-                    .as_ref()
-                    .and_then(|v| v.get("last_yt_sync_at"))
-                    .and_then(|v| v.as_u64())
-                    .is_some()
-                    || !db.favorites(&sid).await.unwrap_or_default().is_empty();
-                if already_synced {
-                    return;
+            if nonce == 0 {
+                if is_ytmusic {
+                    let stamps: Option<serde_json::Value> = db
+                        .meta_get("yt_sync", "timestamps")
+                        .await
+                        .ok()
+                        .flatten()
+                        .and_then(|s| serde_json::from_str(&s).ok());
+                    // Stamp present, OR a CLEAN favorite row already exists for
+                    // this server (covers DBs migrated before the stamp was
+                    // written) — either proves a prior sync; the reconciler
+                    // keeps it fresh. Dirty rows don't count: a locally-hearted
+                    // never-pushed like must not suppress the initial import.
+                    let favorites = db.favorites(&sid).await.unwrap_or_default().len();
+                    let dirty = db.dirty_favorites(&sid).await.unwrap_or_default().len();
+                    let already_synced = stamps
+                        .as_ref()
+                        .and_then(|v| v.get("last_yt_sync_at"))
+                        .and_then(|v| v.as_u64())
+                        .is_some()
+                        || favorites > dirty;
+                    if already_synced {
+                        return;
+                    }
+                } else {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    let last_pull: u64 = db
+                        .meta_get("fav_pull", &sid)
+                        .await
+                        .ok()
+                        .flatten()
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0);
+                    if last_pull <= now && now - last_pull < 30 * 60 {
+                        return;
+                    }
                 }
             }
 
@@ -98,19 +119,30 @@ pub fn JellyfinFavorites(
             let url = server.url.clone();
             let source = Source::Server(sid.clone());
 
-            let _ids: Vec<String> = match server.service {
-                MusicService::Jellyfin => {
-                    let remote =
-                        JellyfinClient::new(&url, Some(&token), &device_id, Some(&user_id));
-                    remote
-                        .get_favorite_items()
-                        .await
-                        .map(|items| items.into_iter().map(|i| i.id).collect())
-                        .unwrap_or_default()
-                }
-                MusicService::Subsonic | MusicService::Custom => {
-                    let remote = SubsonicClient::new(&url, &user_id, &token);
-                    remote.get_starred_song_ids().await.unwrap_or_default()
+            match server.service {
+                MusicService::Jellyfin | MusicService::Subsonic | MusicService::Custom => {
+                    let ids: Vec<String> = if server.service == MusicService::Jellyfin {
+                        let remote =
+                            JellyfinClient::new(&url, Some(&token), &device_id, Some(&user_id));
+                        remote
+                            .get_favorite_items()
+                            .await
+                            .map(|items| items.into_iter().map(|i| i.id).collect())
+                            .unwrap_or_default()
+                    } else {
+                        let remote = SubsonicClient::new(&url, &user_id, &token);
+                        remote.get_starred_song_ids().await.unwrap_or_default()
+                    };
+                    // Mirror the reconciler's pull (see server::sync): dirty
+                    // local rows survive the replace.
+                    if db.replace_favorites_clean(&sid, &ids).await.is_ok() {
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+                        let _ = db.meta_put("fav_pull", &sid, &now.to_string()).await;
+                        gens.bump(Table::Favorites);
+                    }
                 }
                 MusicService::YtMusic => {
                     let yt =
@@ -191,15 +223,13 @@ pub fn JellyfinFavorites(
                             }
                             gens.bump(Table::Tracks);
                             gens.bump(Table::Albums);
-                            ids
                         }
                         Err(e) => {
                             tracing::warn!(error = %e, "YT favorites sync failed");
-                            Vec::new()
                         }
                     }
                 }
-            };
+            }
 
             is_syncing.set(false);
         }.instrument(tracing::info_span!("favorites.sync")));
@@ -534,26 +564,32 @@ pub fn JellyfinFavorites(
             }
 
             if is_empty && !*is_syncing.read() {
-                {
-                    let yt_anon = config
-                        .read()
-                        .server
-                        .as_ref()
-                        .map(|s| {
-                            s.service == config::MusicService::YtMusic && s.yt_anonymous
-                        })
-                        .unwrap_or(false);
-                    rsx! {
-                        div {
-                            class: "flex flex-col items-center justify-center h-64 text-slate-500 text-center px-6",
-                            if yt_anon {
-                                i { class: "fa-solid fa-right-to-bracket text-4xl mb-4 opacity-50" }
-                                p { class: "text-base", "{i18n::t(\"yt_anon_favorites\")}" }
-                            } else {
-                                i { class: "fa-regular fa-heart text-4xl mb-4 opacity-30" }
-                                p { class: "text-base", "{i18n::t(\"no_favorites\")}" }
-                                p { class: "text-sm mt-1 opacity-70",
-                                    "{i18n::t(\"heart_track_to_add_server\")}"
+                if fav_tracks_res.read().is_none() {
+                    div { class: "flex items-center justify-center py-12",
+                        i { class: "fa-solid fa-spinner fa-spin text-3xl text-white/20" }
+                    }
+                } else {
+                    {
+                        let yt_anon = config
+                            .read()
+                            .server
+                            .as_ref()
+                            .map(|s| {
+                                s.service == config::MusicService::YtMusic && s.yt_anonymous
+                            })
+                            .unwrap_or(false);
+                        rsx! {
+                            div {
+                                class: "flex flex-col items-center justify-center h-64 text-slate-500 text-center px-6",
+                                if yt_anon {
+                                    i { class: "fa-solid fa-right-to-bracket text-4xl mb-4 opacity-50" }
+                                    p { class: "text-base", "{i18n::t(\"yt_anon_favorites\")}" }
+                                } else {
+                                    i { class: "fa-regular fa-heart text-4xl mb-4 opacity-30" }
+                                    p { class: "text-base", "{i18n::t(\"no_favorites\")}" }
+                                    p { class: "text-sm mt-1 opacity-70",
+                                        "{i18n::t(\"heart_track_to_add_server\")}"
+                                    }
                                 }
                             }
                         }

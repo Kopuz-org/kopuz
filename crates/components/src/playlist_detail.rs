@@ -22,7 +22,13 @@ pub fn PlaylistDetail(
     let mut tracks = use_signal(Vec::<reader::models::Track>::new);
     let mut has_loaded_jellyfin_tracks = use_signal(|| false);
     let gens = hooks::db_reactivity::use_generations();
-    let playlists_res = use_playlists();
+    let active_server_id = use_memo(move || {
+        let conf = config.read();
+        conf.active_server_id
+            .clone()
+            .or_else(|| conf.server.as_ref().and_then(|s| s.id.clone()))
+    });
+    let playlists_res = use_playlists(active_server_id);
     let source_local = use_memo(|| Source::Local);
     let albums_res = use_albums(source_local);
 
@@ -96,26 +102,10 @@ pub fn PlaylistDetail(
         }
     });
 
-    let store_loading = playlists_res.read().is_none();
-    let store = playlists_res.read().clone().unwrap_or_default();
-    let (playlist_name, is_jellyfin, playlist_custom_cover, playlist_image_tag) =
-        if let Some(p) = store.playlists.iter().find(|p| p.id == playlist_id) {
-            (p.name.clone(), false, p.cover_path.clone(), None::<String>)
-        } else if let Some(p) = store
-            .jellyfin_playlists
-            .iter()
-            .find(|p| p.id == playlist_id)
-        {
-            (p.name.clone(), true, p.cover_path.clone(), p.image_tag.clone())
-        } else if store_loading {
-            return rsx! { div {} };
-        } else {
-            return rsx! { div { "{i18n::t(\"playlist_not_found\")}" } };
-        };
-
-    if is_jellyfin {
-        let pid = playlist_id.clone();
-        use_effect(move || {
+    let pid = playlist_id.clone();
+    use_effect(move || {
+        let is_j = seed_refs.read().0;
+        if is_j {
             if !*has_loaded_jellyfin_tracks.read() {
                 let pid_clone = pid.clone();
                 let load_span =
@@ -277,8 +267,25 @@ pub fn PlaylistDetail(
                     }
                 }.instrument(load_span));
             }
-        });
-    }
+        }
+    });
+
+    let store_loading = playlists_res.read().is_none();
+    let store = playlists_res.read().clone().unwrap_or_default();
+    let (playlist_name, is_jellyfin, playlist_custom_cover, playlist_image_tag) =
+        if let Some(p) = store.playlists.iter().find(|p| p.id == playlist_id) {
+            (p.name.clone(), false, p.cover_path.clone(), None::<String>)
+        } else if let Some(p) = store
+            .jellyfin_playlists
+            .iter()
+            .find(|p| p.id == playlist_id)
+        {
+            (p.name.clone(), true, p.cover_path.clone(), p.image_tag.clone())
+        } else if store_loading {
+            return rsx! { div {} };
+        } else {
+            return rsx! { div { "{i18n::t(\"playlist_not_found\")}" } };
+        };
 
     let tracks_val = tracks.read().clone();
 

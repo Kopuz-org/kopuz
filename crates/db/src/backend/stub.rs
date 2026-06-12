@@ -224,7 +224,10 @@ impl Storage for Stub {
         Ok(crate::QueueSnapshot::default())
     }
 
-    async fn load_playlists(&self) -> Result<reader::PlaylistStore, DbError> {
+    async fn load_playlists(
+        &self,
+        _active_server: Option<&str>,
+    ) -> Result<reader::PlaylistStore, DbError> {
         Ok(reader::PlaylistStore::default())
     }
 

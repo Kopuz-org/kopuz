@@ -326,8 +326,11 @@ impl Storage for Native {
         dump::load_queue(&self.pool()).await
     }
 
-    async fn load_playlists(&self) -> Result<reader::PlaylistStore, DbError> {
-        dump::load_playlists(&self.pool()).await
+    async fn load_playlists(
+        &self,
+        active_server: Option<&str>,
+    ) -> Result<reader::PlaylistStore, DbError> {
+        dump::load_playlists(&self.pool(), active_server).await
     }
 
     async fn save_queue(&self, snap: &crate::QueueSnapshot) -> Result<(), DbError> {

@@ -84,7 +84,9 @@ pub fn JellyfinHome(
     });
     let server_source = use_memo(move || Source::Server(active_server_id()));
     let albums_res = use_albums(server_source);
-    let playlists_res = use_playlists();
+    let playlists_server_id =
+        use_memo(move || Some(active_server_id()).filter(|id| !id.is_empty()));
+    let playlists_res = use_playlists(playlists_server_id);
     let offline_keys = use_memo(move || -> Vec<String> {
         if !*is_offline.read() {
             return Vec::new();

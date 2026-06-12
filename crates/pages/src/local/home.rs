@@ -3,8 +3,8 @@ use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{
-    use_album_tracks, use_albums, use_artist_images, use_favorites, use_playlists,
-    use_recent_albums, use_top_genre, use_tracks_by_keys,
+    use_active_server_id, use_album_tracks, use_albums, use_artist_images, use_favorites,
+    use_playlists, use_recent_albums, use_top_genre, use_tracks_by_keys,
 };
 use rand::rng;
 use rand::seq::SliceRandom;
@@ -54,7 +54,8 @@ pub fn LocalHome(
     let albums_res = use_albums(source);
     let recent_albums_res = use_recent_albums(source, 20);
     let artist_images_res = use_artist_images();
-    let playlists_res = use_playlists();
+    let active_server_id = use_active_server_id();
+    let playlists_res = use_playlists(active_server_id);
     let recent_keys = use_memo(move || config.read().recently_played.clone());
     let recent_tracks_res = use_tracks_by_keys(source, recent_keys);
     let top_genre_res = use_top_genre(source);

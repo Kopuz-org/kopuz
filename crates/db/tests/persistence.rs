@@ -99,7 +99,7 @@ async fn playlists_round_trip() {
     .await
     .unwrap();
 
-    let store = db.load_playlists().await.unwrap();
+    let store = db.load_playlists(None).await.unwrap();
     assert_eq!(store.playlists.len(), 1);
     assert_eq!(store.playlists[0].id, "pl-1");
     assert_eq!(store.playlists[0].name, "Mine");
@@ -216,14 +216,14 @@ async fn active_server_writes_never_touch_other_servers_rows() {
     );
 
     // load_playlists only sees local + ACTIVE rows: srv-1 first...
-    let store = db.load_playlists().await.unwrap();
+    let store = db.load_playlists(None).await.unwrap();
     assert_eq!(store.jellyfin_playlists.len(), 1);
     assert_eq!(store.jellyfin_playlists[0].id, "LM");
     assert_eq!(store.jellyfin_playlists[0].tracks, vec!["VID1"]);
 
     // ...then switch the active server to srv-other to see its playlist survived.
     seed_active_server(&db, "srv-other").await;
-    let store = db.load_playlists().await.unwrap();
+    let store = db.load_playlists(None).await.unwrap();
     assert_eq!(
         store.jellyfin_playlists.len(),
         1,

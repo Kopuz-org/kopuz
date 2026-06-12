@@ -332,7 +332,12 @@ pub trait Storage: Send + Sync {
     /// The `PlaylistStore` shape (local + ACTIVE-server playlists + folders) —
     /// the read side of the playlists UI (`use_playlists`). Writes go through
     /// the playlist-scoped ops, never a whole-store save.
-    async fn load_playlists(&self) -> Result<reader::PlaylistStore, DbError>;
+    /// The playlist store scoped to local + `active_server` (the caller's
+    /// in-memory active id; `None` falls back to the persisted blob's).
+    async fn load_playlists(
+        &self,
+        active_server: Option<&str>,
+    ) -> Result<reader::PlaylistStore, DbError>;
 
     /// Persist the queue/progress snapshot to the single `queue_state` row.
     async fn save_queue(&self, snap: &QueueSnapshot) -> Result<(), DbError>;

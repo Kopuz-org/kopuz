@@ -86,11 +86,10 @@ pub fn LocalLogs(config: Signal<AppConfig>) -> Element {
     let visible_tracks: Vec<(usize, Track, u64, String, Option<CoverUrl>)> = {
         let conf = config.read();
         let albums = album_map.read();
-        window
+        let window_rows = window.rows.read().clone().unwrap_or_default();
+        let row_offset = window_rows.offset as usize;
+        window_rows
             .rows
-            .read()
-            .clone()
-            .unwrap_or_default()
             .into_iter()
             .enumerate()
             .map(|(i, track)| {
@@ -100,7 +99,7 @@ pub fn LocalLogs(config: Signal<AppConfig>) -> Element {
                     .copied()
                     .unwrap_or(0);
                 let (genre, cover_url) = albums.get(&track.album_id).cloned().unwrap_or_default();
-                (scroll_info.start_index + i, track, plays, genre, cover_url)
+                (row_offset + i, track, plays, genre, cover_url)
             })
             .collect()
     };
@@ -157,9 +156,15 @@ pub fn LocalLogs(config: Signal<AppConfig>) -> Element {
                         scroll_positions.write().insert(Route::Activity, scroll);
                     },
                     if track_data_len == 0 {
-                        div { class: "flex flex-col items-center justify-center py-24 text-slate-500",
-                            i { class: "fa-solid fa-headphones text-4xl mb-4 opacity-50" }
-                            p { "{i18n::t(\"no_tracks_in_library\")}" }
+                        if window.total.read().is_none() {
+                            div { class: "flex items-center justify-center py-12",
+                                i { class: "fa-solid fa-spinner fa-spin text-3xl text-white/20" }
+                            }
+                        } else {
+                            div { class: "flex flex-col items-center justify-center py-24 text-slate-500",
+                                i { class: "fa-solid fa-headphones text-4xl mb-4 opacity-50" }
+                                p { "{i18n::t(\"no_tracks_in_library\")}" }
+                            }
                         }
                     } else {
                         for (idx, track, plays, genre, cover_url) in visible_tracks {
