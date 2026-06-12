@@ -303,7 +303,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                 }
                                 let columns = if props.is_album { COLUMNS_MODERN_ALBUM } else { COLUMNS_MODERN };
                                 rsx! {
-                                    div { key: "{track.id.uid()}", class: if crate::blitz_active() { "" } else { "contents" },
+                                    div { key: "{track.id.uid()}", class: "contents",
                                     div { class: "flex items-center group",
                                         if has_multiple_discs && props.is_album && is_new_disc && sort_state.peek().is_none() {
                                             div { class: "flex-1 min-w-0",

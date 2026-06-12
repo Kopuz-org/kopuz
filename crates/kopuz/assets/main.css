@@ -1,34 +1,17 @@
 /* App-wide styling */
 
-/* Themed scrollbars — uses CSS vars so all themes apply automatically */
-
-/* Standard css-scrollbars-1 form (blitz; inherited from the root).
-   Transparent track == the black ::-webkit-scrollbar-track below on the
-   app's black background. */
+/* Themed scrollbars — standard css-scrollbars-1, identical in both
+   renderers (engines render their overlay scrollbars with these colors).
+   Inherited from the root; uses CSS vars so themes apply automatically. */
 html {
     scrollbar-color: var(--color-slate-500, #64748b) transparent;
 }
 
-::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
-}
-
-::-webkit-scrollbar-track {
-    background: var(--color-black, #000000);
-}
-
-::-webkit-scrollbar-thumb {
-    background: var(--color-slate-500, #64748b);
-    border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-    background: var(--color-slate-400, #94a3b8);
-}
-
-::-webkit-scrollbar-corner {
-    background: var(--color-black, #000000);
+/* Referenced throughout the markup; previously undefined (a Tailwind
+   plugin class that was never installed), so the webview showed its
+   scrollbars on these elements by accident. */
+.scrollbar-hide {
+    scrollbar-width: none;
 }
 
 @keyframes scan-slide {
