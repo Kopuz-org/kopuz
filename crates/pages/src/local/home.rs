@@ -67,7 +67,7 @@ pub fn LocalHome(
     let new_release_albums = use_memo(move || {
         let lib = library.read();
         let mut albums = lib.albums.clone();
-        albums.sort_by(|a, b| b.year.cmp(&a.year));
+        albums.sort_by_key(|b| std::cmp::Reverse(b.year));
         let mut unique_albums = Vec::new();
         let mut seen_titles = std::collections::HashSet::new();
         for album in albums {
@@ -193,10 +193,10 @@ pub fn LocalHome(
                 } else if is_unknown_artist(&track.artist) {
                     continue;
                 }
-                if let Some(ref a) = album {
-                    if !seen_albums.insert(a.id.clone()) {
-                        continue;
-                    }
+                if let Some(ref a) = album
+                    && !seen_albums.insert(a.id.clone())
+                {
+                    continue;
                 }
                 out.push(((*track).clone(), album));
                 if out.len() >= 10 {
@@ -356,9 +356,8 @@ pub fn LocalHome(
                                                 disabled: idx == 0,
                                                 onclick: move |_| {
                                                     let mut conf = config.write();
-                                                    if let Some(i) = conf.home_sections.iter().position(|s| s.key == key_up) {
-                                                        if i > 0 { conf.home_sections.swap(i, i - 1); }
-                                                    }
+                                                    if let Some(i) = conf.home_sections.iter().position(|s| s.key == key_up)
+                                                        && i > 0 { conf.home_sections.swap(i, i - 1); }
                                                 },
                                                 i { class: "fa-solid fa-chevron-up text-xs" }
                                             }
@@ -368,9 +367,8 @@ pub fn LocalHome(
                                                 disabled: idx + 1 >= total,
                                                 onclick: move |_| {
                                                     let mut conf = config.write();
-                                                    if let Some(i) = conf.home_sections.iter().position(|s| s.key == key_down) {
-                                                        if i + 1 < conf.home_sections.len() { conf.home_sections.swap(i, i + 1); }
-                                                    }
+                                                    if let Some(i) = conf.home_sections.iter().position(|s| s.key == key_down)
+                                                        && i + 1 < conf.home_sections.len() { conf.home_sections.swap(i, i + 1); }
                                                 },
                                                 i { class: "fa-solid fa-chevron-down text-xs" }
                                             }
@@ -574,10 +572,10 @@ fn LocalHeroBanner(
             if !track.title.trim().is_empty() {
                 return track.title.clone();
             }
-            if let Some(album) = album_opt.as_ref() {
-                if !is_unknown_album(&album.title) {
-                    return album.title.clone();
-                }
+            if let Some(album) = album_opt.as_ref()
+                && !is_unknown_album(&album.title)
+            {
+                return album.title.clone();
             }
             track.title.clone()
         })
@@ -664,9 +662,7 @@ fn LocalHeroBanner(
                                             let new_fav = !local_hero_fav;
                                             for track in tracks {
                                                 let currently = favorites_store.read().is_local_favorite(&track.path);
-                                                if new_fav && !currently {
-                                                    favorites_store.write().toggle_local(track.path);
-                                                } else if !new_fav && currently {
+                                                if currently != new_fav {
                                                     favorites_store.write().toggle_local(track.path);
                                                 }
                                             }
@@ -950,6 +946,7 @@ fn render_top_artists(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_albums_row(
     scroll_id: &'static str,
     title: String,

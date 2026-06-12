@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use components::track_row::TrackRow;
 use config::{AppConfig, MusicService};
 use dioxus::prelude::*;
 use reader::models::{Library, Track};
 use server::ytmusic::discover::{DiscoverHome, DiscoverItem, DiscoverShelf, YtArtist};
-use components::track_row::TrackRow;
 use std::path::PathBuf;
 use tracing::Instrument;
 
@@ -60,27 +60,30 @@ pub fn DiscoverPage(
             return;
         }
         let home_span = tracing::info_span!("discover.load_home");
-        spawn(async move {
-            let token = config
-                .peek()
-                .server
-                .as_ref()
-                .and_then(|s| s.access_token.clone());
-            let Some(token) = token else {
-                error.set(Some("not signed in".to_string()));
-                initial_loading.set(false);
-                return;
-            };
-            let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(token);
-            match yt.discover_home().await {
-                Ok(home) => {
-                    apply_home(home, &mut shelves, &mut continuation);
-                    error.set(None);
+        spawn(
+            async move {
+                let token = config
+                    .peek()
+                    .server
+                    .as_ref()
+                    .and_then(|s| s.access_token.clone());
+                let Some(token) = token else {
+                    error.set(Some("not signed in".to_string()));
+                    initial_loading.set(false);
+                    return;
+                };
+                let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(token);
+                match yt.discover_home().await {
+                    Ok(home) => {
+                        apply_home(home, &mut shelves, &mut continuation);
+                        error.set(None);
+                    }
+                    Err(e) => error.set(Some(e)),
                 }
-                Err(e) => error.set(Some(e)),
+                initial_loading.set(false);
             }
-            initial_loading.set(false);
-        }.instrument(home_span));
+            .instrument(home_span),
+        );
     });
 
     if !is_ytmusic {
@@ -100,21 +103,24 @@ pub fn DiscoverPage(
         }
         loading_more.set(true);
         let more_span = tracing::info_span!("discover.load_more");
-        spawn(async move {
-            let cookies = config
-                .peek()
-                .server
-                .as_ref()
-                .and_then(|s| s.access_token.clone());
-            if let Some(cookies) = cookies {
-                let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
-                match yt.discover_continuation(&token).await {
-                    Ok(home) => apply_home(home, &mut shelves, &mut continuation),
-                    Err(e) => error.set(Some(e)),
+        spawn(
+            async move {
+                let cookies = config
+                    .peek()
+                    .server
+                    .as_ref()
+                    .and_then(|s| s.access_token.clone());
+                if let Some(cookies) = cookies {
+                    let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
+                    match yt.discover_continuation(&token).await {
+                        Ok(home) => apply_home(home, &mut shelves, &mut continuation),
+                        Err(e) => error.set(Some(e)),
+                    }
                 }
+                loading_more.set(false);
             }
-            loading_more.set(false);
-        }.instrument(more_span));
+            .instrument(more_span),
+        );
     };
 
     use_effect(move || {
@@ -385,8 +391,13 @@ fn DiscoverTile(
     match item {
         DiscoverItem::Song(track) => {
             rsx! { SongCard { track: track.clone() } }
-        },
-        DiscoverItem::Playlist { playlist_id, title, subtitle, thumbnail } => {
+        }
+        DiscoverItem::Playlist {
+            playlist_id,
+            title,
+            subtitle,
+            thumbnail,
+        } => {
             let title_for_click = title.clone();
             let pid_for_play = playlist_id.clone();
             let pid_for_source = playlist_id.clone();
@@ -405,8 +416,13 @@ fn DiscoverTile(
                     source_id: Some(pid_for_source),
                 }
             }
-        },
-        DiscoverItem::Album { browse_id, title, subtitle, thumbnail } => {
+        }
+        DiscoverItem::Album {
+            browse_id,
+            title,
+            subtitle,
+            thumbnail,
+        } => {
             let title_for_click = title.clone();
             let bid_for_play = browse_id.clone();
             let bid_for_source = browse_id.clone();
@@ -425,8 +441,12 @@ fn DiscoverTile(
                     source_id: Some(bid_for_source),
                 }
             }
-        },
-        DiscoverItem::Artist { channel_id, name, thumbnail } => {
+        }
+        DiscoverItem::Artist {
+            channel_id,
+            name,
+            thumbnail,
+        } => {
             let cid = channel_id.clone();
             let name_for_click = name.clone();
             rsx! {
@@ -440,8 +460,10 @@ fn DiscoverTile(
                     source_id: None,
                 }
             }
-        },
-        DiscoverItem::Mood { title, thumbnail, .. } => rsx! {
+        }
+        DiscoverItem::Mood {
+            title, thumbnail, ..
+        } => rsx! {
             Card {
                 title: title,
                 subtitle: String::new(),
@@ -484,85 +506,87 @@ fn play_playlist_async(
         return;
     }
     let play_span = tracing::info_span!("discover.play_playlist", playlist_id = %id);
-    spawn(async move {
-        let mut cache_writer = cache;
-        // Shared failure path: release is_loading AND let go of the
-        // now_playing tag so the tile drops out of phantom-pause state
-        // and a subsequent click can retry through the normal play path
-        // rather than landing on ctrl.toggle() against an unrelated
-        // currently-playing track.
-        let fail = |ctrl: &mut hooks::use_player_controller::PlayerController,
-                    now_playing: &mut Signal<Option<String>>| {
-            ctrl.is_loading.set(false);
-            now_playing.set(None);
-        };
-        let Some(cookies) = config
-            .peek()
-            .server
-            .as_ref()
-            .and_then(|s| s.access_token.clone())
-        else {
-            fail(&mut ctrl, &mut now_playing);
-            return;
-        };
-        let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
+    spawn(
+        async move {
+            let mut cache_writer = cache;
+            // Shared failure path: release is_loading AND let go of the
+            // now_playing tag so the tile drops out of phantom-pause state
+            // and a subsequent click can retry through the normal play path
+            // rather than landing on ctrl.toggle() against an unrelated
+            // currently-playing track.
+            let fail = |ctrl: &mut hooks::use_player_controller::PlayerController,
+                        now_playing: &mut Signal<Option<String>>| {
+                ctrl.is_loading.set(false);
+                now_playing.set(None);
+            };
+            let Some(cookies) = config
+                .peek()
+                .server
+                .as_ref()
+                .and_then(|s| s.access_token.clone())
+            else {
+                fail(&mut ctrl, &mut now_playing);
+                return;
+            };
+            let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
 
-        // Albums come back in a single browse hit. Playlists give the
-        // first ~100 rows on the initial browse and paginate the rest
-        // via continuation tokens — stream them so the first batch can
-        // start playing instantly while the tail fills in.
-        if id.starts_with("MPRE") {
-            match yt.fetch_album_tracks(&id).await {
-                Ok(tracks) if !tracks.is_empty() => {
-                    // Warm the cache for the next click on the same
-                    // tile — without this the MPRE branch repaid full
-                    // network roundtrip for every cold click.
-                    cache_writer.write().insert(id, tracks.clone());
-                    ctrl.play_queue_linear(tracks);
+            // Albums come back in a single browse hit. Playlists give the
+            // first ~100 rows on the initial browse and paginate the rest
+            // via continuation tokens — stream them so the first batch can
+            // start playing instantly while the tail fills in.
+            if id.starts_with("MPRE") {
+                match yt.fetch_album_tracks(&id).await {
+                    Ok(tracks) if !tracks.is_empty() => {
+                        // Warm the cache for the next click on the same
+                        // tile — without this the MPRE branch repaid full
+                        // network roundtrip for every cold click.
+                        cache_writer.write().insert(id, tracks.clone());
+                        ctrl.play_queue_linear(tracks);
+                    }
+                    _ => fail(&mut ctrl, &mut now_playing),
                 }
-                _ => fail(&mut ctrl, &mut now_playing),
+                return;
             }
-            return;
-        }
 
-        let mut started = false;
-        let mut accumulated = Vec::<Track>::new();
-        let result = yt
-            .stream_playlist_entries(&id, |batch| {
-                if batch.is_empty() {
-                    return;
-                }
-                accumulated.extend(batch.iter().cloned());
-                if started {
-                    ctrl.add_to_queue(batch);
-                } else {
-                    ctrl.play_queue_linear(batch);
-                    started = true;
-                }
-            })
-            .await;
-        if !started {
-            fail(&mut ctrl, &mut now_playing);
-            return;
-        }
-        // Only cache when the WHOLE playlist successfully streamed. A
-        // mid-stream failure (continuation 5xx, network blip) yields a
-        // truncated `accumulated` — caching it would poison every
-        // future click on this tile with the partial copy, with no UI
-        // affordance to refresh. Surface the failure to the user so
-        // they can retry from the playlist viewer.
-        match result {
-            Ok(()) => {
-                cache_writer.write().insert(id, accumulated);
+            let mut started = false;
+            let mut accumulated = Vec::<Track>::new();
+            let result = yt
+                .stream_playlist_entries(&id, |batch| {
+                    if batch.is_empty() {
+                        return;
+                    }
+                    accumulated.extend(batch.iter().cloned());
+                    if started {
+                        ctrl.add_to_queue(batch);
+                    } else {
+                        ctrl.play_queue_linear(batch);
+                        started = true;
+                    }
+                })
+                .await;
+            if !started {
+                fail(&mut ctrl, &mut now_playing);
+                return;
             }
-            Err(e) => {
-                tracing::warn!(error = %e, "discover playlist stream errored mid-flight");
-                ctrl.playback_error.set(Some(format!(
-                    "Discover playlist failed mid-load:\n{e}"
-                )));
+            // Only cache when the WHOLE playlist successfully streamed. A
+            // mid-stream failure (continuation 5xx, network blip) yields a
+            // truncated `accumulated` — caching it would poison every
+            // future click on this tile with the partial copy, with no UI
+            // affordance to refresh. Surface the failure to the user so
+            // they can retry from the playlist viewer.
+            match result {
+                Ok(()) => {
+                    cache_writer.write().insert(id, accumulated);
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "discover playlist stream errored mid-flight");
+                    ctrl.playback_error
+                        .set(Some(format!("Discover playlist failed mid-load:\n{e}")));
+                }
             }
         }
-    }.instrument(play_span));
+        .instrument(play_span),
+    );
 }
 
 #[component]
@@ -588,7 +612,11 @@ fn Card(
     } else {
         "w-44 h-44 rounded-lg bg-white/5"
     };
-    let cover_radius = if rounded_full { "rounded-full" } else { "rounded-lg" };
+    let cover_radius = if rounded_full {
+        "rounded-full"
+    } else {
+        "rounded-lg"
+    };
     let now_playing = use_context::<DiscoverNowPlaying>().0;
     let mut cache = use_context::<DiscoverPrefetchCache>().0;
     let config_ctx = use_context::<Signal<AppConfig>>();
@@ -865,34 +893,37 @@ fn play_song_with_mix(
         return;
     }
     let song_span = tracing::info_span!("discover.play_song", video_id = %video_id);
-    spawn(async move {
-        let Some(cookies) = config
-            .peek()
-            .server
-            .as_ref()
-            .and_then(|s| s.access_token.clone())
-        else {
-            ctrl.is_loading.set(false);
-            now_playing.set(None);
-            return;
-        };
-        let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
-        match yt.start_mix(&video_id).await {
-            Ok(mix) if !mix.is_empty() => {
-                let mut cache_writer = cache;
-                cache_writer.write().insert(video_id, mix.clone());
-                let queue = build_song_queue(&seed, mix);
-                ctrl.play_queue_linear(queue);
-            }
-            _ => {
-                // Mix failed → at least play the seed alone so the user
-                // gets the song they clicked, even if "next" won't work.
-                // now_playing stays as the video_id so the tile shows
-                // pause overlay for the seed song that IS now playing.
-                ctrl.play_queue_linear(vec![seed]);
+    spawn(
+        async move {
+            let Some(cookies) = config
+                .peek()
+                .server
+                .as_ref()
+                .and_then(|s| s.access_token.clone())
+            else {
+                ctrl.is_loading.set(false);
+                now_playing.set(None);
+                return;
+            };
+            let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
+            match yt.start_mix(&video_id).await {
+                Ok(mix) if !mix.is_empty() => {
+                    let mut cache_writer = cache;
+                    cache_writer.write().insert(video_id, mix.clone());
+                    let queue = build_song_queue(&seed, mix);
+                    ctrl.play_queue_linear(queue);
+                }
+                _ => {
+                    // Mix failed → at least play the seed alone so the user
+                    // gets the song they clicked, even if "next" won't work.
+                    // now_playing stays as the video_id so the tile shows
+                    // pause overlay for the seed song that IS now playing.
+                    ctrl.play_queue_linear(vec![seed]);
+                }
             }
         }
-    }.instrument(song_span));
+        .instrument(song_span),
+    );
 }
 
 /// Put the seed at index 0 and append the rest of the mix. The seed
@@ -908,7 +939,12 @@ fn build_song_queue(seed: &Track, mix: Vec<Track>) -> Vec<Track> {
         .into_iter()
         .partition(|t| seed_vid.is_some() && track_video_id(t) == seed_vid);
     let mut out = Vec::with_capacity(rest.len() + 1);
-    out.push(seed_in_queue.into_iter().next().unwrap_or_else(|| seed.clone()));
+    out.push(
+        seed_in_queue
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| seed.clone()),
+    );
     out.extend(rest);
     out
 }
@@ -1166,60 +1202,63 @@ pub fn DiscoverArtistPage(
         loading.set(true);
         error.set(None);
         let artist_span = tracing::info_span!("artist.load", artist = %name);
-        spawn(async move {
-            let cookies = config
-                .peek()
-                .server
-                .as_ref()
-                .and_then(|s| s.access_token.clone());
-            let Some(cookies) = cookies else {
-                if *fetch_gen.peek() == my_gen {
-                    error.set(Some("not signed in".to_string()));
-                    loading.set(false);
+        spawn(
+            async move {
+                let cookies = config
+                    .peek()
+                    .server
+                    .as_ref()
+                    .and_then(|s| s.access_token.clone());
+                let Some(cookies) = cookies else {
+                    if *fetch_gen.peek() == my_gen {
+                        error.set(Some("not signed in".to_string()));
+                        loading.set(false);
+                    }
+                    return;
+                };
+                let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
+                // Resolve cid from name if we didn't get one with the
+                // click. Top YT search hit for the artist filter is the
+                // first UC… browseId in the response — see
+                // search::resolve_artist_channel_id.
+                let cid = match cid_opt {
+                    Some(c) => c,
+                    None => match yt.resolve_artist_channel_id(name.trim()).await {
+                        Ok(Some(c)) => c,
+                        Ok(None) => {
+                            if *fetch_gen.peek() == my_gen {
+                                error.set(Some(format!(
+                                    "No YouTube Music artist found for \"{}\"",
+                                    name.trim()
+                                )));
+                                loading.set(false);
+                            }
+                            return;
+                        }
+                        Err(e) => {
+                            if *fetch_gen.peek() == my_gen {
+                                error.set(Some(e));
+                                loading.set(false);
+                            }
+                            return;
+                        }
+                    },
+                };
+                if *fetch_gen.peek() != my_gen {
+                    return;
                 }
-                return;
-            };
-            let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
-            // Resolve cid from name if we didn't get one with the
-            // click. Top YT search hit for the artist filter is the
-            // first UC… browseId in the response — see
-            // search::resolve_artist_channel_id.
-            let cid = match cid_opt {
-                Some(c) => c,
-                None => match yt.resolve_artist_channel_id(name.trim()).await {
-                    Ok(Some(c)) => c,
-                    Ok(None) => {
-                        if *fetch_gen.peek() == my_gen {
-                            error.set(Some(format!(
-                                "No YouTube Music artist found for \"{}\"",
-                                name.trim()
-                            )));
-                            loading.set(false);
-                        }
-                        return;
-                    }
-                    Err(e) => {
-                        if *fetch_gen.peek() == my_gen {
-                            error.set(Some(e));
-                            loading.set(false);
-                        }
-                        return;
-                    }
-                },
-            };
-            if *fetch_gen.peek() != my_gen {
-                return;
+                let result = yt.fetch_artist(&cid).await;
+                if *fetch_gen.peek() != my_gen {
+                    return;
+                }
+                match result {
+                    Ok(a) => artist.set(Some(a)),
+                    Err(e) => error.set(Some(e)),
+                }
+                loading.set(false);
             }
-            let result = yt.fetch_artist(&cid).await;
-            if *fetch_gen.peek() != my_gen {
-                return;
-            }
-            match result {
-                Ok(a) => artist.set(Some(a)),
-                Err(e) => error.set(Some(e)),
-            }
-            loading.set(false);
-        }.instrument(artist_span));
+            .instrument(artist_span),
+        );
     });
 
     if selected_artist_id.read().is_none() && selected_artist_name.read().trim().is_empty() {
@@ -1300,4 +1339,3 @@ pub fn DiscoverArtistPage(
         }
     }
 }
-

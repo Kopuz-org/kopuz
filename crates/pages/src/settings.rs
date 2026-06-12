@@ -76,11 +76,9 @@ fn logs_section(mut config: Signal<AppConfig>) -> Element {
                                 .set_file_name("kopuz-logs.txt")
                                 .save_file()
                                 .await
-                            {
-                                if let Err(e) = utils::logs::export_logs(file.path()) {
+                                && let Err(e) = utils::logs::export_logs(file.path()) {
                                     tracing::warn!(error = %e, "failed to export logs");
                                 }
-                            }
                         });
                     },
                     i { class: "fa-solid fa-file-export" }
@@ -181,8 +179,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     let mut show_add_server = use_signal(|| false);
     let mut show_login = use_signal(|| false);
 
-    let mut server_name = use_signal(|| String::new());
-    let mut server_url = use_signal(|| String::new());
+    let mut server_name = use_signal(String::new);
+    let mut server_url = use_signal(String::new);
     let mut server_service = use_signal(|| MusicService::Jellyfin);
     let yt_browser = use_signal(|| {
         config
@@ -197,15 +195,15 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     // popup opens on the only working method.
     let yt_anonymous = use_signal(|| cfg!(target_os = "windows"));
 
-    let mut username = use_signal(|| String::new());
-    let mut password = use_signal(|| String::new());
+    let mut username = use_signal(String::new);
+    let mut password = use_signal(String::new);
 
     let mut error = use_signal(|| Option::<String>::None);
     let mut login_error = use_signal(|| Option::<String>::None);
     let mut is_loading = use_signal(|| false);
 
     let mut show_add_registry = use_signal(|| false);
-    let mut registry_url = use_signal(|| String::new());
+    let mut registry_url = use_signal(String::new);
     let mut registry_error = use_signal(|| Option::<String>::None);
     let mut registry_loading = use_signal(|| false);
     let mut registry_toggle_error = use_signal(|| Option::<String>::None);
@@ -225,31 +223,34 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         registry_loading.set(true);
         registry_error.set(None);
 
-        spawn(async move {
-            let mut temp_registry = radio::registry::StationRegistry::new();
-            match temp_registry.import_registry(&url).await {
-                Ok(_) => {
-                    let mut current_config = config.write();
-                    if !current_config.radio_registries.iter().any(|r| r.url == url) {
-                        current_config.radio_registries.push(config::RegistryEntry {
-                            url,
-                            enabled: true,
-                            is_default: false,
-                        });
+        spawn(
+            async move {
+                let mut temp_registry = radio::registry::StationRegistry::new();
+                match temp_registry.import_registry(&url).await {
+                    Ok(_) => {
+                        let mut current_config = config.write();
+                        if !current_config.radio_registries.iter().any(|r| r.url == url) {
+                            current_config.radio_registries.push(config::RegistryEntry {
+                                url,
+                                enabled: true,
+                                is_default: false,
+                            });
+                        }
+                        registry_url.set(String::new());
+                        registry_error.set(None);
+                        show_add_registry.set(false);
                     }
-                    registry_url.set(String::new());
-                    registry_error.set(None);
-                    show_add_registry.set(false);
+                    Err(e) => {
+                        registry_error.set(Some(i18n::t_with(
+                            "radio_registry_import_failed",
+                            &[("error", e.to_string())],
+                        )));
+                    }
                 }
-                Err(e) => {
-                    registry_error.set(Some(i18n::t_with(
-                        "radio_registry_import_failed",
-                        &[("error", e.to_string())],
-                    )));
-                }
+                registry_loading.set(false);
             }
-            registry_loading.set(false);
-        }.instrument(tracing::info_span!("radio.import_registry")));
+            .instrument(tracing::info_span!("radio.import_registry")),
+        );
     };
 
     let ytmusic_auto_login = move || {
@@ -314,65 +315,68 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         let name_input = server_name();
         let url_input = server_url();
 
-        spawn(async move {
-            let display_name = if name_input.is_empty() {
-                format!("Local {}", selected_service.display_name())
-            } else {
-                name_input
-            };
+        spawn(
+            async move {
+                let display_name = if name_input.is_empty() {
+                    format!("Local {}", selected_service.display_name())
+                } else {
+                    name_input
+                };
 
-            let effective_url = if is_ytmusic {
-                "https://music.youtube.com".to_string()
-            } else {
-                url_input
-            };
+                let effective_url = if is_ytmusic {
+                    "https://music.youtube.com".to_string()
+                } else {
+                    url_input
+                };
 
-            let mut new_server = config::MusicServer::new_with_service(
-                display_name,
-                effective_url,
-                selected_service,
-            );
-            let is_anon = is_ytmusic && *yt_anonymous.peek();
-            new_server.yt_anonymous = is_anon;
-            if is_anon {
-                // Mark anonymous mode at the server level. Empty access
-                // token + yt_anonymous=true is what get_stream /
-                // discover etc. read as "no cookies, public surfaces
-                // only".
-                new_server.access_token = Some(String::new());
+                let mut new_server = config::MusicServer::new_with_service(
+                    display_name,
+                    effective_url,
+                    selected_service,
+                );
+                let is_anon = is_ytmusic && *yt_anonymous.peek();
+                new_server.yt_anonymous = is_anon;
+                if is_anon {
+                    // Mark anonymous mode at the server level. Empty access
+                    // token + yt_anonymous=true is what get_stream /
+                    // discover etc. read as "no cookies, public surfaces
+                    // only".
+                    new_server.access_token = Some(String::new());
+                }
+                // Persist the chosen browser on the active server too (not just the
+                // saved-list entry), so the sign-in flow knows which browser to use.
+                new_server.yt_browser = (is_ytmusic && !is_anon).then(|| *yt_browser.peek());
+
+                let saved = config::SavedServer {
+                    id: new_server.id.clone().unwrap_or_default(),
+                    name: new_server.name.clone(),
+                    url: new_server.url.clone(),
+                    service: new_server.service,
+                    yt_browser: (is_ytmusic && !is_anon).then(|| *yt_browser.peek()),
+                    yt_anonymous: is_anon,
+                };
+                {
+                    let mut cfg = config.write();
+                    cfg.add_saved_server(saved);
+                    cfg.server = Some(new_server);
+                }
+
+                server_name.set(String::new());
+                server_url.set(String::new());
+                server_service.set(MusicService::Jellyfin);
+                error.set(None);
+                show_add_server.set(false);
+
+                if is_ytmusic && !is_anon {
+                    ytmusic_auto_login();
+                } else if !is_ytmusic {
+                    show_login.set(true);
+                }
+                // Anonymous YT needs no further setup — the server entry
+                // is already active and playable.
             }
-            // Persist the chosen browser on the active server too (not just the
-            // saved-list entry), so the sign-in flow knows which browser to use.
-            new_server.yt_browser = (is_ytmusic && !is_anon).then(|| *yt_browser.peek());
-
-            let saved = config::SavedServer {
-                id: new_server.id.clone().unwrap_or_default(),
-                name: new_server.name.clone(),
-                url: new_server.url.clone(),
-                service: new_server.service,
-                yt_browser: (is_ytmusic && !is_anon).then(|| *yt_browser.peek()),
-                yt_anonymous: is_anon,
-            };
-            {
-                let mut cfg = config.write();
-                cfg.add_saved_server(saved);
-                cfg.server = Some(new_server);
-            }
-
-            server_name.set(String::new());
-            server_url.set(String::new());
-            server_service.set(MusicService::Jellyfin);
-            error.set(None);
-            show_add_server.set(false);
-
-            if is_ytmusic && !is_anon {
-                ytmusic_auto_login();
-            } else if !is_ytmusic {
-                show_login.set(true);
-            }
-            // Anonymous YT needs no further setup — the server entry
-            // is already active and playable.
-        }.instrument(tracing::info_span!("yt.anon_setup")));
+            .instrument(tracing::info_span!("yt.anon_setup")),
+        );
     };
 
     let handle_switch_server = move |id: String| {

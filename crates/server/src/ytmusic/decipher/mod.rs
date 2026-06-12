@@ -229,13 +229,16 @@ fn pct_encode(s: &str) -> String {
 /// every few hours and its `signatureTimestamp` must match, so we re-fetch the
 /// pair periodically instead of pinning it for the whole process — otherwise a
 /// rotation would break decipher until restart.
-static PLAYER_JS: Mutex<Option<(Instant, Arc<(String, u64)>)>> = Mutex::new(None);
+type CachedPlayerJs = Arc<(String, u64)>;
+type PlayerJsCacheEntry = (Instant, CachedPlayerJs);
+
+static PLAYER_JS: Mutex<Option<PlayerJsCacheEntry>> = Mutex::new(None);
 const PLAYER_JS_TTL: Duration = Duration::from_secs(60 * 60);
 
 /// Fetch YouTube's player `base.js` and its embedded `signatureTimestamp`,
 /// cached for [`PLAYER_JS_TTL`]. Seeded from any `video_id`'s watch page.
 #[tracing::instrument(name = "yt.player_js", fields(video_id = %video_id))]
-pub async fn player_js(video_id: &str) -> Result<Arc<(String, u64)>, String> {
+pub async fn player_js(video_id: &str) -> Result<CachedPlayerJs, String> {
     if let Ok(g) = PLAYER_JS.lock()
         && let Some((at, data)) = g.as_ref()
         && at.elapsed() < PLAYER_JS_TTL
@@ -310,10 +313,22 @@ fn detect_runtime() -> Option<Runtime> {
     static RT: OnceLock<Option<Runtime>> = OnceLock::new();
     *RT.get_or_init(|| {
         const CANDIDATES: &[Runtime] = &[
-            Runtime { bin: "deno", args: &["run", "--quiet", "--no-prompt"] },
-            Runtime { bin: "node", args: &[] },
-            Runtime { bin: "bun", args: &["run"] },
-            Runtime { bin: "qjs", args: &[] },
+            Runtime {
+                bin: "deno",
+                args: &["run", "--quiet", "--no-prompt"],
+            },
+            Runtime {
+                bin: "node",
+                args: &[],
+            },
+            Runtime {
+                bin: "bun",
+                args: &["run"],
+            },
+            Runtime {
+                bin: "qjs",
+                args: &[],
+            },
         ];
         CANDIDATES.iter().copied().find(|c| {
             std::process::Command::new(c.bin)
@@ -479,7 +494,10 @@ mod tests {
             { "type": "result", "data": { "SCRAMBLED": "UNSCRAMBLED" } }
         ]);
         assert_eq!(lookup(&responses, "OLD").as_deref(), Some("NEW"));
-        assert_eq!(lookup(&responses, "SCRAMBLED").as_deref(), Some("UNSCRAMBLED"));
+        assert_eq!(
+            lookup(&responses, "SCRAMBLED").as_deref(),
+            Some("UNSCRAMBLED")
+        );
         assert_eq!(lookup(&responses, "MISSING"), None);
     }
 
@@ -513,12 +531,7 @@ mod tests {
             .and_then(|v| v.as_array())
             .expect("formats")
             .iter()
-            .filter(|f| {
-                f["mimeType"]
-                    .as_str()
-                    .unwrap_or("")
-                    .starts_with("audio/")
-            })
+            .filter(|f| f["mimeType"].as_str().unwrap_or("").starts_with("audio/"))
             .max_by_key(|f| f["bitrate"].as_u64().unwrap_or(0))
             .expect("audio format");
         assert!(

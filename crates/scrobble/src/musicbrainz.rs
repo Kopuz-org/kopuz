@@ -94,7 +94,7 @@ pub fn make_listen<'a>(
             artist_name: artist,
             track_name: track,
             release_name: release.filter(|s| !s.is_empty()),
-            additional_info: additional_info,
+            additional_info,
         },
     }
 }
@@ -111,7 +111,7 @@ pub fn make_playing_now<'a>(
             artist_name: artist,
             track_name: track,
             release_name: release.filter(|s| !s.is_empty()),
-            additional_info: additional_info,
+            additional_info,
         },
     }
 }

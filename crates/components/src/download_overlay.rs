@@ -170,7 +170,11 @@ pub fn DownloadOverlay(mut queue: Signal<DownloadQueue>) -> Element {
                                             style: if item.bytes_total > 0 {
                                                 format!("width: {:.1}%", item.bytes_done as f64 / item.bytes_total as f64 * 100.0)
                                             } else {
-                                                format!("width: {:.1}%", (item.bytes_done as f64 / 8_000_000.0 * 100.0).max(5.0).min(95.0))
+                                                format!(
+                                                    "width: {:.1}%",
+                                                    (item.bytes_done as f64 / 8_000_000.0 * 100.0)
+                                                        .clamp(5.0, 95.0)
+                                                )
                                             }
                                         }
                                     }

@@ -300,7 +300,7 @@ fn ServerServiceFields(
                     }
                 }
             }
-        },
+        }
         _ => rsx! {
             input {
                 placeholder: "{server_url_placeholder}",

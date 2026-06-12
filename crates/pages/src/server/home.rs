@@ -177,7 +177,7 @@ pub fn JellyfinHome(
         let lib = library.read();
         let conf = config.read();
         let mut albums = lib.jellyfin_albums.clone();
-        albums.sort_by(|a, b| b.year.cmp(&a.year));
+        albums.sort_by_key(|b| std::cmp::Reverse(b.year));
         let mut unique = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for album in albums {
@@ -263,10 +263,10 @@ pub fn JellyfinHome(
                 } else if is_unknown_artist(&track.artist) {
                     continue;
                 }
-                if let Some(ref a) = album {
-                    if !seen_albums.insert(a.id.clone()) {
-                        continue;
-                    }
+                if let Some(ref a) = album
+                    && !seen_albums.insert(a.id.clone())
+                {
+                    continue;
                 }
                 let cover = track_cover_url(&conf, track);
                 out.push(((*track).clone(), album, cover));
@@ -426,12 +426,8 @@ pub fn JellyfinHome(
             return None;
         };
         let entry = hero_entry.read();
-        let Some((_, album_opt, _)) = entry.as_ref() else {
-            return None;
-        };
-        let Some(album) = album_opt.as_ref() else {
-            return None;
-        };
+        let (_, album_opt, _) = entry.as_ref()?;
+        let album = album_opt.as_ref()?;
         album.cover_path.as_ref().and_then(|cover_path| {
             utils::jellyfin_image::jellyfin_image_url_from_path(
                 &cover_path.to_string_lossy(),
@@ -508,9 +504,8 @@ pub fn JellyfinHome(
                                                 disabled: idx == 0,
                                                 onclick: move |_| {
                                                     let mut conf = config.write();
-                                                    if let Some(i) = conf.home_sections.iter().position(|s| s.key == key_up) {
-                                                        if i > 0 { conf.home_sections.swap(i, i - 1); }
-                                                    }
+                                                    if let Some(i) = conf.home_sections.iter().position(|s| s.key == key_up)
+                                                        && i > 0 { conf.home_sections.swap(i, i - 1); }
                                                 },
                                                 i { class: "fa-solid fa-chevron-up text-xs" }
                                             }
@@ -520,9 +515,8 @@ pub fn JellyfinHome(
                                                 disabled: idx + 1 >= total,
                                                 onclick: move |_| {
                                                     let mut conf = config.write();
-                                                    if let Some(i) = conf.home_sections.iter().position(|s| s.key == key_down) {
-                                                        if i + 1 < conf.home_sections.len() { conf.home_sections.swap(i, i + 1); }
-                                                    }
+                                                    if let Some(i) = conf.home_sections.iter().position(|s| s.key == key_down)
+                                                        && i + 1 < conf.home_sections.len() { conf.home_sections.swap(i, i + 1); }
                                                 },
                                                 i { class: "fa-solid fa-chevron-down text-xs" }
                                             }
@@ -1113,6 +1107,7 @@ fn render_top_artists(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_albums_row(
     scroll_id: &'static str,
     title: String,

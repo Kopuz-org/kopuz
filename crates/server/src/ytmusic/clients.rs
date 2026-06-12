@@ -108,7 +108,4 @@ pub const MAIN_CLIENT: YouTubeClient = WEB_REMIX;
 /// were dropped — their stream URLs are rate-limited to the first ~1 MiB
 /// from byte 0, so even when /player returns OK, chunked Range fetches
 /// for the rest of the track 403 mid-playback. Worse than failing fast.
-pub const STREAM_FALLBACK_CLIENTS: &[YouTubeClient] = &[
-    ANDROID_VR_1_43_32,
-    ANDROID_VR_1_61_48,
-];
+pub const STREAM_FALLBACK_CLIENTS: &[YouTubeClient] = &[ANDROID_VR_1_43_32, ANDROID_VR_1_61_48];

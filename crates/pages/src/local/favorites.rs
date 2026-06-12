@@ -1,9 +1,8 @@
-use components::constants::{COLUMNS_MODERN, COLUMNS_NORMAL};
 use components::header::Header;
 use components::metadata_modal::MetadataModal;
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
-use components::showcase::{self, SortField};
+use components::showcase::{self};
 use components::track_row::TrackRow;
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
@@ -28,7 +27,7 @@ pub fn LocalFavorites(
 
     // Multi-selection state
     let mut is_selection_mode = use_signal(|| false);
-    let mut selected_tracks = use_signal(|| HashSet::<PathBuf>::new());
+    let mut selected_tracks = use_signal(HashSet::<PathBuf>::new);
     let sort_state = use_signal(|| None);
 
     let displayed_tracks: Vec<(reader::models::Track, Option<utils::CoverUrl>)> = {
@@ -199,11 +198,10 @@ pub fn LocalFavorites(
                                         playlist.tracks.push(path.clone());
                                     }
                                 }
-                            } else if let Some(path) = selected_track_for_playlist.read().clone() {
-                                if !playlist.tracks.contains(&path) {
+                            } else if let Some(path) = selected_track_for_playlist.read().clone()
+                                && !playlist.tracks.contains(&path) {
                                     playlist.tracks.push(path);
                                 }
-                            }
                         }
                         show_playlist_modal.set(false);
                         active_menu_track.set(None);

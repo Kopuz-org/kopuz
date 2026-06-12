@@ -117,8 +117,7 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
 
     // Anonymous: ANDROID_VR + content_pot. Mint + visitor_data in parallel.
     let mut last_err = {
-        let (pot, visitor) =
-            tokio::join!(botguard::mint_content_pot(video_id), visitor_data(None));
+        let (pot, visitor) = tokio::join!(botguard::mint_content_pot(video_id), visitor_data(None));
         match (pot, visitor) {
             (Ok(pot), Ok(visitor)) => {
                 let extras = PlayerExtras {
@@ -152,7 +151,11 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
     tracing::debug!(%last_err, "ANDROID_VR+pot failed — trying bare clients");
 
     for client in STREAM_FALLBACK_CLIENTS {
-        let cookies_for = if client.login_supported { cookies } else { None };
+        let cookies_for = if client.login_supported {
+            cookies
+        } else {
+            None
+        };
         match innertube::player(*client, video_id, cookies_for, PlayerExtras::default()).await {
             Ok(json) => {
                 let status = PlayabilityStatus::from_response(&json);
@@ -174,7 +177,9 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
         }
     }
     if let Some(info) = decipher_fallback {
-        tracing::warn!("no content pot available (minter not running?) — using the non-Premium decipher stream; deep seeks may 403");
+        tracing::warn!(
+            "no content pot available (minter not running?) — using the non-Premium decipher stream; deep seeks may 403"
+        );
         return Ok(info);
     }
     Err(format!("all stream paths failed; last error: {last_err}"))
@@ -382,7 +387,10 @@ fn stream_info_from(
                 .and_then(|s| s.parse::<u64>().ok())
                 .map(|ms| (ms + 500) / 1000)
         });
-    let bitrate = fmt.get("bitrate").and_then(|v| v.as_u64()).map(|v| v as u32);
+    let bitrate = fmt
+        .get("bitrate")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
     let itag = fmt.get("itag").and_then(|v| v.as_u64()).map(|v| v as u32);
     let vid = json
         .pointer("/videoDetails/videoId")
@@ -468,7 +476,9 @@ mod tests {
     #[ignore = "hits live YouTube + needs a system JS runtime"]
     #[expect(clippy::print_stderr, reason = "test diagnostic output")]
     async fn resolve_populates_bitrate_itag_duration() {
-        let info = resolve("dQw4w9WgXcQ", None).await.expect("resolve should succeed");
+        let info = resolve("dQw4w9WgXcQ", None)
+            .await
+            .expect("resolve should succeed");
         eprintln!(
             "[test] resolved itag={:?} bitrate={:?} kbps duration={:?}s",
             info.itag,

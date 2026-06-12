@@ -10,7 +10,8 @@ async fn post(endpoint: &str, body: Value, cookies: &str) -> Result<Value, Strin
     let client = WEB_REMIX;
     let auth =
         sapisid_hash(cookies, ORIGIN_YOUTUBE_MUSIC).ok_or_else(|| "SAPISID missing".to_string())?;
-    let resp = super::innertube::http_client().clone()
+    let resp = super::innertube::http_client()
+        .clone()
         .post(format!(
             "{ORIGIN_YOUTUBE_MUSIC}/youtubei/v1/{endpoint}?prettyPrint=false"
         ))
@@ -82,7 +83,9 @@ pub async fn add_to_playlist(
             "addedVideoId": video_id,
         }],
     });
-    post("browse/edit_playlist", body, cookies).await.map(|_| ())
+    post("browse/edit_playlist", body, cookies)
+        .await
+        .map(|_| ())
 }
 
 /// Remove a video from a user playlist by video ID. (YT's API also
@@ -102,7 +105,9 @@ pub async fn remove_from_playlist(
             "removedVideoId": video_id,
         }],
     });
-    post("browse/edit_playlist", body, cookies).await.map(|_| ())
+    post("browse/edit_playlist", body, cookies)
+        .await
+        .map(|_| ())
 }
 
 /// Create a new playlist with an optional initial set of video IDs.

@@ -3,6 +3,7 @@ use reader::Library;
 use std::path::PathBuf;
 
 #[component]
+#[allow(clippy::await_holding_invalid_type)]
 pub fn AlbumDetails(
     album_id: String,
     library: Signal<Library>,

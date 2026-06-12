@@ -23,23 +23,24 @@ pub async fn extract_from(browser: Browser, profile_root: &Path) -> Result<Strin
     let browser_name = rookie_browser_name(browser);
     let profile_root_owned = profile_root.to_path_buf();
 
-    let cookies = tokio::task::spawn_blocking(move || -> Result<Vec<rookie::enums::Cookie>, String> {
-        let domains = Some(vec!["youtube.com".to_string()]);
-        #[cfg(not(target_os = "windows"))]
-        {
-            let _ = profile_root_owned;
-            let config = rookie::config::get_browser_config(browser_name);
-            rookie::chromium_based(config, db_path, domains).map_err(|e| e.to_string())
-        }
-        #[cfg(target_os = "windows")]
-        {
-            let _ = browser_name;
-            let key_path = profile_root_owned.join("Local State");
-            rookie::chromium_based(key_path, db_path, domains).map_err(|e| e.to_string())
-        }
-    })
-    .await
-    .map_err(|e| format!("cookie extract task: {e}"))??;
+    let cookies =
+        tokio::task::spawn_blocking(move || -> Result<Vec<rookie::enums::Cookie>, String> {
+            let domains = Some(vec!["youtube.com".to_string()]);
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = profile_root_owned;
+                let config = rookie::config::get_browser_config(browser_name);
+                rookie::chromium_based(config, db_path, domains).map_err(|e| e.to_string())
+            }
+            #[cfg(target_os = "windows")]
+            {
+                let _ = browser_name;
+                let key_path = profile_root_owned.join("Local State");
+                rookie::chromium_based(key_path, db_path, domains).map_err(|e| e.to_string())
+            }
+        })
+        .await
+        .map_err(|e| format!("cookie extract task: {e}"))??;
 
     let header = cookies
         .iter()
