@@ -464,10 +464,20 @@ fn init_db_blocking() -> db::Db {
         let handle = match db::init(&db_path).await {
             Ok(h) => h,
             Err(e) => {
-                // A corrupt/unopenable DB must not brick the app before a
-                // window exists. Move it aside (kept for inspection) and
-                // recreate — the importer below repopulates from *.json.bak.
-                tracing::error!(error = %e, "kopuz database failed to open — moving it aside and recreating");
+                // A corrupt DB must not brick the app before a window exists:
+                // move it aside (kept for inspection) and recreate — the
+                // importer below repopulates from *.json.bak. ONLY for real
+                // corruption, though: lock contention (a second instance),
+                // disk-full, or a failed migration would otherwise get a
+                // healthy database renamed away and replaced by stale data.
+                let msg = e.to_string().to_lowercase();
+                let is_corruption = msg.contains("malformed")
+                    || msg.contains("not a database")
+                    || msg.contains("corrupt");
+                if !is_corruption {
+                    panic!("kopuz database failed to open (not corruption — refusing to discard it): {e}");
+                }
+                tracing::error!(error = %e, "kopuz database is corrupt — moving it aside and recreating");
                 let ts = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_secs())
@@ -885,23 +895,10 @@ fn App() -> Element {
     // would be left truncated (cut mid-event, unloadable). Flush on the
     // loop's final event so a normally-closed window still yields a valid
     // trace. (Ctrl+C is covered separately by the SIGINT handler.)
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-    dioxus::desktop::use_wry_event_handler(|event, _| {
-        use dioxus::desktop::tao::event::{Event, WindowEvent};
-        // Flush the moment the window starts closing (CloseRequested),
-        // well before tao calls process::exit; LoopDestroyed is the final
-        // backstop. shutdown() is idempotent so firing on both is fine.
-        if matches!(
-            event,
-            Event::LoopDestroyed
-                | Event::WindowEvent {
-                    event: WindowEvent::CloseRequested,
-                    ..
-                }
-        ) {
-            crate::logging::shutdown();
-        }
-    });
+    // logging::shutdown() is called from the DB close-flush handler below —
+    // wry handlers fire in registration order, and shutting logging down
+    // first would leave the final queue/config persists (and any failure
+    // warnings) out of latest.log and the trace.
 
     // Native YouTube sig/n deciphering runs in this WebView's own
     // JavaScriptCore (issue #349): register a JS engine that forwards each
@@ -1073,11 +1070,17 @@ fn App() -> Element {
             ) {
                 let db = db.clone();
                 let queue_snap = pending_queue_state_snapshot.peek().clone();
+                let queue_restored = *initial_load_done.peek();
                 rt.block_on(async move {
-                    if let Some(snap) = queue_snap
-                        && let Err(e) = db.save_queue(&queue_snapshot(snap)).await
-                    {
-                        tracing::warn!(error = %e, "queue flush on close failed");
+                    // None = the queue is empty (a cleared queue must persist
+                    // as empty, not resurrect) — but only once the saved queue
+                    // has actually been restored, else a quit during startup
+                    // would wipe it.
+                    if queue_restored {
+                        let snap = queue_snap.map(queue_snapshot).unwrap_or_default();
+                        if let Err(e) = db.save_queue(&snap).await {
+                            tracing::warn!(error = %e, "queue flush on close failed");
+                        }
                     }
                     // Library/playlists/favorites need no flush — every mutation
                     // already committed as a targeted write when it happened.
@@ -1088,6 +1091,10 @@ fn App() -> Element {
                     }
                 });
             }
+            // After the persists, so they (and any failure warnings) land in
+            // latest.log and the trace. Idempotent across CloseRequested/
+            // LoopDestroyed; Ctrl+C is covered by the SIGINT handler.
+            crate::logging::shutdown();
         }
     });
 
@@ -1708,6 +1715,14 @@ fn App() -> Element {
         }
         last_scan_key.set(Some(scan_key));
 
+        // Scans aren't cancelled, so two can overlap (a root removed mid-scan
+        // respawns this effect). Only the newest may persist — a stale scan's
+        // upserts + prune would resurrect the removed root.
+        static SCAN_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let epoch = SCAN_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        let scan_is_current =
+            move || SCAN_EPOCH.load(std::sync::atomic::Ordering::Relaxed) == epoch;
+
         let db_scan = db_for_rescan.clone();
         let gens_scan = gens_for_albums;
         #[cfg(not(target_arch = "wasm32"))]
@@ -1723,6 +1738,9 @@ fn App() -> Element {
             // Seed the scan working set from the DB (the scanner skips files it
             // already knows; album-merge keeps manual covers). One folder query
             // per root, deduped by key in case roots nest.
+            // An errored seed must abort the scan: the keep-set fed to
+            // prune_source comes from these, and defaulting to empty would
+            // turn one transient DB error into a pruned library.
             let mut seed_tracks: Vec<reader::Track> = Vec::new();
             let mut seen_keys = std::collections::HashSet::new();
             for dir in &configured_dirs {
@@ -1730,16 +1748,30 @@ fn App() -> Element {
                 if !prefix.ends_with(std::path::MAIN_SEPARATOR) {
                     prefix.push(std::path::MAIN_SEPARATOR);
                 }
-                for t in db.folder_tracks(&prefix).await.unwrap_or_default() {
+                let found = match db.folder_tracks(&prefix).await {
+                    Ok(t) => t,
+                    Err(e) => {
+                        tracing::error!(error = %e, root = %prefix, "rescan: seed query failed — aborting scan");
+                        return;
+                    }
+                };
+                for t in found {
                     if seen_keys.insert(t.id.key().into_owned()) {
                         seed_tracks.push(t);
                     }
                 }
             }
+            let seed_albums = match db.albums(&db::Source::Local).await {
+                Ok(a) => a,
+                Err(e) => {
+                    tracing::error!(error = %e, "rescan: album seed failed — aborting scan");
+                    return;
+                }
+            };
             let mut current_lib = reader::Library {
                 root_paths: configured_dirs.clone(),
                 tracks: seed_tracks,
-                albums: db.albums(&db::Source::Local).await.unwrap_or_default(),
+                albums: seed_albums,
                 ..Default::default()
             };
 
@@ -1791,6 +1823,10 @@ fn App() -> Element {
 
                 // Persist the scan directly: chunked upserts, prune what's gone,
                 // bump so the page hooks re-query. No in-memory mirror.
+                if !scan_is_current() {
+                    tracing::info!("rescan superseded by a newer scan — discarding results");
+                    return;
+                }
                 for chunk in current_lib.tracks.chunks(100) {
                     let _ = db.upsert_tracks(&db::Source::Local, chunk).await;
                     gens.bump_coalesced(hooks::db_reactivity::Table::Tracks);
@@ -1803,12 +1839,25 @@ fn App() -> Element {
                     .collect();
                 let keep_albums: Vec<String> =
                     current_lib.albums.iter().map(|a| a.id.clone()).collect();
+                if !scan_is_current() {
+                    tracing::info!("rescan superseded mid-persist — skipping prune");
+                    return;
+                }
                 let _ = db
                     .prune_source(&db::Source::Local, &keep_keys, &keep_albums)
                     .await;
                 for (artist, img) in &current_lib.local_artist_images {
                     let p = img.to_string_lossy().into_owned();
                     let _ = db.set_artist_image(artist, "local", Some(&p)).await;
+                }
+                // Drop stored local artist images whose file disappeared (the
+                // old scan rebuilt the whole map each pass, self-healing this).
+                if let Ok((_, local_imgs, _)) = db.artist_images().await {
+                    for (artist, path) in local_imgs {
+                        if !path.exists() {
+                            let _ = db.set_artist_image(&artist, "local", None).await;
+                        }
+                    }
                 }
                 gens.bump(hooks::db_reactivity::Table::Tracks);
                 gens.bump(hooks::db_reactivity::Table::Albums);
@@ -2289,17 +2338,22 @@ fn App() -> Element {
                                 on_play_album: move |id: String| {
                                     selected_album_id.set(id.clone());
 
-                                    let is_jelly = id.starts_with("jellyfin:");
-                                    let source = if is_jelly {
+                                    // Key on the active source, not an id-prefix
+                                    // sniff — Subsonic/Custom album ids carry
+                                    // their own prefixes and Home only emits the
+                                    // active source's ids anyway.
+                                    let source = {
                                         let c = config.peek();
-                                        db::Source::Server(
-                                            c.active_server_id
-                                                .clone()
-                                                .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
-                                                .unwrap_or_default(),
-                                        )
-                                    } else {
-                                        db::Source::Local
+                                        let server_active =
+                                            matches!(c.active_source, config::MusicSource::Server);
+                                        match c
+                                            .active_server_id
+                                            .clone()
+                                            .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
+                                        {
+                                            Some(sid) if server_active => db::Source::Server(sid),
+                                            _ => db::Source::Local,
+                                        }
                                     };
                                     let db = db_for_play_album.clone();
                                     spawn(async move {
