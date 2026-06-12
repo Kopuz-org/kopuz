@@ -84,6 +84,12 @@ pub fn use_all_tracks(filter: Memo<TrackFilter>) -> Resource<Vec<reader::Track>>
         let span =
             tracing::info_span!("query.tracks_all", filter = ?f, rows = tracing::field::Empty);
         async move {
+            // Empty-id sentinel (home hero before an album is picked):
+            // always zero rows, skip the round-trip.
+            if f.album_id.as_deref() == Some("") {
+                tracing::Span::current().record("rows", 0);
+                return Vec::new();
+            }
             let rows = db.tracks_all(&f).await.unwrap_or_default();
             tracing::Span::current().record("rows", rows.len());
             rows
@@ -109,6 +115,10 @@ pub fn use_tracks_by_keys(
             rows = tracing::field::Empty,
         );
         async move {
+            if k.is_empty() {
+                tracing::Span::current().record("rows", 0);
+                return Vec::new();
+            }
             let rows = db.tracks_by_keys(&s, &k).await.unwrap_or_default();
             tracing::Span::current().record("rows", rows.len());
             rows
