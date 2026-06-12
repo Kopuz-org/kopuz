@@ -2375,7 +2375,12 @@ fn App() -> Element {
                     // Under blitz the wrapper is a real positioned flex item, so
                     // pages' `absolute inset-0` roots anchor to it and inner
                     // scrollers get honest heights.
-                    div { class: if cfg!(target_os = "android") { "relative flex-1 min-h-0 overflow-y-auto" } else if blitz_enabled() { "relative flex-1 min-h-0 flex flex-col" } else { "contents" },
+                    // min-h-full, not flex-1: the parent scroller is a BLOCK
+                    // container, so flex-1 resolves to nothing and the wrapper
+                    // collapses to 0 height — absolute-inset pages anchored to
+                    // it become invisible. min-h-full sizes it to the scroller
+                    // viewport while letting normal-flow pages grow it.
+                    div { class: if cfg!(target_os = "android") { "relative flex-1 min-h-0 overflow-y-auto" } else if blitz_enabled() { "relative min-h-full flex flex-col" } else { "contents" },
                     match *current_route.read() {
                         Route::Home => rsx! {
                             pages::home::Home {
