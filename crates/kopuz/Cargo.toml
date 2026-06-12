@@ -28,7 +28,8 @@ dioxus = { workspace = true, features = ["desktop"] }
 # bundled "native" feature: engine fixes show up live in kopuz on rebuild.
 # Default features minus "vello-hybrid" (panics on kopuz's 0-alpha paints —
 # vello_hybrid schedule.rs "reserved for clipping") and minus "incremental"
-# (suspected missed-damage on dynamic subtree swaps: blank pages, stuck hover).
+# (off while the engine loop stabilizes; exonerated for the blank-page bug,
+# untested in combination with the local engine fixes).
 dioxus-native = { path = "../../../blitz/packages/dioxus-native", default-features = false, features = [
     "accessibility",
     "hot-reload",
