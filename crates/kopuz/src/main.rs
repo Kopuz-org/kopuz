@@ -2290,7 +2290,8 @@ fn App() -> Element {
                 }
                 div {
                     id: "main-scroll-area",
-                    class: if cfg!(target_os = "android") { "flex-1 min-h-0 flex flex-col overflow-hidden relative" } else { "flex-1 overflow-y-auto" },
+                    // relative: the blitz route wrapper anchors absolute to it.
+                    class: if cfg!(target_os = "android") { "flex-1 min-h-0 flex flex-col overflow-hidden relative" } else { "relative flex-1 overflow-y-auto" },
                     onscroll: move |evt| {
                         let pos = evt.scroll_top();
                         let route = *current_route.peek();
@@ -2375,12 +2376,13 @@ fn App() -> Element {
                     // Under blitz the wrapper is a real positioned flex item, so
                     // pages' `absolute inset-0` roots anchor to it and inner
                     // scrollers get honest heights.
-                    // min-h-full, not flex-1: the parent scroller is a BLOCK
-                    // container, so flex-1 resolves to nothing and the wrapper
-                    // collapses to 0 height — absolute-inset pages anchored to
-                    // it become invisible. min-h-full sizes it to the scroller
-                    // viewport while letting normal-flow pages grow it.
-                    div { class: if cfg!(target_os = "android") { "relative flex-1 min-h-0 overflow-y-auto" } else if blitz_enabled() { "relative min-h-full flex flex-col" } else { "contents" },
+                    // blitz: no percentages, no flex-1 — both failed to give
+                    // this wrapper a height in Taffy's block context (pages
+                    // anchored to a collapsed box and vanished). absolute
+                    // inset-0 against the (relative) main scroll area is exact
+                    // and proven in the repro; the wrapper carries its own
+                    // overflow so normal-flow pages (playlists) still scroll.
+                    div { class: if cfg!(target_os = "android") { "relative flex-1 min-h-0 overflow-y-auto" } else if blitz_enabled() { "absolute inset-0 overflow-y-auto flex flex-col" } else { "contents" },
                     match *current_route.read() {
                         Route::Home => rsx! {
                             pages::home::Home {
