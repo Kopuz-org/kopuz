@@ -488,26 +488,27 @@ pub fn JellyfinLibrary(
                         aria_label: "Select all tracks",
                         disabled: is_empty,
                         onclick: move |_| {
-                            let tracks = displayed_tracks.read();
-                            let all_selected = !tracks.is_empty()
-                                && tracks
-                                    .iter()
-                                    .all(|(track, _)| selected_tracks.read().contains(&track.id.uid_path()));
+                            let all_selected = !is_empty
+                                && selected_tracks.read().len() >= *total_items.read();
                             if all_selected {
                                 selected_tracks.write().clear();
                                 is_selection_mode.set(false);
                             } else {
-                                selected_tracks
-                                    .set(tracks.iter().map(|(track, _)| track.id.uid_path()).collect());
-                                is_selection_mode.set(true);
+                                let db = consume_context::<db::Db>();
+                                let f = filter();
+                                spawn(async move {
+                                    let total = db.tracks_count(&f).await.unwrap_or(0);
+                                    let tracks = db
+                                        .tracks_page(&f, Page { offset: 0, limit: total })
+                                        .await
+                                        .unwrap_or_default();
+                                    selected_tracks
+                                        .set(tracks.into_iter().map(|track| track.id.uid_path()).collect());
+                                    is_selection_mode.set(true);
+                                });
                             }
                         },
-                        if !is_empty
-                            && displayed_tracks
-                                .read()
-                                .iter()
-                                .all(|(track, _)| selected_tracks.read().contains(&track.id.uid_path()))
-                        {
+                        if !is_empty && selected_tracks.read().len() >= *total_items.read() {
                             i { class: "fa-solid fa-check", style: "font-size: 9px;" }
                         }
                     }
