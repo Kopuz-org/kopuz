@@ -135,6 +135,60 @@ dioxus-native 0.8.0-alpha.0 does NOT build: vello_hybrid semver drift.)
 All still-broken rows confirmed reproducible on main → ready to file
 upstream with the harness code.
 
+## Engine TDD loop (2026-06-13) — new methodology
+All 0.2.4-era workarounds REVERTED (recoverable: checkpoint commit 9bb9b3e,
+reverts c7e9086 + 7069e28..ce3bdb1). Engine bugs now get fixed in the local
+blitz checkout (~/projects/blitz, path dep) with red→green tests, verified
+live in kopuz. No kopuz-side workarounds for engine bugs anymore.
+
+14. **Comment nodes force inline layout → whole pages invisible** (the
+    "nothing on favorites/playlists" bug; Home escaped only by being the
+    initial route... actually by markup: its root is normal-flow). A Dioxus
+    conditional renders a COMMENT placeholder; in blitz main's
+    collect_layout_children a comment has no styles → defaults to
+    display:inline → container with [comment, abspos div] classified
+    all_inline → becomes inline root → element children embedded in parley
+    inline layout as out-of-flow boxes sized 0x0. Diagnosed via Alt+T taffy
+    dump (wrapper 0x0, "BOX OutOfFlow") + Alt+Y node dump (temp keybind in
+    blitz-shell, uncommitted). Fixed in blitz branch
+    fix/comment-inline-classification (65ed76a): skip comments in the
+    classification scan + regression tests
+    (packages/blitz-html/tests/comment_layout.rs). Latent secondary bug for
+    upstream: out-of-flow boxes inside GENUINE inline contexts still zero-
+    size.
+    Debug tooling learned: blitz windows respond to Alt+D (layout overlay),
+    Alt+H (hover highlight), Alt+T (taffy tree dump to stdout).
+    Also: vello-hybrid (main's default backend) panics on 0-alpha paints
+    ("Color fields with 0 alpha are reserved for clipping") — kopuz uses
+    the "vello" feature instead; ICU4X lacks the ja segmentation model
+    (cjdict) → stderr noise per Japanese title, non-fatal.
+
+15. **display:contents fixed in the engine** (blitz a8d66e6) — three bugs:
+    classification didn't recurse into contents children (all_inline
+    misroute → inline root), the Contents hoisting arm pushed grandchildren's
+    layout children (skipping a generation; leaves vanished), and the
+    whitespace-anonymous-block cleanup pop()'d the wrong layout_children
+    entry leaving a stale slab id (panic). With these + the comment fix the
+    ORIGINAL kopuz markup runs under blitz: route wrapper + showcase rows
+    reverted to plain class="contents" — the last structural kopuz
+    workarounds are deleted.
+16. **Radio cards 1px tall → taffy bug** (the real F10): taffy's block
+    layout passes available_space.height = MinContent ("min-content
+    constraint") for in-flow children when it means "indefinite" — every
+    grid nested under an auto-height block then zeroes scroll-container
+    items (auto min = 0) and the maximize step has zero free space.
+    One-line fix (MinContent→MaxContent) in a local taffy checkout
+    (~/projects/taffy-fix, [patch.crates-io] in BOTH blitz and kopuz
+    workspaces). WPT css-grid+flexbox: +8 new passes / -2 regressions
+    (fr-row tests — taffy's AvailableSpace can't distinguish "indefinite"
+    from "max-content constraint"; needs an upstream design decision).
+    Diagnosed with taffy's "debug" feature (algorithm trace) + pure-taffy
+    repro at /tmp/taffy-repro.
+
+## Open in-app issues
+- Favorites list doesn't wheel-scroll (page-level Home scroll works);
+  VirtualScrollView inner scroller — not yet diagnosed.
+
 ## Next experiments
 - File the still-broken findings (F9, F11, F12, F1, truncate, glyph swap)
   at DioxusLabs/blitz with the /tmp/blitz-repro-08 repro cases.

@@ -103,3 +103,8 @@ strip = "symbols"
 lto = "thin"
 codegen-units = 1
 panic = "abort"
+
+[patch.crates-io]
+# Local taffy with the block-layout available-space fix (MinContent ->
+# MaxContent for in-flow children) — see ~/projects/taffy-fix; engine TDD loop.
+taffy = { path = "/home/umceko/projects/taffy-fix" }
