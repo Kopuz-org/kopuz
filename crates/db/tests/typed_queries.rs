@@ -1,0 +1,136 @@
+//! Smoke tests for the typed narrow queries that replaced `tracks_all`
+//! (runtime-built SQL — not covered by the sqlx offline macro check).
+
+use std::path::PathBuf;
+
+use db::{Page, Source, TrackFilter, TrackSort};
+use sqlx::sqlite::SqliteConnectOptions;
+use sqlx::{ConnectOptions, Executor};
+
+fn unique_db() -> PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let dir = std::env::temp_dir().join(format!("kopuz-tq-{nanos}"));
+    std::fs::create_dir_all(&dir).unwrap();
+    dir.join("kopuz.db")
+}
+
+async fn seed(db_path: &std::path::Path) {
+    let mut conn = SqliteConnectOptions::new()
+        .filename(db_path)
+        .connect()
+        .await
+        .unwrap();
+    let mut batch = String::new();
+    // Two local albums (rock inserted before jazz so jazz is "newer"), one
+    // server track, listen counts keyed by uid (path / "ytmusic:id").
+    for (i, (key, album_id, title, artist, album, disc, track)) in [
+        ("/music/rock/a1.flac", "al-rock", "Anthem", "Axel", "Rock One", 1, 2),
+        ("/music/rock/a2.flac", "al-rock", "Ballad", "Axel", "Rock One", 1, 1),
+        ("/music/jazz/b_1.flac", "al-jazz", "Cool", "Bea", "Jazz One", 1, 1),
+        ("/music/jazz/b_2.flac", "al-jazz", "Drift", "Bea", "Jazz One", 1, 2),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        batch.push_str(&format!(
+            "INSERT INTO tracks (rowid_pk, source, track_key, source_album_id, title, artist, album, \
+             disc_number, track_number, artists_json) VALUES \
+             ({}, 'local', '{key}', '{album_id}', '{title}', '{artist}', '{album}', {disc}, {track}, '[]');\n",
+            i + 1
+        ));
+    }
+    batch.push_str(
+        "INSERT INTO tracks (rowid_pk, source, track_key, service, source_album_id, title, artist, album, artists_json) \
+         VALUES (100, 'srv-1', 'vid1', 'YtMusic', 'al-yt', 'Server Song', 'Cyn', 'Yt Album', '[]');\n\
+         INSERT INTO albums (source, source_album_id, title, artist, genre) VALUES \
+           ('local', 'al-rock', 'Rock One', 'Axel', 'Rock'), \
+           ('local', 'al-jazz', 'Jazz One', 'Bea', 'Jazz'), \
+           ('srv-1', 'al-yt', 'Yt Album', 'Cyn', 'Pop');\n\
+         INSERT INTO listen_counts (track_key, count) VALUES \
+           ('/music/rock/a1.flac', 3), ('/music/jazz/b_1.flac', 10), ('ytmusic:vid1', 7);\n",
+    );
+    conn.execute(batch.as_str()).await.unwrap();
+}
+
+#[tokio::test]
+async fn typed_queries_smoke() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    seed(&db_path).await;
+    let local = Source::Local;
+    let srv = Source::Server("srv-1".into());
+
+    let rock = db.album_tracks(&local, "al-rock").await.unwrap();
+    assert_eq!(
+        rock.iter().map(|t| t.title.as_str()).collect::<Vec<_>>(),
+        ["Ballad", "Anthem"],
+        "album_tracks orders by disc/track"
+    );
+
+    let bea = db.artist_tracks(&local, "Bea").await.unwrap();
+    assert_eq!(bea.len(), 2);
+    assert!(bea.iter().all(|t| t.artist == "Bea"));
+
+    let jazz = db.genre_tracks(&local, "Jazz").await.unwrap();
+    assert_eq!(jazz.len(), 2);
+    assert!(jazz.iter().all(|t| t.album == "Jazz One"));
+
+    // Prefix with an underscore in a filename must not act as a wildcard.
+    let folder = db.folder_tracks("/music/jazz/").await.unwrap();
+    assert_eq!(folder.len(), 2);
+    let none = db.folder_tracks("/music/ja_z/").await.unwrap();
+    assert!(none.is_empty(), "LIKE metachars are escaped");
+
+    let recent = db.recent_albums(&local, 10).await.unwrap();
+    assert_eq!(
+        recent.iter().map(|a| a.title.as_str()).collect::<Vec<_>>(),
+        ["Jazz One", "Rock One"],
+        "newest-track-first"
+    );
+
+    let samples = db.artist_sample_tracks(&local, 10).await.unwrap();
+    assert_eq!(
+        samples.iter().map(|t| t.artist.as_str()).collect::<Vec<_>>(),
+        ["Axel", "Bea"],
+        "one per artist, A→Z"
+    );
+
+    assert_eq!(
+        db.top_genre(&local).await.unwrap().as_deref(),
+        Some("Jazz"),
+        "highest summed plays wins"
+    );
+    assert_eq!(
+        db.top_genre(&srv).await.unwrap().as_deref(),
+        Some("Pop"),
+        "server uid join (service:id) maps listen counts"
+    );
+
+    let by_plays = db
+        .tracks_page(
+            &TrackFilter {
+                source: local.clone(),
+                sort: TrackSort::PlayCount,
+                search: String::new(),
+            },
+            Page {
+                offset: 0,
+                limit: 10,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        by_plays
+            .iter()
+            .map(|t| t.title.as_str())
+            .collect::<Vec<_>>(),
+        ["Cool", "Anthem", "Ballad", "Drift"],
+        "plays DESC, title tiebreak"
+    );
+
+    assert_eq!(db.search_corpus(&local).await.unwrap().len(), 4);
+}

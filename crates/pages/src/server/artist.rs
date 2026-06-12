@@ -3,10 +3,10 @@ use components::dots_menu::{DotsMenu, MenuAction};
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
 use config::{AppConfig, ArtistPhotoSource, ArtistViewOrder, MusicService};
-use db::{Source, TrackFilter};
+use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
-use hooks::use_db_queries::{use_albums, use_all_tracks, use_artist_images};
+use hooks::use_db_queries::{use_albums, use_artist_images, use_artist_tracks, use_tracks_by_keys};
 use server::jellyfin::JellyfinClient;
 use server::subsonic::SubsonicClient;
 use std::collections::{HashMap, HashSet};
@@ -56,10 +56,23 @@ pub fn JellyfinArtist(
             .unwrap_or_default()
     });
     let server_source = use_memo(move || Source::Server(active_server_id()));
-    let all_filter = use_memo(move || TrackFilter::new(Source::Server(active_server_id())));
-    let tracks_res = use_all_tracks(all_filter);
     let albums_res = use_albums(server_source);
     let artist_images_res = use_artist_images();
+    let artist_memo = use_memo(move || artist_name.read().clone());
+    let artist_tracks_res = use_artist_tracks(server_source, artist_memo);
+    let offline_keys = use_memo(move || -> Vec<String> {
+        if !*is_offline.read() {
+            return Vec::new();
+        }
+        config
+            .read()
+            .offline_tracks
+            .iter()
+            .filter(|(_, path)| std::path::Path::new(path).exists())
+            .map(|(id, _)| id.clone())
+            .collect()
+    });
+    let offline_tracks_res = use_tracks_by_keys(server_source, offline_keys);
 
     use_effect(move || {
         let use_artist_photo = config.read().artist_photo_source == ArtistPhotoSource::ArtistPhoto;
@@ -154,7 +167,6 @@ pub fn JellyfinArtist(
 
     let jellyfin_artists = use_memo(move || {
         let all_albums = albums_res.read().clone().unwrap_or_default();
-        let all_tracks = tracks_res.read().clone().unwrap_or_default();
         let custom_images = artist_images_res
             .read()
             .clone()
@@ -186,41 +198,36 @@ pub fn JellyfinArtist(
             }
         }
         let offline = *is_offline.read();
-        let conf = config.read();
+        let downloaded_artists: HashSet<String> = if offline {
+            offline_tracks_res
+                .read()
+                .clone()
+                .unwrap_or_default()
+                .iter()
+                .map(|t| t.artist.to_lowercase())
+                .collect()
+        } else {
+            HashSet::new()
+        };
         let mut artists: Vec<_> = artist_map
             .into_iter()
-            .filter(|(artist, _)| {
-                if !offline {
-                    return true;
-                }
-                all_tracks.iter().any(|t| {
-                    if t.artist.to_lowercase() != artist.to_lowercase() {
-                        return false;
-                    }
-                    let id = t.id.key();
-                    if let Some(path_str) = conf.offline_tracks.get(id.as_ref()) {
-                        std::path::Path::new(path_str).exists()
-                    } else {
-                        false
-                    }
-                })
-            })
+            .filter(|(artist, _)| !offline || downloaded_artists.contains(&artist.to_lowercase()))
             .collect();
         artists.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
         artists
     });
 
     let artist_tracks = use_memo(move || {
-        let all_tracks = tracks_res.read().clone().unwrap_or_default();
-        let artist = artist_name.read();
-        if artist.is_empty() {
+        if artist_name.read().is_empty() {
             return Vec::new();
         }
         let offline = *is_offline.read();
         let conf = config.read();
-        all_tracks
+        artist_tracks_res
+            .read()
+            .clone()
+            .unwrap_or_default()
             .iter()
-            .filter(|t| t.artist.to_lowercase() == artist.to_lowercase())
             .filter(|t| {
                 if !offline {
                     return true;
@@ -283,33 +290,27 @@ pub fn JellyfinArtist(
 
     let artist_albums = use_memo(move || {
         let all_albums = albums_res.read().clone().unwrap_or_default();
-        let all_tracks = tracks_res.read().clone().unwrap_or_default();
         let artist = artist_name.read();
         if artist.is_empty() {
             return Vec::new();
         }
         let artist_lc = artist.to_lowercase();
         let offline = *is_offline.read();
-        let conf = config.read();
+        let downloaded_album_ids: HashSet<String> = if offline {
+            offline_tracks_res
+                .read()
+                .clone()
+                .unwrap_or_default()
+                .iter()
+                .map(|t| t.album_id.clone())
+                .collect()
+        } else {
+            HashSet::new()
+        };
         let mut albums: Vec<_> = all_albums
             .iter()
             .filter(|a| a.artist.to_lowercase() == artist_lc)
-            .filter(|a| {
-                if !offline {
-                    return true;
-                }
-                all_tracks.iter().any(|t| {
-                    if t.album_id != a.id {
-                        return false;
-                    }
-                    let id = t.id.key();
-                    if let Some(path_str) = conf.offline_tracks.get(id.as_ref()) {
-                        std::path::Path::new(path_str).exists()
-                    } else {
-                        false
-                    }
-                })
-            })
+            .filter(|a| !offline || downloaded_album_ids.contains(&a.id))
             .cloned()
             .collect();
         albums.sort_by(|a, b| {
@@ -324,13 +325,6 @@ pub fn JellyfinArtist(
     });
 
     let name = artist_name.read().clone();
-    let tracks_for_album = |tracks: &[reader::models::Track], album_id: &str| -> Vec<PathBuf> {
-        tracks
-            .iter()
-            .filter(|t| t.album_id == album_id)
-            .map(|t| t.id.uid_path())
-            .collect()
-    };
 
     rsx! {
         div {
@@ -521,20 +515,23 @@ pub fn JellyfinArtist(
                                 on_close: move |_| show_album_playlist_modal.set(false),
                                 on_add_to_playlist: move |playlist_id: String| {
                                     if let Some(album_id) = pending_album_id_for_playlist.read().clone() {
-                                        let all = tracks_res.read().clone().unwrap_or_default();
-                                        let paths = tracks_for_album(&all, &album_id);
                                         let pid = playlist_id.clone();
+                                        let s = server_source.peek().clone();
+                                        let db = consume_context::<db::Db>();
                                         spawn(async move {
                                             let Some(conn) =
                                                 ::server::server_ops::ServerConn::resolve(&config.peek())
                                             else {
                                                 return;
                                             };
-                                            let item_ids: Vec<String> = paths
+                                            let item_ids: Vec<String> = db
+                                                .album_tracks(&s, &album_id)
+                                                .await
+                                                .unwrap_or_default()
                                                 .iter()
-                                                .filter_map(|p| {
-                                                    ::server::server_ops::parse_item_id(p.to_str()?)
-                                                        .map(str::to_string)
+                                                .filter_map(|t| {
+                                                    let k = t.id.key();
+                                                    (!k.is_empty()).then(|| k.to_string())
                                                 })
                                                 .collect();
                                             let _ = ::server::server_ops::add_tracks_to_playlist(
@@ -547,27 +544,28 @@ pub fn JellyfinArtist(
                                     pending_album_id_for_playlist.set(None);
                                 },
                                 on_create_playlist: move |playlist_name: String| {
-                                    let paths = pending_album_id_for_playlist
-                                        .read()
-                                        .as_deref()
-                                        .map(|id| {
-                                            let all = tracks_res.read().clone().unwrap_or_default();
-                                            tracks_for_album(&all, id)
-                                        })
-                                        .unwrap_or_default();
+                                    let album_id = pending_album_id_for_playlist.read().clone();
+                                    let s = server_source.peek().clone();
+                                    let db = consume_context::<db::Db>();
                                     spawn(async move {
                                         let Some(conn) =
                                             ::server::server_ops::ServerConn::resolve(&config.peek())
                                         else {
                                             return;
                                         };
-                                        let item_ids: Vec<String> = paths
-                                            .iter()
-                                            .filter_map(|p| {
-                                                ::server::server_ops::parse_item_id(p.to_str()?)
-                                                    .map(str::to_string)
-                                            })
-                                            .collect();
+                                        let item_ids: Vec<String> = match album_id {
+                                            Some(id) => db
+                                                .album_tracks(&s, &id)
+                                                .await
+                                                .unwrap_or_default()
+                                                .iter()
+                                                .filter_map(|t| {
+                                                    let k = t.id.key();
+                                                    (!k.is_empty()).then(|| k.to_string())
+                                                })
+                                                .collect(),
+                                            None => Vec::new(),
+                                        };
                                         if !item_ids.is_empty() {
                                             let _ = ::server::server_ops::create_server_playlist(
                                                 &conn,
@@ -600,7 +598,7 @@ pub fn JellyfinArtist(
                                                 let id_for_navigate = album.id.clone();
                                                 let is_open = open_album_menu.read().as_deref() == Some(&album.id);
                                                 let is_downloaded = {
-                                                    let all = tracks_res.read().clone().unwrap_or_default();
+                                                    let all = artist_tracks_res.read().clone().unwrap_or_default();
                                                     let conf = config.read();
                                                     let aid = album.id.clone();
                                                     let tracks: Vec<_> = all.iter().filter(|t| t.album_id == aid).collect();
@@ -690,39 +688,34 @@ pub fn JellyfinArtist(
                                                                             pending_album_id_for_playlist.set(Some(id.clone()));
                                                                             show_album_playlist_modal.set(true);
                                                                         } else if idx == 1 {
-                                                                            if is_downloaded {
-                                                                                let album_id = id.clone();
-                                                                                let ids: Vec<String> = {
-                                                                                    tracks_res
-                                                                                        .read()
-                                                                                        .clone()
-                                                                                        .unwrap_or_default()
+                                                                            let album_id = id.clone();
+                                                                            let s = server_source.peek().clone();
+                                                                            let db = consume_context::<db::Db>();
+                                                                            spawn(async move {
+                                                                                let tracks = db
+                                                                                    .album_tracks(&s, &album_id)
+                                                                                    .await
+                                                                                    .unwrap_or_default();
+                                                                                if is_downloaded {
+                                                                                    let ids: Vec<String> = tracks
                                                                                         .iter()
-                                                                                        .filter(|t| t.album_id == album_id)
                                                                                         .filter_map(|t| {
                                                                                             let k = t.id.key();
                                                                                             (!k.is_empty()).then(|| k.to_string())
                                                                                         })
-                                                                                        .collect()
-                                                                                };
-                                                                                crate::server::download_manager::delete_downloads(ids, config, download_queue);
-                                                                            } else {
-                                                                                let album_id = id.clone();
-                                                                                let requests: Vec<(String, String, String)> = {
-                                                                                    tracks_res
-                                                                                        .read()
-                                                                                        .clone()
-                                                                                        .unwrap_or_default()
+                                                                                        .collect();
+                                                                                    crate::server::download_manager::delete_downloads(ids, config, download_queue);
+                                                                                } else {
+                                                                                    let requests: Vec<(String, String, String)> = tracks
                                                                                         .iter()
-                                                                                        .filter(|t| t.album_id == album_id)
                                                                                         .filter_map(|t| {
                                                                                             let k = t.id.key();
                                                                                             (!k.is_empty()).then(|| (k.to_string(), t.title.clone(), t.artist.clone()))
                                                                                         })
-                                                                                        .collect()
-                                                                                };
-                                                                                queue_downloads(requests, config, download_queue);
-                                                                            }
+                                                                                        .collect();
+                                                                                    queue_downloads(requests, config, download_queue);
+                                                                                }
+                                                                            });
                                                                         }
                                                                     }
                                                                 },

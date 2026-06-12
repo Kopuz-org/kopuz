@@ -1,7 +1,7 @@
 use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
-use hooks::use_db_queries::{use_album, use_all_tracks};
+use hooks::use_db_queries::{use_album, use_album_tracks};
 use std::path::PathBuf;
 
 #[component]
@@ -13,8 +13,7 @@ pub fn AlbumDetails(
     let source = use_memo(|| Source::Local);
     let album_id_memo = use_memo(use_reactive!(|album_id| album_id));
     let album_res = use_album(source, album_id_memo);
-    let filter = use_memo(move || db::TrackFilter::album(Source::Local, album_id_memo()));
-    let tracks_res = use_all_tracks(filter);
+    let tracks_res = use_album_tracks(source, album_id_memo);
 
     let album_loading = album_res.read().is_none();
     let album = match album_res.read().clone().flatten() {
@@ -37,15 +36,7 @@ pub fn AlbumDetails(
         .map(|d| d.cache_dir().join("covers"))
         .unwrap_or_else(|| PathBuf::from("./cache/covers"));
 
-    let mut tracks: Vec<_> = tracks_res.read().clone().unwrap_or_default();
-
-    tracks.sort_by(|a, b| {
-        a.disc_number.cmp(&b.disc_number).then_with(|| {
-            a.track_number
-                .cmp(&b.track_number)
-                .then_with(|| a.title.cmp(&b.title))
-        })
-    });
+    let tracks: Vec<_> = tracks_res.read().clone().unwrap_or_default();
 
     let tracks_for_delete = tracks.clone();
     let aid = album_id.clone();

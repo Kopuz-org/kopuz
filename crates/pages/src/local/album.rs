@@ -1,5 +1,5 @@
 use components::dots_menu::{DotsMenu, MenuAction};
-use db::{Source, TrackFilter};
+use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::use_albums;
@@ -121,10 +121,12 @@ pub fn LocalAlbum(
                                                     match idx {
                                                         0 => {
                                                             let db = consume_context::<db::Db>();
-                                                            let filter = TrackFilter::album(Source::Local, id.clone());
+                                                            let album_id = id.clone();
                                                             spawn(async move {
-                                                                let mut tracks_for_queue =
-                                                                    db.tracks_all(&filter).await.unwrap_or_default();
+                                                                let mut tracks_for_queue = db
+                                                                    .album_tracks(&Source::Local, &album_id)
+                                                                    .await
+                                                                    .unwrap_or_default();
                                                                 tracks_for_queue.sort_by(|a, b| {
                                                                     a.track_number
                                                                         .cmp(&b.track_number)
@@ -143,10 +145,7 @@ pub fn LocalAlbum(
                                                             let album_id = id.clone();
                                                             spawn(async move {
                                                                 let tracks_to_delete = db
-                                                                    .tracks_all(&TrackFilter::album(
-                                                                        Source::Local,
-                                                                        album_id.clone(),
-                                                                    ))
+                                                                    .album_tracks(&Source::Local, &album_id)
                                                                     .await
                                                                     .unwrap_or_default();
                                                                 for track in &tracks_to_delete {

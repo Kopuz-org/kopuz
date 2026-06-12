@@ -335,20 +335,16 @@ pub fn PlaylistsPage(
                                 .file_name()
                                 .map(|name| name.to_string_lossy().to_string())
                                 .unwrap_or_else(|| folder_path.clone());
+                            let prefix = if folder_path.ends_with(std::path::MAIN_SEPARATOR) {
+                                folder_path
+                            } else {
+                                format!("{folder_path}{}", std::path::MAIN_SEPARATOR)
+                            };
                             let db = consume_context::<db::Db>();
                             spawn(async move {
-                                let tracks = db
-                                    .tracks_all(&db::TrackFilter::new(Source::Local))
-                                    .await
-                                    .unwrap_or_default();
+                                let tracks = db.folder_tracks(&prefix).await.unwrap_or_default();
                                 let refs: Vec<String> = tracks
                                     .iter()
-                                    .filter(|track| {
-                                        track
-                                            .id
-                                            .local_path()
-                                            .is_some_and(|p| p.starts_with(&folder_path_buf))
-                                    })
                                     .map(|track| track.id.key().into_owned())
                                     .collect();
                                 let id = uuid::Uuid::new_v4().to_string();

@@ -1,9 +1,10 @@
 use config::{AppConfig, ArtistPhotoSource, ListenNowStyle, UiStyle};
-use db::{Source, TrackFilter, TrackSort};
+use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{
-    use_albums, use_all_tracks, use_artist_images, use_favorites, use_playlists,
+    use_album_tracks, use_albums, use_artist_images, use_favorites, use_playlists,
+    use_recent_albums, use_top_genre, use_tracks_by_keys,
 };
 use rand::rng;
 use rand::seq::SliceRandom;
@@ -51,31 +52,21 @@ pub fn LocalHome(
     let mut config = use_context::<Signal<AppConfig>>();
     let source = use_memo(|| Source::Local);
     let albums_res = use_albums(source);
-    let tracks_filter = use_memo(|| TrackFilter {
-        source: Source::Local,
-        sort: TrackSort::DateAdded,
-        ..Default::default()
-    });
-    let tracks_res = use_all_tracks(tracks_filter);
+    let recent_albums_res = use_recent_albums(source, 20);
     let artist_images_res = use_artist_images();
     let playlists_res = use_playlists();
+    let recent_keys = use_memo(move || config.read().recently_played.clone());
+    let recent_tracks_res = use_tracks_by_keys(source, recent_keys);
+    let top_genre_res = use_top_genre(source);
 
-    // tracks_res is DateAdded-sorted, so first-seen album ids give newest-first
-    // (the old code relied on lib.albums insertion order, which SQL doesn't keep).
     let recent_albums = use_memo(move || {
-        let albums = albums_res.read().clone().unwrap_or_default();
-        let tracks = tracks_res.read().clone().unwrap_or_default();
-        let album_by_id: HashMap<&str, &Album> =
-            albums.iter().map(|a| (a.id.as_str(), a)).collect();
+        let albums = recent_albums_res.read().clone().unwrap_or_default();
         let mut unique_albums = Vec::new();
         let mut seen_titles = std::collections::HashSet::new();
-        for track in &tracks {
-            let Some(album) = album_by_id.get(track.album_id.as_str()) else {
-                continue;
-            };
+        for album in albums {
             let title_key = album.title.trim().to_lowercase();
             if seen_titles.insert(title_key) {
-                unique_albums.push((*album).clone());
+                unique_albums.push(album);
             }
             if unique_albums.len() >= 10 {
                 break;
@@ -104,9 +95,22 @@ pub fn LocalHome(
         unique_albums
     });
 
+    let playlist_cover_keys = use_memo(move || {
+        let store = playlists_res.read().clone().unwrap_or_default();
+        store
+            .playlists
+            .iter()
+            .rev()
+            .take(10)
+            .filter_map(|p| p.tracks.first())
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+    });
+    let playlist_cover_tracks_res = use_tracks_by_keys(source, playlist_cover_keys);
+
     let recent_playlists = use_memo(move || {
         let store = playlists_res.read().clone().unwrap_or_default();
-        let tracks = tracks_res.read().clone().unwrap_or_default();
+        let tracks = playlist_cover_tracks_res.read().clone().unwrap_or_default();
         let albums = albums_res.read().clone().unwrap_or_default();
         store
             .playlists
@@ -191,7 +195,7 @@ pub fn LocalHome(
     });
 
     let continue_listening = use_memo(move || {
-        let tracks = tracks_res.read().clone().unwrap_or_default();
+        let tracks = recent_tracks_res.read().clone().unwrap_or_default();
         let albums = albums_res.read().clone().unwrap_or_default();
         let conf = config.read();
         let track_by_path: HashMap<String, &Track> =
@@ -228,7 +232,7 @@ pub fn LocalHome(
     });
 
     let hero_entry = use_memo(move || {
-        let tracks = tracks_res.read().clone().unwrap_or_default();
+        let tracks = recent_tracks_res.read().clone().unwrap_or_default();
         let albums = albums_res.read().clone().unwrap_or_default();
         let conf = config.read();
         let track_by_path: HashMap<String, &Track> =
@@ -249,32 +253,8 @@ pub fn LocalHome(
     });
 
     let made_for_you = use_memo(move || {
-        let tracks = tracks_res.read().clone().unwrap_or_default();
         let all_albums = albums_res.read().clone().unwrap_or_default();
-        let conf = config.read();
-        let mut genre_scores: HashMap<String, u64> = HashMap::new();
-        let album_genre: HashMap<&str, &str> = all_albums
-            .iter()
-            .map(|a| (a.id.as_str(), a.genre.as_str()))
-            .collect();
-        for track in &tracks {
-            let path = track.id.uid();
-            let plays = conf.listen_counts.get(&path).copied().unwrap_or(0);
-            if plays == 0 {
-                continue;
-            }
-            if let Some(genre) = album_genre.get(track.album_id.as_str()) {
-                if genre.trim().is_empty() {
-                    continue;
-                }
-                *genre_scores.entry(genre.to_string()).or_insert(0) += plays;
-            }
-        }
-        let top_genre = genre_scores
-            .into_iter()
-            .max_by_key(|(_, v)| *v)
-            .map(|(k, _)| k);
-        let Some(top_genre) = top_genre else {
+        let Some(top_genre) = top_genre_res.read().clone().flatten() else {
             return (String::new(), Vec::<Album>::new());
         };
         let mut albums: Vec<Album> = all_albums
@@ -291,21 +271,15 @@ pub fn LocalHome(
     });
 
     let recently_added = use_memo(move || {
-        let albums = albums_res.read().clone().unwrap_or_default();
-        let tracks = tracks_res.read().clone().unwrap_or_default();
-        let album_by_id: HashMap<&str, &Album> =
-            albums.iter().map(|a| (a.id.as_str(), a)).collect();
+        let albums = recent_albums_res.read().clone().unwrap_or_default();
         let mut unique = Vec::new();
         let mut seen = std::collections::HashSet::new();
-        for track in &tracks {
-            let Some(album) = album_by_id.get(track.album_id.as_str()) else {
-                continue;
-            };
+        for album in albums {
             if is_unknown_album(&album.title) || is_unknown_artist(&album.artist) {
                 continue;
             }
             if seen.insert(album.title.trim().to_lowercase()) {
-                unique.push((*album).clone());
+                unique.push(album);
             }
             if unique.len() >= 12 {
                 break;
@@ -541,13 +515,10 @@ fn LocalHeroBanner(
     let hero_album_id = hero_entry
         .as_ref()
         .and_then(|(_, a)| a.as_ref().map(|a| a.id.clone()));
-    let fav_filter = use_memo(use_reactive!(|hero_album_id| TrackFilter {
-        source: Source::Local,
-        // empty-id sentinel: no album means no tracks, not the whole library
-        album_id: Some(hero_album_id.unwrap_or_default()),
-        ..Default::default()
-    }));
-    let album_tracks_res = use_all_tracks(fav_filter);
+    let source = use_memo(|| Source::Local);
+    let hero_album_id_memo =
+        use_memo(use_reactive!(|hero_album_id| hero_album_id.unwrap_or_default()));
+    let album_tracks_res = use_album_tracks(source, hero_album_id_memo);
     let local_sid = use_memo(|| "local".to_string());
     let favorites_res = use_favorites(local_sid);
     let mut is_resizing = use_signal(|| false);

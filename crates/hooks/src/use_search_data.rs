@@ -1,6 +1,7 @@
 use config::{AppConfig, MusicService, MusicSource};
 use dioxus::prelude::*;
 use reader::models::{Album, Track};
+use tracing::Instrument;
 
 type TrackRes = Vec<(Track, Option<utils::CoverUrl>)>;
 type AlbumRes = Vec<(Album, Option<utils::CoverUrl>)>;
@@ -360,8 +361,12 @@ pub fn use_search_data(search_query: Signal<String>, config: Signal<AppConfig>) 
             if query.trim().is_empty() {
                 return None;
             }
-            let filter = db::TrackFilter::new(src.clone());
-            let tracks = db.tracks_all(&filter).await.unwrap_or_default();
+            let span = tracing::info_span!("query.search_corpus", source = src.as_str());
+            let tracks = db
+                .search_corpus(&src)
+                .instrument(span)
+                .await
+                .unwrap_or_default();
             let albums = db.albums(&src).await.unwrap_or_default();
             run_search(query, tracks, albums, active_source, active_service, server).await
         }

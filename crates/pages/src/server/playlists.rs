@@ -2,10 +2,10 @@ use crate::server::download_manager::{DownloadQueue, DownloadStatus, queue_downl
 use ::server::jellyfin::JellyfinClient;
 use ::server::subsonic::SubsonicClient;
 use config::{AppConfig, MusicService};
-use db::{Source, TrackFilter};
+use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
-use hooks::use_db_queries::{use_all_tracks, use_playlists};
+use hooks::use_db_queries::{use_playlists, use_tracks_by_keys};
 use tracing::Instrument;
 
 #[component]
@@ -32,8 +32,16 @@ pub fn JellyfinPlaylists(
             .unwrap_or_default()
     });
     let playlists_res = use_playlists();
-    let all_filter = use_memo(move || TrackFilter::new(Source::Server(active_server_id())));
-    let tracks_res = use_all_tracks(all_filter);
+    let server_source = use_memo(move || Source::Server(active_server_id()));
+    let cover_keys = use_memo(move || -> Vec<String> {
+        let store = playlists_res.read().clone().unwrap_or_default();
+        store
+            .jellyfin_playlists
+            .iter()
+            .filter_map(|p| p.tracks.first().cloned())
+            .collect()
+    });
+    let cover_tracks_res = use_tracks_by_keys(server_source, cover_keys);
 
     use_effect(move || {
         let yt_nonce = *yt_refresh_nonce.read();
@@ -461,7 +469,7 @@ pub fn JellyfinPlaylists(
                                         80,
                                     )))
                                 } else if let Some(first_track_id) = playlist.tracks.first() {
-                                    tracks_res
+                                    cover_tracks_res
                                         .read()
                                         .clone()
                                         .unwrap_or_default()
@@ -487,18 +495,6 @@ pub fn JellyfinPlaylists(
                         };
 
                         let playlist_id_nav = playlist.id.clone();
-                        let track_requests_dl: Vec<(String, String, String)> = {
-                            let all_tracks = tracks_res.read().clone().unwrap_or_default();
-                            playlist.tracks.iter().map(|tid| {
-                                let meta = all_tracks.iter()
-                                    .find(|t| t.id.key().contains(tid.as_str()));
-                                (
-                                    tid.clone(),
-                                    meta.map(|t| t.title.clone()).unwrap_or_default(),
-                                    meta.map(|t| t.artist.clone()).unwrap_or_default(),
-                                )
-                            }).collect()
-                        };
                         let is_dl = {
                             let q = download_queue.read();
                             playlist.tracks.iter().any(|tid| q.items.iter().any(|i| &i.id == tid && matches!(i.status, DownloadStatus::Queued | DownloadStatus::Downloading)))
@@ -546,7 +542,24 @@ pub fn JellyfinPlaylists(
                                             let ids_only = playlist.tracks.clone();
                                             crate::server::download_manager::delete_downloads(ids_only, config, download_queue);
                                         } else {
-                                            queue_downloads(track_requests_dl.clone(), config, download_queue);
+                                            let ids = playlist.tracks.clone();
+                                            let s = server_source.peek().clone();
+                                            let db = consume_context::<db::Db>();
+                                            spawn(async move {
+                                                let meta = db.tracks_by_keys(&s, &ids).await.unwrap_or_default();
+                                                let requests: Vec<(String, String, String)> = ids
+                                                    .iter()
+                                                    .map(|tid| {
+                                                        let m = meta.iter().find(|t| t.id.key().as_ref() == tid.as_str());
+                                                        (
+                                                            tid.clone(),
+                                                            m.map(|t| t.title.clone()).unwrap_or_default(),
+                                                            m.map(|t| t.artist.clone()).unwrap_or_default(),
+                                                        )
+                                                    })
+                                                    .collect();
+                                                queue_downloads(requests, config, download_queue);
+                                            });
                                         }
                                     },
                                     if is_dl {

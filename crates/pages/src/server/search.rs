@@ -4,9 +4,9 @@ use components::search_genre_detail::SearchGenreDetail;
 use components::search_genres::SearchGenres;
 use components::search_results::SearchResults;
 use config::{AppConfig, UiStyle};
-use db::{Source, TrackFilter};
+use db::Source;
 use dioxus::prelude::*;
-use hooks::use_db_queries::{use_albums, use_all_tracks};
+use hooks::use_db_queries::use_genre_tracks;
 use hooks::use_search_data::use_search_data;
 use player::player;
 
@@ -41,48 +41,32 @@ pub fn JellyfinSearch(
             .unwrap_or_default()
     });
     let server_source = use_memo(move || Source::Server(active_server_id()));
-    let all_filter = use_memo(move || TrackFilter::new(Source::Server(active_server_id())));
-    let tracks_res = use_all_tracks(all_filter);
-    let albums_res = use_albums(server_source);
+    let selected_genre_memo =
+        use_memo(move || selected_genre.read().clone().unwrap_or_default());
+    let genre_tracks_res = use_genre_tracks(server_source, selected_genre_memo);
 
     let genre_tracks = use_memo(move || {
-        let genre = selected_genre.read();
-
-        if let Some(g) = &*genre {
-            let all_albums = albums_res.read().clone().unwrap_or_default();
-            let all_tracks = tracks_res.read().clone().unwrap_or_default();
-
-            let valid_album_ids: std::collections::HashSet<&String> = all_albums
-                .iter()
-                .filter(|a| a.genre.to_lowercase().contains(&g.to_lowercase()))
-                .map(|a| &a.id)
-                .collect();
-
-            let mut matching_tracks = Vec::new();
-            for track in &all_tracks {
-                if valid_album_ids.contains(&track.album_id) {
-                    let cover = if let Some(server) = &config.read().server {
-                        utils::map_cover_url(
-                            utils::jellyfin_image::resolve_track_cover(
-                                track.cover.as_deref(),
-                                &track.id.key(),
-                                &track.album_id,
-                                &server.url,
-                                server.access_token.as_deref(),
-                                80,
-                                80,
-                            ),
-                        )
-                    } else {
-                        None
-                    };
-                    matching_tracks.push((track.clone(), cover));
-                }
-            }
-            matching_tracks
-        } else {
-            Vec::new()
-        }
+        let conf = config.read();
+        genre_tracks_res
+            .read()
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|track| {
+                let cover = conf.server.as_ref().and_then(|server| {
+                    utils::map_cover_url(utils::jellyfin_image::resolve_track_cover(
+                        track.cover.as_deref(),
+                        &track.id.key(),
+                        &track.album_id,
+                        &server.url,
+                        server.access_token.as_deref(),
+                        80,
+                        80,
+                    ))
+                });
+                (track, cover)
+            })
+            .collect::<Vec<_>>()
     });
 
     let is_modern = config.read().ui_style == UiStyle::Modern;

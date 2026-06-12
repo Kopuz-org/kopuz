@@ -5,10 +5,10 @@ use components::selection_bar::SelectionBar;
 use components::track_row::TrackRow;
 use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use config::{AppConfig, MusicService, UiStyle};
-use db::{Source, TrackFilter};
+use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
-use hooks::use_db_queries::{use_album, use_albums, use_all_tracks};
+use hooks::use_db_queries::{use_album, use_albums, use_tracks_by_keys};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -31,9 +31,20 @@ pub fn JellyfinAlbum(
             .unwrap_or_default()
     });
     let server_source = use_memo(move || Source::Server(active_server_id()));
-    let all_filter = use_memo(move || TrackFilter::new(Source::Server(active_server_id())));
-    let tracks_res = use_all_tracks(all_filter);
     let albums_res = use_albums(server_source);
+    let offline_keys = use_memo(move || -> Vec<String> {
+        if !*is_offline.read() {
+            return Vec::new();
+        }
+        config
+            .read()
+            .offline_tracks
+            .iter()
+            .filter(|(_, path)| std::path::Path::new(path).exists())
+            .map(|(id, _)| id.clone())
+            .collect()
+    });
+    let offline_tracks_res = use_tracks_by_keys(server_source, offline_keys);
     let jellyfin_albums = use_memo(move || {
         let conf = config.read();
 
@@ -50,19 +61,11 @@ pub fn JellyfinAlbum(
 
         let offline = *is_offline.read();
         let downloaded_album_ids: std::collections::HashSet<String> = if offline {
-            tracks_res
+            offline_tracks_res
                 .read()
                 .clone()
                 .unwrap_or_default()
                 .iter()
-                .filter(|t| {
-                    let id_str = t.id.key();
-                    if let Some(path_str) = conf.offline_tracks.get(id_str.as_ref()) {
-                        std::path::Path::new(path_str).exists()
-                    } else {
-                        false
-                    }
-                })
                 .map(|t| t.album_id.clone())
                 .collect()
         } else {
@@ -181,23 +184,16 @@ pub fn JellyfinAlbum(
                                                     open_album_menu.set(None);
                                                     match idx {
                                                         0 => {
-                                                            let mut tracks_for_queue: Vec<_> = tracks_res
-                                                                .read()
-                                                                .clone()
-                                                                .unwrap_or_default()
-                                                                .into_iter()
-                                                                .filter(|t| t.album_id == id)
-                                                                .collect();
-                                                            tracks_for_queue.sort_by(|a, b| {
-                                                                let disc_cmp =
-                                                                    a.disc_number.unwrap_or(1).cmp(&b.disc_number.unwrap_or(1));
-                                                                if disc_cmp == std::cmp::Ordering::Equal {
-                                                                    a.track_number.unwrap_or(0).cmp(&b.track_number.unwrap_or(0))
-                                                                } else {
-                                                                    disc_cmp
-                                                                }
+                                                            let aid = id.clone();
+                                                            let s = server_source.peek().clone();
+                                                            let db = consume_context::<db::Db>();
+                                                            spawn(async move {
+                                                                let tracks_for_queue = db
+                                                                    .album_tracks(&s, &aid)
+                                                                    .await
+                                                                    .unwrap_or_default();
+                                                                ctrl.add_to_queue(tracks_for_queue);
                                                             });
-                                                            ctrl.add_to_queue(tracks_for_queue);
                                                         }
                                                         1 => {
                                                             pending_album_id_for_playlist.set(Some(id.clone()));
@@ -279,21 +275,47 @@ pub fn JellyfinAlbumDetails(
     let server_source = use_memo(move || Source::Server(active_server_id()));
     let album_id_memo = use_memo(move || album_id_sig.read().clone());
     let album_res = use_album(server_source, album_id_memo);
-    let all_filter = use_memo(move || TrackFilter::new(Source::Server(active_server_id())));
-    let tracks_res = use_all_tracks(all_filter);
+    let albums_res = use_albums(server_source);
 
     let album_info = use_memo(move || album_res.read().clone().flatten());
 
+    // The grid dedupes albums by title, so this view shows every same-titled
+    // album's tracks — resolve the title to its album ids, then query each.
+    let matching_album_ids = use_memo(move || -> Vec<String> {
+        let Some(info) = album_info() else {
+            return Vec::new();
+        };
+        let ids: Vec<String> = albums_res
+            .read()
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|a| a.title == info.title)
+            .map(|a| a.id)
+            .collect();
+        if ids.is_empty() { vec![info.id] } else { ids }
+    });
+    let gens = hooks::db_reactivity::use_generations();
+    let db = use_context::<db::Db>();
+    let album_tracks_res = use_resource(move || {
+        let _ = gens.generation(Table::Tracks);
+        let (db, s, ids) = (db.clone(), server_source(), matching_album_ids());
+        async move {
+            let mut out = Vec::new();
+            for id in &ids {
+                out.extend(db.album_tracks(&s, id).await.unwrap_or_default());
+            }
+            out
+        }
+    });
+
     let album_tracks = use_memo(move || {
-        let all_tracks = tracks_res.read().clone().unwrap_or_default();
+        let all_tracks = album_tracks_res.read().clone().unwrap_or_default();
         let conf = config.read();
         let offline = *is_offline.read();
-        let info = album_info();
-        let album_name = info.as_ref().map(|a| a.title.clone()).unwrap_or_default();
 
         let mut tracks: Vec<_> = all_tracks
             .iter()
-            .filter(|t| !album_name.is_empty() && t.album == album_name)
             .filter(|t| {
                 if !offline {
                     return true;

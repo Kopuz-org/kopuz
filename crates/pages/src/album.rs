@@ -2,7 +2,7 @@ use config::{AppConfig, MusicSource};
 use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
-use hooks::use_db_queries::{use_albums, use_all_tracks, use_tracks_window};
+use hooks::use_db_queries::{use_album_tracks, use_albums, use_tracks_window};
 
 use crate::local::album::LocalAlbum;
 use crate::server::album::{ServerAlbum, ServerAlbumDetails};
@@ -38,19 +38,20 @@ pub fn Album(
     });
     let server_tracks_win = use_tracks_window(server_filter, probe_page);
     let server_albums_res = use_albums(server_source);
-    let pending_filter = use_memo(move || {
-        let aid = pending_album_id_for_playlist
-            .read()
-            .clone()
-            .unwrap_or_default();
-        let source = if config.read().active_source == MusicSource::Server {
+    let pending_source = use_memo(move || {
+        if config.read().active_source == MusicSource::Server {
             Source::Server(active_server_id())
         } else {
             Source::Local
-        };
-        db::TrackFilter::album(source, aid)
+        }
     });
-    let pending_tracks_res = use_all_tracks(pending_filter);
+    let pending_album_id = use_memo(move || {
+        pending_album_id_for_playlist
+            .read()
+            .clone()
+            .unwrap_or_default()
+    });
+    let pending_tracks_res = use_album_tracks(pending_source, pending_album_id);
 
     let mut fetch_jellyfin = move || {
         has_fetched_jellyfin.set(true);

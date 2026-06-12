@@ -1721,13 +1721,24 @@ fn App() -> Element {
                 .cloned()
                 .collect();
             // Seed the scan working set from the DB (the scanner skips files it
-            // already knows; album-merge keeps manual covers).
+            // already knows; album-merge keeps manual covers). One folder query
+            // per root, deduped by key in case roots nest.
+            let mut seed_tracks: Vec<reader::Track> = Vec::new();
+            let mut seen_keys = std::collections::HashSet::new();
+            for dir in &configured_dirs {
+                let mut prefix = dir.to_string_lossy().into_owned();
+                if !prefix.ends_with(std::path::MAIN_SEPARATOR) {
+                    prefix.push(std::path::MAIN_SEPARATOR);
+                }
+                for t in db.folder_tracks(&prefix).await.unwrap_or_default() {
+                    if seen_keys.insert(t.id.key().into_owned()) {
+                        seed_tracks.push(t);
+                    }
+                }
+            }
             let mut current_lib = reader::Library {
                 root_paths: configured_dirs.clone(),
-                tracks: db
-                    .tracks_all(&db::TrackFilter::new(db::Source::Local))
-                    .await
-                    .unwrap_or_default(),
+                tracks: seed_tracks,
                 albums: db.albums(&db::Source::Local).await.unwrap_or_default(),
                 ..Default::default()
             };
@@ -2292,10 +2303,8 @@ fn App() -> Element {
                                     };
                                     let db = db_for_play_album.clone();
                                     spawn(async move {
-                                        let mut tracks = db
-                                            .tracks_all(&db::TrackFilter::album(source, id))
-                                            .await
-                                            .unwrap_or_default();
+                                        let mut tracks =
+                                            db.album_tracks(&source, &id).await.unwrap_or_default();
                                         if !tracks.is_empty() {
                                             tracks.sort_by(|a, b| {
                                                 let disc_cmp = a.disc_number.unwrap_or(1).cmp(&b.disc_number.unwrap_or(1));

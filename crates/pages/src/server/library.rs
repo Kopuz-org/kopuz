@@ -5,9 +5,9 @@ use components::stat_card::StatCard;
 use components::track_row::TrackRow;
 use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use config::{AppConfig, UiStyle};
-use db::{Source, TrackFilter, TrackSort};
+use db::{Page, Source, TrackFilter, TrackSort};
 use dioxus::prelude::*;
-use hooks::use_db_queries::{use_albums, use_all_tracks, use_artists, use_playlists};
+use hooks::use_db_queries::{use_albums, use_artists, use_playlists, use_tracks_window};
 use hooks::use_player_controller::PlayerController;
 use kopuz_route::Route;
 use std::collections::HashSet;
@@ -64,7 +64,27 @@ pub fn JellyfinLibrary(
         },
         ..Default::default()
     });
-    let tracks_res = use_all_tracks(filter);
+    let container_height = use_signal(|| 0.0_f64);
+    let mut total_items = use_signal(|| 0usize);
+    let page = use_memo(move || {
+        let info = use_virtual_scroll(
+            *scroll_stat.read(),
+            *container_height.read(),
+            *total_items.read(),
+            ITEM_HEIGHT,
+        );
+        Page {
+            offset: info.start_index as u32,
+            limit: info.items_to_render as u32,
+        }
+    });
+    let window = use_tracks_window(filter, page);
+    use_effect(move || {
+        let total = (*window.total.read()).unwrap_or(0) as usize;
+        if *total_items.peek() != total {
+            total_items.set(total);
+        }
+    });
     let albums_res = use_albums(source);
     let artists_res = use_artists(source);
     let playlists_res = use_playlists();
@@ -87,8 +107,8 @@ pub fn JellyfinLibrary(
 
     use_effect(move || {
         if !*has_fetched.read() {
-            if let Some(tracks) = tracks_res.read().as_ref() {
-                if tracks.is_empty() {
+            if let Some(total) = *window.total.read() {
+                if total == 0 {
                     fetch_jellyfin();
                 } else {
                     has_fetched.set(true);
@@ -98,7 +118,7 @@ pub fn JellyfinLibrary(
     });
 
     let displayed_tracks = use_memo(move || {
-        let tracks = tracks_res.read().clone().unwrap_or_default();
+        let tracks = window.rows.read().clone().unwrap_or_default();
         let conf = config.read();
         tracks
             .into_iter()
@@ -123,54 +143,39 @@ pub fn JellyfinLibrary(
             .collect::<Vec<_>>()
     });
 
-    let queue_tracks = use_memo(move || {
-        displayed_tracks
-            .read()
-            .iter()
-            .map(|(t, _)| t.clone())
-            .collect::<Vec<_>>()
-    });
-
-    let queue_source = use_memo(move || std::sync::Arc::new(queue_tracks.read().clone()));
-
-    let container_height = use_signal(|| 0.0_f64);
-    let scroll_top = *scroll_stat.read();
-
-    let all_tracks = displayed_tracks.read();
-    let is_empty = all_tracks.is_empty();
-    let total_tracks = all_tracks.len();
+    let total_tracks = *total_items.read();
+    let is_empty = total_tracks == 0;
+    let row_offset = page().offset as usize;
 
     let scroll_info = use_virtual_scroll(
-        scroll_top,
+        *scroll_stat.read(),
         *container_height.read(),
         total_tracks,
         ITEM_HEIGHT,
     );
 
-    let currently_playing_idx: Option<usize> = {
+    let current_track_id: Option<reader::models::TrackId> = {
         let queue = ctrl.queue.read();
         let q_idx = *ctrl.current_queue_index.read();
-        let qt = queue_tracks.read();
-        if queue.len() == qt.len() && queue.iter().zip(qt.iter()).all(|(q, t)| q.id == t.id) {
-            Some(q_idx)
+        if queue.len() == total_tracks {
+            queue.get(q_idx).map(|t| t.id.clone())
         } else {
             None
         }
     };
 
+    let all_tracks = displayed_tracks.read();
     let tracks_nodes = all_tracks
         .iter()
         .enumerate()
-        .skip(scroll_info.start_index)
-        .take(scroll_info.items_to_render)
-        .map(|(idx, (track, cover_url))| {
+        .map(|(i, (track, cover_url))| {
+            let idx = row_offset + i;
             let track_menu = track.clone();
             let track_add = track.clone();
             let track_queue = track.clone();
             let track_path = track.id.uid_path();
-            let is_currently_playing = currently_playing_idx == Some(idx);
+            let is_currently_playing = current_track_id.as_ref() == Some(&track.id);
             let track_select = track.id.uid_path();
-            let queue_arc = queue_source.read().clone();
             let track_key = format!("{}-{}", track.id.uid(), idx);
             let is_menu_open = active_menu_track.read().as_ref() == Some(&track.id.uid_path());
             let is_selected = selected_tracks.read().contains(&track_path);
@@ -254,8 +259,16 @@ pub fn JellyfinLibrary(
                             }
                         },
                         on_play: move |_| {
-                            queue.set((*queue_arc).clone());
-                            ctrl.play_track(idx);
+                            let f = filter.peek().clone();
+                            let db = consume_context::<db::Db>();
+                            spawn(async move {
+                                let all = db
+                                    .tracks_page(&f, Page { offset: 0, limit: u32::MAX })
+                                    .await
+                                    .unwrap_or_default();
+                                queue.set(all);
+                                ctrl.play_track(idx);
+                            });
                         },
                     }
                 }
@@ -361,15 +374,21 @@ pub fn JellyfinLibrary(
                         if selected.is_empty() {
                             return;
                         }
-                        let tracks: Vec<_> = displayed_tracks
-                            .read()
+                        let keys: Vec<String> = selected
                             .iter()
-                            .filter(|(t, _)| selected.contains(&t.id.uid_path()))
-                            .map(|(track, _)| track.clone())
+                            .filter_map(|p| {
+                                ::server::server_ops::parse_item_id(p.to_str()?)
+                                    .map(str::to_string)
+                            })
                             .collect();
-                        if !tracks.is_empty() {
-                            ctrl.add_to_queue(tracks);
-                        }
+                        let s = source.peek().clone();
+                        let db = consume_context::<db::Db>();
+                        spawn(async move {
+                            let tracks = db.tracks_by_keys(&s, &keys).await.unwrap_or_default();
+                            if !tracks.is_empty() {
+                                ctrl.add_to_queue(tracks);
+                            }
+                        });
                         is_selection_mode.set(false);
                         selected_tracks.write().clear();
                     },

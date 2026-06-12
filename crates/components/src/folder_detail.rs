@@ -1,6 +1,6 @@
 use db::Source;
 use dioxus::prelude::*;
-use hooks::use_db_queries::{use_albums, use_all_tracks};
+use hooks::use_db_queries::{use_albums, use_folder_tracks};
 use reader::models::Track;
 use std::path::PathBuf;
 
@@ -17,17 +17,17 @@ pub fn FolderDetail(
         .unwrap_or_else(|| folder_path.clone());
 
     let source = use_memo(|| Source::Local);
-    let filter = use_memo(|| db::TrackFilter::new(Source::Local));
-    let tracks_res = use_all_tracks(filter);
+    let prefix = use_memo(use_reactive!(|folder_path| {
+        if folder_path.ends_with(std::path::MAIN_SEPARATOR) {
+            folder_path
+        } else {
+            format!("{folder_path}{}", std::path::MAIN_SEPARATOR)
+        }
+    }));
+    let tracks_res = use_folder_tracks(prefix);
     let albums_res = use_albums(source);
 
-    let mut folder_tracks: Vec<Track> = tracks_res
-        .read()
-        .clone()
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|t| t.id.local_path().is_some_and(|p| p.starts_with(&folder_path_buf)))
-        .collect();
+    let mut folder_tracks: Vec<Track> = tracks_res.read().clone().unwrap_or_default();
     folder_tracks.sort_by(|a, b| {
         a.disc_number
             .cmp(&b.disc_number)

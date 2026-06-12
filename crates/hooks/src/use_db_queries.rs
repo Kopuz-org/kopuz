@@ -73,28 +73,169 @@ pub fn use_tracks_window(filter: Memo<TrackFilter>, page: Memo<Page>) -> TracksW
     TracksWindow { rows, total }
 }
 
-/// The complete filtered+sorted list — artist/album details and other small
-/// lists. Big unbounded lists should use [`use_tracks_window`] instead.
-pub fn use_all_tracks(filter: Memo<TrackFilter>) -> Resource<Vec<reader::Track>> {
+/// One album's tracks, disc/track-ordered. An empty `album_id` (the home-hero
+/// "nothing picked yet" sentinel) resolves to empty without touching the DB.
+pub fn use_album_tracks(
+    source: Memo<Source>,
+    album_id: Memo<String>,
+) -> Resource<Vec<reader::Track>> {
     let db = use_context::<Db>();
     let gens = use_generations();
     use_resource(move || {
         let _ = gens.generation(Table::Tracks);
-        let (db, f) = (db.clone(), filter());
-        let span =
-            tracing::info_span!("query.tracks_all", filter = ?f, rows = tracing::field::Empty);
+        let (db, s, id) = (db.clone(), source(), album_id());
+        let span = tracing::info_span!(
+            "query.album_tracks",
+            source = s.as_str(),
+            album_id = %id,
+            rows = tracing::field::Empty,
+        );
         async move {
-            // Empty-id sentinel (home hero before an album is picked):
-            // always zero rows, skip the round-trip.
-            if f.album_id.as_deref() == Some("") {
+            if id.is_empty() {
                 tracing::Span::current().record("rows", 0);
                 return Vec::new();
             }
-            let rows = db.tracks_all(&f).await.unwrap_or_default();
+            let rows = db.album_tracks(&s, &id).await.unwrap_or_default();
             tracing::Span::current().record("rows", rows.len());
             rows
         }
         .instrument(span)
+    })
+}
+
+/// One artist's tracks, album/disc/track-ordered.
+pub fn use_artist_tracks(
+    source: Memo<Source>,
+    artist: Memo<String>,
+) -> Resource<Vec<reader::Track>> {
+    let db = use_context::<Db>();
+    let gens = use_generations();
+    use_resource(move || {
+        let _ = gens.generation(Table::Tracks);
+        let (db, s, a) = (db.clone(), source(), artist());
+        let span = tracing::info_span!(
+            "query.artist_tracks",
+            source = s.as_str(),
+            artist = %a,
+            rows = tracing::field::Empty,
+        );
+        async move {
+            let rows = db.artist_tracks(&s, &a).await.unwrap_or_default();
+            tracing::Span::current().record("rows", rows.len());
+            rows
+        }
+        .instrument(span)
+    })
+}
+
+/// Tracks whose album has this genre. An empty genre resolves to empty
+/// without touching the DB.
+pub fn use_genre_tracks(
+    source: Memo<Source>,
+    genre: Memo<String>,
+) -> Resource<Vec<reader::Track>> {
+    let db = use_context::<Db>();
+    let gens = use_generations();
+    use_resource(move || {
+        let _ = gens.generation(Table::Tracks);
+        let (db, s, g) = (db.clone(), source(), genre());
+        let span = tracing::info_span!(
+            "query.genre_tracks",
+            source = s.as_str(),
+            genre = %g,
+            rows = tracing::field::Empty,
+        );
+        async move {
+            if g.is_empty() {
+                tracing::Span::current().record("rows", 0);
+                return Vec::new();
+            }
+            let rows = db.genre_tracks(&s, &g).await.unwrap_or_default();
+            tracing::Span::current().record("rows", rows.len());
+            rows
+        }
+        .instrument(span)
+    })
+}
+
+/// Local tracks under a directory, path-ordered.
+pub fn use_folder_tracks(prefix: Memo<String>) -> Resource<Vec<reader::Track>> {
+    let db = use_context::<Db>();
+    let gens = use_generations();
+    use_resource(move || {
+        let _ = gens.generation(Table::Tracks);
+        let (db, p) = (db.clone(), prefix());
+        let span = tracing::info_span!(
+            "query.folder_tracks",
+            prefix = %p,
+            rows = tracing::field::Empty
+        );
+        async move {
+            let rows = db.folder_tracks(&p).await.unwrap_or_default();
+            tracing::Span::current().record("rows", rows.len());
+            rows
+        }
+        .instrument(span)
+    })
+}
+
+/// Albums by most-recently-added track, newest first.
+pub fn use_recent_albums(source: Memo<Source>, limit: u32) -> Resource<Vec<reader::Album>> {
+    let db = use_context::<Db>();
+    let gens = use_generations();
+    use_resource(move || {
+        let _ = gens.generation(Table::Tracks);
+        let _ = gens.generation(Table::Albums);
+        let (db, s) = (db.clone(), source());
+        let span = tracing::info_span!(
+            "query.recent_albums",
+            source = s.as_str(),
+            limit,
+            rows = tracing::field::Empty,
+        );
+        async move {
+            let rows = db.recent_albums(&s, limit).await.unwrap_or_default();
+            tracing::Span::current().record("rows", rows.len());
+            rows
+        }
+        .instrument(span)
+    })
+}
+
+/// One representative track per artist, A→Z — artist tiles with covers.
+pub fn use_artist_sample_tracks(
+    source: Memo<Source>,
+    limit: u32,
+) -> Resource<Vec<reader::Track>> {
+    let db = use_context::<Db>();
+    let gens = use_generations();
+    use_resource(move || {
+        let _ = gens.generation(Table::Tracks);
+        let (db, s) = (db.clone(), source());
+        let span = tracing::info_span!(
+            "query.artist_samples",
+            source = s.as_str(),
+            limit,
+            rows = tracing::field::Empty,
+        );
+        async move {
+            let rows = db.artist_sample_tracks(&s, limit).await.unwrap_or_default();
+            tracing::Span::current().record("rows", rows.len());
+            rows
+        }
+        .instrument(span)
+    })
+}
+
+/// The genre with the highest summed play count for a source.
+pub fn use_top_genre(source: Memo<Source>) -> Resource<Option<String>> {
+    let db = use_context::<Db>();
+    let gens = use_generations();
+    use_resource(move || {
+        let _ = gens.generation(Table::Tracks);
+        let (db, s) = (db.clone(), source());
+        let span = tracing::info_span!("query.top_genre", source = s.as_str());
+        async move { db.top_genre(&s).await.unwrap_or_default() }.instrument(span)
     })
 }
 

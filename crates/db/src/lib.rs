@@ -74,41 +74,27 @@ pub enum TrackSort {
     Album,
     /// Most-recently-added first (insertion order).
     DateAdded,
+    /// Most-played first (`listen_counts` join), ties by title.
+    PlayCount,
 }
 
-/// What a track listing selects: which source, how it's sorted, an optional
-/// case-insensitive search across title/artist/album, and optional exact
-/// artist / album-id narrowing. Drives `WHERE`/`ORDER BY` so only the needed
-/// rows are materialized.
+/// What a windowed track listing selects: which source, how it's sorted, and
+/// an optional case-insensitive search across title/artist/album. Drives
+/// `WHERE`/`ORDER BY` so only the needed rows are materialized. Narrower
+/// listings (one album, one artist, one genre, a folder) have dedicated
+/// `Storage` methods instead of filter fields — there is deliberately no way
+/// to pull a whole source and filter it in memory.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TrackFilter {
     pub source: Source,
     pub sort: TrackSort,
     pub search: String,
-    pub artist: Option<String>,
-    pub album_id: Option<String>,
 }
 
 impl TrackFilter {
     pub fn new(source: Source) -> Self {
         Self {
             source,
-            ..Default::default()
-        }
-    }
-
-    pub fn album(source: Source, album_id: impl Into<String>) -> Self {
-        Self {
-            source,
-            album_id: Some(album_id.into()),
-            ..Default::default()
-        }
-    }
-
-    pub fn artist(source: Source, artist: impl Into<String>) -> Self {
-        Self {
-            source,
-            artist: Some(artist.into()),
             ..Default::default()
         }
     }
@@ -191,8 +177,53 @@ pub trait Storage: Send + Sync {
     /// Total rows a `tracks_page` filter matches (for the scroll spacer).
     async fn tracks_count(&self, filter: &TrackFilter) -> Result<u32, DbError>;
 
-    /// The complete filtered+sorted list (artist/album details, small lists).
-    async fn tracks_all(&self, filter: &TrackFilter) -> Result<Vec<reader::Track>, DbError>;
+    /// One album's tracks, disc/track-ordered.
+    async fn album_tracks(
+        &self,
+        source: &Source,
+        album_id: &str,
+    ) -> Result<Vec<reader::Track>, DbError>;
+
+    /// One artist's tracks, album/disc/track-ordered.
+    async fn artist_tracks(
+        &self,
+        source: &Source,
+        artist: &str,
+    ) -> Result<Vec<reader::Track>, DbError>;
+
+    /// Tracks whose album has this genre, artist/album-ordered.
+    async fn genre_tracks(
+        &self,
+        source: &Source,
+        genre: &str,
+    ) -> Result<Vec<reader::Track>, DbError>;
+
+    /// Local tracks under a directory (path-prefix match), path-ordered.
+    async fn folder_tracks(&self, prefix: &str) -> Result<Vec<reader::Track>, DbError>;
+
+    /// Albums by most-recently-added track, newest first.
+    async fn recent_albums(
+        &self,
+        source: &Source,
+        limit: u32,
+    ) -> Result<Vec<reader::Album>, DbError>;
+
+    /// One representative (first-inserted) track per artist, artist A→Z — for
+    /// artist tiles that need a cover without pulling the whole source.
+    async fn artist_sample_tracks(
+        &self,
+        source: &Source,
+        limit: u32,
+    ) -> Result<Vec<reader::Track>, DbError>;
+
+    /// The genre with the highest summed play count for a source, if any.
+    async fn top_genre(&self, source: &Source) -> Result<Option<String>, DbError>;
+
+    /// Every track of a source — ONLY for full-text search, which needs the
+    /// corpus because its Unicode-aware matching can't be expressed as SQLite
+    /// `LIKE` (ASCII-only case folding). Runs on demand when a query is typed,
+    /// never on page mount. Nothing else may pull a whole source.
+    async fn search_corpus(&self, source: &Source) -> Result<Vec<reader::Track>, DbError>;
 
     /// Resolve tracks by `track_key`, preserving the input order (recents,
     /// playlist membership). Missing keys are skipped.

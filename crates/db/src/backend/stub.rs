@@ -52,7 +52,55 @@ impl Storage for Stub {
         Ok(0)
     }
 
-    async fn tracks_all(&self, _filter: &crate::TrackFilter) -> Result<Vec<reader::Track>, DbError> {
+    async fn album_tracks(
+        &self,
+        _source: &crate::Source,
+        _album_id: &str,
+    ) -> Result<Vec<reader::Track>, DbError> {
+        Ok(Vec::new())
+    }
+
+    async fn artist_tracks(
+        &self,
+        _source: &crate::Source,
+        _artist: &str,
+    ) -> Result<Vec<reader::Track>, DbError> {
+        Ok(Vec::new())
+    }
+
+    async fn genre_tracks(
+        &self,
+        _source: &crate::Source,
+        _genre: &str,
+    ) -> Result<Vec<reader::Track>, DbError> {
+        Ok(Vec::new())
+    }
+
+    async fn folder_tracks(&self, _prefix: &str) -> Result<Vec<reader::Track>, DbError> {
+        Ok(Vec::new())
+    }
+
+    async fn recent_albums(
+        &self,
+        _source: &crate::Source,
+        _limit: u32,
+    ) -> Result<Vec<reader::Album>, DbError> {
+        Ok(Vec::new())
+    }
+
+    async fn artist_sample_tracks(
+        &self,
+        _source: &crate::Source,
+        _limit: u32,
+    ) -> Result<Vec<reader::Track>, DbError> {
+        Ok(Vec::new())
+    }
+
+    async fn top_genre(&self, _source: &crate::Source) -> Result<Option<String>, DbError> {
+        Ok(None)
+    }
+
+    async fn search_corpus(&self, _source: &crate::Source) -> Result<Vec<reader::Track>, DbError> {
         Ok(Vec::new())
     }
 

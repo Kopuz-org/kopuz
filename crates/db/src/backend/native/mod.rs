@@ -153,8 +153,56 @@ impl Storage for Native {
         queries::tracks_count(&self.pool(), filter).await
     }
 
-    async fn tracks_all(&self, filter: &crate::TrackFilter) -> Result<Vec<reader::Track>, DbError> {
-        queries::tracks_all(&self.pool(), filter).await
+    async fn album_tracks(
+        &self,
+        source: &crate::Source,
+        album_id: &str,
+    ) -> Result<Vec<reader::Track>, DbError> {
+        queries::album_tracks(&self.pool(), source, album_id).await
+    }
+
+    async fn artist_tracks(
+        &self,
+        source: &crate::Source,
+        artist: &str,
+    ) -> Result<Vec<reader::Track>, DbError> {
+        queries::artist_tracks(&self.pool(), source, artist).await
+    }
+
+    async fn genre_tracks(
+        &self,
+        source: &crate::Source,
+        genre: &str,
+    ) -> Result<Vec<reader::Track>, DbError> {
+        queries::genre_tracks(&self.pool(), source, genre).await
+    }
+
+    async fn folder_tracks(&self, prefix: &str) -> Result<Vec<reader::Track>, DbError> {
+        queries::folder_tracks(&self.pool(), prefix).await
+    }
+
+    async fn recent_albums(
+        &self,
+        source: &crate::Source,
+        limit: u32,
+    ) -> Result<Vec<reader::Album>, DbError> {
+        queries::recent_albums(&self.pool(), source, limit).await
+    }
+
+    async fn artist_sample_tracks(
+        &self,
+        source: &crate::Source,
+        limit: u32,
+    ) -> Result<Vec<reader::Track>, DbError> {
+        queries::artist_sample_tracks(&self.pool(), source, limit).await
+    }
+
+    async fn top_genre(&self, source: &crate::Source) -> Result<Option<String>, DbError> {
+        queries::top_genre(&self.pool(), source).await
+    }
+
+    async fn search_corpus(&self, source: &crate::Source) -> Result<Vec<reader::Track>, DbError> {
+        queries::search_corpus(&self.pool(), source).await
     }
 
     async fn tracks_by_keys(

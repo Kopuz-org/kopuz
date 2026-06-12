@@ -4,10 +4,10 @@ use components::search_genre_detail::SearchGenreDetail;
 use components::search_genres::SearchGenres;
 use components::search_results::SearchResults;
 use config::{AppConfig, UiStyle};
-use db::{Source, TrackFilter};
+use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
-use hooks::use_db_queries::{use_albums, use_all_tracks};
+use hooks::use_db_queries::{use_albums, use_genre_tracks};
 use hooks::use_search_data::use_search_data;
 use player::player;
 
@@ -36,40 +36,29 @@ pub fn LocalSearch(
 
     let gens = hooks::db_reactivity::use_generations();
     let source = use_memo(|| Source::Local);
-    let all_filter = use_memo(|| TrackFilter::new(Source::Local));
-    let tracks_res = use_all_tracks(all_filter);
     let albums_res = use_albums(source);
+    let selected_genre_memo =
+        use_memo(move || selected_genre.read().clone().unwrap_or_default());
+    let genre_tracks_res = use_genre_tracks(source, selected_genre_memo);
 
     let genre_tracks = use_memo(move || {
-        let genre = selected_genre.read();
-
-        if let Some(g) = &*genre {
-            let all_albums = albums_res.read().clone().unwrap_or_default();
-            let all_tracks = tracks_res.read().clone().unwrap_or_default();
-
-            let valid_album_ids: std::collections::HashSet<&String> = all_albums
-                .iter()
-                .filter(|a| a.genre.to_lowercase().contains(&g.to_lowercase()))
-                .map(|a| &a.id)
-                .collect();
-
-            let album_map: std::collections::HashMap<&String, &reader::models::Album> =
-                all_albums.iter().map(|a| (&a.id, a)).collect();
-
-            let mut matching_tracks = Vec::new();
-            for track in &all_tracks {
-                if valid_album_ids.contains(&track.album_id) {
-                    let cover = album_map
-                        .get(&track.album_id)
-                        .and_then(|a| a.cover_path.as_ref())
-                        .and_then(|c| utils::format_artwork_url(Some(c)));
-                    matching_tracks.push((track.clone(), cover));
-                }
-            }
-            matching_tracks
-        } else {
-            Vec::new()
+        let tracks = genre_tracks_res.read().clone().unwrap_or_default();
+        if tracks.is_empty() {
+            return Vec::new();
         }
+        let all_albums = albums_res.read().clone().unwrap_or_default();
+        let album_map: std::collections::HashMap<&String, &reader::models::Album> =
+            all_albums.iter().map(|a| (&a.id, a)).collect();
+        tracks
+            .iter()
+            .map(|track| {
+                let cover = album_map
+                    .get(&track.album_id)
+                    .and_then(|a| a.cover_path.as_ref())
+                    .and_then(|c| utils::format_artwork_url(Some(c)));
+                (track.clone(), cover)
+            })
+            .collect()
     });
 
     let is_modern = config.read().ui_style == UiStyle::Modern;
