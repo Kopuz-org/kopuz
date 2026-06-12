@@ -23,6 +23,16 @@ pub fn JellyfinAlbum(
 ) -> Element {
     let is_offline = use_context::<Signal<bool>>();
     let gens = hooks::db_reactivity::use_generations();
+    let mut scroll_positions =
+        use_context::<Signal<std::collections::HashMap<kopuz_route::Route, f64>>>();
+    let saved_scroll = scroll_positions
+        .peek()
+        .get(&kopuz_route::Route::Album)
+        .copied()
+        .unwrap_or(0.0);
+    let scroll_stat = use_signal(move || saved_scroll);
+    let container_height = use_signal(|| 0.0_f64);
+    let container_width = use_signal(|| 0.0_f64);
     let active_server_id = use_memo(move || {
         let c = config.read();
         c.active_server_id
@@ -120,13 +130,51 @@ pub fn JellyfinAlbum(
         MenuAction::new(remove_from_cache_text.as_str(), "fa-solid fa-trash").destructive(),
     ];
 
+    // Window the card grid: only ~3 viewport-heights of cards exist in the
+    // DOM (710 covers at once was the page's frame-rate problem). Card height
+    // tracks column width (aspect-square cover), so the math derives rows
+    // from the measured container width. 180 = the minmax track minimum;
+    // 56 ≈ card padding + title/artist block; 24 = gap-6.
+    let albums_all = jellyfin_albums();
+    let grid = components::virtual_scroll::use_virtual_grid(
+        *scroll_stat.read(),
+        *container_height.read(),
+        *container_width.read(),
+        albums_all.len(),
+        180.0,
+        56.0,
+        24.0,
+    );
+    let visible_albums: Vec<_> = albums_all
+        .iter()
+        .skip(grid.start_index)
+        .take(grid.items_to_render)
+        .cloned()
+        .collect();
+
     rsx! {
         div {
-            if jellyfin_albums().is_empty() {
+            class: "flex-1 min-h-0 flex flex-col",
+            if albums_all.is_empty() {
                 p { class: "text-slate-500", "{i18n::t(\"no_albums_found\")}" }
             } else {
+                components::virtual_scroll::VirtualScrollView {
+                    id: "server-albums-scroll".to_string(),
+                    class: "flex-1 overflow-y-auto pb-20".to_string(),
+                    scroll_stat,
+                    container_height,
+                    container_width,
+                    // The scroll handler quantizes window updates to this step;
+                    // ~half a grid row keeps re-renders ~2 per row crossed.
+                    item_height: 120.0,
+                    saved_scroll,
+                    top_pad: grid.top_pad,
+                    bottom_pad: grid.bottom_pad,
+                    onscroll: move |scroll| {
+                        scroll_positions.write().insert(kopuz_route::Route::Album, scroll);
+                    },
                 div { class: "grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-6",
-                    for (album_id_val, album_title, artist, cover_url) in jellyfin_albums() {
+                    for (album_id_val, album_title, artist, cover_url) in visible_albums {
                         {
                             let id_for_nav    = album_id_val.clone();
                             let id_for_menu   = album_id_val.clone();
@@ -232,6 +280,7 @@ pub fn JellyfinAlbum(
                             }
                         }
                     }
+                }
                 }
             }
         }

@@ -81,8 +81,9 @@ pub fn Album(
 
             if album_id.read().is_empty() {
                 div {
+                    class: "flex-1 min-h-0 flex flex-col",
                     if !cfg!(target_os = "android") {
-                        h1 { class: "text-3xl font-bold text-white mb-6", "{i18n::t(\"all_albums\")}" }
+                        h1 { class: "text-3xl font-bold text-white mb-6 shrink-0", "{i18n::t(\"all_albums\")}" }
                     }
 
                     if is_server {
@@ -95,12 +96,16 @@ pub fn Album(
                             pending_album_id_for_playlist,
                         }
                     } else {
-                        LocalAlbum {
-                            album_id,
-                            queue,
-                            open_album_menu,
-                            show_album_playlist_modal,
-                            pending_album_id_for_playlist,
+                        // Local grid isn't windowed (small libraries) — needs
+                        // its own scroller now that the wrapper doesn't grow.
+                        div { class: "flex-1 min-h-0 overflow-y-auto pb-24",
+                            LocalAlbum {
+                                album_id,
+                                queue,
+                                open_album_menu,
+                                show_album_playlist_modal,
+                                pending_album_id_for_playlist,
+                            }
                         }
                     }
 
