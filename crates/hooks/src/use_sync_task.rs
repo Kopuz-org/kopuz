@@ -97,7 +97,9 @@ pub fn use_sync_task(config: Signal<config::AppConfig>) {
                     match reconcile_favorites(&db, &conn, &server_id, reason).await {
                         Ok(report) => {
                             consecutive_failures = 0;
-                            if report.pushed_likes + report.pushed_unlikes + report.pulled > 0 {
+                            // did_pull, not pulled: a pull that only removed
+                            // rows reports pulled == 0 but still changed the DB.
+                            if report.pushed_likes + report.pushed_unlikes > 0 || report.did_pull {
                                 gens.bump(Table::Favorites);
                             }
                         }

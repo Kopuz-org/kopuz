@@ -28,6 +28,10 @@ pub struct SyncReport {
     pub pushed_unlikes: usize,
     pub failed_pushes: usize,
     pub pulled: usize,
+    /// Whether a pull APPLIED this cycle — `pulled` is the remote set's size,
+    /// so a pull that only removed rows reports `pulled == 0` and the caller
+    /// still needs to refresh the UI.
+    pub did_pull: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,8 +73,11 @@ pub async fn reconcile_favorites(
         .flatten()
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
-    let should_pull =
-        matches!(reason, SyncReason::Manual) || now.saturating_sub(last_pull) >= PULL_MIN_SECS;
+    // A stamp in the future (backward clock step) counts as stale, otherwise
+    // pulls would be suppressed until real time catches up to it.
+    let should_pull = matches!(reason, SyncReason::Manual)
+        || last_pull > now
+        || now - last_pull >= PULL_MIN_SECS;
     if likes.is_empty() && unlikes.is_empty() && !should_pull {
         return Ok(SyncReport::default());
     }
@@ -88,12 +95,20 @@ pub async fn reconcile_favorites(
     let mut report = SyncReport::default();
 
     // Push pending likes, then pending unlikes (each resolved on success only,
-    // so a failure is retried next cycle).
+    // so a failure is retried next cycle). The pushed refs are remembered: a
+    // pull in the SAME cycle can see a stale remote listing (YT's liked
+    // browse is eventually consistent), and a just-pushed like — now clean —
+    // would otherwise be deleted by the pull, or a just-pushed unlike
+    // resurrected.
+    let mut pushed_like_refs: Vec<String> = Vec::new();
+    let mut pushed_unlike_refs: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
     for r in likes {
         match client.set_favorite(&r, true).await {
             Ok(()) => {
                 let _ = db.clear_favorite_dirty(server_id, &r).await;
                 report.pushed_likes += 1;
+                pushed_like_refs.push(r);
             }
             Err(e) => {
                 tracing::warn!(error = %e, item = %r, "favorite like push failed");
@@ -106,6 +121,7 @@ pub async fn reconcile_favorites(
             Ok(()) => {
                 let _ = db.clear_favorite_dirty(server_id, &r).await;
                 report.pushed_unlikes += 1;
+                pushed_unlike_refs.insert(r);
             }
             Err(e) => {
                 tracing::warn!(error = %e, item = %r, "favorite unlike push failed");
@@ -119,15 +135,23 @@ pub async fn reconcile_favorites(
     // stream), so the pull is staleness-gated (computed up top): Manual always
     // pulls; everything else only when the last pull is old.
     if should_pull {
-        let remote = client
+        let mut remote = client
             .fetch_favorites()
             .await
             .map_err(SyncError::Unreachable)?;
         report.pulled = remote.len();
+        // Overlay this cycle's pushes on the (possibly stale) remote listing.
+        for r in pushed_like_refs {
+            if !remote.contains(&r) {
+                remote.push(r);
+            }
+        }
+        remote.retain(|r| !pushed_unlike_refs.contains(r));
         db.replace_favorites_clean(server_id, &remote)
             .await
             .map_err(|e| SyncError::Unreachable(e.to_string()))?;
         let _ = db.meta_put("fav_pull", server_id, &now.to_string()).await;
+        report.did_pull = true;
     }
 
     tracing::info!(
