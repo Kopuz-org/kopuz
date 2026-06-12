@@ -122,14 +122,30 @@ pub fn init(log_dir: &Path, config_tracing_enabled: bool) {
         let (chrome_layer, guard) = tracing_chrome::ChromeLayerBuilder::new()
             .file(&trace_path)
             .include_args(true)
-            // Async style nests spans by their tracing parent/child
-            // relationship on a single track instead of splitting them
-            // across per-thread rows. This is what makes an
-            // `.instrument()`'d span that hops to a worker thread (e.g.
-            // playlist.load_entries -> yt.playlist_entries ->
-            // yt.browse_continuation) render as one nested tree you can
-            // read without hunting through the worker tracks.
+            // Async style keys every span event on its ROOT span's id
+            // instead of the OS thread, so a span that hops worker
+            // threads still emits one coherent b/e pair. But Perfetto
+            // groups these legacy async events into one track per NAME,
+            // which flattens the parent/child structure — `yt.browse`
+            // lands on its own row and nothing shows what covers it.
+            // Encode the lineage in the name itself: each span is
+            // labeled with its full path from root, so the track list
+            // sorts into a readable tree ("favorites.reconcile ›
+            // yt.validate › yt.browse").
             .trace_style(tracing_chrome::TraceStyle::Async)
+            .name_fn(Box::new(|data| match data {
+                tracing_chrome::EventOrSpan::Event(e) => e.metadata().name().to_owned(),
+                tracing_chrome::EventOrSpan::Span(s) => {
+                    let mut path = String::new();
+                    for span in s.scope().from_root() {
+                        if !path.is_empty() {
+                            path.push_str(" › ");
+                        }
+                        path.push_str(span.name());
+                    }
+                    path
+                }
+            }))
             .build();
         tracing_subscriber::registry()
             .with(file_layer)
