@@ -9,9 +9,7 @@
 //!
 //! Every hook's query runs under a `query.*` span, so the click → rows-on-
 //! screen path is visible in a trace: each re-run (input change or generation
-//! bump) is one slice with its inputs and result count. The one exception is
-//! [`use_is_favorite`] — a per-visible-row point lookup that re-runs for every
-//! row on every favorites bump and would bury a trace in micro-slices.
+//! bump) is one slice with its inputs and result count.
 
 use db::{Db, Page, Source, TrackFilter};
 use dioxus::prelude::*;
@@ -301,27 +299,6 @@ pub fn use_artists(source: Memo<Source>) -> Resource<Vec<(String, u32)>> {
     })
 }
 
-/// Distinct album genres for a source, A→Z.
-pub fn use_genres(source: Memo<Source>) -> Resource<Vec<String>> {
-    let db = use_context::<Db>();
-    let gens = use_generations();
-    use_resource(move || {
-        let _ = gens.generation(Table::Albums);
-        let (db, s) = (db.clone(), source());
-        let span = tracing::info_span!(
-            "query.genres",
-            source = s.as_str(),
-            rows = tracing::field::Empty
-        );
-        async move {
-            let rows = db.genres(&s).await.unwrap_or_default();
-            tracing::Span::current().record("rows", rows.len());
-            rows
-        }
-        .instrument(span)
-    })
-}
-
 /// The playlist store (local + active server), re-queried on a playlists bump.
 pub fn use_playlists() -> Resource<reader::PlaylistStore> {
     let db = use_context::<Db>();
@@ -394,17 +371,3 @@ pub fn use_favorites(server_id: Memo<String>) -> Resource<Vec<String>> {
     })
 }
 
-/// Whether one ref is favorited under a server. Re-queried on a favorites bump,
-/// so a toggle anywhere updates every row showing that track.
-///
-/// Deliberately unspanned: it runs once per visible row per favorites bump —
-/// spanning it would flood traces with hundreds of sub-millisecond slices.
-pub fn use_is_favorite(server_id: String, ref_: String) -> Resource<bool> {
-    let db = use_context::<Db>();
-    let gens = use_generations();
-    use_resource(move || {
-        let _ = gens.generation(Table::Favorites);
-        let (db, sid, r) = (db.clone(), server_id.clone(), ref_.clone());
-        async move { db.is_favorite(&sid, &r).await.unwrap_or(false) }
-    })
-}
