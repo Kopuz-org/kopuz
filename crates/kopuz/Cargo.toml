@@ -20,8 +20,10 @@ directories = { workspace = true }
 discord-presence = { workspace = true }
 
 # Desktop only. Android uses the mobile renderer, logs to logcat, and has no Discord IPC.
+# blitz-spike: BOTH renderers compiled; KOPUZ_BLITZ=1 selects the wgpu-based
+# native renderer at runtime, so one binary can A/B against the webview.
 [target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))'.dependencies]
-dioxus = { workspace = true, features = ["desktop"] }
+dioxus = { workspace = true, features = ["desktop", "native"] }
 discord-rich-presence = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }

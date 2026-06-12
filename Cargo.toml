@@ -39,7 +39,8 @@ tokio = { version = "1.0", features = ["rt", "time", "sync", "macros", "io-util"
 async-recursion = "1.0"
 discord-rich-presence = "1.1.0"
 lofty = "0.24.0"
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
+# =0.25.6: blitz-dom (dioxus-native) pins image exactly; resolver needs one version.
+image = { version = "=0.25.6", default-features = false, features = ["jpeg", "png", "webp"] }
 rfd = "0.17.2"
 percent-encoding = "2.3.2"
 dotenvy = "0.15"

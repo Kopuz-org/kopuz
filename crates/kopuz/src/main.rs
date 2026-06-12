@@ -450,6 +450,17 @@ fn make_hq_image(raw: &[u8], cache_path: &std::path::Path) -> Option<Vec<u8>> {
 /// `main` before the UI mounts, then provided to the app via context.
 static DB_HANDLE: std::sync::OnceLock<db::Db> = std::sync::OnceLock::new();
 
+/// blitz-spike: `KOPUZ_BLITZ=1` launches the wgpu-based native renderer
+/// instead of the webview. Process-constant, so renderer-conditional hooks
+/// keep a stable order. Known-broken under blitz for now: YT playback
+/// (pot minter + decipher need a JS engine), artwork:// covers, custom
+/// titlebar, and the close-time persist flush.
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+fn blitz_enabled() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("KOPUZ_BLITZ").is_some_and(|v| v == "1"))
+}
+
 /// Open the DB and run the one-shot legacy import, blocking. sqlx-sqlite does its
 /// work on dedicated connection threads, so the throwaway runtime here is safe to
 /// drop — the pool keeps working under the app's runtime afterwards.
@@ -795,9 +806,14 @@ fn main() {
                 },
             );
 
-        dioxus::LaunchBuilder::desktop()
-            .with_cfg(config)
-            .launch(App);
+        if blitz_enabled() {
+            tracing::info!("blitz-spike: launching the native (wgpu) renderer");
+            dioxus::native::launch(App);
+        } else {
+            dioxus::LaunchBuilder::desktop()
+                .with_cfg(config)
+                .launch(App);
+        }
         // Window closed → flush the log file tail + finalize the
         // chrome trace's closing bracket.
         logging::shutdown();
@@ -1063,7 +1079,11 @@ fn App() -> Element {
     // flush silently never ran. Signals are peeked here (not Send), the
     // joined thread does the blocking DB work. Idempotent across
     // CloseRequested/LoopDestroyed.
+    // blitz-spike: only registered under the webview renderer (the handler is
+    // a desktop-runtime API; the condition is process-constant so hook order
+    // stays stable). Under blitz the close flush is a known gap for now.
     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+    if !blitz_enabled() {
     dioxus::desktop::use_wry_event_handler(move |event, _| {
         use dioxus::desktop::tao::event::{Event, WindowEvent};
         if matches!(
@@ -1115,6 +1135,7 @@ fn App() -> Element {
             crate::logging::shutdown();
         }
     });
+    }
 
     #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
     use_effect(move || {
@@ -1456,6 +1477,9 @@ fn App() -> Element {
     ))]
     use_effect(move || {
         let mode = config.read().titlebar_mode;
+        if blitz_enabled() {
+            return;
+        }
         let win = dioxus::desktop::use_window();
         win.set_decorations(mode == config::TitlebarMode::System);
     });
