@@ -243,11 +243,14 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
     } else {
         "text-slate-500 hover:text-slate-300"
     };
+    // Inset pairs instead of calc() widths: blitz mis-sizes calc-percentage
+    // widths on absolutely positioned elements; left/right stretch is exact
+    // in every engine (and identical geometry to within 2px here).
     let slider_style = match (is_rtl, is_server) {
-        (false, false) => "left: 4px; width: calc(50% - 4px);",
-        (false, true) => "left: calc(50% + 2px); width: calc(50% - 4px);",
-        (true, false) => "right: 4px; width: calc(50% - 4px);",
-        (true, true) => "right: calc(50% + 2px); width: calc(50% - 4px);",
+        (false, false) => "left: 4px; right: 50%;",
+        (false, true) => "left: 50%; right: 4px;",
+        (true, false) => "right: 4px; left: 50%;",
+        (true, true) => "right: 50%; left: 4px;",
     };
 
     let ordered_items: Vec<SidebarItem> = {
@@ -345,7 +348,10 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
                                 style: "{slider_style}"
                             }
                             button {
-                                class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 {local_class}",
+                                // relative: z-index on STATIC flex items is a
+                                // spec nicety blitz doesn't implement — without
+                                // it the abspos slider paints over the labels.
+                                class: "relative flex-1 text-[11px] font-bold z-10 transition-colors duration-300 {local_class}",
                                 onclick: move |_| {
                                     let mut cfg = config.write();
                                     cfg.active_source = MusicSource::Local;
@@ -354,7 +360,7 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
                                 "{i18n::t(\"local\").to_uppercase()}"
                             }
                             button {
-                                class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 {server_class}",
+                                class: "relative flex-1 text-[11px] font-bold z-10 transition-colors duration-300 {server_class}",
                                 onclick: move |_| {
                                     let mut cfg = config.write();
                                     cfg.active_source = MusicSource::Server;
