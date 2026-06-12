@@ -27,6 +27,10 @@
     button, input:where([type="button"], [type="reset"], [type="submit"]) {
         appearance: button;
     }
+    /* Browsers' UA sheets center button text; blitz's doesn't. */
+    button {
+        text-align: center;
+    }
 }
 
 /* Themed scrollbars — uses CSS vars so all themes apply automatically */
@@ -111,8 +115,13 @@ button:focus {
 body {
     background-color: #000000;
     color: #ffffff;
+    /* Nerd Font names included explicitly: the common Linux install ships
+       "JetBrainsMono Nerd Font", not "JetBrains Mono" — fontconfig (webview)
+       quietly substituted Noto Sans Mono, and blitz/fontique does no
+       substitution at all and fell through to sans. */
     font-family:
-        "JetBrains Mono", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif,
+        "JetBrains Mono", "JetBrainsMono Nerd Font", "JetBrainsMono NF",
+        "Segoe UI", Tahoma, Geneva, Verdana, sans-serif,
         "nasin-nanpa";
     margin: 0;
     overflow: hidden;
