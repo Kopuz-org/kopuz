@@ -344,11 +344,19 @@ pub fn BottombarModern(
                     title: i18n::t("share_musicbrainz").to_string(),
                     onclick: move |_| {
                         if let Some(t) = ctrl.current_track_snapshot.read().clone() {
-                            crate::track_row::share_to_musicbrainz(
-                                t.musicbrainz_release_id,
-                                t.artist,
-                                t.title,
-                            );
+                            let path = t.path.to_string_lossy();
+                            if let Some(vid) = path
+                                .strip_prefix("ytmusic:")
+                                .and_then(|rest| rest.split(':').next())
+                            {
+                                crate::track_row::share_youtube_url(vid);
+                            } else {
+                                crate::track_row::share_to_musicbrainz(
+                                    t.musicbrainz_release_id,
+                                    t.artist,
+                                    t.title,
+                                );
+                            }
                         }
                     },
                     i { class: "fa-solid fa-share-nodes text-[10px]" }

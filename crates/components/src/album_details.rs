@@ -112,6 +112,7 @@ pub fn AlbumDetails(
                 library,
                 playlist_store,
                 on_close,
+                enable_metadata: true,
                 on_cover_click: move |_| {
                     let aid = aid.clone();
                     let _ = &aid;

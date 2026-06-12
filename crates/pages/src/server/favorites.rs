@@ -11,6 +11,7 @@ use hooks::use_player_controller::PlayerController;
 use reader::{FavoritesStore, Library, PlaylistStore};
 use std::collections::HashSet;
 use std::path::PathBuf;
+use tracing::Instrument;
 
 #[component]
 pub fn JellyfinFavorites(
@@ -22,8 +23,14 @@ pub fn JellyfinFavorites(
 ) -> Element {
     let mut ctrl = use_context::<PlayerController>();
     let mut active_menu_track = use_signal(|| None::<PathBuf>);
-    let mut has_synced = use_signal(|| false);
+    // YT sync state:
+    // - `is_syncing`: true while a fetch is in flight
+    // - `synced_so_far`: count of tracks streamed into the library so far
+    // - `refresh_nonce`: bumped by the manual refresh button to force a
+    //   re-sync even when the library already has data on disk
     let mut is_syncing = use_signal(|| false);
+    let mut synced_so_far: Signal<usize> = use_signal(|| 0);
+    let mut refresh_nonce: Signal<u64> = use_signal(|| 0);
 
     // Multi-selection state
     let mut is_selection_mode = use_signal(|| false);
@@ -34,58 +41,128 @@ pub fn JellyfinFavorites(
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
     use_effect(move || {
-        if !*has_synced.read() {
-            has_synced.set(true);
-            is_syncing.set(true);
-            spawn(async move {
-                let (server_config, device_id) = {
-                    let conf = config.peek();
-                    if let Some(server) = &conf.server {
-                        if let (Some(token), Some(user_id)) =
-                            (&server.access_token, &server.user_id)
-                        {
-                            (
-                                Some((
-                                    server.service,
-                                    server.url.clone(),
-                                    token.clone(),
-                                    user_id.clone(),
-                                )),
-                                conf.device_id.clone(),
-                            )
-                        } else {
-                            (None, conf.device_id.clone())
-                        }
-                    } else {
-                        (None, conf.device_id.clone())
-                    }
-                };
+        let nonce = *refresh_nonce.read();
 
-                let ids = if let Some((service, url, token, user_id)) = server_config {
-                    match service {
-                        MusicService::Jellyfin => {
-                            let remote =
-                                JellyfinClient::new(&url, Some(&token), &device_id, Some(&user_id));
-                            remote
-                                .get_favorite_items()
-                                .await
-                                .map(|items| items.into_iter().map(|i| i.id).collect())
-                                .unwrap_or_default()
-                        }
-                        MusicService::Subsonic | MusicService::Custom => {
-                            let remote = SubsonicClient::new(&url, &user_id, &token);
-                            remote.get_starred_song_ids().await.unwrap_or_default()
-                        }
-                    }
-                } else {
-                    Vec::new()
-                };
+        let token = match config.peek().server.as_ref().and_then(|s| s.access_token.clone()) {
+            Some(t) => t,
+            None => return,
+        };
+        let service = config.peek().server.as_ref().map(|s| s.service);
+        let is_ytmusic = service == Some(MusicService::YtMusic);
 
-                let mut store = favorites_store.write();
-                store.jellyfin_favorites = ids;
-                is_syncing.set(false);
-            });
+        if is_ytmusic && nonce == 0 && library.peek().last_yt_sync_at.is_some() {
+            return;
         }
+
+        is_syncing.set(true);
+        synced_so_far.set(0);
+        spawn(async move {
+            let device_id = config.peek().device_id.clone();
+            let server_snapshot = config.peek().server.clone();
+            let Some(server) = server_snapshot else {
+                is_syncing.set(false);
+                return;
+            };
+            let user_id = server.user_id.clone().unwrap_or_default();
+            let url = server.url.clone();
+
+            let ids: Vec<String> = match server.service {
+                MusicService::Jellyfin => {
+                    let remote =
+                        JellyfinClient::new(&url, Some(&token), &device_id, Some(&user_id));
+                    remote
+                        .get_favorite_items()
+                        .await
+                        .map(|items| items.into_iter().map(|i| i.id).collect())
+                        .unwrap_or_default()
+                }
+                MusicService::Subsonic | MusicService::Custom => {
+                    let remote = SubsonicClient::new(&url, &user_id, &token);
+                    remote.get_starred_song_ids().await.unwrap_or_default()
+                }
+                MusicService::YtMusic => {
+                    let yt =
+                        ::server::ytmusic::YouTubeMusicClient::with_cookies(token);
+
+                    {
+                        let mut lib = library.write();
+                        lib.jellyfin_tracks.clear();
+                        lib.jellyfin_albums.clear();
+                    }
+
+                    let mut accumulated: Vec<reader::models::Track> = Vec::new();
+                    let result = yt
+                        .stream_liked_songs(|page| {
+                            accumulated.extend(page.iter().cloned());
+                            let albums = synthesize_albums(&accumulated);
+                            {
+                                let mut lib = library.write();
+                                lib.jellyfin_tracks.extend(page);
+                                lib.jellyfin_albums = albums;
+                            }
+                            synced_so_far.set(accumulated.len());
+                        })
+                        .await;
+
+                    match result {
+                        Ok(()) => {
+                            let ids: Vec<String> = accumulated
+                                .iter()
+                                .filter_map(|t| {
+                                    t.path
+                                        .to_string_lossy()
+                                        .split(':')
+                                        .nth(1)
+                                        .map(|s| s.to_string())
+                                })
+                                .collect();
+                            let now = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_secs())
+                                .unwrap_or(0);
+                            library.write().last_yt_sync_at = Some(now);
+                            let liked_cover = accumulated
+                                .first()
+                                .and_then(|t| {
+                                    t.path
+                                        .to_string_lossy()
+                                        .split(':')
+                                        .nth(2)
+                                        .filter(|s| s.starts_with("urlhex_"))
+                                        .map(|s| s.to_string())
+                                });
+                            let liked_entry = reader::models::JellyfinPlaylist {
+                                id: "LM".to_string(),
+                                name: "Liked Songs".to_string(),
+                                tracks: ids.clone(),
+                                image_tag: liked_cover,
+                                cover_path: None,
+                            };
+                            {
+                                let mut ps = playlist_store.write();
+                                if let Some(existing) = ps
+                                    .jellyfin_playlists
+                                    .iter_mut()
+                                    .find(|p| p.id == "LM")
+                                {
+                                    *existing = liked_entry;
+                                } else {
+                                    ps.jellyfin_playlists.insert(0, liked_entry);
+                                }
+                            }
+                            ids
+                        }
+                        Err(e) => {
+                            tracing::warn!(error = %e, "YT favorites sync failed");
+                            Vec::new()
+                        }
+                    }
+                }
+            };
+
+            favorites_store.write().jellyfin_favorites = ids;
+            is_syncing.set(false);
+        }.instrument(tracing::info_span!("favorites.sync")));
     });
 
     let displayed_tracks: Vec<(reader::models::Track, Option<utils::CoverUrl>)> = {
@@ -94,16 +171,20 @@ pub fn JellyfinFavorites(
         let server = config.read();
         let server_ref = server.server.as_ref().cloned();
 
+        let fav_set: std::collections::HashSet<&str> = store
+            .jellyfin_favorites
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
         lib.jellyfin_tracks
             .iter()
             .filter(|t| {
                 let path_str = t.path.to_string_lossy();
-                let parts: Vec<&str> = path_str.split(':').collect();
-                if parts.len() >= 2 {
-                    store.is_jellyfin_favorite(parts[1])
-                } else {
-                    false
-                }
+                path_str
+                    .split(':')
+                    .nth(1)
+                    .map(|id| fav_set.contains(id))
+                    .unwrap_or(false)
             })
             .map(|t| {
                 let cover_url = if let Some(ref srv) = server_ref {
@@ -260,32 +341,22 @@ pub fn JellyfinFavorites(
                         if !selected_paths.is_empty() {
                                 let pid = playlist_id.clone();
                             spawn(async move {
-                                let conf = config.peek();
-                                if let Some(server) = &conf.server {
-                                    if let (Some(token), Some(user_id)) = (&server.access_token, &server.user_id) {
-                                        for path in selected_paths {
-                                            let parts: Vec<&str> = path.to_str().unwrap_or_default().split(':').collect();
-                                            if parts.len() >= 2 {
-                                                let item_id = parts[1];
-                                                    match server.service {
-                                                        MusicService::Jellyfin => {
-                                                            let remote = JellyfinClient::new(
-                                                                &server.url,
-                                                                Some(token),
-                                                                &conf.device_id,
-                                                                Some(user_id),
-                                                            );
-                                                            let _ = remote.add_to_playlist(&pid, item_id).await;
-                                                        }
-                                                        MusicService::Subsonic | MusicService::Custom => {
-                                                            let remote = SubsonicClient::new(&server.url, user_id, token);
-                                                            let _ = remote.add_to_playlist(&pid, item_id).await;
-                                                        }
-                                                    }
-                                            }
-                                        }
-                                    }
-                                }
+                                let Some(conn) =
+                                    ::server::server_ops::ServerConn::resolve(&config.peek())
+                                else {
+                                    return;
+                                };
+                                let item_ids: Vec<String> = selected_paths
+                                    .iter()
+                                    .filter_map(|p| {
+                                        ::server::server_ops::parse_item_id(p.to_str()?)
+                                            .map(str::to_string)
+                                    })
+                                    .collect();
+                                let _ = ::server::server_ops::add_tracks_to_playlist(
+                                    &conn, &pid, &item_ids,
+                                )
+                                .await;
                             });
                         }
                         show_playlist_modal.set(false);
@@ -304,42 +375,25 @@ pub fn JellyfinFavorites(
                         if !selected_paths.is_empty() {
                             let playlist_name = name.clone();
                             spawn(async move {
-                                let conf = config.peek();
-                                if let Some(server) = &conf.server {
-                                    if let (Some(token), Some(user_id)) = (&server.access_token, &server.user_id) {
-                                        let item_ids: Vec<String> = selected_paths
-                                            .iter()
-                                            .filter_map(|p| {
-                                                let parts: Vec<&str> = p.to_str()?.split(':').collect();
-                                                if parts.len() >= 2 {
-                                                    Some(parts[1].to_string())
-                                                } else {
-                                                    None
-                                                }
-                                            })
-                                            .collect();
-
-                                        if !item_ids.is_empty() {
-                                            let item_id_refs: Vec<&str> = item_ids.iter().map(|s| s.as_str()).collect();
-                                            match server.service {
-                                                MusicService::Jellyfin => {
-                                                    let remote = JellyfinClient::new(
-                                                        &server.url,
-                                                        Some(token),
-                                                        &conf.device_id,
-                                                        Some(user_id),
-                                                    );
-                                                    let _ = remote
-                                                        .create_playlist(&playlist_name, &item_id_refs)
-                                                        .await;
-                                                }
-                                                MusicService::Subsonic | MusicService::Custom => {
-                                                    let remote = SubsonicClient::new(&server.url, user_id, token);
-                                                    let _ = remote.create_playlist(&playlist_name, &item_id_refs).await;
-                                                }
-                                            }
-                                        }
-                                    }
+                                let Some(conn) =
+                                    ::server::server_ops::ServerConn::resolve(&config.peek())
+                                else {
+                                    return;
+                                };
+                                let item_ids: Vec<String> = selected_paths
+                                    .iter()
+                                    .filter_map(|p| {
+                                        ::server::server_ops::parse_item_id(p.to_str()?)
+                                            .map(str::to_string)
+                                    })
+                                    .collect();
+                                if !item_ids.is_empty() {
+                                    let _ = ::server::server_ops::create_server_playlist(
+                                        &conn,
+                                        &playlist_name,
+                                        &item_ids,
+                                    )
+                                    .await;
                                 }
                             });
                         }
@@ -385,7 +439,17 @@ pub fn JellyfinFavorites(
                 }
             }
 
-            if *is_syncing.read() {
+            // Generic "Syncing with server" spinner for non-YT
+            // services. YT has its own status row below with track
+            // counter + refresh button — don't double-render.
+            if *is_syncing.read()
+                && config
+                    .read()
+                    .server
+                    .as_ref()
+                    .map(|s| s.service != MusicService::YtMusic)
+                    .unwrap_or(true)
+            {
                 div {
                     class: "flex items-center gap-2 text-slate-400 text-sm mb-4",
                     i { class: "fa-solid fa-circle-notch fa-spin" }
@@ -393,13 +457,80 @@ pub fn JellyfinFavorites(
                 }
             }
 
+            // Sync status row — visible whenever we're syncing or when
+            // YT Music is the active server (so the user always has a
+            // refresh button to force a re-fetch). Counter ticks up as
+            // pages stream in. Stays out of the way for non-YT services
+            // because it's a YT-specific affordance.
+            {
+                let is_ytmusic = config
+                    .read()
+                    .server
+                    .as_ref()
+                    .map(|s| s.service == MusicService::YtMusic)
+                    .unwrap_or(false);
+                let synced = *synced_so_far.read();
+                let syncing = *is_syncing.read();
+                let total = displayed_tracks.len();
+                if is_ytmusic {
+                    rsx! {
+                        div {
+                            class: "flex items-center justify-between gap-3 mb-3 px-2 text-xs text-slate-400",
+                            div {
+                                class: "flex items-center gap-2",
+                                if syncing {
+                                    i { class: "fa-solid fa-arrows-rotate fa-spin text-indigo-300" }
+                                    span {
+                                        "{i18n::t_with(\"yt_syncing_progress\", &[(\"count\", synced.to_string())])}"
+                                    }
+                                } else if total > 0 {
+                                    i { class: "fa-solid fa-check text-emerald-400" }
+                                    span {
+                                        "{i18n::t_with(\"yt_synced_total\", &[(\"count\", total.to_string())])}"
+                                    }
+                                }
+                            }
+                            button {
+                                class: "px-3 py-1 rounded bg-white/5 hover:bg-white/10 text-white/80 transition-colors disabled:opacity-50",
+                                disabled: syncing,
+                                onclick: move |_| {
+                                    let next = *refresh_nonce.peek() + 1;
+                                    refresh_nonce.set(next);
+                                },
+                                i { class: "fa-solid fa-arrows-rotate mr-1" }
+                                "{i18n::t(\"refresh\")}"
+                            }
+                        }
+                    }
+                } else {
+                    rsx! {}
+                }
+            }
+
             if is_empty && !*is_syncing.read() {
-                div {
-                    class: "flex flex-col items-center justify-center h-64 text-slate-500",
-                    i { class: "fa-regular fa-heart text-4xl mb-4 opacity-30" }
-                    p { class: "text-base", "{i18n::t(\"no_favorites\")}" }
-                    p { class: "text-sm mt-1 opacity-70",
-                        "{i18n::t(\"heart_track_to_add_server\")}"
+                {
+                    let yt_anon = config
+                        .read()
+                        .server
+                        .as_ref()
+                        .map(|s| {
+                            s.service == config::MusicService::YtMusic && s.yt_anonymous
+                        })
+                        .unwrap_or(false);
+                    rsx! {
+                        div {
+                            class: "flex flex-col items-center justify-center h-64 text-slate-500 text-center px-6",
+                            if yt_anon {
+                                i { class: "fa-solid fa-right-to-bracket text-4xl mb-4 opacity-50" }
+                                p { class: "text-base", "{i18n::t(\"yt_anon_favorites\")}" }
+                            } else {
+                                i { class: "fa-regular fa-heart text-4xl mb-4 opacity-30" }
+                                p { class: "text-base", "{i18n::t(\"no_favorites\")}" }
+                                p { class: "text-sm mt-1 opacity-70",
+                                    "{i18n::t(\"heart_track_to_add_server\")}"
+                                }
+                            }
+                        }
                     }
                 }
             } else if !is_empty {
@@ -476,3 +607,49 @@ pub fn JellyfinFavorites(
 }
 
 pub use JellyfinFavorites as ServerFavorites;
+
+/// Build a list of synthetic Album entries out of the user's YT tracks.
+/// YT doesn't expose a separate albums endpoint, so we group by
+/// Track.album_id (assigned in search.rs::synthesize_album_id) and pick
+/// the first track per group as the album's representative for title +
+/// artist + cover.
+fn synthesize_albums(tracks: &[reader::models::Track]) -> Vec<reader::models::Album> {
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    let mut by_album: HashMap<String, &reader::models::Track> = HashMap::new();
+    for t in tracks {
+        if t.album_id.is_empty() {
+            continue;
+        }
+        by_album.entry(t.album_id.clone()).or_insert(t);
+    }
+    by_album
+        .into_iter()
+        .map(|(album_id, t)| {
+            // Reuse the first track's encoded thumbnail (3rd segment of
+            // its path: `ytmusic:VID:urlhex_HEX`) as the album cover.
+            // `jellyfin_image_url_from_path` will decode the embedded
+            // URL out of this PathBuf the same way it does for tracks.
+            let cover_path = t
+                .path
+                .to_string_lossy()
+                .split(':')
+                .nth(2)
+                .filter(|s| s.starts_with("urlhex_"))
+                .map(|tag| PathBuf::from(format!("ytmusic:_:{tag}")));
+            reader::models::Album {
+                id: album_id,
+                title: if t.album.is_empty() {
+                    "Singles".to_string()
+                } else {
+                    t.album.clone()
+                },
+                artist: t.artist.clone(),
+                genre: String::new(),
+                year: 0,
+                cover_path,
+                manual_cover: false,
+            }
+        })
+        .collect()
+}

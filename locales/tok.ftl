@@ -27,10 +27,10 @@ add = o namako
 add_folder = o namako e poki
 no_music_folders = poki kalama li ala
 add_server = o namako e pana
-# TODO: NEED LOCALIZATION
-connect_to_lastfm = Connect to Last.fm
-lastfm_connected = Last.fm Connected
-# TODO: NEED LOCALIZATION
+connect_to_lastfm = o lon tawa Last.fm
+connect_to_librefm = o lon tawa Libre.fm
+lastfm_connected = Last.fm li lon
+librefm_connected = Libre.fm li lon
 server_details = sona pana
 server_name = nimi pana
 server_url = nasin URL pana
@@ -81,10 +81,8 @@ create = o pali
 save = o kama jo
 enabled = LON
 disabled = LON ALA
-# TODO: Translate lines below
-play = Play
-shuffle = Shuffle
-# ------
+play = o kalama
+shuffle = o nasa e nasin kalama
 
 # Navigation & Headers
 tracks = kalama musi
@@ -140,10 +138,8 @@ heart_track_to_add_server = o luka e nena olin lon kute kalama la kalama li kama
 search_placeholder = o alasa e jan pali, e kulupu pi kalama sama, e kalama...
 no_results_found = "{ $query }" li lon ala
 listenbrainz_token_placeholder = o pana e "token ListenBrainz"
-# TODO: NEED LOCALIZATION
-lastfm_api_key_placeholder = Enter your Last.fm API Key
-lastfm_api_secret_placeholder = Enter your Last.fm API Secret
-# TODO: NEED LOCALIZATION
+lastfm_api_key_placeholder = o pana e Last.fm API key sina
+lastfm_api_secret_placeholder = o pana e Last.fm API secret sina
 
 # Empty States
 album_not_found = kulupu pi kalama sama li lon ala
@@ -189,6 +185,9 @@ most_played_local_tracks = kalama pi kute mute sina
 no_tracks_in_library = kalama li lon ala
 no_songs_here = kalama li lon ala ni
 syncing_with_server = mi toki tawa pana...
+yt_syncing_progress = mi pana e kalama musi { $count }
+yt_synced_total = kalama musi pona { $count } li lon
+refresh = sin
 most_played_tracks = kalama pi kute mute sina
 no_more_songs = kalama poka li pini
 server_playlist = kulupu kalama pi tan pana
@@ -207,6 +206,11 @@ rescan_library = o lukin sin e poki kalama
 refresh_music_library = o lukin sin e poki kalama
 listenbrainz = ListenBrainz
 lastfm = Last.fm
+librefm = Libre.fm
+enable_tracing = o open e lukin
+tracing_warning = o open sin e ilo
+export_logs = o pana e sitelen sona
+open_logs_folder = o open e poki sitelen sona
 album_art_gradient = Album art gradient
 default_theme = Default
 gruvbox_material = Gruvbox Material
@@ -377,6 +381,7 @@ artist_photo = sitelen jan pali
 album_cover = sitelen kulupu pi kalama sama
 auto_fetch_covers = o kama e sitelen kulupu pi kalama sama
 prefer_local_lyrics = o wile e nimi kalama lon ilo (.lrc / lon insa, ala lon linja)
+enable_musixmatch_lyrics = o kepeken Musixmatch tan nimi kalama ante
 cover_fetch_strategy = nasin kama sitelen
 musicbrainz_first = MusicBrainz nanpa wan
 lastfm_first = Last.fm nanpa wan
@@ -421,3 +426,27 @@ radio_registries_empty = lipu ijo ala li lon
 offline_downloads = ijo tawa ilo
 download_quality = pona pi ijo tawa ilo
 saving = awen...
+discover_more_loading = mi alasa e ijo sin…
+discover_failed = pakala — mi ken ala alasa: { $error }
+discover_requires_ytmusic = sona sin li lon taso lon tenpo pi YouTube Music.
+discover_show_all = lukin e ale
+yt_anon_playlists = o kama lon YouTube Music la sina ken lukin e kulupu kalama sina.
+yt_anon_favorites = o kama lon YouTube Music la sina ken lukin e kalama pi olin sina.
+
+# Metadata Viewer / Editor
+view_metadata = o lukin e ijo nanpa
+edit_metadata = o ante e ijo nanpa
+edit = o ante
+track_number = nanpa pi kalama musi
+disc_number = nanpa pi sike kalama
+duration = tenpo
+sample_rate = nanpa pi kipisi kalama
+bitrate = nanpa pi suli kalama
+musicbrainz_release = kulupu MusicBrainz
+musicbrainz_recording = kalama MusicBrainz
+musicbrainz_track = kalama musi MusicBrainz
+path = nasin lipu
+add_photo = o pana e sitelen
+change_photo = o ante e sitelen
+remove_photo = o weka e sitelen
+metadata_edit_warning = nimi ala li weka e nimi nanpa. ni li ante e lipu. sina ken ala ante e ni.

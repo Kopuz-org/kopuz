@@ -77,7 +77,22 @@ pub fn sorted_track_indices(tracks: &[Track], sort_state: SortState) -> Vec<usiz
                 SortDirection::Asc => primary,
                 SortDirection::Desc => primary.reverse(),
             };
-            directional.then_with(|| left_idx.cmp(&right_idx))
+            match field {
+                SortField::Album => directional
+                    .then_with(|| {
+                        left.disc_number
+                            .unwrap_or(0)
+                            .cmp(&right.disc_number.unwrap_or(0))
+                    })
+                    .then_with(|| {
+                        left.track_number
+                            .unwrap_or(0)
+                            .cmp(&right.track_number.unwrap_or(0))
+                    })
+                    .then_with(|| compare_text(&left.title, &right.title))
+                    .then_with(|| left_idx.cmp(&right_idx)),
+                _ => directional.then_with(|| left_idx.cmp(&right_idx)),
+            }
         });
     }
 
@@ -101,6 +116,7 @@ pub struct ShowcaseProps {
     pub on_add_to_playlist: Option<EventHandler<usize>>,
     pub on_delete_track: Option<EventHandler<usize>>,
     pub on_remove_from_playlist: Option<EventHandler<usize>>,
+    pub on_view_metadata: Option<EventHandler<usize>>,
     pub on_download_track: Option<EventHandler<usize>>,
     pub active_track: Option<std::path::PathBuf>,
     pub on_click_menu: Option<EventHandler<usize>>,

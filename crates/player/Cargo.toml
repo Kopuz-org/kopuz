@@ -3,13 +3,17 @@ name = "player"
 version.workspace = true
 edition = "2024"
 
+[lints]
+workspace = true
+
 [dependencies]
+tracing = { workspace = true }
 config = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 cpal = { workspace = true }
 symphonia = { workspace = true }
-symphonia-adapter-libopus = "0.1"
+symphonia-adapter-libopus = "0.3"
 rb = { workspace = true }
 tokio = { workspace = true }
 
@@ -18,7 +22,7 @@ web-sys = { workspace = true }
 wasm-bindgen = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = { version = "0.6.3", features = ["std"] }
+objc2 = { version = "0.6.4", features = ["std"] }
 objc2-foundation = { version = "0.3.2", features = [
     "NSString",
     "NSDictionary",
@@ -40,7 +44,7 @@ block2 = "0.6"
 tokio = { workspace = true, features = ["full"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-mpris-server = "0.9.0"
+mpris-server = "0.10.0"
 tokio = { workspace = true, features = ["full"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

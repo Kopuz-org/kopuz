@@ -79,5 +79,53 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Build Windows app
-        run: cargo build -p kopuz --locked
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@30b5ca8b54e1dcffd9548bc87ede1531310fdc67 # v1.20.0
+
+      - name: Install dioxus-cli
+        # Token lets binstall query the GitHub API for the prebuilt release
+        # asset without hitting the 60-req/hr unauthenticated limit. Disable the
+        # compile fallback so a missed prebuilt fails fast instead of building
+        # dioxus-cli from source (which breaks on auth-git2/git2 0.21).
+        # Force reinstall because rust-cache can restore Cargo's install
+        # metadata without the corresponding dx.exe in .cargo/bin.
+        run: cargo binstall dioxus-cli@0.7.9 -y --force --disable-strategies compile
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Add Cargo bin to PATH
+        shell: pwsh
+        run: |
+          $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE ".cargo" }
+          $cargoBin = Join-Path $cargoHome "bin"
+          $cargoBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Verify dioxus-cli
+        shell: pwsh
+        run: |
+          if (-not (Get-Command dx -ErrorAction SilentlyContinue)) {
+            $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $env:USERPROFILE ".cargo" }
+            $cargoBin = Join-Path $cargoHome "bin"
+            Get-ChildItem $cargoBin -ErrorAction SilentlyContinue
+            throw "dx.exe was not found on PATH; dioxus-cli may not have installed correctly. Expected Cargo bin directory: $cargoBin"
+          }
+          dx --version
+
+      - name: Bundle Windows installer (.msi)
+        shell: pwsh
+        run: dx bundle --release --platform desktop --package kopuz
+
+      - name: List bundle output
+        if: always()
+        shell: pwsh
+        run: Get-ChildItem -Recurse target/dx -Include *.msi,*.exe -ErrorAction SilentlyContinue | Select-Object FullName
+
+      - name: Upload Windows installer
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: kopuz-windows-installer
+          path: |
+            target/dx/**/*setup*.exe
+            target/dx/**/*.msi
+          if-no-files-found: warn

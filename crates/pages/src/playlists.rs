@@ -1,9 +1,7 @@
-use ::server::jellyfin::JellyfinClient;
-use ::server::subsonic::SubsonicClient;
 use components::folder_detail::FolderDetail;
 use components::playlist_detail::PlaylistDetail;
 use components::playlist_popups::AddPlaylistPopup;
-use config::{AppConfig, MusicService, MusicSource, UiStyle};
+use config::{AppConfig, MusicSource, UiStyle};
 use dioxus::prelude::*;
 use reader::{Library, PlaylistStore};
 
@@ -14,6 +12,7 @@ use crate::server::playlists::ServerPlaylists;
 use crate::spotify_page::{SpotifyPage, SpotifyView};
 
 #[component]
+#[tracing::instrument(name = "render.playlists_page", skip_all)]
 pub fn PlaylistsPage(
     playlist_store: Signal<PlaylistStore>,
     library: Signal<Library>,
@@ -57,17 +56,15 @@ pub fn PlaylistsPage(
                 error.set(None);
                 saving.set(true);
                 spawn(async move {
-                    let result = match service {
-                        MusicService::Jellyfin => {
-                            let remote =
-                                JellyfinClient::new(&url, Some(&token), &device_id, Some(&user_id));
-                            remote.create_playlist(&name, &[]).await
-                        }
-                        MusicService::Subsonic | MusicService::Custom => {
-                            let remote = SubsonicClient::new(&url, &user_id, &token);
-                            remote.create_playlist(&name, &[]).await
-                        }
+                    let conn = ::server::server_ops::ServerConn {
+                        service,
+                        url,
+                        token,
+                        user_id,
+                        device_id,
                     };
+                    let result =
+                        ::server::server_ops::create_server_playlist(&conn, &name, &[]).await;
                     saving.set(false);
                     match result {
                         Ok(_) => {

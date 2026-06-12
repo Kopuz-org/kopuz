@@ -25,15 +25,16 @@ pub fn Artist(
     mut current_queue_index: Signal<usize>,
 ) -> Element {
     let is_server = config.read().active_source == MusicSource::Server;
+    let page_container_class = crate::layout::page_container_class(&config.read().ui_style);
 
     rsx! {
         div {
-            class: if cfg!(target_os = "android") { "px-4 pt-2 pb-28" } else { "p-8 pb-24" },
+            class: page_container_class,
 
             if artist_name.read().is_empty() {
-                div {
+                div { class: "flex-1 min-h-0 flex flex-col",
                     if !cfg!(target_os = "android") {
-                        h1 { class: "text-3xl font-bold text-white mb-6", "{i18n::t(\"artists\")}" }
+                        h1 { class: "text-3xl font-bold text-white mb-6 shrink-0", "{i18n::t(\"artists\")}" }
                     }
 
                     if is_server {
@@ -59,10 +60,10 @@ pub fn Artist(
                     }
                 }
             } else {
-                div { class: "w-full max-w-[1600px] mx-auto",
+                div { class: "relative flex-1 min-h-0 flex flex-col w-full max-w-[1600px] mx-auto",
                     if !cfg!(target_os = "android") {
                         button {
-                            class: "flex items-center gap-2 text-slate-400 hover:text-white transition-colors mb-6 group",
+                            class: "flex items-center gap-2 text-slate-400 hover:text-white transition-colors mb-6 group shrink-0",
                             onclick: move |_| artist_name.set(String::new()),
                             i { class: "fa-solid fa-chevron-left text-sm group-hover:-translate-x-0.5 transition-transform" }
                             span { class: "text-sm font-medium", "{i18n::t(\"back_to_artists\")}" }

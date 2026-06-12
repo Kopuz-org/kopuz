@@ -7,8 +7,6 @@ use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use config::{AppConfig, MusicService, UiStyle};
 use dioxus::prelude::*;
 use reader::{Library, PlaylistStore};
-use server::jellyfin::JellyfinClient;
-use server::subsonic::SubsonicClient;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -394,38 +392,22 @@ pub fn JellyfinAlbumDetails(
                         if !selected_paths.is_empty() {
                             let pid = playlist_id.clone();
                             spawn(async move {
-                                let conf = config.peek();
-                                if let Some(server) = &conf.server {
-                                    if let (Some(token), Some(user_id)) = (&server.access_token, &server.user_id) {
-                                        match server.service {
-                                            MusicService::Jellyfin => {
-                                                let remote = JellyfinClient::new(
-                                                    &server.url,
-                                                    Some(token),
-                                                    &conf.device_id,
-                                                    Some(user_id),
-                                                );
-                                                for path in selected_paths {
-                                                    let parts: Vec<&str> = path.to_str().unwrap_or_default().split(':').collect();
-                                                    if parts.len() >= 2 {
-                                                        let item_id = parts[1];
-                                                        let _ = remote.add_to_playlist(&pid, item_id).await;
-                                                    }
-                                                }
-                                            }
-                                            MusicService::Subsonic | MusicService::Custom => {
-                                                let remote = SubsonicClient::new(&server.url, user_id, token);
-                                                for path in selected_paths {
-                                                    let parts: Vec<&str> = path.to_str().unwrap_or_default().split(':').collect();
-                                                    if parts.len() >= 2 {
-                                                        let item_id = parts[1];
-                                                        let _ = remote.add_to_playlist(&pid, item_id).await;
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                                let Some(conn) =
+                                    ::server::server_ops::ServerConn::resolve(&config.peek())
+                                else {
+                                    return;
+                                };
+                                let item_ids: Vec<String> = selected_paths
+                                    .iter()
+                                    .filter_map(|p| {
+                                        ::server::server_ops::parse_item_id(p.to_str()?)
+                                            .map(str::to_string)
+                                    })
+                                    .collect();
+                                let _ = ::server::server_ops::add_tracks_to_playlist(
+                                    &conn, &pid, &item_ids,
+                                )
+                                .await;
                             });
                         }
                         show_playlist_modal.set(false);
@@ -444,44 +426,25 @@ pub fn JellyfinAlbumDetails(
                         if !selected_paths.is_empty() {
                             let playlist_name = name.clone();
                             spawn(async move {
-                                let conf = config.peek();
-                                if let Some(server) = &conf.server {
-                                    if let (Some(token), Some(user_id)) = (&server.access_token, &server.user_id) {
-                                        let item_ids: Vec<String> = selected_paths
-                                            .iter()
-                                            .filter_map(|p| {
-                                                let parts: Vec<&str> = p.to_str()?.split(':').collect();
-                                                if parts.len() >= 2 {
-                                                    Some(parts[1].to_string())
-                                                } else {
-                                                    None
-                                                }
-                                            })
-                                            .collect();
-
-                                        if !item_ids.is_empty() {
-                                            let item_id_refs: Vec<&str> = item_ids.iter().map(|s| s.as_str()).collect();
-                                            match server.service {
-                                                MusicService::Jellyfin => {
-                                                    let remote = JellyfinClient::new(
-                                                        &server.url,
-                                                        Some(token),
-                                                        &conf.device_id,
-                                                        Some(user_id),
-                                                    );
-                                                    let _ = remote
-                                                        .create_playlist(&playlist_name, &item_id_refs)
-                                                        .await;
-                                                }
-                                                MusicService::Subsonic | MusicService::Custom => {
-                                                    let remote = SubsonicClient::new(&server.url, user_id, token);
-                                                    let _ = remote
-                                                        .create_playlist(&playlist_name, &item_id_refs)
-                                                        .await;
-                                                }
-                                            }
-                                        }
-                                    }
+                                let Some(conn) =
+                                    ::server::server_ops::ServerConn::resolve(&config.peek())
+                                else {
+                                    return;
+                                };
+                                let item_ids: Vec<String> = selected_paths
+                                    .iter()
+                                    .filter_map(|p| {
+                                        ::server::server_ops::parse_item_id(p.to_str()?)
+                                            .map(str::to_string)
+                                    })
+                                    .collect();
+                                if !item_ids.is_empty() {
+                                    let _ = ::server::server_ops::create_server_playlist(
+                                        &conn,
+                                        &playlist_name,
+                                        &item_ids,
+                                    )
+                                    .await;
                                 }
                             });
                         }
@@ -982,7 +945,7 @@ pub fn ServerAlbum(
                 pending_album_id_for_playlist,
             }
         },
-        MusicService::Custom => rsx! {
+        MusicService::Custom | MusicService::YtMusic => rsx! {
             CustomAlbum {
                 library,
                 config,
@@ -1082,7 +1045,7 @@ pub fn ServerAlbumDetails(
                 on_close,
             }
         },
-        MusicService::Custom => rsx! {
+        MusicService::Custom | MusicService::YtMusic => rsx! {
             CustomAlbumDetails {
                 album_jellyfin_id,
                 library,

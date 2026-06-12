@@ -14,6 +14,11 @@
   <img src="https://github.com/Kopuz-org/kopuz/actions/workflows/build.yml/badge.svg" alt="Build">
   <img src="https://github.com/user-attachments/assets/2b12ec40-2fcb-45e9-969e-ef99b4654957" alt="Kopuz">
 
+<br/>
+  <br/>
+  <p>
+    <b>English</b> | <a href="docs/README-TR.md">Türkçe</a>
+  </p>
 </div>
 
 ## About the Name
@@ -32,11 +37,12 @@ this is mythological rather than historical.
 
 ## Overview
 
-Kopuz allows you to scan your local directories for audio files, or stream from
-your Jellyfin or Subsonic (Navidrome, etc.) server, automatically organizing
-everything into a browsable library. You can navigate by artists, albums,
-genres, or explore your custom playlists. The application is built for
-performance and desktop integration, utilizing the power of Rust.
+Kopuz allows you to scan your local directories for audio files, stream from
+your Jellyfin or Subsonic (Navidrome, etc.) server, or connect **YouTube Music**
+as a streaming backend — automatically organizing everything into a browsable
+library. You can navigate by artists, albums, genres, or explore your custom
+playlists. The application is built for performance and desktop integration,
+utilizing the power of Rust.
 
 ## Features
 
@@ -50,8 +56,15 @@ performance and desktop integration, utilizing the power of Rust.
   Media Transport Controls).
 - **Discord RPC**: Embedded RPC included!!!
 - **Multiple Backends**: Stream from your Jellyfin or Subsonic-compatible server
-  (Navidrome works great), or just point it at a local folder. Mix and match as
-  you like.
+  (Navidrome works great), connect YouTube Music, or just point it at a local
+  folder. Mix and match as you like.
+- **YouTube Music**: Full streaming backend with a Spotify-style **Discover**
+  page (recommended songs, playlists, albums, artists, and moods), rich **artist
+  profiles** (banner, top songs, albums, singles, related artists),
+  album/playlist browsing, and **mix radio** ("start radio" from any track).
+  Sign in with your account for your library, Liked Music, and playlists — or
+  run it **anonymously** (no sign-in) for browse, search, and playback of public
+  tracks. See [YouTube Music Setup](#youtube-music-setup).
 - **Lyrics Support**: Enjoy real-time synced and plain lyrics, complete with
   auto-scrolling to follow along with your music.
 - **Favorites**: Star tracks locally or sync favorites with your
@@ -370,6 +383,128 @@ OAuth tokens are stored in the OS keyring (Secret Service / Keychain / Windows
 Credential Manager). No client secret is required and no secret is shipped in
 the desktop binary. A plaintext file cache exists only behind the
 development-only `insecure-token-cache` Cargo feature.
+
+## YouTube Music Setup
+
+Kopuz can use YouTube Music as a streaming backend. Add it from **Settings →
+Media servers → Add → YouTube Music**.
+
+### Prerequisite: rustypipe-botguard
+
+Playback (in both signed-in and anonymous modes) needs the
+[`rustypipe-botguard`](https://crates.io/crates/rustypipe-botguard) helper to
+mint the PO token YouTube requires for stream URLs. Install it once:
+
+```bash
+cargo install rustypipe-botguard --version 0.1.2
+```
+
+The Add-server dialog has a **Check rustypipe-botguard** button to confirm it's
+on your `PATH`. Without it, tracks resolve but fail to play.
+
+### Choosing a mode
+
+The setup dialog offers two methods:
+
+- **Sign in with a browser** — kopuz opens the Google sign-in page in an
+  **isolated browser profile** (a fresh, separate session; your normal browsing
+  is never touched), waits for you to log in, and extracts the session cookies.
+  Pick which installed Chromium-family browser to use (Chrome, Chromium, Brave,
+  Edge, or Vivaldi). This unlocks your **library, Liked Music, playlists, and
+  followed artists**.
+
+- **Continue without signing in (anonymous)** — no sign-in, no cookies. You can
+  **browse, search, open artist/album/playlist pages, start mix radio, and play
+  public tracks**. Liked Music, library playlists, and following/liking are
+  disabled (those views show a "sign in to enable" prompt). Music Premium-only
+  tracks can't be played anonymously.
+
+> [!NOTE]
+> On **Windows**, browser sign-in is currently disabled — the Google accounts
+> page renders blank inside the isolated profile. Windows users get anonymous
+> mode automatically. Sign-in works on Linux and macOS. (Tracked as
+> `TODO(windows-signin)` in `crates/server/src/ytmusic/isolated_profile.rs`.)
+
+### Premium tracks
+
+Music Premium-locked tracks fall back to a local
+[`yt-dlp`](https://github.com/yt-dlp/yt-dlp) resolve when the primary path
+returns `UNPLAYABLE`, so having `yt-dlp` installed helps for those. Anonymous
+mode can't play Premium-only content at all.
+
+## Logs & Debugging
+
+Kopuz logs through [`tracing`](https://docs.rs/tracing). Most of this is
+reachable from the app itself — **Settings → Logs** has **Open logs folder**,
+**Export logs**, and an **Enable Performance Tracing** toggle — so users never
+need a terminal to send a useful report.
+
+### Where the files live
+
+All files sit in the logs directory (the **Open logs folder** button jumps
+straight here):
+
+- Linux: `~/.cache/kopuz/logs/`
+- macOS: `~/Library/Caches/com.temidaradev.kopuz/logs/`
+- Windows: `%LOCALAPPDATA%\temidaradev\kopuz\cache\logs\`
+
+| File                    | What it is                                                                                       |
+| ----------------------- | ------------------------------------------------------------------------------------------------ |
+| `latest.log`            | The current session. Span timing + events; the live log.                                         |
+| `kopuz-<timestamp>.log` | Previous sessions, archived on startup (last 10 kept). A restart never erases the run before it. |
+| `crash-<timestamp>.txt` | Written **only on a crash** (Rust panic): message, backtrace, recent log tail, app/OS version.   |
+| `kopuz-trace.json`      | Performance trace — only when tracing is enabled (see below). Overwritten each run.              |
+
+Timestamps are UTC `YYYY-MM-DD_HH-MM-SS`, so the files sort chronologically.
+
+### Triage cheat-sheet
+
+**App crashed →** a `crash-<timestamp>.txt` is generated automatically. Ask the
+user for **Settings → Logs → Export logs** (bundles `latest.log` + the newest
+crash report into one file), or **Open logs folder** and grab the newest
+`crash-*.txt`.
+
+**Performance issue (freeze / slow load / stutter) →** ask the user to:
+
+1. **Settings → Logs → enable "Performance Tracing"**, then **restart** the app
+   (the toggle warns about this — the trace recorder is set up once at startup).
+2. Reproduce the slow action.
+3. **Quit the app** (this flushes the trace cleanly).
+4. **Settings → Logs → Open logs folder** and send `kopuz-trace.json` (or
+   **Export logs**).
+
+Open the trace at [speedscope.app](https://speedscope.app) or
+[ui.perfetto.dev](https://ui.perfetto.dev). Critical paths (YouTube stream
+resolve, browse/search/pagination, mix radio, library scan, downloads, playback
+transitions, per-component renders) are instrumented as named spans, and
+worker-thread work nests under the action that launched it, so the trace shows
+exactly where time goes. Turn it back off afterward — it adds overhead and grows
+the trace file during long sessions.
+
+### Power-user env vars
+
+Log **verbosity** is controlled by env vars for terminal runs:
+
+```bash
+# Verbose (debug-level) logs for a session
+KOPUZ_DEBUG=1 kopuz
+
+# Fine-grained, per-module (overrides KOPUZ_DEBUG); standard tracing directive syntax
+KOPUZ_LOG="server::ytmusic=trace,kopuz=debug" kopuz
+
+# Deep render-tree profiling: Dioxus's own per-component render/diff spans
+# (enable the trace toggle in Settings first; this just controls what's recorded)
+KOPUZ_LOG="info,dioxus_core=trace" kopuz
+```
+
+`RUST_LOG` works too; `KOPUZ_LOG` takes precedence.
+
+The **performance trace** is enabled only via **Settings → Logs → Enable
+Performance Tracing** (then restart) — there's no env var for it; the UI is the
+single source of truth. Off by default → zero overhead.
+
+> Debug builds add a **Trigger crash** button in Settings → Logs to exercise the
+> crash-report path. It's compiled out of release builds.
 
 ## Optimization
 

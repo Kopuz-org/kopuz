@@ -17,6 +17,8 @@
         "--talk-name=org.freedesktop.Notifications",
         "--talk-name=org.mpris.MediaPlayer2.*",
         "--own-name=org.mpris.MediaPlayer2.kopuz",
+        "--talk-name=org.freedesktop.Flatpak",
+        "--talk-name=org.freedesktop.secrets",
         "--env=LD_LIBRARY_PATH=/app/lib"
     ],
     "modules": [
@@ -31,7 +33,7 @@
                 {
                     "type": "git",
                     "url": "https://github.com/jordansissel/xdotool.git",
-                    "tag": "v3.20211022.1"
+                    "tag": "v4.20260303.1"
                 }
             ]
         },

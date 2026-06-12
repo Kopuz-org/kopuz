@@ -27,6 +27,7 @@ pub struct SubsonicLibraryData {
     pub artist_images: std::collections::HashMap<String, String>,
 }
 
+#[tracing::instrument(name = "library.sync", skip_all, fields(clear_first = clear_first))]
 pub async fn sync_server_library(
     mut library: Signal<Library>,
     config: Signal<AppConfig>,
@@ -337,6 +338,7 @@ pub async fn sync_server_library(
             }
             info!("Subsonic/Custom sync completed successfully.");
         }
+        MusicService::YtMusic => {}
     }
 
     Ok(())
@@ -353,6 +355,7 @@ pub async fn fetch_subsonic_library(
         MusicService::Subsonic => "subsonic",
         MusicService::Custom => "custom",
         MusicService::Jellyfin => "jellyfin",
+        MusicService::YtMusic => "ytmusic",
     };
 
     let mut albums_out = Vec::new();

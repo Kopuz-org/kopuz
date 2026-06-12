@@ -39,6 +39,31 @@ pub struct Track {
     pub artists: Vec<String>,
 }
 
+/// What to do with the track's embedded front-cover picture on save.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub enum CoverChange {
+    /// Leave the existing picture untouched.
+    #[default]
+    Keep,
+    /// Strip the front-cover picture from the file.
+    Remove,
+    /// Replace the front cover with these image bytes (format auto-detected).
+    Set(Vec<u8>),
+}
+
+/// User-supplied edits to a track's tags. Empty strings / `None` mean
+/// "remove this tag from the file". Produced by the metadata editor UI and
+/// consumed by [`crate::metadata::write_tags`].
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TrackEdits {
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub track_number: Option<u32>,
+    pub disc_number: Option<u32>,
+    pub cover: CoverChange,
+}
+
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct Library {
     #[serde(
@@ -55,6 +80,17 @@ pub struct Library {
     pub jellyfin_albums: Vec<Album>,
     #[serde(default)]
     pub jellyfin_genres: Vec<(String, String)>,
+    /// Unix timestamp (seconds) of the last successful YT library sync.
+    /// `None` means "never synced" → the Favorites page kicks off an
+    /// initial fetch on next mount. Cleared by the manual refresh
+    /// button to force a re-fetch.
+    #[serde(default)]
+    pub last_yt_sync_at: Option<u64>,
+    /// Companion to `last_yt_sync_at` for the YT playlists list.
+    /// Tracked separately because the favorites page and the playlists
+    /// page are independent — one synced doesn't imply the other.
+    #[serde(default)]
+    pub last_yt_playlists_sync_at: Option<u64>,
     #[serde(default)]
     pub server_artist_images: std::collections::HashMap<String, String>,
     #[serde(default)]
@@ -89,22 +125,30 @@ impl Library {
         }
     }
 
+    #[tracing::instrument(name = "library.load", skip_all)]
     pub fn load(path: &Path) -> std::io::Result<Self> {
         if !path.exists() {
             return Ok(Self::default());
         }
         let data = fs::read_to_string(path)?;
-        let library = serde_json::from_str(&data)
+        let library: Self = serde_json::from_str(&data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+        tracing::debug!(
+            bytes = data.len(),
+            tracks = library.tracks.len(),
+            "library loaded from disk"
+        );
         Ok(library)
     }
 
+    #[tracing::instrument(name = "library.save", skip_all, fields(tracks = self.tracks.len()))]
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
         let data = serde_json::to_string(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+        tracing::debug!(bytes = data.len(), "writing library to disk");
         fs::write(path, data)
     }
 
@@ -198,22 +242,26 @@ pub struct PlaylistStore {
 }
 
 impl PlaylistStore {
+    #[tracing::instrument(name = "playlists.load", skip_all)]
     pub fn load(path: &Path) -> std::io::Result<Self> {
         if !path.exists() {
             return Ok(Self::default());
         }
         let data = fs::read_to_string(path)?;
-        let store = serde_json::from_str(&data)
+        let store: Self = serde_json::from_str(&data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+        tracing::debug!(bytes = data.len(), playlists = store.playlists.len(), "playlists loaded");
         Ok(store)
     }
 
+    #[tracing::instrument(name = "playlists.save", skip_all, fields(playlists = self.playlists.len()))]
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
         let data = serde_json::to_string(self)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+        tracing::debug!(bytes = data.len(), "writing playlists to disk");
         fs::write(path, data)
     }
 }
@@ -227,16 +275,24 @@ pub struct FavoritesStore {
 }
 
 impl FavoritesStore {
+    #[tracing::instrument(name = "favorites.load", skip_all)]
     pub fn load(path: &Path) -> std::io::Result<Self> {
         if !path.exists() {
             return Ok(Self::default());
         }
         let data = fs::read_to_string(path)?;
-        let store = serde_json::from_str(&data)
+        let store: Self = serde_json::from_str(&data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+        tracing::debug!(
+            bytes = data.len(),
+            local = store.local_favorites.len(),
+            remote = store.jellyfin_favorites.len(),
+            "favorites loaded"
+        );
         Ok(store)
     }
 
+    #[tracing::instrument(name = "favorites.save", skip_all)]
     pub fn save(&self, path: &Path) -> std::io::Result<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;

@@ -3,28 +3,19 @@ members = ["crates/*"]
 resolver = "3"
 
 [workspace.package]
-version = "0.6.5"
+version = "0.6.7"
+
+# Steer code toward the tracing subscriber (see crates/kopuz/src/logging.rs).
+# Inherited per-crate via `[lints] workspace = true`. Build scripts (cargo:
+# directives), examples, and test diagnostics opt out with `#[expect(...)]`.
+[workspace.lints.clippy]
+print_stdout = "deny"
+print_stderr = "deny"
 
 [workspace.dependencies]
-dioxus = { version = "0.7.5", features = [] }
-getrandom = { version = "0.2", features = ["js"] }
-web-sys = { version = "0.3", features = [
-  "AudioContext",
-  "AudioDestinationNode",
-  "AudioNode",
-  "AudioParam",
-  "BiquadFilterNode",
-  "BiquadFilterType",
-  "ChannelMergerNode",
-  "ChannelSplitterNode",
-  "GainNode",
-  "HtmlAudioElement",
-  "HtmlMediaElement",
-  "MediaElementAudioSourceNode",
-  "MediaError",
-  "Window",
-  "Storage",
-] }
+dioxus = { version = "0.7.9", features = [] }
+getrandom = { version = "0.4", features = ["wasm_js"] }
+web-sys = { version = "0.3", features = ["AudioContext", "AudioDestinationNode", "AudioNode", "AudioParam", "BiquadFilterNode", "BiquadFilterType", "ChannelMergerNode", "ChannelSplitterNode", "GainNode", "HtmlAudioElement", "HtmlMediaElement", "MediaElementAudioSourceNode", "MediaError", "Window", "Storage"] }
 wasm-bindgen = "0.2"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -37,12 +28,8 @@ tokio = { version = "1.0", features = [
 ] }
 async-recursion = "1.0"
 discord-rich-presence = "1.1.0"
-lofty = "0.22.4"
-image = { version = "0.25", default-features = false, features = [
-  "jpeg",
-  "png",
-  "webp",
-] }
+lofty = "0.24.0"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 rfd = "0.17.2"
 percent-encoding = "2.3.2"
 dotenvy = "0.15"
@@ -54,21 +41,19 @@ uuid = { version = "1.20.0", features = [
   "js",
 ] }
 cpal = "0.17"
-symphonia = { version = "0.5", features = ["all"] }
+symphonia = { version = "0.6", features = ["all"] }
 rb = "0.4"
 jellyfin-sdk-rust = "0.1.2"
-reqwest = { version = "0.12", default-features = false, features = [
-  "rustls-tls",
-  "http2",
-  "charset",
-] }
-rand = "0.8"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "charset", "query", "form"] }
+rand = "0.10"
 web-time = "1.1"
-gloo-timers = { version = "0.3", features = ["futures"] }
+gloo-timers = { version = "0.4", features = ["futures"] }
 directories = "6.0"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 tracing-appender = "0.2"
+tracing-chrome = "0.7"
+ctrlc = "3.5"
 i18n = { path = "./crates/i18n" }
 player = { path = "./crates/player" }
 reader = { path = "./crates/reader" }

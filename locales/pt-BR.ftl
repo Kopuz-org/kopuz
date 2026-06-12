@@ -27,10 +27,10 @@ add = Adicionar
 add_folder = Adicionar pasta
 no_music_folders = Nenhuma pasta de músicas configurada
 add_server = Adicionar servidor
-# TODO: NEED LOCALIZATION
-connect_to_lastfm = Connect to Last.fm
-lastfm_connected = Last.fm Connected
-# TODO: NEED LOCALIZATION
+connect_to_lastfm = Conectar ao Last.fm
+connect_to_librefm = Conectar ao Libre.fm
+lastfm_connected = Conectado ao Last.fm
+librefm_connected = Conectado ao Libre.fm
 server_details = Detalhes do servidor
 server_name = Nome do servidor
 server_url = URL do servidor
@@ -136,10 +136,8 @@ maximize = Maximizar
 close = Fechar
 enabled = ATIVADO
 disabled = DESATIVADO
-# TODO: Translate lines below
-play = Play
-shuffle = Shuffle
-# ------
+play = Tocar
+shuffle = Aleatório
 
 # Navigation & Headers
 tracks = Faixas
@@ -195,10 +193,8 @@ heart_track_to_add_server = Curta uma faixa enquanto ela estiver tocando para ad
 search_placeholder = Buscar artistas, álbuns ou faixas...
 no_results_found = Nenhum resultado encontrado para "{ $query }"
 listenbrainz_token_placeholder = Insira seu token do ListenBrainz
-# TODO: NEED LOCALIZATION
-lastfm_api_key_placeholder = Enter your Last.fm API Key
-lastfm_api_secret_placeholder = Enter your Last.fm API Secret
-# TODO: NEED LOCALIZATION
+lastfm_api_key_placeholder = Digite sua chave de API do Last.fm
+lastfm_api_secret_placeholder = Digite seu segredo de API do Last.fm
 
 # Empty States
 album_not_found = Álbum não encontrado
@@ -244,6 +240,9 @@ most_played_local_tracks = Suas faixas locais mais reproduzidas.
 no_tracks_in_library = Nenhuma faixa encontrada na sua biblioteca.
 no_songs_here = Nenhuma música aqui.
 syncing_with_server = Sincronizando com o servidor...
+yt_syncing_progress = Sincronizando — { $count } faixas carregadas até agora
+yt_synced_total = { $count } faixas curtidas sincronizadas
+refresh = Atualizar
 most_played_tracks = Suas faixas mais reproduzidas.
 no_more_songs = Não há mais músicas na fila
 server_playlist = Playlist do servidor
@@ -259,6 +258,11 @@ rescan_library = Reescanear biblioteca
 refresh_music_library = Atualizar biblioteca de músicas
 listenbrainz = ListenBrainz
 lastfm = Last.fm
+librefm = Libre.fm
+enable_tracing = Ativar rastreamento de desempenho
+tracing_warning = Adiciona sobrecarga e aumenta o arquivo de rastreamento; entra em vigor após reiniciar.
+export_logs = Exportar logs
+open_logs_folder = Abrir pasta de logs
 album_art_gradient = Gradiente da capa do álbum
 default_theme = Padrão
 gruvbox_material = Gruvbox Material
@@ -376,6 +380,7 @@ artist_photo = Foto do artista
 album_cover = Capa do álbum
 auto_fetch_covers = Buscar capas de álbum automaticamente
 prefer_local_lyrics = Preferir letras locais (.lrc / incorporadas, sem recurso online)
+enable_musixmatch_lyrics = Usar Musixmatch como fonte alternativa de letras
 cover_fetch_strategy = Estratégia de busca de capas
 musicbrainz_first = MusicBrainz primeiro
 lastfm_first = Last.fm primeiro
@@ -420,3 +425,27 @@ radio_registries_empty = Nenhum registro configurado
 offline_downloads = Downloads Offline
 download_quality = Qualidade do Download
 saving = Salvando...
+discover_more_loading = Carregando mais…
+discover_failed = Não foi possível carregar Descobrir: { $error }
+discover_requires_ytmusic = Descobrir só está disponível quando o YouTube Music é o servidor ativo.
+discover_show_all = Mostrar tudo
+yt_anon_playlists = Entre no YouTube Music para ver suas playlists.
+yt_anon_favorites = Entre no YouTube Music para ver suas músicas curtidas.
+
+# Metadata Viewer / Editor
+view_metadata = Ver metadados
+edit_metadata = Editar metadados
+edit = Editar
+track_number = Nº da faixa
+disc_number = Nº do disco
+duration = Duração
+sample_rate = Taxa de amostragem
+bitrate = Taxa de bits
+musicbrainz_release = Lançamento do MusicBrainz
+musicbrainz_recording = Gravação do MusicBrainz
+musicbrainz_track = Faixa do MusicBrainz
+path = Caminho
+add_photo = Adicionar foto
+change_photo = Alterar foto
+remove_photo = Remover foto
+metadata_edit_warning = Campos vazios removem a tag. Grava diretamente no arquivo — sem desfazer.

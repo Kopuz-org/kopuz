@@ -3,7 +3,11 @@ name = "hooks"
 version.workspace = true
 edition = "2024"
 
+[lints]
+workspace = true
+
 [dependencies]
+tracing = { workspace = true }
 dioxus = { workspace = true }
 reader = { workspace = true }
 utils = { workspace = true }

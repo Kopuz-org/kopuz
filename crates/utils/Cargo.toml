@@ -3,6 +3,9 @@ name = "utils"
 version.workspace = true
 edition = "2024"
 
+[lints]
+workspace = true
+
 [dependencies]
 percent-encoding = { workspace = true }
 reqwest = { workspace = true }
@@ -13,10 +16,13 @@ tracing = { workspace = true }
 color-thief = "0.2.2"
 image = "0.25.10"
 urlencoding = "2.1.3"
-md5 = "0.7"
+md5 = "0.8"
+hex = "0.4"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 lofty = { workspace = true }
+reqwest = { workspace = true, features = ["blocking", "json"] }
+time = { version = "0.3", features = ["formatting", "macros"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-timers = { workspace = true }

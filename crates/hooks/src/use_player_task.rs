@@ -172,7 +172,7 @@ pub fn use_player_task(ctrl: PlayerController) {
         async move {
             use player::systemint::{SystemEvent, wait_event};
             player::systemint::init();
-            println!("[player_task] Starting Windows SMTC event loop");
+            tracing::debug!("starting Windows SMTC event loop");
             loop {
                 match wait_event().await {
                     Some(SystemEvent::Play) => ctrl.resume(),
@@ -285,8 +285,9 @@ pub fn use_player_task(ctrl: PlayerController) {
                         && last_recent_path.as_ref() != Some(&path)
                     {
                         last_recent_path = Some(path.clone());
-                        let is_server =
-                            path.starts_with("jellyfin:") || path.starts_with("subsonic:");
+                        let is_server = path.starts_with("jellyfin:")
+                            || path.starts_with("subsonic:")
+                            || path.starts_with("ytmusic:");
                         let id = if is_server {
                             path.split(':').nth(1).unwrap_or(&path).to_string()
                         } else {
@@ -305,18 +306,26 @@ pub fn use_player_task(ctrl: PlayerController) {
                     let next_track_key = next_track.path.to_string_lossy().to_string();
                     if last_lyrics_prefetch_track.as_ref() != Some(&next_track_key) {
                         last_lyrics_prefetch_track = Some(next_track_key);
-                        let (server_url, server_token, server_user_id, prefer_local) = {
+                        let (
+                            server_url,
+                            server_token,
+                            server_user_id,
+                            prefer_local,
+                            enable_musixmatch,
+                        ) = {
                             let conf = config.read();
                             let prefer_local = conf.prefer_local_lyrics;
+                            let enable_musixmatch = conf.enable_musixmatch_lyrics;
                             if let Some(server) = &conf.server {
                                 (
                                     Some(server.url.clone()),
                                     server.access_token.clone(),
                                     server.user_id.clone(),
                                     prefer_local,
+                                    enable_musixmatch,
                                 )
                             } else {
-                                (None, None, None, prefer_local)
+                                (None, None, None, prefer_local, enable_musixmatch)
                             }
                         };
 
@@ -332,6 +341,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                                 server_token.as_deref(),
                                 server_user_id.as_deref(),
                                 prefer_local,
+                                enable_musixmatch,
                             )
                             .await;
                         });

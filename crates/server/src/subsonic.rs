@@ -1,4 +1,4 @@
-use rand::{Rng, distributions::Alphanumeric};
+use rand::{RngExt, distr::Alphanumeric};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
@@ -434,13 +434,14 @@ impl SubsonicClient {
     }
 
     fn random_salt(&self) -> String {
-        rand::thread_rng()
+        rand::rng()
             .sample_iter(&Alphanumeric)
             .take(16)
             .map(char::from)
             .collect()
     }
 
+    #[tracing::instrument(name = "subsonic.call", skip_all, fields(endpoint = %endpoint))]
     async fn call<T: DeserializeOwned + Default>(
         &self,
         endpoint: &str,

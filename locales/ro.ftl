@@ -27,10 +27,10 @@ add = Adaugă
 add_folder = Adaugă Folder
 no_music_folders = Nu sunt configurate foldere muzicale
 add_server = Adaugă Server
-# TODO: NEED LOCALIZATION
-connect_to_lastfm = Connect to Last.fm
-lastfm_connected = Last.fm Connected
-# TODO: NEED LOCALIZATION
+connect_to_lastfm = Conectează-te la Last.fm
+connect_to_librefm = Conectează-te la Libre.fm
+lastfm_connected = Conectat la Last.fm
+librefm_connected = Conectat la Libre.fm
 server_details = Detalii Server
 server_name = Nume Server
 server_url = URL Server
@@ -81,10 +81,8 @@ create = Creează
 save = Salvează
 enabled = PORNIT
 disabled = OPRIT
-# TODO: Translate lines below
-play = Play
-shuffle = Shuffle
-# ------
+play = Redare
+shuffle = Amestecare
 
 # Navigation & Headers
 tracks = Piese
@@ -140,10 +138,8 @@ heart_track_to_add_server = Adaugă o piesă la favorite în timp ce este redat�
 search_placeholder = Caută artiști, albume sau piese...
 no_results_found = Niciun rezultat pentru "{ $query }"
 listenbrainz_token_placeholder = Introdu token-ul ListenBrainz
-# TODO: NEED LOCALIZATION
-lastfm_api_key_placeholder = Enter your Last.fm API Key
-lastfm_api_secret_placeholder = Enter your Last.fm API Secret
-# TODO: NEED LOCALIZATION
+lastfm_api_key_placeholder = Introdu cheia API Last.fm
+lastfm_api_secret_placeholder = Introdu secretul API Last.fm
 
 # Empty States
 album_not_found = Albumul nu a fost găsit
@@ -189,6 +185,9 @@ most_played_local_tracks = Cele mai ascultate piese locale.
 no_tracks_in_library = Nu s-au găsit piese în biblioteca ta.
 no_songs_here = Nu sunt piese aici.
 syncing_with_server = Se sincronizează cu serverul...
+yt_syncing_progress = Se sincronizează — { $count } piese încărcate până acum
+yt_synced_total = { $count } piese preferate sincronizate
+refresh = Reîmprospătează
 most_played_tracks = Cele mai ascultate piese.
 no_more_songs = Nu mai sunt piese în coadă
 server_playlist = Listă de Redare Server
@@ -207,6 +206,11 @@ rescan_library = Rescanare Bibliotecă
 refresh_music_library = Actualizează Biblioteca
 listenbrainz = ListenBrainz
 lastfm = Last.fm
+librefm = Libre.fm
+enable_tracing = Activează urmărirea performanței
+tracing_warning = Adaugă supraîncărcare și mărește fișierul de urmărire; are efect după repornire.
+export_logs = Exportă jurnalele
+open_logs_folder = Deschide folderul de jurnale
 album_art_gradient = Gradient copertă album
 default_theme = Implicit
 gruvbox_material = Gruvbox Material
@@ -377,6 +381,7 @@ artist_photo = Fotografie artist
 album_cover = Copertă album
 auto_fetch_covers = Preia automat coperțile albumelor
 prefer_local_lyrics = Preferă versurile locale (.lrc / încorporate, fără rezervă online)
+enable_musixmatch_lyrics = Folosește Musixmatch ca sursă de rezervă pentru versuri
 cover_fetch_strategy = Strategie de preluare coperți
 musicbrainz_first = MusicBrainz mai întâi
 lastfm_first = Last.fm mai întâi
@@ -421,3 +426,27 @@ radio_registries_empty = Niciun registru configurat
 offline_downloads = Descărcări Offline
 download_quality = Calitatea descărcării
 saving = Se salvează...
+discover_more_loading = Se încarcă mai mult…
+discover_failed = Nu s-a putut încărca Descoperă: { $error }
+discover_requires_ytmusic = Descoperă este disponibil doar când YouTube Music este serverul activ.
+discover_show_all = Afișează toate
+yt_anon_playlists = Conectează-te la YouTube Music pentru a vedea playlisturile din bibliotecă.
+yt_anon_favorites = Conectează-te la YouTube Music pentru a vedea melodiile apreciate.
+
+# Metadata Viewer / Editor
+view_metadata = Vezi metadatele
+edit_metadata = Editează metadatele
+edit = Editează
+track_number = Nr. piesă
+disc_number = Nr. disc
+duration = Durată
+sample_rate = Rată de eșantionare
+bitrate = Rată de biți
+musicbrainz_release = Lansare MusicBrainz
+musicbrainz_recording = Înregistrare MusicBrainz
+musicbrainz_track = Piesă MusicBrainz
+path = Cale
+add_photo = Adaugă fotografie
+change_photo = Schimbă fotografia
+remove_photo = Elimină fotografia
+metadata_edit_warning = Câmpurile goale elimină eticheta. Se scrie direct în fișier — fără anulare.

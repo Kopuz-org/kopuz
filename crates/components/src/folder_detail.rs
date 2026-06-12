@@ -51,6 +51,7 @@ pub fn FolderDetail(
             library,
             playlist_store,
             on_close,
+            enable_metadata: true,
         }
     }
 }

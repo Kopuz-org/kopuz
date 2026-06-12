@@ -27,10 +27,10 @@ add = Hinzufügen
 add_folder = Ordner hinzufügen
 no_music_folders = Keine Musikordner konfiguriert
 add_server = Server hinzufügen
-# TODO: NEED LOCALIZATION
-connect_to_lastfm = Connect to Last.fm
-lastfm_connected = Last.fm Connected
-# TODO: NEED LOCALIZATION
+connect_to_lastfm = Mit Last.fm verbinden
+connect_to_librefm = Mit Libre.fm verbinden
+lastfm_connected = Mit Last.fm verbunden
+librefm_connected = Mit Libre.fm verbunden
 server_details = Serverdetails
 server_name = Servername
 server_url = Serveradresse
@@ -81,10 +81,8 @@ create = Erstellen
 save = Speichern
 enabled = AKTIVIERT
 disabled = DEAKTIVIERT
-# TODO: Translate lines below
-play = Play
-shuffle = Shuffle
-# ------
+play = Abspielen
+shuffle = Zufall
 
 # Navigation & Headers
 tracks = Titel
@@ -140,10 +138,8 @@ heart_track_to_add_server = Markiere einen Titel mit „Gefällt mir“, um ihn 
 search_placeholder = Suche nach Künstlern, Alben oder Titeln...
 no_results_found = Keine Ergebnisse für „{ $query }“ gefunden
 listenbrainz_token_placeholder = Gib deinen ListenBrainz-Token ein
-# TODO: NEED LOCALIZATION
-lastfm_api_key_placeholder = Enter your Last.fm API Key
-lastfm_api_secret_placeholder = Enter your Last.fm API Secret
-# TODO: NEED LOCALIZATION
+lastfm_api_key_placeholder = Gib deinen Last.fm-API-Schlüssel ein
+lastfm_api_secret_placeholder = Gib dein Last.fm-API-Geheimnis ein
 
 # Empty States
 album_not_found = Album nicht gefunden
@@ -189,6 +185,9 @@ most_played_local_tracks = Deine meistgehörten lokalen Titel
 no_tracks_in_library = Keine Titel in deiner Bibliothek gefunden
 no_songs_here = Hier sind keine Songs
 syncing_with_server = Synchronisiere mit dem Server...
+yt_syncing_progress = Synchronisiere — { $count } Titel geladen
+yt_synced_total = { $count } Lieblingstitel synchronisiert
+refresh = Aktualisieren
 most_played_tracks = Deine meistgehörten Titel
 no_more_songs = Keine weiteren Songs in der Warteschlange
 server_playlist = Server-Playlist
@@ -207,6 +206,11 @@ rescan_library = Bibliothek neu scannen
 refresh_music_library = Musikbibliothek aktualisieren
 listenbrainz = ListenBrainz
 lastfm = Last.fm
+librefm = Libre.fm
+enable_tracing = Leistungs-Tracing aktivieren
+tracing_warning = Verursacht Mehraufwand und vergrößert die Trace-Datei; wird nach einem Neustart wirksam.
+export_logs = Protokolle exportieren
+open_logs_folder = Protokollordner öffnen
 album_art_gradient = Albumcover-Verlauf
 default_theme = Standard
 gruvbox_material = Gruvbox Material
@@ -377,6 +381,7 @@ artist_photo = Künstlerfoto
 album_cover = Albumcover
 auto_fetch_covers = Albumcover automatisch abrufen
 prefer_local_lyrics = Lokale Liedtexte bevorzugen (.lrc / eingebettet, kein Online-Fallback)
+enable_musixmatch_lyrics = Musixmatch als Liedtext-Fallback verwenden
 cover_fetch_strategy = Cover-Abrufstrategie
 musicbrainz_first = MusicBrainz zuerst
 lastfm_first = Last.fm zuerst
@@ -421,3 +426,27 @@ radio_registries_empty = Keine Registries konfiguriert
 offline_downloads = Offline-Downloads
 download_quality = Download-Qualität
 saving = Speichern...
+discover_more_loading = Lade weitere…
+discover_failed = Entdecken konnte nicht geladen werden: { $error }
+discover_requires_ytmusic = Entdecken ist nur verfügbar, wenn YouTube Music der aktive Server ist.
+discover_show_all = Alle anzeigen
+yt_anon_playlists = Melde dich bei YouTube Music an, um deine Bibliotheks-Playlists zu sehen.
+yt_anon_favorites = Melde dich bei YouTube Music an, um deine markierten Songs zu sehen.
+
+# Metadata Viewer / Editor
+view_metadata = Metadaten anzeigen
+edit_metadata = Metadaten bearbeiten
+edit = Bearbeiten
+track_number = Titelnr.
+disc_number = CD-Nr.
+duration = Dauer
+sample_rate = Abtastrate
+bitrate = Bitrate
+musicbrainz_release = MusicBrainz-Veröffentlichung
+musicbrainz_recording = MusicBrainz-Aufnahme
+musicbrainz_track = MusicBrainz-Titel
+path = Pfad
+add_photo = Foto hinzufügen
+change_photo = Foto ändern
+remove_photo = Foto entfernen
+metadata_edit_warning = Leere Felder entfernen das Tag. Wird direkt in die Datei geschrieben — kein Rückgängig.

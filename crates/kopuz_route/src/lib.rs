@@ -1,6 +1,8 @@
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Route {
     Home,
+    Discover,
+    DiscoverPlaylist,
     Search,
     Library,
     Album,

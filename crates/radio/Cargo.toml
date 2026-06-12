@@ -3,16 +3,19 @@ name = "radio"
 version.workspace = true
 edition = "2024"
 
+[lints]
+workspace = true
+
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-thiserror = "1.0"
+thiserror = "2.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 reqwest = { workspace = true, features = ["json"] }
-tokio-tungstenite = { version = "0.21.0", features = ["native-tls"] }
+tokio-tungstenite = { version = "0.29.0", features = ["native-tls"] }
 futures-util = "0.3.30"
 
 [dev-dependencies]

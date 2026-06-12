@@ -4,6 +4,7 @@
   craneLib,
   pkg-config,
   cmake,
+  git,
   openssl,
   tailwindcss_4,
   dioxus-cli,
@@ -24,13 +25,14 @@
 }:
 let
   pname = "kopuz";
-  version = "0.6.5";
+  version = "0.6.7";
 
   nativeBuildInputs = [
     pkg-config
     cmake
     tailwindcss_4
     dioxus-cli
+    git
   ]
   ++ lib.optionals stdenv.isLinux [ wrapGAppsHook3 ];
 

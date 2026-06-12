@@ -27,10 +27,10 @@ add = إضافة
 add_folder = إضافة مجلد
 no_music_folders = لم يتم تكوين مجلدات موسيقى
 add_server = إضافة خادم
-# TODO: NEED LOCALIZATION
-connect_to_lastfm = Connect to Last.fm
-lastfm_connected = Last.fm Connected
-# TODO: NEED LOCALIZATION
+connect_to_lastfm = الاتصال بـ Last.fm
+connect_to_librefm = الاتصال بـ Libre.fm
+lastfm_connected = تم الاتصال بـ Last.fm
+librefm_connected = تم الاتصال بـ Libre.fm
 server_details = تفاصيل الخادم
 server_name = اسم الخادم
 server_url = رابط الخادم
@@ -81,10 +81,8 @@ create = إنشاء
 save = حفظ
 enabled = مفعّل
 disabled = مُعطّل
-# TODO: Translate lines below
-play = Play
-shuffle = Shuffle
-# ------
+play = تشغيل
+shuffle = عشوائي
 
 # Navigation & Headers
 tracks = المقاطع
@@ -140,10 +138,8 @@ heart_track_to_add_server = أضف إعجابك بمقطع أثناء تشغيل
 search_placeholder = ابحث عن فنانين أو ألبومات أو مقاطع...
 no_results_found = لم يتم العثور على نتائج لـ "{ $query }"
 listenbrainz_token_placeholder = أدخل رمز ListenBrainz الخاص بك
-# TODO: NEED LOCALIZATION
-lastfm_api_key_placeholder = Enter your Last.fm API Key
-lastfm_api_secret_placeholder = Enter your Last.fm API Secret
-# TODO: NEED LOCALIZATION
+lastfm_api_key_placeholder = أدخل مفتاح API الخاص بـ Last.fm
+lastfm_api_secret_placeholder = أدخل سر API الخاص بـ Last.fm
 
 # Empty States
 album_not_found = لم يتم العثور على الألبوم
@@ -189,6 +185,9 @@ most_played_local_tracks = أكثر المقاطع المحلية تشغيلاً
 no_tracks_in_library = لم يتم العثور على مقاطع في مكتبتك.
 no_songs_here = لا توجد أغانٍ هنا.
 syncing_with_server = جارٍ المزامنة مع الخادم...
+yt_syncing_progress = جارٍ المزامنة — تم تحميل { $count } مقطع حتى الآن
+yt_synced_total = تمت مزامنة { $count } مقطع مفضل
+refresh = تحديث
 most_played_tracks = أكثر مقاطعك تشغيلاً.
 no_more_songs = لا توجد أغانٍ أخرى في قائمة الانتظار
 server_playlist = قائمة تشغيل الخادم
@@ -207,6 +206,11 @@ rescan_library = تحديث المكتبة
 refresh_music_library = تحديث مكتبة الموسيقى
 listenbrainz = ListenBrainz
 lastfm = Last.fm
+librefm = Libre.fm
+enable_tracing = تفعيل تتبع الأداء
+tracing_warning = يضيف حملًا على الأداء ويُكبّر ملف التتبع؛ يسري بعد إعادة التشغيل.
+export_logs = تصدير السجلات
+open_logs_folder = فتح مجلد السجلات
 english = English
 russian = Русский
 toki_pona = toki pona
@@ -383,6 +387,7 @@ artist_photo = صورة الفنان
 album_cover = غلاف الألبوم
 auto_fetch_covers = الجلب التلقائي لأغلفة الألبومات
 prefer_local_lyrics = تفضيل كلمات الأغاني المحلية (.lrc / مضمّنة، دون رجوع إلى الإنترنت)
+enable_musixmatch_lyrics = استخدام Musixmatch كمصدر احتياطي لكلمات الأغاني
 cover_fetch_strategy = استراتيجية جلب الغلاف
 musicbrainz_first = MusicBrainz أولاً
 lastfm_first = Last.fm أولاً
@@ -427,3 +432,27 @@ radio_registries_empty = لم يتم تكوين أي سجلات
 offline_downloads = التنزيلات دون اتصال
 download_quality = جودة التنزيل
 saving = جارٍ الحفظ...
+discover_more_loading = جارٍ تحميل المزيد…
+discover_failed = تعذّر تحميل قسم الاكتشاف: { $error }
+discover_requires_ytmusic = الاكتشاف متاح فقط عندما تكون YouTube Music هي الخادم النشط.
+discover_show_all = عرض الكل
+yt_anon_playlists = سجّل الدخول إلى YouTube Music لعرض قوائم التشغيل في مكتبتك.
+yt_anon_favorites = سجّل الدخول إلى YouTube Music لعرض الأغاني التي أعجبتك.
+
+# Metadata Viewer / Editor
+view_metadata = عرض البيانات الوصفية
+edit_metadata = تحرير البيانات الوصفية
+edit = تحرير
+track_number = رقم المقطع
+disc_number = رقم القرص
+duration = المدة
+sample_rate = معدل العينات
+bitrate = معدل البت
+musicbrainz_release = إصدار MusicBrainz
+musicbrainz_recording = تسجيل MusicBrainz
+musicbrainz_track = مقطع MusicBrainz
+path = المسار
+add_photo = إضافة صورة
+change_photo = تغيير الصورة
+remove_photo = إزالة الصورة
+metadata_edit_warning = الحقول الفارغة تحذف الوسم. يُكتب مباشرة في الملف — لا يمكن التراجع.

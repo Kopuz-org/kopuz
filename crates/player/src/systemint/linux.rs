@@ -247,7 +247,16 @@ pub fn update_now_playing(
             .album(album)
             .length(Time::from_micros((duration * 1e6) as i64));
         if let Some(art) = artwork_path {
-            b = b.art_url(if art.starts_with('/') {
+            // MPRIS art_url accepts any URI. Pass remote URLs (Jellyfin
+            // thumbs, YT Music covers) through unchanged so clients can
+            // fetch them directly; only wrap actual local file paths
+            // with file://.
+            b = b.art_url(if art.starts_with("http://")
+                || art.starts_with("https://")
+                || art.starts_with("file://")
+            {
+                art.to_string()
+            } else if art.starts_with('/') {
                 format!("file://{art}")
             } else {
                 format!(

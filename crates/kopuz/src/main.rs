@@ -20,6 +20,7 @@ use dioxus::desktop::tao::platform::windows::WindowExtWindows;
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use dioxus::desktop::tao::window::Icon;
 use dioxus::prelude::*;
+use tracing::Instrument;
 #[cfg(not(target_arch = "wasm32"))]
 use discord_presence::Presence;
 use kopuz_route::Route;
@@ -31,11 +32,12 @@ use reader::FavoritesStore;
 use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
 use windows::Win32::Foundation::HWND;
 
+mod logging;
+#[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+mod pot_minter;
 mod queue_state;
 mod web_storage;
 #[cfg(target_os = "windows")]
@@ -202,12 +204,45 @@ fn persist_config_snapshot(config_snapshot: config::AppConfig, path: std::path::
             Ok(Err(e)) => tracing::error!("Failed to save config: {}", e),
             Err(e) => tracing::error!("Failed to join config save task: {}", e),
         }
-    });
+    }.instrument(tracing::info_span!("config.persist")));
 }
 
 #[cfg(target_arch = "wasm32")]
 fn persist_config_snapshot(config_snapshot: config::AppConfig, _path: std::path::PathBuf) {
     save_web_config(&config_snapshot);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn run_rotation(mut config: Signal<config::AppConfig>) {
+    let cookies = match config.peek().server.as_ref() {
+        Some(s) if s.service == config::MusicService::YtMusic => s.access_token.clone(),
+        _ => return,
+    };
+    let Some(cookies) = cookies else { return };
+    // Anonymous YT carries an empty token — nothing to keep alive.
+    if cookies.is_empty() {
+        return;
+    }
+    let started = std::time::Instant::now();
+    // Logging policy: noisy in the rare cases (jar rotated, error),
+    // silent on the steady-state OK-no-change tick. The keepalive
+    // fires every 5 min and 99% of ticks are no-change; the original
+    // per-tick OK line drowned stderr.
+    match server::ytmusic::verify_session_keepalive::tick(&cookies).await {
+        Ok(Some(updated)) => {
+            tracing::debug!(
+                secs = started.elapsed().as_secs_f32(),
+                from = cookies.len(),
+                to = updated.len(),
+                "verify_session OK — jar rotated",
+            );
+            if let Some(srv) = config.write().server.as_mut() {
+                srv.access_token = Some(updated);
+            }
+        }
+        Ok(None) => {}
+        Err(e) => tracing::warn!(error = %e, "verify_session failed"),
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -463,20 +498,17 @@ fn main() {
             .unwrap_or_else(|| std::path::PathBuf::from("logs"));
         let _ = std::fs::create_dir_all(&log_dir);
 
-        let file_appender = tracing_appender::rolling::daily(&log_dir, "kopuz.log");
-        let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-        tracing_subscriber::registry()
-            .with(
-                tracing_subscriber::EnvFilter::try_from_default_env()
-                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-            )
-            .with(
-                tracing_subscriber::fmt::layer()
-                    .with_ansi(false)
-                    .with_writer(non_blocking),
-            )
-            .init();
-        tracing::info!("Log file: {}", log_dir.display());
+        // Read the persisted tracing toggle from config.json before the app
+        // (and its config Signal) exists — the subscriber is built once here,
+        // so the setting is applied at startup. Same path the settings UI
+        // writes to. Missing/unreadable config defaults to off.
+        let config_tracing_enabled = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
+            .map(|dirs| config::AppConfig::load(&dirs.config_dir().join("config.json")).tracing_enabled)
+            .unwrap_or(false);
+
+        // Guards live in a global inside `logging`; flushed by
+        // logging::shutdown() after launch returns or on Ctrl+C.
+        logging::init(&log_dir, config_tracing_enabled);
 
         migrate_legacy_locations();
 
@@ -534,6 +566,12 @@ fn main() {
             .with_background_color((0, 0, 0, 255))
             .with_data_directory(webview_data_dir)
             .with_window(window)
+            // Anon PoToken minter: stand up the hidden music.youtube.com webview
+            // once we have the event-loop target (issue #349).
+            .with_custom_event_handler(|_event, _target| {
+                crate::pot_minter::install_if_wanted(_target);
+                crate::pot_minter::pump();
+            })
             .with_asynchronous_custom_protocol(
                 "artwork",
                 |_id, request, responder: RequestAsyncResponder| {
@@ -716,13 +754,16 @@ fn main() {
                                 .body(std::borrow::Cow::from(bytes))
                                 .unwrap(),
                         );
-                    });
+                    }.instrument(tracing::info_span!("artwork.serve")));
                 },
             );
 
         dioxus::LaunchBuilder::desktop()
             .with_cfg(config)
             .launch(App);
+        // Window closed → flush the log file tail + finalize the
+        // chrome trace's closing bracket.
+        logging::shutdown();
     }
 
     #[cfg(target_os = "android")]
@@ -809,9 +850,79 @@ fn main() {
 
 #[component]
 fn App() -> Element {
+    // tao's event loop calls process::exit() on window close, so the
+    // logging::shutdown() after .launch() never runs and the chrome trace
+    // would be left truncated (cut mid-event, unloadable). Flush on the
+    // loop's final event so a normally-closed window still yields a valid
+    // trace. (Ctrl+C is covered separately by the SIGINT handler.)
+    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+    dioxus::desktop::use_wry_event_handler(|event, _| {
+        use dioxus::desktop::tao::event::{Event, WindowEvent};
+        // Flush the moment the window starts closing (CloseRequested),
+        // well before tao calls process::exit; LoopDestroyed is the final
+        // backstop. shutdown() is idempotent so firing on both is fine.
+        if matches!(
+            event,
+            Event::LoopDestroyed
+                | Event::WindowEvent {
+                    event: WindowEvent::CloseRequested,
+                    ..
+                }
+        ) {
+            crate::logging::shutdown();
+        }
+    });
+
+    // Native YouTube sig/n deciphering runs in this WebView's own
+    // JavaScriptCore (issue #349): register a JS engine that forwards each
+    // solver program to this task, which executes it via `document::eval` and
+    // returns the printed result. No external JS runtime, no yt-dlp, no
+    // botguard — the decipher path uses the engine already loaded for the UI.
+    use_hook(|| {
+        let (engine, mut rx) = server::ytmusic::decipher::webview_channel();
+        if server::ytmusic::decipher::set_engine(engine).is_err() {
+            tracing::warn!("yt-decipher engine already registered — webview solver not active");
+        }
+        spawn(async move {
+            while let Some(req) = rx.recv().await {
+                // Always send exactly one message back: the printed result, or
+                // the JS error prefixed with a NUL marker. Without the
+                // try/catch a throwing solver would never call `dioxus.send`
+                // and `recv()` below would hang forever, stalling playback.
+                let wrapped = format!(
+                    "globalThis.print=function(s){{dioxus.send(s);}};\
+                     try{{{}}}catch(e){{dioxus.send('\\u0000ERR'+(e&&e.stack?e.stack:e));}}",
+                    req.program
+                );
+                // Bound the wait — a non-returning solver script must not stall
+                // the decipher queue forever.
+                let mut eval = dioxus::document::eval(&wrapped);
+                let result = match tokio::time::timeout(
+                    std::time::Duration::from_secs(20),
+                    eval.recv::<String>(),
+                )
+                .await
+                {
+                    Ok(Ok(s)) => match s.strip_prefix('\u{0}') {
+                        Some(err) => Err(format!("webview JS: {}", err.trim_start_matches("ERR"))),
+                        None => Ok(s),
+                    },
+                    Ok(Err(e)) => Err(format!("webview eval recv: {e}")),
+                    Err(_) => Err("webview decipher timed out".to_string()),
+                };
+                let _ = req.reply.send(result);
+            }
+        });
+    });
+
     let mut library = use_signal(reader::Library::default);
     let mut current_route = use_signal(|| Route::Home);
     let mut scroll_positions: Signal<std::collections::HashMap<Route, f64>> =
+        use_signal(std::collections::HashMap::new);
+    // Album/artist list and detail share one Route, so detail scroll is kept in a
+    // separate map keyed by `album:<id>` / `artist:<name>`. This stops a detail's
+    // scroll from clobbering the list scroll the user expects back on return.
+    let mut detail_scroll_positions: Signal<std::collections::HashMap<String, f64>> =
         use_signal(std::collections::HashMap::new);
     let cache_dir = use_memo(move || {
         // Android: external/ProjectDirs paths aren't writable; use the app-internal files
@@ -866,6 +977,23 @@ fn App() -> Element {
     let lib_path = use_memo(move || config_dir().join("library.json"));
     let config_path = use_memo(move || config_dir().join("config.json"));
     let mut config = use_signal(config::AppConfig::default);
+    // Start the PoToken minter whenever a YouTube Music server is active — not
+    // just anon. A *signed-in but non-Premium* account streams the same 251 as
+    // anon and also needs a content pot for deep ranges; only true Premium
+    // subscribers (itag 774) are pot-exempt, and we can't know that until a
+    // track resolves. So run the minter for any YtMusic session; Premium just
+    // leaves it idle. Reactive: fires when config loads or the server changes.
+    #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+    use_effect(move || {
+        let yt_active = config
+            .read()
+            .server
+            .as_ref()
+            .is_some_and(|s| s.service == config::MusicService::YtMusic);
+        if yt_active {
+            crate::pot_minter::request();
+        }
+    });
     #[allow(unused_variables)]
     let playlist_path = use_memo(move || config_dir().join("playlists.json"));
     let mut playlist_store = use_signal(reader::PlaylistStore::default);
@@ -879,6 +1007,8 @@ fn App() -> Element {
     #[cfg(not(target_arch = "wasm32"))]
     let _ = std::fs::create_dir_all(cover_cache());
     let download_queue = use_signal(DownloadQueue::default);
+    let download_progress = use_signal(::server::DownloadProgress::default);
+    pages::server::download_manager::register_progress_signal(download_progress);
     let mut trigger_rescan = use_signal(|| 0);
     let mut last_scan_key = use_signal(|| None::<String>);
     let mut scan_current_file = use_signal(|| Option::<String>::None);
@@ -957,7 +1087,7 @@ fn App() -> Element {
                 if let Some(colors) = utils::color::get_palette_from_url(&url).await {
                     palette.set(Some(colors));
                 }
-            });
+            }.instrument(tracing::info_span!("ui.palette_fetch")));
         } else {
             palette.set(None);
         }
@@ -1015,16 +1145,23 @@ fn App() -> Element {
             if import_count > 0 {
                 tracing::info!("Imported {} external radio registries", import_count);
             }
-        });
+        }.instrument(tracing::info_span!("radio.registry_load")));
     });
 
     let mut selected_album_id = use_signal(String::new);
     let mut selected_playlist_id = use_signal(|| None::<String>);
+    let mut discover_selected_playlist_id = use_signal(|| None::<String>);
+    let mut discover_selected_playlist_title = use_signal(|| None::<String>);
+    // YT channel id corresponding to selected_artist_name when known
+    // (Discover tile / mix entry carries it). Left None when the
+    // click only had a name — the YT artist page resolves it via
+    // search at render time.
+    let mut selected_artist_channel_id = use_signal(|| None::<String>);
     let mut selected_artist_name = use_signal(String::new);
     let fetched_artist_images: Signal<std::collections::HashMap<String, String>> =
         use_signal(std::collections::HashMap::new);
     let is_fetching_artist_images = use_signal(|| false);
-    let search_query = use_signal(String::new);
+    let mut search_query = use_signal(String::new);
     let mut last_server_playlist_key = use_signal(|| None::<String>);
     let mut server_playlist_key_initialized = use_signal(|| false);
     let mut queue = use_signal(Vec::<reader::Track>::new);
@@ -1060,15 +1197,16 @@ fn App() -> Element {
             return;
         }
 
+        // Server identity excludes access_token: tokens rotate without making it a
+        // different account, but their rotation would otherwise wipe synced playlists.
         let current_server_key = {
             let conf = config.read();
             conf.server.as_ref().map(|server| {
                 format!(
-                    "{:?}|{}|{}|{}",
+                    "{:?}|{}|{}",
                     server.service,
                     server.url,
                     server.user_id.as_deref().unwrap_or_default(),
-                    server.access_token.as_deref().unwrap_or_default()
                 )
             })
         };
@@ -1083,6 +1221,12 @@ fn App() -> Element {
             last_server_playlist_key.set(current_server_key);
             selected_playlist_id.set(None);
             playlist_store.write().jellyfin_playlists.clear();
+            {
+                let mut lib = library.write();
+                lib.jellyfin_tracks.clear();
+                lib.jellyfin_albums.clear();
+            }
+            ctrl.reset_for_backend_switch();
         }
     });
 
@@ -1109,7 +1253,7 @@ fn App() -> Element {
             if let Some(update) = fetch_available_update().await {
                 update_banner.set(Some(update));
             }
-        });
+        }.instrument(tracing::info_span!("app.update_check")));
     });
 
     use_effect(move || {
@@ -1130,6 +1274,60 @@ fn App() -> Element {
         let mut config_snapshot = config.peek().clone();
         config_snapshot.volume = committed_volume;
         persist_config_snapshot(config_snapshot, config_path());
+    });
+
+    // Keepalive is rearm-on-account-change, not rearm-on-every-config-
+    // write. Re-running the effect on every config save would spawn
+    // a fresh loop that immediately fires run_rotation, spamming
+    // /verify_session a dozen times a minute on any settings churn.
+    //
+    // The signal stores the YT identity (a stable hash of the SAPISID
+    // cookie) we currently have a loop running against. The effect
+    // re-runs cheap, but only spawns a new loop when the identity
+    // changes (sign-in, account switch). Sign-out clears the
+    // identity and the running loop exits on its next tick.
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut yt_keepalive_identity = use_signal(|| None::<String>);
+    #[cfg(not(target_arch = "wasm32"))]
+    use_effect(move || {
+        if !*initial_load_done.read() {
+            return;
+        }
+        let yt_cookies: Option<String> = config.read().server.as_ref().and_then(|s| {
+            (s.service == config::MusicService::YtMusic)
+                .then(|| s.access_token.clone())
+                .flatten()
+                .filter(|t| !t.is_empty())
+        });
+        let live_identity = yt_cookies
+            .as_deref()
+            .and_then(server::ytmusic::derive_user_id);
+        if live_identity == *yt_keepalive_identity.peek() {
+            return;
+        }
+        // Identity changed (fresh sign-in, account switch, or
+        // sign-out): the previously-running loop (if any) will read
+        // the new identity on its next tick and exit. Update the
+        // tracked identity; spawn a fresh loop only if we still have
+        // valid auth.
+        yt_keepalive_identity.set(live_identity.clone());
+        let Some(my_identity) = live_identity else {
+            return;
+        };
+        spawn(async move {
+            run_rotation(config).await;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+                if yt_keepalive_identity
+                    .peek()
+                    .as_deref()
+                    != Some(my_identity.as_str())
+                {
+                    return;
+                }
+                run_rotation(config).await;
+            }
+        });
     });
 
     #[cfg(all(
@@ -1164,7 +1362,7 @@ fn App() -> Element {
                 if let Ok(Err(e)) = result {
                     tracing::error!("Failed to save playlists: {}", e);
                 }
-            });
+            }.instrument(tracing::info_span!("playlists.persist")));
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -1186,7 +1384,7 @@ fn App() -> Element {
                 if let Ok(Err(e)) = result {
                     tracing::error!("Failed to save library: {}", e);
                 }
-            });
+            }.instrument(tracing::info_span!("library.persist")));
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -1208,7 +1406,7 @@ fn App() -> Element {
                 if let Ok(Err(e)) = result {
                     tracing::error!("Failed to save favorites: {}", e);
                 }
-            });
+            }.instrument(tracing::info_span!("favorites.persist")));
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -1423,7 +1621,7 @@ fn App() -> Element {
                 }
 
                 initial_load_done.set(true);
-            });
+            }.instrument(tracing::info_span!("startup.load")));
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -1646,7 +1844,7 @@ fn App() -> Element {
                         if let Some(merged_lib) = merged_lib {
                             let _ = merged_lib.save(&lib_path());
                         }
-                    });
+                    }.instrument(tracing::info_span!("library.fetch_covers")));
                 } else {
                     // No cover fetching — drop the callback so the progress bar closes.
                     drop(progress_cb);
@@ -1658,12 +1856,28 @@ fn App() -> Element {
                 library.set(current_lib.clone());
                 let _ = current_lib.save(&lib_path());
             }
-        });
+        }.instrument(tracing::info_span!("library.rescan")));
     });
 
     use_effect(move || {
         let route = *current_route.read();
-        let pos = scroll_positions.peek().get(&route).copied().unwrap_or(0.0);
+        // Read detail selections so this re-runs on list<->detail toggle, not just
+        // on route change (album/artist list and detail are the same Route).
+        let album_sel = selected_album_id.read().clone();
+        let artist_sel = selected_artist_name.read().clone();
+        let pos = match route {
+            Route::Album if !album_sel.is_empty() => detail_scroll_positions
+                .peek()
+                .get(&format!("album:{album_sel}"))
+                .copied()
+                .unwrap_or(0.0),
+            Route::Artist if !artist_sel.is_empty() => detail_scroll_positions
+                .peek()
+                .get(&format!("artist:{artist_sel}"))
+                .copied()
+                .unwrap_or(0.0),
+            _ => scroll_positions.peek().get(&route).copied().unwrap_or(0.0),
+        };
         let _ = dioxus::document::eval(&format!(
             "let el = document.getElementById('main-scroll-area'); if (el) el.scrollTop = {pos};"
         ));
@@ -1671,13 +1885,23 @@ fn App() -> Element {
 
     provide_context(ctrl);
     provide_context(config);
+    let discover_now_playing = use_signal(|| None::<String>);
+    provide_context(pages::server::discover::DiscoverNowPlaying(
+        discover_now_playing,
+    ));
+    let discover_prefetch_cache = use_signal(std::collections::HashMap::new);
+    provide_context(pages::server::discover::DiscoverPrefetchCache(
+        discover_prefetch_cache,
+    ));
     provide_context(download_queue);
+    provide_context(download_progress);
     provide_context(scroll_positions);
     provide_context(fetched_artist_images);
     provide_context(is_fetching_artist_images);
     provide_context(components::NavigationController {
         current_route,
         selected_artist_name,
+        selected_artist_channel_id,
         selected_album_id,
     });
 
@@ -1745,16 +1969,18 @@ fn App() -> Element {
         document::Link { rel: "stylesheet", href: TAILWIND_CSS }
         document::Link { rel: "stylesheet", href: REDUCED_ANIMATIONS_CSS }
         WindowsToolbarIconAssets {}
-        document::Script {
-            "(function(){{
-                ['https://fonts.bunny.net/css?family=jetbrains-mono:400,500,700,800&display=swap',
-                 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css']
-                .forEach(function(href){{
-                    var l=document.createElement('link');
-                    l.rel='stylesheet';l.href=href;
-                    document.head.appendChild(l);
-                }});
-            }})();"
+        // Font stylesheets injected declaratively rather than via a
+        // document::Script: a Script is processed once but App re-renders
+        // on every signal change, and dioxus_document warns "Changing the
+        // props of Script {} is not supported" each time. Links are
+        // re-render-safe and do the same job (and load a touch earlier).
+        document::Link {
+            rel: "stylesheet",
+            href: "https://fonts.bunny.net/css?family=jetbrains-mono:400,500,700,800&display=swap",
+        }
+        document::Link {
+            rel: "stylesheet",
+            href: "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css",
         }
 
         div {
@@ -1797,6 +2023,38 @@ fn App() -> Element {
                                 } else {
                                     "{file}"
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Only show playback errors when the active server is YouTube
+            // Music — other backends (Jellyfin/Subsonic/Custom) surface
+            // their own errors via the settings popup, and a lingering YT
+            // error from a previous session shouldn't haunt a switched-to
+            // server.
+            if config
+                .read()
+                .server
+                .as_ref()
+                .map(|s| s.service == config::MusicService::YtMusic)
+                .unwrap_or(false)
+            {
+                if let Some(msg) = ctrl.playback_error.read().clone() {
+                    div {
+                        class: "flex-shrink-0",
+                        div {
+                            class: "flex items-center justify-between gap-3 px-4 py-2 bg-rose-500/15 border-b border-rose-500/20 text-rose-200 text-sm",
+                            div {
+                                class: "flex items-center gap-2 whitespace-pre-line",
+                                i { class: "fa-solid fa-triangle-exclamation text-xs" }
+                                span { "{msg}" }
+                            }
+                            button {
+                                class: "opacity-50 hover:opacity-100 transition-opacity p-1",
+                                onclick: move |_| ctrl.playback_error.set(None),
+                                i { class: "fa-solid fa-xmark text-xs" }
                             }
                         }
                     }
@@ -1918,6 +2176,7 @@ fn App() -> Element {
                         }
                         if route == Route::Artist {
                             selected_artist_name.set(String::new());
+                            selected_artist_channel_id.set(None);
                         }
                         current_route.set(route);
                     }
@@ -1927,7 +2186,24 @@ fn App() -> Element {
                     class: if cfg!(target_os = "android") { "flex-1 min-h-0 flex flex-col overflow-hidden relative" } else { "flex-1 overflow-y-auto" },
                     onscroll: move |evt| {
                         let pos = evt.scroll_top();
-                        scroll_positions.write().insert(*current_route.peek(), pos);
+                        let route = *current_route.peek();
+                        let album_sel = selected_album_id.peek().clone();
+                        let artist_sel = selected_artist_name.peek().clone();
+                        match route {
+                            Route::Album if !album_sel.is_empty() => {
+                                detail_scroll_positions
+                                    .write()
+                                    .insert(format!("album:{album_sel}"), pos);
+                            }
+                            Route::Artist if !artist_sel.is_empty() => {
+                                detail_scroll_positions
+                                    .write()
+                                    .insert(format!("artist:{artist_sel}"), pos);
+                            }
+                            _ => {
+                                scroll_positions.write().insert(route, pos);
+                            }
+                        }
                     },
 
                     if cfg!(target_os = "android") {
@@ -1957,7 +2233,10 @@ fn App() -> Element {
                                             onclick: move |_| {
                                                 match *current_route.peek() {
                                                     Route::Album => selected_album_id.set(String::new()),
-                                                    Route::Artist => selected_artist_name.set(String::new()),
+                                                    Route::Artist => {
+                                                        selected_artist_name.set(String::new());
+                                                        selected_artist_channel_id.set(None);
+                                                    }
                                                     Route::Playlists => selected_playlist_id.set(None),
                                                     _ => {}
                                                 }
@@ -2025,8 +2304,45 @@ fn App() -> Element {
                                 },
                                 on_search_artist: move |artist: String| {
                                     selected_artist_name.set(artist);
+                                    selected_artist_channel_id.set(None);
                                     current_route.set(Route::Artist);
                                 }
+                            }
+                        },
+                        Route::Discover => rsx! {
+                            pages::server::discover::DiscoverPage {
+                                library: library,
+                                on_select_album: move |id: String| {
+                                    selected_album_id.set(id);
+                                    current_route.set(Route::Album);
+                                },
+                                on_select_playlist: move |(id, title): (String, String)| {
+                                    discover_selected_playlist_id.set(Some(id));
+                                    discover_selected_playlist_title.set(Some(title));
+                                    current_route.set(Route::DiscoverPlaylist);
+                                },
+                                on_open_artist: move |(cid, name): (String, String)| {
+                                    selected_artist_channel_id.set(Some(cid));
+                                    selected_artist_name.set(name);
+                                    current_route.set(Route::Artist);
+                                },
+                                on_search_artist: move |name: String| {
+                                    search_query.set(name);
+                                    current_route.set(Route::Search);
+                                },
+                            }
+                        },
+                        Route::DiscoverPlaylist => rsx! {
+                            pages::server::discover::DiscoverPlaylistDetail {
+                                selected_playlist_id: discover_selected_playlist_id,
+                                selected_playlist_title: discover_selected_playlist_title,
+                                on_back: move |_| {
+                                    // Mirror DiscoverArtist: clear id so
+                                    // re-opening the same playlist refetches.
+                                    discover_selected_playlist_id.set(None);
+                                    discover_selected_playlist_title.set(None);
+                                    current_route.set(Route::Discover);
+                                },
                             }
                         },
                         Route::Search => rsx! {
@@ -2079,26 +2395,77 @@ fn App() -> Element {
                                 current_queue_index: current_queue_index,
                             }
                         },
-                        Route::Artist => rsx! {
-                            pages::artist::Artist {
-                                library: library,
-                                config: config,
-                                artist_name: selected_artist_name,
-                                playlist_store: playlist_store,
-                                player: player,
-                                on_navigate: move |album_id| {
-                                    selected_album_id.set(album_id);
-                                    current_route.set(Route::Album);
-                                },
-                                is_playing: is_playing,
-                                current_playing: current_playing,
-                                current_song_cover_url: current_song_cover_url,
-                                current_song_title: current_song_title,
-                                current_song_artist: current_song_artist,
-                                current_song_duration: current_song_duration,
-                                current_song_progress: current_song_progress,
-                                queue: queue,
-                                current_queue_index: current_queue_index,
+                        Route::Artist => {
+                            // YT Music gets the rich YT-backed profile (banner,
+                            // top songs, albums, related) ONLY when an artist
+                            // is actually selected. The Artists sidebar tab /
+                            // back-to-list navigation lands with both signals
+                            // cleared — fall through to the library-driven
+                            // grid in that case (populated on YT from followed
+                            // artists + liked-song artists by the library
+                            // sync). Local / Jellyfin / Subsonic keep the
+                            // library-driven page in all cases.
+                            let is_ytmusic = config
+                                .read()
+                                .server
+                                .as_ref()
+                                .map(|s| s.service == config::MusicService::YtMusic)
+                                .unwrap_or(false);
+                            let has_selection = !selected_artist_name.read().is_empty()
+                                || selected_artist_channel_id.read().is_some();
+                            if is_ytmusic && has_selection {
+                                rsx! {
+                                    pages::server::discover::DiscoverArtistPage {
+                                        selected_artist_id: selected_artist_channel_id,
+                                        selected_artist_name: selected_artist_name,
+                                        on_back: move |_| {
+                                            // Empty selection on Route::Artist renders the grid.
+                                            selected_artist_name.set(String::new());
+                                            selected_artist_channel_id.set(None);
+                                            current_route.set(Route::Artist);
+                                        },
+                                        on_select_album: move |id: String| {
+                                            selected_album_id.set(id);
+                                            current_route.set(Route::Album);
+                                        },
+                                        on_select_playlist: move |(id, title): (String, String)| {
+                                            discover_selected_playlist_id.set(Some(id));
+                                            discover_selected_playlist_title.set(Some(title));
+                                            current_route.set(Route::DiscoverPlaylist);
+                                        },
+                                        on_open_artist: move |(cid, name): (String, String)| {
+                                            selected_artist_channel_id.set(Some(cid));
+                                            selected_artist_name.set(name);
+                                        },
+                                        on_search_artist: move |name: String| {
+                                            search_query.set(name);
+                                            current_route.set(Route::Search);
+                                        },
+                                    }
+                                }
+                            } else {
+                                rsx! {
+                                    pages::artist::Artist {
+                                        library: library,
+                                        config: config,
+                                        artist_name: selected_artist_name,
+                                        playlist_store: playlist_store,
+                                        player: player,
+                                        on_navigate: move |album_id| {
+                                            selected_album_id.set(album_id);
+                                            current_route.set(Route::Album);
+                                        },
+                                        is_playing: is_playing,
+                                        current_playing: current_playing,
+                                        current_song_cover_url: current_song_cover_url,
+                                        current_song_title: current_song_title,
+                                        current_song_artist: current_song_artist,
+                                        current_song_duration: current_song_duration,
+                                        current_song_progress: current_song_progress,
+                                        queue: queue,
+                                        current_queue_index: current_queue_index,
+                                    }
+                                }
                             }
                         },
                         Route::Favorites => rsx! {
@@ -2172,7 +2539,6 @@ fn App() -> Element {
                 current_song_album: current_song_album,
                 current_queue_index: current_queue_index,
                 current_song_title: current_song_title,
-                current_song_khz: current_song_khz,
                 current_song_bitrate: current_song_bitrate,
                 current_song_artist: current_song_artist,
                 current_song_cover_url: current_song_cover_url,

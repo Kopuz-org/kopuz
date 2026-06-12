@@ -38,6 +38,14 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+     <release version="0.6.7" date="2026-06-07">
+      <description>
+        <p>
+          Youtube music is now first class supported and bug fixes.
+        </p>
+      </description>
+    </release>
+    
     <release version="0.6.5" date="2026-05-23">
       <description>
         <p>

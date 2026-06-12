@@ -27,10 +27,10 @@ add = Agregar
 add_folder = Agregar carpeta
 no_music_folders = No hay carpetas de música configuradas
 add_server = Agregar servidor
-# TODO: NEED LOCALIZATION
-connect_to_lastfm = Connect to Last.fm 
-lastfm_connected = Last.fm Connected
-# TODO: NEED LOCALIZATION
+connect_to_lastfm = Conectar con Last.fm
+connect_to_librefm = Conectar con Libre.fm
+lastfm_connected = Conectado a Last.fm
+librefm_connected = Conectado a Libre.fm
 server_details = Detalles del servidor
 server_name = Nombre del servidor
 server_url = URL del servidor
@@ -81,10 +81,8 @@ create = Crear
 save = Guardar
 enabled = Habilitado
 disabled = Deshabilitado
-# TODO: Translate lines below
-play = Play
-shuffle = Shuffle
-# ------
+play = Reproducir
+shuffle = Aleatorio
 
 # Navigation & Headers
 tracks = Pistas
@@ -141,10 +139,8 @@ heart_track_to_add_server = Dale corazón a una pista mientras se reproduce para
 search_placeholder = Buscar artistas, álbumes o pistas...
 no_results_found = No se encontraron resultados para "{ $query }"
 listenbrainz_token_placeholder = Introduce tu token de ListenBrainz
-# TODO: NEED LOCALIZATION
-lastfm_api_key_placeholder = Enter your Last.fm API Key
-lastfm_api_secret_placeholder = Enter your Last.fm API Secret
-# TODO: NEED LOCALIZATION
+lastfm_api_key_placeholder = Ingresa tu clave API de Last.fm
+lastfm_api_secret_placeholder = Ingresa tu secreto API de Last.fm
 
 # Empty States
 album_not_found = Álbum no encontrado
@@ -190,6 +186,9 @@ most_played_local_tracks = Tus pistas locales más reproducidas.
 no_tracks_in_library = No hay pistas encontradas en tu biblioteca.
 no_songs_here = No hay canciones aquí.
 syncing_with_server = Sincronizando con el servidor...
+yt_syncing_progress = Sincronizando — { $count } pistas cargadas
+yt_synced_total = { $count } pistas favoritas sincronizadas
+refresh = Actualizar
 most_played_tracks = Tus pistas más reproducidas.
 no_more_songs = No hay más canciones en cola
 server_playlist = Playlist del servidor
@@ -208,6 +207,11 @@ rescan_library = Re-escanear biblioteca
 refresh_music_library = Refrescar biblioteca de música
 listenbrainz = ListenBrainz
 lastfm = Last.fm
+librefm = Libre.fm
+enable_tracing = Activar rastreo de rendimiento
+tracing_warning = Añade sobrecarga y agranda el archivo de rastreo; surte efecto tras reiniciar.
+export_logs = Exportar logs
+open_logs_folder = Abrir carpeta de logs
 album_art_gradient = Degradado de la carátula
 default_theme = Tema predeterminado
 gruvbox_material = Gruvbox Material
@@ -378,6 +382,7 @@ artist_photo = Foto del artista
 album_cover = Portada del álbum
 auto_fetch_covers = Obtener portadas automáticamente
 prefer_local_lyrics = Preferir letras locales (.lrc / incrustadas, sin recurso en línea)
+enable_musixmatch_lyrics = Usar Musixmatch como fuente de letras de respaldo
 cover_fetch_strategy = Estrategia de obtención de portadas
 musicbrainz_first = MusicBrainz primero
 lastfm_first = Last.fm primero
@@ -422,3 +427,27 @@ radio_registries_empty = No hay registros configurados
 offline_downloads = Descargas sin conexión
 download_quality = Calidad de descarga
 saving = Guardando...
+discover_more_loading = Cargando más…
+discover_failed = No se pudo cargar Descubrir: { $error }
+discover_requires_ytmusic = Descubrir solo está disponible cuando YouTube Music es el servidor activo.
+discover_show_all = Ver todo
+yt_anon_playlists = Inicia sesión en YouTube Music para ver tus listas de reproducción.
+yt_anon_favorites = Inicia sesión en YouTube Music para ver tus canciones marcadas.
+
+# Metadata Viewer / Editor
+view_metadata = Ver metadatos
+edit_metadata = Editar metadatos
+edit = Editar
+track_number = N.º de pista
+disc_number = N.º de disco
+duration = Duración
+sample_rate = Frecuencia de muestreo
+bitrate = Tasa de bits
+musicbrainz_release = Lanzamiento de MusicBrainz
+musicbrainz_recording = Grabación de MusicBrainz
+musicbrainz_track = Pista de MusicBrainz
+path = Ruta
+add_photo = Añadir foto
+change_photo = Cambiar foto
+remove_photo = Quitar foto
+metadata_edit_warning = Los campos vacíos eliminan esa etiqueta. Se escribe directamente en el archivo, sin deshacer.

@@ -27,10 +27,10 @@ add = Ekle
 add_folder = Klasör Ekle
 no_music_folders = Müzik klasörü yapılandırılmadı
 add_server = Sunucu Ekle
-# TODO: NEED LOCALIZATION
-connect_to_lastfm = Connect to Last.fm
-lastfm_connected = Last.fm Connected
-# TODO: NEED LOCALIZATION
+connect_to_lastfm = Last.fm'ye bağlan
+lastfm_connected = Last.fm'e bağlandı
+connect_to_librefm = Libre.fm'ye bağlan
+librefm_connected = Libre.fm'e bağlandı
 server_details = Sunucu Detayları
 server_name = Sunucu Adı
 server_url = Sunucu URL'si
@@ -81,10 +81,8 @@ create = Oluştur
 save = Kaydet
 enabled = ETKİN
 disabled = DEVRE DIŞI
-# TODO: Translate lines below
-play = Play
-shuffle = Shuffle
-# ------
+play = Oynat
+shuffle = Karıştır
 
 # Navigation & Headers
 tracks = Parçalar
@@ -140,10 +138,8 @@ heart_track_to_add_server = Eklemek ve sunucunuza senkronize etmek için çalark
 search_placeholder = Sanatçı, albüm veya parça ara...
 no_results_found = "{ $query }" için sonuç bulunamadı
 listenbrainz_token_placeholder = ListenBrainz token'ınızı girin
-# TODO: NEED LOCALIZATION
-lastfm_api_key_placeholder = Enter your Last.fm API Key
-lastfm_api_secret_placeholder = Enter your Last.fm API Secret
-# TODO: NEED LOCALIZATION
+lastfm_api_key_placeholder = Last.fm API anahtarınızı girin
+lastfm_api_secret_placeholder = Last.fm API gizli anahtarınızı girin
 
 # Empty States
 album_not_found = Albüm bulunamadı
@@ -189,6 +185,9 @@ most_played_local_tracks = En çok dinlenen yerel parçalarınız.
 no_tracks_in_library = Kütüphanenizde parça bulunamadı.
 no_songs_here = Burada şarkı yok.
 syncing_with_server = Sunucuyla senkronize ediliyor...
+yt_syncing_progress = Senkronize ediliyor — şu ana kadar { $count } parça yüklendi
+yt_synced_total = { $count } beğenilen parça senkronize edildi
+refresh = Yenile
 most_played_tracks = En çok dinlenen parçalarınız.
 no_more_songs = Kuyrukta daha fazla şarkı yok
 server_playlist = Sunucu Çalma Listesi
@@ -207,6 +206,11 @@ rescan_library = Kütüphaneyi Tara
 refresh_music_library = Müzik Kütüphaneni Yenile
 listenbrainz = ListenBrainz
 lastfm = Last.fm
+enable_tracing = Performans izlemeyi etkinleştir
+tracing_warning = Ek yük getirir ve izleme dosyasını büyütür; yeniden başlatınca etkinleşir.
+export_logs = Günlükleri dışa aktar
+open_logs_folder = Günlük klasörünü aç
+librefm = Libre.fm
 album_art_gradient = Albüm kapağı gradyanı
 default_theme = Varsayılan
 gruvbox_material = Gruvbox Material
@@ -377,6 +381,7 @@ artist_photo = Sanatçı fotoğrafı
 album_cover = Albüm kapağı
 auto_fetch_covers = Albüm kapaklarını otomatik getir
 prefer_local_lyrics = Yerel şarkı sözlerini tercih et (.lrc / gömülü, çevrimiçi yedek yok)
+enable_musixmatch_lyrics = Musixmatch'i yedek şarkı sözü kaynağı olarak kullan
 cover_fetch_strategy = Kapak getirme stratejisi
 musicbrainz_first = Önce MusicBrainz
 lastfm_first = Önce Last.fm
@@ -421,3 +426,27 @@ radio_registries_empty = Yapılandırılmış kayıt defteri yok
 offline_downloads = Çevrimdışı İndirmeler
 download_quality = İndirme Kalitesi
 saving = Kaydediliyor...
+discover_more_loading = Daha fazlası yükleniyor…
+discover_failed = Keşfet yüklenemedi: { $error }
+discover_requires_ytmusic = Keşfet yalnızca YouTube Music aktif sunucu olduğunda kullanılabilir.
+discover_show_all = Tümünü gör
+yt_anon_playlists = Kitaplık çalma listelerini görmek için YouTube Music'e giriş yap.
+yt_anon_favorites = Beğendiğin şarkıları görmek için YouTube Music'e giriş yap.
+
+# Metadata Viewer / Editor
+view_metadata = Üst verileri görüntüle
+edit_metadata = Üst verileri düzenle
+edit = Düzenle
+track_number = Parça No
+disc_number = Disk No
+duration = Süre
+sample_rate = Örnekleme hızı
+bitrate = Bit hızı
+musicbrainz_release = MusicBrainz yayını
+musicbrainz_recording = MusicBrainz kaydı
+musicbrainz_track = MusicBrainz parçası
+path = Yol
+add_photo = Fotoğraf ekle
+change_photo = Fotoğrafı değiştir
+remove_photo = Fotoğrafı kaldır
+metadata_edit_warning = Boş alanlar o etiketi siler. Doğrudan dosyaya yazılır — geri alınamaz.
