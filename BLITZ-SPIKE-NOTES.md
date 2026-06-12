@@ -222,3 +222,15 @@ Issues: blitz#455 (group-hover invalidation), #456 (range input), #457
 (::before re-resolution), #458 (paint order), #459 (ICU ja/cjdict),
 vello#1707 (vello_hybrid 0-alpha panic); impact comment on blitz#252
 (hover media). Forks: UMCEKO/blitz, UMCEKO/taffy.
+
+19. **Hero overlay invisible → paint-order fixed in engine** (blitz a8783c7,
+    PR #460, closes #458): position_to_order put relative at the in-flow
+    level below abspos; per CSS 2.1 Appendix E all positioned z-auto
+    descendants share one level in tree order. Bonus from the WPT gate:
+    flex/grid items ignored position in paint order AND z-index on static
+    flex/grid items was never hoisted — fixing those turned a "regression"
+    (a reftest whose REFERENCE page depended on the first fix — it had been
+    passing because test+ref rendered identically wrong) into 9 new WPT
+    passes, 0 regressions. New tooling: pixel-assertion paint tests
+    (packages/blitz-html/tests/paint_order.rs, vello_cpu render_to_buffer).
+    Hero renders with stock markup — no z-10 anywhere.
