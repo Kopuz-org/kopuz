@@ -1014,6 +1014,9 @@ fn App() -> Element {
     let download_progress = use_signal(::server::DownloadProgress::default);
     pages::server::download_manager::register_progress_signal(download_progress);
     let mut trigger_rescan = use_signal(|| 0);
+    // Applies detached yt-dlp completions (history + rescan) in this scope —
+    // the job drivers outlive the downloads page and can't write these.
+    pages::ytdlp::use_ytdlp_completion_sink(config, trigger_rescan);
     let mut last_scan_key = use_signal(|| None::<String>);
     let mut scan_current_file = use_signal(|| Option::<String>::None);
     let current_playing = use_signal(|| 0);
@@ -2567,7 +2570,7 @@ fn App() -> Element {
                             }
                         },
                         #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-                        Route::Ytdlp => rsx! { pages::ytdlp::YtdlpPage { config, trigger_rescan } },
+                        Route::Ytdlp => rsx! { pages::ytdlp::YtdlpPage { config } },
                         #[cfg(target_arch = "wasm32")]
                         Route::Ytdlp => rsx! { pages::settings::Settings { config } },
                         Route::Settings => rsx! { pages::settings::Settings { config } },

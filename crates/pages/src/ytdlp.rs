@@ -9,6 +9,36 @@ use std::path::PathBuf;
 /// progress) when the user navigates away from the page (#327).
 static JOBS: GlobalSignal<Vec<DownloadJob>> = Signal::global(Vec::new);
 
+/// Completions waiting to be applied to config history / the rescan trigger.
+/// The detached job driver can't write those directly — they're owned by the
+/// App component's scope, and a ROOT-scoped task using them trips Dioxus's
+/// cross-scope lint — so it pushes here and [`use_ytdlp_completion_sink`]
+/// (installed once in App) drains in the owning scope.
+static FINISHED: GlobalSignal<Vec<(config::YtdlpHistoryEntry, bool)>> = Signal::global(Vec::new);
+
+/// Install in App: applies finished yt-dlp jobs to the config history and
+/// bumps the rescan trigger for successful ones.
+pub fn use_ytdlp_completion_sink(mut config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) {
+    use_effect(move || {
+        if FINISHED.read().is_empty() {
+            return;
+        }
+        let drained: Vec<_> = FINISHED.write().drain(..).collect();
+        let mut rescan = false;
+        {
+            let mut cfg = config.write();
+            for (entry, ok) in drained {
+                rescan |= ok;
+                cfg.ytdlp_history.insert(0, entry);
+                cfg.ytdlp_history.truncate(200);
+            }
+        }
+        if rescan {
+            *trigger_rescan.write() += 1;
+        }
+    });
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct DownloadJob {
     pub id: String,
@@ -400,7 +430,7 @@ fn parse_line(line: &str) -> Option<LineInfo> {
 }
 
 #[component]
-pub fn YtdlpPage(config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) -> Element {
+pub fn YtdlpPage(config: Signal<AppConfig>) -> Element {
     let mut url_input = use_signal(String::new);
     let mut format = use_signal(|| AudioFormat::BestAudio);
     let mut out_dir = use_signal(|| config.peek().ytdlp_output_dir.clone());
@@ -467,8 +497,8 @@ pub fn YtdlpPage(config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) -
         url_input.set(String::new());
 
         // spawn_forever: the driver must outlive the page or navigating away
-        // kills the download mid-flight (#327). Everything it writes (JOBS,
-        // config, trigger_rescan) is app-lifetime state.
+        // kills the download mid-flight (#327). It only writes globals (JOBS,
+        // FINISHED) — App-scoped signals would trip the cross-scope lint.
         spawn_forever(async move {
             if let Some(j) = JOBS.write().iter_mut().find(|j| j.id == job_id) {
                 j.status = JobStatus::Downloading;
@@ -564,11 +594,8 @@ pub fn YtdlpPage(config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) -
                             j.eta = String::new();
                         }
                         if let Some(e) = entry {
-                            let mut cfg = config.write();
-                            cfg.ytdlp_history.insert(0, e);
-                            cfg.ytdlp_history.truncate(200);
+                            FINISHED.write().push((e, true));
                         }
-                        *trigger_rescan.write() += 1;
                         break;
                     }
                     LineInfo::Error(msg) => {
@@ -585,9 +612,7 @@ pub fn YtdlpPage(config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) -
                             j.status = JobStatus::Failed(msg);
                         }
                         if let Some(e) = entry {
-                            let mut cfg = config.write();
-                            cfg.ytdlp_history.insert(0, e);
-                            cfg.ytdlp_history.truncate(200);
+                            FINISHED.write().push((e, false));
                         }
                         break;
                     }
