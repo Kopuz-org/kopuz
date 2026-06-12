@@ -1,4 +1,5 @@
 use config::{AppConfig, MusicService};
+use dioxus::core::spawn_forever;
 use dioxus::prelude::*;
 use std::cell::Cell;
 use std::sync::Arc;
@@ -96,18 +97,24 @@ pub fn queue_downloads(
 
     let session_start = Instant::now();
     let session_span = tracing::info_span!("downloads.session");
-    spawn(async move {
-        tokio::join!(
-            download_worker(queue, config, session_start, cancel_flag.clone()),
-            download_worker(queue, config, session_start, cancel_flag.clone()),
-            download_worker(queue, config, session_start, cancel_flag.clone()),
-            download_worker(queue, config, session_start, cancel_flag.clone()),
-        );
+    // spawn_forever: queue_downloads is called from page event handlers, and a
+    // scope-tied spawn dies with the page — navigating away from the downloads
+    // view cancelled the whole session mid-download (#327).
+    spawn_forever(
+        async move {
+            tokio::join!(
+                download_worker(queue, config, session_start, cancel_flag.clone()),
+                download_worker(queue, config, session_start, cancel_flag.clone()),
+                download_worker(queue, config, session_start, cancel_flag.clone()),
+                download_worker(queue, config, session_start, cancel_flag.clone()),
+            );
 
-        let mut q = queue.write();
-        q.is_running = false;
-        q.cancel_requested = false;
-    }.instrument(session_span));
+            let mut q = queue.write();
+            q.is_running = false;
+            q.cancel_requested = false;
+        }
+        .instrument(session_span),
+    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -248,7 +255,9 @@ pub fn delete_downloads(
         }
         if let Some(db) = db.clone() {
             let id = id.clone();
-            spawn(async move {
+            // The file is already deleted above — the DB row removal must
+            // outlive the calling page or the registry points at nothing.
+            spawn_forever(async move {
                 let _ = db.set_offline_track(&id, None).await;
             });
         }
