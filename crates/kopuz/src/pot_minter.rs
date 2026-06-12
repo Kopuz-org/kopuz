@@ -227,7 +227,13 @@ pub fn install_if_wanted<T: 'static>(target: &EventLoopWindowTarget<T>) {
             // the full JS stack, so a broken minter shows up in logs as more
             // than "Function@[native code]".
             if let Some(diag) = v.get("diag").and_then(|d| d.as_str()) {
-                tracing::warn!(%diag, "pot-minter diagnostic");
+                // Failures at WARN; env dumps and success milestones (e.g.
+                // "integrity token negotiated") are routine — DEBUG.
+                if diag.contains("FAILED") || diag.contains("error") {
+                    tracing::warn!(%diag, "pot-minter diagnostic");
+                } else {
+                    tracing::debug!(%diag, "pot-minter diagnostic");
+                }
                 return;
             }
             let Some(id) = v.get("id").and_then(|i| i.as_u64()) else {
