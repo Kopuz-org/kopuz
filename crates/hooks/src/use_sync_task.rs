@@ -6,6 +6,7 @@
 //! hammer the network.
 
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use db::Db;
 use dioxus::prelude::*;
@@ -15,6 +16,7 @@ use server::sync::{SyncError, SyncReason, reconcile_favorites};
 use crate::db_reactivity::{Table, use_generations};
 
 static NUDGE: OnceLock<tokio::sync::Notify> = OnceLock::new();
+static MUTATION_NUDGE: AtomicBool = AtomicBool::new(false);
 
 fn nudge_handle() -> &'static tokio::sync::Notify {
     NUDGE.get_or_init(tokio::sync::Notify::new)
@@ -23,6 +25,13 @@ fn nudge_handle() -> &'static tokio::sync::Notify {
 /// Ask the coordinator to reconcile soon (debounced). Called after a favorite
 /// toggle so a pending like reaches the server within seconds, not minutes.
 pub fn nudge() {
+    MUTATION_NUDGE.store(true, Ordering::Relaxed);
+    nudge_handle().notify_one();
+}
+
+/// Startup/activation kick: same debounced cycle, but the reconcile is
+/// recorded as `Activate` so a trace doesn't claim a mutation happened.
+pub fn nudge_activate() {
     nudge_handle().notify_one();
 }
 
@@ -77,7 +86,11 @@ pub fn use_sync_task(config: Signal<config::AppConfig>) {
                     };
 
                     let reason = if nudged {
-                        SyncReason::AfterMutation
+                        if MUTATION_NUDGE.swap(false, Ordering::Relaxed) {
+                            SyncReason::AfterMutation
+                        } else {
+                            SyncReason::Activate
+                        }
                     } else {
                         SyncReason::Interval
                     };

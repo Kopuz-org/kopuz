@@ -1663,7 +1663,7 @@ fn App() -> Element {
                 // Kick one reconcile shortly after startup so pending offline
                 // likes from the previous session push now, not on the first
                 // multi-minute interval.
-                hooks::use_sync_task::nudge();
+                hooks::use_sync_task::nudge_activate();
             }.instrument(tracing::info_span!("startup.load")));
         }
         // wasm: the stub Db yields defaults (web is not a shipped target); just
