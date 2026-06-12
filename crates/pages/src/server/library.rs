@@ -184,7 +184,10 @@ pub fn JellyfinLibrary(
             let track_path = track.id.uid_path();
             let is_currently_playing = current_track_id.as_ref() == Some(&track.id);
             let track_select = track.id.uid_path();
-            let track_key = format!("{}-{}", track.id.uid(), idx);
+            // Key by identity only: an index-suffixed key changes for every
+            // visible row on each one-row scroll step, remounting the whole
+            // window (DOM teardown + image re-decode + full repaint).
+            let track_key = track.id.uid();
             let is_menu_open = active_menu_track.read().as_ref() == Some(&track.id.uid_path());
             let is_selected = selected_tracks.read().contains(&track_path);
 

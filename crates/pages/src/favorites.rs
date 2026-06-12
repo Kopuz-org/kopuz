@@ -23,7 +23,10 @@ pub fn FavoritesPage(
 
     rsx! {
         div {
-            class: if cfg!(target_os = "android") { "px-4 pt-2 pb-28 min-h-full" } else if is_modern { "px-6 pt-6 pb-24 min-h-full" } else { "p-8 min-h-full" },
+            // Height-constrained column so the server list can window its rows
+            // behind its own scroller (837 favorites in the DOM at once was
+            // the page's frame-rate problem).
+            class: if cfg!(target_os = "android") { "px-4 pt-2 absolute inset-0 flex flex-col overflow-x-hidden" } else if is_modern { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
 
             if is_modern {
                 div { class: "mb-6",
@@ -51,9 +54,13 @@ pub fn FavoritesPage(
                     queue,
                 }
             } else {
-                LocalFavorites {
-                    config,
-                    queue,
+                // Local list isn't windowed (small libraries) — give it its
+                // own scroller since the wrapper no longer grows.
+                div { class: "flex-1 min-h-0 overflow-y-auto pb-24",
+                    LocalFavorites {
+                        config,
+                        queue,
+                    }
                 }
             }
         }

@@ -10,10 +10,15 @@ use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_favorites, use_tracks_by_keys};
+use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use hooks::use_player_controller::PlayerController;
+use kopuz_route::Route;
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::rc::Rc;
 use tracing::Instrument;
+
+const ITEM_HEIGHT: f64 = 60.0;
 
 #[component]
 pub fn JellyfinFavorites(
@@ -22,6 +27,14 @@ pub fn JellyfinFavorites(
 ) -> Element {
     let mut ctrl = use_context::<PlayerController>();
     let mut active_menu_track = use_signal(|| None::<PathBuf>);
+    let mut scroll_positions = use_context::<Signal<std::collections::HashMap<Route, f64>>>();
+    let saved_scroll = scroll_positions
+        .peek()
+        .get(&Route::Favorites)
+        .copied()
+        .unwrap_or(0.0);
+    let scroll_stat = use_signal(move || saved_scroll);
+    let container_height = use_signal(|| 0.0_f64);
     // YT sync state:
     // - `is_syncing`: true while a fetch is in flight
     // - `synced_so_far`: count of tracks streamed into the library so far
@@ -268,10 +281,14 @@ pub fn JellyfinFavorites(
     let sorted_displayed_tracks =
         showcase::sorted_track_pairs(&displayed_tracks, *sort_state.read());
 
-    let queue_tracks: Vec<reader::models::Track> = sorted_displayed_tracks
-        .iter()
-        .map(|(t, _)| t.clone())
-        .collect();
+    // Rc, not a Vec clone per row: the play handler needs the whole sorted
+    // list as the queue, and cloning 800+ tracks × 800+ rows was quadratic.
+    let queue_tracks: Rc<Vec<reader::models::Track>> = Rc::new(
+        sorted_displayed_tracks
+            .iter()
+            .map(|(t, _)| t.clone())
+            .collect(),
+    );
 
     let currently_playing_path = {
         let idx = *ctrl.current_queue_index.read();
@@ -282,10 +299,22 @@ pub fn JellyfinFavorites(
     let is_empty = displayed_tracks.is_empty();
     let is_modern = config.read().ui_style == UiStyle::Modern;
 
+    // Window the rows: only the visible slice (plus buffer) exists in the
+    // DOM — the full 800+ row list made every scroll frame repaint a huge
+    // layer and re-run per-row work.
+    let scroll_info = use_virtual_scroll(
+        *scroll_stat.read(),
+        *container_height.read(),
+        sorted_displayed_tracks.len(),
+        ITEM_HEIGHT,
+    );
+
     let tracks_nodes = sorted_displayed_tracks
         .iter()
-        .cloned()
         .enumerate()
+        .skip(scroll_info.start_index)
+        .take(scroll_info.items_to_render)
+        .map(|(idx, pair)| (idx, pair.clone()))
         .map(|(idx, (track, cover_url))| {
             let track_menu = track.clone();
             let track_path = track.id.uid_path();
@@ -293,7 +322,7 @@ pub fn JellyfinFavorites(
             let track_add = track.clone();
             let track_queue = track.clone();
             let queue_source = queue_tracks.clone();
-            let track_key = format!("{}-{}", track.id.uid(), idx);
+            let track_key = track.id.uid();
             let is_menu_open = active_menu_track.read().as_ref() == Some(&track.id.uid_path());
             let is_selected = selected_tracks.read().contains(&track_path);
             let matches_current_path = currently_playing_path.as_ref() == Some(&track.id.uid_path());
@@ -310,8 +339,8 @@ pub fn JellyfinFavorites(
             let track_artist = track.artist.clone();
 
             rsx! {
+                div { key: "{track_key}", style: "height: {ITEM_HEIGHT}px;",
                 TrackRow {
-                    key: "{track_key}",
                     track: track.clone(),
                     cover_url: cover_url.clone(),
                     row_num: Some(idx + 1),
@@ -367,15 +396,17 @@ pub fn JellyfinFavorites(
                         }
                     },
                     on_play: move |_| {
-                        queue.set(queue_source.clone());
+                        queue.set((*queue_source).clone());
                         ctrl.play_track(idx);
                     },
+                }
                 }
             }
         });
 
     rsx! {
         div {
+            class: "flex-1 min-h-0 flex flex-col",
             if *show_playlist_modal.read() {
                 PlaylistModal {
                     is_jellyfin: true,
@@ -659,8 +690,18 @@ pub fn JellyfinFavorites(
                     }
                     div {}
                 }
-                div {
-                    class: if is_modern { "" } else { "space-y-1" },
+                VirtualScrollView {
+                    id: "favorites-scroll".to_string(),
+                    class: if cfg!(target_os = "android") { "flex-1 overflow-y-auto overflow-x-hidden pb-20".to_string() } else { "flex-1 overflow-y-auto pb-20".to_string() },
+                    scroll_stat,
+                    container_height,
+                    item_height: ITEM_HEIGHT,
+                    saved_scroll,
+                    top_pad: scroll_info.top_pad,
+                    bottom_pad: scroll_info.bottom_pad,
+                    onscroll: move |scroll| {
+                        scroll_positions.write().insert(Route::Favorites, scroll);
+                    },
                     {tracks_nodes}
                 }
             }
