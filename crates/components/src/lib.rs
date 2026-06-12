@@ -1,3 +1,11 @@
+/// blitz-spike: whether the wgpu/native renderer is active (KOPUZ_BLITZ=1).
+/// `display: contents` contributes ~zero scrollable size in blitz-dom 0.2.4,
+/// so keyed wrappers that use it swap to a plain block under blitz.
+pub fn blitz_active() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| std::env::var_os("KOPUZ_BLITZ").is_some_and(|v| v == "1"))
+}
+
 pub mod modern;
 pub mod navigation_controller;
 pub mod normal;

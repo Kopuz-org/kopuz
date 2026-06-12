@@ -291,7 +291,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                              rsx! {
                                  div {
                                      key: "{track.id.uid()}",
-                                     class: "contents",
+                                     class: if crate::blitz_active() { "" } else { "contents" },
                                  div {
                                      class: "flex items-center group",
                                      if has_multiple_discs && props.is_album && is_new_disc && sort_state.peek().is_none() {

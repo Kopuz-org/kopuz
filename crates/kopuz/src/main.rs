@@ -2369,7 +2369,13 @@ fn App() -> Element {
                         }
                     }
 
-                    div { class: if cfg!(target_os = "android") { "relative flex-1 min-h-0 overflow-y-auto" } else { "contents" },
+                    // blitz-spike: display:contents contributes ~zero scrollable
+                    // size in blitz-dom 0.2.4 (bisected: a scroller wrapping a
+                    // contents-div clamps to ~1px), killing scrolling app-wide.
+                    // Under blitz the wrapper is a real positioned flex item, so
+                    // pages' `absolute inset-0` roots anchor to it and inner
+                    // scrollers get honest heights.
+                    div { class: if cfg!(target_os = "android") { "relative flex-1 min-h-0 overflow-y-auto" } else if blitz_enabled() { "relative flex-1 min-h-0 flex flex-col" } else { "contents" },
                     match *current_route.read() {
                         Route::Home => rsx! {
                             pages::home::Home {
