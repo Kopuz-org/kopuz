@@ -335,7 +335,14 @@ pub fn Radio(props: RadioProps) -> Element {
                         for station in filtered.iter() {
                             div {
                                 key: "{station.id}",
-                                class: "group relative rounded-2xl overflow-hidden border transition-all duration-300 cursor-pointer hover:border-white/15",
+                                // overflow-hidden collapses the card to zero height under
+                                // blitz (a hidden-overflow auto-height container contributes
+                                // no content size to its grid track).
+                                class: if components::blitz_active() {
+                                    "group relative rounded-2xl border transition-all duration-300 cursor-pointer hover:border-white/15"
+                                } else {
+                                    "group relative rounded-2xl overflow-hidden border transition-all duration-300 cursor-pointer hover:border-white/15"
+                                },
                                 style: "border-color: rgba(255,255,255,0.06); background: rgba(255,255,255,0.03);",
                                 onclick: {
                                     let station_id = station.id.clone();

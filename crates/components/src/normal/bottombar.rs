@@ -92,7 +92,13 @@ pub fn BottombarNormal(
                     button {
                         class: "w-12 h-12 flex items-center justify-center text-white text-xl active:scale-90 transition-transform",
                         onclick: move |evt| { evt.stop_propagation(); ctrl.toggle(); },
-                        i { class: if *is_playing.read() { "fa-solid fa-pause" } else { "fa-solid fa-play ml-1" } }
+                        // Separate elements, not a class swap: blitz doesn't
+                        // re-resolve the FontAwesome glyph when a class changes.
+                        if *is_playing.read() {
+                            i { class: "fa-solid fa-pause" }
+                        } else {
+                            i { class: "fa-solid fa-play ml-1" }
+                        }
                     }
                     button {
                         class: "w-12 h-12 flex items-center justify-center text-white text-lg active:scale-90 transition-transform",
@@ -201,7 +207,11 @@ pub fn BottombarNormal(
                     button {
                         class: "w-10 h-10 bg-white rounded-full flex items-center justify-center text-black hover:scale-105 active:scale-95 transition-all",
                         onclick: move |_| ctrl.toggle(),
-                        i { class: if *is_playing.read() { "fa-solid fa-pause text-lg" } else { "fa-solid fa-play text-lg ml-0.5" } }
+                        if *is_playing.read() {
+                            i { class: "fa-solid fa-pause text-lg" }
+                        } else {
+                            i { class: "fa-solid fa-play text-lg ml-0.5" }
+                        }
                     }
                     button {
                         class: "text-slate-400 hover:text-white transition-all active:scale-90",
@@ -237,25 +247,46 @@ pub fn BottombarNormal(
                             style: "width: {progress_percent}%",
                             div { class: "absolute -right-1.5 -top-1 w-3 h-3 bg-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity" }
                         }
-                        input {
-                            r#type: "range",
-                            min: "0",
-                            max: "{*current_song_duration.read()}",
-                            value: "{display_progress}",
-                            class: format!("absolute top-0 left-0 w-full h-full opacity-0 z-10 {}", if is_radio { "pointer-events-none" } else { "cursor-pointer" }),
-                            disabled: is_radio,
-                            onchange: move |evt| {
-                                if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
-                                    player.write().seek(std::time::Duration::from_secs(val));
-                                    current_song_progress.set(val);
-                                    drag_progress.set(val);
-                                    is_dragging.set(false);
+                        // range inputs are inert under blitz; click-to-seek
+                        // segments stand in for the invisible slider.
+                        if crate::blitz_active() {
+                            if !is_radio {
+                                crate::slider_overlay::BlitzSliderOverlay {
+                                    segments: 40,
+                                    on_set: move |f: f64| {
+                                        let duration = *current_song_duration.peek();
+                                        if duration == 0 || duration == u64::MAX {
+                                            return;
+                                        }
+                                        let val = (f * duration as f64) as u64;
+                                        player.write().seek(std::time::Duration::from_secs(val));
+                                        current_song_progress.set(val);
+                                        drag_progress.set(val);
+                                        is_dragging.set(false);
+                                    },
                                 }
-                            },
-                            oninput: move |evt| {
-                                if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
-                                    is_dragging.set(true);
-                                    drag_progress.set(val);
+                            }
+                        } else {
+                            input {
+                                r#type: "range",
+                                min: "0",
+                                max: "{*current_song_duration.read()}",
+                                value: "{display_progress}",
+                                class: format!("absolute top-0 left-0 w-full h-full opacity-0 z-10 {}", if is_radio { "pointer-events-none" } else { "cursor-pointer" }),
+                                disabled: is_radio,
+                                onchange: move |evt| {
+                                    if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
+                                        player.write().seek(std::time::Duration::from_secs(val));
+                                        current_song_progress.set(val);
+                                        drag_progress.set(val);
+                                        is_dragging.set(false);
+                                    }
+                                },
+                                oninput: move |evt| {
+                                    if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
+                                        is_dragging.set(true);
+                                        drag_progress.set(val);
+                                    }
                                 }
                             }
                         }
@@ -286,7 +317,11 @@ pub fn BottombarNormal(
                                 is_muted.set(true);
                             }
                         },
-                        i { class: if *is_muted.read() { "fa-solid fa-volume-xmark text-xs" } else { "fa-solid fa-volume-high text-xs" } }
+                        if *is_muted.read() {
+                            i { class: "fa-solid fa-volume-xmark text-xs" }
+                        } else {
+                            i { class: "fa-solid fa-volume-high text-xs" }
+                        }
                     }
                     div {
                         class: "w-24 h-1 bg-white/10 rounded-full group/vol cursor-pointer relative",
@@ -313,26 +348,42 @@ pub fn BottombarNormal(
                             style: "width: {volume_percent}%",
                             div { class: "absolute -right-1.5 -top-1 w-3 h-3 bg-white rounded-full opacity-0 group-hover/vol:opacity-100 transition-opacity" }
                         }
-                        input {
-                            r#type: "range",
-                            min: "0",
-                            max: "1",
-                            step: "0.01",
-                            value: "{*volume.read()}",
-                            class: "absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer z-10",
-                            onchange: move |evt| {
-                                if let Ok(val) = evt.value().parse::<f32>() {
-                                    persisted_volume.set(val);
-                                    is_muted.set(val == 0.0);
-                                }
-                            },
-                            oninput: move |evt| {
-                                if let Ok(val) = evt.value().parse::<f32>() {
+                        if crate::blitz_active() {
+                            crate::slider_overlay::BlitzSliderOverlay {
+                                segments: 20,
+                                on_set: move |f: f64| {
+                                    let val = f as f32;
                                     player.write().set_volume(val);
                                     volume.set(val);
+                                    persisted_volume.set(val);
                                     is_muted.set(val == 0.0);
                                     if val > f32::EPSILON {
                                         volume_before_mute.set(val);
+                                    }
+                                },
+                            }
+                        } else {
+                            input {
+                                r#type: "range",
+                                min: "0",
+                                max: "1",
+                                step: "0.01",
+                                value: "{*volume.read()}",
+                                class: "absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer z-10",
+                                onchange: move |evt| {
+                                    if let Ok(val) = evt.value().parse::<f32>() {
+                                        persisted_volume.set(val);
+                                        is_muted.set(val == 0.0);
+                                    }
+                                },
+                                oninput: move |evt| {
+                                    if let Ok(val) = evt.value().parse::<f32>() {
+                                        player.write().set_volume(val);
+                                        volume.set(val);
+                                        is_muted.set(val == 0.0);
+                                        if val > f32::EPSILON {
+                                            volume_before_mute.set(val);
+                                        }
                                     }
                                 }
                             }

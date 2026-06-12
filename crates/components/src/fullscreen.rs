@@ -53,25 +53,46 @@ fn ProgressBarControl(
                         class: "absolute bg-white rounded-full pointer-events-none",
                         style: "width: 12px; height: 12px; top: 4px; left: calc({progress_percent}% - 6px);"
                     }
-                    input {
-                        r#type: "range",
-                        min: "0",
-                        max: "{*current_song_duration.read()}",
-                        value: "{display_progress}",
-                        class: format!("absolute top-0 left-0 w-full h-full opacity-0 {}", if is_radio { "" } else { "cursor-pointer" }),
-                        disabled: is_radio,
-                        onchange: move |evt| {
-                            if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
-                                player.write().seek(std::time::Duration::from_secs(val));
-                                current_song_progress.set(val);
-                                drag_progress.set(val);
-                                is_dragging.set(false);
+                    // range inputs are inert under blitz; click-to-seek
+                    // segments stand in for the invisible slider.
+                    if crate::blitz_active() {
+                        if !is_radio {
+                            crate::slider_overlay::BlitzSliderOverlay {
+                                segments: 40,
+                                on_set: move |f: f64| {
+                                    let duration = *current_song_duration.peek();
+                                    if duration == 0 || duration == u64::MAX {
+                                        return;
+                                    }
+                                    let val = (f * duration as f64) as u64;
+                                    player.write().seek(std::time::Duration::from_secs(val));
+                                    current_song_progress.set(val);
+                                    drag_progress.set(val);
+                                    is_dragging.set(false);
+                                },
                             }
-                        },
-                        oninput: move |evt| {
-                            if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
-                                is_dragging.set(true);
-                                drag_progress.set(val);
+                        }
+                    } else {
+                        input {
+                            r#type: "range",
+                            min: "0",
+                            max: "{*current_song_duration.read()}",
+                            value: "{display_progress}",
+                            class: format!("absolute top-0 left-0 w-full h-full opacity-0 {}", if is_radio { "" } else { "cursor-pointer" }),
+                            disabled: is_radio,
+                            onchange: move |evt| {
+                                if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
+                                    player.write().seek(std::time::Duration::from_secs(val));
+                                    current_song_progress.set(val);
+                                    drag_progress.set(val);
+                                    is_dragging.set(false);
+                                }
+                            },
+                            oninput: move |evt| {
+                                if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
+                                    is_dragging.set(true);
+                                    drag_progress.set(val);
+                                }
                             }
                         }
                     }
@@ -125,22 +146,34 @@ fn VolumeControl(
                     class: "absolute bg-white rounded-full pointer-events-none",
                     style: "width: 12px; height: 12px; top: 4px; left: calc({volume_percent}% - 6px);"
                 }
-                input {
-                    r#type: "range",
-                    min: "0",
-                    max: "1",
-                    step: "0.01",
-                    value: "{*volume.read()}",
-                    class: "absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer",
-                    onchange: move |evt| {
-                        if let Ok(val) = evt.value().parse::<f32>() {
-                            persisted_volume.set(val);
-                        }
-                    },
-                    oninput: move |evt| {
-                        if let Ok(val) = evt.value().parse::<f32>() {
+                if crate::blitz_active() {
+                    crate::slider_overlay::BlitzSliderOverlay {
+                        segments: 20,
+                        on_set: move |f: f64| {
+                            let val = f as f32;
                             player.write().set_volume(val);
                             volume.set(val);
+                            persisted_volume.set(val);
+                        },
+                    }
+                } else {
+                    input {
+                        r#type: "range",
+                        min: "0",
+                        max: "1",
+                        step: "0.01",
+                        value: "{*volume.read()}",
+                        class: "absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer",
+                        onchange: move |evt| {
+                            if let Ok(val) = evt.value().parse::<f32>() {
+                                persisted_volume.set(val);
+                            }
+                        },
+                        oninput: move |evt| {
+                            if let Ok(val) = evt.value().parse::<f32>() {
+                                player.write().set_volume(val);
+                                volume.set(val);
+                            }
                         }
                     }
                 }
@@ -177,7 +210,13 @@ fn PlaybackControl(mut is_playing: Signal<bool>) -> Element {
                     onclick: move |_| {
                         ctrl.toggle();
                     },
-                    i { class: if *is_playing.read() { "fa-solid fa-pause text-3xl" } else { "fa-solid fa-play text-3xl ml-1" } }
+                    // Separate elements, not a class swap: blitz doesn't
+                    // re-resolve the FontAwesome glyph when a class changes.
+                    if *is_playing.read() {
+                        i { class: "fa-solid fa-pause text-3xl" }
+                    } else {
+                        i { class: "fa-solid fa-play text-3xl ml-1" }
+                    }
                 }
                 button {
                     class: "text-white hover:text-white/80 transition-colors flex-shrink-0",
