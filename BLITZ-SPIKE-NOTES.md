@@ -30,15 +30,36 @@ blitz-dom 0.2.4. `image` workspace-pinned to =0.25.6 for blitz-dom.
    tailwind source emits plain pseudo-classes (c98c52a). Blitz's own :hover
    state machinery was fine.
 
-## Still broken (cosmetic tier)
-1. **Hero overlay gone + cover unclipped/zoomed** — absolutely-positioned
+## Solved, round two
+4. **Source toggle** — three gaps in one widget: z-index on static flex items
+   not honored (labels under the slider → make them `relative`),
+   calc-percentage abspos widths mis-sized (→ inset pairs), abspos auto-top
+   static position mis-resolved in a centered flex row (→ explicit `top-1`).
+5. **Button text left-aligned** — blitz's UA sheet doesn't center button text
+   like browsers; added to the base resets in main.css.
+6. **Font** — nothing on the system is actually named "JetBrains Mono" (only
+   Nerd Font variants); fontconfig substituted Noto Sans Mono in the webview,
+   fontique (no substitution) fell to sans. Real family names in the stack
+   fix BOTH renderers.
+7. **SVG paints** — blitz hands SVG attrs to usvg, which can't evaluate
+   var()/color-mix(): the settings EQ editor rendered black and warned per
+   drag-frame. Resolved literals fix it.
+8. **Segfault in NVIDIA vkCreateBuffer** (610.43.02, sane 438KB request,
+   garbage top stack frames) fired on the Settings page and STOPPED
+   REPRODUCING once the SVG paints were fixed — suggests the usvg/vello
+   image path corrupts state upstream of the driver. Core dumps preserved
+   via coredumpctl if a report needs them.
+
+## Still broken
+1. **Some clickable elements** — details TBD (next session: enumerate which
+   clicks dead vs working; blitz logs "Clicked link without href" for
+   <a>-as-button patterns, dropdown/context-menu behavior unverified).
+2. **Hero overlay gone + cover unclipped/zoomed** — absolutely-positioned
    children inside the relative hero container don't render/lay out;
    object-fit/overflow clipping not applied.
-2. **No text truncation** (`truncate` → ellipsis/nowrap/hidden) — card
+3. **No text truncation** (`truncate` → ellipsis/nowrap/hidden) — card
    titles spill.
-3. JetBrains Mono not picked up (falls back to default sans).
-4. Minor: pill toggle styling, paddings, scroll chevrons, card height
-   uniformity (follows from #2).
+4. Misc CSS polish (paddings, radii, native checkbox/range widgets).
 
 ## Gotchas learned
 - Assets resolve via CARGO_MANIFEST_DIR at runtime in dev: `cargo run` from
