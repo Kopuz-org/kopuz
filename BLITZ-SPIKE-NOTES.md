@@ -234,3 +234,14 @@ vello#1707 (vello_hybrid 0-alpha panic); impact comment on blitz#252
     passes, 0 regressions. New tooling: pixel-assertion paint tests
     (packages/blitz-html/tests/paint_order.rs, vello_cpu render_to_buffer).
     Hero renders with stock markup — no z-10 anywhere.
+
+20. **No scrollbars anywhere → feature implemented in engine** (blitz
+    71eac75, PR #461 draft, stacked on #460): blitz never painted
+    scrollbars at all. Overlay thumbs per overflowing axis (scroll=always,
+    auto=when overflowing, hidden/clip=never), visible while hovered or
+    scrolled — the always-visible variant regressed 10 WPT overflow
+    reftests, hover/scroll rule regresses 0. Kopuz note: `scrollbar-hide`
+    class is UNDEFINED in our CSS (the webview bar comes from the global
+    ::-webkit-scrollbar theming); under blitz shelves now show the engine
+    overlay thumb on hover/scroll. Follow-ups upstream: thumb dragging,
+    css-scrollbars-1 styling, fade animation.
