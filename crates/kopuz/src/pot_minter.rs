@@ -69,10 +69,14 @@ fn init_script() -> String {
     format!(
         r#"
 window.module = {{ exports: {{}} }}; window.exports = window.module.exports;
-// Chromium (WebView2) enforces Trusted Types on `new Function`/`eval`; the
-// BotGuard VM does unwrapped `new Function(...)` internally, so a permissive
-// `default` policy is needed to let those through. WebKit (Linux/macOS) ignores
-// this (no enforcement). Best-effort: a pre-existing default policy throws.
+// music.youtube.com serves `require-trusted-types-for 'script'`. Chromium
+// (WebView2) has always enforced it; WebKitGTK gained Trusted Types around
+// 2.46, so modern Linux webviews enforce it too. The permissive `default`
+// policy lets the BotGuard VM's internal string compilation through. The
+// outcome is recorded for the env diag: a pre-existing default policy makes
+// `createPolicy` throw, and every later compile check then consults *that*
+// policy instead.
+window.__kopuzDefaultPolicy = 'absent';
 try {{
   if (window.trustedTypes && window.trustedTypes.createPolicy) {{
     window.trustedTypes.createPolicy('default', {{
@@ -80,8 +84,9 @@ try {{
       createScript: function(s) {{ return s; }},
       createScriptURL: function(s) {{ return s; }}
     }});
+    window.__kopuzDefaultPolicy = 'installed';
   }}
-}} catch (e) {{}}
+}} catch (e) {{ window.__kopuzDefaultPolicy = 'failed: ' + e; }}
 {BGUTILS}
 window.__KOPUZ_BGX = (window.module && window.module.exports) || null;
 window.__kopuzMinter = null;
@@ -91,6 +96,15 @@ window.__kopuzMinting = null;
 // Rust side so a broken minter is debuggable from logs (issue: BotGuard VM
 // throwing "Function@[native code]" on some webview setups).
 window.__kopuzDiag = function(m) {{ try {{ window.ipc.postMessage(JSON.stringify({{diag: '' + m}})); }} catch(e) {{}} }};
+// JavaScriptCore stacks are frames only — no leading "Name: message" line
+// like V8 — so the name/message must be logged explicitly or the actual
+// error text is lost (all we'd see is "Function@[native code]").
+window.__kopuzErrStr = function(e) {{
+  if (!e) return '' + e;
+  var s = (e.name || 'Error') + ': ' + (e.message !== undefined ? e.message : ('' + e));
+  if (e.stack) s += ' :: ' + e.stack;
+  return s;
+}};
 
 window.__kopuzEnsureMinter = function() {{
   var now = Date.now();
@@ -114,10 +128,19 @@ window.__kopuzEnsureMinter = function() {{
     if (js) {{
       var src = js;
       if (window.trustedTypes && window.trustedTypes.createPolicy) {{
-        var pol = window.trustedTypes.createPolicy('kopuz-bg', {{ createScript: function(s){{ return s; }} }});
-        src = pol.createScript(js);
+        window.__kopuzBgPol = window.__kopuzBgPol ||
+          window.trustedTypes.createPolicy('kopuz-bg', {{ createScript: function(s) {{ return s; }} }});
+        src = window.__kopuzBgPol.createScript(js);
       }}
-      new Function(src)();
+      // Indirect eval first: the TT spec admits eval(TrustedScript) as-is,
+      // while `new Function(TrustedScript)` re-checks the assembled function
+      // source against the default policy — the path WebKitGTK rejects.
+      try {{
+        (0, eval)(src);
+      }} catch (evalErr) {{
+        window.__kopuzDiag('interpreter eval failed, retrying via Function :: ' + window.__kopuzErrStr(evalErr));
+        new Function(src)();
+      }}
     }}
     step = 'botguard_create';
     var botguard = await BG.BotGuardClient.create({{ program: ch.program, globalName: ch.globalName, globalObj: window }});
@@ -140,7 +163,7 @@ window.__kopuzEnsureMinter = function() {{
     window.__kopuzDiag('integrity token negotiated (ttl=' + ttl + 's)');
     return minter;
     }} catch (e) {{
-      window.__kopuzDiag('ensureMinter FAILED at step=' + step + ' :: ' + ((e && e.stack) ? e.stack : ('' + e)));
+      window.__kopuzDiag('ensureMinter FAILED at step=' + step + ' :: ' + window.__kopuzErrStr(e));
       throw e;
     }}
   }})();
@@ -159,18 +182,32 @@ window.__kopuzMint = async function(videoId, reqId) {{
     send({{pot: (pot || '') + ''}});
   }} catch (e) {{
     window.__kopuzMinter = null; window.__kopuzMinterExp = 0;
-    var stk = (e && e.stack) ? e.stack : ('' + e);
-    window.__kopuzDiag('mint FAILED in phase=' + phase + ' :: ' + stk);
-    send({{err: 'phase=' + phase + ': ' + stk}});
+    var msg = window.__kopuzErrStr(e);
+    window.__kopuzDiag('mint FAILED in phase=' + phase + ' :: ' + msg);
+    send({{err: 'phase=' + phase + ': ' + msg}});
   }}
 }};
 
 // One-shot environment snapshot: whether BgUtils captured BG, Trusted-Types
-// presence, the automation flag, and the UA — the usual culprits when the
-// BotGuard VM behaves differently across webview builds.
+// presence/enforcement, the automation flag, and the UA — the usual culprits
+// when the BotGuard VM behaves differently across webview builds. The three
+// compile probes pinpoint which dynamic-code path the engine blocks.
 setTimeout(function() {{
   var x = window.__KOPUZ_BGX;
-  window.__kopuzDiag('env: bgx=' + !!x + ' BG=' + !!(x && x.BG) + ' trustedTypes=' + !!(window.trustedTypes) + ' webdriver=' + navigator.webdriver + ' ua=' + navigator.userAgent);
+  var probe = function(fn) {{ try {{ fn(); return 'ok'; }} catch (e) {{ return ((e && e.name) || 'Error') + ':' + ((e && e.message) || e); }} }};
+  var fnRaw = probe(function() {{ new Function('return 1')(); }});
+  var fnTrusted = 'n/a', evalTrusted = 'n/a';
+  if (window.trustedTypes && window.trustedTypes.createPolicy) {{
+    try {{
+      var p = window.trustedTypes.createPolicy('kopuz-probe', {{ createScript: function(s) {{ return s; }} }});
+      fnTrusted = probe(function() {{ new Function(p.createScript('return 1'))(); }});
+      evalTrusted = probe(function() {{ (0, eval)(p.createScript('1')); }});
+    }} catch (e) {{ fnTrusted = 'policy-failed: ' + e; }}
+  }}
+  window.__kopuzDiag('env: bgx=' + !!x + ' BG=' + !!(x && x.BG) + ' trustedTypes=' + !!(window.trustedTypes)
+    + ' defaultPolicy=' + window.__kopuzDefaultPolicy
+    + ' newFunction=' + fnRaw + ' newFunctionTrusted=' + fnTrusted + ' evalTrusted=' + evalTrusted
+    + ' webdriver=' + navigator.webdriver + ' ua=' + navigator.userAgent);
 }}, 2000);
 
 // Pre-warm the integrity token as soon as the origin is live, so even the
