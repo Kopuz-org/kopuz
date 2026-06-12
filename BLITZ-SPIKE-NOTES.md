@@ -14,23 +14,38 @@ blitz-dom 0.2.4. `image` workspace-pinned to =0.25.6 for blitz-dom.
   blitz logs "Clicked link without href" for <a>-as-button, harmless).
 - Whole backend: DB, scan, sync, Discord, radio — renderer-agnostic.
 
-## Broken
-1. **Scrolling: nothing scrolls.** blitz-dom DOES implement nested
-   overflow-auto scrolling with bubbling (document.rs `scroll_node_by`), so
-   the suspect is content-size measurement through kopuz's structure:
-   `absolute inset-0` page wrappers + `display: contents` route shell +
-   flex-column scrollers. If Taffy computes scroll_height=0 there, scrolling
-   clamps to nothing everywhere. Next step: minimal repro (plain
-   overflow-y-auto div with tall content, then add the absolute/contents
-   wrappers until it breaks) → either fix kopuz's structure or file upstream.
-2. **Hero overlay gone + cover unclipped/zoomed** — absolutely-positioned
+## Solved during the spike (each bisected with /tmp/blitz-scroll-repro)
+1. **Scrolling** — `display: contents` contributes ~zero scrollable size in
+   blitz-dom 0.2.4 (repro: scroller wrapping a contents-div clamps to ~1px).
+   Kopuz's route shell used class="contents" → no scroll app-wide. Bypassed
+   under blitz (3124430).
+2. **Pages invisible** (everything with an absolute-inset root) — neither
+   flex-1 (block parent) nor min-h-full (percentage min-height) gave the
+   route wrapper a height in Taffy; pages anchored to a collapsed box.
+   Wrapper is now absolute inset-0 against the relative main scroll area and
+   carries its own overflow (402cad0). App functional after this.
+3. **Hover styles** — Tailwind v4 wraps hover: variants in
+   @media (hover: hover); blitz's Stylo device doesn't claim hover
+   capability so all 60 rules dropped. `@custom-variant hover (&:hover)` in
+   tailwind source emits plain pseudo-classes (c98c52a). Blitz's own :hover
+   state machinery was fine.
+
+## Still broken (cosmetic tier)
+1. **Hero overlay gone + cover unclipped/zoomed** — absolutely-positioned
    children inside the relative hero container don't render/lay out;
    object-fit/overflow clipping not applied.
-3. **No text truncation** (`truncate` → ellipsis/nowrap/hidden) — card
+2. **No text truncation** (`truncate` → ellipsis/nowrap/hidden) — card
    titles spill.
-4. JetBrains Mono not picked up (falls back to default sans).
-5. Minor: pill toggle styling, paddings, scroll chevrons, card height
-   uniformity (follows from #3).
+3. JetBrains Mono not picked up (falls back to default sans).
+4. Minor: pill toggle styling, paddings, scroll chevrons, card height
+   uniformity (follows from #2).
+
+## Gotchas learned
+- Assets resolve via CARGO_MANIFEST_DIR at runtime in dev: `cargo run` from
+  the repo root works; invoking target/debug/kopuz directly loses all CSS.
+- Blitz windows: empty class, title "Dioxus App" (for hyprctl/grim hunting).
+- Repro harness lives at /tmp/blitz-scroll-repro (dioxus-native 0.7.9,
+  cached deps — rebuilds in ~1s; bisect any suspected CSS gap there first).
 
 ## Deliberately broken on this branch
 YT playback (pot minter + decipher need a JS engine — host-runtime plan in
