@@ -27,6 +27,8 @@ use std::sync::Arc;
 #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
 use windows::Win32::Foundation::HWND;
 
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+mod chrome_trace;
 mod logging;
 #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
 mod pot_minter;

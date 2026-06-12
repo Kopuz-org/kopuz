@@ -37,7 +37,7 @@ use tracing_subscriber::{
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 struct LogGuards {
     _file: tracing_appender::non_blocking::WorkerGuard,
-    _chrome: Option<tracing_chrome::FlushGuard>,
+    _chrome: Option<crate::chrome_trace::FlushGuard>,
 }
 
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
@@ -119,44 +119,28 @@ pub fn init(log_dir: &Path, config_tracing_enabled: bool) {
     let trace_path = log_dir.join("kopuz-trace.json");
 
     let chrome_guard = if config_tracing_enabled {
-        let (chrome_layer, guard) = tracing_chrome::ChromeLayerBuilder::new()
-            .file(&trace_path)
-            .include_args(true)
-            // Async style keys every span event on its ROOT span's id
-            // instead of the OS thread, so a span that hops worker
-            // threads still emits one coherent b/e pair. But Perfetto
-            // groups these legacy async events into one track per NAME,
-            // which flattens the parent/child structure — `yt.browse`
-            // lands on its own row and nothing shows what covers it.
-            // Encode the lineage in the name itself: each span is
-            // labeled with its full path from root, so the track list
-            // sorts into a readable tree ("favorites.reconcile ›
-            // yt.validate › yt.browse").
-            .trace_style(tracing_chrome::TraceStyle::Async)
-            .name_fn(Box::new(|data| match data {
-                tracing_chrome::EventOrSpan::Event(e) => e.metadata().name().to_owned(),
-                tracing_chrome::EventOrSpan::Span(s) => {
-                    let mut path = String::new();
-                    for span in s.scope().from_root() {
-                        if !path.is_empty() {
-                            path.push_str(" › ");
-                        }
-                        path.push_str(span.name());
-                    }
-                    path
-                }
-            }))
-            .build();
-        tracing_subscriber::registry()
-            .with(file_layer)
-            .with(console_layer)
-            // Filter the chrome layer the same as the file so the
-            // trace isn't 30MB of h2/wgpu/dioxus-internal spans
-            // burying the kopuz spans you actually want to analyze.
-            .with(chrome_layer.with_filter(file_filter()))
-            .init();
-        tracing::info!(trace = %trace_path.display(), "chrome span trace enabled");
-        Some(guard)
+        match crate::chrome_trace::ChromeTraceLayer::new(&trace_path) {
+            Ok((chrome_layer, guard)) => {
+                tracing_subscriber::registry()
+                    .with(file_layer)
+                    .with(console_layer)
+                    // Filter the chrome layer the same as the file so the
+                    // trace isn't 30MB of h2/wgpu/dioxus-internal spans
+                    // burying the kopuz spans you actually want to analyze.
+                    .with(chrome_layer.with_filter(file_filter()))
+                    .init();
+                tracing::info!(trace = %trace_path.display(), "chrome span trace enabled");
+                Some(guard)
+            }
+            Err(err) => {
+                tracing_subscriber::registry()
+                    .with(file_layer)
+                    .with(console_layer)
+                    .init();
+                tracing::warn!(trace = %trace_path.display(), %err, "failed to open chrome trace file — tracing disabled this session");
+                None
+            }
+        }
     } else {
         tracing_subscriber::registry()
             .with(file_layer)
