@@ -413,10 +413,6 @@ pub trait Storage: Send + Sync {
     async fn upsert_albums(&self, source: &Source, albums: &[reader::Album])
     -> Result<(), DbError>;
 
-    /// Delete local tracks whose path is under `root` but was not in the last
-    /// scan (`keep` = the scanned `track_key`s). Returns rows removed. The scan's
-    /// reconcile step, replacing the old post-scan `retain`.
-    async fn prune_local_tracks(&self, root: &str, keep: &[String]) -> Result<u64, DbError>;
 }
 
 /// Cheap-`Clone` handle to the active storage backend, shared via Dioxus context.

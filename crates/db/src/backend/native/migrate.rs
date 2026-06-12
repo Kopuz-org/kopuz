@@ -1,10 +1,12 @@
 //! One-shot importer: legacy `*.json` store → SQLite (issue #347).
 //!
-//! Runs once. Gated on an empty DB + a `.db_migrated` sentinel, so it's safe to
-//! call on every launch. The whole import is a single transaction — a crash
-//! before commit leaves the DB empty and the JSONs untouched, so it re-runs
-//! cleanly. After commit each `X.json` is renamed to `X.json.bak` (kept for
-//! downgrade; never deleted) and the sentinel is written.
+//! Runs once per database (gated on the DB being empty), so it's safe to call
+//! on every launch. The whole import is a single transaction — a crash before
+//! commit leaves the DB empty and the JSONs untouched, so it re-runs cleanly.
+//! A file that fails to parse is skipped (and left in place for repair); the
+//! rest import normally. The names actually consumed are recorded in
+//! `metadata_cache`, and [`finalize_migration`] renames exactly those files to
+//! `*.json.bak` (kept for downgrade; never deleted).
 //!
 //! Legacy `Track.path` was the overloaded `"service:id[:cover]"` string; we
 //! parse it here (the one place, via [`TrackId::from_legacy_path`]) into the
@@ -57,25 +59,59 @@ pub async fn run_json_import(
         return Ok(ImportReport::default());
     }
 
+    // Per-file tolerance: a corrupt file (truncated by a power loss, say)
+    // imports as its default and is NOT recorded as consumed, so finalize
+    // leaves it on disk for repair while everything else migrates.
+    let mut consumed: Vec<&str> = Vec::new();
     let read_src = |name: &str| legacy_source(config_dir, name);
     let cfg_val: serde_json::Value = match read_src("config.json") {
-        Some(p) => read_value(&p)?.unwrap_or(serde_json::Value::Null),
+        Some(p) => match read_json_tolerant(&p) {
+            Some(v) => {
+                consumed.push("config.json");
+                v
+            }
+            None => serde_json::Value::Null,
+        },
         None => serde_json::Value::Null,
     };
     let lib: LegacyLibrary = match read_src("library.json") {
-        Some(p) => read_json(&p)?,
+        Some(p) => match read_json_tolerant(&p) {
+            Some(v) => {
+                consumed.push("library.json");
+                v
+            }
+            None => LegacyLibrary::default(),
+        },
         None => LegacyLibrary::default(),
     };
     let plists: LegacyPlaylists = match read_src("playlists.json") {
-        Some(p) => read_json(&p)?,
+        Some(p) => match read_json_tolerant(&p) {
+            Some(v) => {
+                consumed.push("playlists.json");
+                v
+            }
+            None => LegacyPlaylists::default(),
+        },
         None => LegacyPlaylists::default(),
     };
     let favs: LegacyFavorites = match read_src("favorites.json") {
-        Some(p) => read_json(&p)?,
+        Some(p) => match read_json_tolerant(&p) {
+            Some(v) => {
+                consumed.push("favorites.json");
+                v
+            }
+            None => LegacyFavorites::default(),
+        },
         None => LegacyFavorites::default(),
     };
     let queue: LegacyQueue = match read_src("queue_state.json") {
-        Some(p) => read_json(&p)?,
+        Some(p) => match read_json_tolerant(&p) {
+            Some(v) => {
+                consumed.push("queue_state.json");
+                v
+            }
+            None => LegacyQueue::default(),
+        },
         None => LegacyQueue::default(),
     };
 
@@ -109,13 +145,29 @@ pub async fn run_json_import(
         .await?;
     }
 
+    // Server-scoped rows need a real server id: every reader keys on 'local'
+    // or a servers.id, and a server added later gets a fresh id — rows filed
+    // under a made-up source would be unreachable forever. Signed out at
+    // migration time ⇒ skip them; the server re-syncs everything after
+    // sign-in, and the originals stay in *.json.bak regardless.
+    if server_src.is_none()
+        && (!lib.jellyfin_tracks.is_empty()
+            || !plists.jellyfin_playlists.is_empty()
+            || !favs.jellyfin_favorites.is_empty())
+    {
+        tracing::warn!(
+            "db: legacy server data present but no signed-in server — skipping it (re-syncs after sign-in)"
+        );
+    }
+
     // --- albums (local + server) ------------------------------------------
     for a in &lib.albums {
         insert_album(&mut tx, "local", a).await?;
     }
-    for a in &lib.jellyfin_albums {
-        let src = album_source(&a.id, &server_src);
-        insert_album(&mut tx, &src, a).await?;
+    if let Some(sid) = &server_src {
+        for a in &lib.jellyfin_albums {
+            insert_album(&mut tx, sid, a).await?;
+        }
     }
 
     // --- tracks (local + server) ------------------------------------------
@@ -124,10 +176,11 @@ pub async fn run_json_import(
             insert_track(&mut tx, "local", &t).await?;
         }
     }
-    for lt in &lib.jellyfin_tracks {
-        if let Some(t) = legacy_to_track(lt) {
-            let src = track_source(&t, &server_src);
-            insert_track(&mut tx, &src, &t).await?;
+    if let Some(sid) = &server_src {
+        for lt in &lib.jellyfin_tracks {
+            if let Some(t) = legacy_to_track(lt) {
+                insert_track(&mut tx, sid, &t).await?;
+            }
         }
     }
 
@@ -142,19 +195,20 @@ pub async fn run_json_import(
             .await?;
         insert_playlist_tracks(&mut tx, pk, &p.tracks).await?;
     }
-    for (i, p) in plists.jellyfin_playlists.iter().enumerate() {
-        let src = server_src.clone().unwrap_or_else(|| "server".to_string());
-        let pk = insert_playlist(
-            &mut tx,
-            &src,
-            &p.id,
-            &p.name,
-            &p.cover_path,
-            p.image_tag.as_deref(),
-            i as i64,
-        )
-        .await?;
-        insert_playlist_tracks(&mut tx, pk, &p.tracks).await?;
+    if let Some(sid) = &server_src {
+        for (i, p) in plists.jellyfin_playlists.iter().enumerate() {
+            let pk = insert_playlist(
+                &mut tx,
+                sid,
+                &p.id,
+                &p.name,
+                &p.cover_path,
+                p.image_tag.as_deref(),
+                i as i64,
+            )
+            .await?;
+            insert_playlist_tracks(&mut tx, pk, &p.tracks).await?;
+        }
     }
     for f in &plists.folders {
         sqlx::query!(
@@ -182,7 +236,7 @@ pub async fn run_json_import(
     for r in &favs.local_favorites {
         insert_favorite(&mut tx, "local", r, now).await?;
     }
-    if let Some(sid) = server_src.as_deref().or(Some("server")) {
+    if let Some(sid) = server_src.as_deref() {
         for r in &favs.jellyfin_favorites {
             insert_favorite(&mut tx, sid, r, now).await?;
         }
@@ -226,6 +280,17 @@ pub async fn run_json_import(
     .execute(&mut *tx)
     .await?;
 
+    // Record what this import actually consumed — finalize renames exactly
+    // these files, so a skipped corrupt file is never moved aside unimported.
+    let consumed_json = serde_json::to_string(&consumed)?;
+    sqlx::query!(
+        "INSERT INTO metadata_cache (cache_key, kind, payload) VALUES ('legacy_import', 'files', ?1) \
+         ON CONFLICT(cache_key, kind) DO UPDATE SET payload = ?1",
+        consumed_json
+    )
+    .execute(&mut *tx)
+    .await?;
+
     tx.commit().await?;
 
     let report = ImportReport {
@@ -247,19 +312,28 @@ pub async fn run_json_import(
     Ok(report)
 }
 
-/// Rename each remaining plain `X.json` → `X.json.bak` (kept for downgrade;
-/// never deleted, never overwritten). Gated on a non-empty DB so it only fires
-/// after a real import. Idempotent. Also drops the obsolete `.db_migrated`
-/// sentinel from earlier builds (per-DB emptiness is the gate now). Returns how
-/// many files were renamed.
+/// Rename each plain `X.json` a real import consumed → `X.json.bak` (kept for
+/// downgrade; never deleted). Gated on the consumed-files record the importer
+/// writes — gating on "DB non-empty" would also fire when the import failed
+/// and later runtime writes populated the DB, renaming files that were never
+/// imported. A file the importer skipped as corrupt stays in place. Idempotent.
+/// Also drops the obsolete `.db_migrated` sentinel from earlier builds.
+/// Returns how many files were renamed.
 pub async fn finalize_migration(pool: &SqlitePool, config_dir: &Path) -> Result<usize, DbError> {
-    if !db_has_data(pool).await? {
+    let consumed: Option<String> = sqlx::query_scalar!(
+        "SELECT payload FROM metadata_cache WHERE cache_key = 'legacy_import' AND kind = 'files'"
+    )
+    .fetch_optional(pool)
+    .await?
+    .flatten();
+    let Some(consumed) = consumed else {
         return Ok(0);
-    }
+    };
+    let consumed: Vec<String> = serde_json::from_str(&consumed).unwrap_or_default();
     let mut renamed = 0;
     for f in LEGACY_FILES {
         let src = config_dir.join(f);
-        if src.exists() {
+        if consumed.iter().any(|c| c == f) && src.exists() {
             backup_aside(&src);
             renamed += 1;
         }
@@ -410,9 +484,11 @@ async fn import_listen_counts(
     for (k, v) in map {
         let key = TrackId::from_legacy_path(k).uid();
         let count = v.as_i64().unwrap_or(0);
+        // Accumulate: distinct legacy keys can collapse to one uid (the old
+        // "service:id:cover" form re-keyed when a cover changed).
         sqlx::query!(
             "INSERT INTO listen_counts (track_key, count) VALUES (?1, ?2) \
-             ON CONFLICT(track_key) DO UPDATE SET count = ?2",
+             ON CONFLICT(track_key) DO UPDATE SET count = count + ?2",
             key,
             count
         )
@@ -622,29 +698,6 @@ fn split_legacy_cover(path: &str) -> Option<String> {
     None
 }
 
-/// Source column for a server track: the active server id, else its protocol.
-fn track_source(t: &Track, server_src: &Option<String>) -> String {
-    server_src.clone().unwrap_or_else(|| {
-        t.id
-            .service()
-            .map(|s| service_str(s).to_string())
-            .unwrap_or_else(|| "server".to_string())
-    })
-}
-
-/// Source for a server album, derived from its prefixed id when no active server.
-fn album_source(album_id: &str, server_src: &Option<String>) -> String {
-    if let Some(s) = server_src {
-        return s.clone();
-    }
-    for prefix in ["ytmusic", "jellyfin", "subsonic", "custom"] {
-        if album_id.starts_with(prefix) {
-            return prefix.to_string();
-        }
-    }
-    "server".to_string()
-}
-
 fn service_str(s: config::MusicService) -> &'static str {
     match s {
         config::MusicService::Jellyfin => "Jellyfin",
@@ -695,32 +748,41 @@ fn now_secs() -> i64 {
         .unwrap_or(0)
 }
 
-fn read_value(path: &Path) -> Result<Option<serde_json::Value>, DbError> {
-    if !path.exists() {
-        return Ok(None);
+/// Read + parse one legacy file, tolerating damage: an unreadable or
+/// unparseable file logs a warning and yields `None` (the caller imports its
+/// default and leaves the file un-renamed for repair) instead of aborting the
+/// whole import.
+fn read_json_tolerant<T: serde::de::DeserializeOwned>(path: &Path) -> Option<T> {
+    let s = match std::fs::read_to_string(path) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(error = %e, file = %path.display(), "db: unreadable legacy json — skipping it");
+            return None;
+        }
+    };
+    match serde_json::from_str(&s) {
+        Ok(v) => Some(v),
+        Err(e) => {
+            tracing::warn!(error = %e, file = %path.display(), "db: corrupt legacy json — skipping it (file left in place)");
+            None
+        }
     }
-    let s = std::fs::read_to_string(path).map_err(|e| DbError::Io(e.to_string()))?;
-    Ok(Some(serde_json::from_str(&s)?))
 }
 
-fn read_json<T: serde::de::DeserializeOwned + Default>(path: &Path) -> Result<T, DbError> {
-    if !path.exists() {
-        return Ok(T::default());
-    }
-    let s = std::fs::read_to_string(path).map_err(|e| DbError::Io(e.to_string()))?;
-    Ok(serde_json::from_str(&s)?)
-}
-
-/// Rename `X.json` → `X.json.bak`, suffixing with the current unix time if a
-/// `.bak` already exists (never overwrite, never delete). Best-effort.
+/// Rename `X.json` → `X.json.bak`. If a `.bak` already exists, the OLD one is
+/// aged to `.bak.<unix>` so the plain `.bak` is always the freshest copy —
+/// `legacy_source` only ever reads the plain `.bak`. Never deletes. Best-effort.
 fn backup_aside(src: &Path) {
     let mut dst = src.as_os_str().to_os_string();
     dst.push(".bak");
-    let mut dst = std::path::PathBuf::from(dst);
+    let dst = std::path::PathBuf::from(dst);
     if dst.exists() {
-        let mut alt = src.as_os_str().to_os_string();
-        alt.push(format!(".bak.{}", now_secs()));
-        dst = std::path::PathBuf::from(alt);
+        let mut aged = dst.as_os_str().to_os_string();
+        aged.push(format!(".{}", now_secs()));
+        if let Err(e) = std::fs::rename(&dst, std::path::PathBuf::from(aged)) {
+            tracing::warn!(error = %e, "db: could not age old .bak aside");
+            return;
+        }
     }
     if let Err(e) = std::fs::rename(src, &dst) {
         tracing::warn!(error = %e, src = %src.display(), "db: could not back up legacy json");
@@ -839,7 +901,6 @@ struct LegacyJellyfinPlaylist {
 struct LegacyFolder {
     id: String,
     #[serde(default)]
-    #[allow(dead_code)]
     name: String,
     #[serde(default)]
     playlist_ids: Vec<String>,

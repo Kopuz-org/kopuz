@@ -266,3 +266,62 @@ async fn smoke_real() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[tokio::test]
+async fn corrupt_file_skipped_rest_imports_and_finalize_leaves_it() {
+    let dir = unique_dir("corrupt");
+
+    // Truncated queue (the power-loss case) + valid favorites + valid library.
+    std::fs::write(dir.join("queue_state.json"), r#"{"queue": [{"path": "/m"#).unwrap();
+    std::fs::write(
+        dir.join("favorites.json"),
+        r#"{ "local_favorites": ["/music/a.flac"] }"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.join("library.json"),
+        r#"{ "tracks": [
+            { "path": "/music/a.flac", "album_id": "alb", "title": "A", "artist": "X",
+              "album": "L", "duration": 1, "khz": 1, "bitrate": 1, "artists": ["X"] }
+        ] }"#,
+    )
+    .unwrap();
+
+    let db_path = dir.join("kopuz.db");
+    let db = db::init(&db_path).await.unwrap();
+    let report = db.import_legacy_json(&dir).await.unwrap();
+    assert!(report.ran, "a corrupt file must not abort the import");
+    assert_eq!(report.tracks, 1);
+    assert_eq!(report.favorites, 1);
+
+    // Finalize renames only what was consumed; the corrupt file stays put.
+    let renamed = db.finalize_migration(&dir).await.unwrap();
+    assert_eq!(renamed, 2);
+    assert!(dir.join("library.json.bak").exists());
+    assert!(dir.join("favorites.json.bak").exists());
+    assert!(
+        dir.join("queue_state.json").exists(),
+        "corrupt file left in place for repair"
+    );
+    assert!(!dir.join("queue_state.json.bak").exists());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[tokio::test]
+async fn finalize_is_inert_when_no_import_ran() {
+    let dir = unique_dir("noimport");
+    std::fs::write(dir.join("config.json"), r#"{ "theme": "dark" }"#).unwrap();
+
+    let db_path = dir.join("kopuz.db");
+    let db = db::init(&db_path).await.unwrap();
+    // Simulate "import failed, runtime wrote data anyway": no import, but the
+    // DB becomes non-empty.
+    db.save_config(&config::AppConfig::default()).await.unwrap();
+
+    let renamed = db.finalize_migration(&dir).await.unwrap();
+    assert_eq!(renamed, 0, "finalize must not rename files no import consumed");
+    assert!(dir.join("config.json").exists());
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

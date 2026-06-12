@@ -49,9 +49,9 @@ fn filter_clauses(filter: &TrackFilter) -> (String, Vec<String>) {
     if !filter.search.trim().is_empty() {
         let n = binds.len() + 2;
         sql.push_str(&format!(
-            " AND (title LIKE ?{n} OR artist LIKE ?{n} OR album LIKE ?{n})"
+            " AND (title LIKE ?{n} ESCAPE '\\' OR artist LIKE ?{n} ESCAPE '\\' OR album LIKE ?{n} ESCAPE '\\')"
         ));
-        binds.push(format!("%{}%", filter.search.trim()));
+        binds.push(format!("%{}%", escape_like(filter.search.trim())));
     }
     (sql, binds)
 }
@@ -145,13 +145,14 @@ pub async fn genre_tracks(
     Ok(rows.into_iter().map(Into::into).collect())
 }
 
+fn escape_like(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+}
+
 pub async fn folder_tracks(pool: &SqlitePool, prefix: &str) -> Result<Vec<Track>, DbError> {
     // Local track_key IS the path. Escape LIKE metachars so a folder named
     // "100%" doesn't widen the match.
-    let escaped = prefix
-        .replace('\\', "\\\\")
-        .replace('%', "\\%")
-        .replace('_', "\\_");
+    let escaped = escape_like(prefix);
     let sql = format!(
         "SELECT {TRACK_COLUMNS} FROM tracks WHERE source = 'local' \
          AND track_key LIKE ?1 ESCAPE '\\' ORDER BY track_key"
@@ -258,12 +259,13 @@ pub async fn tracks_by_keys(
         .bind(keys_json)
         .fetch_all(pool)
         .await?;
-    let mut by_key: std::collections::HashMap<String, Track> = rows
+    let by_key: std::collections::HashMap<String, Track> = rows
         .into_iter()
         .map(Into::into)
         .map(|t: Track| (t.id.key().into_owned(), t))
         .collect();
-    Ok(keys.iter().filter_map(|k| by_key.remove(k)).collect())
+    // get(), not remove(): a playlist can hold the same track twice.
+    Ok(keys.iter().filter_map(|k| by_key.get(k).cloned()).collect())
 }
 
 pub async fn artists(pool: &SqlitePool, source: &Source) -> Result<Vec<(String, u32)>, DbError> {

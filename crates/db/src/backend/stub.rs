@@ -256,9 +256,6 @@ impl Storage for Stub {
         Ok(())
     }
 
-    async fn prune_local_tracks(&self, _root: &str, _keep: &[String]) -> Result<u64, DbError> {
-        Ok(0)
-    }
 
     async fn set_favorite(&self, _server_id: &str, _ref_: &str, _on: bool) -> Result<(), DbError> {
         Ok(())

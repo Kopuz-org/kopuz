@@ -221,39 +221,6 @@ pub async fn replace_favorites_clean(
     Ok(())
 }
 
-pub async fn prune_local_tracks(
-    pool: &SqlitePool,
-    root: &str,
-    keep: &[String],
-) -> Result<u64, DbError> {
-    let keep_json = serde_json::to_string(keep)?;
-    let like = format!("{root}%");
-    let res = sqlx::query!(
-        "DELETE FROM tracks WHERE source = 'local' AND path LIKE ?1 \
-         AND track_key NOT IN (SELECT value FROM json_each(?2))",
-        like,
-        keep_json
-    )
-    .execute(pool)
-    .await?;
-    Ok(res.rows_affected())
-}
-
-async fn prune_full(pool: &SqlitePool, table_key: &str, source: &str, keep: &[String]) -> Result<(), DbError> {
-    let keep_json = serde_json::to_string(keep)?;
-    let col = if table_key == "albums" { "source_album_id" } else { "track_key" };
-    let table = if table_key == "albums" { "albums" } else { "tracks" };
-    let sql = format!(
-        "DELETE FROM {table} WHERE source = ?1 AND {col} NOT IN (SELECT value FROM json_each(?2))"
-    );
-    sqlx::query(&sql)
-        .bind(source)
-        .bind(keep_json)
-        .execute(pool)
-        .await?;
-    Ok(())
-}
-
 #[tracing::instrument(skip_all, fields(count = keys.len(), source = %source.as_str()))]
 pub async fn delete_tracks(
     pool: &SqlitePool,
@@ -277,7 +244,8 @@ pub async fn delete_tracks(
 }
 
 /// Drop a source's tracks/albums not present in the keep-sets (post-sync
-/// reconcile — the replacement for clear-and-repopulate).
+/// reconcile — the replacement for clear-and-repopulate). One transaction, so
+/// a failure can't leave tracks pruned but their albums behind.
 #[tracing::instrument(skip_all, fields(source = %source.as_str()))]
 pub async fn prune_source(
     pool: &SqlitePool,
@@ -285,8 +253,27 @@ pub async fn prune_source(
     keep_track_keys: &[String],
     keep_album_ids: &[String],
 ) -> Result<(), DbError> {
-    prune_full(pool, "tracks", source.as_str(), keep_track_keys).await?;
-    prune_full(pool, "albums", source.as_str(), keep_album_ids).await?;
+    let src = source.as_str();
+    let keep_tracks = serde_json::to_string(keep_track_keys)?;
+    let keep_albums = serde_json::to_string(keep_album_ids)?;
+    let mut tx = pool.begin().await?;
+    sqlx::query!(
+        "DELETE FROM tracks WHERE source = ?1 \
+         AND track_key NOT IN (SELECT value FROM json_each(?2))",
+        src,
+        keep_tracks
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query!(
+        "DELETE FROM albums WHERE source = ?1 \
+         AND source_album_id NOT IN (SELECT value FROM json_each(?2))",
+        src,
+        keep_albums
+    )
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
     Ok(())
 }
 
@@ -506,8 +493,11 @@ pub async fn set_offline_track(
     let key = format!("$.offline_tracks.\"{}\"", id.replace('"', ""));
     match path {
         Some(p) => {
+            // Upsert so a download finishing before the first config save
+            // (fresh DB, no row 1 yet) isn't silently dropped.
             sqlx::query!(
-                "UPDATE app_config SET json = json_set(json, ?1, ?2) WHERE id = 1",
+                "INSERT INTO app_config (id, json) VALUES (1, json_set('{}', ?1, ?2)) \
+                 ON CONFLICT(id) DO UPDATE SET json = json_set(json, ?1, ?2)",
                 key,
                 p
             )

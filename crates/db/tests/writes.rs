@@ -70,11 +70,10 @@ async fn upsert_then_prune() {
     assert_eq!(got.artists, vec!["Artist".to_string(), "Feat".to_string()]);
     assert!(matches!(got.id, TrackId::Local(_)));
 
-    // Prune the /music root keeping only "a.flac" → "b.flac" goes, "c.flac"
-    // (a different root) stays.
-    let keep = vec!["/music/a.flac".to_string()];
-    let removed = db.prune_local_tracks("/music", &keep).await.unwrap();
-    assert_eq!(removed, 1);
+    // Prune the local source keeping "a.flac" + "c.flac" → "b.flac" goes (the
+    // scan-reconcile step: anything not in the last scan's keep-set).
+    let keep = vec!["/music/a.flac".to_string(), "/other/c.flac".to_string()];
+    db.prune_source(&Source::Local, &keep, &[]).await.unwrap();
     assert_eq!(db.tracks_count(&filter).await.unwrap(), 2);
     let remaining: Vec<String> = db
         .tracks_page(&filter, Page { offset: 0, limit: 10 })

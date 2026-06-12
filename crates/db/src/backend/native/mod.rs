@@ -358,10 +358,6 @@ impl Storage for Native {
         writes::upsert_albums(&self.pool(), source, albums).await
     }
 
-    async fn prune_local_tracks(&self, root: &str, keep: &[String]) -> Result<u64, DbError> {
-        writes::prune_local_tracks(&self.pool(), root, keep).await
-    }
-
     async fn set_favorite(&self, server_id: &str, ref_: &str, on: bool) -> Result<(), DbError> {
         writes::set_favorite(&self.pool(), server_id, ref_, on).await
     }
