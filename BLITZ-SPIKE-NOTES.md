@@ -212,3 +212,13 @@ live in kopuz. No kopuz-side workarounds for engine bugs anymore.
     browser's UA sheet has `button { text-align: center }`; blitz's
     default.css didn't. One line + a centering test (probe = inline-block
     embedded box position; plain inline spans get no box assigned).
+
+## Upstreamed (2026-06-13)
+PRs: blitz#452 (comment classification), blitz#453 (display:contents,
+draft/stacked), blitz#454 (UA button centering), taffy#964 (block available
+space — taffy's full suite incl. 4409 fixtures green; carries the
+AvailableSpace "indefinite vs max-content constraint" design question).
+Issues: blitz#455 (group-hover invalidation), #456 (range input), #457
+(::before re-resolution), #458 (paint order), #459 (ICU ja/cjdict),
+vello#1707 (vello_hybrid 0-alpha panic); impact comment on blitz#252
+(hover media). Forks: UMCEKO/blitz, UMCEKO/taffy.
