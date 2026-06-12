@@ -386,6 +386,7 @@ back_behavior_always_prev = ALWAYS PREV
 metadata = Metadata
 auto_fetch_covers = Auto-fetch album covers
 prefer_local_lyrics = Prefer local lyrics (.lrc / embedded, no online fallback)
+enable_musixmatch_lyrics = Use Musixmatch lyrics fallback
 cover_fetch_strategy = Cover fetch strategy
 musicbrainz_first = MusicBrainz first
 lastfm_first = Last.fm first

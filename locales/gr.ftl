@@ -381,6 +381,7 @@ artist_photo = Φωτογραφία καλλιτέχνη
 album_cover = Εξώφυλλο άλμπουμ
 auto_fetch_covers = Αυτόματη λήψη εξωφύλλων άλμπουμ
 prefer_local_lyrics = Προτίμηση τοπικών στίχων (.lrc / ενσωματωμένοι, χωρίς διαδικτυακή εναλλακτική)
+enable_musixmatch_lyrics = Χρήση του Musixmatch ως εφεδρική πηγή στίχων
 cover_fetch_strategy = Στρατηγική λήψης εξωφύλλων
 musicbrainz_first = MusicBrainz πρώτα
 lastfm_first = Last.fm πρώτα

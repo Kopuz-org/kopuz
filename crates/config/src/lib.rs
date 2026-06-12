@@ -612,6 +612,8 @@ pub struct AppConfig {
     pub radio_registries: Vec<RegistryEntry>,
     #[serde(default)]
     pub prefer_local_lyrics: bool,
+    #[serde(default)]
+    pub enable_musixmatch_lyrics: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -894,6 +896,7 @@ impl Default for AppConfig {
             cover_fetch_strategy: FetchStrategy::default(),
             radio_registries: default_radio_registries(),
             prefer_local_lyrics: false,
+            enable_musixmatch_lyrics: false,
         }
     }
 }

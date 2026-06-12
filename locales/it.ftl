@@ -379,6 +379,7 @@ back_behavior_always_prev = SEMPRE PRECEDENTE
 metadata = Metadati
 auto_fetch_covers = Cerca in automatico copertine album
 prefer_local_lyrics = Preferisci testi locali (.lrc / incorporati, nessun ripiego online)
+enable_musixmatch_lyrics = Usa Musixmatch come fonte testi di riserva
 cover_fetch_strategy = Strategia di ricerca delle copertine 
 musicbrainz_first = MusicBrainz per primo 
 lastfm_first = Last.fm per primo
