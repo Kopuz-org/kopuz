@@ -1,10 +1,11 @@
-//! One client trait over Jellyfin / Subsonic / YouTube Music (issue #347,
-//! step 8). The per-service quirks (YT cookie auth + paged likes, Subsonic
-//! salted calls, Jellyfin item shapes) live inside the impls; the reconciler,
-//! auth gate, and `server_ops` dispatch through `Box<dyn MediaServerClient>`
-//! instead of scattering `match service` blocks.
+//! One client over Jellyfin / Subsonic / YouTube Music (issue #347, step 8).
+//! The per-service quirks (YT cookie auth + paged likes, Subsonic salted calls,
+//! Jellyfin item shapes) live inside the variants; the reconciler, auth gate,
+//! and `server_ops` dispatch through `MediaServerClient` instead of scattering
+//! `match service` blocks. An enum (not a `dyn` trait) so the async methods
+//! stay native — `async fn` in traits isn't `dyn`-compatible — and dispatch is
+//! static, no vtable or heap box.
 
-use async_trait::async_trait;
 use config::MusicService;
 
 use crate::jellyfin::JellyfinClient;
@@ -21,191 +22,136 @@ pub enum AuthOutcome {
     Unreachable,
 }
 
-#[async_trait]
-pub trait MediaServerClient: Send + Sync {
-    /// Check the stored creds against the server.
-    async fn validate(&self) -> AuthOutcome;
-
-    /// All favorited item ids on the remote (YT pages internally).
-    async fn fetch_favorites(&self) -> Result<Vec<String>, String>;
-
-    /// Favorite/unfavorite one item.
-    async fn set_favorite(&self, item_id: &str, on: bool) -> Result<(), String>;
-
-    /// Add items to a playlist; returns the ids that were added successfully.
-    async fn add_to_playlist(&self, playlist_id: &str, item_ids: &[String]) -> Vec<String>;
-
-    /// Create a playlist seeded with items, returning its new id.
-    async fn create_playlist(&self, name: &str, item_ids: &[String]) -> Result<String, String>;
+/// A resolved server client. The per-service impls back each variant.
+pub enum MediaServerClient {
+    Jellyfin(JellyfinClient),
+    Subsonic(SubsonicClient),
+    YtMusic(YouTubeMusicClient),
 }
 
-/// Resolve the trait impl for a connection — the ONE place service dispatch
-/// happens.
-pub fn client_for(conn: &ServerConn) -> Box<dyn MediaServerClient> {
+/// Resolve the client for a connection — the ONE place service dispatch happens.
+pub fn client_for(conn: &ServerConn) -> MediaServerClient {
     match conn.service {
-        MusicService::Jellyfin => Box::new(JellyfinMsc {
-            inner: JellyfinClient::new(
-                &conn.url,
-                Some(&conn.token),
-                &conn.device_id,
-                Some(&conn.user_id),
-            ),
-        }),
-        MusicService::Subsonic | MusicService::Custom => Box::new(SubsonicMsc {
-            inner: SubsonicClient::new(&conn.url, &conn.user_id, &conn.token),
-        }),
-        MusicService::YtMusic => Box::new(YtMsc {
-            inner: YouTubeMusicClient::with_cookies(conn.token.clone()),
-        }),
+        MusicService::Jellyfin => MediaServerClient::Jellyfin(JellyfinClient::new(
+            &conn.url,
+            Some(&conn.token),
+            &conn.device_id,
+            Some(&conn.user_id),
+        )),
+        MusicService::Subsonic | MusicService::Custom => {
+            MediaServerClient::Subsonic(SubsonicClient::new(&conn.url, &conn.user_id, &conn.token))
+        }
+        MusicService::YtMusic => {
+            MediaServerClient::YtMusic(YouTubeMusicClient::with_cookies(conn.token.clone()))
+        }
     }
 }
 
-struct JellyfinMsc {
-    inner: JellyfinClient,
-}
-
-#[async_trait]
-impl MediaServerClient for JellyfinMsc {
-    async fn validate(&self) -> AuthOutcome {
-        match self.inner.ping().await {
-            Ok(()) => AuthOutcome::Valid,
+impl MediaServerClient {
+    /// Check the stored creds against the server.
+    pub async fn validate(&self) -> AuthOutcome {
+        match self {
             // ping surfaces the HTTP status in its error string; only a real
             // auth rejection means the token is dead.
-            Err(e) if e.contains("401") || e.contains("403") => AuthOutcome::Expired,
-            Err(_) => AuthOutcome::Unreachable,
-        }
-    }
-
-    async fn fetch_favorites(&self) -> Result<Vec<String>, String> {
-        Ok(self
-            .inner
-            .get_favorite_items()
-            .await?
-            .into_iter()
-            .map(|i| i.id)
-            .collect())
-    }
-
-    async fn set_favorite(&self, item_id: &str, on: bool) -> Result<(), String> {
-        if on {
-            self.inner.mark_favorite(item_id).await
-        } else {
-            self.inner.unmark_favorite(item_id).await
-        }
-    }
-
-    async fn add_to_playlist(&self, playlist_id: &str, item_ids: &[String]) -> Vec<String> {
-        let mut added = Vec::new();
-        for id in item_ids {
-            if self.inner.add_to_playlist(playlist_id, id).await.is_ok() {
-                added.push(id.clone());
-            }
-        }
-        added
-    }
-
-    async fn create_playlist(&self, name: &str, item_ids: &[String]) -> Result<String, String> {
-        let refs: Vec<&str> = item_ids.iter().map(String::as_str).collect();
-        self.inner.create_playlist(name, &refs).await
-    }
-}
-
-struct SubsonicMsc {
-    inner: SubsonicClient,
-}
-
-#[async_trait]
-impl MediaServerClient for SubsonicMsc {
-    async fn validate(&self) -> AuthOutcome {
-        match self.inner.ping().await {
-            Ok(()) => AuthOutcome::Valid,
+            Self::Jellyfin(c) => match c.ping().await {
+                Ok(()) => AuthOutcome::Valid,
+                Err(e) if e.contains("401") || e.contains("403") => AuthOutcome::Expired,
+                Err(_) => AuthOutcome::Unreachable,
+            },
             // Subsonic reports bad creds as error code 40 ("Wrong username or
             // password"); anything else is treated as a transient failure.
-            Err(e)
-                if e.contains("Wrong username")
-                    || e.contains("not authorized")
-                    || e.contains("code 40") =>
-            {
-                AuthOutcome::Expired
+            Self::Subsonic(c) => match c.ping().await {
+                Ok(()) => AuthOutcome::Valid,
+                Err(e)
+                    if e.contains("Wrong username")
+                        || e.contains("not authorized")
+                        || e.contains("code 40") =>
+                {
+                    AuthOutcome::Expired
+                }
+                Err(_) => AuthOutcome::Unreachable,
+            },
+            Self::YtMusic(c) => match c.validate_cookies().await {
+                Ok(()) => AuthOutcome::Valid,
+                Err(e) if e.contains("cookies expired") || e.contains("signed out") => {
+                    AuthOutcome::Expired
+                }
+                Err(_) => AuthOutcome::Unreachable,
+            },
+        }
+    }
+
+    /// All favorited item ids on the remote (YT pages internally).
+    pub async fn fetch_favorites(&self) -> Result<Vec<String>, String> {
+        match self {
+            Self::Jellyfin(c) => Ok(c
+                .get_favorite_items()
+                .await?
+                .into_iter()
+                .map(|i| i.id)
+                .collect()),
+            Self::Subsonic(c) => c.get_starred_song_ids().await,
+            Self::YtMusic(c) => {
+                let mut ids = Vec::new();
+                c.stream_liked_songs(|page| {
+                    ids.extend(page.into_iter().map(|t| t.id.key().into_owned()));
+                })
+                .await?;
+                Ok(ids)
             }
-            Err(_) => AuthOutcome::Unreachable,
         }
     }
 
-    async fn fetch_favorites(&self) -> Result<Vec<String>, String> {
-        self.inner.get_starred_song_ids().await
-    }
-
-    async fn set_favorite(&self, item_id: &str, on: bool) -> Result<(), String> {
-        if on {
-            self.inner.star(item_id).await
-        } else {
-            self.inner.unstar(item_id).await
+    /// Favorite/unfavorite one item.
+    pub async fn set_favorite(&self, item_id: &str, on: bool) -> Result<(), String> {
+        match self {
+            Self::Jellyfin(c) => {
+                if on {
+                    c.mark_favorite(item_id).await
+                } else {
+                    c.unmark_favorite(item_id).await
+                }
+            }
+            Self::Subsonic(c) => {
+                if on {
+                    c.star(item_id).await
+                } else {
+                    c.unstar(item_id).await
+                }
+            }
+            Self::YtMusic(c) => {
+                if on {
+                    c.like_video(item_id).await
+                } else {
+                    c.unlike_video(item_id).await
+                }
+            }
         }
     }
 
-    async fn add_to_playlist(&self, playlist_id: &str, item_ids: &[String]) -> Vec<String> {
+    /// Add items to a playlist; returns the ids that were added successfully.
+    pub async fn add_to_playlist(&self, playlist_id: &str, item_ids: &[String]) -> Vec<String> {
         let mut added = Vec::new();
         for id in item_ids {
-            if self.inner.add_to_playlist(playlist_id, id).await.is_ok() {
+            let ok = match self {
+                Self::Jellyfin(c) => c.add_to_playlist(playlist_id, id).await.is_ok(),
+                Self::Subsonic(c) => c.add_to_playlist(playlist_id, id).await.is_ok(),
+                Self::YtMusic(c) => c.add_to_playlist(playlist_id, id).await.is_ok(),
+            };
+            if ok {
                 added.push(id.clone());
             }
         }
         added
     }
 
-    async fn create_playlist(&self, name: &str, item_ids: &[String]) -> Result<String, String> {
+    /// Create a playlist seeded with items, returning its new id.
+    pub async fn create_playlist(&self, name: &str, item_ids: &[String]) -> Result<String, String> {
         let refs: Vec<&str> = item_ids.iter().map(String::as_str).collect();
-        self.inner.create_playlist(name, &refs).await
-    }
-}
-
-struct YtMsc {
-    inner: YouTubeMusicClient,
-}
-
-#[async_trait]
-impl MediaServerClient for YtMsc {
-    async fn validate(&self) -> AuthOutcome {
-        match self.inner.validate_cookies().await {
-            Ok(()) => AuthOutcome::Valid,
-            Err(e) if e.contains("cookies expired") || e.contains("signed out") => {
-                AuthOutcome::Expired
-            }
-            Err(_) => AuthOutcome::Unreachable,
+        match self {
+            Self::Jellyfin(c) => c.create_playlist(name, &refs).await,
+            Self::Subsonic(c) => c.create_playlist(name, &refs).await,
+            Self::YtMusic(c) => c.create_playlist(name, "", &refs).await,
         }
-    }
-
-    async fn fetch_favorites(&self) -> Result<Vec<String>, String> {
-        let mut ids = Vec::new();
-        self.inner
-            .stream_liked_songs(|page| {
-                ids.extend(page.into_iter().map(|t| t.id.key().into_owned()));
-            })
-            .await?;
-        Ok(ids)
-    }
-
-    async fn set_favorite(&self, item_id: &str, on: bool) -> Result<(), String> {
-        if on {
-            self.inner.like_video(item_id).await
-        } else {
-            self.inner.unlike_video(item_id).await
-        }
-    }
-
-    async fn add_to_playlist(&self, playlist_id: &str, item_ids: &[String]) -> Vec<String> {
-        let mut added = Vec::new();
-        for id in item_ids {
-            if self.inner.add_to_playlist(playlist_id, id).await.is_ok() {
-                added.push(id.clone());
-            }
-        }
-        added
-    }
-
-    async fn create_playlist(&self, name: &str, item_ids: &[String]) -> Result<String, String> {
-        let refs: Vec<&str> = item_ids.iter().map(String::as_str).collect();
-        self.inner.create_playlist(name, "", &refs).await
     }
 }
