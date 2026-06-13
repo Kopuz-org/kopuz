@@ -334,56 +334,13 @@ pub fn JellyfinArtist(
 
     let name = artist_name.read().clone();
 
-    // Window the artist tiles: the grid is auto-fill/minmax so the CSS and
-    // the row math share one column definition (breakpoint classes would
-    // desync from the measured container width). 160 = track minimum,
-    // 48 ≈ name block under the round cover, 32 = gap-8.
-    let mut scroll_positions =
-        use_context::<Signal<std::collections::HashMap<kopuz_route::Route, f64>>>();
-    let saved_scroll = scroll_positions
-        .peek()
-        .get(&kopuz_route::Route::Artist)
-        .copied()
-        .unwrap_or(0.0);
-    let scroll_stat = use_signal(move || saved_scroll);
-    let container_height = use_signal(|| 0.0_f64);
-    let container_width = use_signal(|| 0.0_f64);
-    let artists_all = jellyfin_artists();
-    let grid = components::virtual_scroll::use_virtual_grid(
-        *scroll_stat.read(),
-        *container_height.read(),
-        *container_width.read(),
-        artists_all.len(),
-        160.0,
-        48.0,
-        32.0,
-    );
-    let visible_artists: Vec<_> = artists_all
-        .iter()
-        .skip(grid.start_index)
-        .take(grid.items_to_render)
-        .cloned()
-        .collect();
-
     rsx! {
         div {
             class: "flex-1 min-h-0 flex flex-col",
             if name.is_empty() {
-                components::virtual_scroll::VirtualScrollView {
-                    id: "server-artists-scroll".to_string(),
-                    class: "flex-1 overflow-y-auto pb-20".to_string(),
-                    scroll_stat,
-                    container_height,
-                    container_width,
-                    item_height: 100.0,
-                    saved_scroll,
-                    top_pad: grid.top_pad,
-                    bottom_pad: grid.bottom_pad,
-                    onscroll: move |scroll| {
-                        scroll_positions.write().insert(kopuz_route::Route::Artist, scroll);
-                    },
-                    div { class: "grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-8",
-                        for (artist, cover_path) in visible_artists {
+                div { class: "flex-1 min-h-0 overflow-y-auto pb-20",
+                    div { class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-8",
+                        for (artist, cover_path) in jellyfin_artists() {
                         {
                             let cover_url = if let Some(server) = &config.read().server {
                                 if let Some(path) = cover_path {

@@ -59,102 +59,6 @@ pub fn use_virtual_scroll(
     }
 }
 
-#[derive(Clone, PartialEq, Debug)]
-pub struct VirtualGridInfo {
-    pub start_index: usize,
-    pub items_to_render: usize,
-    pub top_pad: f64,
-    pub bottom_pad: f64,
-    pub columns: usize,
-}
-
-/// Windowing math for a `repeat(auto-fill, minmax(min_cell_width, 1fr))` card
-/// grid whose cover is `aspect-square` — card height tracks column width, so
-/// the row height is derived from the measured container width instead of
-/// being a constant. `cell_extra_height` = the non-cover part of a card
-/// (padding + title/subtitle block); `gap` applies between rows and columns.
-pub fn use_virtual_grid(
-    scroll_top: f64,
-    container_height: f64,
-    container_width: f64,
-    total_items: usize,
-    min_cell_width: f64,
-    cell_extra_height: f64,
-    gap: f64,
-) -> VirtualGridInfo {
-    let width = if container_width <= 0.0 || container_width.is_nan() {
-        1200.0
-    } else {
-        container_width
-    };
-    let columns = (((width + gap) / (min_cell_width + gap)).floor() as usize).max(1);
-    use_virtual_grid_cols(
-        scroll_top,
-        container_height,
-        width,
-        total_items,
-        columns,
-        cell_extra_height,
-        gap,
-    )
-}
-
-/// [`use_virtual_grid`] with an explicit column count — for breakpoint grids
-/// (`grid-cols-N`) where the caller derives N from the width.
-pub fn use_virtual_grid_cols(
-    scroll_top: f64,
-    container_height: f64,
-    container_width: f64,
-    total_items: usize,
-    columns: usize,
-    cell_extra_height: f64,
-    gap: f64,
-) -> VirtualGridInfo {
-    let width = if container_width <= 0.0 || container_width.is_nan() {
-        1200.0
-    } else {
-        container_width
-    };
-    let columns = columns.max(1);
-    let cell_width = (width - gap * (columns as f64 - 1.0)) / columns as f64;
-    let row_height = cell_width + cell_extra_height + gap;
-
-    if total_items == 0 {
-        return VirtualGridInfo {
-            start_index: 0,
-            items_to_render: 0,
-            top_pad: 0.0,
-            bottom_pad: 0.0,
-            columns,
-        };
-    }
-
-    let total_rows = total_items.div_ceil(columns);
-    let viewport_rows = if container_height <= 0.0 || container_height.is_nan() {
-        6
-    } else {
-        (container_height / row_height).ceil() as usize
-    };
-    let buffer_rows = 2;
-    let start_row = ((scroll_top / row_height).floor() as usize)
-        .saturating_sub(buffer_rows)
-        .min(total_rows - 1);
-    let end_row = (start_row + viewport_rows + 2 * buffer_rows).min(total_rows);
-
-    let start_index = start_row * columns;
-    let items_to_render = (end_row * columns).min(total_items) - start_index;
-    let top_pad = start_row as f64 * row_height;
-    let bottom_pad = ((total_rows - end_row) as f64 * row_height).max(0.0);
-
-    VirtualGridInfo {
-        start_index,
-        items_to_render,
-        top_pad,
-        bottom_pad,
-        columns,
-    }
-}
-
 #[component]
 pub fn VirtualScrollView(
     id: String,
@@ -170,10 +74,6 @@ pub fn VirtualScrollView(
     #[props(default)] on_mouse_leave: Option<EventHandler<MouseEvent>>,
     #[props(default)] on_mouse_move: Option<EventHandler<MouseEvent>>,
     #[props(default)] bottom_content: Option<Element>,
-    /// Grids window by row, so they need the container width to derive the
-    /// column count (see [`use_virtual_grid`]).
-    #[props(default)]
-    container_width: Option<Signal<f64>>,
 ) -> Element {
     // The mount-time restore below can race the async row count: at mount the
     // list height is ~0, so the browser clamps scrollTop to 0, and once the
@@ -202,9 +102,6 @@ pub fn VirtualScrollView(
                 spawn(async move {
                     if let Ok(window) = event.get_client_rect().await {
                         container_height.set(window.height());
-                        if let Some(mut w) = container_width {
-                            w.set(window.width());
-                        }
                     }
                 });
                 if saved_scroll > 0.0 {
