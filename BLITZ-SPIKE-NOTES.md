@@ -245,3 +245,24 @@ vello#1707 (vello_hybrid 0-alpha panic); impact comment on blitz#252
     ::-webkit-scrollbar theming); under blitz shelves now show the engine
     overlay thumb on hover/scroll. Follow-ups upstream: thumb dragging,
     css-scrollbars-1 styling, fade animation.
+
+## Round 21 — scrollbars end-to-end (2026-06-13, late)
+- Dragging + hover/active thumb states: blitz f16eb04, PR #462 (stacked on
+  #461). Shared Node::scrollbar_thumb geometry between paint and hit-test;
+  DragMode::ScrollbarDrag; doc-tracked hovered_scrollbar.
+- css-scrollbars-1 (scrollbar-color/scrollbar-width) implemented in blitz
+  (efc168f, LOCAL — depends on a 2-line stylo patch removing the
+  engine="gecko" gate in longhands.toml: ~/projects/stylo-fix, wired via
+  [patch.crates-io] in blitz AND kopuz; upstream target = servo/stylo).
+  Behavior: author-set scrollbar-color => persistent bars; auto => overlay
+  hide-at-rest. WPT: 0 regressions.
+- Kopuz standardization (6e8ff71 + follow-ups): webkit-only CSS removed
+  project-wide; scrollbar theming = standard scrollbar-color;
+  .scrollbar-hide now real (scrollbar-width:none); CL shelves show bars.
+- DECISION (option A): webview divergence ACCEPTED — WebKitGTK renders
+  scrollbar-color per GTK policy (autohide overlay, grows on hover);
+  persistent classic bars there are only reachable via webkit pseudos
+  (banned) or GTK_OVERLAY_SCROLLING env coercion (tried, reverted as a
+  workaround: 1396aa5/ed7fe00). Blitz is the canonical target renderer
+  and renders the design correctly. Shelf alternative if ever needed:
+  app-level ScrollArea component (pixel-identical everywhere).
