@@ -1230,11 +1230,13 @@ mod tests {
         use super::{SortCriterion, SortDirection, TrackSortField};
 
         // Arrange
-        let mut config = AppConfig::default();
-        config.track_sort = vec![
-            SortCriterion::new(TrackSortField::Artist, SortDirection::Asc),
-            SortCriterion::new(TrackSortField::Year, SortDirection::Desc),
-        ];
+        let config = AppConfig {
+            track_sort: vec![
+                SortCriterion::new(TrackSortField::Artist, SortDirection::Asc),
+                SortCriterion::new(TrackSortField::Year, SortDirection::Desc),
+            ],
+            ..AppConfig::default()
+        };
 
         // Act — serialize then deserialize.
         let json = serde_json::to_string(&config).unwrap();
