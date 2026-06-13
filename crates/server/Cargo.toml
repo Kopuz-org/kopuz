@@ -25,6 +25,7 @@ web-time = { workspace = true }
 tokio = { workspace = true, features = ["fs", "process", "rt", "sync"] }
 reader = { workspace = true }
 db = { workspace = true }
+async-trait = "0.1"
 
 [[example]]
 name = "duration_probe"

@@ -114,14 +114,13 @@ pub async fn remove_from_playlist(
 #[tracing::instrument(name = "yt.playlist_create", skip(cookies, video_ids), fields(title = %title, count = video_ids.len()))]
 pub async fn create_playlist(
     title: &str,
-    description: &str,
     video_ids: &[&str],
     cookies: &str,
 ) -> Result<String, String> {
     let body = json!({
         "context": { "client": ytmusic_context()["client"], "user": { "lockedSafetyMode": false } },
         "title": title,
-        "description": description,
+        "description": "",
         "privacyStatus": "PRIVATE",
         "videoIds": video_ids,
     });

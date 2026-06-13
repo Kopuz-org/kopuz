@@ -137,14 +137,9 @@ impl YouTubeMusicClient {
         mutations::remove_from_playlist(playlist_id, video_id, cookies).await
     }
 
-    pub async fn create_playlist(
-        &self,
-        title: &str,
-        description: &str,
-        video_ids: &[&str],
-    ) -> Result<String, String> {
+    pub async fn create_playlist(&self, title: &str, video_ids: &[&str]) -> Result<String, String> {
         let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
-        mutations::create_playlist(title, description, video_ids, cookies).await
+        mutations::create_playlist(title, video_ids, cookies).await
     }
 
     /// Stream the user's full Liked Music playlist page by page. The
