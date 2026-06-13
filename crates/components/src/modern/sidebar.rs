@@ -1,6 +1,4 @@
 use config::MusicSource;
-#[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
-use dioxus::desktop::use_window;
 use dioxus::prelude::*;
 use kopuz_route::Route;
 
@@ -195,10 +193,7 @@ pub fn SidebarModern(props: SidebarProps) -> Element {
             if cfg!(all(not(target_arch = "wasm32"), target_os = "macos")) {
                 div {
                     class: "h-10 flex-shrink-0",
-                    onmousedown: move |_| {
-                        #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
-                        use_window().drag();
-                    }
+                    onmousedown: move |_| crate::window_chrome::drag(),
                 }
             }
 

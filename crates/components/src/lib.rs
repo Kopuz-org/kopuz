@@ -43,3 +43,4 @@ pub mod titlebar;
 pub mod track_list_view;
 pub mod track_row;
 pub mod virtual_scroll;
+pub mod window_chrome;

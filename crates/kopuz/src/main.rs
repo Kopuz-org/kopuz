@@ -578,10 +578,13 @@ fn main() {
             player::systemint::init();
         }
 
+        const WINDOW_TITLE: &str = "Kopuz";
+        const WINDOW_SIZE: (f64, f64) = (1350.0, 800.0);
+
         let mut window = dioxus::desktop::WindowBuilder::new()
-            .with_title("Kopuz")
+            .with_title(WINDOW_TITLE)
             .with_resizable(true)
-            .with_inner_size(LogicalSize::new(1350.0, 800.0));
+            .with_inner_size(LogicalSize::new(WINDOW_SIZE.0, WINDOW_SIZE.1));
 
         if let Some(icon) = build_window_icon() {
             window = window.with_window_icon(Some(icon));
@@ -808,7 +811,22 @@ fn main() {
 
         if blitz_enabled() {
             tracing::info!("blitz-spike: launching the native (wgpu) renderer");
-            dioxus_native::launch(App);
+            let attrs = dioxus_native::WindowAttributes::default()
+                .with_title(WINDOW_TITLE)
+                .with_decorations(
+                    read_titlebar_mode_from_disk() == config::TitlebarMode::System,
+                )
+                .with_surface_size(dioxus_native::LogicalSize::new(
+                    WINDOW_SIZE.0,
+                    WINDOW_SIZE.1,
+                ));
+            dioxus_native::launch_cfg(
+                App,
+                vec![],
+                vec![Box::new(
+                    dioxus_native::Config::new().with_window_attributes(attrs),
+                )],
+            );
         } else {
             dioxus::LaunchBuilder::desktop()
                 .with_cfg(config)
@@ -1477,11 +1495,7 @@ fn App() -> Element {
     ))]
     use_effect(move || {
         let mode = config.read().titlebar_mode;
-        if blitz_enabled() {
-            return;
-        }
-        let win = dioxus::desktop::use_window();
-        win.set_decorations(mode == config::TitlebarMode::System);
+        components::window_chrome::set_decorations(mode == config::TitlebarMode::System);
     });
 
     #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]

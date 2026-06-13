@@ -104,9 +104,15 @@ lto = "thin"
 codegen-units = 1
 panic = "abort"
 
+# Engine fixes for the native (blitz) renderer, pinned to the exact crate
+# versions blitz depends on so the patches apply. Each branch is on a UMCEKO
+# fork; the upstream PRs are linked from the blitz-spike PR.
+#   taffy: =0.11.0-experimental-cache-fix.3 (the 0.11.0 release dropped APIs
+#          stylo_taffy uses, so the patch must carry that exact prerelease)
+#   stylo / stylo_atoms: 0.18.0 (servo main has drifted — these branches are
+#          the published-0.18.0 tree + the pointer/hover + scrollbar changes)
 [patch.crates-io]
-# Local taffy with the block-layout available-space fix (MinContent ->
-# MaxContent for in-flow children) — see ~/projects/taffy-fix; engine TDD loop.
-taffy = { path = "/home/umceko/projects/taffy-fix" }
-# Local stylo enabling css-scrollbars-1 properties (scrollbar-color/width)
-stylo = { path = "/home/umceko/projects/stylo-fix" }
+taffy = { git = "https://github.com/UMCEKO/taffy", branch = "spike/cache-fix-3" }
+stylo = { git = "https://github.com/UMCEKO/stylo", branch = "spike/style-0.18" }
+stylo_atoms = { git = "https://github.com/UMCEKO/stylo", branch = "spike/atoms-0.18" }
+wgpu_context = { git = "https://github.com/UMCEKO/anyrender", branch = "fix/drop-surface-output-before-reconfigure" }

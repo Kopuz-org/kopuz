@@ -24,13 +24,10 @@ discord-presence = { workspace = true }
 # native renderer at runtime, so one binary can A/B against the webview.
 [target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))'.dependencies]
 dioxus = { workspace = true, features = ["desktop"] }
-# Local blitz checkout (~/projects/blitz, git main line) instead of dioxus's
-# bundled "native" feature: engine fixes show up live in kopuz on rebuild.
-# Default features minus "vello-hybrid" (panics on kopuz's 0-alpha paints —
-# vello_hybrid schedule.rs "reserved for clipping") and minus "incremental"
-# (off while the engine loop stabilizes; exonerated for the blank-page bug,
-# untested in combination with the local engine fixes).
-dioxus-native = { path = "../../../blitz/packages/dioxus-native", default-features = false, features = [
+# Native renderer from the UMCEKO/blitz spike branch (carries the engine
+# fixes filed upstream). Default features minus "vello-hybrid" (panics on
+# kopuz's 0-alpha paints) and minus "incremental".
+dioxus-native = { git = "https://github.com/UMCEKO/blitz", branch = "fix/comment-inline-classification", package = "dioxus-native", default-features = false, features = [
     "accessibility",
     "hot-reload",
     "net",

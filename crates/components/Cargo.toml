@@ -9,6 +9,9 @@ workspace = true
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 dioxus = { workspace = true, features = ["desktop"] }
 directories = { workspace = true }
+# blitz-spike: window-chrome controls under the native renderer (same checkout
+# dioxus-native is path-depped from, so the context types match)
+blitz-traits = { git = "https://github.com/UMCEKO/blitz", branch = "fix/comment-inline-classification" }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true, features = ["web"] }

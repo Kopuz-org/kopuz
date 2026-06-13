@@ -2,12 +2,7 @@
 use config::AppConfig;
 use dioxus::prelude::*;
 
-/// The desktop window handle, or `None` under the blitz/native renderer
-/// (no webview, no DesktopContext) — window chrome no-ops there.
-#[cfg(not(target_arch = "wasm32"))]
-fn desktop_window() -> Option<dioxus::desktop::DesktopContext> {
-    try_consume_context::<dioxus::desktop::DesktopContext>()
-}
+use crate::window_chrome;
 
 #[component]
 pub fn Titlebar() -> Element {
@@ -19,7 +14,7 @@ pub fn Titlebar() -> Element {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let config = use_context::<Signal<AppConfig>>();
-        if config.read().titlebar_mode != config::TitlebarMode::Custom || desktop_window().is_none()
+        if config.read().titlebar_mode != config::TitlebarMode::Custom || !window_chrome::available()
         {
             return rsx! {};
         }
@@ -30,11 +25,7 @@ pub fn Titlebar() -> Element {
         rsx! {
             div {
                 class: "flex items-center h-9 bg-black/50 border-b border-white/5 flex-shrink-0 select-none relative",
-                onmousedown: move |_| {
-                    if let Some(w) = desktop_window() {
-                        w.drag();
-                    }
-                },
+                onmousedown: move |_| window_chrome::drag(),
 
                 div { class: "flex-1" }
 
@@ -53,19 +44,19 @@ pub fn Titlebar() -> Element {
                     button {
                         class: "w-11 h-full flex items-center justify-center text-white/25 hover:text-white/70 hover:bg-white/6 transition-all duration-150",
                         title: "{minimize_text}",
-                        onclick: move |_| if let Some(w) = desktop_window() { w.window.set_minimized(true) },
+                        onclick: move |_| window_chrome::minimize(),
                         i { class: "fa-solid fa-minus text-[10px] leading-none" }
                     }
                     button {
                         class: "w-11 h-full flex items-center justify-center text-white/25 hover:text-white/70 hover:bg-white/6 transition-all duration-150",
                         title: "{maximize_text}",
-                        onclick: move |_| if let Some(w) = desktop_window() { w.toggle_maximized() },
+                        onclick: move |_| window_chrome::toggle_maximized(),
                         i { class: "fa-regular fa-square text-[10px] leading-none" }
                     }
                     button {
                         class: "w-11 h-full flex items-center justify-center text-white/25 hover:text-white hover:bg-red-500/70 transition-all duration-150",
                         title: "{close_text}",
-                        onclick: move |_| if let Some(w) = desktop_window() { w.close() },
+                        onclick: move |_| window_chrome::close(),
                         i { class: "fa-solid fa-xmark text-[10px] leading-none" }
                     }
                 }
