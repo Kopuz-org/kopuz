@@ -2384,19 +2384,7 @@ fn App() -> Element {
                         }
                     }
 
-                    // blitz-spike: display:contents contributes ~zero scrollable
-                    // size in blitz-dom 0.2.4 (bisected: a scroller wrapping a
-                    // contents-div clamps to ~1px), killing scrolling app-wide.
-                    // Under blitz the wrapper is a real positioned flex item, so
-                    // pages' `absolute inset-0` roots anchor to it and inner
-                    // scrollers get honest heights.
-                    // blitz: no percentages, no flex-1 — both failed to give
-                    // this wrapper a height in Taffy's block context (pages
-                    // anchored to a collapsed box and vanished). absolute
-                    // inset-0 against the (relative) main scroll area is exact
-                    // and proven in the repro; the wrapper carries its own
-                    // overflow so normal-flow pages (playlists) still scroll.
-                    div { class: if cfg!(target_os = "android") { "relative flex-1 min-h-0 overflow-y-auto" } else if blitz_enabled() { "absolute inset-0 overflow-y-auto flex flex-col" } else { "contents" },
+                    div { class: if cfg!(target_os = "android") { "relative flex-1 min-h-0 overflow-y-auto" } else { "contents" },
                     match *current_route.read() {
                         Route::Home => rsx! {
                             pages::home::Home {
