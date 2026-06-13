@@ -1,15 +1,14 @@
 /* App-wide styling */
 
-/* Themed scrollbars — standard css-scrollbars-1, identical in both
-   renderers (engines render their overlay scrollbars with these colors).
-   Inherited from the root; uses CSS vars so themes apply automatically. */
+/* Themed scrollbars — standard css-scrollbars-1; uses CSS vars so themes
+   apply automatically. Persistent (non-autohiding) bars need one platform
+   knob alongside this: GTK_OVERLAY_SCROLLING=0 (set in main.rs), which
+   switches GTK/WebKitGTK from overlay to classic scrollbars. Blitz shows
+   author-styled scrollbars persistently by itself. */
 html {
     scrollbar-color: var(--color-slate-500, #64748b) transparent;
 }
 
-/* Referenced throughout the markup; previously undefined (a Tailwind
-   plugin class that was never installed), so the webview showed its
-   scrollbars on these elements by accident. */
 .scrollbar-hide {
     scrollbar-width: none;
 }
