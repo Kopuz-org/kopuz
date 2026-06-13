@@ -811,11 +811,16 @@ fn main() {
 
         if blitz_enabled() {
             tracing::info!("blitz-spike: launching the native (wgpu) renderer");
+            // read_titlebar_mode_from_disk is only compiled for linux/windows
+            // (the platforms with a runtime-switchable custom titlebar); other
+            // desktop targets keep system decorations.
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
+            let decorations = read_titlebar_mode_from_disk() == config::TitlebarMode::System;
+            #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+            let decorations = true;
             let attrs = dioxus_native::WindowAttributes::default()
                 .with_title(WINDOW_TITLE)
-                .with_decorations(
-                    read_titlebar_mode_from_disk() == config::TitlebarMode::System,
-                )
+                .with_decorations(decorations)
                 .with_surface_size(dioxus_native::LogicalSize::new(
                     WINDOW_SIZE.0,
                     WINDOW_SIZE.1,
