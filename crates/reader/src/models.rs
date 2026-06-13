@@ -250,7 +250,11 @@ impl PlaylistStore {
         let data = fs::read_to_string(path)?;
         let store: Self = serde_json::from_str(&data)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-        tracing::debug!(bytes = data.len(), playlists = store.playlists.len(), "playlists loaded");
+        tracing::debug!(
+            bytes = data.len(),
+            playlists = store.playlists.len(),
+            "playlists loaded"
+        );
         Ok(store)
     }
 

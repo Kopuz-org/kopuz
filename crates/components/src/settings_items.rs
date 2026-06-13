@@ -3,12 +3,12 @@ use config::{
     MusicServer, SavedServer,
 };
 use dioxus::prelude::*;
-use tracing::Instrument;
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use rfd::AsyncFileDialog;
 use scrobble::lastfm;
 use scrobble::librefm;
+use tracing::Instrument;
 
 #[component]
 pub fn SettingItem(title: String, control: Element) -> Element {
@@ -526,10 +526,7 @@ pub fn LastFmSettings(
 }
 
 #[component]
-pub fn LibreFmSettings(
-    session_key: String,
-    on_session_key_save: EventHandler<String>,
-) -> Element {
+pub fn LibreFmSettings(session_key: String, on_session_key_save: EventHandler<String>) -> Element {
     rsx! {
         div {
             class: "flex flex-col gap-3 w-full max-w-xl",

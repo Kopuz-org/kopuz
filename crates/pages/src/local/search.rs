@@ -80,11 +80,10 @@ pub fn LocalSearch(
                     on_add_to_playlist: move |playlist_id: String| {
                         if let Some(path) = selected_track_for_playlist.read().clone() {
                             let mut store = playlist_store.write();
-                            if let Some(playlist) = store.playlists.iter_mut().find(|p| p.id == playlist_id) {
-                                if !playlist.tracks.contains(&path) {
+                            if let Some(playlist) = store.playlists.iter_mut().find(|p| p.id == playlist_id)
+                                && !playlist.tracks.contains(&path) {
                                     playlist.tracks.push(path);
                                 }
-                            }
                         }
                         show_playlist_modal.set(false);
                         active_menu_track.set(None);

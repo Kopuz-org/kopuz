@@ -214,16 +214,15 @@ async fn search_ytmusic(query: &str, cookies: Option<String>) -> Option<(TrackRe
         .into_iter()
         .map(|t| {
             let path_str = t.path.to_string_lossy();
-            let cover_url = utils::map_cover_url(
-                utils::jellyfin_image::track_cover_url_with_album_fallback(
+            let cover_url =
+                utils::map_cover_url(utils::jellyfin_image::track_cover_url_with_album_fallback(
                     &path_str,
                     &t.album_id,
                     "",
                     None,
                     80,
                     80,
-                ),
-            );
+                ));
             (t, cover_url)
         })
         .collect();
@@ -252,7 +251,7 @@ pub fn use_search_data(
 ) -> SearchData {
     let genres = use_memo(move || {
         let conf = config.read();
-        let active_source = conf.active_source.clone();
+        let active_source = conf.active_source;
         let active_service = conf.active_service();
         let server = conf.server.clone();
         let lib = library.read();
@@ -341,7 +340,7 @@ pub fn use_search_data(
         let (active_source, active_service, server) = {
             let conf = config.read();
             (
-                conf.active_source.clone(),
+                conf.active_source,
                 conf.active_service(),
                 conf.server.clone(),
             )

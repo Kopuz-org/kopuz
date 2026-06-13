@@ -8,11 +8,11 @@
 //! Layout under `<cache>/logs/`:
 //!   - `latest.log`        — the current session (the appender writes here).
 //!   - `kopuz-<ts>.log`    — previous sessions, archived on startup so a
-//!                           restart never erases a crashing run. `<ts>` is
-//!                           UTC `YYYY-MM-DD_HH-MM-SS`, which sorts
-//!                           alphabetically == chronologically.
+//!     restart never erases a crashing run. `<ts>` is UTC
+//!     `YYYY-MM-DD_HH-MM-SS`, which sorts alphabetically ==
+//!     chronologically.
 //!   - `crash-<ts>.txt`    — written only on a panic (message + backtrace +
-//!                           recent log tail + version/OS).
+//!     recent log tail + version/OS).
 
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -138,7 +138,12 @@ pub fn write_crash_report(
     let mut f = std::fs::File::create(&path).ok()?;
     let _ = writeln!(f, "kopuz crash report — {ts} UTC");
     let _ = writeln!(f, "version: {version}");
-    let _ = writeln!(f, "os: {} / {}", std::env::consts::OS, std::env::consts::ARCH);
+    let _ = writeln!(
+        f,
+        "os: {} / {}",
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    );
     let _ = writeln!(f, "\npanic: {message}");
     let _ = writeln!(f, "location: {location}");
     let _ = writeln!(f, "\n--- backtrace ---\n{backtrace}");
@@ -201,7 +206,12 @@ pub fn export_logs(dest: &Path) -> io::Result<()> {
 
     let mut out = std::fs::File::create(dest)?;
     writeln!(out, "=== kopuz log export — {} UTC ===", timestamp())?;
-    writeln!(out, "os: {} / {}", std::env::consts::OS, std::env::consts::ARCH)?;
+    writeln!(
+        out,
+        "os: {} / {}",
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    )?;
 
     writeln!(out, "\n=== {LATEST} ===")?;
     match latest {
@@ -244,7 +254,11 @@ mod tests {
         content.push_str("TAIL LINE");
         std::fs::write(&p, content.as_bytes()).unwrap();
         let out = read_tail(&p).unwrap();
-        assert!(out.len() <= TAIL_BYTES as usize, "tail {} exceeds cap", out.len());
+        assert!(
+            out.len() <= TAIL_BYTES as usize,
+            "tail {} exceeds cap",
+            out.len()
+        );
         assert_eq!(out, "TAIL LINE", "partial first line should be trimmed");
         let _ = std::fs::remove_file(&p);
     }

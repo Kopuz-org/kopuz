@@ -216,10 +216,10 @@ fn copy_kt_dir(src: &Path, dst: &Path) {
     }
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) == Some("kt") {
-            if let Some(name) = path.file_name() {
-                copy_file(&path, &dst.join(name));
-            }
+        if path.extension().and_then(|e| e.to_str()) == Some("kt")
+            && let Some(name) = path.file_name()
+        {
+            copy_file(&path, &dst.join(name));
         }
     }
 }
@@ -291,9 +291,9 @@ fn patch_manifest(path: &Path) {
         );
     }
 
-    if content != original {
-        if let Err(e) = fs::write(path, &content) {
-            warn(&format!("cannot write {}: {e}", path.display()));
-        }
+    if content != original
+        && let Err(e) = fs::write(path, &content)
+    {
+        warn(&format!("cannot write {}: {e}", path.display()));
     }
 }

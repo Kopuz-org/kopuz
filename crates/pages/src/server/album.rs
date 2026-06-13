@@ -233,7 +233,7 @@ pub fn JellyfinAlbumDetails(
 
     // Multi-selection state
     let mut is_selection_mode = use_signal(|| false);
-    let mut selected_tracks = use_signal(|| HashSet::<PathBuf>::new());
+    let mut selected_tracks = use_signal(HashSet::<PathBuf>::new);
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
     let mut album_id_sig = use_signal(|| album_jellyfin_id.clone());

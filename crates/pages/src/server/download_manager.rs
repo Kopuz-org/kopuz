@@ -96,18 +96,21 @@ pub fn queue_downloads(
 
     let session_start = Instant::now();
     let session_span = tracing::info_span!("downloads.session");
-    spawn(async move {
-        tokio::join!(
-            download_worker(queue, config, session_start, cancel_flag.clone()),
-            download_worker(queue, config, session_start, cancel_flag.clone()),
-            download_worker(queue, config, session_start, cancel_flag.clone()),
-            download_worker(queue, config, session_start, cancel_flag.clone()),
-        );
+    spawn(
+        async move {
+            tokio::join!(
+                download_worker(queue, config, session_start, cancel_flag.clone()),
+                download_worker(queue, config, session_start, cancel_flag.clone()),
+                download_worker(queue, config, session_start, cancel_flag.clone()),
+                download_worker(queue, config, session_start, cancel_flag.clone()),
+            );
 
-        let mut q = queue.write();
-        q.is_running = false;
-        q.cancel_requested = false;
-    }.instrument(session_span));
+            let mut q = queue.write();
+            q.is_running = false;
+            q.cancel_requested = false;
+        }
+        .instrument(session_span),
+    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -152,10 +155,7 @@ async fn download_worker(
         let (service, yt_cookies) = {
             let conf = config.read();
             let s = conf.server.as_ref();
-            (
-                s.map(|x| x.service),
-                s.and_then(|x| x.access_token.clone()),
-            )
+            (s.map(|x| x.service), s.and_then(|x| x.access_token.clone()))
         };
 
         let resolved: Option<(String, &'static str, Option<String>, Option<u64>)> =
@@ -248,6 +248,7 @@ pub fn delete_downloads(
     skip(url, user_agent, queue, session_start, cancel_flag),
     fields(item_id = %item_id, content_length)
 )]
+#[allow(clippy::too_many_arguments)]
 async fn download_with_progress(
     item_id: &str,
     url: &str,
@@ -370,12 +371,14 @@ async fn download_with_progress(
             }
         }
 
-        writer
-            .flush()
-            .await
-            .map_err(|e| format!("Flush: {e}"))?;
+        writer.flush().await.map_err(|e| format!("Flush: {e}"))?;
         let trailing = bytes_done.saturating_sub(last_update_bytes);
-        publish_progress(item_id, bytes_done, trailing, session_start.elapsed().as_secs_f64());
+        publish_progress(
+            item_id,
+            bytes_done,
+            trailing,
+            session_start.elapsed().as_secs_f64(),
+        );
         return Ok(file_path);
     }
 
@@ -465,11 +468,13 @@ async fn download_with_progress(
         }
     }
 
-    writer
-        .flush()
-        .await
-        .map_err(|e| format!("Flush: {e}"))?;
+    writer.flush().await.map_err(|e| format!("Flush: {e}"))?;
     let trailing = bytes_done.saturating_sub(last_update_bytes);
-    publish_progress(item_id, bytes_done, trailing, session_start.elapsed().as_secs_f64());
+    publish_progress(
+        item_id,
+        bytes_done,
+        trailing,
+        session_start.elapsed().as_secs_f64(),
+    );
     Ok(file_path)
 }

@@ -221,16 +221,16 @@ fn install_panic_hook() {
                 .unwrap_or_else(|| "unknown".to_string());
             let backtrace = std::backtrace::Backtrace::force_capture().to_string();
 
-            if let Some(dir) = utils::logs::log_dir() {
-                if let Some(path) = utils::logs::write_crash_report(
+            if let Some(dir) = utils::logs::log_dir()
+                && let Some(path) = utils::logs::write_crash_report(
                     &dir,
                     env!("CARGO_PKG_VERSION"),
                     &message,
                     &location,
                     &backtrace,
-                ) {
-                    tracing::error!(crash_report = %path.display(), panic = %message, %location, "panic — crash report written");
-                }
+                )
+            {
+                tracing::error!(crash_report = %path.display(), panic = %message, %location, "panic — crash report written");
             }
         }
         default(info);

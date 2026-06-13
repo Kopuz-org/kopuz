@@ -19,15 +19,15 @@ pub(super) fn http_client() -> &'static reqwest::Client {
 
 /// Builds the `Authorization: SAPISIDHASH <ts>_<sha1(ts " " SAPISID " " origin)>` header.
 pub fn sapisid_hash(cookies: &str, origin: &str) -> Option<String> {
-    let sapisid = cookie_value(cookies, "SAPISID")
-        .or_else(|| cookie_value(cookies, "__Secure-3PAPISID"))?;
-    let ts = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .ok()?
-        .as_secs();
+    let sapisid =
+        cookie_value(cookies, "SAPISID").or_else(|| cookie_value(cookies, "__Secure-3PAPISID"))?;
+    let ts = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
     let mut hasher = Sha1::new();
     hasher.update(format!("{ts} {sapisid} {origin}").as_bytes());
-    Some(format!("SAPISIDHASH {ts}_{}", hex::encode(hasher.finalize())))
+    Some(format!(
+        "SAPISIDHASH {ts}_{}",
+        hex::encode(hasher.finalize())
+    ))
 }
 
 fn cookie_value(header: &str, name: &str) -> Option<String> {
@@ -43,7 +43,10 @@ fn cookie_value(header: &str, name: &str) -> Option<String> {
 
 fn build_context(client: YouTubeClient) -> Value {
     let mut obj = serde_json::Map::new();
-    obj.insert("clientName".into(), Value::String(client.client_name.into()));
+    obj.insert(
+        "clientName".into(),
+        Value::String(client.client_name.into()),
+    );
     obj.insert(
         "clientVersion".into(),
         Value::String(client.client_version.into()),
@@ -57,7 +60,10 @@ fn build_context(client: YouTubeClient) -> Value {
         obj.insert("osVersion".into(), Value::String(client.os_version.into()));
     }
     if !client.device_make.is_empty() {
-        obj.insert("deviceMake".into(), Value::String(client.device_make.into()));
+        obj.insert(
+            "deviceMake".into(),
+            Value::String(client.device_make.into()),
+        );
     }
     if !client.device_model.is_empty() {
         obj.insert(
@@ -147,8 +153,8 @@ pub async fn player(
     if client.login_supported
         && let Some(c) = cookies
     {
-        let auth = sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC)
-            .ok_or_else(|| "SAPISID missing".to_string())?;
+        let auth =
+            sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC).ok_or_else(|| "SAPISID missing".to_string())?;
         req = req.header("Cookie", c).header("Authorization", auth);
     }
 
@@ -170,10 +176,7 @@ pub async fn player(
 
 /// Hits `/youtubei/v1/browse` (used for Liked Music validation and library
 /// fetches). Always WEB_REMIX with cookies.
-pub async fn browse(
-    browse_id: &str,
-    cookies: &str,
-) -> Result<Value, String> {
+pub async fn browse(browse_id: &str, cookies: &str) -> Result<Value, String> {
     browse_maybe_auth(browse_id, Some(cookies)).await
 }
 
@@ -183,10 +186,7 @@ pub async fn browse(
 /// recs). Private surfaces (Liked, user library) will return a
 /// sign-in shelf for anonymous callers — caller has to detect that.
 #[tracing::instrument(name = "yt.browse", skip(cookies), fields(browse_id = %browse_id, anon = cookies.is_none()))]
-pub async fn browse_maybe_auth(
-    browse_id: &str,
-    cookies: Option<&str>,
-) -> Result<Value, String> {
+pub async fn browse_maybe_auth(browse_id: &str, cookies: Option<&str>) -> Result<Value, String> {
     let client = super::clients::WEB_REMIX;
     let context = build_context(client);
     let body = json!({
@@ -194,7 +194,9 @@ pub async fn browse_maybe_auth(
         "browseId": browse_id,
     });
     let mut req = http_client()
-        .post(format!("{ORIGIN_YOUTUBE_MUSIC}/youtubei/v1/browse?prettyPrint=false"))
+        .post(format!(
+            "{ORIGIN_YOUTUBE_MUSIC}/youtubei/v1/browse?prettyPrint=false"
+        ))
         .header("User-Agent", client.user_agent)
         .header("Content-Type", "application/json")
         .header("X-Goog-Api-Format-Version", "1")
@@ -203,8 +205,8 @@ pub async fn browse_maybe_auth(
         .header("X-Origin", ORIGIN_YOUTUBE_MUSIC)
         .header("Referer", format!("{ORIGIN_YOUTUBE_MUSIC}/"));
     if let Some(c) = cookies {
-        let auth = sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC)
-            .ok_or_else(|| "SAPISID missing".to_string())?;
+        let auth =
+            sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC).ok_or_else(|| "SAPISID missing".to_string())?;
         req = req.header("Cookie", c).header("Authorization", auth);
     }
     let resp = req
@@ -232,10 +234,7 @@ pub fn extract_visitor_data(resp: &Value) -> Option<String> {
 /// Hit `/browse` with a continuation token instead of a browseId — used
 /// to walk paginated playlist shelves (Liked Music returns ~100 tracks
 /// per page).
-pub async fn browse_continuation(
-    continuation: &str,
-    cookies: &str,
-) -> Result<Value, String> {
+pub async fn browse_continuation(continuation: &str, cookies: &str) -> Result<Value, String> {
     browse_continuation_maybe_auth(continuation, Some(cookies)).await
 }
 
@@ -261,8 +260,8 @@ pub async fn browse_continuation_maybe_auth(
         .header("X-Origin", ORIGIN_YOUTUBE_MUSIC)
         .header("Referer", format!("{ORIGIN_YOUTUBE_MUSIC}/"));
     if let Some(c) = cookies {
-        let auth = sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC)
-            .ok_or_else(|| "SAPISID missing".to_string())?;
+        let auth =
+            sapisid_hash(c, ORIGIN_YOUTUBE_MUSIC).ok_or_else(|| "SAPISID missing".to_string())?;
         req = req.header("Cookie", c).header("Authorization", auth);
     }
     let resp = req

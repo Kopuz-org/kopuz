@@ -62,10 +62,7 @@ impl YouTubeMusicClient {
         search::music_search_tracks(query, self.cookies.as_deref()).await
     }
 
-    pub async fn resolve_artist_channel_id(
-        &self,
-        query: &str,
-    ) -> Result<Option<String>, String> {
+    pub async fn resolve_artist_channel_id(&self, query: &str) -> Result<Option<String>, String> {
         search::resolve_artist_channel_id(query, self.cookies.as_deref()).await
     }
 
@@ -76,9 +73,7 @@ impl YouTubeMusicClient {
     /// Library playlists view (FEmusic_liked_playlists). Auth-only —
     /// returns Ok(vec![]) in anonymous mode so the playlists tab
     /// just shows empty rather than erroring.
-    pub async fn list_playlists(
-        &self,
-    ) -> Result<Vec<playlists::YtPlaylistSummary>, String> {
+    pub async fn list_playlists(&self) -> Result<Vec<playlists::YtPlaylistSummary>, String> {
         let Some(cookies) = self.cookies.as_deref() else {
             return Ok(Vec::new());
         };
@@ -87,10 +82,7 @@ impl YouTubeMusicClient {
 
     /// Playlist contents. Public playlists work anonymously; the
     /// user's personal/private ones obviously won't.
-    pub async fn get_playlist_entries(
-        &self,
-        playlist_id: &str,
-    ) -> Result<Vec<Track>, String> {
+    pub async fn get_playlist_entries(&self, playlist_id: &str) -> Result<Vec<Track>, String> {
         playlists::get_playlist_entries(playlist_id, self.cookies.as_deref().unwrap_or("")).await
     }
 
@@ -102,7 +94,12 @@ impl YouTubeMusicClient {
     where
         F: FnMut(Vec<Track>),
     {
-        playlists::stream_playlist_entries(playlist_id, self.cookies.as_deref().unwrap_or(""), on_batch).await
+        playlists::stream_playlist_entries(
+            playlist_id,
+            self.cookies.as_deref().unwrap_or(""),
+            on_batch,
+        )
+        .await
     }
 
     // Mutations are inherently auth-only — keep the explicit "not
@@ -118,11 +115,7 @@ impl YouTubeMusicClient {
         mutations::unlike_video(video_id, cookies).await
     }
 
-    pub async fn add_to_playlist(
-        &self,
-        playlist_id: &str,
-        video_id: &str,
-    ) -> Result<(), String> {
+    pub async fn add_to_playlist(&self, playlist_id: &str, video_id: &str) -> Result<(), String> {
         let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
         mutations::add_to_playlist(playlist_id, video_id, cookies).await
     }
@@ -170,20 +163,21 @@ impl YouTubeMusicClient {
         // boundaries; dedup against a video-id set across the entire stream so the
         // callback always sees unique tracks.
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-        let dedup = |page: Vec<Track>, seen: &mut std::collections::HashSet<String>| -> Vec<Track> {
-            page.into_iter()
-                .filter(|t| {
-                    let id = t
-                        .path
-                        .to_string_lossy()
-                        .split(':')
-                        .nth(1)
-                        .unwrap_or("")
-                        .to_string();
-                    !id.is_empty() && seen.insert(id)
-                })
-                .collect()
-        };
+        let dedup =
+            |page: Vec<Track>, seen: &mut std::collections::HashSet<String>| -> Vec<Track> {
+                page.into_iter()
+                    .filter(|t| {
+                        let id = t
+                            .path
+                            .to_string_lossy()
+                            .split(':')
+                            .nth(1)
+                            .unwrap_or("")
+                            .to_string();
+                        !id.is_empty() && seen.insert(id)
+                    })
+                    .collect()
+            };
 
         let (page1, mut next) = search::walk_playlist_shelf(&resp);
         let page1 = dedup(page1, &mut seen);

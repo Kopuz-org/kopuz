@@ -3,6 +3,6 @@ await-holding-invalid-types = [
   { path = "generational_box::GenerationalRef", reason = "Reads should not be held over an await point. This will cause any writes to fail while the await is pending since the read borrow is still active." },
   "generational_box::GenerationalRefMut",
   { path = "generational_box::GenerationalRefMut", reason = "Write should not be held over an await point. This will cause any reads or writes to fail while the await is pending since the write borrow is still active." },
-  "dioxus_signals::Write",
-  { path = "dioxus_signals::Write", reason = "Write should not be held over an await point. This will cause any reads or writes to fail while the await is pending since the write borrow is still active." },
+  "dioxus_signals::WriteLock",
+  { path = "dioxus_signals::WriteLock", reason = "Write should not be held over an await point. This will cause any reads or writes to fail while the await is pending since the write borrow is still active." },
 ]
