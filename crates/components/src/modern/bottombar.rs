@@ -61,15 +61,14 @@ pub fn BottombarModern(
         }
         _ => "local".to_string(),
     });
-    let favorites_res = hooks::use_db_queries::use_favorites(fav_sid);
-    let track_is_favorite = |t: Option<&reader::models::Track>| {
-        let key = t.map(|t| t.id.key().into_owned()).unwrap_or_default();
-        !key.trim().is_empty()
-            && favorites_res
-                .read()
-                .as_ref()
-                .is_some_and(|favs| favs.contains(&key))
-    };
+    let fav_key = use_memo(move || {
+        ctrl.current_track_snapshot
+            .read()
+            .as_ref()
+            .map(|t| t.id.key().into_owned())
+            .unwrap_or_default()
+    });
+    let is_fav_res = hooks::use_db_queries::use_is_favorite(fav_sid, fav_key);
     if cfg!(target_os = "android") {
         let pct = if *current_song_duration.read() > 0 {
             (*current_song_progress.read() as f64 / *current_song_duration.read() as f64) * 100.0
@@ -77,8 +76,7 @@ pub fn BottombarModern(
             0.0
         };
         let cover = current_song_cover_url.read().clone();
-        let snapshot = ctrl.current_track_snapshot.read().clone();
-        let fav = track_is_favorite(snapshot.as_ref());
+        let fav = (*is_fav_res.read()).unwrap_or(false);
         return rsx! {
             div {
                 class: "shrink-0 h-[68px] bg-black/85 backdrop-blur-2xl border-t border-white/10 flex items-center px-3 gap-3 relative overflow-hidden mb-[env(safe-area-inset-bottom)]",
@@ -119,7 +117,7 @@ pub fn BottombarModern(
     }
 
     let current_track_snapshot = ctrl.current_track_snapshot.read().clone();
-    let is_favorite = track_is_favorite(current_track_snapshot.as_ref());
+    let is_favorite = (*is_fav_res.read()).unwrap_or(false);
     let heart_class = if is_favorite {
         "text-red-400 hover:text-red-300 transition-colors"
     } else {

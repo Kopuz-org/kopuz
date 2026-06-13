@@ -61,7 +61,14 @@ pub fn BottombarNormal(
         }
         _ => "local".to_string(),
     });
-    let favorites_res = hooks::use_db_queries::use_favorites(fav_sid);
+    let fav_key = use_memo(move || {
+        ctrl.current_track_snapshot
+            .read()
+            .as_ref()
+            .map(|t| t.id.key().into_owned())
+            .unwrap_or_default()
+    });
+    let is_fav_res = hooks::use_db_queries::use_is_favorite(fav_sid, fav_key);
 
     if cfg!(target_os = "android") {
         let progress_percent = if *current_song_duration.read() > 0 {
@@ -105,17 +112,7 @@ pub fn BottombarNormal(
     }
 
     let current_track_snapshot = ctrl.current_track_snapshot.read().clone();
-    let is_favorite = {
-        let key = current_track_snapshot
-            .as_ref()
-            .map(|t| t.id.key().into_owned())
-            .unwrap_or_default();
-        !key.trim().is_empty()
-            && favorites_res
-                .read()
-                .as_ref()
-                .is_some_and(|favs| favs.contains(&key))
-    };
+    let is_favorite = (*is_fav_res.read()).unwrap_or(false);
     let heart_class = if is_favorite {
         "ml-2 text-red-400 hover:text-red-300 transition-colors"
     } else {

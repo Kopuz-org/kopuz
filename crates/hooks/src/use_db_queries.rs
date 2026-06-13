@@ -391,3 +391,24 @@ pub fn use_favorites(server_id: Memo<String>) -> Resource<Vec<String>> {
         .instrument(span)
     })
 }
+
+/// Whether a single ref is favorited for a server — a targeted `EXISTS` query,
+/// re-run on track change or a favorites bump. Use this for single-item checks
+/// (e.g. the now-playing bar); a list view should load [`use_favorites`] once
+/// and test membership instead.
+pub fn use_is_favorite(server_id: Memo<String>, ref_: Memo<String>) -> Resource<bool> {
+    let db = use_context::<Db>();
+    let gens = use_generations();
+    use_resource(move || {
+        let _ = gens.generation(Table::Favorites);
+        let (db, sid, r) = (db.clone(), server_id(), ref_());
+        let span = tracing::info_span!("query.is_favorite", server_id = %sid);
+        async move {
+            if r.trim().is_empty() {
+                return false;
+            }
+            db.is_favorite(&sid, &r).await.unwrap_or(false)
+        }
+        .instrument(span)
+    })
+}
