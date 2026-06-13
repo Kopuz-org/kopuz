@@ -307,6 +307,8 @@ pub trait Storage: Send + Sync {
     async fn delete_playlist(&self, source: &Source, pl_id: &str) -> Result<(), DbError>;
 
     /// Replace ONE playlist's membership (creates the playlist row if absent).
+    /// For reorders and full rebuilds; prefer the incremental variants below for
+    /// single add/remove so a big playlist isn't rewritten wholesale.
     async fn set_playlist_tracks(
         &self,
         source: &Source,
@@ -314,8 +316,40 @@ pub trait Storage: Send + Sync {
         refs: &[String],
     ) -> Result<(), DbError>;
 
-    /// Replace the (local) playlist folders.
-    async fn set_folders(&self, folders: &[reader::models::PlaylistFolder]) -> Result<(), DbError>;
+    /// Append refs to one playlist (creating it if absent), skipping any already
+    /// present so a track is never duplicated.
+    async fn add_playlist_tracks(
+        &self,
+        source: &Source,
+        pl_id: &str,
+        refs: &[String],
+    ) -> Result<(), DbError>;
+
+    /// Remove every occurrence of each ref from one playlist. No-op for absent
+    /// playlists/refs.
+    async fn remove_playlist_tracks(
+        &self,
+        source: &Source,
+        pl_id: &str,
+        refs: &[String],
+    ) -> Result<(), DbError>;
+
+    /// Create one (local) playlist folder.
+    async fn create_folder(&self, id: &str, name: &str) -> Result<(), DbError>;
+
+    /// Rename one folder.
+    async fn rename_folder(&self, id: &str, name: &str) -> Result<(), DbError>;
+
+    /// Delete one folder; its playlist memberships cascade away.
+    async fn delete_folder(&self, id: &str) -> Result<(), DbError>;
+
+    /// Move one playlist into `folder_id`, or out of every folder when `None`.
+    /// Folder membership is single-folder per playlist.
+    async fn set_playlist_folder(
+        &self,
+        playlist_ref: &str,
+        folder_id: Option<&str>,
+    ) -> Result<(), DbError>;
 
     /// Increment one track's play count (single-row upsert; key = `TrackId::uid()`).
     async fn bump_listen_count(&self, track_uid: &str) -> Result<(), DbError>;

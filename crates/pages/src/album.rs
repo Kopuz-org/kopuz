@@ -165,32 +165,16 @@ pub fn Album(
                                                 .await;
                                                 if !added.is_empty() {
                                                     let db = consume_context::<db::Db>();
-                                                    let store = db
-                                                        .load_playlists(Some(sid.as_str()))
+                                                    if db
+                                                        .add_playlist_tracks(
+                                                            &Source::Server(sid),
+                                                            &pid,
+                                                            &added,
+                                                        )
                                                         .await
-                                                        .unwrap_or_default();
-                                                    if let Some(pl) = store
-                                                        .jellyfin_playlists
-                                                        .iter()
-                                                        .find(|p| p.id == pid)
+                                                        .is_ok()
                                                     {
-                                                        let mut refs = pl.tracks.clone();
-                                                        for id in added {
-                                                            if !refs.contains(&id) {
-                                                                refs.push(id);
-                                                            }
-                                                        }
-                                                        if db
-                                                            .set_playlist_tracks(
-                                                                &Source::Server(sid),
-                                                                &pid,
-                                                                &refs,
-                                                            )
-                                                            .await
-                                                            .is_ok()
-                                                        {
-                                                            gens.bump(Table::Playlists);
-                                                        }
+                                                        gens.bump(Table::Playlists);
                                                     }
                                                 }
                                             });
@@ -198,27 +182,16 @@ pub fn Album(
                                     } else {
                                         let db = consume_context::<db::Db>();
                                         spawn(async move {
-                                            let store = db.load_playlists(None).await.unwrap_or_default();
-                                            if let Some(playlist) =
-                                                store.playlists.iter().find(|p| p.id == playlist_id)
+                                            let refs: Vec<String> = tracks
+                                                .iter()
+                                                .map(|p| p.to_string_lossy().into_owned())
+                                                .collect();
+                                            if db
+                                                .add_playlist_tracks(&Source::Local, &playlist_id, &refs)
+                                                .await
+                                                .is_ok()
                                             {
-                                                let mut paths = playlist.tracks.clone();
-                                                for path in tracks {
-                                                    if !paths.contains(&path) {
-                                                        paths.push(path);
-                                                    }
-                                                }
-                                                let refs: Vec<String> = paths
-                                                    .iter()
-                                                    .map(|p| p.to_string_lossy().into_owned())
-                                                    .collect();
-                                                if db
-                                                    .set_playlist_tracks(&Source::Local, &playlist_id, &refs)
-                                                    .await
-                                                    .is_ok()
-                                                {
-                                                    gens.bump(Table::Playlists);
-                                                }
+                                                gens.bump(Table::Playlists);
                                             }
                                         });
                                     }

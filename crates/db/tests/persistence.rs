@@ -6,7 +6,7 @@ use std::path::PathBuf;
 
 use config::{AppConfig, MusicServer, MusicService, SavedServer};
 use db::{QueueSnapshot, Source, TrackFilter};
-use reader::models::{PlaylistFolder, Track, TrackId};
+use reader::models::{Track, TrackId};
 
 fn unique_db() -> PathBuf {
     let nanos = std::time::SystemTime::now()
@@ -93,13 +93,8 @@ async fn playlists_round_trip() {
         .await
         .unwrap();
 
-    db.set_folders(&[PlaylistFolder {
-        id: "f1".into(),
-        name: "Folder".into(),
-        playlist_ids: vec!["pl-1".into()],
-    }])
-    .await
-    .unwrap();
+    db.create_folder("f1", "Folder").await.unwrap();
+    db.set_playlist_folder("pl-1", Some("f1")).await.unwrap();
 
     let store = db.load_playlists(None).await.unwrap();
     assert_eq!(store.playlists.len(), 1);
@@ -122,6 +117,206 @@ async fn playlists_round_trip() {
     );
     assert_eq!(store.folders.len(), 1);
     assert_eq!(store.folders[0].playlist_ids, vec!["pl-1"]);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+/// Helper: a local playlist's track refs (as strings) from the loaded store.
+async fn local_playlist_tracks(db: &db::Db, id: &str) -> Vec<String> {
+    db.load_playlists(None)
+        .await
+        .unwrap()
+        .playlists
+        .into_iter()
+        .find(|p| p.id == id)
+        .unwrap_or_else(|| panic!("playlist {id} missing"))
+        .tracks
+        .into_iter()
+        .map(|p| p.to_string_lossy().into_owned())
+        .collect()
+}
+
+#[tokio::test]
+async fn playlist_add_appends_and_dedups() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    db.upsert_playlist_meta(&Source::Local, "pl", "Mine", None, None)
+        .await
+        .unwrap();
+    db.set_playlist_tracks(&Source::Local, "pl", &["a".into(), "b".into()])
+        .await
+        .unwrap();
+
+    // New tracks append at the end, in order.
+    db.add_playlist_tracks(&Source::Local, "pl", &["c".into(), "d".into()])
+        .await
+        .unwrap();
+    assert_eq!(local_playlist_tracks(&db, "pl").await, ["a", "b", "c", "d"]);
+
+    // Already-present refs are skipped; only the genuinely new one is appended.
+    db.add_playlist_tracks(&Source::Local, "pl", &["b".into(), "e".into()])
+        .await
+        .unwrap();
+    assert_eq!(
+        local_playlist_tracks(&db, "pl").await,
+        ["a", "b", "c", "d", "e"]
+    );
+
+    // A batch with an internal duplicate adds that ref only once.
+    db.add_playlist_tracks(&Source::Local, "pl", &["f".into(), "f".into()])
+        .await
+        .unwrap();
+    assert_eq!(
+        local_playlist_tracks(&db, "pl").await,
+        ["a", "b", "c", "d", "e", "f"]
+    );
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn playlist_add_creates_playlist_if_absent() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+
+    db.add_playlist_tracks(&Source::Local, "fresh", &["x".into()])
+        .await
+        .unwrap();
+    assert_eq!(local_playlist_tracks(&db, "fresh").await, ["x"]);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn playlist_remove_keeps_remaining_order() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    db.upsert_playlist_meta(&Source::Local, "pl", "Mine", None, None)
+        .await
+        .unwrap();
+    db.set_playlist_tracks(
+        &Source::Local,
+        "pl",
+        &["a".into(), "b".into(), "c".into(), "d".into()],
+    )
+    .await
+    .unwrap();
+
+    db.remove_playlist_tracks(&Source::Local, "pl", &["b".into(), "d".into()])
+        .await
+        .unwrap();
+    assert_eq!(local_playlist_tracks(&db, "pl").await, ["a", "c"]);
+
+    // Removing a non-member is a no-op.
+    db.remove_playlist_tracks(&Source::Local, "pl", &["z".into()])
+        .await
+        .unwrap();
+    assert_eq!(local_playlist_tracks(&db, "pl").await, ["a", "c"]);
+
+    // A later add still appends after the survivors (no position collision).
+    db.add_playlist_tracks(&Source::Local, "pl", &["e".into()])
+        .await
+        .unwrap();
+    assert_eq!(local_playlist_tracks(&db, "pl").await, ["a", "c", "e"]);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+/// Helper: a folder's playlist_ids from the loaded store, or panic if absent.
+async fn folder_members(db: &db::Db, id: &str) -> Vec<String> {
+    db.load_playlists(None)
+        .await
+        .unwrap()
+        .folders
+        .into_iter()
+        .find(|f| f.id == id)
+        .unwrap_or_else(|| panic!("folder {id} missing"))
+        .playlist_ids
+}
+
+#[tokio::test]
+async fn folder_create_rename_delete() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+
+    db.create_folder("f1", "Rock").await.unwrap();
+    let store = db.load_playlists(None).await.unwrap();
+    assert_eq!(store.folders.len(), 1);
+    assert_eq!(store.folders[0].name, "Rock");
+
+    // create on the same id is an upsert of the name (idempotent on id).
+    db.create_folder("f1", "Metal").await.unwrap();
+    let store = db.load_playlists(None).await.unwrap();
+    assert_eq!(store.folders.len(), 1, "no duplicate folder row");
+    assert_eq!(store.folders[0].name, "Metal");
+
+    db.rename_folder("f1", "Jazz").await.unwrap();
+    let store = db.load_playlists(None).await.unwrap();
+    assert_eq!(store.folders[0].name, "Jazz");
+
+    db.delete_folder("f1").await.unwrap();
+    assert!(db.load_playlists(None).await.unwrap().folders.is_empty());
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn folder_move_is_not_duplicate() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    db.create_folder("f1", "A").await.unwrap();
+    db.create_folder("f2", "B").await.unwrap();
+
+    // Put a playlist in f1, then move it to f2: it must leave f1, not be in both.
+    db.set_playlist_folder("p1", Some("f1")).await.unwrap();
+    assert_eq!(folder_members(&db, "f1").await, vec!["p1"]);
+
+    db.set_playlist_folder("p1", Some("f2")).await.unwrap();
+    assert!(
+        folder_members(&db, "f1").await.is_empty(),
+        "moving out of f1 clears the old membership"
+    );
+    assert_eq!(folder_members(&db, "f2").await, vec!["p1"]);
+
+    // None removes it from every folder.
+    db.set_playlist_folder("p1", None).await.unwrap();
+    assert!(folder_members(&db, "f2").await.is_empty());
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn folder_membership_appends_in_order() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    db.create_folder("f1", "A").await.unwrap();
+
+    db.set_playlist_folder("pA", Some("f1")).await.unwrap();
+    db.set_playlist_folder("pB", Some("f1")).await.unwrap();
+    db.set_playlist_folder("pC", Some("f1")).await.unwrap();
+    assert_eq!(folder_members(&db, "f1").await, vec!["pA", "pB", "pC"]);
+
+    // Re-adding an existing member is idempotent (no duplicate, position kept).
+    db.set_playlist_folder("pB", Some("f1")).await.unwrap();
+    assert_eq!(folder_members(&db, "f1").await, vec!["pA", "pC", "pB"]);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn deleting_folder_cascades_membership() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    db.create_folder("f1", "A").await.unwrap();
+    db.set_playlist_folder("p1", Some("f1")).await.unwrap();
+
+    db.delete_folder("f1").await.unwrap();
+    // Folder gone; re-creating it must come back empty (no orphaned membership).
+    db.create_folder("f1", "A").await.unwrap();
+    assert!(
+        folder_members(&db, "f1").await.is_empty(),
+        "membership did not survive the folder delete"
+    );
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }

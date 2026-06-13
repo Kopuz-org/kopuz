@@ -489,29 +489,18 @@ pub fn PlaylistDetail(
             on_remove_from_playlist: move |idx: usize| {
                 if let Some(t) = tracks.read().get(idx).cloned() {
                     if !is_jellyfin {
-                        let store = playlists_res.read().clone().unwrap_or_default();
-                        if let Some(playlist) =
-                            store.playlists.iter().find(|p| p.id == pid_for_remove)
-                        {
-                            let removed = t.id.uid_path();
-                            let refs: Vec<String> = playlist
-                                .tracks
-                                .iter()
-                                .filter(|p| **p != removed)
-                                .map(|p| p.to_string_lossy().into_owned())
-                                .collect();
-                            let pid = pid_for_remove.clone();
-                            let db = consume_context::<db::Db>();
-                            spawn(async move {
-                                if db
-                                    .set_playlist_tracks(&Source::Local, &pid, &refs)
-                                    .await
-                                    .is_ok()
-                                {
-                                    gens.bump(Table::Playlists);
-                                }
-                            });
-                        }
+                        let removed = t.id.uid_path().to_string_lossy().into_owned();
+                        let pid = pid_for_remove.clone();
+                        let db = consume_context::<db::Db>();
+                        spawn(async move {
+                            if db
+                                .remove_playlist_tracks(&Source::Local, &pid, &[removed])
+                                .await
+                                .is_ok()
+                            {
+                                gens.bump(Table::Playlists);
+                            }
+                        });
                     } else {
                         let pid_clone = pid_for_remove.clone();
                         let entry_id_opt = t.playlist_item_id.clone();

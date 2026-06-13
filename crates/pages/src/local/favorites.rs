@@ -8,9 +8,7 @@ use config::{AppConfig, UiStyle};
 use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
-use hooks::use_db_queries::{
-    use_active_server_id, use_albums, use_favorites, use_playlists, use_tracks_by_keys,
-};
+use hooks::use_db_queries::{use_albums, use_favorites, use_tracks_by_keys};
 use hooks::use_player_controller::PlayerController;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -38,8 +36,6 @@ pub fn LocalFavorites(
     let favorites_res = use_favorites(local_sid);
     let fav_keys = use_memo(move || favorites_res.read().clone().unwrap_or_default());
     let fav_tracks_res = use_tracks_by_keys(source, fav_keys);
-    let active_server_id = use_active_server_id();
-    let playlists_res = use_playlists(active_server_id);
 
     let displayed_tracks: Vec<(reader::models::Track, Option<utils::CoverUrl>)> = {
         let album_covers: std::collections::HashMap<String, Option<utils::CoverUrl>> = albums_res
@@ -207,26 +203,23 @@ pub fn LocalFavorites(
                         }
                     },
                     on_add_to_playlist: move |playlist_id: String| {
-                        let store = playlists_res.read().clone().unwrap_or_default();
-                        if let Some(playlist) = store.playlists.iter().find(|p| p.id == playlist_id) {
-                            let mut tracks = playlist.tracks.clone();
-                            if is_selection_mode() {
-                                for path in selected_tracks.read().iter() {
-                                    if !tracks.contains(path) {
-                                        tracks.push(path.clone());
-                                    }
-                                }
-                            } else if let Some(path) = selected_track_for_playlist.read().clone()
-                                && !tracks.contains(&path) {
-                                    tracks.push(path);
-                                }
-                            let refs: Vec<String> = tracks
+                        let refs: Vec<String> = if is_selection_mode() {
+                            selected_tracks
+                                .read()
                                 .iter()
                                 .map(|p| p.to_string_lossy().into_owned())
-                                .collect();
+                                .collect()
+                        } else {
+                            selected_track_for_playlist
+                                .read()
+                                .iter()
+                                .map(|p| p.to_string_lossy().into_owned())
+                                .collect()
+                        };
+                        if !refs.is_empty() {
                             let db = consume_context::<db::Db>();
                             spawn(async move {
-                                if db.set_playlist_tracks(&Source::Local, &playlist_id, &refs).await.is_ok() {
+                                if db.add_playlist_tracks(&Source::Local, &playlist_id, &refs).await.is_ok() {
                                     gens.bump(Table::Playlists);
                                 }
                             });

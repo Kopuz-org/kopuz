@@ -174,18 +174,13 @@ pub fn LocalPlaylists(
                         if name.is_empty() {
                             return;
                         }
-                        let mut folders = playlists_res.read().clone().unwrap_or_default().folders;
-                        if let Some(folder) =
-                            folders.iter_mut().find(|folder| folder.id == rename_id)
-                        {
-                            folder.name = name;
-                            let db = consume_context::<db::Db>();
-                            spawn(async move {
-                                if db.set_folders(&folders).await.is_ok() {
-                                    gens.bump(Table::Folders);
-                                }
-                            });
-                        }
+                        let rename_id = rename_id.clone();
+                        let db = consume_context::<db::Db>();
+                        spawn(async move {
+                            if db.rename_folder(&rename_id, &name).await.is_ok() {
+                                gens.bump(Table::Folders);
+                            }
+                        });
                         rename_folder_id.set(None);
                         rename_folder_name.set(String::new());
                     },
@@ -225,7 +220,6 @@ pub fn LocalPlaylists(
                                         let pid_menu = playlist.id.clone();
                                         let pid_action = playlist.id.clone();
                                         let playlist_name_for_rename = playlist.name.clone();
-                                        let fid_remove = folder.id.clone();
                                         let is_menu_open = active_menu.read().as_deref()
                                             == Some(playlist.id.as_str());
                                         rsx! {
@@ -278,16 +272,13 @@ pub fn LocalPlaylists(
                                                                         active_menu.set(None);
                                                                     }
                                                                     1 => {
-                                                                        let mut folders = playlists_res.read().clone().unwrap_or_default().folders;
-                                                                        if let Some(f) = folders.iter_mut().find(|f| f.id == fid_remove) {
-                                                                            f.playlist_ids.retain(|id| id != &pid_action);
-                                                                            let db = consume_context::<db::Db>();
-                                                                            spawn(async move {
-                                                                                if db.set_folders(&folders).await.is_ok() {
-                                                                                    gens.bump(Table::Folders);
-                                                                                }
-                                                                            });
-                                                                        }
+                                                                        let pid = pid_action.clone();
+                                                                        let db = consume_context::<db::Db>();
+                                                                        spawn(async move {
+                                                                            if db.set_playlist_folder(&pid, None).await.is_ok() {
+                                                                                gens.bump(Table::Folders);
+                                                                            }
+                                                                        });
                                                                         active_menu.set(None);
                                                                     }
                                                                     2 => {
@@ -296,15 +287,11 @@ pub fn LocalPlaylists(
                                                                         active_menu.set(None);
                                                                     }
                                                                     _ => {
-                                                                        let mut folders = playlists_res.read().clone().unwrap_or_default().folders;
-                                                                        for f in &mut folders {
-                                                                            f.playlist_ids.retain(|id| id != &pid_action);
-                                                                        }
                                                                         let pid = pid_action.clone();
                                                                         let db = consume_context::<db::Db>();
                                                                         spawn(async move {
                                                                             if db.delete_playlist(&Source::Local, &pid).await.is_ok()
-                                                                                && db.set_folders(&folders).await.is_ok()
+                                                                                && db.set_playlist_folder(&pid, None).await.is_ok()
                                                                             {
                                                                                 gens.bump(Table::Playlists);
                                                                                 gens.bump(Table::Folders);
@@ -394,11 +381,10 @@ pub fn LocalPlaylists(
                                                                             active_menu.set(None);
                                                                         }
                                                                         _ => {
-                                                                            let mut folders = playlists_res.read().clone().unwrap_or_default().folders;
-                                                                            folders.retain(|f| f.id != fid_del);
+                                                                            let fid = fid_del.clone();
                                                                             let db = consume_context::<db::Db>();
                                                                             spawn(async move {
-                                                                                if db.set_folders(&folders).await.is_ok() {
+                                                                                if db.delete_folder(&fid).await.is_ok() {
                                                                                     gens.bump(Table::Folders);
                                                                                 }
                                                                             });

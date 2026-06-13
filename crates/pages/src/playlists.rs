@@ -291,15 +291,11 @@ pub fn PlaylistsPage(
                                 class: "text-white/60 flex items-center hover:text-white transition-colors p-3 rounded-full hover:bg-white/10",
                                 title: i18n::t("new_folder").to_string(),
                                 onclick: move |_| {
-                                    let mut folders = playlists_res.read().clone().unwrap_or_default().folders;
-                                    folders.push(reader::PlaylistFolder {
-                                        id: uuid::Uuid::new_v4().to_string(),
-                                        name: i18n::t("new_folder").to_string(),
-                                        playlist_ids: vec![],
-                                    });
+                                    let new_id = uuid::Uuid::new_v4().to_string();
+                                    let name = i18n::t("new_folder").to_string();
                                     let db = consume_context::<db::Db>();
                                     spawn(async move {
-                                        if db.set_folders(&folders).await.is_ok() {
+                                        if db.create_folder(&new_id, &name).await.is_ok() {
                                             gens.bump(Table::Folders);
                                         }
                                     });

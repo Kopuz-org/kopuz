@@ -74,25 +74,13 @@ pub fn LocalSearch(
                         if let Some(path) = selected_track_for_playlist.read().clone() {
                             let db = consume_context::<db::Db>();
                             spawn(async move {
-                                let store = db.load_playlists(None).await.unwrap_or_default();
-                                if let Some(playlist) =
-                                    store.playlists.iter().find(|p| p.id == playlist_id)
+                                let refs = vec![path.to_string_lossy().into_owned()];
+                                if db
+                                    .add_playlist_tracks(&Source::Local, &playlist_id, &refs)
+                                    .await
+                                    .is_ok()
                                 {
-                                    let mut tracks = playlist.tracks.clone();
-                                    if !tracks.contains(&path) {
-                                        tracks.push(path);
-                                    }
-                                    let refs: Vec<String> = tracks
-                                        .iter()
-                                        .map(|p| p.to_string_lossy().into_owned())
-                                        .collect();
-                                    if db
-                                        .set_playlist_tracks(&Source::Local, &playlist_id, &refs)
-                                        .await
-                                        .is_ok()
-                                    {
-                                        gens.bump(Table::Playlists);
-                                    }
+                                    gens.bump(Table::Playlists);
                                 }
                             });
                         }

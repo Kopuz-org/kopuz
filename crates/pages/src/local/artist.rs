@@ -7,8 +7,7 @@ use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{
-    use_active_server_id, use_albums, use_artist_images, use_artist_sample_tracks,
-    use_artist_tracks, use_playlists,
+    use_albums, use_artist_images, use_artist_sample_tracks, use_artist_tracks,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -32,8 +31,6 @@ pub fn LocalArtist(
     let artist_memo = use_memo(move || artist_name.read().clone());
     let artist_tracks_res = use_artist_tracks(source, artist_memo);
     let artist_images_res = use_artist_images();
-    let active_server_id = use_active_server_id();
-    let playlists_res = use_playlists(active_server_id);
     let sort_order = use_signal(move || config.read().artist_view_order.clone());
     use_effect(move || {
         let curr = sort_order.read().clone();
@@ -174,24 +171,17 @@ pub fn LocalArtist(
 
     let name = artist_name.read().clone();
     let add_tracks_to_playlist = move |playlist_id: String, paths: Vec<PathBuf>| {
-        let store = playlists_res.read().clone().unwrap_or_default();
-        let Some(playlist) = store.playlists.iter().find(|p| p.id == playlist_id) else {
-            return;
-        };
-        let mut tracks = playlist.tracks.clone();
-        for path in paths {
-            if !tracks.contains(&path) {
-                tracks.push(path);
-            }
-        }
-        let refs: Vec<String> = tracks
+        let refs: Vec<String> = paths
             .iter()
             .map(|p| p.to_string_lossy().into_owned())
             .collect();
+        if refs.is_empty() {
+            return;
+        }
         let db = consume_context::<db::Db>();
         spawn(async move {
             if db
-                .set_playlist_tracks(&Source::Local, &playlist_id, &refs)
+                .add_playlist_tracks(&Source::Local, &playlist_id, &refs)
                 .await
                 .is_ok()
             {

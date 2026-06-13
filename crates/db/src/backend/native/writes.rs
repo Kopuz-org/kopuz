@@ -403,8 +403,36 @@ pub async fn delete_playlist(
     Ok(())
 }
 
+/// Resolve a playlist's `rowid_pk`, creating the playlist row (name = id) if it
+/// doesn't exist yet. Shared by the membership writers below.
+async fn resolve_or_create_pk(
+    conn: &mut sqlx::SqliteConnection,
+    src: &str,
+    pl_id: &str,
+) -> Result<i64, DbError> {
+    let existing: Option<i64> = sqlx::query_scalar!(
+        "SELECT rowid_pk FROM playlists WHERE source = ?1 AND source_pl_id = ?2",
+        src,
+        pl_id
+    )
+    .fetch_optional(&mut *conn)
+    .await?
+    .flatten();
+    if let Some(pk) = existing {
+        return Ok(pk);
+    }
+    let res = sqlx::query!(
+        "INSERT INTO playlists (source, source_pl_id, name) VALUES (?1, ?2, ?2)",
+        src,
+        pl_id
+    )
+    .execute(&mut *conn)
+    .await?;
+    Ok(res.last_insert_rowid())
+}
+
 /// Replace ONE playlist's membership (creating the playlist row if absent) —
-/// playlist-scoped, never the whole store.
+/// playlist-scoped, never the whole store. For reorders and full rebuilds.
 #[tracing::instrument(skip_all, fields(count = refs.len(), source = %source.as_str(), pl_id))]
 pub async fn set_playlist_tracks(
     pool: &SqlitePool,
@@ -414,27 +442,7 @@ pub async fn set_playlist_tracks(
 ) -> Result<(), DbError> {
     let src = source.as_str();
     let mut tx = pool.begin().await?;
-    let existing: Option<i64> = sqlx::query_scalar!(
-        "SELECT rowid_pk FROM playlists WHERE source = ?1 AND source_pl_id = ?2",
-        src,
-        pl_id
-    )
-    .fetch_optional(&mut *tx)
-    .await?
-    .flatten();
-    let pk: i64 = match existing {
-        Some(pk) => pk,
-        None => {
-            let res = sqlx::query!(
-                "INSERT INTO playlists (source, source_pl_id, name) VALUES (?1, ?2, ?2)",
-                src,
-                pl_id
-            )
-            .execute(&mut *tx)
-            .await?;
-            res.last_insert_rowid()
-        }
-    };
+    let pk = resolve_or_create_pk(&mut tx, src, pl_id).await?;
     sqlx::query!("DELETE FROM playlist_tracks WHERE playlist_pk = ?1", pk)
         .execute(&mut *tx)
         .await?;
@@ -453,35 +461,144 @@ pub async fn set_playlist_tracks(
     Ok(())
 }
 
-#[tracing::instrument(skip_all, fields(count = folders.len()))]
-pub async fn set_folders(
+/// Append `refs` to one playlist (creating it if absent), skipping any ref
+/// already present so a track is never duplicated. Existing rows are untouched.
+#[tracing::instrument(skip_all, fields(count = refs.len(), source = %source.as_str(), pl_id))]
+pub async fn add_playlist_tracks(
     pool: &SqlitePool,
-    folders: &[reader::models::PlaylistFolder],
+    source: &Source,
+    pl_id: &str,
+    refs: &[String],
 ) -> Result<(), DbError> {
+    let src = source.as_str();
     let mut tx = pool.begin().await?;
-    sqlx::query!("DELETE FROM folders")
-        .execute(&mut *tx)
-        .await?;
-    for f in folders {
-        sqlx::query!(
-            "INSERT INTO folders (id, source, name) VALUES (?1, 'local', ?2)",
-            f.id,
-            f.name
-        )
-        .execute(&mut *tx)
-        .await?;
-        for (pos, pid) in f.playlist_ids.iter().enumerate() {
-            let pos = pos as i64;
+    let pk = resolve_or_create_pk(&mut tx, src, pl_id).await?;
+    let mut present: std::collections::HashSet<String> = sqlx::query_scalar!(
+        "SELECT track_ref FROM playlist_tracks WHERE playlist_pk = ?1",
+        pk
+    )
+    .fetch_all(&mut *tx)
+    .await?
+    .into_iter()
+    .collect();
+    let max_pos: Option<i64> = sqlx::query_scalar!(
+        "SELECT MAX(position) AS \"m?: i64\" FROM playlist_tracks WHERE playlist_pk = ?1",
+        pk
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    let mut next = max_pos.map_or(0, |m| m + 1);
+    for r in refs {
+        if present.insert(r.clone()) {
             sqlx::query!(
-                "INSERT OR IGNORE INTO folder_playlists (folder_id, playlist_ref, position) \
-                 VALUES (?1, ?2, ?3)",
-                f.id,
-                pid,
-                pos
+                "INSERT INTO playlist_tracks (playlist_pk, position, track_ref) VALUES (?1, ?2, ?3)",
+                pk,
+                next,
+                r
             )
             .execute(&mut *tx)
             .await?;
+            next += 1;
         }
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+/// Remove every occurrence of each ref from one playlist. No-op if the playlist
+/// or a ref is absent. Leaves gaps in `position` — reads are `ORDER BY position`,
+/// so the surviving order is unaffected.
+#[tracing::instrument(skip_all, fields(count = refs.len(), source = %source.as_str(), pl_id))]
+pub async fn remove_playlist_tracks(
+    pool: &SqlitePool,
+    source: &Source,
+    pl_id: &str,
+    refs: &[String],
+) -> Result<(), DbError> {
+    if refs.is_empty() {
+        return Ok(());
+    }
+    let src = source.as_str();
+    let mut tx = pool.begin().await?;
+    let pk: Option<i64> = sqlx::query_scalar!(
+        "SELECT rowid_pk FROM playlists WHERE source = ?1 AND source_pl_id = ?2",
+        src,
+        pl_id
+    )
+    .fetch_optional(&mut *tx)
+    .await?
+    .flatten();
+    let Some(pk) = pk else {
+        return Ok(());
+    };
+    for r in refs {
+        sqlx::query!(
+            "DELETE FROM playlist_tracks WHERE playlist_pk = ?1 AND track_ref = ?2",
+            pk,
+            r
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+#[tracing::instrument(skip(pool), fields(id = %id))]
+pub async fn create_folder(pool: &SqlitePool, id: &str, name: &str) -> Result<(), DbError> {
+    sqlx::query!(
+        "INSERT INTO folders (id, source, name) VALUES (?1, 'local', ?2) \
+         ON CONFLICT(id) DO UPDATE SET name = excluded.name",
+        id,
+        name
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+#[tracing::instrument(skip(pool), fields(id = %id))]
+pub async fn rename_folder(pool: &SqlitePool, id: &str, name: &str) -> Result<(), DbError> {
+    sqlx::query!("UPDATE folders SET name = ?2 WHERE id = ?1", id, name)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+#[tracing::instrument(skip(pool), fields(id = %id))]
+pub async fn delete_folder(pool: &SqlitePool, id: &str) -> Result<(), DbError> {
+    sqlx::query!("DELETE FROM folders WHERE id = ?1", id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Move one playlist into `folder_id`, or out of every folder when `None`.
+/// Membership is single-folder, so the playlist's existing rows are cleared
+/// first, then one is appended at the end of the target folder.
+#[tracing::instrument(skip(pool), fields(playlist_ref = %playlist_ref))]
+pub async fn set_playlist_folder(
+    pool: &SqlitePool,
+    playlist_ref: &str,
+    folder_id: Option<&str>,
+) -> Result<(), DbError> {
+    let mut tx = pool.begin().await?;
+    sqlx::query!(
+        "DELETE FROM folder_playlists WHERE playlist_ref = ?1",
+        playlist_ref
+    )
+    .execute(&mut *tx)
+    .await?;
+    if let Some(fid) = folder_id {
+        sqlx::query!(
+            "INSERT OR IGNORE INTO folder_playlists (folder_id, playlist_ref, position) \
+             SELECT ?1, ?2, COALESCE(MAX(position) + 1, 0) \
+             FROM folder_playlists WHERE folder_id = ?1",
+            fid,
+            playlist_ref
+        )
+        .execute(&mut *tx)
+        .await?;
     }
     tx.commit().await?;
     Ok(())

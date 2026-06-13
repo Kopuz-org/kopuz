@@ -205,9 +205,40 @@ impl Storage for Stub {
         Ok(())
     }
 
-    async fn set_folders(
+    async fn add_playlist_tracks(
         &self,
-        _folders: &[reader::models::PlaylistFolder],
+        _source: &crate::Source,
+        _pl_id: &str,
+        _refs: &[String],
+    ) -> Result<(), DbError> {
+        Ok(())
+    }
+
+    async fn remove_playlist_tracks(
+        &self,
+        _source: &crate::Source,
+        _pl_id: &str,
+        _refs: &[String],
+    ) -> Result<(), DbError> {
+        Ok(())
+    }
+
+    async fn create_folder(&self, _id: &str, _name: &str) -> Result<(), DbError> {
+        Ok(())
+    }
+
+    async fn rename_folder(&self, _id: &str, _name: &str) -> Result<(), DbError> {
+        Ok(())
+    }
+
+    async fn delete_folder(&self, _id: &str) -> Result<(), DbError> {
+        Ok(())
+    }
+
+    async fn set_playlist_folder(
+        &self,
+        _playlist_ref: &str,
+        _folder_id: Option<&str>,
     ) -> Result<(), DbError> {
         Ok(())
     }

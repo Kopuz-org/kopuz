@@ -239,26 +239,23 @@ pub fn LocalLibrary(
                         }
                     },
                     on_add_to_playlist: move |playlist_id: String| {
-                        let store = playlists_res.read().clone().unwrap_or_default();
-                        if let Some(playlist) = store.playlists.iter().find(|p| p.id == playlist_id) {
-                            let mut tracks = playlist.tracks.clone();
-                            if is_selection_mode() {
-                                for path in selected_tracks.read().iter() {
-                                    if !tracks.contains(path) {
-                                        tracks.push(path.clone());
-                                    }
-                                }
-                            } else if let Some(path) = selected_track_for_playlist.read().clone()
-                                && !tracks.contains(&path) {
-                                    tracks.push(path);
-                                }
-                            let refs: Vec<String> = tracks
+                        let refs: Vec<String> = if is_selection_mode() {
+                            selected_tracks
+                                .read()
                                 .iter()
                                 .map(|p| p.to_string_lossy().into_owned())
-                                .collect();
+                                .collect()
+                        } else {
+                            selected_track_for_playlist
+                                .read()
+                                .iter()
+                                .map(|p| p.to_string_lossy().into_owned())
+                                .collect()
+                        };
+                        if !refs.is_empty() {
                             let db = consume_context::<db::Db>();
                             spawn(async move {
-                                if db.set_playlist_tracks(&Source::Local, &playlist_id, &refs).await.is_ok() {
+                                if db.add_playlist_tracks(&Source::Local, &playlist_id, &refs).await.is_ok() {
                                     gens.bump(Table::Playlists);
                                 }
                             });
