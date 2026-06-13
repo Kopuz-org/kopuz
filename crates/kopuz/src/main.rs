@@ -538,25 +538,6 @@ fn init_db_blocking() -> db::Db {
 }
 
 fn main() {
-    // Classic (persistent) scrollbars instead of GTK's autohiding overlay
-    // ones — pairs with the standard scrollbar-color theming in main.css.
-    // Platform config, not renderer styling: GTK/WebKitGTK read it at init.
-    // std::env::set_var is unsafe (edition 2024), so re-exec once with the
-    // variable in the child environment instead; an existing value (user
-    // override or the re-exec'd child itself) skips this.
-    #[cfg(target_os = "linux")]
-    if std::env::var_os("GTK_OVERLAY_SCROLLING").is_none() {
-        use std::os::unix::process::CommandExt;
-        if let Ok(exe) = std::env::current_exe() {
-            let err = std::process::Command::new(exe)
-                .args(std::env::args_os().skip(1))
-                .env("GTK_OVERLAY_SCROLLING", "0")
-                .exec();
-            // exec only returns on failure — start normally without it.
-            eprintln!("kopuz: re-exec for GTK_OVERLAY_SCROLLING failed: {err}");
-        }
-    }
-
     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
     {
         let log_dir = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
