@@ -283,3 +283,43 @@ vello#1707 (vello_hybrid 0-alpha panic); impact comment on blitz#252
     <img>/object-fit path was verified correct en route (tests added:
     explicit/percentage/aspect-ratio-derived heights). WPT
     css-backgrounds +4 / -0.
+
+## Round 23 — the aspect-ratio arc + paint order (2026-06-13)
+- Hero text/buttons invisible → blitz damage.rs paint order vs CSS 2.1
+  Appendix E: `position_to_order` mapped only Absolute/Fixed as
+  positioned; Relative/Sticky painted at the wrong level, and flex/grid
+  hoisting compared bare `order`. Fix: Static→0, all positioned→2;
+  flex/grid sort key = (paint level, order-modified position); hoist when
+  z_index!=0 on flex/grid items too. +9 WPT. PR #460.
+- Wide 16:9 CL covers letterboxed instead of cover-cropped — THREE bugs:
+  1. blitz-paint background-size: Cover/Contain branches crossed whenever
+     the image exceeded the container in an axis (Cover must be the MAX
+     scale ratio always, Contain the min). PR #463, +4 WPT. Real bug,
+     not THE bug.
+  2. taffy block layout: an aspect-ratio container with a *stretched*
+     (non-explicit) width never got a definite height, so a child's
+     height:100% resolved against nothing. Fix in compute/block.rs:
+     aspect_derived_height = outer_width/ratio (clamped) feeding
+     percentage-resolution + outer height, PLUS re-resolving each item's
+     size/min/max against the now-definite inner size. Both gated to
+     RunMode::PerformLayout — measure-pass widths are tentative and must
+     not transfer through the ratio (WPT stale-width). taffy PR #965;
+     4409 fixtures green; +36 css-sizing WPT.
+  3. Same gap in blitz's inline-root entry (compute_inline_layout):
+     known dimensions never went through maybe_apply_aspect_ratio. Same
+     PerformLayout gate. blitz PR #464 (draft, stacked on #453, depends
+     on taffy #965).
+- THE diagnostic lesson: Tailwind preflight sets `img { display: block }`
+  — kopuz images take taffy's BLOCK path, not blitz's inline/replaced
+  paths. A hand-rolled test without the real stylesheets passed where the
+  app failed. The full-fidelity repro (include_str! the app's
+  tailwind.css + main.css, real classes, inject RasterImageData +
+  node.cache.clear() + re-resolve) in blitz-html/tests/image_layout.rs
+  reproduced it instantly and is the template for future fidelity gaps.
+- Accidental-pass WPT tests are real: 3 "regressions" from this work were
+  proven bogus (2× grid-lanes — unimplemented display type whose red
+  aspect-ratio marker previously collapsed to 0; 1× stale-width — the
+  test requires JavaScript, blitz has none). Investigate every WPT diff
+  line before believing it; document flips in the PR body.
+- Scrollbar PRs consolidated per maintainer-friendliness: #461 now carries
+  paint + drag + hover/active as two commits (not stacked #461/#462).
