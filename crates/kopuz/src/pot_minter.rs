@@ -223,7 +223,7 @@ pub fn install_if_wanted<T: 'static>(target: &EventLoopWindowTarget<T>) {
     let builder = WebViewBuilder::new()
         .with_url("https://music.youtube.com/")
         .with_user_agent(UA)
-        .with_initialization_script(&init_script())
+        .with_initialization_script(init_script())
         .with_ipc_handler(move |req| {
             let body = req.into_body();
             let v: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();

@@ -61,16 +61,17 @@ pub fn Album(
     };
 
     use_effect(move || {
-        if is_server && !*has_fetched_jellyfin.read() {
-            if let (Some(total), Some(albums)) = (
+        if is_server
+            && !*has_fetched_jellyfin.read()
+            && let (Some(total), Some(albums)) = (
                 *server_tracks_win.total.read(),
                 server_albums_res.read().clone(),
-            ) {
-                if total == 0 || albums.is_empty() {
-                    fetch_jellyfin();
-                } else {
-                    has_fetched_jellyfin.set(true);
-                }
+            )
+        {
+            if total == 0 || albums.is_empty() {
+                fetch_jellyfin();
+            } else {
+                has_fetched_jellyfin.set(true);
             }
         }
     });

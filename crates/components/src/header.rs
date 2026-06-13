@@ -69,8 +69,8 @@ pub fn Header(
                 button {
                     class: "flex items-center gap-1 uppercase tracking-widest text-left hover:text-white transition-colors",
                     onclick: move |_| {
-                        if sort_state.is_some() {
-                            showcase::toggle_sort_state(sort_state.unwrap(), SortField::Title);
+                        if let Some(sort_state) = sort_state {
+                            showcase::toggle_sort_state(sort_state, SortField::Title);
                         }
                     },
                     "{i18n::t(\"title\")}"
@@ -79,8 +79,8 @@ pub fn Header(
                 button {
                     class: "flex items-center gap-1 uppercase tracking-widest text-left hover:text-white transition-colors",
                     onclick: move |_| {
-                        if sort_state.is_some() {
-                            showcase::toggle_sort_state(sort_state.unwrap(), SortField::Artist);
+                        if let Some(sort_state) = sort_state {
+                            showcase::toggle_sort_state(sort_state, SortField::Artist);
                         }
                     },
                     "{i18n::t(\"artist\")}"
@@ -90,8 +90,8 @@ pub fn Header(
                     button {
                         class: "flex items-center gap-1 uppercase tracking-widest text-left hover:text-white transition-colors",
                         onclick: move |_| {
-                            if sort_state.is_some() {
-                                showcase::toggle_sort_state(sort_state.unwrap(), SortField::Album);
+                            if let Some(sort_state) = sort_state {
+                                showcase::toggle_sort_state(sort_state, SortField::Album);
                             }
                         },
                         "{i18n::t(\"album\")}"
@@ -101,8 +101,8 @@ pub fn Header(
                 button {
                     class: "flex items-center justify-end gap-1 uppercase tracking-widest text-right hover:text-white transition-colors",
                     onclick: move |_| {
-                        if sort_state.is_some() {
-                            showcase::toggle_sort_state(sort_state.unwrap(), SortField::Duration);
+                        if let Some(sort_state) = sort_state {
+                            showcase::toggle_sort_state(sort_state, SortField::Duration);
                         }
                     },
                     i { class: "fa-regular fa-clock" }
@@ -142,8 +142,8 @@ pub fn Header(
                       button {
                           class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
                           onclick: move |_| {
-                              if sort_state.is_some() {
-                                  showcase::toggle_sort_state(sort_state.unwrap(), SortField::Title);
+                              if let Some(sort_state) = sort_state {
+                                  showcase::toggle_sort_state(sort_state, SortField::Title);
                               }
                           },
                           "{i18n::t(\"title\")}"
@@ -152,8 +152,8 @@ pub fn Header(
                       button {
                           class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
                           onclick: move |_| {
-                              if sort_state.is_some() {
-                                  showcase::toggle_sort_state(sort_state.unwrap(), SortField::Artist);
+                              if let Some(sort_state) = sort_state {
+                                  showcase::toggle_sort_state(sort_state, SortField::Artist);
                               }
                           },
                           "{i18n::t(\"artist\")}"
@@ -163,8 +163,8 @@ pub fn Header(
                           button {
                               class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
                               onclick: move |_| {
-                                  if sort_state.is_some() {
-                                      showcase::toggle_sort_state(sort_state.unwrap(), SortField::Album);
+                                  if let Some(sort_state) = sort_state {
+                                      showcase::toggle_sort_state(sort_state, SortField::Album);
                                   }
                               },
                               "{i18n::t(\"album\")}"
@@ -174,8 +174,8 @@ pub fn Header(
                       button {
                           class: "flex items-center justify-end gap-1 uppercase tracking-wider text-right hover:text-white transition-colors",
                           onclick: move |_| {
-                              if sort_state.is_some() {
-                                  showcase::toggle_sort_state(sort_state.unwrap(), SortField::Duration);
+                              if let Some(sort_state) = sort_state {
+                                  showcase::toggle_sort_state(sort_state, SortField::Duration);
                               }
                           },
                           i { class: "fa-regular fa-clock" }

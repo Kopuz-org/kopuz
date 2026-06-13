@@ -27,10 +27,42 @@ async fn seed(db_path: &std::path::Path) {
     // Two local albums (rock inserted before jazz so jazz is "newer"), one
     // server track, listen counts keyed by uid (path / "ytmusic:id").
     for (i, (key, album_id, title, artist, album, disc, track)) in [
-        ("/music/rock/a1.flac", "al-rock", "Anthem", "Axel", "Rock One", 1, 2),
-        ("/music/rock/a2.flac", "al-rock", "Ballad", "Axel", "Rock One", 1, 1),
-        ("/music/jazz/b_1.flac", "al-jazz", "Cool", "Bea", "Jazz One", 1, 1),
-        ("/music/jazz/b_2.flac", "al-jazz", "Drift", "Bea", "Jazz One", 1, 2),
+        (
+            "/music/rock/a1.flac",
+            "al-rock",
+            "Anthem",
+            "Axel",
+            "Rock One",
+            1,
+            2,
+        ),
+        (
+            "/music/rock/a2.flac",
+            "al-rock",
+            "Ballad",
+            "Axel",
+            "Rock One",
+            1,
+            1,
+        ),
+        (
+            "/music/jazz/b_1.flac",
+            "al-jazz",
+            "Cool",
+            "Bea",
+            "Jazz One",
+            1,
+            1,
+        ),
+        (
+            "/music/jazz/b_2.flac",
+            "al-jazz",
+            "Drift",
+            "Bea",
+            "Jazz One",
+            1,
+            2,
+        ),
     ]
     .into_iter()
     .enumerate()
@@ -93,7 +125,10 @@ async fn typed_queries_smoke() {
 
     let samples = db.artist_sample_tracks(&local, 10).await.unwrap();
     assert_eq!(
-        samples.iter().map(|t| t.artist.as_str()).collect::<Vec<_>>(),
+        samples
+            .iter()
+            .map(|t| t.artist.as_str())
+            .collect::<Vec<_>>(),
         ["Axel", "Bea"],
         "one per artist, A→Z"
     );

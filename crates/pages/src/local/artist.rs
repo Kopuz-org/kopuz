@@ -51,7 +51,7 @@ pub fn LocalArtist(
 
     // Multi-selection state
     let mut is_selection_mode = use_signal(|| false);
-    let mut selected_tracks = use_signal(|| HashSet::<PathBuf>::new());
+    let mut selected_tracks = use_signal(HashSet::<PathBuf>::new);
 
     let mut open_album_menu = use_signal(|| None::<String>);
     let mut show_album_playlist_modal = use_signal(|| false);
@@ -685,9 +685,9 @@ pub fn LocalArtist(
                                     }
                                 },
                                 on_delete_track: move |idx: usize| {
-                                    if let Some(track) = artist_tracks().get(idx) {
-                                        if let Some(p) = track.id.local_path() {
-                                            if std::fs::remove_file(p).is_ok() {
+                                    if let Some(track) = artist_tracks().get(idx)
+                                        && let Some(p) = track.id.local_path()
+                                            && std::fs::remove_file(p).is_ok() {
                                                 let db = consume_context::<db::Db>();
                                                 let key = track.id.key().into_owned();
                                                 spawn(async move {
@@ -696,8 +696,6 @@ pub fn LocalArtist(
                                                     }
                                                 });
                                             }
-                                        }
-                                    }
                                     active_menu_track.set(None);
                                 },
                                 actions: Some(rsx! {

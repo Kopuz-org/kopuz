@@ -18,17 +18,17 @@ use std::{
     io::{BufWriter, Write as _},
     path::Path,
     sync::{
+        Mutex,
         atomic::{AtomicU64, Ordering},
         mpsc::{self, Sender},
-        Mutex,
     },
     thread::JoinHandle,
     time::Instant,
 };
 
 use serde_json::{Map, Value};
-use tracing::{field::Field, span, Event, Subscriber};
-use tracing_subscriber::{layer::Context, registry::LookupSpan, Layer};
+use tracing::{Event, Subscriber, field::Field, span};
+use tracing_subscriber::{Layer, layer::Context, registry::LookupSpan};
 
 enum Msg {
     Entry(Value),
@@ -235,7 +235,8 @@ mod tests {
 
     #[test]
     fn repeat_roots_get_distinct_ids_and_lineage_names() {
-        let path = std::env::temp_dir().join(format!("kopuz-chrome-trace-{}.json", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("kopuz-chrome-trace-{}.json", std::process::id()));
         let (layer, guard) = ChromeTraceLayer::new(&path).unwrap();
         let subscriber = tracing_subscriber::registry().with(layer);
 
@@ -267,10 +268,8 @@ mod tests {
 
         // Every span instance has its own id — b/e pairing can never cross,
         // even for same-named concurrent siblings or recycled tracing ids.
-        let ids: std::collections::HashSet<u64> = begins
-            .iter()
-            .map(|e| e["id"].as_u64().unwrap())
-            .collect();
+        let ids: std::collections::HashSet<u64> =
+            begins.iter().map(|e| e["id"].as_u64().unwrap()).collect();
         assert_eq!(ids.len(), begins.len());
 
         assert_eq!(begins[1]["args"]["browse_id"], "VLLM");

@@ -130,16 +130,22 @@ struct CrossfadeState {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+type SharedConsumer = Arc<Mutex<rb::Consumer<f32>>>;
+
+#[cfg(not(target_arch = "wasm32"))]
+type ActiveConsumerSlot = Arc<Mutex<Option<SharedConsumer>>>;
+
+#[cfg(not(target_arch = "wasm32"))]
 pub struct Player {
     state: Arc<Mutex<PlaybackState>>,
     active_state_handle: Arc<Mutex<Arc<Mutex<PlaybackState>>>>,
     _device: cpal::Device,
     stream_config: cpal::StreamConfig,
     _stream: Option<cpal::Stream>,
-    active_consumer: Arc<Mutex<Option<Arc<Mutex<rb::Consumer<f32>>>>>>,
-    fading_consumer: Arc<Mutex<Option<Arc<Mutex<rb::Consumer<f32>>>>>>,
+    active_consumer: ActiveConsumerSlot,
+    fading_consumer: ActiveConsumerSlot,
     crossfade_state: Arc<Mutex<Option<CrossfadeState>>>,
-    ring_buf_consumer: Option<Arc<Mutex<rb::Consumer<f32>>>>,
+    ring_buf_consumer: Option<SharedConsumer>,
     ring_buf: Option<SpscRb<f32>>,
     decoder_handle: Option<std::thread::JoinHandle<()>>,
     fading_session_state: Arc<Mutex<Option<Arc<Mutex<PlaybackState>>>>>,
@@ -768,8 +774,7 @@ impl Player {
                 .as_deref()
                 .and_then(parse_opushead_channels)
                 .unwrap_or(2);
-            audio_params.channels =
-                Some(symphonia::core::audio::Channels::Discrete(ch as u16));
+            audio_params.channels = Some(symphonia::core::audio::Channels::Discrete(ch as u16));
             if audio_params.sample_rate.is_none() {
                 audio_params.sample_rate = Some(48_000);
             }
@@ -802,8 +807,7 @@ impl Player {
                 }
 
                 if let Some(seek_time) = st.seek_to.take() {
-                    let time =
-                        Time::try_from_secs_f64(seek_time.as_secs_f64()).unwrap_or_default();
+                    let time = Time::try_from_secs_f64(seek_time.as_secs_f64()).unwrap_or_default();
                     let seek_to = SeekTo::Time {
                         time,
                         track_id: Some(track_id),

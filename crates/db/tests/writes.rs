@@ -60,7 +60,13 @@ async fn upsert_then_prune() {
 
     // Round-trip preserves the typed fields.
     let page = db
-        .tracks_page(&filter, Page { offset: 0, limit: 10 })
+        .tracks_page(
+            &filter,
+            Page {
+                offset: 0,
+                limit: 10,
+            },
+        )
         .await
         .unwrap();
     let got = page.iter().find(|t| t.title.starts_with("A")).unwrap();
@@ -76,7 +82,13 @@ async fn upsert_then_prune() {
     db.prune_source(&Source::Local, &keep, &[]).await.unwrap();
     assert_eq!(db.tracks_count(&filter).await.unwrap(), 2);
     let remaining: Vec<String> = db
-        .tracks_page(&filter, Page { offset: 0, limit: 10 })
+        .tracks_page(
+            &filter,
+            Page {
+                offset: 0,
+                limit: 10,
+            },
+        )
         .await
         .unwrap()
         .iter()

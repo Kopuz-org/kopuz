@@ -111,7 +111,7 @@ pub fn JellyfinPlaylists(
             let last_server_key = last_key.as_ref().and_then(|k| {
                 let parts: Vec<&str> = k.splitn(5, '|').collect();
                 if parts.len() >= 3 {
-                    Some(format!("{}", &parts[..3].join("|")))
+                    Some(parts[..3].join("|").to_string())
                 } else {
                     None
                 }

@@ -1031,7 +1031,6 @@ impl AppConfig {
     pub fn uses_jellyfin_server(&self) -> bool {
         self.active_service() == Some(MusicService::Jellyfin)
     }
-
 }
 
 #[cfg(test)]

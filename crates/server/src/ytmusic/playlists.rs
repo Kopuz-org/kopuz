@@ -97,10 +97,7 @@ pub async fn list_playlists(cookies: &str) -> Result<Vec<YtPlaylistSummary>, Str
 /// playlist ID (without the `VL` prefix); we add it here. Follows
 /// `nextContinuationData` until exhausted so playlists longer than the
 /// first ~100-track page come through complete.
-pub async fn get_playlist_entries(
-    playlist_id: &str,
-    cookies: &str,
-) -> Result<Vec<Track>, String> {
+pub async fn get_playlist_entries(playlist_id: &str, cookies: &str) -> Result<Vec<Track>, String> {
     let mut out = Vec::new();
     stream_playlist_entries(playlist_id, cookies, |batch| out.extend(batch)).await?;
     Ok(out)
@@ -128,7 +125,11 @@ where
     // Public playlists (the ones Discover surfaces) load anonymously.
     // Empty cookies (anon mode) → None so browse skips SAPISID auth
     // instead of erroring "SAPISID missing".
-    let auth = if cookies.is_empty() { None } else { Some(cookies) };
+    let auth = if cookies.is_empty() {
+        None
+    } else {
+        Some(cookies)
+    };
     let resp: Value = innertube::browse_maybe_auth(&browse_id, auth).await?;
     let (raw_first, mut next) = walk_playlist_shelf(&resp);
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -154,11 +155,20 @@ where
             break;
         }
         page += 1;
-        tracing::debug!(page, new_tracks = unique.len(), total = seen.len(), "playlist continuation page");
+        tracing::debug!(
+            page,
+            new_tracks = unique.len(),
+            total = seen.len(),
+            "playlist continuation page"
+        );
         on_batch(unique);
         next = next_token;
     }
-    tracing::debug!(pages = page, total = seen.len(), "playlist pagination complete");
+    tracing::debug!(
+        pages = page,
+        total = seen.len(),
+        "playlist pagination complete"
+    );
     Ok(())
 }
 
@@ -168,8 +178,7 @@ where
 fn has_sign_in_endpoint(v: &Value) -> bool {
     match v {
         Value::Object(map) => {
-            map.contains_key("signInEndpoint")
-                || map.values().any(has_sign_in_endpoint)
+            map.contains_key("signInEndpoint") || map.values().any(has_sign_in_endpoint)
         }
         Value::Array(items) => items.iter().any(has_sign_in_endpoint),
         _ => false,

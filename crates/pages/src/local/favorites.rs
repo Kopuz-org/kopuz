@@ -28,7 +28,7 @@ pub fn LocalFavorites(
 
     // Multi-selection state
     let mut is_selection_mode = use_signal(|| false);
-    let mut selected_tracks = use_signal(|| HashSet::<PathBuf>::new());
+    let mut selected_tracks = use_signal(HashSet::<PathBuf>::new);
     let sort_state = use_signal(|| None);
 
     let gens = hooks::db_reactivity::use_generations();
@@ -85,96 +85,93 @@ pub fn LocalFavorites(
     let is_empty = displayed_tracks.is_empty();
     let is_modern = config.read().ui_style == UiStyle::Modern;
 
-    let tracks_nodes =
-        sorted_displayed_tracks
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(idx, (track, cover_url))| {
-                let track_menu = track.clone();
-                let track_path = track.id.uid_path();
-                let track_select = track.id.uid_path();
-                let track_add = track.clone();
-                let track_queue = track.clone();
-                let track_meta = track.clone();
-                let track_delete = track.clone();
-                let queue_source = queue_tracks.clone();
-                let track_key = format!("{}-{}", track.id.uid(), idx);
-                let is_menu_open = active_menu_track.read().as_ref() == Some(&track.id.uid_path());
-                let is_selected = selected_tracks.read().contains(&track_path);
-                let matches_current_path = currently_playing_path.as_ref() == Some(&track.id.uid_path());
+    let tracks_nodes = sorted_displayed_tracks.iter().cloned().enumerate().map(
+        |(idx, (track, cover_url))| {
+            let track_menu = track.clone();
+            let track_path = track.id.uid_path();
+            let track_select = track.id.uid_path();
+            let track_add = track.clone();
+            let track_queue = track.clone();
+            let track_meta = track.clone();
+            let track_delete = track.clone();
+            let queue_source = queue_tracks.clone();
+            let track_key = format!("{}-{}", track.id.uid(), idx);
+            let is_menu_open = active_menu_track.read().as_ref() == Some(&track.id.uid_path());
+            let is_selected = selected_tracks.read().contains(&track_path);
+            let matches_current_path =
+                currently_playing_path.as_ref() == Some(&track.id.uid_path());
 
-                rsx! {
-                    div {
-                        key: "{track_key}",
-                        style: "content-visibility: auto; contain-intrinsic-size: 0 60px;",
-                        TrackRow {
-                            track: track.clone(),
-                            cover_url: cover_url.clone(),
-                            row_num: Some(idx + 1),
-                        is_menu_open,
-                            is_album: false,
-                        is_currently_playing: matches_current_path,
-                        is_selection_mode: is_selection_mode(),
-                        is_selected,
-                        on_long_press: move |_| {
+            rsx! {
+                div {
+                    key: "{track_key}",
+                    style: "content-visibility: auto; contain-intrinsic-size: 0 60px;",
+                    TrackRow {
+                        track: track.clone(),
+                        cover_url: cover_url.clone(),
+                        row_num: Some(idx + 1),
+                    is_menu_open,
+                        is_album: false,
+                    is_currently_playing: matches_current_path,
+                    is_selection_mode: is_selection_mode(),
+                    is_selected,
+                    on_long_press: move |_| {
+                        is_selection_mode.set(true);
+                        selected_tracks.write().insert(track_path.clone());
+                    },
+                    on_select: move |selected| {
+                        if selected {
                             is_selection_mode.set(true);
-                            selected_tracks.write().insert(track_path.clone());
-                        },
-                        on_select: move |selected| {
-                            if selected {
-                                is_selection_mode.set(true);
-                                selected_tracks.write().insert(track_select.clone());
-                            } else {
-                                selected_tracks.write().remove(&track_select);
-                                if selected_tracks.read().is_empty() {
-                                    is_selection_mode.set(false);
-                                }
+                            selected_tracks.write().insert(track_select.clone());
+                        } else {
+                            selected_tracks.write().remove(&track_select);
+                            if selected_tracks.read().is_empty() {
+                                is_selection_mode.set(false);
                             }
-                        },
-                        on_click_menu: move |_| {
-                            if active_menu_track.read().as_ref() == Some(&track_menu.id.uid_path()) {
-                                active_menu_track.set(None);
-                            } else {
-                                active_menu_track.set(Some(track_menu.id.uid_path()));
+                        }
+                    },
+                    on_click_menu: move |_| {
+                        if active_menu_track.read().as_ref() == Some(&track_menu.id.uid_path()) {
+                            active_menu_track.set(None);
+                        } else {
+                            active_menu_track.set(Some(track_menu.id.uid_path()));
+                        }
+                    },
+                    on_add_to_playlist: move |_| {
+                        selected_track_for_playlist.set(Some(track_add.id.uid_path()));
+                        show_playlist_modal.set(true);
+                        active_menu_track.set(None);
+                    },
+                    on_queue: move |_| {
+                        ctrl.add_to_queue(vec![track_queue.clone()]);
+                        active_menu_track.set(None);
+                    },
+                    on_close_menu: move |_| active_menu_track.set(None),
+                    on_view_metadata: move |_| {
+                        metadata_track.set(Some(track_meta.clone()));
+                        active_menu_track.set(None);
+                    },
+                    on_delete: move |_| {
+                        active_menu_track.set(None);
+                        if let Some(p) = track_delete.id.local_path()
+                            && std::fs::remove_file(p).is_ok() {
+                                let db = consume_context::<db::Db>();
+                                let key = track_delete.id.key().into_owned();
+                                spawn(async move {
+                                    if db.delete_tracks(&Source::Local, &[key]).await.is_ok() {
+                                        gens.bump(Table::Tracks);
+                                    }
+                                });
                             }
-                        },
-                        on_add_to_playlist: move |_| {
-                            selected_track_for_playlist.set(Some(track_add.id.uid_path()));
-                            show_playlist_modal.set(true);
-                            active_menu_track.set(None);
-                        },
-                        on_queue: move |_| {
-                            ctrl.add_to_queue(vec![track_queue.clone()]);
-                            active_menu_track.set(None);
-                        },
-                        on_close_menu: move |_| active_menu_track.set(None),
-                        on_view_metadata: move |_| {
-                            metadata_track.set(Some(track_meta.clone()));
-                            active_menu_track.set(None);
-                        },
-                        on_delete: move |_| {
-                            active_menu_track.set(None);
-                            if let Some(p) = track_delete.id.local_path() {
-                                if std::fs::remove_file(p).is_ok() {
-                                    let db = consume_context::<db::Db>();
-                                    let key = track_delete.id.key().into_owned();
-                                    spawn(async move {
-                                        if db.delete_tracks(&Source::Local, &[key]).await.is_ok() {
-                                            gens.bump(Table::Tracks);
-                                        }
-                                    });
-                                }
-                            }
-                        },
-                        on_play: move |_| {
-                            queue.set(queue_source.clone());
-                            ctrl.play_track(idx);
-                        },
-                    }
-                    }
+                    },
+                    on_play: move |_| {
+                        queue.set(queue_source.clone());
+                        ctrl.play_track(idx);
+                    },
                 }
-            });
+                }
+            }
+        },
+    );
 
     let all_selected = !sorted_displayed_tracks.is_empty()
         && sorted_displayed_tracks
@@ -219,11 +216,10 @@ pub fn LocalFavorites(
                                         tracks.push(path.clone());
                                     }
                                 }
-                            } else if let Some(path) = selected_track_for_playlist.read().clone() {
-                                if !tracks.contains(&path) {
+                            } else if let Some(path) = selected_track_for_playlist.read().clone()
+                                && !tracks.contains(&path) {
                                     tracks.push(path);
                                 }
-                            }
                             let refs: Vec<String> = tracks
                                 .iter()
                                 .map(|p| p.to_string_lossy().into_owned())

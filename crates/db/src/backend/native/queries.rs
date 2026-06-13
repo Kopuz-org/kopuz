@@ -153,7 +153,9 @@ pub async fn genre_tracks(
 }
 
 fn escape_like(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+    s.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 pub async fn folder_tracks(pool: &SqlitePool, prefix: &str) -> Result<Vec<Track>, DbError> {
@@ -341,11 +343,7 @@ pub async fn favorites(pool: &SqlitePool, server_id: &str) -> Result<Vec<String>
     .await?)
 }
 
-pub async fn is_favorite(
-    pool: &SqlitePool,
-    server_id: &str,
-    ref_: &str,
-) -> Result<bool, DbError> {
+pub async fn is_favorite(pool: &SqlitePool, server_id: &str, ref_: &str) -> Result<bool, DbError> {
     let n: i64 = sqlx::query_scalar!(
         "SELECT COUNT(*) FROM favorites WHERE server_id = ?1 AND ref = ?2 AND dirty != 2",
         server_id,

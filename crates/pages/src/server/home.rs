@@ -113,13 +113,13 @@ pub fn JellyfinHome(
     };
 
     use_effect(move || {
-        if !*has_fetched.read() {
-            if let Some(albums) = albums_res.read().as_ref() {
-                if albums.is_empty() {
-                    fetch_jellyfin();
-                } else {
-                    has_fetched.set(true);
-                }
+        if !*has_fetched.read()
+            && let Some(albums) = albums_res.read().as_ref()
+        {
+            if albums.is_empty() {
+                fetch_jellyfin();
+            } else {
+                has_fetched.set(true);
             }
         }
     });
@@ -191,7 +191,7 @@ pub fn JellyfinHome(
     let new_releases = use_memo(move || -> Vec<AlbumCard> {
         let conf = config.read();
         let mut albums = albums_res.read().clone().unwrap_or_default();
-        albums.sort_by(|a, b| b.year.cmp(&a.year));
+        albums.sort_by_key(|b| std::cmp::Reverse(b.year));
         let mut unique = Vec::new();
         let mut seen = std::collections::HashSet::new();
         for album in albums {
@@ -253,10 +253,8 @@ pub fn JellyfinHome(
         let conf = config.read();
         let recent_tracks = recent_tracks_res.read().clone().unwrap_or_default();
         let all_albums = albums_res.read().clone().unwrap_or_default();
-        let album_by_id: HashMap<&str, &Album> = all_albums
-            .iter()
-            .map(|a| (a.id.as_str(), a))
-            .collect();
+        let album_by_id: HashMap<&str, &Album> =
+            all_albums.iter().map(|a| (a.id.as_str(), a)).collect();
         let mut out: Vec<(Track, Option<Album>, Option<String>)> = Vec::new();
         let mut seen_albums = std::collections::HashSet::new();
         for track in recent_tracks.iter() {
@@ -271,10 +269,10 @@ pub fn JellyfinHome(
             } else if is_unknown_artist(&track.artist) {
                 continue;
             }
-            if let Some(ref a) = album {
-                if !seen_albums.insert(a.id.clone()) {
-                    continue;
-                }
+            if let Some(ref a) = album
+                && !seen_albums.insert(a.id.clone())
+            {
+                continue;
             }
             let cover = track_cover_url(&conf, track);
             out.push((track.clone(), album, cover));
@@ -289,10 +287,8 @@ pub fn JellyfinHome(
         let conf = config.read();
         let recent_tracks = recent_tracks_res.read().clone().unwrap_or_default();
         let all_albums = albums_res.read().clone().unwrap_or_default();
-        let album_by_id: HashMap<&str, &Album> = all_albums
-            .iter()
-            .map(|a| (a.id.as_str(), a))
-            .collect();
+        let album_by_id: HashMap<&str, &Album> =
+            all_albums.iter().map(|a| (a.id.as_str(), a)).collect();
 
         for track in recent_tracks.iter() {
             if track.title.trim().is_empty() {
@@ -340,7 +336,7 @@ pub fn JellyfinHome(
         let conf = config.read();
         let tracks = if *is_offline.read() {
             let mut downloaded = offline_tracks_res.read().clone().unwrap_or_default();
-            downloaded.sort_by(|a, b| a.artist.to_lowercase().cmp(&b.artist.to_lowercase()));
+            downloaded.sort_by_key(|a| a.artist.to_lowercase());
             downloaded
         } else {
             artist_samples_res.read().clone().unwrap_or_default()
@@ -417,12 +413,8 @@ pub fn JellyfinHome(
             return None;
         };
         let entry = hero_entry.read();
-        let Some((_, album_opt, _)) = entry.as_ref() else {
-            return None;
-        };
-        let Some(album) = album_opt.as_ref() else {
-            return None;
-        };
+        let (_, album_opt, _) = entry.as_ref()?;
+        let album = album_opt.as_ref()?;
         album.cover_path.as_ref().and_then(|cover_path| {
             utils::jellyfin_image::jellyfin_image_url_from_path(
                 &cover_path.to_string_lossy(),
@@ -499,9 +491,8 @@ pub fn JellyfinHome(
                                                 disabled: idx == 0,
                                                 onclick: move |_| {
                                                     let mut conf = config.write();
-                                                    if let Some(i) = conf.home_sections.iter().position(|s| s.key == key_up) {
-                                                        if i > 0 { conf.home_sections.swap(i, i - 1); }
-                                                    }
+                                                    if let Some(i) = conf.home_sections.iter().position(|s| s.key == key_up)
+                                                        && i > 0 { conf.home_sections.swap(i, i - 1); }
                                                 },
                                                 i { class: "fa-solid fa-chevron-up text-xs" }
                                             }
@@ -511,9 +502,8 @@ pub fn JellyfinHome(
                                                 disabled: idx + 1 >= total,
                                                 onclick: move |_| {
                                                     let mut conf = config.write();
-                                                    if let Some(i) = conf.home_sections.iter().position(|s| s.key == key_down) {
-                                                        if i + 1 < conf.home_sections.len() { conf.home_sections.swap(i, i + 1); }
-                                                    }
+                                                    if let Some(i) = conf.home_sections.iter().position(|s| s.key == key_down)
+                                                        && i + 1 < conf.home_sections.len() { conf.home_sections.swap(i, i + 1); }
                                                 },
                                                 i { class: "fa-solid fa-chevron-down text-xs" }
                                             }

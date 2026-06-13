@@ -23,37 +23,39 @@ async fn config_round_trips_with_creds_in_servers_table() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();
 
-    let mut cfg = AppConfig::default();
-    cfg.servers = vec![
-        SavedServer {
-            id: "srv-a".into(),
-            name: "Jelly".into(),
-            url: "https://jelly.example".into(),
-            service: MusicService::Jellyfin,
-            yt_browser: None,
-            yt_anonymous: false,
-        },
-        SavedServer {
-            id: "srv-b".into(),
+    let cfg = AppConfig {
+        servers: vec![
+            SavedServer {
+                id: "srv-a".into(),
+                name: "Jelly".into(),
+                url: "https://jelly.example".into(),
+                service: MusicService::Jellyfin,
+                yt_browser: None,
+                yt_anonymous: false,
+            },
+            SavedServer {
+                id: "srv-b".into(),
+                name: "Yt".into(),
+                url: "https://music.youtube.com".into(),
+                service: MusicService::YtMusic,
+                yt_browser: Some(config::Browser::Brave),
+                yt_anonymous: false,
+            },
+        ],
+        server: Some(MusicServer {
             name: "Yt".into(),
             url: "https://music.youtube.com".into(),
             service: MusicService::YtMusic,
+            access_token: Some("TOPSECRET_COOKIE".into()),
+            user_id: Some("u-1".into()),
+            id: Some("srv-b".into()),
             yt_browser: Some(config::Browser::Brave),
             yt_anonymous: false,
-        },
-    ];
-    cfg.server = Some(MusicServer {
-        name: "Yt".into(),
-        url: "https://music.youtube.com".into(),
-        service: MusicService::YtMusic,
-        access_token: Some("TOPSECRET_COOKIE".into()),
-        user_id: Some("u-1".into()),
-        id: Some("srv-b".into()),
-        yt_browser: Some(config::Browser::Brave),
-        yt_anonymous: false,
-    });
-    cfg.active_server_id = Some("srv-b".into());
-    cfg.theme = "midnight".into();
+        }),
+        active_server_id: Some("srv-b".into()),
+        theme: "midnight".into(),
+        ..Default::default()
+    };
 
     db.save_config(&cfg).await.unwrap();
 
@@ -83,12 +85,18 @@ async fn config_round_trips_with_creds_in_servers_table() {
         .fetch_one(&mut conn)
         .await
         .unwrap();
-    assert!(!blob.contains("TOPSECRET_COOKIE"), "token leaked into the blob");
+    assert!(
+        !blob.contains("TOPSECRET_COOKIE"),
+        "token leaked into the blob"
+    );
     let v: serde_json::Value = serde_json::from_str(&blob).unwrap();
     assert!(v.get("server").is_none());
     assert!(v.get("servers").is_none());
     assert!(v.get("listen_counts").is_none());
-    assert_eq!(v.get("active_server_id").and_then(|x| x.as_str()), Some("srv-b"));
+    assert_eq!(
+        v.get("active_server_id").and_then(|x| x.as_str()),
+        Some("srv-b")
+    );
 
     // Removing a server from the list drops its row (the active one is kept).
     let mut cfg2 = loaded;

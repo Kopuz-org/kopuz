@@ -32,7 +32,7 @@ pub struct DiscoverShelf {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DiscoverItem {
-    Song(Track),
+    Song(Box<Track>),
     Playlist {
         playlist_id: String,
         title: String,
@@ -222,7 +222,9 @@ fn best_artist_banner(header: &Value) -> Option<String> {
 fn parse_artist_carousel(section: &Value) -> Option<DiscoverShelf> {
     let shelf = section.get("musicCarouselShelfRenderer")?;
     let header = shelf.pointer("/header/musicCarouselShelfBasicHeaderRenderer");
-    let title = header.and_then(|h| runs_text(h, "/title/runs")).unwrap_or_default();
+    let title = header
+        .and_then(|h| runs_text(h, "/title/runs"))
+        .unwrap_or_default();
     if title.is_empty() {
         return None;
     }
@@ -273,7 +275,7 @@ fn parse_artist_song_list(section: &Value) -> Option<DiscoverShelf> {
             arr.iter()
                 .filter_map(|i| i.get("musicResponsiveListItemRenderer"))
                 .filter_map(parse_artist_song_row)
-                .map(DiscoverItem::Song)
+                .map(|t| DiscoverItem::Song(Box::new(t)))
                 .collect()
         })
         .unwrap_or_default();
@@ -303,7 +305,11 @@ fn parse_artist_song_row(row: &Value) -> Option<Track> {
     let mut flex_duration: Option<u64> = None;
     for c in &cols {
         match c {
-            RowColumn::Title { text, video_id: vid, .. } => {
+            RowColumn::Title {
+                text,
+                video_id: vid,
+                ..
+            } => {
                 if title.is_empty() {
                     title = text.clone();
                 }
@@ -411,7 +417,11 @@ fn parse_album(browse_id: &str, resp: &Value) -> YtAlbum {
             // no /flexColumns/N positional dive.
             if audio_pid_from_rows.is_none() {
                 for c in classify_flex_columns(row) {
-                    if let RowColumn::Title { playlist_id: Some(pid), .. } = c {
+                    if let RowColumn::Title {
+                        playlist_id: Some(pid),
+                        ..
+                    } = c
+                    {
                         audio_pid_from_rows = Some(pid);
                         break;
                     }
@@ -521,7 +531,9 @@ fn pick_album_artist(header: Option<&Value>) -> Option<String> {
     // Use `let else continue` instead of `?` so a single empty/structural
     // run in the middle doesn't abort the whole scan and miss the real
     // artist later in the array.
-    let arr = header.pointer("/subtitle/runs").and_then(|v| v.as_array())?;
+    let arr = header
+        .pointer("/subtitle/runs")
+        .and_then(|v| v.as_array())?;
     for r in arr {
         let Some(text) = r.get("text").and_then(|v| v.as_str()) else {
             continue;
@@ -608,7 +620,11 @@ fn parse_album_row(
     let mut flex_duration: Option<u64> = None;
     for c in &cols {
         match c {
-            RowColumn::Title { text, video_id: vid, .. } => {
+            RowColumn::Title {
+                text,
+                video_id: vid,
+                ..
+            } => {
                 if title.is_empty() {
                     title = text.clone();
                 }
@@ -646,7 +662,9 @@ fn parse_album_row(
     } else {
         vec![primary_artist.clone()]
     };
-    let cover = album_thumbnail.map(|u| u.to_string()).filter(|u| !u.is_empty());
+    let cover = album_thumbnail
+        .map(|u| u.to_string())
+        .filter(|u| !u.is_empty());
     let album_id = synthesize_album_id(album_title, &primary_artist);
     Some(Track {
         id: super::yt_id(video_id.clone()),
@@ -743,8 +761,7 @@ async fn post(url: &str, body: &Value, cookies: &str) -> Result<Value, String> {
 }
 
 fn parse_initial(resp: &Value) -> DiscoverHome {
-    let sections =
-        tab_section_contents(resp, "/contents/singleColumnBrowseResultsRenderer/tabs");
+    let sections = tab_section_contents(resp, "/contents/singleColumnBrowseResultsRenderer/tabs");
     let continuation = resp
         .pointer("/contents/singleColumnBrowseResultsRenderer/tabs")
         .and_then(|v| v.as_array())
@@ -781,7 +798,9 @@ fn parse_continuation(resp: &Value) -> DiscoverHome {
 fn parse_shelf(section: &Value) -> Option<DiscoverShelf> {
     let shelf = section.get("musicCarouselShelfRenderer")?;
     let header = shelf.pointer("/header/musicCarouselShelfBasicHeaderRenderer");
-    let title = header.and_then(|h| runs_text(h, "/title/runs")).unwrap_or_default();
+    let title = header
+        .and_then(|h| runs_text(h, "/title/runs"))
+        .unwrap_or_default();
     if title.is_empty() {
         return None;
     }
@@ -827,12 +846,12 @@ fn parse_tile(item: &Value) -> Option<DiscoverItem> {
         .pointer("/navigationEndpoint/watchEndpoint/videoId")
         .and_then(|v| v.as_str())
     {
-        return Some(DiscoverItem::Song(build_song_track(
+        return Some(DiscoverItem::Song(Box::new(build_song_track(
             video_id,
             &title,
             &subtitle,
             thumbnail.as_deref(),
-        )));
+        ))));
     }
 
     if let Some(playlist_id) = r
@@ -886,21 +905,11 @@ fn parse_tile(item: &Value) -> Option<DiscoverItem> {
     None
 }
 
-fn build_song_track(
-    video_id: &str,
-    title: &str,
-    subtitle: &str,
-    thumbnail: Option<&str>,
-) -> Track {
+fn build_song_track(video_id: &str, title: &str, subtitle: &str, thumbnail: Option<&str>) -> Track {
     // Subtitle for songs/videos is typically "Artist • N views" — take
     // the first run as the primary artist; everything after the first
     // dot is metadata that doesn't belong in the artist field.
-    let primary_artist = subtitle
-        .split('•')
-        .next()
-        .unwrap_or("")
-        .trim()
-        .to_string();
+    let primary_artist = subtitle.split('•').next().unwrap_or("").trim().to_string();
     let artists = if primary_artist.is_empty() {
         Vec::new()
     } else {
@@ -1132,10 +1141,8 @@ fn fixed_columns_duration(row: &Value) -> Option<u64> {
         // `let else continue` — a textless column (e.g. a like-toggle
         // fixedColumn before the duration column) must not abort the
         // whole scan; iterate until we find one that parses as mm:ss.
-        let Some(text) = runs_text(
-            col,
-            "/musicResponsiveListItemFixedColumnRenderer/text/runs",
-        ) else {
+        let Some(text) = runs_text(col, "/musicResponsiveListItemFixedColumnRenderer/text/runs")
+        else {
             continue;
         };
         if let Some(secs) = parse_mm_ss(text.trim()) {

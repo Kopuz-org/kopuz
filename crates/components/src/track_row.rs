@@ -1,16 +1,16 @@
+use crate::NavigationController;
 use crate::constants::*;
 use crate::dots_menu::{DotsMenu, MenuAction};
 use crate::queue_drag::{
     clear_dragged_queue_track, handle_select_click, is_queue_drag_enabled, set_dragged_queue_track,
     set_dragged_queue_tracks,
 };
-use crate::NavigationController;
+use config::MusicSource;
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::PlayerController;
-use tracing::Instrument;
 use reader::models::Track;
-use config::MusicSource;
+use tracing::Instrument;
 
 pub(crate) fn copy_to_clipboard(text: &str) {
     let value = serde_json::to_string(text).unwrap_or_else(|_| "\"\"".to_string());
@@ -21,16 +21,19 @@ pub(crate) fn copy_to_clipboard(text: &str) {
 }
 
 pub(crate) fn share_to_musicbrainz(release_id: Option<String>, artist: String, title: String) {
-    spawn(async move {
-        if let Some(url) =
-            utils::musicbrainz::track_page_url(release_id.as_deref(), &artist, &title).await
-        {
-            copy_to_clipboard(&url);
-            toast("Copied MusicBrainz link");
-        } else {
-            toast("Couldn't find this track on MusicBrainz");
+    spawn(
+        async move {
+            if let Some(url) =
+                utils::musicbrainz::track_page_url(release_id.as_deref(), &artist, &title).await
+            {
+                copy_to_clipboard(&url);
+                toast("Copied MusicBrainz link");
+            } else {
+                toast("Couldn't find this track on MusicBrainz");
+            }
         }
-    }.instrument(tracing::info_span!("musicbrainz.fetch")));
+        .instrument(tracing::info_span!("musicbrainz.fetch")),
+    );
 }
 
 pub(crate) fn share_youtube_url(video_id: &str) {
@@ -171,8 +174,7 @@ pub fn TrackRow(
 
     let delete_action_idx = if !hide_delete {
         let idx = actions.len();
-        actions
-            .push(MenuAction::new(delete_song_text.as_str(), "fa-solid fa-trash").destructive());
+        actions.push(MenuAction::new(delete_song_text.as_str(), "fa-solid fa-trash").destructive());
         Some(idx)
     } else {
         None
@@ -187,7 +189,10 @@ pub fn TrackRow(
     let is_ytmusic_track = track.id.uid().starts_with("ytmusic:");
     let mix_idx = if is_ytmusic_track {
         let idx = actions.len();
-        actions.push(MenuAction::new("Start radio", "fa-solid fa-tower-broadcast"));
+        actions.push(MenuAction::new(
+            "Start radio",
+            "fa-solid fa-tower-broadcast",
+        ));
         Some(idx)
     } else {
         None
@@ -485,11 +490,10 @@ pub fn TrackRow(
                                 }
                                 if let Some(queue_idx) = add_to_queue_idx
                                     && idx == queue_idx
+                                    && let Some(handler) = on_queue
                                 {
-                                    if let Some(handler) = on_queue {
-                                        handler.call(());
-                                        return;
-                                    }
+                                    handler.call(());
+                                    return;
                                 }
                                 if idx == add_to_playlist_idx {
                                     on_add_to_playlist.call(());
@@ -751,13 +755,13 @@ pub fn TrackRow(
                                 on_close_menu.call(());
                                 return;
                             }
-                            if let Some(queue_idx) = add_to_queue_idx {
-                                if idx == queue_idx {
-                                    if let Some(handler) = on_queue {
-                                        handler.call(());
-                                    }
-                                    return;
+                            if let Some(queue_idx) = add_to_queue_idx
+                                && idx == queue_idx
+                            {
+                                if let Some(handler) = on_queue {
+                                    handler.call(());
                                 }
+                                return;
                             }
 
                             if idx == add_to_playlist_idx {
@@ -823,14 +827,17 @@ fn start_radio_from(
         .as_ref()
         .and_then(|s| s.access_token.clone())
         .unwrap_or_default();
-    spawn(async move {
-        let yt = server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
-        match yt.start_mix(&video_id).await {
-            Ok(tracks) if !tracks.is_empty() => {
-                ctrl.play_queue_linear(tracks);
+    spawn(
+        async move {
+            let yt = server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
+            match yt.start_mix(&video_id).await {
+                Ok(tracks) if !tracks.is_empty() => {
+                    ctrl.play_queue_linear(tracks);
+                }
+                Ok(_) => tracing::debug!(seed = %video_id, "YT mix returned empty queue"),
+                Err(e) => tracing::warn!(seed = %video_id, error = %e, "YT mix failed"),
             }
-            Ok(_) => tracing::debug!(seed = %video_id, "YT mix returned empty queue"),
-            Err(e) => tracing::warn!(seed = %video_id, error = %e, "YT mix failed"),
         }
-    }.instrument(tracing::info_span!("mix.start")));
+        .instrument(tracing::info_span!("mix.start")),
+    );
 }

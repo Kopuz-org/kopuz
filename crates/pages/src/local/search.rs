@@ -37,8 +37,7 @@ pub fn LocalSearch(
     let gens = hooks::db_reactivity::use_generations();
     let source = use_memo(|| Source::Local);
     let albums_res = use_albums(source);
-    let selected_genre_memo =
-        use_memo(move || selected_genre.read().clone().unwrap_or_default());
+    let selected_genre_memo = use_memo(move || selected_genre.read().clone().unwrap_or_default());
     let genre_tracks_res = use_genre_tracks(source, selected_genre_memo);
 
     let genre_tracks = use_memo(move || {

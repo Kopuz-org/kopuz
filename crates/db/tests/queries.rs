@@ -66,7 +66,13 @@ async fn windowed_queries_over_20k_tracks() {
         ..local.clone()
     };
     let page = db
-        .tracks_page(&by_title, Page { offset: 0, limit: 100 })
+        .tracks_page(
+            &by_title,
+            Page {
+                offset: 0,
+                limit: 100,
+            },
+        )
         .await
         .unwrap();
     assert_eq!(page.len(), 100);
@@ -75,7 +81,13 @@ async fn windowed_queries_over_20k_tracks() {
 
     // A deeper window starts where it should — only that slice is materialized.
     let mid = db
-        .tracks_page(&by_title, Page { offset: 12_345, limit: 10 })
+        .tracks_page(
+            &by_title,
+            Page {
+                offset: 12_345,
+                limit: 10,
+            },
+        )
         .await
         .unwrap();
     assert_eq!(mid.len(), 10);
@@ -91,7 +103,13 @@ async fn windowed_queries_over_20k_tracks() {
     };
     assert_eq!(db.tracks_count(&search).await.unwrap(), (N / 50) as u32);
     let hits = db
-        .tracks_page(&search, Page { offset: 0, limit: 5 })
+        .tracks_page(
+            &search,
+            Page {
+                offset: 0,
+                limit: 5,
+            },
+        )
         .await
         .unwrap();
     assert_eq!(hits.len(), 5);
@@ -104,7 +122,10 @@ async fn windowed_queries_over_20k_tracks() {
                 sort: TrackSort::Artist,
                 ..local.clone()
             },
-            Page { offset: 0, limit: 1 },
+            Page {
+                offset: 0,
+                limit: 1,
+            },
         )
         .await
         .unwrap();

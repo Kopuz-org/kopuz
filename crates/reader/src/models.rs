@@ -311,7 +311,6 @@ pub struct PlaylistStore {
     pub folders: Vec<PlaylistFolder>,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct FavoritesStore {
     #[serde(default)]

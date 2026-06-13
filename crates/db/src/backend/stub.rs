@@ -141,7 +141,11 @@ impl Storage for Stub {
         Ok(Default::default())
     }
 
-    async fn delete_tracks(&self, _source: &crate::Source, _keys: &[String]) -> Result<u64, DbError> {
+    async fn delete_tracks(
+        &self,
+        _source: &crate::Source,
+        _keys: &[String],
+    ) -> Result<u64, DbError> {
         Ok(0)
     }
 
@@ -258,7 +262,6 @@ impl Storage for Stub {
     ) -> Result<(), DbError> {
         Ok(())
     }
-
 
     async fn set_favorite(&self, _server_id: &str, _ref_: &str, _on: bool) -> Result<(), DbError> {
         Ok(())

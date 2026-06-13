@@ -191,8 +191,16 @@ pub async fn run_json_import(
 
     // --- playlists + membership -------------------------------------------
     for (i, p) in plists.playlists.iter().enumerate() {
-        let pk = insert_playlist(&mut tx, "local", &p.id, &p.name, &p.cover_path, None, i as i64)
-            .await?;
+        let pk = insert_playlist(
+            &mut tx,
+            "local",
+            &p.id,
+            &p.name,
+            &p.cover_path,
+            None,
+            i as i64,
+        )
+        .await?;
         insert_playlist_tracks(&mut tx, pk, &p.tracks).await?;
     }
     if let Some(sid) = &server_src {
@@ -364,7 +372,10 @@ async fn import_servers(
             let url = str_at(s, "url");
             let service = service_at(s);
             let yt_browser = opt_str_at(s, "yt_browser");
-            let yt_anon = s.get("yt_anonymous").and_then(|v| v.as_bool()).unwrap_or(false) as i64;
+            let yt_anon = s
+                .get("yt_anonymous")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false) as i64;
             sqlx::query!(
                 "INSERT OR IGNORE INTO servers (id, name, url, service, yt_browser, yt_anonymous) \
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -389,7 +400,10 @@ async fn import_servers(
     let token = opt_str_at(srv, "access_token");
     let user_id = opt_str_at(srv, "user_id");
     let yt_browser = opt_str_at(srv, "yt_browser");
-    let yt_anon = srv.get("yt_anonymous").and_then(|v| v.as_bool()).unwrap_or(false) as i64;
+    let yt_anon = srv
+        .get("yt_anonymous")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false) as i64;
 
     // Resolve id: explicit, else match a saved server by (url, service), else synth.
     let resolved = opt_str_at(srv, "id")
@@ -455,7 +469,10 @@ async fn import_config_blob(
             "active_server_id".into(),
             serde_json::json!(active_server_id),
         );
-        obj.insert("last_yt_sync_at".into(), serde_json::json!(lib.last_yt_sync_at));
+        obj.insert(
+            "last_yt_sync_at".into(),
+            serde_json::json!(lib.last_yt_sync_at),
+        );
         obj.insert(
             "last_yt_playlists_sync_at".into(),
             serde_json::json!(lib.last_yt_playlists_sync_at),
@@ -708,7 +725,10 @@ fn service_str(s: config::MusicService) -> &'static str {
 }
 
 fn str_at(v: &serde_json::Value, key: &str) -> String {
-    v.get(key).and_then(|x| x.as_str()).unwrap_or("").to_string()
+    v.get(key)
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string()
 }
 
 fn opt_str_at(v: &serde_json::Value, key: &str) -> Option<String> {
@@ -720,7 +740,11 @@ fn opt_str_at(v: &serde_json::Value, key: &str) -> Option<String> {
 
 fn service_at(v: &serde_json::Value) -> String {
     let s = str_at(v, "service");
-    if s.is_empty() { "Jellyfin".to_string() } else { s }
+    if s.is_empty() {
+        "Jellyfin".to_string()
+    } else {
+        s
+    }
 }
 
 async fn db_has_data(pool: &SqlitePool) -> Result<bool, DbError> {

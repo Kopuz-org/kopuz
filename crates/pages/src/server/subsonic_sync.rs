@@ -208,8 +208,7 @@ pub async fn sync_server_library(
                             .await
                             .map_err(|e| e.to_string())?;
                     }
-                    synced_track_keys
-                        .extend(page_tracks.iter().map(|t| t.id.key().into_owned()));
+                    synced_track_keys.extend(page_tracks.iter().map(|t| t.id.key().into_owned()));
                     synced_album_ids.extend(page_tracks.iter().map(|t| t.album_id.clone()));
                     gens.bump_coalesced(Table::Tracks);
 
@@ -224,20 +223,20 @@ pub async fn sync_server_library(
 
             if let Ok(artists) = remote.get_artists().await {
                 for artist in artists {
-                    if let Some(tags) = &artist.image_tags {
-                        if let Some(tag) = tags.get("Primary") {
-                            let url = utils::jellyfin_image::jellyfin_image_url(
-                                &server_url,
-                                &artist.id,
-                                Some(tag.as_str()),
-                                Some(&token),
-                                512,
-                                90,
-                            );
-                            db.set_artist_image(&artist.name, "server", Some(&url))
-                                .await
-                                .map_err(|e| e.to_string())?;
-                        }
+                    if let Some(tags) = &artist.image_tags
+                        && let Some(tag) = tags.get("Primary")
+                    {
+                        let url = utils::jellyfin_image::jellyfin_image_url(
+                            &server_url,
+                            &artist.id,
+                            Some(tag.as_str()),
+                            Some(&token),
+                            512,
+                            90,
+                        );
+                        db.set_artist_image(&artist.name, "server", Some(&url))
+                            .await
+                            .map_err(|e| e.to_string())?;
                     }
                 }
             }
@@ -282,10 +281,8 @@ pub async fn sync_server_library(
             }
 
             // Full sync — prune rows the server no longer has.
-            let keep_keys: Vec<String> =
-                tracks.iter().map(|t| t.id.key().into_owned()).collect();
-            let keep_albums: Vec<String> =
-                merged_albums.iter().map(|a| a.id.clone()).collect();
+            let keep_keys: Vec<String> = tracks.iter().map(|t| t.id.key().into_owned()).collect();
+            let keep_albums: Vec<String> = merged_albums.iter().map(|a| a.id.clone()).collect();
             let _ = db.prune_source(&source, &keep_keys, &keep_albums).await;
 
             gens.bump(Table::Tracks);
@@ -320,10 +317,10 @@ pub async fn fetch_subsonic_library(
     let mut artist_images = std::collections::HashMap::new();
     if let Ok(artists) = remote.get_artists().await {
         for artist in artists {
-            if let Some(cover_art_id) = &artist.cover_art {
-                if let Ok(url) = remote.cover_art_url(cover_art_id, Some(512)) {
-                    artist_images.insert(artist.name, url);
-                }
+            if let Some(cover_art_id) = &artist.cover_art
+                && let Ok(url) = remote.cover_art_url(cover_art_id, Some(512))
+            {
+                artist_images.insert(artist.name, url);
             }
         }
     }
@@ -386,10 +383,10 @@ pub async fn fetch_subsonic_library(
                     continue;
                 }
 
-                if let Some(genre) = &song.genre {
-                    if !genre.is_empty() {
-                        genres.insert(genre.clone());
-                    }
+                if let Some(genre) = &song.genre
+                    && !genre.is_empty()
+                {
+                    genres.insert(genre.clone());
                 }
 
                 let bitrate_u16 = song.bit_rate.unwrap_or(0).min(u16::MAX as u32) as u16;
@@ -434,7 +431,7 @@ pub async fn fetch_subsonic_library(
         .into_iter()
         .map(|genre| (genre.clone(), genre))
         .collect();
-    genres_out.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+    genres_out.sort_by_key(|a| a.0.to_lowercase());
 
     Ok(SubsonicLibraryData {
         albums: albums_out,

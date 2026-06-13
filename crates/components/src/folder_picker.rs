@@ -3,10 +3,7 @@ use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_active_server_id, use_playlists};
 
 #[component]
-pub fn FolderPickerModal(
-    playlist_id: String,
-    on_close: EventHandler<()>,
-) -> Element {
+pub fn FolderPickerModal(playlist_id: String, on_close: EventHandler<()>) -> Element {
     let mut new_folder_name = use_signal(String::new);
     let mut show_create = use_signal(|| false);
     let gens = hooks::db_reactivity::use_generations();

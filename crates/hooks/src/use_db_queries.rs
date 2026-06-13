@@ -70,8 +70,7 @@ pub fn use_tracks_window(filter: Memo<TrackFilter>, page: Memo<Page>) -> TracksW
         move || {
             let _ = gens.generation(Table::Tracks);
             let (db, f) = (db.clone(), filter());
-            let span =
-                tracing::info_span!("query.tracks_count", filter = ?f, total = tracing::field::Empty);
+            let span = tracing::info_span!("query.tracks_count", filter = ?f, total = tracing::field::Empty);
             async move {
                 let total = db.tracks_count(&f).await.unwrap_or(0);
                 tracing::Span::current().record("total", total);
@@ -141,10 +140,7 @@ pub fn use_artist_tracks(
 
 /// Tracks whose album has this genre. An empty genre resolves to empty
 /// without touching the DB.
-pub fn use_genre_tracks(
-    source: Memo<Source>,
-    genre: Memo<String>,
-) -> Resource<Vec<reader::Track>> {
+pub fn use_genre_tracks(source: Memo<Source>, genre: Memo<String>) -> Resource<Vec<reader::Track>> {
     let db = use_context::<Db>();
     let gens = use_generations();
     use_resource(move || {
@@ -214,10 +210,7 @@ pub fn use_recent_albums(source: Memo<Source>, limit: u32) -> Resource<Vec<reade
 }
 
 /// One representative track per artist, A→Z — artist tiles with covers.
-pub fn use_artist_sample_tracks(
-    source: Memo<Source>,
-    limit: u32,
-) -> Resource<Vec<reader::Track>> {
+pub fn use_artist_sample_tracks(source: Memo<Source>, limit: u32) -> Resource<Vec<reader::Track>> {
     let db = use_context::<Db>();
     let gens = use_generations();
     use_resource(move || {
@@ -336,12 +329,7 @@ pub fn use_playlists(server_id: Memo<Option<String>>) -> Resource<reader::Playli
         let _ = gens.generation(Table::Folders);
         let (db, sid) = (db.clone(), server_id());
         let span = tracing::info_span!("query.playlists", server_id = ?sid);
-        async move {
-            db.load_playlists(sid.as_deref())
-                .await
-                .unwrap_or_default()
-        }
-        .instrument(span)
+        async move { db.load_playlists(sid.as_deref()).await.unwrap_or_default() }.instrument(span)
     })
 }
 
@@ -403,4 +391,3 @@ pub fn use_favorites(server_id: Memo<String>) -> Resource<Vec<String>> {
         .instrument(span)
     })
 }
-

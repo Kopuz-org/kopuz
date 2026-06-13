@@ -158,7 +158,7 @@ pub fn Rightbar(
 
                 while let Ok(val) = eval.recv::<Value>().await {
                     if let Some(w) = val.as_f64() {
-                        let new_width = w.max(280.0).min(600.0);
+                        let new_width = w.clamp(280.0, 600.0);
                         width.set(new_width as usize);
                     } else if val.as_str() == Some("stop") {
                         is_resizing.set(false);
@@ -180,11 +180,11 @@ pub fn Rightbar(
             ctrl.shuffle_order
                 .read()
                 .iter()
-                .filter_map(|&qi| q.get(qi).cloned().map(|t| t))
+                .filter_map(|&qi| q.get(qi).cloned())
                 .collect::<Vec<_>>()
         } else {
             (0..q.len())
-                .filter_map(|qi| q.get(qi).cloned().map(|t| t))
+                .filter_map(|qi| q.get(qi).cloned())
                 .collect::<Vec<_>>()
         }
     };

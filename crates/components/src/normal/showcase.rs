@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use crate::NavigationController;
 use crate::constants::{COLUMNS_NORMAL, COLUMNS_NORMAL_ALBUM};
 use crate::header::Header;
 use crate::reorder_buttons::ReorderButtons;
@@ -13,6 +14,7 @@ use hooks::use_player_controller::PlayerController;
 pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     let mut ctrl = use_context::<PlayerController>();
     let config = use_context::<Signal<AppConfig>>();
+    let _nav_ctrl = use_context::<NavigationController>();
     let total_seconds: u64 = props.tracks.iter().map(|t| t.duration).sum();
     let duration_min = total_seconds / 60;
 
@@ -122,7 +124,15 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                  }
                  div { class: "flex-1",
                      if !props.description.is_empty() {
-                         h5 { class: "text-sm font-bold tracking-widest text-white/60 uppercase mb-2", "{props.description}" }
+                         if let Some(on_description_click) = props.on_description_click {
+                             button {
+                                 class: "text-sm font-bold tracking-widest text-white/60 uppercase mb-2 text-left cursor-pointer hover:underline hover:text-white transition-colors",
+                                 onclick: move |_| on_description_click.call(()),
+                                 "{props.description}"
+                             }
+                         } else {
+                             h5 { class: "text-sm font-bold tracking-widest text-white/60 uppercase mb-2", "{props.description}" }
+                         }
                      }
                      h1 { class: if cfg!(target_os = "android") { "text-3xl font-bold text-white mb-3" } else { "text-5xl md:text-7xl font-bold text-white mb-6" }, "{props.name}" }
                      div { class: if cfg!(target_os = "android") { "flex items-center justify-center gap-4 text-slate-400" } else { "flex items-center gap-6 text-slate-400" },

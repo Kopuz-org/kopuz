@@ -129,9 +129,10 @@ mod tests {
         if let Some(u) = user_id {
             server["user_id"] = u.into();
         }
-        let mut c = config::AppConfig::default();
-        c.server = Some(serde_json::from_value(server).unwrap());
-        c
+        config::AppConfig {
+            server: Some(serde_json::from_value(server).unwrap()),
+            ..Default::default()
+        }
     }
 
     #[test]

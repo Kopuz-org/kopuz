@@ -240,8 +240,11 @@ pub trait Storage: Send + Sync {
     async fn genres(&self, source: &Source) -> Result<Vec<String>, DbError>;
 
     /// One album by id.
-    async fn album(&self, source: &Source, album_id: &str)
-    -> Result<Option<reader::Album>, DbError>;
+    async fn album(
+        &self,
+        source: &Source,
+        album_id: &str,
+    ) -> Result<Option<reader::Album>, DbError>;
 
     /// The artist-image maps: (server urls, local paths, custom paths).
     #[allow(clippy::type_complexity)]
@@ -312,8 +315,7 @@ pub trait Storage: Send + Sync {
     ) -> Result<(), DbError>;
 
     /// Replace the (local) playlist folders.
-    async fn set_folders(&self, folders: &[reader::models::PlaylistFolder])
-    -> Result<(), DbError>;
+    async fn set_folders(&self, folders: &[reader::models::PlaylistFolder]) -> Result<(), DbError>;
 
     /// Increment one track's play count (single-row upsert; key = `TrackId::uid()`).
     async fn bump_listen_count(&self, track_uid: &str) -> Result<(), DbError>;
@@ -417,7 +419,6 @@ pub trait Storage: Send + Sync {
     /// Batch upsert albums for a source (one transaction).
     async fn upsert_albums(&self, source: &Source, albums: &[reader::Album])
     -> Result<(), DbError>;
-
 }
 
 /// Cheap-`Clone` handle to the active storage backend, shared via Dioxus context.
@@ -481,12 +482,11 @@ pub fn peek_config(db_path: &std::path::Path) -> Option<config::AppConfig> {
             .read_only(true);
         use sqlx::ConnectOptions;
         let mut conn = opts.connect().await.ok()?;
-        let json: Option<String> =
-            sqlx::query_scalar!("SELECT json FROM app_config WHERE id = 1")
-                .fetch_optional(&mut conn)
-                .await
-                .ok()
-                .flatten();
+        let json: Option<String> = sqlx::query_scalar!("SELECT json FROM app_config WHERE id = 1")
+            .fetch_optional(&mut conn)
+            .await
+            .ok()
+            .flatten();
         json.and_then(|j| serde_json::from_str(&j).ok())
     })
 }

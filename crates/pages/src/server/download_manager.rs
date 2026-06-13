@@ -159,10 +159,7 @@ async fn download_worker(
         let (service, yt_cookies) = {
             let conf = config.read();
             let s = conf.server.as_ref();
-            (
-                s.map(|x| x.service),
-                s.and_then(|x| x.access_token.clone()),
-            )
+            (s.map(|x| x.service), s.and_then(|x| x.access_token.clone()))
         };
 
         let resolved: Option<(String, &'static str, Option<String>, Option<u64>)> =
@@ -216,10 +213,7 @@ async fn download_worker(
                 if let Some(db) = try_consume_context::<db::Db>() {
                     let _ = db.set_offline_track(&id, Some(&path_str)).await;
                 }
-                config
-                    .write()
-                    .offline_tracks
-                    .insert(id.clone(), path_str);
+                config.write().offline_tracks.insert(id.clone(), path_str);
                 if let Some(item) = queue.write().items.iter_mut().find(|i| i.id == id) {
                     item.status = DownloadStatus::Done;
                 }
@@ -393,12 +387,14 @@ async fn download_with_progress(
             }
         }
 
-        writer
-            .flush()
-            .await
-            .map_err(|e| format!("Flush: {e}"))?;
+        writer.flush().await.map_err(|e| format!("Flush: {e}"))?;
         let trailing = bytes_done.saturating_sub(last_update_bytes);
-        publish_progress(item_id, bytes_done, trailing, session_start.elapsed().as_secs_f64());
+        publish_progress(
+            item_id,
+            bytes_done,
+            trailing,
+            session_start.elapsed().as_secs_f64(),
+        );
         return Ok(file_path);
     }
 
@@ -488,11 +484,13 @@ async fn download_with_progress(
         }
     }
 
-    writer
-        .flush()
-        .await
-        .map_err(|e| format!("Flush: {e}"))?;
+    writer.flush().await.map_err(|e| format!("Flush: {e}"))?;
     let trailing = bytes_done.saturating_sub(last_update_bytes);
-    publish_progress(item_id, bytes_done, trailing, session_start.elapsed().as_secs_f64());
+    publish_progress(
+        item_id,
+        bytes_done,
+        trailing,
+        session_start.elapsed().as_secs_f64(),
+    );
     Ok(file_path)
 }

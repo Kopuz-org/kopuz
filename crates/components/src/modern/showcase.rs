@@ -114,10 +114,19 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
 
                 div { class: "flex flex-col gap-1 pb-1 min-w-0",
                     if !props.description.is_empty() {
-                        p {
-                            class: "text-xs font-bold tracking-widest uppercase mb-1",
-                            style: "color: var(--color-white); opacity: 0.35;",
-                            "{props.description}"
+                        if let Some(on_description_click) = props.on_description_click {
+                            button {
+                                class: "text-xs font-bold tracking-widest uppercase mb-1 text-left cursor-pointer hover:underline transition-colors",
+                                style: "color: var(--color-white); opacity: 0.45;",
+                                onclick: move |_| on_description_click.call(()),
+                                "{props.description}"
+                            }
+                        } else {
+                            p {
+                                class: "text-xs font-bold tracking-widest uppercase mb-1",
+                                style: "color: var(--color-white); opacity: 0.35;",
+                                "{props.description}"
+                            }
                         }
                     }
                     h1 { class: "text-4xl font-bold text-white truncate mb-1", "{props.name}" }

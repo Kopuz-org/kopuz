@@ -121,19 +121,17 @@ fn search_dirs() -> &'static [PathBuf] {
         let mut dirs: Vec<PathBuf> =
             std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
 
-        if let Some(shell) = std::env::var_os("SHELL") {
-            if let Ok(out) = std::process::Command::new(shell)
+        if let Some(shell) = std::env::var_os("SHELL")
+            && let Ok(out) = std::process::Command::new(shell)
                 .arg("-lc")
                 .arg("printf %s \"$PATH\"")
                 .output()
-            {
-                if out.status.success() {
-                    let path = String::from_utf8_lossy(&out.stdout);
-                    for dir in std::env::split_paths(path.trim()) {
-                        if !dirs.contains(&dir) {
-                            dirs.push(dir);
-                        }
-                    }
+            && out.status.success()
+        {
+            let path = String::from_utf8_lossy(&out.stdout);
+            for dir in std::env::split_paths(path.trim()) {
+                if !dirs.contains(&dir) {
+                    dirs.push(dir);
                 }
             }
         }
@@ -523,7 +521,10 @@ pub fn YtdlpPage(config: Signal<AppConfig>) -> Element {
                 };
 
                 if let Some(stdout) = child.stdout.take() {
-                    for line in std::io::BufReader::new(stdout).lines().flatten() {
+                    for line in std::io::BufReader::new(stdout)
+                        .lines()
+                        .map_while(Result::ok)
+                    {
                         if let Some(info) = parse_line(&line) {
                             let _ = tx.send(info);
                         }
@@ -532,7 +533,7 @@ pub fn YtdlpPage(config: Signal<AppConfig>) -> Element {
                 if let Some(stderr) = child.stderr.take() {
                     let errs: Vec<String> = std::io::BufReader::new(stderr)
                         .lines()
-                        .flatten()
+                        .map_while(Result::ok)
                         .filter(|l| l.contains("ERROR"))
                         .collect();
                     if !errs.is_empty() {

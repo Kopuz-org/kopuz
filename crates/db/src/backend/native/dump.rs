@@ -6,8 +6,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-use reader::models::{JellyfinPlaylist, Playlist, PlaylistFolder};
 use reader::PlaylistStore;
+use reader::models::{JellyfinPlaylist, Playlist, PlaylistFolder};
 use sqlx::SqlitePool;
 
 use crate::{DbError, QueueSnapshot};

@@ -390,17 +390,15 @@ pub fn QueueListView(
         if is_server_track {
             if let Some(server) = &conf.server {
                 let url = match server.service {
-                    config::MusicService::Jellyfin => {
-                        utils::jellyfin_image::resolve_track_cover(
-                            track.cover.as_deref(),
-                            &track.id.key(),
-                            &track.album_id,
-                            &server.url,
-                            server.access_token.as_deref(),
-                            cover_max_width,
-                            80,
-                        )
-                    }
+                    config::MusicService::Jellyfin => utils::jellyfin_image::resolve_track_cover(
+                        track.cover.as_deref(),
+                        &track.id.key(),
+                        &track.album_id,
+                        &server.url,
+                        server.access_token.as_deref(),
+                        cover_max_width,
+                        80,
+                    ),
                     config::MusicService::Subsonic | config::MusicService::Custom => {
                         let subsonic_path = match track.cover.as_deref() {
                             Some(c) => format!("{}:{}", track.id.uid(), c),
@@ -414,17 +412,15 @@ pub fn QueueListView(
                             80,
                         )
                     }
-                    config::MusicService::YtMusic => {
-                        utils::jellyfin_image::resolve_track_cover(
-                            track.cover.as_deref(),
-                            &track.id.key(),
-                            &track.album_id,
-                            "",
-                            None,
-                            cover_max_width,
-                            80,
-                        )
-                    }
+                    config::MusicService::YtMusic => utils::jellyfin_image::resolve_track_cover(
+                        track.cover.as_deref(),
+                        &track.id.key(),
+                        &track.album_id,
+                        "",
+                        None,
+                        cover_max_width,
+                        80,
+                    ),
                 };
                 return utils::map_cover_url(url);
             }
@@ -623,7 +619,7 @@ pub fn QueueListView(
                 queue_count,
                 queue_duration,
                 current_queue_index,
-                layout: layout.clone(),
+                layout,
             }
 
             VirtualScrollView {
@@ -811,39 +807,42 @@ pub fn QueueListView(
                                             if queue_reorder_from.read().is_some() {
                                                 is_queue_drag_over.set(true);
                                                 queue_drop_index.set(Some(row_drop_index));
-                                                if let Some(from) = *queue_reorder_from.read() {
-                                                    if rightbar_reorder_move_target(from, row_drop_index, queue_count)
-                                                        .is_some()
-                                                    {
-                                                        queue_reorder_did_move.set(true);
-                                                    }
+                                                if let Some(from) = *queue_reorder_from.read()
+                                                    && rightbar_reorder_move_target(
+                                                        from,
+                                                        row_drop_index,
+                                                        queue_count,
+                                                    )
+                                                    .is_some()
+                                                {
+                                                    queue_reorder_did_move.set(true);
                                                 }
                                                 return;
                                             }
                                             let pending = *pending_queue_reorder.read();
-                                            if let Some((from_idx, start_x, start_y)) = pending {
-                                                if from_idx == queue_idx {
-                                                    let coords = evt.client_coordinates();
-                                                    let dx = coords.x - start_x;
-                                                    let dy = coords.y - start_y;
-                                                    if dx.hypot(dy) >= QUEUE_REORDER_THRESHOLD_PX {
-                                                        pending_queue_reorder.set(None);
-                                                        start_rightbar_reorder(
-                                                            queue_idx,
-                                                            queue_drop_index,
-                                                            queue_reorder_from,
-                                                            queue_reorder_did_move,
-                                                        );
-                                                        queue_drop_index.set(Some(row_drop_index));
-                                                        if rightbar_reorder_move_target(
-                                                                queue_idx,
-                                                                row_drop_index,
-                                                                queue_count,
-                                                            )
-                                                            .is_some()
-                                                        {
-                                                            queue_reorder_did_move.set(true);
-                                                        }
+                                            if let Some((from_idx, start_x, start_y)) = pending
+                                                && from_idx == queue_idx
+                                            {
+                                                let coords = evt.client_coordinates();
+                                                let dx = coords.x - start_x;
+                                                let dy = coords.y - start_y;
+                                                if dx.hypot(dy) >= QUEUE_REORDER_THRESHOLD_PX {
+                                                    pending_queue_reorder.set(None);
+                                                    start_rightbar_reorder(
+                                                        queue_idx,
+                                                        queue_drop_index,
+                                                        queue_reorder_from,
+                                                        queue_reorder_did_move,
+                                                    );
+                                                    queue_drop_index.set(Some(row_drop_index));
+                                                    if rightbar_reorder_move_target(
+                                                        queue_idx,
+                                                        row_drop_index,
+                                                        queue_count,
+                                                    )
+                                                    .is_some()
+                                                    {
+                                                        queue_reorder_did_move.set(true);
                                                     }
                                                 }
                                             }

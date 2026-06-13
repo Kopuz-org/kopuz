@@ -1,4 +1,5 @@
 use crate::server::download_manager::{DownloadQueue, DownloadStatus, queue_downloads};
+use components::NavigationController;
 use components::dots_menu::{DotsMenu, MenuAction};
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
@@ -295,6 +296,7 @@ pub fn JellyfinAlbumDetails(
     on_close: EventHandler<()>,
 ) -> Element {
     let is_offline = use_context::<Signal<bool>>();
+    let nav_ctrl = use_context::<NavigationController>();
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let mut active_menu_track = use_signal(|| None::<PathBuf>);
     let mut show_playlist_modal = use_signal(|| false);
@@ -302,7 +304,7 @@ pub fn JellyfinAlbumDetails(
 
     // Multi-selection state
     let mut is_selection_mode = use_signal(|| false);
-    let mut selected_tracks = use_signal(|| HashSet::<PathBuf>::new());
+    let mut selected_tracks = use_signal(HashSet::<PathBuf>::new);
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
     let album_id_memo = use_memo(use_reactive!(|album_jellyfin_id| album_jellyfin_id));
@@ -370,17 +372,15 @@ pub fn JellyfinAlbumDetails(
             })
             .map(|t| {
                 let cover_url = if let Some(server) = &conf.server {
-                    utils::map_cover_url(
-                        utils::jellyfin_image::resolve_track_cover(
-                            t.cover.as_deref(),
-                            &t.id.key(),
-                            &t.album_id,
-                            &server.url,
-                            server.access_token.as_deref(),
-                            80,
-                            80,
-                        ),
-                    )
+                    utils::map_cover_url(utils::jellyfin_image::resolve_track_cover(
+                        t.cover.as_deref(),
+                        &t.id.key(),
+                        &t.album_id,
+                        &server.url,
+                        server.access_token.as_deref(),
+                        80,
+                        80,
+                    ))
                 } else {
                     None
                 };
@@ -441,10 +441,7 @@ pub fn JellyfinAlbumDetails(
         if let Some(q_idx) = ctrl.get_queue_index(current_index) {
             let tracks: Vec<_> = album_tracks().into_iter().map(|(t, _)| t).collect();
             if queue.len() == tracks.len()
-                && queue
-                    .iter()
-                    .zip(tracks.iter())
-                    .all(|(q, t)| q.id == t.id)
+                && queue.iter().zip(tracks.iter()).all(|(q, t)| q.id == t.id)
             {
                 Some(q_idx)
             } else {
@@ -615,9 +612,13 @@ pub fn JellyfinAlbumDetails(
                     }
                     div { class: "flex flex-col gap-1 pb-1 min-w-0",
                         if !artist.is_empty() {
-                            p {
-                                class: "text-xs font-bold tracking-widest uppercase mb-1",
-                                style: "color: rgba(255,255,255,0.35);",
+                            button {
+                                class: "text-xs font-bold tracking-widest uppercase mb-1 text-left cursor-pointer hover:underline transition-colors",
+                                style: "color: rgba(255,255,255,0.45);",
+                                onclick: {
+                                    let artist = artist.clone();
+                                    move |_| nav_ctrl.navigate_to_artist(artist.clone())
+                                },
                                 "{artist}"
                             }
                         }
@@ -738,7 +739,14 @@ pub fn JellyfinAlbumDetails(
                     }
                     div { class: "flex-1",
                         if !artist.is_empty() {
-                            h5 { class: "text-sm font-bold tracking-widest text-white/60 uppercase mb-2", "{artist}" }
+                            button {
+                                class: "text-sm font-bold tracking-widest text-white/60 uppercase mb-2 text-left cursor-pointer hover:underline hover:text-white transition-colors",
+                                onclick: {
+                                    let artist = artist.clone();
+                                    move |_| nav_ctrl.navigate_to_artist(artist.clone())
+                                },
+                                "{artist}"
+                            }
                         }
                         h1 { class: "text-5xl md:text-7xl font-bold text-white mb-6", "{album_title}" }
                         div { class: "flex items-center gap-6 text-slate-400",

@@ -4,9 +4,7 @@ use config::AppConfig;
 use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
-use hooks::use_db_queries::{
-    use_active_server_id, use_albums, use_playlists, use_tracks_by_keys,
-};
+use hooks::use_db_queries::{use_active_server_id, use_albums, use_playlists, use_tracks_by_keys};
 
 #[component]
 pub fn LocalPlaylists(

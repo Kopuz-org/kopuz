@@ -20,8 +20,8 @@ pub async fn get_palette_from_url(url: &str) -> Option<Vec<Color>> {
     let bytes = if url.starts_with("http") {
         reqwest::get(url).await.ok()?.bytes().await.ok()?.to_vec()
     } else {
-        let path = if url.starts_with("artwork://local") {
-            let decoded = percent_encoding::percent_decode_str(&url[15..]).decode_utf8_lossy();
+        let path = if let Some(stripped) = url.strip_prefix("artwork://local") {
+            let decoded = percent_encoding::percent_decode_str(stripped).decode_utf8_lossy();
             decoded.to_string()
         } else {
             url.to_string()

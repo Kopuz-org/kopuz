@@ -41,8 +41,7 @@ pub fn JellyfinSearch(
             .unwrap_or_default()
     });
     let server_source = use_memo(move || Source::Server(active_server_id()));
-    let selected_genre_memo =
-        use_memo(move || selected_genre.read().clone().unwrap_or_default());
+    let selected_genre_memo = use_memo(move || selected_genre.read().clone().unwrap_or_default());
     let genre_tracks_res = use_genre_tracks(server_source, selected_genre_memo);
 
     let genre_tracks = use_memo(move || {

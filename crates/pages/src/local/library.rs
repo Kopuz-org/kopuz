@@ -82,7 +82,7 @@ pub fn LocalLibrary(
     let mut selected_track_for_playlist = use_signal(|| None::<PathBuf>);
     let mut metadata_track = use_signal(|| None::<reader::models::Track>);
     let mut is_selection_mode = use_signal(|| false);
-    let mut selected_tracks = use_signal(|| HashSet::<PathBuf>::new());
+    let mut selected_tracks = use_signal(HashSet::<PathBuf>::new);
     let album_covers = use_memo(move || {
         albums_res
             .read()
@@ -194,8 +194,8 @@ pub fn LocalLibrary(
                             },
                             on_delete: move |_| {
                                 active_menu_track.set(None);
-                                if let Some(p) = track_delete.id.local_path() {
-                                    if std::fs::remove_file(p).is_ok() {
+                                if let Some(p) = track_delete.id.local_path()
+                                    && std::fs::remove_file(p).is_ok() {
                                         let db = consume_context::<db::Db>();
                                         let key = track_delete.id.key().into_owned();
                                         spawn(async move {
@@ -204,7 +204,6 @@ pub fn LocalLibrary(
                                             }
                                         });
                                     }
-                                }
                             },
                             on_play: move |_| {
                                 let db = consume_context::<db::Db>();
@@ -249,11 +248,10 @@ pub fn LocalLibrary(
                                         tracks.push(path.clone());
                                     }
                                 }
-                            } else if let Some(path) = selected_track_for_playlist.read().clone() {
-                                if !tracks.contains(&path) {
+                            } else if let Some(path) = selected_track_for_playlist.read().clone()
+                                && !tracks.contains(&path) {
                                     tracks.push(path);
                                 }
-                            }
                             let refs: Vec<String> = tracks
                                 .iter()
                                 .map(|p| p.to_string_lossy().into_owned())

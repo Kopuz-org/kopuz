@@ -13,7 +13,6 @@ use dioxus::desktop::tao::platform::windows::WindowExtWindows;
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use dioxus::desktop::tao::window::Icon;
 use dioxus::prelude::*;
-use tracing::Instrument;
 #[cfg(not(target_arch = "wasm32"))]
 use discord_presence::Presence;
 use kopuz_route::Route;
@@ -24,6 +23,7 @@ use queue_state::PersistedQueueState;
 use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
+use tracing::Instrument;
 #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
 use windows::Win32::Foundation::HWND;
 
@@ -614,184 +614,190 @@ fn main() {
                 |_id, request, responder: RequestAsyncResponder| {
                     let uri = request.uri().clone();
 
-                    tokio::spawn(async move {
-                        let query = uri.query().unwrap_or_default();
-                        let file_path: String = query
-                            .split('&')
-                            .find_map(|kv| kv.strip_prefix("p="))
-                            .map(|encoded| {
-                                percent_encoding::percent_decode_str(encoded)
-                                    .decode_utf8_lossy()
-                                    .into_owned()
-                            })
-                            .unwrap_or_default();
-                        let high_quality = query.split('&').any(|kv| kv == "hq=1");
+                    tokio::spawn(
+                        async move {
+                            let query = uri.query().unwrap_or_default();
+                            let file_path: String = query
+                                .split('&')
+                                .find_map(|kv| kv.strip_prefix("p="))
+                                .map(|encoded| {
+                                    percent_encoding::percent_decode_str(encoded)
+                                        .decode_utf8_lossy()
+                                        .into_owned()
+                                })
+                                .unwrap_or_default();
+                            let high_quality = query.split('&').any(|kv| kv == "hq=1");
 
-                        if file_path.is_empty() {
-                            responder.respond(
-                                http::Response::builder()
-                                    .status(400)
-                                    .body(std::borrow::Cow::from(Vec::new()))
-                                    .unwrap(),
-                            );
-                            return;
-                        }
-
-                        #[cfg(target_os = "windows")]
-                        let file_path = file_path.replace('/', "\\");
-
-                        #[cfg(not(target_os = "windows"))]
-                        let file_path = if file_path.starts_with('~') {
-                            if let Ok(home) = std::env::var("HOME") {
-                                file_path.replacen('~', &home, 1)
-                            } else {
-                                file_path
-                            }
-                        } else {
-                            file_path
-                        };
-
-                        if high_quality {
-                            let hq_path = hq_cache_path(&file_path);
-                            if hq_path.exists()
-                                && let Ok(b) = tokio::fs::read(&hq_path).await
-                            {
+                            if file_path.is_empty() {
                                 responder.respond(
                                     http::Response::builder()
-                                        .header("Content-Type", "image/jpeg")
-                                        .header("Access-Control-Allow-Origin", "*")
-                                        .header("Cache-Control", "public, max-age=31536000")
-                                        .body(std::borrow::Cow::from(b))
+                                        .status(400)
+                                        .body(std::borrow::Cow::from(Vec::new()))
                                         .unwrap(),
                                 );
                                 return;
                             }
-                            match tokio::fs::read(&file_path).await {
-                                Ok(raw) => {
-                                    let file_path_clone = file_path.clone();
-                                    let result = tokio::task::spawn_blocking(move || {
-                                        make_hq_image(&raw, &hq_path)
-                                            .map(|b| (b, "image/jpeg"))
-                                            .unwrap_or_else(|| {
-                                                let mime = if file_path_clone.ends_with(".png") {
-                                                    "image/png"
-                                                } else {
-                                                    "image/jpeg"
-                                                };
-                                                (raw, mime)
-                                            })
-                                    })
-                                    .await;
-                                    match result {
-                                        Ok((bytes, mime)) => responder.respond(
-                                            http::Response::builder()
-                                                .header("Content-Type", mime)
-                                                .header("Access-Control-Allow-Origin", "*")
-                                                .header("Cache-Control", "public, max-age=31536000")
-                                                .body(std::borrow::Cow::from(bytes))
-                                                .unwrap(),
-                                        ),
-                                        Err(_) => responder.respond(
-                                            http::Response::builder()
-                                                .status(500)
-                                                .body(std::borrow::Cow::from(Vec::new()))
-                                                .unwrap(),
-                                        ),
-                                    }
-                                }
-                                Err(_) => responder.respond(
-                                    http::Response::builder()
-                                        .status(404)
-                                        .body(std::borrow::Cow::from(Vec::new()))
-                                        .unwrap(),
-                                ),
-                            }
-                            return;
-                        }
 
-                        let thumb_path = thumb_cache_path(&file_path);
+                            #[cfg(target_os = "windows")]
+                            let file_path = file_path.replace('/', "\\");
 
-                        let (bytes, mime) = if thumb_path.exists() {
-                            match tokio::fs::read(&thumb_path).await {
-                                Ok(b) => (b, "image/jpeg"),
-                                Err(_) => {
-                                    let _ = std::fs::remove_file(&thumb_path);
-                                    match tokio::fs::read(&file_path).await {
-                                        Ok(b) => (
-                                            b,
-                                            if file_path.ends_with(".png") {
-                                                "image/png"
-                                            } else {
-                                                "image/jpeg"
-                                            },
-                                        ),
-                                        Err(_) => {
-                                            responder.respond(
-                                                http::Response::builder()
-                                                    .status(404)
-                                                    .body(std::borrow::Cow::from(Vec::new()))
-                                                    .unwrap(),
-                                            );
-                                            return;
-                                        }
-                                    }
+                            #[cfg(not(target_os = "windows"))]
+                            let file_path = if file_path.starts_with('~') {
+                                if let Ok(home) = std::env::var("HOME") {
+                                    file_path.replacen('~', &home, 1)
+                                } else {
+                                    file_path
                                 }
-                            }
-                        } else {
-                            match tokio::fs::read(&file_path).await {
-                                Ok(raw) => {
-                                    let thumb_path_clone = thumb_path.clone();
-                                    match tokio::task::spawn_blocking(move || match make_thumbnail(
-                                        &raw,
-                                        &thumb_path_clone,
-                                    ) {
-                                        Some(b) => Ok(b),
-                                        None => Err(raw),
-                                    })
-                                    .await
-                                    {
-                                        Ok(Ok(b)) => (b, "image/jpeg"),
-                                        Ok(Err(raw)) => (
-                                            raw,
-                                            if file_path.ends_with(".png") {
-                                                "image/png"
-                                            } else {
-                                                "image/jpeg"
-                                            },
-                                        ),
-                                        Err(_) => {
-                                            responder.respond(
-                                                http::Response::builder()
-                                                    .status(500)
-                                                    .body(std::borrow::Cow::from(Vec::new()))
-                                                    .unwrap(),
-                                            );
-                                            return;
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    tracing::warn!("[artwork] not found {}: {}", file_path, e);
+                            } else {
+                                file_path
+                            };
+
+                            if high_quality {
+                                let hq_path = hq_cache_path(&file_path);
+                                if hq_path.exists()
+                                    && let Ok(b) = tokio::fs::read(&hq_path).await
+                                {
                                     responder.respond(
                                         http::Response::builder()
-                                            .status(404)
-                                            .body(std::borrow::Cow::from(Vec::new()))
+                                            .header("Content-Type", "image/jpeg")
+                                            .header("Access-Control-Allow-Origin", "*")
+                                            .header("Cache-Control", "public, max-age=31536000")
+                                            .body(std::borrow::Cow::from(b))
                                             .unwrap(),
                                     );
                                     return;
                                 }
+                                match tokio::fs::read(&file_path).await {
+                                    Ok(raw) => {
+                                        let file_path_clone = file_path.clone();
+                                        let result = tokio::task::spawn_blocking(move || {
+                                            make_hq_image(&raw, &hq_path)
+                                                .map(|b| (b, "image/jpeg"))
+                                                .unwrap_or_else(|| {
+                                                    let mime = if file_path_clone.ends_with(".png")
+                                                    {
+                                                        "image/png"
+                                                    } else {
+                                                        "image/jpeg"
+                                                    };
+                                                    (raw, mime)
+                                                })
+                                        })
+                                        .await;
+                                        match result {
+                                            Ok((bytes, mime)) => responder.respond(
+                                                http::Response::builder()
+                                                    .header("Content-Type", mime)
+                                                    .header("Access-Control-Allow-Origin", "*")
+                                                    .header(
+                                                        "Cache-Control",
+                                                        "public, max-age=31536000",
+                                                    )
+                                                    .body(std::borrow::Cow::from(bytes))
+                                                    .unwrap(),
+                                            ),
+                                            Err(_) => responder.respond(
+                                                http::Response::builder()
+                                                    .status(500)
+                                                    .body(std::borrow::Cow::from(Vec::new()))
+                                                    .unwrap(),
+                                            ),
+                                        }
+                                    }
+                                    Err(_) => responder.respond(
+                                        http::Response::builder()
+                                            .status(404)
+                                            .body(std::borrow::Cow::from(Vec::new()))
+                                            .unwrap(),
+                                    ),
+                                }
+                                return;
                             }
-                        };
 
-                        responder.respond(
-                            http::Response::builder()
-                                .header("Content-Type", mime)
-                                .header("Access-Control-Allow-Origin", "*")
-                                .header("Cache-Control", "public, max-age=31536000")
-                                .body(std::borrow::Cow::from(bytes))
-                                .unwrap(),
-                        );
-                    }.instrument(tracing::info_span!("artwork.serve")));
+                            let thumb_path = thumb_cache_path(&file_path);
+
+                            let (bytes, mime) = if thumb_path.exists() {
+                                match tokio::fs::read(&thumb_path).await {
+                                    Ok(b) => (b, "image/jpeg"),
+                                    Err(_) => {
+                                        let _ = std::fs::remove_file(&thumb_path);
+                                        match tokio::fs::read(&file_path).await {
+                                            Ok(b) => (
+                                                b,
+                                                if file_path.ends_with(".png") {
+                                                    "image/png"
+                                                } else {
+                                                    "image/jpeg"
+                                                },
+                                            ),
+                                            Err(_) => {
+                                                responder.respond(
+                                                    http::Response::builder()
+                                                        .status(404)
+                                                        .body(std::borrow::Cow::from(Vec::new()))
+                                                        .unwrap(),
+                                                );
+                                                return;
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                match tokio::fs::read(&file_path).await {
+                                    Ok(raw) => {
+                                        let thumb_path_clone = thumb_path.clone();
+                                        match tokio::task::spawn_blocking(move || {
+                                            match make_thumbnail(&raw, &thumb_path_clone) {
+                                                Some(b) => Ok(b),
+                                                None => Err(raw),
+                                            }
+                                        })
+                                        .await
+                                        {
+                                            Ok(Ok(b)) => (b, "image/jpeg"),
+                                            Ok(Err(raw)) => (
+                                                raw,
+                                                if file_path.ends_with(".png") {
+                                                    "image/png"
+                                                } else {
+                                                    "image/jpeg"
+                                                },
+                                            ),
+                                            Err(_) => {
+                                                responder.respond(
+                                                    http::Response::builder()
+                                                        .status(500)
+                                                        .body(std::borrow::Cow::from(Vec::new()))
+                                                        .unwrap(),
+                                                );
+                                                return;
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!("[artwork] not found {}: {}", file_path, e);
+                                        responder.respond(
+                                            http::Response::builder()
+                                                .status(404)
+                                                .body(std::borrow::Cow::from(Vec::new()))
+                                                .unwrap(),
+                                        );
+                                        return;
+                                    }
+                                }
+                            };
+
+                            responder.respond(
+                                http::Response::builder()
+                                    .header("Content-Type", mime)
+                                    .header("Access-Control-Allow-Origin", "*")
+                                    .header("Cache-Control", "public, max-age=31536000")
+                                    .body(std::borrow::Cow::from(bytes))
+                                    .unwrap(),
+                            );
+                        }
+                        .instrument(tracing::info_span!("artwork.serve")),
+                    );
                 },
             );
 
@@ -983,8 +989,7 @@ fn App() -> Element {
     // ROOT-owned: detached tasks (download workers, close-flush) read/write
     // these after the spawning page — and in principle this component — is
     // gone; owning them at ROOT keeps Dioxus's cross-scope lint honest.
-    let mut config =
-        use_hook(|| Signal::new_in_scope(config::AppConfig::default(), ScopeId::ROOT));
+    let mut config = use_hook(|| Signal::new_in_scope(config::AppConfig::default(), ScopeId::ROOT));
     let db = DB_HANDLE
         .get()
         .cloned()
@@ -1014,8 +1019,7 @@ fn App() -> Element {
     let cover_cache = use_memo(move || cache_dir().join("covers"));
     #[cfg(not(target_arch = "wasm32"))]
     let _ = std::fs::create_dir_all(cover_cache());
-    let download_queue =
-        use_hook(|| Signal::new_in_scope(DownloadQueue::default(), ScopeId::ROOT));
+    let download_queue = use_hook(|| Signal::new_in_scope(DownloadQueue::default(), ScopeId::ROOT));
     let download_progress =
         use_hook(|| Signal::new_in_scope(::server::DownloadProgress::default(), ScopeId::ROOT));
     pages::server::download_manager::register_progress_signal(download_progress);
@@ -1080,8 +1084,13 @@ fn App() -> Element {
                 // empty, not resurrect) — but only once the saved queue has
                 // actually been restored, else a quit during startup would
                 // wipe it.
-                let queue_snap = (*initial_load_done.peek())
-                    .then(|| pending_queue_state_snapshot.peek().clone().map(queue_snapshot).unwrap_or_default());
+                let queue_snap = (*initial_load_done.peek()).then(|| {
+                    pending_queue_state_snapshot
+                        .peek()
+                        .clone()
+                        .map(queue_snapshot)
+                        .unwrap_or_default()
+                });
                 // Library/playlists/favorites need no flush — every mutation
                 // already committed as a targeted write when it happened.
                 let cfg = (*config_loaded_ok.peek()).then(|| {
@@ -1164,11 +1173,14 @@ fn App() -> Element {
     use_effect(move || {
         let url = current_song_cover_url.read().clone();
         if !url.is_empty() {
-            spawn(async move {
-                if let Some(colors) = utils::color::get_palette_from_url(&url).await {
-                    palette.set(Some(colors));
+            spawn(
+                async move {
+                    if let Some(colors) = utils::color::get_palette_from_url(&url).await {
+                        palette.set(Some(colors));
+                    }
                 }
-            }.instrument(tracing::info_span!("ui.palette_fetch")));
+                .instrument(tracing::info_span!("ui.palette_fetch")),
+            );
         } else {
             palette.set(None);
         }
@@ -1210,23 +1222,26 @@ fn App() -> Element {
         }
         last_radio_registry_key.set(Some(key));
 
-        spawn(async move {
-            let mut new_registry = radio::registry::StationRegistry::new();
-            let mut import_count = 0;
+        spawn(
+            async move {
+                let mut new_registry = radio::registry::StationRegistry::new();
+                let mut import_count = 0;
 
-            for path in registry_paths {
-                match new_registry.import_registry(&path).await {
-                    Ok(_) => import_count += 1,
-                    Err(e) => tracing::warn!("Failed to import registry from {}: {}", path, e),
+                for path in registry_paths {
+                    match new_registry.import_registry(&path).await {
+                        Ok(_) => import_count += 1,
+                        Err(e) => tracing::warn!("Failed to import registry from {}: {}", path, e),
+                    }
+                }
+
+                station_registry.set(new_registry);
+
+                if import_count > 0 {
+                    tracing::info!("Imported {} external radio registries", import_count);
                 }
             }
-
-            station_registry.set(new_registry);
-
-            if import_count > 0 {
-                tracing::info!("Imported {} external radio registries", import_count);
-            }
-        }.instrument(tracing::info_span!("radio.registry_load")));
+            .instrument(tracing::info_span!("radio.registry_load")),
+        );
     });
 
     let mut selected_album_id = use_signal(String::new);
@@ -1340,11 +1355,14 @@ fn App() -> Element {
         }
 
         did_check_updates.set(true);
-        spawn(async move {
-            if let Some(update) = fetch_available_update().await {
-                update_banner.set(Some(update));
+        spawn(
+            async move {
+                if let Some(update) = fetch_available_update().await {
+                    update_banner.set(Some(update));
+                }
             }
-        }.instrument(tracing::info_span!("app.update_check")));
+            .instrument(tracing::info_span!("app.update_check")),
+        );
     });
 
     // The store saves are FULL-REPLACE (hundreds-to-thousands of statements),
@@ -1438,11 +1456,7 @@ fn App() -> Element {
             run_rotation(config).await;
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(300)).await;
-                if yt_keepalive_identity
-                    .peek()
-                    .as_deref()
-                    != Some(my_identity.as_str())
-                {
+                if yt_keepalive_identity.peek().as_deref() != Some(my_identity.as_str()) {
                     return;
                 }
                 run_rotation(config).await;

@@ -4,11 +4,12 @@ use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_album, use_album_tracks};
 use std::path::PathBuf;
 
+use crate::NavigationController;
+
 #[component]
-pub fn AlbumDetails(
-    album_id: String,
-    on_close: EventHandler<()>,
-) -> Element {
+#[allow(clippy::await_holding_invalid_type)]
+pub fn AlbumDetails(album_id: String, on_close: EventHandler<()>) -> Element {
+    let nav_ctrl = use_context::<NavigationController>();
     let gens = hooks::db_reactivity::use_generations();
     let source = use_memo(|| Source::Local);
     let album_id_memo = use_memo(use_reactive!(|album_id| album_id));
@@ -30,6 +31,7 @@ pub fn AlbumDetails(
 
     let album_title = album.title.clone();
     let album_artist = album.artist.clone();
+    let album_artist_for_nav = album_artist.clone();
     let cover_url = utils::format_artwork_url(album.cover_path.as_ref());
     let current_cover = album.cover_path.clone();
     let cover_cache = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
@@ -84,6 +86,9 @@ pub fn AlbumDetails(
             crate::track_list_view::TrackListView {
                 name: album_title,
                 description: album_artist,
+                on_description_click: Some(EventHandler::new(move |_| {
+                    nav_ctrl.navigate_to_artist(album_artist_for_nav.clone());
+                })),
                 cover_url,
                 is_album: true,
                 back_label: i18n::t("back_to_albums").to_string(),

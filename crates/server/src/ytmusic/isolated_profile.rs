@@ -15,8 +15,7 @@ use std::time::{Duration, Instant};
 use config::Browser;
 use tokio::process::Command;
 
-const SIGNIN_URL: &str =
-    "https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fmusic.youtube.com%2F";
+const SIGNIN_URL: &str = "https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fmusic.youtube.com%2F";
 
 pub fn profile_dir(server_id: &str) -> PathBuf {
     let safe: String = server_id
@@ -60,21 +59,11 @@ fn browser_candidates(browser: Browser) -> &'static [&'static str] {
 #[cfg(target_os = "macos")]
 fn macos_app_paths(browser: Browser) -> &'static [&'static str] {
     match browser {
-        Browser::Brave => &[
-            "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-        ],
-        Browser::Chrome => &[
-            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-        ],
-        Browser::Chromium => &[
-            "/Applications/Chromium.app/Contents/MacOS/Chromium",
-        ],
-        Browser::Edge => &[
-            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-        ],
-        Browser::Vivaldi => &[
-            "/Applications/Vivaldi.app/Contents/MacOS/Vivaldi",
-        ],
+        Browser::Brave => &["/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"],
+        Browser::Chrome => &["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"],
+        Browser::Chromium => &["/Applications/Chromium.app/Contents/MacOS/Chromium"],
+        Browser::Edge => &["/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"],
+        Browser::Vivaldi => &["/Applications/Vivaldi.app/Contents/MacOS/Vivaldi"],
     }
 }
 
@@ -121,7 +110,10 @@ fn windows_install_paths(browser: Browser) -> Vec<PathBuf> {
 }
 
 fn find_browser_bin(browser: Browser) -> Option<String> {
-    let env_key = format!("KOPUZ_{}_BIN", browser.id().to_uppercase().replace('-', "_"));
+    let env_key = format!(
+        "KOPUZ_{}_BIN",
+        browser.id().to_uppercase().replace('-', "_")
+    );
     if let Some(v) = std::env::var_os(&env_key)
         && !v.is_empty()
     {
@@ -165,7 +157,10 @@ async fn find_host_browser_bin(browser: Browser) -> Option<String> {
     // Honour an explicit override (e.g. a non-standard host install path) — same
     // escape hatch as the native `find_browser_bin`. `flatpak-spawn --host` runs
     // it in the host environment, so an absolute host path works.
-    let env_key = format!("KOPUZ_{}_BIN", browser.id().to_uppercase().replace('-', "_"));
+    let env_key = format!(
+        "KOPUZ_{}_BIN",
+        browser.id().to_uppercase().replace('-', "_")
+    );
     if let Some(v) = std::env::var_os(&env_key)
         && !v.is_empty()
     {

@@ -78,7 +78,7 @@ pub fn LocalHome(
 
     let new_release_albums = use_memo(move || {
         let mut albums = albums_res.read().clone().unwrap_or_default();
-        albums.sort_by(|a, b| b.year.cmp(&a.year));
+        albums.sort_by_key(|b| std::cmp::Reverse(b.year));
         let mut unique_albums = Vec::new();
         let mut seen_titles = std::collections::HashSet::new();
         for album in albums {
@@ -121,13 +121,16 @@ pub fn LocalHome(
             .cloned()
             .map(|p| {
                 let cover_url = p.tracks.first().and_then(|path| {
-                    tracks.iter().find(|t| t.id.uid_path() == *path).and_then(|t| {
-                        albums
-                            .iter()
-                            .find(|a| a.id == t.album_id)
-                            .and_then(|a| a.cover_path.as_ref())
-                            .and_then(|cp| utils::format_artwork_url(Some(cp)))
-                    })
+                    tracks
+                        .iter()
+                        .find(|t| t.id.uid_path() == *path)
+                        .and_then(|t| {
+                            albums
+                                .iter()
+                                .find(|a| a.id == t.album_id)
+                                .and_then(|a| a.cover_path.as_ref())
+                                .and_then(|cp| utils::format_artwork_url(Some(cp)))
+                        })
                 });
                 (p.id, p.name, p.tracks.len(), cover_url)
             })
@@ -218,10 +221,10 @@ pub fn LocalHome(
                 } else if is_unknown_artist(&track.artist) {
                     continue;
                 }
-                if let Some(ref a) = album {
-                    if !seen_albums.insert(a.id.clone()) {
-                        continue;
-                    }
+                if let Some(ref a) = album
+                    && !seen_albums.insert(a.id.clone())
+                {
+                    continue;
                 }
                 out.push(((*track).clone(), album));
                 if out.len() >= 10 {
@@ -354,9 +357,8 @@ pub fn LocalHome(
                                                 disabled: idx == 0,
                                                 onclick: move |_| {
                                                     let mut conf = config.write();
-                                                    if let Some(i) = conf.home_sections.iter().position(|s| s.key == key_up) {
-                                                        if i > 0 { conf.home_sections.swap(i, i - 1); }
-                                                    }
+                                                    if let Some(i) = conf.home_sections.iter().position(|s| s.key == key_up)
+                                                        && i > 0 { conf.home_sections.swap(i, i - 1); }
                                                 },
                                                 i { class: "fa-solid fa-chevron-up text-xs" }
                                             }
@@ -366,9 +368,8 @@ pub fn LocalHome(
                                                 disabled: idx + 1 >= total,
                                                 onclick: move |_| {
                                                     let mut conf = config.write();
-                                                    if let Some(i) = conf.home_sections.iter().position(|s| s.key == key_down) {
-                                                        if i + 1 < conf.home_sections.len() { conf.home_sections.swap(i, i + 1); }
-                                                    }
+                                                    if let Some(i) = conf.home_sections.iter().position(|s| s.key == key_down)
+                                                        && i + 1 < conf.home_sections.len() { conf.home_sections.swap(i, i + 1); }
                                                 },
                                                 i { class: "fa-solid fa-chevron-down text-xs" }
                                             }
@@ -517,8 +518,9 @@ fn LocalHeroBanner(
         .as_ref()
         .and_then(|(_, a)| a.as_ref().map(|a| a.id.clone()));
     let source = use_memo(|| Source::Local);
-    let hero_album_id_memo =
-        use_memo(use_reactive!(|hero_album_id| hero_album_id.unwrap_or_default()));
+    let hero_album_id_memo = use_memo(use_reactive!(
+        |hero_album_id| hero_album_id.unwrap_or_default()
+    ));
     let album_tracks_res = use_album_tracks(source, hero_album_id_memo);
     let local_sid = use_memo(|| "local".to_string());
     let favorites_res = use_favorites(local_sid);
@@ -573,10 +575,10 @@ fn LocalHeroBanner(
             if !track.title.trim().is_empty() {
                 return track.title.clone();
             }
-            if let Some(album) = album_opt.as_ref() {
-                if !is_unknown_album(&album.title) {
-                    return album.title.clone();
-                }
+            if let Some(album) = album_opt.as_ref()
+                && !is_unknown_album(&album.title)
+            {
+                return album.title.clone();
             }
             track.title.clone()
         })

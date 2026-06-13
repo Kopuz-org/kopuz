@@ -44,7 +44,7 @@ pub fn JellyfinLibrary(
     let mut selected_track_for_playlist = use_signal(|| None::<PathBuf>);
 
     let mut is_selection_mode = use_signal(|| false);
-    let mut selected_tracks = use_signal(|| HashSet::<PathBuf>::new());
+    let mut selected_tracks = use_signal(HashSet::<PathBuf>::new);
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
     let active_server_id = use_memo(move || {
@@ -98,8 +98,7 @@ pub fn JellyfinLibrary(
         let current_gen = *fetch_generation.peek();
         spawn(async move {
             if *fetch_generation.read() == current_gen {
-                let _ =
-                    crate::server::subsonic_sync::sync_server_library(config, true).await;
+                let _ = crate::server::subsonic_sync::sync_server_library(config, true).await;
                 if *fetch_generation.read() == current_gen {
                     is_loading.set(false);
                 }
@@ -108,13 +107,13 @@ pub fn JellyfinLibrary(
     };
 
     use_effect(move || {
-        if !*has_fetched.read() {
-            if let Some(total) = *window.total.read() {
-                if total == 0 {
-                    fetch_jellyfin();
-                } else {
-                    has_fetched.set(true);
-                }
+        if !*has_fetched.read()
+            && let Some(total) = *window.total.read()
+        {
+            if total == 0 {
+                fetch_jellyfin();
+            } else {
+                has_fetched.set(true);
             }
         }
     });
@@ -126,17 +125,15 @@ pub fn JellyfinLibrary(
             .into_iter()
             .map(|t| {
                 let cover_url = if let Some(server) = &conf.server {
-                    utils::map_cover_url(
-                        utils::jellyfin_image::resolve_track_cover(
-                            t.cover.as_deref(),
-                            &t.id.key(),
-                            &t.album_id,
-                            &server.url,
-                            server.access_token.as_deref(),
-                            80,
-                            80,
-                        ),
-                    )
+                    utils::map_cover_url(utils::jellyfin_image::resolve_track_cover(
+                        t.cover.as_deref(),
+                        &t.id.key(),
+                        &t.album_id,
+                        &server.url,
+                        server.access_token.as_deref(),
+                        80,
+                        80,
+                    ))
                 } else {
                     None
                 };
@@ -148,12 +145,7 @@ pub fn JellyfinLibrary(
     let total_tracks = *total_items.read();
     let is_empty = total_tracks == 0;
     let all_selected = !is_empty && selected_tracks.read().len() >= *total_items.read();
-    let row_offset = window
-        .rows
-        .read()
-        .as_ref()
-        .map(|w| w.offset)
-        .unwrap_or(0) as usize;
+    let row_offset = window.rows.read().as_ref().map(|w| w.offset).unwrap_or(0) as usize;
 
     let scroll_info = use_virtual_scroll(
         *scroll_stat.read(),

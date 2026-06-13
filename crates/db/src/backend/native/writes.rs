@@ -82,7 +82,10 @@ pub async fn upsert_albums(
     for a in albums {
         let year = a.year as i64;
         let manual = a.manual_cover as i64;
-        let cover = a.cover_path.as_ref().map(|p| p.to_string_lossy().into_owned());
+        let cover = a
+            .cover_path
+            .as_ref()
+            .map(|p| p.to_string_lossy().into_owned());
         sqlx::query!(
             "INSERT INTO albums (source, source_album_id, title, artist, genre, year, cover_path, manual_cover) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
@@ -456,7 +459,9 @@ pub async fn set_folders(
     folders: &[reader::models::PlaylistFolder],
 ) -> Result<(), DbError> {
     let mut tx = pool.begin().await?;
-    sqlx::query!("DELETE FROM folders").execute(&mut *tx).await?;
+    sqlx::query!("DELETE FROM folders")
+        .execute(&mut *tx)
+        .await?;
     for f in folders {
         sqlx::query!(
             "INSERT INTO folders (id, source, name) VALUES (?1, 'local', ?2)",

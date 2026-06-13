@@ -260,10 +260,10 @@ impl StationManifest {
                     if static_def.artist.trim().is_empty() {
                         return Err(ManifestError::EmptyStaticArtist);
                     }
-                    if let Some(url) = &static_def.cover_url {
-                        if !url.starts_with("https://") {
-                            return Err(ManifestError::InsecureStaticCoverUrl(url.clone()));
-                        }
+                    if let Some(url) = &static_def.cover_url
+                        && !url.starts_with("https://")
+                    {
+                        return Err(ManifestError::InsecureStaticCoverUrl(url.clone()));
                     }
                     for ov in static_def.stream_overrides.values() {
                         if ov.title.trim().is_empty() {
@@ -272,10 +272,10 @@ impl StationManifest {
                         if ov.artist.trim().is_empty() {
                             return Err(ManifestError::EmptyStaticArtist);
                         }
-                        if let Some(url) = &ov.cover_url {
-                            if !url.starts_with("https://") {
-                                return Err(ManifestError::InsecureStaticCoverUrl(url.clone()));
-                            }
+                        if let Some(url) = &ov.cover_url
+                            && !url.starts_with("https://")
+                        {
+                            return Err(ManifestError::InsecureStaticCoverUrl(url.clone()));
                         }
                     }
                 }

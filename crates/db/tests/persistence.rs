@@ -43,26 +43,28 @@ fn server_track(id: &str, title: &str) -> Track {
 }
 
 async fn seed_active_server(db: &db::Db, id: &str) {
-    let mut cfg = AppConfig::default();
-    cfg.servers = vec![SavedServer {
-        id: id.into(),
-        name: "yt".into(),
-        url: "https://music.youtube.com".into(),
-        service: MusicService::YtMusic,
-        yt_browser: None,
-        yt_anonymous: false,
-    }];
-    cfg.server = Some(MusicServer {
-        name: "yt".into(),
-        url: "https://music.youtube.com".into(),
-        service: MusicService::YtMusic,
-        access_token: Some("cookie".into()),
-        user_id: None,
-        id: Some(id.into()),
-        yt_browser: None,
-        yt_anonymous: false,
-    });
-    cfg.active_server_id = Some(id.into());
+    let cfg = AppConfig {
+        servers: vec![SavedServer {
+            id: id.into(),
+            name: "yt".into(),
+            url: "https://music.youtube.com".into(),
+            service: MusicService::YtMusic,
+            yt_browser: None,
+            yt_anonymous: false,
+        }],
+        server: Some(MusicServer {
+            name: "yt".into(),
+            url: "https://music.youtube.com".into(),
+            service: MusicService::YtMusic,
+            access_token: Some("cookie".into()),
+            user_id: None,
+            id: Some(id.into()),
+            yt_browser: None,
+            yt_anonymous: false,
+        }),
+        active_server_id: Some(id.into()),
+        ..Default::default()
+    };
     db.save_config(&cfg).await.unwrap();
 }
 
@@ -105,7 +107,10 @@ async fn playlists_round_trip() {
     assert_eq!(store.playlists[0].name, "Mine");
     assert_eq!(
         store.playlists[0].tracks,
-        vec![PathBuf::from("/music/a.flac"), PathBuf::from("/music/b.flac")]
+        vec![
+            PathBuf::from("/music/a.flac"),
+            PathBuf::from("/music/b.flac")
+        ]
     );
     assert_eq!(store.jellyfin_playlists.len(), 1);
     assert_eq!(store.jellyfin_playlists[0].id, "LM");
@@ -127,7 +132,9 @@ async fn favorites_round_trip() {
     let db = db::init(&db_path).await.unwrap();
     seed_active_server(&db, "srv-1").await;
 
-    db.set_favorite("local", "/music/a.flac", true).await.unwrap();
+    db.set_favorite("local", "/music/a.flac", true)
+        .await
+        .unwrap();
     db.set_favorite("srv-1", "VID1", true).await.unwrap();
 
     assert_eq!(db.favorites("local").await.unwrap(), vec!["/music/a.flac"]);
@@ -185,7 +192,10 @@ async fn active_server_writes_never_touch_other_servers_rows() {
     let active = Source::Server("srv-1".into());
     db.upsert_tracks(
         &active,
-        &[server_track("VID1", "Yt One"), server_track("VID2", "Yt Two")],
+        &[
+            server_track("VID1", "Yt One"),
+            server_track("VID2", "Yt Two"),
+        ],
     )
     .await
     .unwrap();

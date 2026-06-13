@@ -107,6 +107,8 @@ fn compare_text(left: &str, right: &str) -> Ordering {
 pub struct ShowcaseProps {
     pub name: String,
     pub description: String,
+    #[props(default)]
+    pub on_description_click: Option<EventHandler<()>>,
     pub cover_url: Option<utils::CoverUrl>,
     pub tracks: Vec<Track>,
     pub on_play_all: EventHandler<()>,

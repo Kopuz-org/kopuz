@@ -28,7 +28,7 @@ pub fn JellyfinArtist(
     let mut selected_track_for_playlist = use_signal(|| None::<PathBuf>);
 
     let mut is_selection_mode = use_signal(|| false);
-    let mut selected_tracks = use_signal(|| HashSet::<PathBuf>::new());
+    let mut selected_tracks = use_signal(HashSet::<PathBuf>::new);
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
     let sort_order = use_signal(move || config.read().artist_view_order.clone());
@@ -107,19 +107,21 @@ pub fn JellyfinArtist(
 
         is_fetching_images.set(true);
 
-        spawn(async move {
-            let (service, url, token, user_id, device_id) = snapshot;
-            let mut images: std::collections::HashMap<String, String> = Default::default();
+        spawn(
+            async move {
+                let (service, url, token, user_id, device_id) = snapshot;
+                let mut images: std::collections::HashMap<String, String> = Default::default();
 
-            match service {
-                config::MusicService::Jellyfin => {
-                    let client =
-                        JellyfinClient::new(&url, Some(&token), &device_id, Some(&user_id));
-                    match client.get_artists().await {
-                        Ok(artists) => {
-                            for artist in artists {
-                                if let Some(tags) = &artist.image_tags {
-                                    if let Some(tag) = tags.get("Primary") {
+                match service {
+                    config::MusicService::Jellyfin => {
+                        let client =
+                            JellyfinClient::new(&url, Some(&token), &device_id, Some(&user_id));
+                        match client.get_artists().await {
+                            Ok(artists) => {
+                                for artist in artists {
+                                    if let Some(tags) = &artist.image_tags
+                                        && let Some(tag) = tags.get("Primary")
+                                    {
                                         let img_url = utils::jellyfin_image::jellyfin_image_url(
                                             &url,
                                             &artist.id,
@@ -132,37 +134,43 @@ pub fn JellyfinArtist(
                                     }
                                 }
                             }
-                        }
-                        Err(e) => {
-                            dioxus::logger::tracing::warn!("Failed to fetch artist images: {}", e);
+                            Err(e) => {
+                                dioxus::logger::tracing::warn!(
+                                    "Failed to fetch artist images: {}",
+                                    e
+                                );
+                            }
                         }
                     }
-                }
-                config::MusicService::Subsonic | config::MusicService::Custom => {
-                    let client = SubsonicClient::new(&url, &user_id, &token);
-                    match client.get_artists().await {
-                        Ok(artists) => {
-                            for artist in artists {
-                                if let Some(cover_art_id) = &artist.cover_art {
-                                    if let Ok(img_url) =
-                                        client.cover_art_url(cover_art_id, Some(512))
+                    config::MusicService::Subsonic | config::MusicService::Custom => {
+                        let client = SubsonicClient::new(&url, &user_id, &token);
+                        match client.get_artists().await {
+                            Ok(artists) => {
+                                for artist in artists {
+                                    if let Some(cover_art_id) = &artist.cover_art
+                                        && let Ok(img_url) =
+                                            client.cover_art_url(cover_art_id, Some(512))
                                     {
                                         images.insert(artist.name.clone(), img_url);
                                     }
                                 }
                             }
-                        }
-                        Err(e) => {
-                            dioxus::logger::tracing::warn!("Failed to fetch artist images: {}", e);
+                            Err(e) => {
+                                dioxus::logger::tracing::warn!(
+                                    "Failed to fetch artist images: {}",
+                                    e
+                                );
+                            }
                         }
                     }
+                    config::MusicService::YtMusic => {}
                 }
-                config::MusicService::YtMusic => {}
-            }
 
-            fetched_artist_images.set(images);
-            is_fetching_images.set(false);
-        }.instrument(tracing::info_span!("artist.fetch_images")));
+                fetched_artist_images.set(images);
+                is_fetching_images.set(false);
+            }
+            .instrument(tracing::info_span!("artist.fetch_images")),
+        );
     });
 
     let jellyfin_artists = use_memo(move || {
@@ -191,10 +199,10 @@ pub fn JellyfinArtist(
         // Custom artist photos override album cover and server-fetched images.
         for name in artist_map.keys().cloned().collect::<Vec<_>>() {
             let norm = name.trim().to_lowercase();
-            if let Some(path) = custom_images.get(&norm) {
-                if let Some(url) = utils::format_artwork_url(Some(path)) {
-                    artist_map.insert(name, Some(PathBuf::from(format!("directurl:{}", url))));
-                }
+            if let Some(path) = custom_images.get(&norm)
+                && let Some(url) = utils::format_artwork_url(Some(path))
+            {
+                artist_map.insert(name, Some(PathBuf::from(format!("directurl:{}", url))));
             }
         }
         let offline = *is_offline.read();
@@ -213,7 +221,7 @@ pub fn JellyfinArtist(
             .into_iter()
             .filter(|(artist, _)| !offline || downloaded_artists.contains(&artist.to_lowercase()))
             .collect();
-        artists.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+        artists.sort_by_key(|a| a.0.to_lowercase());
         artists
     });
 
@@ -256,10 +264,10 @@ pub fn JellyfinArtist(
             return None;
         }
         // Custom artist photo overrides every other source, regardless of config.
-        if let Some(path) = custom_images.get(&artist.trim().to_lowercase()) {
-            if let Some(url) = utils::format_artwork_url(Some(path)) {
-                return Some(url);
-            }
+        if let Some(path) = custom_images.get(&artist.trim().to_lowercase())
+            && let Some(url) = utils::format_artwork_url(Some(path))
+        {
+            return Some(url);
         }
         if conf.artist_photo_source == ArtistPhotoSource::ArtistPhoto {
             let fetched = fetched_artist_images.read();

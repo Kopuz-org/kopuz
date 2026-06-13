@@ -82,17 +82,15 @@ fn search_server(
         .map(|t| {
             let cover_url = server.as_ref().and_then(|srv| {
                 let url = match active_service {
-                    Some(MusicService::Jellyfin) => {
-                        utils::jellyfin_image::resolve_track_cover(
-                            t.cover.as_deref(),
-                            &t.id.key(),
-                            &t.album_id,
-                            &srv.url,
-                            srv.access_token.as_deref(),
-                            80,
-                            80,
-                        )
-                    }
+                    Some(MusicService::Jellyfin) => utils::jellyfin_image::resolve_track_cover(
+                        t.cover.as_deref(),
+                        &t.id.key(),
+                        &t.album_id,
+                        &srv.url,
+                        srv.access_token.as_deref(),
+                        80,
+                        80,
+                    ),
                     Some(MusicService::Subsonic) | Some(MusicService::Custom) => {
                         let subsonic_path = match t.cover.as_deref() {
                             Some(c) => format!("{}:{}", t.id.uid(), c),
@@ -206,17 +204,15 @@ async fn search_ytmusic(query: &str, cookies: Option<String>) -> Option<(TrackRe
     let result_tracks: TrackRes = tracks
         .into_iter()
         .map(|t| {
-            let cover_url = utils::map_cover_url(
-                utils::jellyfin_image::resolve_track_cover(
-                    t.cover.as_deref(),
-                    &t.id.key(),
-                    &t.album_id,
-                    "",
-                    None,
-                    80,
-                    80,
-                ),
-            );
+            let cover_url = utils::map_cover_url(utils::jellyfin_image::resolve_track_cover(
+                t.cover.as_deref(),
+                &t.id.key(),
+                &t.album_id,
+                "",
+                None,
+                80,
+                80,
+            ));
             (t, cover_url)
         })
         .collect();
@@ -258,7 +254,7 @@ pub fn use_search_data(search_query: Signal<String>, config: Signal<AppConfig>) 
 
     let genres = use_memo(move || {
         let conf = config.read();
-        let active_source = conf.active_source.clone();
+        let active_source = conf.active_source;
         let active_service = conf.active_service();
         let server = conf.server.clone();
         let albums = albums_res.read().clone().unwrap_or_default();
@@ -349,7 +345,7 @@ pub fn use_search_data(search_query: Signal<String>, config: Signal<AppConfig>) 
         let (active_source, active_service, server) = {
             let conf = config.read();
             (
-                conf.active_source.clone(),
+                conf.active_source,
                 conf.active_service(),
                 conf.server.clone(),
             )

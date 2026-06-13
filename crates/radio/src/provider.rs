@@ -245,11 +245,11 @@ async fn start_ws_metadata(
                     }
                     tokio::select! {
                         _ = heartbeat_timer.tick(), if def.heartbeat.is_some() => {
-                            if let Some(hb) = &def.heartbeat {
-                                if let Err(e) = ws_stream.send(tokio_tungstenite::tungstenite::Message::Text(hb.message.clone().into())).await {
-                                    tracing::warn!("WebSocket heartbeat failed: {}", e);
-                                    break;
-                                }
+                            if let Some(hb) = &def.heartbeat
+                                && let Err(e) = ws_stream.send(tokio_tungstenite::tungstenite::Message::Text(hb.message.clone().into())).await
+                            {
+                                tracing::warn!("WebSocket heartbeat failed: {}", e);
+                                break;
                             }
                         }
                         msg = ws_stream.next() => {

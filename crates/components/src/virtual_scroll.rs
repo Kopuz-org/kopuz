@@ -172,7 +172,8 @@ pub fn VirtualScrollView(
     #[props(default)] bottom_content: Option<Element>,
     /// Grids window by row, so they need the container width to derive the
     /// column count (see [`use_virtual_grid`]).
-    #[props(default)] container_width: Option<Signal<f64>>,
+    #[props(default)]
+    container_width: Option<Signal<f64>>,
 ) -> Element {
     // The mount-time restore below can race the async row count: at mount the
     // list height is ~0, so the browser clamps scrollTop to 0, and once the

@@ -11,6 +11,8 @@ use std::path::PathBuf;
 pub struct TrackListViewProps {
     pub name: String,
     pub description: String,
+    #[props(default)]
+    pub on_description_click: Option<EventHandler<()>>,
     pub cover_url: Option<utils::CoverUrl>,
     pub back_label: String,
     pub tracks: Vec<Track>,
@@ -91,6 +93,7 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
             crate::showcase::Showcase {
                 name: props.name.clone(),
                 description: props.description.clone(),
+                on_description_click: props.on_description_click,
                 cover_url: props.cover_url.clone(),
                 tracks: props.tracks.clone(),
                 is_album: props.is_album,

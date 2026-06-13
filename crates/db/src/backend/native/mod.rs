@@ -7,9 +7,7 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use sqlx::SqlitePool;
-use sqlx::sqlite::{
-    SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous,
-};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 
 use crate::{DbError, Storage};
 
@@ -76,11 +74,10 @@ async fn snapshot_if_pending(path: &Path) {
         return;
     };
     // Max applied version (the table won't exist on a pre-migration legacy DB).
-    let applied: Option<i64> =
-        sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations")
-            .fetch_one(&pool)
-            .await
-            .unwrap_or(None);
+    let applied: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations")
+        .fetch_one(&pool)
+        .await
+        .unwrap_or(None);
     let available = MIGRATOR.iter().map(|m| m.version).max();
     let pending = match (applied, available) {
         (Some(a), Some(v)) => v > a,
@@ -101,7 +98,10 @@ async fn snapshot_if_pending(path: &Path) {
             }
         }
     }
-    tracing::info!(applied = stamp, "db: snapshotted before applying pending migrations");
+    tracing::info!(
+        applied = stamp,
+        "db: snapshotted before applying pending migrations"
+    );
 }
 
 fn with_ext(path: &Path, suffix: &str) -> std::path::PathBuf {
@@ -130,10 +130,7 @@ impl Storage for Native {
         cfg_store::save_config(&self.pool(), cfg).await
     }
 
-    async fn import_legacy_json(
-        &self,
-        config_dir: &Path,
-    ) -> Result<crate::ImportReport, DbError> {
+    async fn import_legacy_json(&self, config_dir: &Path) -> Result<crate::ImportReport, DbError> {
         migrate::run_json_import(&self.pool(), config_dir).await
     }
 
@@ -286,8 +283,7 @@ impl Storage for Native {
         cover_path: Option<&str>,
         image_tag: Option<&str>,
     ) -> Result<(), DbError> {
-        writes::upsert_playlist_meta(&self.pool(), source, pl_id, name, cover_path, image_tag)
-            .await
+        writes::upsert_playlist_meta(&self.pool(), source, pl_id, name, cover_path, image_tag).await
     }
 
     async fn delete_playlist(&self, source: &crate::Source, pl_id: &str) -> Result<(), DbError> {
@@ -303,10 +299,7 @@ impl Storage for Native {
         writes::set_playlist_tracks(&self.pool(), source, pl_id, refs).await
     }
 
-    async fn set_folders(
-        &self,
-        folders: &[reader::models::PlaylistFolder],
-    ) -> Result<(), DbError> {
+    async fn set_folders(&self, folders: &[reader::models::PlaylistFolder]) -> Result<(), DbError> {
         writes::set_folders(&self.pool(), folders).await
     }
 
@@ -396,11 +389,7 @@ impl Storage for Native {
         Ok(())
     }
 
-    async fn debug_load_release(
-        &self,
-        release_path: &Path,
-        db_path: &Path,
-    ) -> Result<(), DbError> {
+    async fn debug_load_release(&self, release_path: &Path, db_path: &Path) -> Result<(), DbError> {
         if !release_path.exists() {
             return Err(DbError::Io(format!(
                 "release db not found at {}",
@@ -447,16 +436,22 @@ impl Storage for Native {
 
     async fn debug_info(&self) -> Result<String, DbError> {
         let pool = self.pool();
-        let migrations: Vec<(i64, String)> = sqlx::query_as(
-            "SELECT version, description FROM _sqlx_migrations ORDER BY version",
-        )
-        .fetch_all(&*pool)
-        .await?;
+        let migrations: Vec<(i64, String)> =
+            sqlx::query_as("SELECT version, description FROM _sqlx_migrations ORDER BY version")
+                .fetch_all(&*pool)
+                .await?;
         let mut out = String::new();
         for (v, d) in &migrations {
             out.push_str(&format!("migration {v} — {d}\n"));
         }
-        for table in ["tracks", "albums", "playlists", "favorites", "servers", "metadata_cache"] {
+        for table in [
+            "tracks",
+            "albums",
+            "playlists",
+            "favorites",
+            "servers",
+            "metadata_cache",
+        ] {
             let n: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
                 .fetch_one(&*pool)
                 .await?;

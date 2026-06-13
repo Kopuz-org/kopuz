@@ -127,8 +127,7 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
 
     // Anonymous: ANDROID_VR + content_pot. Mint + visitor_data in parallel.
     let mut last_err = {
-        let (pot, visitor) =
-            tokio::join!(botguard::mint_content_pot(video_id), visitor_data(None));
+        let (pot, visitor) = tokio::join!(botguard::mint_content_pot(video_id), visitor_data(None));
         match (pot, visitor) {
             (Ok(pot), Ok(visitor)) => {
                 let extras = PlayerExtras {
@@ -162,7 +161,11 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
     tracing::debug!(%last_err, "ANDROID_VR+pot failed — trying bare clients");
 
     for client in STREAM_FALLBACK_CLIENTS {
-        let cookies_for = if client.login_supported { cookies } else { None };
+        let cookies_for = if client.login_supported {
+            cookies
+        } else {
+            None
+        };
         match innertube::player(*client, video_id, cookies_for, PlayerExtras::default()).await {
             Ok(json) => {
                 let status = PlayabilityStatus::from_response(&json);
@@ -250,7 +253,9 @@ fn known_non_premium(user_id: &str) -> bool {
 /// real age so the daily re-check still happens on schedule.
 async fn seed_tier_from_db(user_id: &str) {
     {
-        let Ok(m) = account_premium().lock() else { return };
+        let Ok(m) = account_premium().lock() else {
+            return;
+        };
         if m.contains_key(user_id) {
             return;
         }
@@ -301,14 +306,17 @@ fn remember_tier(user_id: &str, premium: bool) {
     if let Some(handle) = TIER_DB.get() {
         let handle = handle.clone();
         let uid = user_id.to_string();
-        tokio::spawn(async move {
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            let payload = format!("{}:{now}", if premium { "premium" } else { "free" });
-            let _ = handle.meta_put(&uid, TIER_META_KIND, &payload).await;
-        }.instrument(tracing::info_span!("yt.tier_persist")));
+        tokio::spawn(
+            async move {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let payload = format!("{}:{now}", if premium { "premium" } else { "free" });
+                let _ = handle.meta_put(&uid, TIER_META_KIND, &payload).await;
+            }
+            .instrument(tracing::info_span!("yt.tier_persist")),
+        );
     }
 }
 
@@ -475,7 +483,10 @@ fn stream_info_from(
                 .and_then(|s| s.parse::<u64>().ok())
                 .map(|ms| (ms + 500) / 1000)
         });
-    let bitrate = fmt.get("bitrate").and_then(|v| v.as_u64()).map(|v| v as u32);
+    let bitrate = fmt
+        .get("bitrate")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
     let itag = fmt.get("itag").and_then(|v| v.as_u64()).map(|v| v as u32);
     let vid = json
         .pointer("/videoDetails/videoId")
@@ -562,7 +573,9 @@ mod tests {
     #[ignore = "hits live YouTube + needs a system JS runtime"]
     #[expect(clippy::print_stderr, reason = "test diagnostic output")]
     async fn resolve_populates_bitrate_itag_duration() {
-        let info = resolve("dQw4w9WgXcQ", None).await.expect("resolve should succeed");
+        let info = resolve("dQw4w9WgXcQ", None)
+            .await
+            .expect("resolve should succeed");
         eprintln!(
             "[test] resolved itag={:?} bitrate={:?} kbps duration={:?}s",
             info.itag,

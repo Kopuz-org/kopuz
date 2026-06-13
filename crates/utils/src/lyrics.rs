@@ -354,6 +354,7 @@ struct PaxsenixYoutubeSearchResult {
 // as a span field, which would leak server_token (and url/user_id) into the
 // trace + log. Record only artist/title, explicitly.
 #[tracing::instrument(name = "lyrics.fetch", skip_all, fields(artist = %artist, title = %title))]
+#[allow(clippy::too_many_arguments)]
 pub async fn fetch_lyrics(
     artist: &str,
     title: &str,
@@ -383,6 +384,7 @@ pub async fn fetch_lyrics(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn fetch_lyrics_progressive<F>(
     artist: &str,
     title: &str,
@@ -416,6 +418,7 @@ where
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn fetch_lyrics_with_progress<F>(
     artist: &str,
     title: &str,
@@ -1116,10 +1119,10 @@ fn read_local_lrc(audio_path: &str) -> Option<String> {
             .as_ref()
             .map(|s| cand_name == format!("{s}.lrc"))
             .unwrap_or(false);
-        if matches_appended || matches_stem {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                return Some(content);
-            }
+        if (matches_appended || matches_stem)
+            && let Ok(content) = std::fs::read_to_string(&path)
+        {
+            return Some(content);
         }
     }
 
@@ -2241,10 +2244,10 @@ fn parse_lrc(lrc_text: &str) -> Vec<LyricLine> {
                     background: false,
                     opposite_turn: false,
                 });
-            } else if !text.is_empty() {
-                if let Some(last) = lines.last_mut() {
-                    append_line_translation(last, &text);
-                }
+            } else if !text.is_empty()
+                && let Some(last) = lines.last_mut()
+            {
+                append_line_translation(last, &text);
             }
             continue;
         }
@@ -2275,17 +2278,17 @@ fn parse_lrc(lrc_text: &str) -> Vec<LyricLine> {
     let mut merged: Vec<LyricLine> = Vec::new();
 
     for mut line in lines {
-        if let Some(last) = merged.last_mut() {
-            if last.start_time == line.start_time {
-                if last.chunks.is_empty() && !line.chunks.is_empty() {
-                    last.chunks = std::mem::take(&mut line.chunks);
-                }
-                if last.end_time.is_none() {
-                    last.end_time = line.end_time;
-                }
-                append_line_translation(last, &line.text);
-                continue;
+        if let Some(last) = merged.last_mut()
+            && last.start_time == line.start_time
+        {
+            if last.chunks.is_empty() && !line.chunks.is_empty() {
+                last.chunks = std::mem::take(&mut line.chunks);
             }
+            if last.end_time.is_none() {
+                last.end_time = line.end_time;
+            }
+            append_line_translation(last, &line.text);
+            continue;
         }
 
         merged.push(line);
@@ -2298,10 +2301,7 @@ fn extract_line_timestamps(line: &str) -> (Vec<f64>, &str) {
     let mut timestamps = Vec::new();
     let mut rest = line.trim_start();
 
-    loop {
-        let Some(after_open) = rest.strip_prefix('[') else {
-            break;
-        };
+    while let Some(after_open) = rest.strip_prefix('[') {
         let Some(close_idx) = after_open.find(']') else {
             break;
         };

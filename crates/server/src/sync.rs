@@ -75,9 +75,8 @@ pub async fn reconcile_favorites(
         .unwrap_or(0);
     // A stamp in the future (backward clock step) counts as stale, otherwise
     // pulls would be suppressed until real time catches up to it.
-    let should_pull = matches!(reason, SyncReason::Manual)
-        || last_pull > now
-        || now - last_pull >= PULL_MIN_SECS;
+    let should_pull =
+        matches!(reason, SyncReason::Manual) || last_pull > now || now - last_pull >= PULL_MIN_SECS;
     if likes.is_empty() && unlikes.is_empty() && !should_pull {
         return Ok(SyncReport::default());
     }

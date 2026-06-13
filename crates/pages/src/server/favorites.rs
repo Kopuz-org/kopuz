@@ -5,12 +5,12 @@ use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
 use components::showcase::{self, SortField};
 use components::track_row::TrackRow;
+use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use config::{AppConfig, MusicService, UiStyle};
 use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_favorites, use_tracks_by_keys};
-use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use hooks::use_player_controller::PlayerController;
 use kopuz_route::Route;
 use std::collections::HashSet;
@@ -46,7 +46,7 @@ pub fn JellyfinFavorites(
 
     // Multi-selection state
     let mut is_selection_mode = use_signal(|| false);
-    let mut selected_tracks = use_signal(|| HashSet::<PathBuf>::new());
+    let mut selected_tracks = use_signal(HashSet::<PathBuf>::new);
     let sort_state = use_signal(|| None);
     let mut show_playlist_modal = use_signal(|| false);
     let mut selected_track_for_playlist = use_signal(|| None::<PathBuf>);
@@ -68,7 +68,12 @@ pub fn JellyfinFavorites(
     use_effect(move || {
         let nonce = *refresh_nonce.read();
 
-        let token = match config.peek().server.as_ref().and_then(|s| s.access_token.clone()) {
+        let token = match config
+            .peek()
+            .server
+            .as_ref()
+            .and_then(|s| s.access_token.clone())
+        {
             Some(t) => t,
             None => return,
         };
@@ -77,175 +82,177 @@ pub fn JellyfinFavorites(
 
         let db = consume_context::<db::Db>();
         let sid = active_server_id();
-        spawn(async move {
-            if nonce == 0 {
-                if is_ytmusic {
-                    let stamps: Option<serde_json::Value> = db
-                        .meta_get("yt_sync", "timestamps")
-                        .await
-                        .ok()
-                        .flatten()
-                        .and_then(|s| serde_json::from_str(&s).ok());
-                    // Stamp present, OR a CLEAN favorite row already exists for
-                    // this server (covers DBs migrated before the stamp was
-                    // written) — either proves a prior sync; the reconciler
-                    // keeps it fresh. Dirty rows don't count: a locally-hearted
-                    // never-pushed like must not suppress the initial import.
-                    let favorites = db.favorites(&sid).await.unwrap_or_default().len();
-                    let dirty = db.dirty_favorites(&sid).await.unwrap_or_default().len();
-                    let already_synced = stamps
-                        .as_ref()
-                        .and_then(|v| v.get("last_yt_sync_at"))
-                        .and_then(|v| v.as_u64())
-                        .is_some()
-                        || favorites > dirty;
-                    if already_synced {
-                        return;
-                    }
-                } else {
-                    let now = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs())
-                        .unwrap_or(0);
-                    let last_pull: u64 = db
-                        .meta_get("fav_pull", &sid)
-                        .await
-                        .ok()
-                        .flatten()
-                        .and_then(|s| s.parse().ok())
-                        .unwrap_or(0);
-                    if last_pull <= now && now - last_pull < 30 * 60 {
-                        return;
-                    }
-                }
-            }
-
-            is_syncing.set(true);
-            synced_so_far.set(0);
-            let device_id = config.peek().device_id.clone();
-            let server_snapshot = config.peek().server.clone();
-            let Some(server) = server_snapshot else {
-                is_syncing.set(false);
-                return;
-            };
-            let user_id = server.user_id.clone().unwrap_or_default();
-            let url = server.url.clone();
-            let source = Source::Server(sid.clone());
-
-            match server.service {
-                MusicService::Jellyfin | MusicService::Subsonic | MusicService::Custom => {
-                    let ids: Vec<String> = if server.service == MusicService::Jellyfin {
-                        let remote =
-                            JellyfinClient::new(&url, Some(&token), &device_id, Some(&user_id));
-                        remote
-                            .get_favorite_items()
+        spawn(
+            async move {
+                if nonce == 0 {
+                    if is_ytmusic {
+                        let stamps: Option<serde_json::Value> = db
+                            .meta_get("yt_sync", "timestamps")
                             .await
-                            .map(|items| items.into_iter().map(|i| i.id).collect())
-                            .unwrap_or_default()
+                            .ok()
+                            .flatten()
+                            .and_then(|s| serde_json::from_str(&s).ok());
+                        // Stamp present, OR a CLEAN favorite row already exists for
+                        // this server (covers DBs migrated before the stamp was
+                        // written) — either proves a prior sync; the reconciler
+                        // keeps it fresh. Dirty rows don't count: a locally-hearted
+                        // never-pushed like must not suppress the initial import.
+                        let favorites = db.favorites(&sid).await.unwrap_or_default().len();
+                        let dirty = db.dirty_favorites(&sid).await.unwrap_or_default().len();
+                        let already_synced = stamps
+                            .as_ref()
+                            .and_then(|v| v.get("last_yt_sync_at"))
+                            .and_then(|v| v.as_u64())
+                            .is_some()
+                            || favorites > dirty;
+                        if already_synced {
+                            return;
+                        }
                     } else {
-                        let remote = SubsonicClient::new(&url, &user_id, &token);
-                        remote.get_starred_song_ids().await.unwrap_or_default()
-                    };
-                    // Mirror the reconciler's pull (see server::sync): dirty
-                    // local rows survive the replace.
-                    if db.replace_favorites_clean(&sid, &ids).await.is_ok() {
                         let now = std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
                             .map(|d| d.as_secs())
                             .unwrap_or(0);
-                        let _ = db.meta_put("fav_pull", &sid, &now.to_string()).await;
-                        gens.bump(Table::Favorites);
+                        let last_pull: u64 = db
+                            .meta_get("fav_pull", &sid)
+                            .await
+                            .ok()
+                            .flatten()
+                            .and_then(|s| s.parse().ok())
+                            .unwrap_or(0);
+                        if last_pull <= now && now - last_pull < 30 * 60 {
+                            return;
+                        }
                     }
                 }
-                MusicService::YtMusic => {
-                    let yt =
-                        ::server::ytmusic::YouTubeMusicClient::with_cookies(token);
 
-                    // Each page is upserted and DROPPED — nothing accumulates in
-                    // memory. Only the lightweight identities survive the stream
-                    // (for the end-of-sync prune + Liked Songs membership).
-                    let mut ids: Vec<String> = Vec::new();
-                    let mut keep_albums: Vec<String> = Vec::new();
-                    let mut first_cover: Option<String> = None;
-                    let result = yt
-                        .stream_liked_songs(|page| {
-                            if first_cover.is_none() {
-                                first_cover = page.first().and_then(|t| t.cover.clone());
-                            }
-                            ids.extend(page.iter().filter_map(|t| {
-                                let k = t.id.key();
-                                (!k.is_empty()).then(|| k.to_string())
-                            }));
-                            keep_albums.extend(page.iter().map(|t| t.album_id.clone()));
-                            let albums = synthesize_albums(&page);
-                            synced_so_far.set(ids.len());
-                            let db = db.clone();
-                            let source = Source::Server(sid.clone());
-                            spawn(async move {
-                                for chunk in page.chunks(100) {
-                                    let _ = db.upsert_tracks(&source, chunk).await;
-                                }
-                                let _ = db.upsert_albums(&source, &albums).await;
-                                gens.bump_coalesced(Table::Tracks);
-                            });
-                        })
-                        .await;
+                is_syncing.set(true);
+                synced_so_far.set(0);
+                let device_id = config.peek().device_id.clone();
+                let server_snapshot = config.peek().server.clone();
+                let Some(server) = server_snapshot else {
+                    is_syncing.set(false);
+                    return;
+                };
+                let user_id = server.user_id.clone().unwrap_or_default();
+                let url = server.url.clone();
+                let source = Source::Server(sid.clone());
 
-                    match result {
-                        Ok(()) => {
-                            // Full stream completed — drop YT rows no longer
-                            // liked remotely (replaces the legacy clear).
-                            keep_albums.sort();
-                            keep_albums.dedup();
-                            let _ = db.prune_source(&source, &ids, &keep_albums).await;
+                match server.service {
+                    MusicService::Jellyfin | MusicService::Subsonic | MusicService::Custom => {
+                        let ids: Vec<String> = if server.service == MusicService::Jellyfin {
+                            let remote =
+                                JellyfinClient::new(&url, Some(&token), &device_id, Some(&user_id));
+                            remote
+                                .get_favorite_items()
+                                .await
+                                .map(|items| items.into_iter().map(|i| i.id).collect())
+                                .unwrap_or_default()
+                        } else {
+                            let remote = SubsonicClient::new(&url, &user_id, &token);
+                            remote.get_starred_song_ids().await.unwrap_or_default()
+                        };
+                        // Mirror the reconciler's pull (see server::sync): dirty
+                        // local rows survive the replace.
+                        if db.replace_favorites_clean(&sid, &ids).await.is_ok() {
                             let now = std::time::SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .map(|d| d.as_secs())
                                 .unwrap_or(0);
-                            let mut stamps: serde_json::Value = db
-                                .meta_get("yt_sync", "timestamps")
-                                .await
-                                .ok()
-                                .flatten()
-                                .and_then(|s| serde_json::from_str(&s).ok())
-                                .unwrap_or_else(|| serde_json::json!({}));
-                            stamps["last_yt_sync_at"] = serde_json::json!(now);
-                            let _ = db
-                                .meta_put("yt_sync", "timestamps", &stamps.to_string())
-                                .await;
-                            let liked_cover = first_cover.as_deref().map(|c| {
-                                if c.starts_with("http://") || c.starts_with("https://") {
-                                    utils::jellyfin_image::encode_cover_url(c)
-                                } else {
-                                    c.to_string()
-                                }
-                            });
-                            if db
-                                .upsert_playlist_meta(
-                                    &source,
-                                    "LM",
-                                    "Liked Songs",
-                                    None,
-                                    liked_cover.as_deref(),
-                                )
-                                .await
-                                .is_ok()
-                                && db.set_playlist_tracks(&source, "LM", &ids).await.is_ok()
-                            {
-                                gens.bump(Table::Playlists);
-                            }
-                            gens.bump(Table::Tracks);
-                            gens.bump(Table::Albums);
+                            let _ = db.meta_put("fav_pull", &sid, &now.to_string()).await;
+                            gens.bump(Table::Favorites);
                         }
-                        Err(e) => {
-                            tracing::warn!(error = %e, "YT favorites sync failed");
+                    }
+                    MusicService::YtMusic => {
+                        let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(token);
+
+                        // Each page is upserted and DROPPED — nothing accumulates in
+                        // memory. Only the lightweight identities survive the stream
+                        // (for the end-of-sync prune + Liked Songs membership).
+                        let mut ids: Vec<String> = Vec::new();
+                        let mut keep_albums: Vec<String> = Vec::new();
+                        let mut first_cover: Option<String> = None;
+                        let result = yt
+                            .stream_liked_songs(|page| {
+                                if first_cover.is_none() {
+                                    first_cover = page.first().and_then(|t| t.cover.clone());
+                                }
+                                ids.extend(page.iter().filter_map(|t| {
+                                    let k = t.id.key();
+                                    (!k.is_empty()).then(|| k.to_string())
+                                }));
+                                keep_albums.extend(page.iter().map(|t| t.album_id.clone()));
+                                let albums = synthesize_albums(&page);
+                                synced_so_far.set(ids.len());
+                                let db = db.clone();
+                                let source = Source::Server(sid.clone());
+                                spawn(async move {
+                                    for chunk in page.chunks(100) {
+                                        let _ = db.upsert_tracks(&source, chunk).await;
+                                    }
+                                    let _ = db.upsert_albums(&source, &albums).await;
+                                    gens.bump_coalesced(Table::Tracks);
+                                });
+                            })
+                            .await;
+
+                        match result {
+                            Ok(()) => {
+                                // Full stream completed — drop YT rows no longer
+                                // liked remotely (replaces the legacy clear).
+                                keep_albums.sort();
+                                keep_albums.dedup();
+                                let _ = db.prune_source(&source, &ids, &keep_albums).await;
+                                let now = std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_secs())
+                                    .unwrap_or(0);
+                                let mut stamps: serde_json::Value = db
+                                    .meta_get("yt_sync", "timestamps")
+                                    .await
+                                    .ok()
+                                    .flatten()
+                                    .and_then(|s| serde_json::from_str(&s).ok())
+                                    .unwrap_or_else(|| serde_json::json!({}));
+                                stamps["last_yt_sync_at"] = serde_json::json!(now);
+                                let _ = db
+                                    .meta_put("yt_sync", "timestamps", &stamps.to_string())
+                                    .await;
+                                let liked_cover = first_cover.as_deref().map(|c| {
+                                    if c.starts_with("http://") || c.starts_with("https://") {
+                                        utils::jellyfin_image::encode_cover_url(c)
+                                    } else {
+                                        c.to_string()
+                                    }
+                                });
+                                if db
+                                    .upsert_playlist_meta(
+                                        &source,
+                                        "LM",
+                                        "Liked Songs",
+                                        None,
+                                        liked_cover.as_deref(),
+                                    )
+                                    .await
+                                    .is_ok()
+                                    && db.set_playlist_tracks(&source, "LM", &ids).await.is_ok()
+                                {
+                                    gens.bump(Table::Playlists);
+                                }
+                                gens.bump(Table::Tracks);
+                                gens.bump(Table::Albums);
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "YT favorites sync failed");
+                            }
                         }
                     }
                 }
-            }
 
-            is_syncing.set(false);
-        }.instrument(tracing::info_span!("favorites.sync")));
+                is_syncing.set(false);
+            }
+            .instrument(tracing::info_span!("favorites.sync")),
+        );
     });
 
     let displayed_tracks: Vec<(reader::models::Track, Option<utils::CoverUrl>)> = {
@@ -259,17 +266,15 @@ pub fn JellyfinFavorites(
             .into_iter()
             .map(|t| {
                 let cover_url = if let Some(ref srv) = server_ref {
-                    utils::map_cover_url(
-                        utils::jellyfin_image::resolve_track_cover(
-                            t.cover.as_deref(),
-                            &t.id.key(),
-                            &t.album_id,
-                            &srv.url,
-                            srv.access_token.as_deref(),
-                            80,
-                            80,
-                        ),
-                    )
+                    utils::map_cover_url(utils::jellyfin_image::resolve_track_cover(
+                        t.cover.as_deref(),
+                        &t.id.key(),
+                        &t.album_id,
+                        &srv.url,
+                        srv.access_token.as_deref(),
+                        80,
+                        80,
+                    ))
                 } else {
                     None
                 };

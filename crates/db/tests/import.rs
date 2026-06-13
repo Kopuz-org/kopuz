@@ -178,11 +178,20 @@ async fn imports_synthetic_fixture() {
         .await
         .unwrap();
     let v: serde_json::Value = serde_json::from_str(&blob).unwrap();
-    assert_eq!(v.get("active_server_id").and_then(|x| x.as_str()), Some("srv-1"));
-    assert!(v.get("server").is_none(), "creds must not remain in the blob");
+    assert_eq!(
+        v.get("active_server_id").and_then(|x| x.as_str()),
+        Some("srv-1")
+    );
+    assert!(
+        v.get("server").is_none(),
+        "creds must not remain in the blob"
+    );
     assert!(v.get("servers").is_none());
     assert!(v.get("listen_counts").is_none());
-    assert!(!blob.contains("SECRET_COOKIE"), "no token leaked into the blob");
+    assert!(
+        !blob.contains("SECRET_COOKIE"),
+        "no token leaked into the blob"
+    );
 
     // YT sync stamps land in the metadata cache (where the runtime reads them —
     // blob-only stamps caused a full YT re-stream on first favorites open).
@@ -199,10 +208,11 @@ async fn imports_synthetic_fixture() {
     );
 
     // listen_counts keyed by uid (cover dropped from the legacy key).
-    let c: i64 = sqlx::query_scalar("SELECT count FROM listen_counts WHERE track_key = 'ytmusic:VID1'")
-        .fetch_one(&mut conn)
-        .await
-        .unwrap();
+    let c: i64 =
+        sqlx::query_scalar("SELECT count FROM listen_counts WHERE track_key = 'ytmusic:VID1'")
+            .fetch_one(&mut conn)
+            .await
+            .unwrap();
     assert_eq!(c, 5);
 
     // Liked-songs playlist membership preserved.
@@ -252,7 +262,7 @@ async fn smoke_real() {
     let db_path = dir.join("kopuz.db");
     let db = db::init(&db_path).await.unwrap();
     let report = db.import_legacy_json(&dir).await.unwrap();
-    println!("real import report: {report:?}");
+    tracing::info!("real import report: {report:?}");
     assert!(report.ran);
 
     let mut conn = open(&db_path).await;
@@ -320,7 +330,10 @@ async fn finalize_is_inert_when_no_import_ran() {
     db.save_config(&config::AppConfig::default()).await.unwrap();
 
     let renamed = db.finalize_migration(&dir).await.unwrap();
-    assert_eq!(renamed, 0, "finalize must not rename files no import consumed");
+    assert_eq!(
+        renamed, 0,
+        "finalize must not rename files no import consumed"
+    );
     assert!(dir.join("config.json").exists());
 
     let _ = std::fs::remove_dir_all(&dir);
