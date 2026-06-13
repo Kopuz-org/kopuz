@@ -136,6 +136,20 @@ type SharedConsumer = Arc<Mutex<rb::Consumer<f32>>>;
 type ActiveConsumerSlot = Arc<Mutex<Option<SharedConsumer>>>;
 
 #[cfg(not(target_arch = "wasm32"))]
+struct OutputStreamContext {
+    active_state_handle: Arc<Mutex<Arc<Mutex<PlaybackState>>>>,
+    position_micros: Arc<AtomicU64>,
+    equalizer: Arc<Mutex<Equalizer>>,
+    channel_mode: Arc<Mutex<ChannelMode>>,
+    active_consumer: ActiveConsumerSlot,
+    fading_consumer: ActiveConsumerSlot,
+    crossfade_state: Arc<Mutex<Option<CrossfadeState>>>,
+    fading_session_state: Arc<Mutex<Option<Arc<Mutex<PlaybackState>>>>>,
+    #[cfg(target_os = "windows")]
+    stream_rebuild_requested: Arc<AtomicBool>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub struct Player {
     state: Arc<Mutex<PlaybackState>>,
     active_state_handle: Arc<Mutex<Arc<Mutex<PlaybackState>>>>,
@@ -205,17 +219,19 @@ impl Player {
     ) -> cpal::StreamConfig {
         let mut stream_config = supported_config.config();
         stream_config.buffer_size = match (
-            current_config.map(|config| config.buffer_size.clone()),
+            current_config.map(|config| config.buffer_size),
             supported_config.buffer_size(),
         ) {
-            (Some(cpal::BufferSize::Fixed(target)), cpal::SupportedBufferSize::Range { min, max }) => {
-                cpal::BufferSize::Fixed(target.clamp(*min, *max))
-            }
+            (
+                Some(cpal::BufferSize::Fixed(target)),
+                cpal::SupportedBufferSize::Range { min, max },
+            ) => cpal::BufferSize::Fixed(target.clamp(*min, *max)),
             _ => Self::preferred_stream_config(supported_config).buffer_size,
         };
         stream_config
     }
 
+    #[cfg(target_os = "windows")]
     fn matching_output_config(
         device: &cpal::Device,
         current_config: &cpal::StreamConfig,
@@ -232,27 +248,22 @@ impl Player {
     fn build_output_stream(
         device: &cpal::Device,
         stream_config: &cpal::StreamConfig,
-        active_state_handle: &Arc<Mutex<Arc<Mutex<PlaybackState>>>>,
-        position_micros: &Arc<AtomicU64>,
-        equalizer: &Arc<Mutex<Equalizer>>,
-        channel_mode: &Arc<Mutex<ChannelMode>>,
-        active_consumer: &ActiveConsumerSlot,
-        fading_consumer: &ActiveConsumerSlot,
-        crossfade_state: &Arc<Mutex<Option<CrossfadeState>>>,
-        fading_session_state: &Arc<Mutex<Option<Arc<Mutex<PlaybackState>>>>>,
-        stream_rebuild_requested: Option<Arc<AtomicBool>>,
+        context: &OutputStreamContext,
     ) -> Result<cpal::Stream, String> {
         let channels = stream_config.channels as usize;
         let device_sample_rate = stream_config.sample_rate;
-        let stream_active_state_handle = active_state_handle.clone();
-        let stream_position = position_micros.clone();
-        let stream_equalizer = equalizer.clone();
-        let stream_channel_mode = channel_mode.clone();
-        let stream_active_consumer = active_consumer.clone();
-        let stream_fading_consumer = fading_consumer.clone();
-        let stream_crossfade_state = crossfade_state.clone();
-        let stream_fading_session_state = fading_session_state.clone();
-        let stream_rebuild_flag = stream_rebuild_requested.clone();
+        let stream_active_state_handle = context.active_state_handle.clone();
+        let stream_position = context.position_micros.clone();
+        let stream_equalizer = context.equalizer.clone();
+        let stream_channel_mode = context.channel_mode.clone();
+        let stream_active_consumer = context.active_consumer.clone();
+        let stream_fading_consumer = context.fading_consumer.clone();
+        let stream_crossfade_state = context.crossfade_state.clone();
+        let stream_fading_session_state = context.fading_session_state.clone();
+        #[cfg(target_os = "windows")]
+        let stream_rebuild_flag = Some(context.stream_rebuild_requested.clone());
+        #[cfg(not(target_os = "windows"))]
+        let stream_rebuild_flag: Option<Arc<AtomicBool>> = None;
 
         let stream = device
             .build_output_stream(
@@ -441,26 +452,26 @@ impl Player {
 
         let next_stream_config =
             Self::stream_config_with_buffer(&supported_config, Some(&self.stream_config));
-        let stream = match Self::build_output_stream(
-            &device,
-            &next_stream_config,
-            &self.active_state_handle,
-            &self.position_micros,
-            &self.equalizer,
-            &self.channel_mode,
-            &self.active_consumer,
-            &self.fading_consumer,
-            &self.crossfade_state,
-            &self.fading_session_state,
-            Some(self.stream_rebuild_requested.clone()),
-        ) {
-            Ok(stream) => stream,
-            Err(error) => {
-                self.stream_rebuild_requested.store(true, Ordering::Release);
-                tracing::warn!(%error, "failed to rebuild Windows output stream");
-                return;
-            }
+        let output_stream_context = OutputStreamContext {
+            active_state_handle: self.active_state_handle.clone(),
+            position_micros: self.position_micros.clone(),
+            equalizer: self.equalizer.clone(),
+            channel_mode: self.channel_mode.clone(),
+            active_consumer: self.active_consumer.clone(),
+            fading_consumer: self.fading_consumer.clone(),
+            crossfade_state: self.crossfade_state.clone(),
+            fading_session_state: self.fading_session_state.clone(),
+            stream_rebuild_requested: self.stream_rebuild_requested.clone(),
         };
+        let stream =
+            match Self::build_output_stream(&device, &next_stream_config, &output_stream_context) {
+                Ok(stream) => stream,
+                Err(error) => {
+                    self.stream_rebuild_requested.store(true, Ordering::Release);
+                    tracing::warn!(%error, "failed to rebuild Windows output stream");
+                    return;
+                }
+            };
 
         let had_active_playback = self.ring_buf_consumer.is_some() || self.decoder_handle.is_some();
         let format_changed = next_stream_config.channels != self.stream_config.channels
@@ -534,30 +545,21 @@ impl Player {
         let fading_session_state = Arc::new(Mutex::new(None::<Arc<Mutex<PlaybackState>>>));
         #[cfg(target_os = "windows")]
         let stream_rebuild_requested = Arc::new(AtomicBool::new(false));
+        let output_stream_context = OutputStreamContext {
+            active_state_handle: active_state_handle.clone(),
+            position_micros: position_micros.clone(),
+            equalizer: equalizer.clone(),
+            channel_mode: channel_mode.clone(),
+            active_consumer: active_consumer.clone(),
+            fading_consumer: fading_consumer.clone(),
+            crossfade_state: crossfade_state.clone(),
+            fading_session_state: fading_session_state.clone(),
+            #[cfg(target_os = "windows")]
+            stream_rebuild_requested: stream_rebuild_requested.clone(),
+        };
 
-        let stream = Self::build_output_stream(
-            &device,
-            &stream_config,
-            &active_state_handle,
-            &position_micros,
-            &equalizer,
-            &channel_mode,
-            &active_consumer,
-            &fading_consumer,
-            &crossfade_state,
-            &fading_session_state,
-            {
-                #[cfg(target_os = "windows")]
-                {
-                    Some(stream_rebuild_requested.clone())
-                }
-                #[cfg(not(target_os = "windows"))]
-                {
-                    None
-                }
-            },
-        )
-        .unwrap_or_else(|error| panic!("{error}"));
+        let stream = Self::build_output_stream(&device, &stream_config, &output_stream_context)
+            .unwrap_or_else(|error| panic!("{error}"));
 
         Self {
             state,
