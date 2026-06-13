@@ -736,7 +736,7 @@ fn render_continue_listening(
             }
             div {
                 id: "continue-listening-scroll",
-                class: "flex overflow-x-auto gap-5 pb-6 pt-2 scrollbar-hide scroll-smooth -mx-2 px-2",
+                class: "flex overflow-x-auto gap-5 pb-6 pt-2 scroll-smooth -mx-2 px-2",
                 for (track, album_opt) in tracks {
                     {
                         let cover_path = album_opt.as_ref().and_then(|a| a.cover_path.clone());

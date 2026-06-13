@@ -906,7 +906,7 @@ fn render_continue_listening(
             }
             div {
                 id: "jelly-continue-scroll",
-                class: "flex overflow-x-auto gap-5 pb-6 pt-2 scrollbar-hide scroll-smooth -mx-2 px-2",
+                class: "flex overflow-x-auto gap-5 pb-6 pt-2 scroll-smooth -mx-2 px-2",
                 for (track, album_opt, cover_url) in tracks {
                     {
                         let title = track.title.clone();
