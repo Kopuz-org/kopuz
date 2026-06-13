@@ -25,24 +25,10 @@ pub struct ImportReport {
     pub servers: usize,
 }
 
-/// Where a track/playlist/favorite comes from: the local filesystem, or a
-/// specific media server (by its `servers.id`).
-#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
-pub enum Source {
-    #[default]
-    Local,
-    Server(String),
-}
-
-impl Source {
-    /// The `source` column value: `"local"` or the server id.
-    pub fn as_str(&self) -> &str {
-        match self {
-            Source::Local => "local",
-            Source::Server(id) => id.as_str(),
-        }
-    }
-}
+// `Source` is defined in `config` (the active source lives there) and is the
+// single type-safe representation of "which source"; re-exported here since the
+// DB layer is its main consumer (`WHERE source = ?`).
+pub use config::Source;
 
 /// A window into a list query (for virtual-scrolled big lists).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -365,15 +351,11 @@ pub trait Storage: Send + Sync {
     /// Reconstruct the queue/progress snapshot from the `queue_state` row.
     async fn load_queue(&self) -> Result<QueueSnapshot, DbError>;
 
-    /// The `PlaylistStore` shape (local + ACTIVE-server playlists + folders) —
-    /// the read side of the playlists UI (`use_playlists`). Writes go through
-    /// the playlist-scoped ops, never a whole-store save.
-    /// The playlist store scoped to local + `active_server` (the caller's
-    /// in-memory active id; `None` falls back to the persisted blob's).
-    async fn load_playlists(
-        &self,
-        active_server: Option<&str>,
-    ) -> Result<reader::PlaylistStore, DbError>;
+    /// The `PlaylistStore` (the active source's playlists + folders) — the read
+    /// side of the playlists UI (`use_playlists`). Writes go through the
+    /// playlist-scoped ops, never a whole-store save. Scoped to `source`, the
+    /// caller's in-memory active source.
+    async fn load_playlists(&self, source: &Source) -> Result<reader::PlaylistStore, DbError>;
 
     /// Persist the queue/progress snapshot to the single `queue_state` row.
     async fn save_queue(&self, snap: &QueueSnapshot) -> Result<(), DbError>;

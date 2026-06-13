@@ -503,7 +503,10 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                 {
                     let mut cfg = config.write();
                     cfg.add_saved_server(saved);
-                    cfg.active_server_id = new_server.id.clone();
+                    cfg.active_source = new_server
+                        .id
+                        .clone()
+                        .map_or(config::Source::Local, config::Source::Server);
                     cfg.server = Some(new_server);
                 }
 
@@ -565,7 +568,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                 };
                 {
                     let mut cfg = config.write();
-                    cfg.active_server_id = Some(saved.id);
+                    cfg.active_source = config::Source::Server(saved.id);
                     cfg.server = Some(active);
                 }
                 // Only launch a sign-in flow when there are no stored creds.

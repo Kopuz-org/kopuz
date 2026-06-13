@@ -1565,7 +1565,7 @@ fn App() -> Element {
 
             let server_url = {
                 let conf = config.read();
-                if conf.active_source != config::MusicSource::Server {
+                if !conf.active_source.is_server() {
                     was_reachable = true;
                     consecutive_failures = 0;
                     continue;
@@ -1598,7 +1598,7 @@ fn App() -> Element {
                 was_reachable = false;
                 is_offline.set(true);
                 auto_switched_to_offline.set(true);
-                config.write().active_source = config::MusicSource::Local;
+                config.write().active_source = config::Source::Local;
                 network_banner.set(Some(true));
             } else if reachable && !was_reachable {
                 was_reachable = true;
@@ -1606,7 +1606,10 @@ fn App() -> Element {
                 is_offline.set(false);
                 if *auto_switched_to_offline.read() {
                     auto_switched_to_offline.set(false);
-                    config.write().active_source = config::MusicSource::Server;
+                    let target = config.peek().server_toggle_target();
+                    if let Some(s) = target {
+                        config.write().active_source = s;
+                    }
                     network_banner.set(Some(false));
                     spawn(async move {
                         utils::sleep(std::time::Duration::from_secs(4)).await;
@@ -1674,8 +1677,13 @@ fn App() -> Element {
                         .is_some();
                     let not_explicitly_set = !cfg.source_explicitly_set;
                     drop(cfg);
-                    if no_local_tracks && server_connected && not_explicitly_set {
-                        config.write().active_source = config::MusicSource::Server;
+                    let target = if no_local_tracks && server_connected && not_explicitly_set {
+                        config.peek().server_toggle_target()
+                    } else {
+                        None
+                    };
+                    if let Some(s) = target {
+                        config.write().active_source = s;
                     }
                 }
 
@@ -1709,7 +1717,10 @@ fn App() -> Element {
         // unblock the save effects.
         #[cfg(target_arch = "wasm32")]
         {
-            config.write().active_source = config::MusicSource::Server;
+            let target = config.peek().server_toggle_target();
+            if let Some(s) = target {
+                config.write().active_source = s;
+            }
             config_loaded_ok.set(true);
             initial_load_done.set(true);
         }
@@ -2059,7 +2070,7 @@ fn App() -> Element {
     });
 
     let reduce_animations = use_memo(move || config.read().reduce_animations);
-    let active_source = use_memo(move || config.read().active_source);
+    let active_source = use_memo(move || config.read().active_source.clone());
 
     rsx! {
         document::Link { rel: "icon", href: FAVICON }
@@ -2104,7 +2115,7 @@ fn App() -> Element {
                 div { dir: "ltr", Titlebar {} }
             }
 
-            if active_source == config::MusicSource::Local {
+            if active_source == config::Source::Local {
                 if let Some(file) = scan_current_file.read().clone() {
                     div {
                         class: "flex-shrink-0",
@@ -2183,7 +2194,10 @@ fn App() -> Element {
                                 button {
                                     class: "ml-2 text-xs underline opacity-70 hover:opacity-100 transition-opacity",
                                     onclick: move |_| {
-                                        config.write().active_source = config::MusicSource::Server;
+                                        let target = config.peek().server_toggle_target();
+                                        if let Some(s) = target {
+                                            config.write().active_source = s;
+                                        }
                                         network_banner.set(None);
                                     },
                                     "Keep server mode"
@@ -2374,19 +2388,7 @@ fn App() -> Element {
                                     // sniff — Subsonic/Custom album ids carry
                                     // their own prefixes and Home only emits the
                                     // active source's ids anyway.
-                                    let source = {
-                                        let c = config.peek();
-                                        let server_active =
-                                            matches!(c.active_source, config::MusicSource::Server);
-                                        match c
-                                            .active_server_id
-                                            .clone()
-                                            .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
-                                        {
-                                            Some(sid) if server_active => db::Source::Server(sid),
-                                            _ => db::Source::Local,
-                                        }
-                                    };
+                                    let source = config.peek().active_source.clone();
                                     let db = db_for_play_album.clone();
                                     spawn(async move {
                                         let mut tracks =

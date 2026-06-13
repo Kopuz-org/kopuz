@@ -1,4 +1,4 @@
-use config::{AppConfig, MusicSource, UiStyle};
+use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 
 use crate::local::favorites::LocalFavorites;
@@ -18,7 +18,7 @@ pub fn FavoritesPage(
     mut queue: Signal<Vec<reader::models::Track>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
-    let is_server = config.read().active_source == MusicSource::Server;
+    let is_server = config.read().active_source.is_server();
     let is_modern = config.read().ui_style == UiStyle::Modern;
 
     rsx! {

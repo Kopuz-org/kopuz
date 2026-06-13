@@ -179,7 +179,9 @@ async fn imports_synthetic_fixture() {
         .unwrap();
     let v: serde_json::Value = serde_json::from_str(&blob).unwrap();
     assert_eq!(
-        v.get("active_server_id").and_then(|x| x.as_str()),
+        v.get("active_source")
+            .and_then(|s| s.get("Server"))
+            .and_then(|x| x.as_str()),
         Some("srv-1")
     );
     assert!(

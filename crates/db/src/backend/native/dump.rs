@@ -7,26 +7,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use reader::PlaylistStore;
-use reader::models::{JellyfinPlaylist, Playlist, PlaylistFolder};
+use reader::models::{Playlist, PlaylistFolder};
 use sqlx::SqlitePool;
 
-use crate::{DbError, QueueSnapshot};
-
-/// The active server id from the config blob (`None` ⇒ local).
-pub(super) async fn active_server_id(pool: &SqlitePool) -> Option<String> {
-    let blob: Option<String> = sqlx::query_scalar!("SELECT json FROM app_config WHERE id = 1")
-        .fetch_optional(pool)
-        .await
-        .ok()
-        .flatten();
-    blob.as_deref()
-        .and_then(|b| serde_json::from_str::<serde_json::Value>(b).ok())
-        .and_then(|v| {
-            v.get("active_server_id")
-                .and_then(|x| x.as_str())
-                .map(String::from)
-        })
-}
+use crate::{DbError, QueueSnapshot, Source};
 
 type ArtistImages = (
     HashMap<String, String>,
@@ -57,30 +41,21 @@ pub async fn artist_images(pool: &SqlitePool) -> Result<ArtistImages, DbError> {
     Ok((server, local, custom))
 }
 
-pub async fn load_playlists(
-    pool: &SqlitePool,
-    active_server: Option<&str>,
-) -> Result<PlaylistStore, DbError> {
-    // Scoped to local + the ACTIVE server: the in-memory store only ever
-    // represents the active server, and the write side is scoped the same
-    // way — so other servers' rows are invisible to this load. The caller
-    // passes the IN-MEMORY active id — the persisted blob lags a server
-    // switch by the debounced config save, which would briefly show the
-    // previous server's playlists under the new identity.
-    let active = match active_server {
-        Some(s) => s.to_owned(),
-        None => active_server_id(pool).await.unwrap_or_default(),
-    };
+pub async fn load_playlists(pool: &SqlitePool, source: &Source) -> Result<PlaylistStore, DbError> {
+    // Scoped to the ACTIVE source only: the app is in local OR one server mode
+    // at a time, so the in-memory store represents exactly one source — a local
+    // and a server playlist that share an id never collide here. The caller
+    // passes the IN-MEMORY active source (the persisted blob lags a switch).
+    let src = source.as_str();
     let rows = sqlx::query!(
-        "SELECT rowid_pk, source, source_pl_id, name, cover_path, image_tag \
-         FROM playlists WHERE source = 'local' OR source = ?1 ORDER BY position",
-        active
+        "SELECT rowid_pk, source_pl_id, name, cover_path, image_tag \
+         FROM playlists WHERE source = ?1 ORDER BY position",
+        src
     )
     .fetch_all(pool)
     .await?;
 
     let mut playlists = Vec::new();
-    let mut jellyfin_playlists = Vec::new();
     for r in rows {
         let tracks: Vec<String> = sqlx::query_scalar!(
             "SELECT track_ref FROM playlist_tracks WHERE playlist_pk = ?1 ORDER BY position",
@@ -88,22 +63,13 @@ pub async fn load_playlists(
         )
         .fetch_all(pool)
         .await?;
-        if r.source == "local" {
-            playlists.push(Playlist {
-                id: r.source_pl_id,
-                name: r.name,
-                tracks: tracks.into_iter().map(PathBuf::from).collect(),
-                cover_path: r.cover_path.map(PathBuf::from),
-            });
-        } else {
-            jellyfin_playlists.push(JellyfinPlaylist {
-                id: r.source_pl_id,
-                name: r.name,
-                tracks,
-                image_tag: r.image_tag,
-                cover_path: r.cover_path.map(PathBuf::from),
-            });
-        }
+        playlists.push(Playlist {
+            id: r.source_pl_id,
+            name: r.name,
+            tracks,
+            image_tag: r.image_tag,
+            cover_path: r.cover_path.map(PathBuf::from),
+        });
     }
 
     let folder_rows = sqlx::query!("SELECT id, name FROM folders")
@@ -124,11 +90,7 @@ pub async fn load_playlists(
         });
     }
 
-    Ok(PlaylistStore {
-        playlists,
-        jellyfin_playlists,
-        folders,
-    })
+    Ok(PlaylistStore { playlists, folders })
 }
 
 pub async fn load_queue(pool: &SqlitePool) -> Result<QueueSnapshot, DbError> {

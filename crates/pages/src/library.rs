@@ -1,4 +1,4 @@
-use config::{AppConfig, MusicSource};
+use config::AppConfig;
 use dioxus::prelude::*;
 use player::player;
 
@@ -20,7 +20,7 @@ pub fn LibraryPage(
     mut queue: Signal<Vec<reader::models::Track>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
-    let is_server = config.read().active_source == MusicSource::Server;
+    let is_server = config.read().active_source.is_server();
 
     rsx! {
         if is_server {

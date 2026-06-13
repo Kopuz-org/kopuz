@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use hooks::use_db_queries::{use_active_server_id, use_playlists};
+use hooks::use_db_queries::use_playlists;
 
 const DEFAULT_OVERLAY_CLASS: &str =
     "fixed inset-0 bg-black/80 flex items-center justify-center z-50";
@@ -17,8 +17,7 @@ pub struct PlaylistModalProps {
 #[component]
 pub fn PlaylistModal(props: PlaylistModalProps) -> Element {
     let mut new_playlist_name = use_signal(String::new);
-    let active_server_id = use_active_server_id();
-    let playlists_res = use_playlists(active_server_id);
+    let playlists_res = use_playlists();
     let store = playlists_res.read().clone().unwrap_or_default();
     let add_to_playlist_text = i18n::t("add_to_playlist").to_string();
     let no_playlists_found_text = i18n::t("no_playlists_found").to_string();
@@ -31,33 +30,18 @@ pub fn PlaylistModal(props: PlaylistModalProps) -> Element {
         .as_deref()
         .unwrap_or(DEFAULT_OVERLAY_CLASS);
 
-    let playlists: Vec<(String, String, String)> = if props.is_jellyfin {
-        store
-            .jellyfin_playlists
-            .iter()
-            .map(|p| {
-                let track_text = if p.tracks.len() == 1 {
-                    i18n::t("track_count_singular").to_string()
-                } else {
-                    i18n::t_with("track_count", &[("count", p.tracks.len().to_string())])
-                };
-                (p.id.clone(), p.name.clone(), track_text)
-            })
-            .collect()
-    } else {
-        store
-            .playlists
-            .iter()
-            .map(|p| {
-                let track_text = if p.tracks.len() == 1 {
-                    i18n::t("track_count_singular").to_string()
-                } else {
-                    i18n::t_with("track_count", &[("count", p.tracks.len().to_string())])
-                };
-                (p.id.clone(), p.name.clone(), track_text)
-            })
-            .collect()
-    };
+    let playlists: Vec<(String, String, String)> = store
+        .playlists
+        .iter()
+        .map(|p| {
+            let track_text = if p.tracks.len() == 1 {
+                i18n::t("track_count_singular").to_string()
+            } else {
+                i18n::t_with("track_count", &[("count", p.tracks.len().to_string())])
+            };
+            (p.id.clone(), p.name.clone(), track_text)
+        })
+        .collect();
 
     rsx! {
         div {

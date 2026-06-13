@@ -1,4 +1,4 @@
-use config::{AppConfig, MusicService, MusicSource};
+use config::{AppConfig, MusicService};
 use dioxus::prelude::*;
 use reader::models::{Album, Track};
 use tracing::Instrument;
@@ -165,19 +165,17 @@ async fn run_search(
     query: String,
     tracks: Vec<Track>,
     albums: Vec<Album>,
-    active_source: MusicSource,
+    active_source: config::Source,
     active_service: Option<MusicService>,
     server: Option<config::MusicServer>,
 ) -> Option<(TrackRes, AlbumRes)> {
-    if matches!(active_source, MusicSource::Server)
-        && matches!(active_service, Some(MusicService::YtMusic))
-    {
+    if active_source.is_server() && matches!(active_service, Some(MusicService::YtMusic)) {
         let cookies = server.as_ref().and_then(|s| s.access_token.clone());
         return search_ytmusic(&query, cookies).await;
     }
     tokio::task::spawn_blocking(move || match active_source {
-        MusicSource::Local => search_local(&query, tracks, albums),
-        MusicSource::Server => search_server(&query, tracks, albums, active_service, server),
+        config::Source::Local => search_local(&query, tracks, albums),
+        config::Source::Server(_) => search_server(&query, tracks, albums, active_service, server),
     })
     .await
     .ok()
@@ -224,42 +222,30 @@ async fn run_search(
     query: String,
     tracks: Vec<Track>,
     albums: Vec<Album>,
-    active_source: MusicSource,
+    active_source: config::Source,
     active_service: Option<MusicService>,
     server: Option<config::MusicServer>,
 ) -> Option<(TrackRes, AlbumRes)> {
     match active_source {
-        MusicSource::Local => search_local(&query, tracks, albums),
-        MusicSource::Server => search_server(&query, tracks, albums, active_service, server),
+        config::Source::Local => search_local(&query, tracks, albums),
+        config::Source::Server(_) => search_server(&query, tracks, albums, active_service, server),
     }
 }
 
 pub fn use_search_data(search_query: Signal<String>, config: Signal<AppConfig>) -> SearchData {
     let db = use_context::<db::Db>();
-    let source = use_memo(move || {
-        let conf = config.read();
-        if conf.active_source == MusicSource::Server {
-            let sid = conf
-                .active_server_id
-                .clone()
-                .or_else(|| conf.server.as_ref().and_then(|s| s.id.clone()))
-                .unwrap_or_default();
-            db::Source::Server(sid)
-        } else {
-            db::Source::Local
-        }
-    });
+    let source = use_memo(move || config.read().active_source.clone());
     let albums_res = crate::use_db_queries::use_albums(source);
     let gens = crate::db_reactivity::use_generations();
 
     let genres = use_memo(move || {
         let conf = config.read();
-        let active_source = conf.active_source;
+        let active_source = conf.active_source.clone();
         let active_service = conf.active_service();
         let server = conf.server.clone();
         let albums = albums_res.read().clone().unwrap_or_default();
 
-        if active_source == MusicSource::Server {
+        if active_source.is_server() {
             let mut genre_items = std::collections::HashMap::new();
             for album in &albums {
                 for g in album.genre.split(['/', ';', ',']) {
@@ -345,7 +331,7 @@ pub fn use_search_data(search_query: Signal<String>, config: Signal<AppConfig>) 
         let (active_source, active_service, server) = {
             let conf = config.read();
             (
-                conf.active_source,
+                conf.active_source.clone(),
                 conf.active_service(),
                 conf.server.clone(),
             )

@@ -1,4 +1,3 @@
-use config::MusicSource;
 #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
 use dioxus::desktop::use_window;
 use dioxus::prelude::*;
@@ -232,7 +231,7 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
     let is_rtl = i18n::is_rtl();
     let border_side = if is_rtl { "border-l" } else { "border-r" };
 
-    let is_server = config.read().active_source == MusicSource::Server;
+    let is_server = config.read().active_source.is_server();
     let local_class = if !is_server {
         "text-white"
     } else {
@@ -348,7 +347,7 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
                                 class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 {local_class}",
                                 onclick: move |_| {
                                     let mut cfg = config.write();
-                                    cfg.active_source = MusicSource::Local;
+                                    cfg.active_source = config::Source::Local;
                                     cfg.source_explicitly_set = true;
                                 },
                                 "{i18n::t(\"local\").to_uppercase()}"
@@ -357,8 +356,10 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
                                 class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 {server_class}",
                                 onclick: move |_| {
                                     let mut cfg = config.write();
-                                    cfg.active_source = MusicSource::Server;
-                                    cfg.source_explicitly_set = true;
+                                    if let Some(s) = cfg.server_toggle_target() {
+                                        cfg.active_source = s;
+                                        cfg.source_explicitly_set = true;
+                                    }
                                 },
                                 "{i18n::t(\"server\").to_uppercase()}"
                             }

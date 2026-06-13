@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT rowid_pk, source, source_pl_id, name, cover_path, image_tag FROM playlists WHERE source = 'local' OR source = ?1 ORDER BY position",
+  "query": "SELECT rowid_pk, source_pl_id, name, cover_path, image_tag FROM playlists WHERE source = ?1 ORDER BY position",
   "describe": {
     "columns": [
       {
@@ -9,28 +9,23 @@
         "type_info": "Integer"
       },
       {
-        "name": "source",
+        "name": "source_pl_id",
         "ordinal": 1,
         "type_info": "Text"
       },
       {
-        "name": "source_pl_id",
+        "name": "name",
         "ordinal": 2,
         "type_info": "Text"
       },
       {
-        "name": "name",
+        "name": "cover_path",
         "ordinal": 3,
         "type_info": "Text"
       },
       {
-        "name": "cover_path",
-        "ordinal": 4,
-        "type_info": "Text"
-      },
-      {
         "name": "image_tag",
-        "ordinal": 5,
+        "ordinal": 4,
         "type_info": "Text"
       }
     ],
@@ -41,10 +36,9 @@
       true,
       false,
       false,
-      false,
       true,
       true
     ]
   },
-  "hash": "6b1148aff21ec5073278ccc0052ccbcbe8f0367b7290603c485fbfe8249ee9b0"
+  "hash": "b8e72e4ab0f2087e63b4939684ee694896a753e602aa610182099debc019e79d"
 }

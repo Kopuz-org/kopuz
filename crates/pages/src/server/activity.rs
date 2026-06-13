@@ -19,8 +19,9 @@ pub fn JellyfinLogs(config: Signal<AppConfig>) -> Element {
 
     let active_server_id = use_memo(move || {
         let c = config.read();
-        c.active_server_id
-            .clone()
+        c.active_source
+            .server_id()
+            .map(String::from)
             .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
             .unwrap_or_default()
     });

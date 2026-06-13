@@ -1,4 +1,4 @@
-use config::{AppConfig, MusicSource, UiStyle};
+use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 
 use crate::local::home::LocalHome;
@@ -12,7 +12,7 @@ pub fn Home(
     on_search_artist: EventHandler<String>,
 ) -> Element {
     let mut config = use_context::<Signal<AppConfig>>();
-    let is_server = config.read().active_source == MusicSource::Server;
+    let is_server = config.read().active_source.is_server();
     let is_modern = config.read().ui_style == UiStyle::Modern;
     let mut edit_mode = use_signal(|| false);
 

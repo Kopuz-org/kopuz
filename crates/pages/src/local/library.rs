@@ -9,9 +9,7 @@ use config::{AppConfig, UiStyle};
 use db::{Page, Source, TrackFilter, TrackSort};
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
-use hooks::use_db_queries::{
-    use_active_server_id, use_albums, use_artists, use_playlists, use_tracks_window,
-};
+use hooks::use_db_queries::{use_albums, use_artists, use_playlists, use_tracks_window};
 use hooks::use_player_controller::PlayerController;
 use kopuz_route::Route;
 use std::collections::HashSet;
@@ -40,8 +38,7 @@ pub fn LocalLibrary(
     let source = use_memo(|| Source::Local);
     let albums_res = use_albums(source);
     let artists_res = use_artists(source);
-    let active_server_id = use_active_server_id();
-    let playlists_res = use_playlists(active_server_id);
+    let playlists_res = use_playlists();
     let mut scroll_positions = use_context::<Signal<std::collections::HashMap<Route, f64>>>();
     let saved_scroll = scroll_positions
         .peek()

@@ -5,7 +5,6 @@ use crate::queue_drag::{
     clear_dragged_queue_track, handle_select_click, is_queue_drag_enabled, set_dragged_queue_track,
     set_dragged_queue_tracks,
 };
-use config::MusicSource;
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::PlayerController;
@@ -154,7 +153,7 @@ pub fn TrackRow(
     }
 
     let has_download = on_download.is_some();
-    let is_server = config.read().active_source == MusicSource::Server;
+    let is_server = config.read().active_source.is_server();
     let has_download = has_download && is_server;
 
     if has_download {

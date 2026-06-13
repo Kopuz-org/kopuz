@@ -22,33 +22,18 @@ pub fn PlaylistDetail(
     let mut tracks = use_signal(Vec::<reader::models::Track>::new);
     let mut has_loaded_jellyfin_tracks = use_signal(|| false);
     let gens = hooks::db_reactivity::use_generations();
-    let active_server_id = use_memo(move || {
-        let conf = config.read();
-        conf.active_server_id
-            .clone()
-            .or_else(|| conf.server.as_ref().and_then(|s| s.id.clone()))
-    });
-    let playlists_res = use_playlists(active_server_id);
+    let playlists_res = use_playlists();
     let source_local = use_memo(|| Source::Local);
     let albums_res = use_albums(source_local);
 
     let pid_for_seed = playlist_id.clone();
     let seed_refs = use_memo(move || {
         let store = playlists_res.read().clone().unwrap_or_default();
+        // The store holds only the active source's playlists, so a found
+        // playlist is a server one iff the active source is a server.
+        let is_server = config.read().active_source.is_server();
         if let Some(p) = store.playlists.iter().find(|p| p.id == pid_for_seed) {
-            (
-                false,
-                p.tracks
-                    .iter()
-                    .map(|pb| pb.to_string_lossy().into_owned())
-                    .collect::<Vec<String>>(),
-            )
-        } else if let Some(p) = store
-            .jellyfin_playlists
-            .iter()
-            .find(|p| p.id == pid_for_seed)
-        {
-            (true, p.tracks.clone())
+            (is_server, p.tracks.clone())
         } else {
             (false, Vec::new())
         }
@@ -86,8 +71,9 @@ pub fn PlaylistDetail(
             let db = consume_context::<db::Db>();
             let server_id = {
                 let conf = config.peek();
-                conf.active_server_id
-                    .clone()
+                conf.active_source
+                    .server_id()
+                    .map(String::from)
                     .or_else(|| conf.server.as_ref().and_then(|s| s.id.clone()))
             };
             spawn(async move {
@@ -281,15 +267,10 @@ pub fn PlaylistDetail(
     let store = playlists_res.read().clone().unwrap_or_default();
     let (playlist_name, is_jellyfin, playlist_custom_cover, playlist_image_tag) =
         if let Some(p) = store.playlists.iter().find(|p| p.id == playlist_id) {
-            (p.name.clone(), false, p.cover_path.clone(), None::<String>)
-        } else if let Some(p) = store
-            .jellyfin_playlists
-            .iter()
-            .find(|p| p.id == playlist_id)
-        {
+            let is_server = config.read().active_source.is_server();
             (
                 p.name.clone(),
-                true,
+                is_server,
                 p.cover_path.clone(),
                 p.image_tag.clone(),
             )
@@ -421,8 +402,9 @@ pub fn PlaylistDetail(
                                 }
                                 let sid = {
                                     let conf = config.peek();
-                                    conf.active_server_id
-                                        .clone()
+                                    conf.active_source
+                                        .server_id()
+                                        .map(String::from)
                                         .or_else(|| conf.server.as_ref().and_then(|s| s.id.clone()))
                                         .unwrap_or_default()
                                 };
@@ -587,12 +569,8 @@ pub fn PlaylistDetail(
                         store.playlists.iter().find(|p| p.id == pid_for_move_up)
                         && idx < pl.tracks.len()
                     {
-                        let mut order = pl.tracks.clone();
-                        order.swap(idx - 1, idx);
-                        let refs: Vec<String> = order
-                            .iter()
-                            .map(|p| p.to_string_lossy().into_owned())
-                            .collect();
+                        let mut refs = pl.tracks.clone();
+                        refs.swap(idx - 1, idx);
                         let pid = pid_for_move_up.clone();
                         let db = consume_context::<db::Db>();
                         spawn(async move {
@@ -678,12 +656,8 @@ pub fn PlaylistDetail(
                         store.playlists.iter().find(|p| p.id == pid_for_move_down)
                         && idx + 1 < pl.tracks.len()
                     {
-                        let mut order = pl.tracks.clone();
-                        order.swap(idx, idx + 1);
-                        let refs: Vec<String> = order
-                            .iter()
-                            .map(|p| p.to_string_lossy().into_owned())
-                            .collect();
+                        let mut refs = pl.tracks.clone();
+                        refs.swap(idx, idx + 1);
                         let pid = pid_for_move_down.clone();
                         let db = consume_context::<db::Db>();
                         spawn(async move {

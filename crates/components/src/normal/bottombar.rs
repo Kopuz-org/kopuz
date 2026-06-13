@@ -54,8 +54,9 @@ pub fn BottombarNormal(
     let fav_sid = use_memo(move || match ctrl.current_track_snapshot.read().as_ref() {
         Some(t) if t.id.is_server() => {
             let c = config.read();
-            c.active_server_id
-                .clone()
+            c.active_source
+                .server_id()
+                .map(String::from)
                 .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
                 .unwrap_or_default()
         }

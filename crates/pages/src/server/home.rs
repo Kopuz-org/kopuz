@@ -77,16 +77,15 @@ pub fn JellyfinHome(
 
     let active_server_id = use_memo(move || {
         let c = config.read();
-        c.active_server_id
-            .clone()
+        c.active_source
+            .server_id()
+            .map(String::from)
             .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
             .unwrap_or_default()
     });
     let server_source = use_memo(move || Source::Server(active_server_id()));
     let albums_res = use_albums(server_source);
-    let playlists_server_id =
-        use_memo(move || Some(active_server_id()).filter(|id| !id.is_empty()));
-    let playlists_res = use_playlists(playlists_server_id);
+    let playlists_res = use_playlists();
     let offline_keys = use_memo(move || -> Vec<String> {
         if !*is_offline.read() {
             return Vec::new();
@@ -361,7 +360,7 @@ pub fn JellyfinHome(
     let playlist_cover_keys = use_memo(move || -> Vec<String> {
         let store = playlists_res.read().clone().unwrap_or_default();
         store
-            .jellyfin_playlists
+            .playlists
             .iter()
             .filter_map(|p| p.tracks.first().cloned())
             .collect()
@@ -374,7 +373,7 @@ pub fn JellyfinHome(
         let conf = config.read();
         let offline = *is_offline.read();
         store
-            .jellyfin_playlists
+            .playlists
             .iter()
             .filter(|p| {
                 if !offline {
@@ -668,8 +667,9 @@ fn ServerHeroBanner(
     let gens = hooks::db_reactivity::use_generations();
     let active_server_id = use_memo(move || {
         let c = config.read();
-        c.active_server_id
-            .clone()
+        c.active_source
+            .server_id()
+            .map(String::from)
             .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
             .unwrap_or_default()
     });

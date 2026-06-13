@@ -62,7 +62,7 @@ async fn seed_active_server(db: &db::Db, id: &str) {
             yt_browser: None,
             yt_anonymous: false,
         }),
-        active_server_id: Some(id.into()),
+        active_source: config::Source::Server(id.into()),
         ..Default::default()
     };
     db.save_config(&cfg).await.unwrap();
@@ -96,34 +96,33 @@ async fn playlists_round_trip() {
     db.create_folder("f1", "Folder").await.unwrap();
     db.set_playlist_folder("pl-1", Some("f1")).await.unwrap();
 
-    let store = db.load_playlists(None).await.unwrap();
+    let store = db.load_playlists(&Source::Local).await.unwrap();
     assert_eq!(store.playlists.len(), 1);
     assert_eq!(store.playlists[0].id, "pl-1");
     assert_eq!(store.playlists[0].name, "Mine");
     assert_eq!(
         store.playlists[0].tracks,
-        vec![
-            PathBuf::from("/music/a.flac"),
-            PathBuf::from("/music/b.flac")
-        ]
-    );
-    assert_eq!(store.jellyfin_playlists.len(), 1);
-    assert_eq!(store.jellyfin_playlists[0].id, "LM");
-    assert_eq!(store.jellyfin_playlists[0].name, "Liked");
-    assert_eq!(store.jellyfin_playlists[0].tracks, vec!["VID1", "VID2"]);
-    assert_eq!(
-        store.jellyfin_playlists[0].image_tag.as_deref(),
-        Some("urlhex_ab")
+        vec!["/music/a.flac", "/music/b.flac"]
     );
     assert_eq!(store.folders.len(), 1);
     assert_eq!(store.folders[0].playlist_ids, vec!["pl-1"]);
 
+    let store = db
+        .load_playlists(&Source::Server("srv-1".into()))
+        .await
+        .unwrap();
+    assert_eq!(store.playlists.len(), 1);
+    assert_eq!(store.playlists[0].id, "LM");
+    assert_eq!(store.playlists[0].name, "Liked");
+    assert_eq!(store.playlists[0].tracks, vec!["VID1", "VID2"]);
+    assert_eq!(store.playlists[0].image_tag.as_deref(), Some("urlhex_ab"));
+
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }
 
-/// Helper: a local playlist's track refs (as strings) from the loaded store.
+/// Helper: a local playlist's track refs from the loaded store.
 async fn local_playlist_tracks(db: &db::Db, id: &str) -> Vec<String> {
-    db.load_playlists(None)
+    db.load_playlists(&Source::Local)
         .await
         .unwrap()
         .playlists
@@ -131,9 +130,6 @@ async fn local_playlist_tracks(db: &db::Db, id: &str) -> Vec<String> {
         .find(|p| p.id == id)
         .unwrap_or_else(|| panic!("playlist {id} missing"))
         .tracks
-        .into_iter()
-        .map(|p| p.to_string_lossy().into_owned())
-        .collect()
 }
 
 #[tokio::test]
@@ -224,7 +220,7 @@ async fn playlist_remove_keeps_remaining_order() {
 
 /// Helper: a folder's playlist_ids from the loaded store, or panic if absent.
 async fn folder_members(db: &db::Db, id: &str) -> Vec<String> {
-    db.load_playlists(None)
+    db.load_playlists(&Source::Local)
         .await
         .unwrap()
         .folders
@@ -240,22 +236,28 @@ async fn folder_create_rename_delete() {
     let db = db::init(&db_path).await.unwrap();
 
     db.create_folder("f1", "Rock").await.unwrap();
-    let store = db.load_playlists(None).await.unwrap();
+    let store = db.load_playlists(&Source::Local).await.unwrap();
     assert_eq!(store.folders.len(), 1);
     assert_eq!(store.folders[0].name, "Rock");
 
     // create on the same id is an upsert of the name (idempotent on id).
     db.create_folder("f1", "Metal").await.unwrap();
-    let store = db.load_playlists(None).await.unwrap();
+    let store = db.load_playlists(&Source::Local).await.unwrap();
     assert_eq!(store.folders.len(), 1, "no duplicate folder row");
     assert_eq!(store.folders[0].name, "Metal");
 
     db.rename_folder("f1", "Jazz").await.unwrap();
-    let store = db.load_playlists(None).await.unwrap();
+    let store = db.load_playlists(&Source::Local).await.unwrap();
     assert_eq!(store.folders[0].name, "Jazz");
 
     db.delete_folder("f1").await.unwrap();
-    assert!(db.load_playlists(None).await.unwrap().folders.is_empty());
+    assert!(
+        db.load_playlists(&Source::Local)
+            .await
+            .unwrap()
+            .folders
+            .is_empty()
+    );
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }
@@ -420,22 +422,27 @@ async fn active_server_writes_never_touch_other_servers_rows() {
         "other server's favorites survived"
     );
 
-    // load_playlists only sees local + ACTIVE rows: srv-1 first...
-    let store = db.load_playlists(None).await.unwrap();
-    assert_eq!(store.jellyfin_playlists.len(), 1);
-    assert_eq!(store.jellyfin_playlists[0].id, "LM");
-    assert_eq!(store.jellyfin_playlists[0].tracks, vec!["VID1"]);
+    // Each server's playlists are scoped to that source — srv-1 first...
+    let store = db
+        .load_playlists(&Source::Server("srv-1".into()))
+        .await
+        .unwrap();
+    assert_eq!(store.playlists.len(), 1);
+    assert_eq!(store.playlists[0].id, "LM");
+    assert_eq!(store.playlists[0].tracks, vec!["VID1"]);
 
-    // ...then switch the active server to srv-other to see its playlist survived.
-    seed_active_server(&db, "srv-other").await;
-    let store = db.load_playlists(None).await.unwrap();
+    // ...and srv-other's playlist survived untouched.
+    let store = db
+        .load_playlists(&Source::Server("srv-other".into()))
+        .await
+        .unwrap();
     assert_eq!(
-        store.jellyfin_playlists.len(),
+        store.playlists.len(),
         1,
         "other server's playlists survived"
     );
-    assert_eq!(store.jellyfin_playlists[0].id, "OPL");
-    assert_eq!(store.jellyfin_playlists[0].tracks, vec!["OV1"]);
+    assert_eq!(store.playlists[0].id, "OPL");
+    assert_eq!(store.playlists[0].tracks, vec!["OV1"]);
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }

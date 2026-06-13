@@ -49,8 +49,9 @@ pub fn JellyfinLibrary(
 
     let active_server_id = use_memo(move || {
         let c = config.read();
-        c.active_server_id
-            .clone()
+        c.active_source
+            .server_id()
+            .map(String::from)
             .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
             .unwrap_or_default()
     });
@@ -87,9 +88,7 @@ pub fn JellyfinLibrary(
     });
     let albums_res = use_albums(source);
     let artists_res = use_artists(source);
-    let playlists_server_id =
-        use_memo(move || Some(active_server_id()).filter(|id| !id.is_empty()));
-    let playlists_res = use_playlists(playlists_server_id);
+    let playlists_res = use_playlists();
 
     let mut fetch_jellyfin = move || {
         has_fetched.set(true);
@@ -448,7 +447,7 @@ pub fn JellyfinLibrary(
                     let playlist_count = playlists_res
                         .read()
                         .as_ref()
-                        .map(|s| s.jellyfin_playlists.len())
+                        .map(|s| s.playlists.len())
                         .unwrap_or(0);
                     rsx! {
                         StatCard {

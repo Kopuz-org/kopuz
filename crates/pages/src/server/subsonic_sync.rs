@@ -52,8 +52,9 @@ pub async fn sync_server_library(
             token.clone(),
             user_id.clone(),
             conf.device_id.clone(),
-            conf.active_server_id
-                .clone()
+            conf.active_source
+                .server_id()
+                .map(String::from)
                 .or_else(|| server.id.clone())
                 .unwrap_or_default(),
         )

@@ -1,4 +1,4 @@
-use config::{AppConfig, MusicSource};
+use config::AppConfig;
 use dioxus::prelude::*;
 use player::player;
 
@@ -21,7 +21,7 @@ pub fn Artist(
     mut queue: Signal<Vec<reader::models::Track>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
-    let is_server = config.read().active_source == MusicSource::Server;
+    let is_server = config.read().active_source.is_server();
     let page_container_class = crate::layout::page_container_class(&config.read().ui_style);
 
     rsx! {

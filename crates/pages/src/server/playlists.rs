@@ -9,8 +9,8 @@ use hooks::use_db_queries::{use_playlists, use_tracks_by_keys};
 use tracing::Instrument;
 
 #[component]
-#[tracing::instrument(name = "render.jellyfin_playlists", skip_all)]
-pub fn JellyfinPlaylists(
+#[tracing::instrument(name = "render.playlists", skip_all)]
+pub fn Playlists(
     config: Signal<AppConfig>,
     mut selected_playlist_id: Signal<Option<String>>,
     #[props(default)] refresh_trigger: Signal<u64>,
@@ -26,19 +26,18 @@ pub fn JellyfinPlaylists(
     let gens = hooks::db_reactivity::use_generations();
     let active_server_id = use_memo(move || {
         let c = config.read();
-        c.active_server_id
-            .clone()
+        c.active_source
+            .server_id()
+            .map(String::from)
             .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
             .unwrap_or_default()
     });
-    let playlists_server_id =
-        use_memo(move || Some(active_server_id()).filter(|id| !id.is_empty()));
-    let playlists_res = use_playlists(playlists_server_id);
+    let playlists_res = use_playlists();
     let server_source = use_memo(move || Source::Server(active_server_id()));
     let cover_keys = use_memo(move || -> Vec<String> {
         let store = playlists_res.read().clone().unwrap_or_default();
         store
-            .jellyfin_playlists
+            .playlists
             .iter()
             .filter_map(|p| p.tracks.first().cloned())
             .collect()
@@ -100,10 +99,10 @@ pub fn JellyfinPlaylists(
             }
 
             let has_cached = !db
-                .load_playlists(Some(sid.as_str()))
+                .load_playlists(&db::Source::Server(sid.clone()))
                 .await
                 .unwrap_or_default()
-                .jellyfin_playlists
+                .playlists
                 .is_empty();
             let last_key = last_fetch_key.peek().clone();
 
@@ -154,7 +153,7 @@ pub fn JellyfinPlaylists(
                             if let Ok(items) = remote.get_playlist_items(&p.id).await {
                                 let tracks: Vec<String> =
                                     items.into_iter().map(|item| item.id).collect();
-                                server_playlists.push(reader::models::JellyfinPlaylist {
+                                server_playlists.push(reader::models::Playlist {
                                     id: p.id.clone(),
                                     name: p.name.clone(),
                                     tracks,
@@ -162,7 +161,7 @@ pub fn JellyfinPlaylists(
                                     cover_path: None,
                                 });
                             } else {
-                                server_playlists.push(reader::models::JellyfinPlaylist {
+                                server_playlists.push(reader::models::Playlist {
                                     id: p.id.clone(),
                                     name: p.name.clone(),
                                     tracks: vec![],
@@ -184,7 +183,7 @@ pub fn JellyfinPlaylists(
                                 .into_iter()
                                 .map(|song| song.id)
                                 .collect();
-                            server_playlists.push(reader::models::JellyfinPlaylist {
+                            server_playlists.push(reader::models::Playlist {
                                 id: p.id,
                                 name: p.name,
                                 tracks,
@@ -220,10 +219,10 @@ pub fn JellyfinPlaylists(
 
                     {
                         let existing = db
-                            .load_playlists(Some(sid.as_str()))
+                            .load_playlists(&db::Source::Server(sid.clone()))
                             .await
                             .unwrap_or_default()
-                            .jellyfin_playlists;
+                            .playlists;
                         for s in &summaries {
                             let image_tag = s
                                 .thumbnail_url
@@ -316,10 +315,10 @@ pub fn JellyfinPlaylists(
             }
 
             let existing = db
-                .load_playlists(Some(sid.as_str()))
+                .load_playlists(&db::Source::Server(sid.clone()))
                 .await
                 .unwrap_or_default()
-                .jellyfin_playlists;
+                .playlists;
             // Preserve any locally-set cover_path when replacing server data
             for p in &mut server_playlists {
                 if let Some(existing) = existing.iter().find(|e| e.id == p.id) {
@@ -362,7 +361,7 @@ pub fn JellyfinPlaylists(
         let conf = config.read();
         if offline {
             store
-                .jellyfin_playlists
+                .playlists
                 .iter()
                 .filter(|p| {
                     !p.tracks.is_empty()
@@ -377,7 +376,7 @@ pub fn JellyfinPlaylists(
                 .cloned()
                 .collect()
         } else {
-            store.jellyfin_playlists.clone()
+            store.playlists.clone()
         }
     });
 
@@ -581,4 +580,4 @@ pub fn JellyfinPlaylists(
     }
 }
 
-pub use JellyfinPlaylists as ServerPlaylists;
+pub use Playlists as ServerPlaylists;

@@ -4,7 +4,7 @@ use config::AppConfig;
 use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
-use hooks::use_db_queries::{use_active_server_id, use_albums, use_playlists, use_tracks_by_keys};
+use hooks::use_db_queries::{use_albums, use_playlists, use_tracks_by_keys};
 
 #[component]
 pub fn LocalPlaylists(
@@ -22,8 +22,7 @@ pub fn LocalPlaylists(
 
     let gens = hooks::db_reactivity::use_generations();
     let source = use_memo(|| Source::Local);
-    let active_server_id = use_active_server_id();
-    let playlists_res = use_playlists(active_server_id);
+    let playlists_res = use_playlists();
     let albums_res = use_albums(source);
     let first_keys = use_memo(move || {
         playlists_res
@@ -32,7 +31,7 @@ pub fn LocalPlaylists(
             .unwrap_or_default()
             .playlists
             .iter()
-            .filter_map(|p| p.tracks.first().map(|t| t.to_string_lossy().into_owned()))
+            .filter_map(|p| p.tracks.first().cloned())
             .collect::<Vec<String>>()
     });
     let first_tracks_res = use_tracks_by_keys(source, first_keys);

@@ -465,9 +465,15 @@ async fn import_config_blob(
         obj.remove("server");
         obj.remove("servers");
         obj.remove("listen_counts");
+        // Collapse the legacy `active_source` mode + `active_server_id` string
+        // into the new typed `active_source` (`{"Server": id}` or `"Local"`).
+        obj.remove("active_server_id");
         obj.insert(
-            "active_server_id".into(),
-            serde_json::json!(active_server_id),
+            "active_source".into(),
+            match active_server_id {
+                Some(id) => serde_json::json!({ "Server": id }),
+                None => serde_json::json!("Local"),
+            },
         );
         obj.insert(
             "last_yt_sync_at".into(),

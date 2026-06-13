@@ -1,4 +1,4 @@
-use config::{AppConfig, MusicSource};
+use config::AppConfig;
 use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
@@ -14,7 +14,7 @@ pub fn Album(
     mut queue: Signal<Vec<reader::models::Track>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
-    let is_server = config.read().active_source == MusicSource::Server;
+    let is_server = config.read().active_source.is_server();
 
     let open_album_menu = use_signal(|| None::<String>);
     let mut show_album_playlist_modal = use_signal(|| false);
@@ -25,8 +25,9 @@ pub fn Album(
     let gens = hooks::db_reactivity::use_generations();
     let active_server_id = use_memo(move || {
         let c = config.read();
-        c.active_server_id
-            .clone()
+        c.active_source
+            .server_id()
+            .map(String::from)
             .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
             .unwrap_or_default()
     });
@@ -38,13 +39,7 @@ pub fn Album(
     });
     let server_tracks_win = use_tracks_window(server_filter, probe_page);
     let server_albums_res = use_albums(server_source);
-    let pending_source = use_memo(move || {
-        if config.read().active_source == MusicSource::Server {
-            Source::Server(active_server_id())
-        } else {
-            Source::Local
-        }
-    });
+    let pending_source = use_memo(move || config.read().active_source.clone());
     let pending_album_id = use_memo(move || {
         pending_album_id_for_playlist
             .read()

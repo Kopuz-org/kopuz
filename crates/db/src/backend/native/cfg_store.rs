@@ -50,7 +50,7 @@ pub async fn load_config(pool: &SqlitePool) -> Result<Option<AppConfig>, DbError
         })
         .collect();
 
-    cfg.server = cfg.active_server_id.as_deref().and_then(|active| {
+    cfg.server = cfg.active_source.server_id().and_then(|active| {
         rows.iter().find(|r| r.id == active).map(|r| MusicServer {
             name: r.name.clone(),
             url: r.url.clone(),
@@ -104,12 +104,12 @@ pub async fn save_config(pool: &SqlitePool, cfg: &AppConfig) -> Result<(), DbErr
     }
 
     // Upsert the active server WITH its creds, and remember its id for the blob.
-    let mut active_id: Option<String> = cfg.active_server_id.clone();
+    let mut active_id: Option<String> = cfg.active_source.server_id().map(String::from);
     if let Some(srv) = &cfg.server {
         let id = srv
             .id
             .clone()
-            .or_else(|| cfg.active_server_id.clone())
+            .or_else(|| cfg.active_source.server_id().map(String::from))
             .unwrap_or_else(|| format!("legacy-{}", service_str(srv.service)));
         let service = service_str(srv.service);
         let browser = srv.yt_browser.map(browser_str);
@@ -169,7 +169,15 @@ pub async fn save_config(pool: &SqlitePool, cfg: &AppConfig) -> Result<(), DbErr
         obj.remove("server");
         obj.remove("servers");
         obj.remove("listen_counts");
-        obj.insert("active_server_id".into(), serde_json::json!(active_id));
+        // The resolved/generated active id is authoritative — persist it as the
+        // typed `active_source` (`{"Server": id}` or `"Local"`).
+        obj.insert(
+            "active_source".into(),
+            match &active_id {
+                Some(id) => serde_json::json!({ "Server": id }),
+                None => serde_json::json!("Local"),
+            },
+        );
     }
     let blob_str = serde_json::to_string(&blob)?;
     sqlx::query!(

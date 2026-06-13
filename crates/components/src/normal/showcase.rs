@@ -6,7 +6,7 @@ use crate::header::Header;
 use crate::reorder_buttons::ReorderButtons;
 use crate::showcase::{self, ShowcaseProps};
 use crate::track_row::TrackRow;
-use config::{AppConfig, MusicService, MusicSource};
+use config::{AppConfig, MusicService};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
@@ -21,7 +21,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     let source_local = use_memo(|| db::Source::Local);
     let albums_res = hooks::use_db_queries::use_albums(source_local);
     let local_albums = albums_res.read().clone().unwrap_or_default();
-    let is_server_source = config.read().active_source == MusicSource::Server;
+    let is_server_source = config.read().active_source.is_server();
 
     let offline_tracks = config.read().offline_tracks.clone();
     let sort_state = use_signal(|| None);

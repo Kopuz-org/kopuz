@@ -1,7 +1,7 @@
 use components::folder_detail::FolderDetail;
 use components::playlist_detail::PlaylistDetail;
 use components::playlist_popups::AddPlaylistPopup;
-use config::{AppConfig, MusicSource, UiStyle};
+use config::{AppConfig, UiStyle};
 use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
@@ -17,7 +17,7 @@ pub fn PlaylistsPage(
     config: Signal<AppConfig>,
     mut selected_playlist_id: Signal<Option<String>>,
 ) -> Element {
-    let is_server = config.read().active_source == MusicSource::Server;
+    let is_server = config.read().active_source.is_server();
 
     let mut selected_folder = use_signal(|| Option::<String>::None);
     let mut show_add_playlist = use_signal(|| false);
@@ -29,21 +29,20 @@ pub fn PlaylistsPage(
     let gens = hooks::db_reactivity::use_generations();
     let active_server_id = use_memo(move || {
         let c = config.read();
-        c.active_server_id
-            .clone()
+        c.active_source
+            .server_id()
+            .map(String::from)
             .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
             .unwrap_or_default()
     });
-    let playlists_server_id =
-        use_memo(move || Some(active_server_id()).filter(|id| !id.is_empty()));
-    let playlists_res = use_playlists(playlists_server_id);
+    let playlists_res = use_playlists();
     let server_source = use_memo(move || Source::Server(active_server_id()));
     let sel_server_refs = use_memo(move || {
         let store = playlists_res.read().clone().unwrap_or_default();
         selected_playlist_id
             .read()
             .as_ref()
-            .and_then(|pid| store.jellyfin_playlists.iter().find(|p| p.id == *pid))
+            .and_then(|pid| store.playlists.iter().find(|p| p.id == *pid))
             .map(|p| p.tracks.clone())
             .unwrap_or_default()
     });
@@ -118,10 +117,10 @@ pub fn PlaylistsPage(
 
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
-    let mut last_source = use_signal(|| config.read().active_source);
+    let mut last_source = use_signal(|| config.read().active_source.clone());
     if *last_source.read() != config.read().active_source {
         selected_playlist_id.set(None);
-        last_source.set(config.read().active_source);
+        last_source.set(config.read().active_source.clone());
     }
 
     let is_modern = config.read().ui_style == UiStyle::Modern;
@@ -140,7 +139,7 @@ pub fn PlaylistsPage(
                     let is_downloading_all = {
                         let store = playlists_res.read().clone().unwrap_or_default();
                         let track_ids = store
-                            .jellyfin_playlists
+                            .playlists
                             .iter()
                             .find(|p| p.id == pid)
                             .map(|p| p.tracks.clone())
@@ -174,7 +173,7 @@ pub fn PlaylistsPage(
                                     let store = playlists_res.read().clone().unwrap_or_default();
                                     let resolved = sel_server_tracks_res.read().clone().unwrap_or_default();
                                     store
-                                        .jellyfin_playlists
+                                        .playlists
                                         .iter()
                                         .find(|p| p.id == pid_for_dl)
                                         .map(|p| {
@@ -205,7 +204,7 @@ pub fn PlaylistsPage(
                                     let ids: Vec<String> = {
                                         let store = playlists_res.read().clone().unwrap_or_default();
                                         store
-                                            .jellyfin_playlists
+                                            .playlists
                                             .iter()
                                             .find(|p| p.id == pid_for_del)
                                             .map(|p| p.tracks.clone())
@@ -229,7 +228,7 @@ pub fn PlaylistsPage(
                                     let mut track_artist = String::new();
 
                                     if let Some(p) = store
-                                        .jellyfin_playlists
+                                        .playlists
                                         .iter()
                                         .find(|p| p.id == pid_for_dl_track)
                                         && let Some(tid) = p.tracks.get(idx) {

@@ -385,7 +385,7 @@ pub fn QueueListView(
         // Cover lookup should not subscribe to library/config updates.
         let conf = config.peek();
 
-        let is_server_track = conf.active_source == config::MusicSource::Server;
+        let is_server_track = conf.active_source.is_server();
 
         if is_server_track {
             if let Some(server) = &conf.server {

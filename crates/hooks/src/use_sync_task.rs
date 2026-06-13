@@ -76,8 +76,9 @@ pub fn use_sync_task(config: Signal<config::AppConfig>) {
                             continue;
                         };
                         let Some(id) = cfg
-                            .active_server_id
-                            .clone()
+                            .active_source
+                            .server_id()
+                            .map(String::from)
                             .or_else(|| cfg.server.as_ref().and_then(|s| s.id.clone()))
                         else {
                             continue;

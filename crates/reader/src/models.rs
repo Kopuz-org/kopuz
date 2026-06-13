@@ -275,23 +275,18 @@ mod tests {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// One playlist. `tracks` are opaque refs — a filesystem path string for local
+/// playlists, an item/video id for a server. Which source these belong to is
+/// context (the active source the store was loaded for), not per-row state, so
+/// there's no source field and no local/server type split. The path↔file
+/// conversion happens only at the player's resolve boundary, not here.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Playlist {
     pub id: String,
     pub name: String,
-    pub tracks: Vec<PathBuf>,
-    #[serde(default)]
-    pub cover_path: Option<PathBuf>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct JellyfinPlaylist {
-    pub id: String,
-    pub name: String,
     pub tracks: Vec<String>,
-    #[serde(default)]
+    /// Server cover-version tag (server playlists only; `None` for local).
     pub image_tag: Option<String>,
-    #[serde(default)]
     pub cover_path: Option<PathBuf>,
 }
 
@@ -302,12 +297,12 @@ pub struct PlaylistFolder {
     pub playlist_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+/// The in-memory playlist read model for the active source (built by the DB
+/// layer, never serialized). One uniform list — local vs server is the active
+/// source context, not a per-row split.
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct PlaylistStore {
     pub playlists: Vec<Playlist>,
-    #[serde(default)]
-    pub jellyfin_playlists: Vec<JellyfinPlaylist>,
-    #[serde(default)]
     pub folders: Vec<PlaylistFolder>,
 }
 

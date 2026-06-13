@@ -1,4 +1,4 @@
-use config::{AppConfig, MusicSource};
+use config::AppConfig;
 use dioxus::prelude::*;
 use player::player;
 
@@ -21,7 +21,7 @@ pub fn Search(
     current_queue_index: Signal<usize>,
     on_select_album: EventHandler<String>,
 ) -> Element {
-    let is_server = config.read().active_source == MusicSource::Server;
+    let is_server = config.read().active_source.is_server();
 
     rsx! {
         if is_server {

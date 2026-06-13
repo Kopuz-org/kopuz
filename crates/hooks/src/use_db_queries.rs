@@ -305,31 +305,31 @@ pub fn use_artists(source: Memo<Source>) -> Resource<Vec<(String, u32)>> {
     })
 }
 
-/// The in-memory active server id, straight from the config signal in
-/// context — the persisted copy lags a server switch by the debounced save.
-pub fn use_active_server_id() -> Memo<Option<String>> {
+/// The in-memory active source, straight from the config signal in context —
+/// the persisted copy lags a server switch by the debounced save.
+pub fn use_active_source() -> Memo<config::Source> {
     let config = use_context::<Signal<config::AppConfig>>();
-    use_memo(move || {
-        let c = config.read();
-        c.active_server_id
-            .clone()
-            .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
-    })
+    use_memo(move || config.read().active_source.clone())
 }
 
-/// The playlist store (local + the given active server), re-queried on a
-/// playlists bump or a server switch. `server_id` must be the IN-MEMORY
-/// active id (see [`use_active_server_id`]) — the persisted one lags a
-/// switch by the debounced config save.
-pub fn use_playlists(server_id: Memo<Option<String>>) -> Resource<reader::PlaylistStore> {
+/// The active server id (`None` ⇒ local) — derived from the active source.
+pub fn use_active_server_id() -> Memo<Option<String>> {
+    let config = use_context::<Signal<config::AppConfig>>();
+    use_memo(move || config.read().active_source.server_id().map(String::from))
+}
+
+/// The playlist store for the active source, re-queried on a playlists/folders
+/// bump or a source switch. Resolves the in-memory active source itself.
+pub fn use_playlists() -> Resource<reader::PlaylistStore> {
     let db = use_context::<Db>();
     let gens = use_generations();
+    let source = use_active_source();
     use_resource(move || {
         let _ = gens.generation(Table::Playlists);
         let _ = gens.generation(Table::Folders);
-        let (db, sid) = (db.clone(), server_id());
-        let span = tracing::info_span!("query.playlists", server_id = ?sid);
-        async move { db.load_playlists(sid.as_deref()).await.unwrap_or_default() }.instrument(span)
+        let (db, src) = (db.clone(), source());
+        let span = tracing::info_span!("query.playlists", source = %src.as_str());
+        async move { db.load_playlists(&src).await.unwrap_or_default() }.instrument(span)
     })
 }
 

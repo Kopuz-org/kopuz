@@ -52,7 +52,7 @@ async fn config_round_trips_with_creds_in_servers_table() {
             yt_browser: Some(config::Browser::Brave),
             yt_anonymous: false,
         }),
-        active_server_id: Some("srv-b".into()),
+        active_source: config::Source::Server("srv-b".into()),
         theme: "midnight".into(),
         ..Default::default()
     };
@@ -70,7 +70,7 @@ async fn config_round_trips_with_creds_in_servers_table() {
 
     let loaded = db.load_config().await.unwrap().expect("config present");
     assert_eq!(loaded.theme, "midnight");
-    assert_eq!(loaded.active_server_id.as_deref(), Some("srv-b"));
+    assert_eq!(loaded.active_source.server_id(), Some("srv-b"));
     assert_eq!(loaded.servers.len(), 2);
     let active = loaded.server.as_ref().expect("active server hydrated");
     assert_eq!(active.id.as_deref(), Some("srv-b"));
@@ -94,7 +94,9 @@ async fn config_round_trips_with_creds_in_servers_table() {
     assert!(v.get("servers").is_none());
     assert!(v.get("listen_counts").is_none());
     assert_eq!(
-        v.get("active_server_id").and_then(|x| x.as_str()),
+        v.get("active_source")
+            .and_then(|s| s.get("Server"))
+            .and_then(|x| x.as_str()),
         Some("srv-b")
     );
 

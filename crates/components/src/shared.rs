@@ -28,8 +28,9 @@ pub fn toggle_favorite(
         }
         let server_id = {
             let cfg = config.peek();
-            cfg.active_server_id
-                .clone()
+            cfg.active_source
+                .server_id()
+                .map(String::from)
                 .or_else(|| cfg.server.as_ref().and_then(|s| s.id.clone()))
         };
         spawn(async move {
