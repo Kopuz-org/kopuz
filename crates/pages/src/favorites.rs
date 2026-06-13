@@ -1,16 +1,12 @@
 use config::{AppConfig, MusicSource, UiStyle};
 use dioxus::prelude::*;
-use reader::{FavoritesStore, Library, PlaylistStore};
 
 use crate::local::favorites::LocalFavorites;
 use crate::server::favorites::ServerFavorites;
 
 #[component]
 pub fn FavoritesPage(
-    favorites_store: Signal<FavoritesStore>,
-    library: Signal<Library>,
     config: Signal<AppConfig>,
-    playlist_store: Signal<PlaylistStore>,
     player: Signal<player::player::Player>,
     mut is_playing: Signal<bool>,
     mut current_playing: Signal<u64>,
@@ -27,7 +23,10 @@ pub fn FavoritesPage(
 
     rsx! {
         div {
-            class: if cfg!(target_os = "android") { "px-4 pt-2 pb-28 min-h-full" } else if is_modern { "px-6 pt-6 pb-24 min-h-full" } else { "p-8 min-h-full" },
+            // Height-constrained column so the server list can window its rows
+            // behind its own scroller (837 favorites in the DOM at once was
+            // the page's frame-rate problem).
+            class: if cfg!(target_os = "android") { "px-4 pt-2 absolute inset-0 flex flex-col overflow-x-hidden" } else if is_modern { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
 
             if is_modern {
                 div { class: "mb-6",
@@ -51,19 +50,17 @@ pub fn FavoritesPage(
 
             if is_server {
                 ServerFavorites {
-                    favorites_store,
-                    library,
                     config,
-                    playlist_store,
                     queue,
                 }
             } else {
-                LocalFavorites {
-                    favorites_store,
-                    library,
-                    config,
-                    playlist_store,
-                    queue,
+                // Local list isn't windowed (small libraries) — give it its
+                // own scroller since the wrapper no longer grows.
+                div { class: "flex-1 min-h-0 overflow-y-auto pb-24",
+                    LocalFavorites {
+                        config,
+                        queue,
+                    }
                 }
             }
         }

@@ -1,16 +1,16 @@
 use config::{AppConfig, MusicSource};
+use db::Source;
 use dioxus::prelude::*;
-use reader::{Library, PlaylistStore};
+use hooks::db_reactivity::Table;
+use hooks::use_db_queries::{use_album_tracks, use_albums, use_tracks_window};
 
 use crate::local::album::LocalAlbum;
 use crate::server::album::{ServerAlbum, ServerAlbumDetails};
 
 #[component]
 pub fn Album(
-    library: Signal<Library>,
     config: Signal<AppConfig>,
     album_id: Signal<String>,
-    playlist_store: Signal<PlaylistStore>,
     mut queue: Signal<Vec<reader::models::Track>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
@@ -22,18 +22,53 @@ pub fn Album(
 
     let mut has_fetched_jellyfin = use_signal(|| false);
 
+    let gens = hooks::db_reactivity::use_generations();
+    let active_server_id = use_memo(move || {
+        let c = config.read();
+        c.active_server_id
+            .clone()
+            .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
+            .unwrap_or_default()
+    });
+    let server_source = use_memo(move || Source::Server(active_server_id()));
+    let server_filter = use_memo(move || db::TrackFilter::new(Source::Server(active_server_id())));
+    let probe_page = use_memo(|| db::Page {
+        offset: 0,
+        limit: 1,
+    });
+    let server_tracks_win = use_tracks_window(server_filter, probe_page);
+    let server_albums_res = use_albums(server_source);
+    let pending_source = use_memo(move || {
+        if config.read().active_source == MusicSource::Server {
+            Source::Server(active_server_id())
+        } else {
+            Source::Local
+        }
+    });
+    let pending_album_id = use_memo(move || {
+        pending_album_id_for_playlist
+            .read()
+            .clone()
+            .unwrap_or_default()
+    });
+    let pending_tracks_res = use_album_tracks(pending_source, pending_album_id);
+
     let mut fetch_jellyfin = move || {
         has_fetched_jellyfin.set(true);
         spawn(async move {
-            let _ = crate::server::subsonic_sync::sync_server_library(library, config, false).await;
+            let _ = crate::server::subsonic_sync::sync_server_library(config, false).await;
         });
     };
 
     use_effect(move || {
-        if is_server && !*has_fetched_jellyfin.read() {
-            if library.read().jellyfin_tracks.is_empty()
-                || library.read().jellyfin_albums.is_empty()
-            {
+        if is_server
+            && !*has_fetched_jellyfin.read()
+            && let (Some(total), Some(albums)) = (
+                *server_tracks_win.total.read(),
+                server_albums_res.read().clone(),
+            )
+        {
+            if total == 0 || albums.is_empty() {
                 fetch_jellyfin();
             } else {
                 has_fetched_jellyfin.set(true);
@@ -47,65 +82,47 @@ pub fn Album(
 
             if album_id.read().is_empty() {
                 div {
+                    class: "flex-1 min-h-0 flex flex-col",
                     if !cfg!(target_os = "android") {
-                        h1 { class: "text-3xl font-bold text-white mb-6", "{i18n::t(\"all_albums\")}" }
+                        h1 { class: "text-3xl font-bold text-white mb-6 shrink-0", "{i18n::t(\"all_albums\")}" }
                     }
 
                     if is_server {
                         ServerAlbum {
-                            library,
                             config,
                             album_id,
-                            playlist_store,
                             queue,
                             open_album_menu,
                             show_album_playlist_modal,
                             pending_album_id_for_playlist,
                         }
                     } else {
-                        LocalAlbum {
-                            library,
-                            album_id,
-                            playlist_store,
-                            queue,
-                            open_album_menu,
-                            show_album_playlist_modal,
-                            pending_album_id_for_playlist,
+                        // Local grid isn't windowed (small libraries) — needs
+                        // its own scroller now that the wrapper doesn't grow.
+                        div { class: "flex-1 min-h-0 overflow-y-auto pb-24",
+                            LocalAlbum {
+                                album_id,
+                                queue,
+                                open_album_menu,
+                                show_album_playlist_modal,
+                                pending_album_id_for_playlist,
+                            }
                         }
                     }
 
                     if *show_album_playlist_modal.read() {
                         components::playlist_modal::PlaylistModal {
-                            playlist_store,
                             is_jellyfin: is_server,
                             on_close: move |_| show_album_playlist_modal.set(false),
                             on_add_to_playlist: move |playlist_id: String| {
-                                if let Some(aid) = pending_album_id_for_playlist.read().clone() {
-                                    let tracks: Vec<_> = {
-                                        let lib = library.read();
-                                        if is_server {
-                                            lib.jellyfin_tracks
-                                                .iter()
-                                                .filter(|t| t.album_id == aid)
-                                                .map(|t| t.path.clone())
-                                                .collect()
-                                        } else {
-                                            let album_title = lib
-                                                .albums
-                                                .iter()
-                                                .find(|a| a.id == aid)
-                                                .map(|a| a.title.clone());
-                                            if let Some(title) = album_title {
-                                                lib.tracks
-                                                    .iter()
-                                                    .filter(|t| t.album == title)
-                                                    .map(|t| t.path.clone())
-                                                    .collect()
-                                            } else {
-                                                Vec::new()
-                                            }
-                                        }
-                                    };
+                                if pending_album_id_for_playlist.read().is_some() {
+                                    let tracks: Vec<_> = pending_tracks_res
+                                        .read()
+                                        .clone()
+                                        .unwrap_or_default()
+                                        .iter()
+                                        .map(|t| t.id.uid_path())
+                                        .collect();
                                     if is_server {
                                         let pid = playlist_id.clone();
                                         let paths = tracks.clone();
@@ -131,6 +148,7 @@ pub fn Album(
                                                 })
                                         };
                                         if let Some((service, url, token, user_id, device_id)) = server_vals {
+                                            let sid = active_server_id();
                                             spawn(async move {
                                                 let conn = ::server::server_ops::ServerConn {
                                                     service,
@@ -151,65 +169,76 @@ pub fn Album(
                                                 )
                                                 .await;
                                                 if !added.is_empty() {
-                                                    let mut store = playlist_store.write();
+                                                    let db = consume_context::<db::Db>();
+                                                    let store = db
+                                                        .load_playlists(Some(sid.as_str()))
+                                                        .await
+                                                        .unwrap_or_default();
                                                     if let Some(pl) = store
                                                         .jellyfin_playlists
-                                                        .iter_mut()
+                                                        .iter()
                                                         .find(|p| p.id == pid)
                                                     {
+                                                        let mut refs = pl.tracks.clone();
                                                         for id in added {
-                                                            if !pl.tracks.contains(&id) {
-                                                                pl.tracks.push(id);
+                                                            if !refs.contains(&id) {
+                                                                refs.push(id);
                                                             }
+                                                        }
+                                                        if db
+                                                            .set_playlist_tracks(
+                                                                &Source::Server(sid),
+                                                                &pid,
+                                                                &refs,
+                                                            )
+                                                            .await
+                                                            .is_ok()
+                                                        {
+                                                            gens.bump(Table::Playlists);
                                                         }
                                                     }
                                                 }
                                             });
                                         }
                                     } else {
-                                        let mut store = playlist_store.write();
-                                        if let Some(playlist) = store
-                                            .playlists
-                                            .iter_mut()
-                                            .find(|p| p.id == playlist_id)
-                                        {
-                                            for path in tracks {
-                                                if !playlist.tracks.contains(&path) {
-                                                    playlist.tracks.push(path);
+                                        let db = consume_context::<db::Db>();
+                                        spawn(async move {
+                                            let store = db.load_playlists(None).await.unwrap_or_default();
+                                            if let Some(playlist) =
+                                                store.playlists.iter().find(|p| p.id == playlist_id)
+                                            {
+                                                let mut paths = playlist.tracks.clone();
+                                                for path in tracks {
+                                                    if !paths.contains(&path) {
+                                                        paths.push(path);
+                                                    }
+                                                }
+                                                let refs: Vec<String> = paths
+                                                    .iter()
+                                                    .map(|p| p.to_string_lossy().into_owned())
+                                                    .collect();
+                                                if db
+                                                    .set_playlist_tracks(&Source::Local, &playlist_id, &refs)
+                                                    .await
+                                                    .is_ok()
+                                                {
+                                                    gens.bump(Table::Playlists);
                                                 }
                                             }
-                                        }
+                                        });
                                     }
                                 }
                                 show_album_playlist_modal.set(false);
                             },
                             on_create_playlist: move |name: String| {
-                                if let Some(aid) = pending_album_id_for_playlist.read().clone() {
-                                    let tracks: Vec<_> = {
-                                        let lib = library.read();
-                                        if is_server {
-                                            lib.jellyfin_tracks
-                                                .iter()
-                                                .filter(|t| t.album_id == aid)
-                                                .map(|t| t.path.clone())
-                                                .collect()
-                                        } else {
-                                            let album_title = lib
-                                                .albums
-                                                .iter()
-                                                .find(|a| a.id == aid)
-                                                .map(|a| a.title.clone());
-                                            if let Some(title) = album_title {
-                                                lib.tracks
-                                                    .iter()
-                                                    .filter(|t| t.album == title)
-                                                    .map(|t| t.path.clone())
-                                                    .collect()
-                                            } else {
-                                                Vec::new()
-                                            }
-                                        }
-                                    };
+                                if pending_album_id_for_playlist.read().is_some() {
+                                    let tracks: Vec<_> = pending_tracks_res
+                                        .read()
+                                        .clone()
+                                        .unwrap_or_default()
+                                        .iter()
+                                        .map(|t| t.id.uid_path())
+                                        .collect();
                                     if is_server {
                                         let playlist_name = name.clone();
                                         let paths = tracks.clone();
@@ -235,6 +264,7 @@ pub fn Album(
                                                 })
                                         };
                                         if let Some((service, url, token, user_id, device_id)) = server_vals {
+                                            let sid = active_server_id();
                                             spawn(async move {
                                                 let conn = ::server::server_ops::ServerConn {
                                                     service,
@@ -257,29 +287,48 @@ pub fn Album(
                                                 )
                                                 .await;
                                                 if let Ok(new_id) = result {
-                                                    let mut store = playlist_store.write();
-                                                    store
-                                                        .jellyfin_playlists
-                                                        .push(reader::models::JellyfinPlaylist {
-                                                            id: new_id,
-                                                            name: playlist_name,
-                                                            tracks: item_ids,
-                                                            image_tag: None,
-                                                            cover_path: None,
-                                                        });
+                                                    let db = consume_context::<db::Db>();
+                                                    let source = Source::Server(sid);
+                                                    if db
+                                                        .upsert_playlist_meta(
+                                                            &source,
+                                                            &new_id,
+                                                            &playlist_name,
+                                                            None,
+                                                            None,
+                                                        )
+                                                        .await
+                                                        .is_ok()
+                                                        && db
+                                                            .set_playlist_tracks(&source, &new_id, &item_ids)
+                                                            .await
+                                                            .is_ok()
+                                                    {
+                                                        gens.bump(Table::Playlists);
+                                                    }
                                                 }
                                             });
                                         }
                                     } else {
-                                        let mut store = playlist_store.write();
-                                        store
-                                            .playlists
-                                            .push(reader::models::Playlist {
-                                                id: uuid::Uuid::new_v4().to_string(),
-                                                name,
-                                                tracks,
-                                                cover_path: None,
-                                            });
+                                        let refs: Vec<String> = tracks
+                                            .iter()
+                                            .map(|p| p.to_string_lossy().into_owned())
+                                            .collect();
+                                        let id = uuid::Uuid::new_v4().to_string();
+                                        let db = consume_context::<db::Db>();
+                                        spawn(async move {
+                                            if db
+                                                .upsert_playlist_meta(&Source::Local, &id, &name, None, None)
+                                                .await
+                                                .is_ok()
+                                                && db
+                                                    .set_playlist_tracks(&Source::Local, &id, &refs)
+                                                    .await
+                                                    .is_ok()
+                                            {
+                                                gens.bump(Table::Playlists);
+                                            }
+                                        });
                                     }
                                 }
                                 show_album_playlist_modal.set(false);
@@ -291,17 +340,13 @@ pub fn Album(
                 if is_server {
                     ServerAlbumDetails {
                         album_jellyfin_id: album_id.read().clone(),
-                        library,
                         config,
-                        playlist_store,
                         queue,
                         on_close: move |_| album_id.set(String::new()),
                     }
                 } else {
                     components::album_details::AlbumDetails {
                         album_id: album_id.read().clone(),
-                        library,
-                        playlist_store,
                         on_close: move |_| album_id.set(String::new()),
                     }
                 }

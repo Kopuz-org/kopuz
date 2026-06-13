@@ -3,14 +3,11 @@ use config::PlayerBarPosition;
 use dioxus::prelude::*;
 use hooks::use_player_controller::{LoopMode, PlayerController};
 use player::player::Player;
-use reader::{FavoritesStore, Library};
 
-use crate::shared::{fmt_time, get_favorite, toggle_favorite};
+use crate::shared::{fmt_time, toggle_favorite};
 
 #[component]
 pub fn BottombarNormal(
-    library: Signal<Library>,
-    favorites_store: Signal<FavoritesStore>,
     mut config: Signal<config::AppConfig>,
     mut player: Signal<Player>,
     mut is_playing: Signal<bool>,
@@ -54,6 +51,17 @@ pub fn BottombarNormal(
     let volume_percent = *volume.read() * 100.0;
     let mut ctrl = use_context::<PlayerController>();
     let nav_ctrl = use_context::<NavigationController>();
+    let fav_sid = use_memo(move || match ctrl.current_track_snapshot.read().as_ref() {
+        Some(t) if t.id.is_server() => {
+            let c = config.read();
+            c.active_server_id
+                .clone()
+                .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
+                .unwrap_or_default()
+        }
+        _ => "local".to_string(),
+    });
+    let favorites_res = hooks::use_db_queries::use_favorites(fav_sid);
 
     if cfg!(target_os = "android") {
         let progress_percent = if *current_song_duration.read() > 0 {
@@ -97,7 +105,17 @@ pub fn BottombarNormal(
     }
 
     let current_track_snapshot = ctrl.current_track_snapshot.read().clone();
-    let is_favorite = get_favorite(current_track_snapshot.as_ref(), &favorites_store);
+    let is_favorite = {
+        let key = current_track_snapshot
+            .as_ref()
+            .map(|t| t.id.key().into_owned())
+            .unwrap_or_default();
+        !key.trim().is_empty()
+            && favorites_res
+                .read()
+                .as_ref()
+                .is_some_and(|favs| favs.contains(&key))
+    };
     let heart_class = if is_favorite {
         "ml-2 text-red-400 hover:text-red-300 transition-colors"
     } else {
@@ -160,7 +178,7 @@ pub fn BottombarNormal(
                 button {
                     class: "{heart_class}",
                     title: if is_favorite { i18n::t("remove_from_favorites").to_string() } else { i18n::t("add_to_favorites").to_string() },
-                    onclick: move |_| toggle_favorite(ctrl.current_track_snapshot.read().clone(), favorites_store, config),
+                    onclick: move |_| toggle_favorite(ctrl.current_track_snapshot.read().clone(), config),
                     i { class: "{heart_icon}" }
                 }
             }
@@ -331,7 +349,7 @@ pub fn BottombarNormal(
                     title: i18n::t("share_musicbrainz").to_string(),
                     onclick: move |_| {
                         if let Some(t) = ctrl.current_track_snapshot.read().clone() {
-                            let path = t.path.to_string_lossy();
+                            let path = t.id.uid();
                             if let Some(vid) = path
                                 .strip_prefix("ytmusic:")
                                 .and_then(|rest| rest.split(':').next())

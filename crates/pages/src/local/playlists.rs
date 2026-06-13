@@ -1,13 +1,13 @@
 use components::dots_menu::{DotsMenu, MenuAction};
 use components::folder_picker::FolderPickerModal;
 use config::AppConfig;
+use db::Source;
 use dioxus::prelude::*;
-use reader::{Library, PlaylistStore};
+use hooks::db_reactivity::Table;
+use hooks::use_db_queries::{use_active_server_id, use_albums, use_playlists, use_tracks_by_keys};
 
 #[component]
 pub fn LocalPlaylists(
-    mut playlist_store: Signal<PlaylistStore>,
-    library: Signal<Library>,
     config: Signal<AppConfig>,
     mut selected_playlist_id: Signal<Option<String>>,
     on_select_folder: EventHandler<String>,
@@ -20,8 +20,24 @@ pub fn LocalPlaylists(
     let mut rename_folder_id = use_signal(|| Option::<String>::None);
     let mut rename_folder_name = use_signal(String::new);
 
-    let store = playlist_store.read();
-    let lib = library.read();
+    let gens = hooks::db_reactivity::use_generations();
+    let source = use_memo(|| Source::Local);
+    let active_server_id = use_active_server_id();
+    let playlists_res = use_playlists(active_server_id);
+    let albums_res = use_albums(source);
+    let first_keys = use_memo(move || {
+        playlists_res
+            .read()
+            .clone()
+            .unwrap_or_default()
+            .playlists
+            .iter()
+            .filter_map(|p| p.tracks.first().map(|t| t.to_string_lossy().into_owned()))
+            .collect::<Vec<String>>()
+    });
+    let first_tracks_res = use_tracks_by_keys(source, first_keys);
+
+    let store = playlists_res.read().clone().unwrap_or_default();
 
     let folders = store.folders.clone();
     let all_playlists = store.playlists.clone();
@@ -70,14 +86,11 @@ pub fn LocalPlaylists(
         MenuAction::new(delete_folder_text.as_str(), "fa-solid fa-trash").destructive(),
     ];
 
-    drop(store);
-    drop(lib);
-
-    let lib = library.read();
+    let first_tracks = first_tracks_res.read().clone().unwrap_or_default();
+    let albums = albums_res.read().clone().unwrap_or_default();
 
     let cover_for = |pid: &str| -> Option<utils::CoverUrl> {
-        let store = playlist_store.read();
-        let playlist = store.playlists.iter().find(|p| p.id == pid)?;
+        let playlist = all_playlists.iter().find(|p| p.id == pid)?;
 
         playlist
             .cover_path
@@ -85,8 +98,10 @@ pub fn LocalPlaylists(
             .and_then(|path| utils::format_artwork_url(Some(path)))
             .or_else(|| {
                 let first_path = playlist.tracks.first()?;
-                let track = lib.tracks.iter().find(|t| t.path == *first_path)?;
-                let album = lib.albums.iter().find(|a| a.id == track.album_id)?;
+                let track = first_tracks
+                    .iter()
+                    .find(|t| t.id.uid_path() == *first_path)?;
+                let album = albums.iter().find(|a| a.id == track.album_id)?;
 
                 utils::format_artwork_url(album.cover_path.as_ref())
             })
@@ -96,7 +111,6 @@ pub fn LocalPlaylists(
         div {
             if let Some(target_id) = move_target_id.read().clone() {
                 FolderPickerModal {
-                    playlist_store,
                     playlist_id: target_id,
                     on_close: move |_| move_target_id.set(None),
                 }
@@ -115,13 +129,31 @@ pub fn LocalPlaylists(
                         if name.is_empty() {
                             return;
                         }
-                        if let Some(playlist) = playlist_store
-                            .write()
-                            .playlists
-                            .iter_mut()
-                            .find(|playlist| playlist.id == rename_id)
+                        let store = playlists_res.read().clone().unwrap_or_default();
+                        if let Some(playlist) =
+                            store.playlists.iter().find(|playlist| playlist.id == rename_id)
                         {
-                            playlist.name = name;
+                            let id = rename_id.clone();
+                            let cover = playlist
+                                .cover_path
+                                .as_ref()
+                                .map(|p| p.to_string_lossy().into_owned());
+                            let db = consume_context::<db::Db>();
+                            spawn(async move {
+                                if db
+                                    .upsert_playlist_meta(
+                                        &Source::Local,
+                                        &id,
+                                        &name,
+                                        cover.as_deref(),
+                                        None,
+                                    )
+                                    .await
+                                    .is_ok()
+                                {
+                                    gens.bump(Table::Playlists);
+                                }
+                            });
                         }
                         rename_playlist_id.set(None);
                         rename_playlist_name.set(String::new());
@@ -142,13 +174,17 @@ pub fn LocalPlaylists(
                         if name.is_empty() {
                             return;
                         }
-                        if let Some(folder) = playlist_store
-                            .write()
-                            .folders
-                            .iter_mut()
-                            .find(|folder| folder.id == rename_id)
+                        let mut folders = playlists_res.read().clone().unwrap_or_default().folders;
+                        if let Some(folder) =
+                            folders.iter_mut().find(|folder| folder.id == rename_id)
                         {
                             folder.name = name;
+                            let db = consume_context::<db::Db>();
+                            spawn(async move {
+                                if db.set_folders(&folders).await.is_ok() {
+                                    gens.bump(Table::Folders);
+                                }
+                            });
                         }
                         rename_folder_id.set(None);
                         rename_folder_name.set(String::new());
@@ -242,9 +278,15 @@ pub fn LocalPlaylists(
                                                                         active_menu.set(None);
                                                                     }
                                                                     1 => {
-                                                                        let mut store = playlist_store.write();
-                                                                        if let Some(f) = store.folders.iter_mut().find(|f| f.id == fid_remove) {
+                                                                        let mut folders = playlists_res.read().clone().unwrap_or_default().folders;
+                                                                        if let Some(f) = folders.iter_mut().find(|f| f.id == fid_remove) {
                                                                             f.playlist_ids.retain(|id| id != &pid_action);
+                                                                            let db = consume_context::<db::Db>();
+                                                                            spawn(async move {
+                                                                                if db.set_folders(&folders).await.is_ok() {
+                                                                                    gens.bump(Table::Folders);
+                                                                                }
+                                                                            });
                                                                         }
                                                                         active_menu.set(None);
                                                                     }
@@ -254,10 +296,20 @@ pub fn LocalPlaylists(
                                                                         active_menu.set(None);
                                                                     }
                                                                     _ => {
-                                                                        playlist_store.write().playlists.retain(|p| p.id != pid_action);
-                                                                        for f in &mut playlist_store.write().folders {
+                                                                        let mut folders = playlists_res.read().clone().unwrap_or_default().folders;
+                                                                        for f in &mut folders {
                                                                             f.playlist_ids.retain(|id| id != &pid_action);
                                                                         }
+                                                                        let pid = pid_action.clone();
+                                                                        let db = consume_context::<db::Db>();
+                                                                        spawn(async move {
+                                                                            if db.delete_playlist(&Source::Local, &pid).await.is_ok()
+                                                                                && db.set_folders(&folders).await.is_ok()
+                                                                            {
+                                                                                gens.bump(Table::Playlists);
+                                                                                gens.bump(Table::Folders);
+                                                                            }
+                                                                        });
                                                                         active_menu.set(None);
                                                                     }
                                                                 }
@@ -342,8 +394,14 @@ pub fn LocalPlaylists(
                                                                             active_menu.set(None);
                                                                         }
                                                                         _ => {
-                                                                            let mut store = playlist_store.write();
-                                                                            store.folders.retain(|f| f.id != fid_del);
+                                                                            let mut folders = playlists_res.read().clone().unwrap_or_default().folders;
+                                                                            folders.retain(|f| f.id != fid_del);
+                                                                            let db = consume_context::<db::Db>();
+                                                                            spawn(async move {
+                                                                                if db.set_folders(&folders).await.is_ok() {
+                                                                                    gens.bump(Table::Folders);
+                                                                                }
+                                                                            });
                                                                             active_menu.set(None);
                                                                         }
                                                                     }
@@ -432,7 +490,13 @@ pub fn LocalPlaylists(
                                                                             active_menu.set(None);
                                                                         }
                                                                         _ => {
-                                                                            playlist_store.write().playlists.retain(|p| p.id != pid_action);
+                                                                            let pid = pid_action.clone();
+                                                                            let db = consume_context::<db::Db>();
+                                                                            spawn(async move {
+                                                                                if db.delete_playlist(&Source::Local, &pid).await.is_ok() {
+                                                                                    gens.bump(Table::Playlists);
+                                                                                }
+                                                                            });
                                                                             active_menu.set(None);
                                                                         }
                                                                     }

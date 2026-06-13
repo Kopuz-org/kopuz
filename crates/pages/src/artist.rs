@@ -1,17 +1,14 @@
 use config::{AppConfig, MusicSource};
 use dioxus::prelude::*;
 use player::player;
-use reader::{Library, PlaylistStore};
 
 use crate::local::artist::LocalArtist;
 use crate::server::artist::ServerArtist;
 
 #[component]
 pub fn Artist(
-    library: Signal<Library>,
     config: Signal<AppConfig>,
     artist_name: Signal<String>,
-    playlist_store: Signal<PlaylistStore>,
     player: Signal<player::Player>,
     on_navigate: EventHandler<String>,
     mut is_playing: Signal<bool>,
@@ -39,20 +36,16 @@ pub fn Artist(
 
                     if is_server {
                         ServerArtist {
-                            library,
                             config,
                             artist_name,
-                            playlist_store,
                             on_navigate,
                             queue,
                             current_queue_index,
                         }
                     } else {
                         LocalArtist {
-                            library,
                             config,
                             artist_name,
-                            playlist_store,
                             on_navigate,
                             queue,
                             current_queue_index,
@@ -71,20 +64,16 @@ pub fn Artist(
                     }
                     if is_server {
                         ServerArtist {
-                            library,
                             config,
                             artist_name,
-                            playlist_store,
                             on_navigate,
                             queue,
                             current_queue_index,
                         }
                     } else {
                         LocalArtist {
-                            library,
                             config,
                             artist_name,
-                            playlist_store,
                             on_navigate,
                             queue,
                             current_queue_index,

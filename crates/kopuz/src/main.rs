@@ -1,10 +1,3 @@
-#[cfg(target_arch = "wasm32")]
-use crate::web_storage::{
-    clear_web_queue_state, load_web_config, load_web_favorites, load_web_library,
-    load_web_playlists, load_web_queue_state, load_web_ui_state, save_web_config,
-    save_web_favorites, save_web_library, save_web_playlists, save_web_queue_state,
-    save_web_ui_state,
-};
 use components::{
     bottombar::Bottombar, download_overlay::DownloadOverlay, fullscreen::Fullscreen,
     rightbar::Rightbar, sidebar::Sidebar, titlebar::Titlebar,
@@ -26,7 +19,6 @@ use kopuz_route::Route;
 use pages::server::download_manager::DownloadQueue;
 use player::player::Player;
 use queue_state::PersistedQueueState;
-use reader::FavoritesStore;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
@@ -35,11 +27,12 @@ use tracing::Instrument;
 #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
 use windows::Win32::Foundation::HWND;
 
+#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+mod chrome_trace;
 mod logging;
 #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
 mod pot_minter;
 mod queue_state;
-mod web_storage;
 #[cfg(target_os = "windows")]
 mod windows_titlebar;
 
@@ -85,6 +78,11 @@ const REDUCED_ANIMATIONS_CSS: Asset = asset!("../assets/reduced-animations.css")
 const TOOLBAR_ICONS: Asset = asset!("../assets/toolbar_icons", AssetOptions::folder());
 const QUEUE_STATE_SAVE_DEBOUNCE_MS: u64 = 1200;
 const QUEUE_STATE_PROGRESS_STEP_SECS: u64 = 5;
+/// Store saves (config/library/playlists/favorites) are full-replace and
+/// expensive; bursts of mutations (batch downloads, syncs) coalesce into one
+/// save per settle+cooldown window instead of one per mutation.
+const STORE_SAVE_SETTLE_MS: u64 = 600;
+const STORE_SAVE_COOLDOWN_MS: u64 = 2500;
 
 #[cfg(target_os = "windows")]
 #[component]
@@ -196,26 +194,6 @@ async fn fetch_available_update() -> Option<AvailableUpdate> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn persist_config_snapshot(config_snapshot: config::AppConfig, path: std::path::PathBuf) {
-    spawn(
-        async move {
-            let result = tokio::task::spawn_blocking(move || config_snapshot.save(&path)).await;
-            match result {
-                Ok(Ok(())) => {}
-                Ok(Err(e)) => tracing::error!("Failed to save config: {}", e),
-                Err(e) => tracing::error!("Failed to join config save task: {}", e),
-            }
-        }
-        .instrument(tracing::info_span!("config.persist")),
-    );
-}
-
-#[cfg(target_arch = "wasm32")]
-fn persist_config_snapshot(config_snapshot: config::AppConfig, _path: std::path::PathBuf) {
-    save_web_config(&config_snapshot);
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 async fn run_rotation(mut config: Signal<config::AppConfig>) {
     let cookies = match config.peek().server.as_ref() {
         Some(s) if s.service == config::MusicService::YtMusic => s.access_token.clone(),
@@ -248,51 +226,29 @@ async fn run_rotation(mut config: Signal<config::AppConfig>) {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-async fn persist_queue_state_snapshot(
-    queue_state: Option<PersistedQueueState>,
-    path: std::path::PathBuf,
-) {
-    let result = tokio::task::spawn_blocking(move || -> std::io::Result<()> {
-        if let Some(queue_state) = queue_state {
-            queue_state.save(&path)
-        } else {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            match std::fs::remove_file(&path) {
-                Ok(()) => Ok(()),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                Err(e) => Err(e),
-            }
-        }
-    })
-    .await;
-
-    match result {
-        Ok(Ok(())) => {}
-        Ok(Err(e)) => tracing::error!("Failed to save queue state: {}", e),
-        Err(e) => tracing::error!("Failed to join queue state save task: {}", e),
+async fn persist_queue_state_snapshot(db: db::Db, queue_state: Option<PersistedQueueState>) {
+    let snap = queue_state.map(queue_snapshot).unwrap_or_default();
+    if let Err(e) = db.save_queue(&snap).await {
+        tracing::error!("Failed to save queue state: {}", e);
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-async fn persist_queue_state_snapshot(
-    queue_state: Option<PersistedQueueState>,
-    _path: std::path::PathBuf,
-) {
-    if let Some(queue_state) = queue_state {
-        save_web_queue_state(&queue_state);
-    } else {
-        clear_web_queue_state();
+fn queue_snapshot(q: PersistedQueueState) -> db::QueueSnapshot {
+    db::QueueSnapshot {
+        version: q.version,
+        queue: q.queue,
+        current_queue_index: q.current_queue_index,
+        progress_secs: q.progress_secs,
+        shuffle_order: q.shuffle_order,
+        shuffle_enabled: q.shuffle_enabled,
     }
 }
 
 fn is_server_queue_track(track: &reader::Track) -> bool {
     matches!(
         track
-            .path
-            .to_string_lossy()
+            .id
+            .uid()
             .split(':')
             .next()
             .unwrap_or_default()
@@ -304,7 +260,7 @@ fn is_server_queue_track(track: &reader::Track) -> bool {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn is_restorable_queue_track(track: &reader::Track) -> bool {
-    is_server_queue_track(track) || track.path.exists()
+    is_server_queue_track(track) || track.id.local_path().is_some_and(|p| p.exists())
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -424,10 +380,7 @@ fn build_queue_state_snapshot(
 
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 fn read_titlebar_mode_from_disk() -> config::TitlebarMode {
-    directories::ProjectDirs::from("com", "temidaradev", "kopuz")
-        .map(|d| d.config_dir().join("config.json"))
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|s| serde_json::from_str::<config::AppConfig>(&s).ok())
+    db::peek_config(&db::default_db_path())
         .map(|c| c.titlebar_mode)
         .unwrap_or_default()
 }
@@ -493,6 +446,86 @@ fn make_hq_image(raw: &[u8], cache_path: &std::path::Path) -> Option<Vec<u8>> {
     Some(out)
 }
 
+/// Process-wide database handle. Opened (and the legacy JSON migrated) once in
+/// `main` before the UI mounts, then provided to the app via context.
+static DB_HANDLE: std::sync::OnceLock<db::Db> = std::sync::OnceLock::new();
+
+/// Open the DB and run the one-shot legacy import, blocking. sqlx-sqlite does its
+/// work on dedicated connection threads, so the throwaway runtime here is safe to
+/// drop — the pool keeps working under the app's runtime afterwards.
+#[cfg(not(target_arch = "wasm32"))]
+fn init_db_blocking() -> db::Db {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("tokio runtime for db init");
+    rt.block_on(async {
+        let db_path = db::default_db_path();
+        let handle = match db::init(&db_path).await {
+            Ok(h) => h,
+            Err(e) => {
+                // A corrupt DB must not brick the app before a window exists:
+                // move it aside (kept for inspection) and recreate — the
+                // importer below repopulates from *.json.bak. ONLY for real
+                // corruption, though: lock contention (a second instance),
+                // disk-full, or a failed migration would otherwise get a
+                // healthy database renamed away and replaced by stale data.
+                let msg = e.to_string().to_lowercase();
+                let is_corruption = msg.contains("malformed")
+                    || msg.contains("not a database")
+                    || msg.contains("corrupt");
+                if !is_corruption {
+                    panic!("kopuz database failed to open (not corruption — refusing to discard it): {e}");
+                }
+                tracing::error!(error = %e, "kopuz database is corrupt — moving it aside and recreating");
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                for ext in ["", "-wal", "-shm"] {
+                    let mut src = db_path.as_os_str().to_os_string();
+                    src.push(ext);
+                    let mut dst = db_path.as_os_str().to_os_string();
+                    dst.push(format!(".corrupt-{ts}{ext}"));
+                    let _ = std::fs::rename(src, dst);
+                }
+                db::init(&db_path).await.expect("recreate kopuz database")
+            }
+        };
+        match handle.import_legacy_json(&db::config_dir()).await {
+            Ok(r) if r.ran => tracing::info!(
+                tracks = r.tracks,
+                albums = r.albums,
+                playlists = r.playlists,
+                favorites = r.favorites,
+                servers = r.servers,
+                "kopuz: migrated legacy JSON store into SQLite"
+            ),
+            Ok(_) => {}
+            Err(e) => tracing::error!(error = %e, "kopuz: legacy JSON import failed"),
+        }
+        // Nothing reads or writes the legacy JSONs anymore — move them aside as
+        // *.json.bak (kept for downgrade; never deleted). RELEASE only: debug
+        // builds leave them in place so deleting kopuz-debug.db re-tests the
+        // migration without restoring anything (the import is gated on the DB
+        // being empty, so the lingering JSONs are otherwise inert).
+        if cfg!(debug_assertions) {
+            tracing::info!("kopuz: debug build — leaving legacy *.json in place for re-testing");
+        } else {
+            match handle.finalize_migration(&db::config_dir()).await {
+                Ok(n) if n > 0 => {
+                    tracing::info!(files = n, "kopuz: legacy *.json renamed to *.json.bak")
+                }
+                Ok(_) => {}
+                Err(e) => tracing::warn!(error = %e, "kopuz: legacy json backup rename failed"),
+            }
+        }
+        server::ytmusic::player::init_tier_store(handle.clone());
+        utils::db_cache::init(handle.clone());
+        handle
+    })
+}
+
 fn main() {
     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
     {
@@ -501,14 +534,11 @@ fn main() {
             .unwrap_or_else(|| std::path::PathBuf::from("logs"));
         let _ = std::fs::create_dir_all(&log_dir);
 
-        // Read the persisted tracing toggle from config.json before the app
-        // (and its config Signal) exists — the subscriber is built once here,
-        // so the setting is applied at startup. Same path the settings UI
-        // writes to. Missing/unreadable config defaults to off.
-        let config_tracing_enabled = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
-            .map(|dirs| {
-                config::AppConfig::load(&dirs.config_dir().join("config.json")).tracing_enabled
-            })
+        // Read the persisted tracing toggle from the DB before the app (and its
+        // config Signal) exists — the subscriber is built once here, so the
+        // setting is applied at startup. Missing DB/blob defaults to off.
+        let config_tracing_enabled = db::peek_config(&db::default_db_path())
+            .map(|c| c.tracing_enabled)
             .unwrap_or(false);
 
         // Guards live in a global inside `logging`; flushed by
@@ -516,6 +546,8 @@ fn main() {
         logging::init(&log_dir, config_tracing_enabled);
 
         migrate_legacy_locations();
+
+        let _ = DB_HANDLE.set(init_db_blocking());
 
         let presence: Option<Arc<Presence>> = match Presence::new("1470087339639443658") {
             Ok(p) => {
@@ -783,6 +815,8 @@ fn main() {
         // OnceLock), but doing it up front means the session exists before first playback.
         player::systemint::init();
 
+        let _ = DB_HANDLE.set(init_db_blocking());
+
         let config = dioxus::mobile::Config::new()
             .with_background_color((0, 0, 0, 255))
             // artwork://local?p=<percent-encoded-absolute-path> — the Android WebView mostly
@@ -855,6 +889,7 @@ fn main() {
 
     #[cfg(target_arch = "wasm32")]
     {
+        let _ = DB_HANDLE.set(db::init_stub());
         dioxus::launch(App);
     }
 }
@@ -866,23 +901,10 @@ fn App() -> Element {
     // would be left truncated (cut mid-event, unloadable). Flush on the
     // loop's final event so a normally-closed window still yields a valid
     // trace. (Ctrl+C is covered separately by the SIGINT handler.)
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-    dioxus::desktop::use_wry_event_handler(|event, _| {
-        use dioxus::desktop::tao::event::{Event, WindowEvent};
-        // Flush the moment the window starts closing (CloseRequested),
-        // well before tao calls process::exit; LoopDestroyed is the final
-        // backstop. shutdown() is idempotent so firing on both is fine.
-        if matches!(
-            event,
-            Event::LoopDestroyed
-                | Event::WindowEvent {
-                    event: WindowEvent::CloseRequested,
-                    ..
-                }
-        ) {
-            crate::logging::shutdown();
-        }
-    });
+    // logging::shutdown() is called from the DB close-flush handler below —
+    // wry handlers fire in registration order, and shutting logging down
+    // first would leave the final queue/config persists (and any failure
+    // warnings) out of latest.log and the trace.
 
     // Native YouTube sig/n deciphering runs in this WebView's own
     // JavaScriptCore (issue #349): register a JS engine that forwards each
@@ -926,7 +948,10 @@ fn App() -> Element {
         });
     });
 
-    let mut library = use_signal(reader::Library::default);
+    // The whole-Library signal is GONE — pages/components read the DB through
+    // query hooks. The player controller's synchronous cover lookups get this
+    // slim local-albums snapshot, kept fresh off the Albums generation.
+    let mut local_albums = use_signal(Vec::<reader::Album>::new);
     let mut current_route = use_signal(|| Route::Home);
     let mut scroll_positions: Signal<std::collections::HashMap<Route, f64>> =
         use_signal(std::collections::HashMap::new);
@@ -961,33 +986,16 @@ fn App() -> Element {
         #[cfg(target_arch = "wasm32")]
         std::path::PathBuf::from("./cache")
     });
-    let config_dir = use_memo(move || {
-        #[cfg(target_os = "android")]
-        {
-            let mut path = player::systemint::get_files_dir()
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join("config");
-            if std::fs::create_dir_all(&path).is_err() {
-                path = std::path::PathBuf::from("./config");
-                let _ = std::fs::create_dir_all(&path);
-            }
-            path
-        }
-        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-        {
-            let path = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
-                .map(|dirs| dirs.config_dir().to_path_buf())
-                .unwrap_or_else(|| std::path::Path::new("./config").to_path_buf());
-            let _ = std::fs::create_dir_all(&path);
-            path
-        }
-        #[cfg(target_arch = "wasm32")]
-        std::path::PathBuf::from("./config")
-    });
-    let lib_path = use_memo(move || config_dir().join("library.json"));
-    let config_path = use_memo(move || config_dir().join("config.json"));
-    let mut config = use_signal(config::AppConfig::default);
+    // ROOT-owned: detached tasks (download workers, close-flush) read/write
+    // these after the spawning page — and in principle this component — is
+    // gone; owning them at ROOT keeps Dioxus's cross-scope lint honest.
+    let mut config = use_hook(|| Signal::new_in_scope(config::AppConfig::default(), ScopeId::ROOT));
+    let db = DB_HANDLE
+        .get()
+        .cloned()
+        .expect("db initialized in main before launch");
+    use_context_provider(|| db.clone());
+    hooks::db_reactivity::use_generations_provider();
     // Start the PoToken minter whenever a YouTube Music server is active — not
     // just anon. A *signed-in but non-Premium* account streams the same 251 as
     // anon and also needs a content pot for deep ranges; only true Premium
@@ -1005,22 +1013,20 @@ fn App() -> Element {
             crate::pot_minter::request();
         }
     });
-    #[allow(unused_variables)]
-    let playlist_path = use_memo(move || config_dir().join("playlists.json"));
-    let mut playlist_store = use_signal(reader::PlaylistStore::default);
-    #[allow(unused_variables)]
-    let favorites_path = use_memo(move || config_dir().join("favorites.json"));
-    let queue_state_path = use_memo(move || config_dir().join("queue_state.json"));
-    let mut favorites_store = use_signal(FavoritesStore::default);
+    hooks::use_sync_task::use_sync_task(config);
     let mut initial_load_done = use_signal(|| false);
     #[allow(unused_variables)]
     let cover_cache = use_memo(move || cache_dir().join("covers"));
     #[cfg(not(target_arch = "wasm32"))]
     let _ = std::fs::create_dir_all(cover_cache());
-    let download_queue = use_signal(DownloadQueue::default);
-    let download_progress = use_signal(::server::DownloadProgress::default);
+    let download_queue = use_hook(|| Signal::new_in_scope(DownloadQueue::default(), ScopeId::ROOT));
+    let download_progress =
+        use_hook(|| Signal::new_in_scope(::server::DownloadProgress::default(), ScopeId::ROOT));
     pages::server::download_manager::register_progress_signal(download_progress);
     let mut trigger_rescan = use_signal(|| 0);
+    // Applies detached yt-dlp completions (history + rescan) in this scope —
+    // the job drivers outlive the downloads page and can't write these.
+    pages::ytdlp::use_ytdlp_completion_sink(config, trigger_rescan);
     let mut last_scan_key = use_signal(|| None::<String>);
     let mut scan_current_file = use_signal(|| Option::<String>::None);
     let current_playing = use_signal(|| 0);
@@ -1043,8 +1049,81 @@ fn App() -> Element {
     let is_rightbar_open = use_signal(|| false);
     let rightbar_width = use_signal(|| 320usize);
     let mut palette = use_signal(|| Option::<Vec<utils::color::Color>>::None);
+    // Config is the one remaining whole-value save: persisting a default that
+    // exists only because the LOAD FAILED would wipe real settings/servers, so
+    // its save stays disarmed unless the load demonstrably succeeded (a fresh
+    // empty DB still counts). Library/playlists/favorites have no such flag
+    // anymore — they're targeted per-row writes, never full-replace.
+    let mut config_loaded_ok = use_signal(|| false);
+
     let mut pending_queue_state_snapshot = use_signal(|| None::<PersistedQueueState>);
     let mut pending_queue_state_revision = use_signal(|| 0u64);
+
+    // tao calls process::exit() after CloseRequested, killing the debounced
+    // save loops — without this, the last debounce window of queue/store
+    // changes was lost on every quit. The flush must run on a FRESH OS
+    // thread: the main thread sits inside dioxus's tokio context, where
+    // block_on panics ("cannot start a runtime from within a runtime") — the
+    // flush silently never ran. Signals are peeked here (not Send), the
+    // joined thread does the blocking DB work. Idempotent across
+    // CloseRequested/LoopDestroyed.
+    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+    dioxus::desktop::use_wry_event_handler(move |event, _| {
+        use dioxus::desktop::tao::event::{Event, WindowEvent};
+        if matches!(
+            event,
+            Event::LoopDestroyed
+                | Event::WindowEvent {
+                    event: WindowEvent::CloseRequested,
+                    ..
+                }
+        ) {
+            if let Some(db) = DB_HANDLE.get() {
+                let db = db.clone();
+                // None = the queue is empty (a cleared queue must persist as
+                // empty, not resurrect) — but only once the saved queue has
+                // actually been restored, else a quit during startup would
+                // wipe it.
+                let queue_snap = (*initial_load_done.peek()).then(|| {
+                    pending_queue_state_snapshot
+                        .peek()
+                        .clone()
+                        .map(queue_snapshot)
+                        .unwrap_or_default()
+                });
+                // Library/playlists/favorites need no flush — every mutation
+                // already committed as a targeted write when it happened.
+                let cfg = (*config_loaded_ok.peek()).then(|| {
+                    let mut cfg = config.peek().clone();
+                    cfg.volume = *volume.peek();
+                    cfg
+                });
+                let _ = std::thread::spawn(move || {
+                    let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                    else {
+                        return;
+                    };
+                    rt.block_on(async move {
+                        if let Some(snap) = queue_snap
+                            && let Err(e) = db.save_queue(&snap).await
+                        {
+                            tracing::warn!(error = %e, "queue flush on close failed");
+                        }
+                        if let Some(cfg) = cfg {
+                            let _ = db.save_config(&cfg).await;
+                        }
+                    });
+                })
+                .join();
+            }
+            // After the persists, so they (and any failure warnings) land in
+            // latest.log and the trace. Idempotent across CloseRequested/
+            // LoopDestroyed; Ctrl+C is covered by the SIGINT handler.
+            crate::logging::shutdown();
+        }
+    });
 
     #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
     use_effect(move || {
@@ -1205,9 +1284,23 @@ fn App() -> Element {
         current_song_cover_url,
         current_track_snapshot,
         volume,
-        library,
+        local_albums,
         config,
     );
+
+    // Hydrate the controller's slim local-albums snapshot from the DB,
+    // re-querying when the albums table changes.
+    let gens_for_albums = hooks::db_reactivity::use_generations();
+    let db_for_albums = db.clone();
+    use_effect(move || {
+        let _ = gens_for_albums.generation(hooks::db_reactivity::Table::Albums);
+        let db = db_for_albums.clone();
+        spawn(async move {
+            if let Ok(albums) = db.albums(&db::Source::Local).await {
+                local_albums.set(albums);
+            }
+        });
+    });
 
     use_effect(move || {
         if !*initial_load_done.read() {
@@ -1215,7 +1308,7 @@ fn App() -> Element {
         }
 
         // Server identity excludes access_token: tokens rotate without making it a
-        // different account, but their rotation would otherwise wipe synced playlists.
+        // different account, but their rotation would otherwise reset playback.
         let current_server_key = {
             let conf = config.read();
             conf.server.as_ref().map(|server| {
@@ -1237,13 +1330,9 @@ fn App() -> Element {
         if *last_server_playlist_key.read() != current_server_key {
             last_server_playlist_key.set(current_server_key);
             selected_playlist_id.set(None);
-            playlist_store.write().jellyfin_playlists.clear();
-            {
-                let mut lib = library.write();
-                lib.jellyfin_tracks.clear();
-                lib.jellyfin_albums.clear();
-            }
             ctrl.reset_for_backend_switch();
+            // Nothing to reload: pages query by source, so switching servers is
+            // just a key change — every hook re-queries the new server's rows.
         }
     });
 
@@ -1276,24 +1365,53 @@ fn App() -> Element {
         );
     });
 
+    // The store saves are FULL-REPLACE (hundreds-to-thousands of statements),
+    // so saving on every signal mutation hammered the runtime — a batch
+    // download bumping `offline_tracks` per finished song ran a complete
+    // config save (≈840 listen-count upserts) per completion and starved the
+    // audio stream into underruns. Each domain now marks itself dirty and a
+    // debounced saver loop persists at most once per cooldown window,
+    // coalescing bursts. The CloseRequested flush below covers quitting inside
+    // the window.
+    let mut config_dirty = use_signal(|| 0u64);
     use_effect(move || {
-        if !*initial_load_done.read() {
+        if !*initial_load_done.read() || !*config_loaded_ok.read() {
             return;
         }
-        let mut config_snapshot = config.read().clone();
-        config_snapshot.volume = *volume.peek();
-        persist_config_snapshot(config_snapshot, config_path());
+        let _ = config.read();
+        config_dirty += 1;
     });
-
     use_effect(move || {
-        if !*initial_load_done.read() {
+        if !*initial_load_done.read() || !*config_loaded_ok.read() {
             return;
         }
-
-        let committed_volume = *persisted_volume.read();
-        let mut config_snapshot = config.peek().clone();
-        config_snapshot.volume = committed_volume;
-        persist_config_snapshot(config_snapshot, config_path());
+        let _ = *persisted_volume.read();
+        config_dirty += 1;
+    });
+    let db_for_cfg_save = db.clone();
+    use_future(move || {
+        let db = db_for_cfg_save.clone();
+        async move {
+            let mut flushed = 0u64;
+            loop {
+                if *config_dirty.peek() == flushed {
+                    utils::sleep(std::time::Duration::from_millis(250)).await;
+                    continue;
+                }
+                utils::sleep(std::time::Duration::from_millis(STORE_SAVE_SETTLE_MS)).await;
+                flushed = *config_dirty.peek();
+                let mut snapshot = config.peek().clone();
+                snapshot.volume = *volume.peek();
+                if let Err(e) = db
+                    .save_config(&snapshot)
+                    .instrument(tracing::info_span!("config.persist"))
+                    .await
+                {
+                    tracing::error!("Failed to save config: {}", e);
+                }
+                utils::sleep(std::time::Duration::from_millis(STORE_SAVE_COOLDOWN_MS)).await;
+            }
+        }
     });
 
     // Keepalive is rearm-on-account-change, not rearm-on-every-config-
@@ -1365,83 +1483,8 @@ fn App() -> Element {
         windows_titlebar::set_custom_titlebar_enabled(mode == config::TitlebarMode::Custom);
     });
 
-    use_effect(move || {
-        if !*initial_load_done.read() {
-            return;
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let store_snapshot = playlist_store.read().clone();
-            let path = playlist_path();
-            spawn(
-                async move {
-                    let result =
-                        tokio::task::spawn_blocking(move || store_snapshot.save(&path)).await;
-                    if let Ok(Err(e)) = result {
-                        tracing::error!("Failed to save playlists: {}", e);
-                    }
-                }
-                .instrument(tracing::info_span!("playlists.persist")),
-            );
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            let store_snapshot = playlist_store.read().clone();
-            save_web_playlists(&store_snapshot);
-        }
-    });
-
-    use_effect(move || {
-        if !*initial_load_done.read() {
-            return;
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let lib_snapshot = library.read().clone();
-            let path = lib_path();
-            spawn(
-                async move {
-                    let result =
-                        tokio::task::spawn_blocking(move || lib_snapshot.save(&path)).await;
-                    if let Ok(Err(e)) = result {
-                        tracing::error!("Failed to save library: {}", e);
-                    }
-                }
-                .instrument(tracing::info_span!("library.persist")),
-            );
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            let lib_snapshot = library.read().clone();
-            save_web_library(&lib_snapshot);
-        }
-    });
-
-    use_effect(move || {
-        if !*initial_load_done.read() {
-            return;
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let store_snapshot = favorites_store.read().clone();
-            let path = favorites_path();
-            spawn(
-                async move {
-                    let result =
-                        tokio::task::spawn_blocking(move || store_snapshot.save(&path)).await;
-                    if let Ok(Err(e)) = result {
-                        tracing::error!("Failed to save favorites: {}", e);
-                    }
-                }
-                .instrument(tracing::info_span!("favorites.persist")),
-            );
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            let store_snapshot = favorites_store.read().clone();
-            save_web_favorites(&store_snapshot);
-        }
-    });
+    // Library/playlists/favorites have no save loops anymore — every mutation
+    // commits as a targeted write at the call site and bumps a generation.
 
     use_effect(move || {
         if !*initial_load_done.read() {
@@ -1467,8 +1510,9 @@ fn App() -> Element {
         }
     });
 
+    let db_for_queue_save = db.clone();
     use_future(move || {
-        let path = queue_state_path();
+        let db = db_for_queue_save.clone();
         async move {
             let mut flushed_revision = 0u64;
 
@@ -1490,7 +1534,9 @@ fn App() -> Element {
                 }
 
                 let snapshot = pending_queue_state_snapshot.read().clone();
-                persist_queue_state_snapshot(snapshot, path.clone()).await;
+                persist_queue_state_snapshot(db.clone(), snapshot)
+                    .instrument(tracing::info_span!("queue.persist"))
+                    .await;
                 flushed_revision = latest_revision;
             }
         }
@@ -1537,6 +1583,7 @@ fn App() -> Element {
             let reachable = client
                 .get(&ping_url)
                 .send()
+                .instrument(tracing::info_span!("net.probe"))
                 .await
                 .map(|r| r.status().as_u16() < 500)
                 .unwrap_or(false);
@@ -1572,138 +1619,76 @@ fn App() -> Element {
         }
     });
 
+    let db_for_load = db.clone();
     use_hook(move || {
         #[cfg(not(target_arch = "wasm32"))]
         {
-            let lib_path = lib_path();
-            let config_path = config_path();
-            let playlist_path = playlist_path();
-            let favorites_path = favorites_path();
-            let queue_state_path = queue_state_path();
+            let db = db_for_load;
             let mut ctrl = ctrl;
 
-            spawn(
-                async move {
-                    let lib_path_c = lib_path.clone();
-                    let config_path_c = config_path.clone();
-                    let playlist_path_c = playlist_path.clone();
-                    let favorites_path_c = favorites_path.clone();
-                    let queue_state_path_c = queue_state_path.clone();
+            spawn(async move {
+                // Everything loads from the DB — the converted source of truth.
+                // The legacy JSON files are never read or written; a fresh DB
+                // with no blob yet just yields the default config.
+                // Startup loads ONLY config + queue — everything else is queried
+                // on demand by the page hooks. Config marks itself loaded ONLY
+                // on success: its save is the one remaining whole-value write,
+                // and persisting a default born of a read failure would wipe
+                // real settings/servers.
+                let cfg_loaded = match db.load_config().await {
+                    Ok(c) => {
+                        config_loaded_ok.set(true);
+                        c
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "failed to load config from db — config saves disabled this session");
+                        None
+                    }
+                };
+                let queue_loaded = db.load_queue().await.ok();
 
-                    let (lib_res, cfg_res, pl_res, fav_res, queue_res) = tokio::join!(
-                        tokio::task::spawn_blocking(move || reader::Library::load(&lib_path_c)),
-                        tokio::task::spawn_blocking(move || config::AppConfig::load(
-                            &config_path_c
-                        )),
-                        tokio::task::spawn_blocking(move || reader::PlaylistStore::load(
-                            &playlist_path_c
-                        )),
-                        tokio::task::spawn_blocking(move || FavoritesStore::load(
-                            &favorites_path_c
-                        )),
-                        tokio::task::spawn_blocking(move || {
-                            PersistedQueueState::load(&queue_state_path_c)
-                        }),
-                    );
-
-                    if let Ok(Ok(loaded)) = lib_res {
-                        library.set(loaded.clone());
-                    }
-                    if let Ok(loaded) = cfg_res {
-                        config.set(loaded.clone());
-                        configured_music_dirs.set(loaded.music_directory.clone());
-                        volume.set(loaded.volume);
-                        persisted_volume.set(loaded.volume);
-                        player.write().set_volume(loaded.volume);
-                        player.write().set_channel_mode(loaded.channel_mode);
-                        player.write().set_equalizer(loaded.equalizer.clone());
-                        i18n::set_locale(&loaded.language);
-                    }
-                    if let Ok(Ok(loaded)) = pl_res {
-                        playlist_store.set(loaded);
-                    }
-                    if let Ok(Ok(loaded)) = fav_res {
-                        favorites_store.set(loaded);
-                    }
-
-                    {
-                        let cfg = config.peek();
-                        let no_local_tracks = library.peek().tracks.is_empty();
-                        let server_connected = cfg
-                            .server
-                            .as_ref()
-                            .and_then(|s| s.access_token.as_ref())
-                            .is_some();
-                        let not_explicitly_set = !cfg.source_explicitly_set;
-                        drop(cfg);
-                        if no_local_tracks && server_connected && not_explicitly_set {
-                            config.write().active_source = config::MusicSource::Server;
-                        }
-                    }
-
-                    if let Ok(Ok(loaded_queue_state)) = queue_res
-                        && let Some(queue_state) = sanitize_queue_state(loaded_queue_state)
-                    {
-                        ctrl.restore_queue_state(
-                            queue_state.queue,
-                            queue_state.current_queue_index,
-                            queue_state.progress_secs,
-                            queue_state.shuffle_order,
-                            queue_state.shuffle_enabled,
-                        );
-                    }
-
-                    initial_load_done.set(true);
+                let cfg_loaded = cfg_loaded.unwrap_or_default();
+                {
+                    let loaded = cfg_loaded;
+                    config.set(loaded.clone());
+                    configured_music_dirs.set(loaded.music_directory.clone());
+                    volume.set(loaded.volume);
+                    persisted_volume.set(loaded.volume);
+                    player.write().set_volume(loaded.volume);
+                    player.write().set_channel_mode(loaded.channel_mode);
+                    player.write().set_equalizer(loaded.equalizer.clone());
+                    i18n::set_locale(&loaded.language);
                 }
-                .instrument(tracing::info_span!("startup.load")),
-            );
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            let mut ctrl = ctrl;
-            let mut loaded = load_web_config().unwrap_or_default();
-            if loaded.server.is_none() {
-                loaded.active_source = config::MusicSource::Server;
-            }
-            let loaded_volume = loaded.volume;
-            let loaded_language = loaded.language.clone();
-            configured_music_dirs.set(loaded.music_directory.clone());
-            config.set(loaded);
-            volume.set(loaded_volume);
-            persisted_volume.set(loaded_volume);
-            player.write().set_volume(loaded_volume);
-            player.write().set_channel_mode(config.read().channel_mode);
-            player
-                .write()
-                .set_equalizer(config.read().equalizer.clone());
-            i18n::set_locale(&loaded_language);
 
-            if let Some((
-                route,
-                saved_album_id,
-                saved_playlist_id,
-                saved_artist_name,
-                saved_search_query,
-            )) = load_web_ui_state()
-            {
-                current_route.set(route);
-                selected_album_id.set(saved_album_id);
-                selected_playlist_id.set(saved_playlist_id);
-                selected_artist_name.set(saved_artist_name);
-                search_query.set(saved_search_query);
-            }
+                {
+                    let no_local_tracks = db
+                        .tracks_count(&db::TrackFilter::new(db::Source::Local))
+                        .await
+                        .map(|n| n == 0)
+                        .unwrap_or(false);
+                    let cfg = config.peek();
+                    let server_connected = cfg
+                        .server
+                        .as_ref()
+                        .and_then(|s| s.access_token.as_ref())
+                        .is_some();
+                    let not_explicitly_set = !cfg.source_explicitly_set;
+                    drop(cfg);
+                    if no_local_tracks && server_connected && not_explicitly_set {
+                        config.write().active_source = config::MusicSource::Server;
+                    }
+                }
 
-            if let Some(loaded_library) = load_web_library() {
-                library.set(loaded_library);
-            }
-            if let Some(loaded_playlists) = load_web_playlists() {
-                playlist_store.set(loaded_playlists);
-            }
-            if let Some(loaded_favorites) = load_web_favorites() {
-                favorites_store.set(loaded_favorites);
-            }
-            if let Some(loaded_queue_state) = load_web_queue_state() {
-                if let Some(queue_state) = sanitize_queue_state(loaded_queue_state) {
+                if let Some(snap) = queue_loaded
+                    && let Some(queue_state) = sanitize_queue_state(PersistedQueueState {
+                        version: snap.version,
+                        queue: snap.queue,
+                        current_queue_index: snap.current_queue_index,
+                        progress_secs: snap.progress_secs,
+                        shuffle_order: snap.shuffle_order,
+                        shuffle_enabled: snap.shuffle_enabled,
+                    })
+                {
                     ctrl.restore_queue_state(
                         queue_state.queue,
                         queue_state.current_queue_index,
@@ -1712,33 +1697,31 @@ fn App() -> Element {
                         queue_state.shuffle_enabled,
                     );
                 }
-            }
 
+                initial_load_done.set(true);
+                // Kick one reconcile shortly after startup so pending offline
+                // likes from the previous session push now, not on the first
+                // multi-minute interval.
+                hooks::use_sync_task::nudge_activate();
+            }.instrument(tracing::info_span!("startup.load")));
+        }
+        // wasm: the stub Db yields defaults (web is not a shipped target); just
+        // unblock the save effects.
+        #[cfg(target_arch = "wasm32")]
+        {
+            config.write().active_source = config::MusicSource::Server;
+            config_loaded_ok.set(true);
             initial_load_done.set(true);
         }
     });
 
+    let db_for_rescan = db.clone();
+    let db_for_play_album = db.clone();
     use_effect(move || {
-        #[cfg(target_arch = "wasm32")]
-        {
-            let route = *current_route.read();
-            let album_id = selected_album_id.read().clone();
-            let playlist_id = selected_playlist_id.read().clone();
-            let artist_name = selected_artist_name.read().clone();
-            let query = search_query.read().clone();
-
-            save_web_ui_state(
-                route,
-                &album_id,
-                playlist_id.as_deref(),
-                &artist_name,
-                &query,
-            );
-        }
-    });
-
-    use_effect(move || {
-        if !*initial_load_done.read() {
+        // config_loaded_ok matters here: a defaulted config (load failure) has
+        // an empty music_directory, and the no-dirs branch below prunes the
+        // local library — which must never happen off phantom state.
+        if !*initial_load_done.read() || !*config_loaded_ok.read() {
             return;
         }
         let configured_dirs = configured_music_dirs.read().clone();
@@ -1764,147 +1747,215 @@ fn App() -> Element {
         }
         last_scan_key.set(Some(scan_key));
 
+        // Scans aren't cancelled, so two can overlap (a root removed mid-scan
+        // respawns this effect). Only the newest may persist — a stale scan's
+        // upserts + prune would resurrect the removed root.
+        static SCAN_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let epoch = SCAN_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        let scan_is_current =
+            move || SCAN_EPOCH.load(std::sync::atomic::Ordering::Relaxed) == epoch;
+
+        let db_scan = db_for_rescan.clone();
+        let gens_scan = gens_for_albums;
         #[cfg(not(target_arch = "wasm32"))]
-        spawn(
-            async move {
-                let configured_dirs = configured_dirs;
-                let scannable_dirs: Vec<PathBuf> = configured_dirs
-                    .iter()
-                    .filter(|d| d.exists())
-                    .cloned()
-                    .collect();
-                let mut current_lib = library.peek().clone();
-
-                let current_roots: std::collections::HashSet<_> =
-                    current_lib.root_paths.iter().cloned().collect();
-                let new_roots: std::collections::HashSet<_> =
-                    configured_dirs.iter().cloned().collect();
-
-                if current_roots != new_roots {
-                    current_lib.root_paths = configured_dirs.clone();
-                    current_lib.tracks.clear();
-                    current_lib.albums.clear();
-                    library.set(current_lib.clone());
+        spawn(async move {
+            let db = db_scan;
+            let gens = gens_scan;
+            let configured_dirs = configured_dirs;
+            let scannable_dirs: Vec<PathBuf> = configured_dirs
+                .iter()
+                .filter(|d| d.exists())
+                .cloned()
+                .collect();
+            // Seed the scan working set from the DB (the scanner skips files it
+            // already knows; album-merge keeps manual covers). One folder query
+            // per root, deduped by key in case roots nest.
+            // An errored seed must abort the scan: the keep-set fed to
+            // prune_source comes from these, and defaulting to empty would
+            // turn one transient DB error into a pruned library.
+            let mut seed_tracks: Vec<reader::Track> = Vec::new();
+            let mut seen_keys = std::collections::HashSet::new();
+            for dir in &configured_dirs {
+                let mut prefix = dir.to_string_lossy().into_owned();
+                if !prefix.ends_with(std::path::MAIN_SEPARATOR) {
+                    prefix.push(std::path::MAIN_SEPARATOR);
                 }
-
-                if !configured_dirs.is_empty() {
-                    current_lib.local_artist_images.clear();
-                    scan_current_file.set(Some(String::new()));
-
-                    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-                    spawn(async move {
-                        while let Some(file) = rx.recv().await {
-                            scan_current_file.set(Some(file));
-                        }
-                        scan_current_file.set(None);
-                    });
-
-                    let progress_cb: std::sync::Arc<dyn Fn(String) + Send + Sync> =
-                        std::sync::Arc::new(move |file: String| {
-                            let _ = tx.send(file);
-                        });
-                    for dir in &scannable_dirs {
-                        let _ = reader::scan_directory(
-                            dir.clone(),
-                            cover_cache(),
-                            &mut current_lib,
-                            progress_cb.clone(),
-                        )
-                        .await;
+                let found = match db.folder_tracks(&prefix).await {
+                    Ok(t) => t,
+                    Err(e) => {
+                        tracing::error!(error = %e, root = %prefix, "rescan: seed query failed — aborting scan");
+                        return;
                     }
-
-                    current_lib.tracks.retain(|t| {
-                        let in_configured_root =
-                            configured_dirs.iter().any(|d| t.path.starts_with(d));
-                        let in_scannable_root =
-                            scannable_dirs.iter().any(|d| t.path.starts_with(d));
-
-                        in_configured_root && (!in_scannable_root || t.path.exists())
-                    });
-
-                    let valid_album_ids: std::collections::HashSet<_> = current_lib
-                        .tracks
-                        .iter()
-                        .map(|t| t.album_id.clone())
-                        .collect();
-                    current_lib
-                        .albums
-                        .retain(|a| valid_album_ids.contains(&a.id));
-
-                    // Show the library immediately — before any cover fetching.
-                    library.set(current_lib.clone());
-                    let _ = current_lib.save(&lib_path());
-
-                    if fetch_covers {
-                        // Fetch missing covers in the background so the UI stays responsive.
-                        // Passing `progress_cb` into the task keeps the scan-progress bar
-                        // alive during fetching; it disappears automatically when the task ends.
-                        let lib_for_fetch = current_lib;
-                        spawn(
-                            async move {
-                                let fetcher = reader::cover_fetcher::CoverFetcher::new(
-                                    cover_cache(),
-                                    fetch_strategy,
-                                    lastfm_key,
-                                    progress_cb,
-                                );
-                                let mut lib = lib_for_fetch;
-                                let report = fetcher.fetch_missing_covers(&mut lib).await;
-                                tracing::info!(
-                                    "Cover auto-fetch: {} found, {} missing, {} errors",
-                                    report.found,
-                                    report.missing,
-                                    report.errors,
-                                );
-                                let merged_lib = {
-                                    let mut current = library.write();
-                                    let mut changed = false;
-
-                                    for fetched_album in lib.albums.iter() {
-                                        let Some(fetched_cover) = fetched_album.cover_path.clone()
-                                        else {
-                                            continue;
-                                        };
-
-                                        let Some(current_album) = current
-                                            .albums
-                                            .iter_mut()
-                                            .find(|a| a.id == fetched_album.id)
-                                        else {
-                                            continue;
-                                        };
-
-                                        if current_album.cover_path.is_none()
-                                            && !current_album.manual_cover
-                                        {
-                                            current_album.cover_path = Some(fetched_cover);
-                                            changed = true;
-                                        }
-                                    }
-
-                                    changed.then(|| current.clone())
-                                };
-
-                                if let Some(merged_lib) = merged_lib {
-                                    let _ = merged_lib.save(&lib_path());
-                                }
-                            }
-                            .instrument(tracing::info_span!("library.fetch_covers")),
-                        );
-                    } else {
-                        // No cover fetching — drop the callback so the progress bar closes.
-                        drop(progress_cb);
+                };
+                for t in found {
+                    if seen_keys.insert(t.id.key().into_owned()) {
+                        seed_tracks.push(t);
                     }
-                } else {
-                    current_lib.tracks.clear();
-                    current_lib.albums.clear();
-                    current_lib.root_paths.clear();
-                    library.set(current_lib.clone());
-                    let _ = current_lib.save(&lib_path());
                 }
             }
-            .instrument(tracing::info_span!("library.rescan")),
-        );
+            let seed_albums = match db.albums(&db::Source::Local).await {
+                Ok(a) => a,
+                Err(e) => {
+                    tracing::error!(error = %e, "rescan: album seed failed — aborting scan");
+                    return;
+                }
+            };
+            let mut current_lib = reader::Library {
+                root_paths: configured_dirs.clone(),
+                tracks: seed_tracks,
+                albums: seed_albums,
+                ..Default::default()
+            };
+
+            if !configured_dirs.is_empty() {
+                scan_current_file.set(Some(String::new()));
+
+                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+                spawn(async move {
+                    while let Some(file) = rx.recv().await {
+                        scan_current_file.set(Some(file));
+                    }
+                    scan_current_file.set(None);
+                });
+
+                let progress_cb: std::sync::Arc<dyn Fn(String) + Send + Sync> =
+                    std::sync::Arc::new(move |file: String| {
+                        let _ = tx.send(file);
+                    });
+                for dir in &scannable_dirs {
+                    let _ = reader::scan_directory(
+                        dir.clone(),
+                        cover_cache(),
+                        &mut current_lib,
+                        progress_cb.clone(),
+                    )
+                    .await;
+                }
+
+                current_lib.tracks.retain(|t| {
+                    let in_configured_root = configured_dirs
+                        .iter()
+                        .any(|d| t.id.local_path().is_some_and(|p| p.starts_with(d)));
+                    let in_scannable_root = scannable_dirs
+                        .iter()
+                        .any(|d| t.id.local_path().is_some_and(|p| p.starts_with(d)));
+
+                    in_configured_root
+                        && (!in_scannable_root || t.id.local_path().is_some_and(|p| p.exists()))
+                });
+
+                let valid_album_ids: std::collections::HashSet<_> = current_lib
+                    .tracks
+                    .iter()
+                    .map(|t| t.album_id.clone())
+                    .collect();
+                current_lib
+                    .albums
+                    .retain(|a| valid_album_ids.contains(&a.id));
+
+                // Persist the scan directly: chunked upserts, prune what's gone,
+                // bump so the page hooks re-query. No in-memory mirror.
+                if !scan_is_current() {
+                    tracing::info!("rescan superseded by a newer scan — discarding results");
+                    return;
+                }
+                for chunk in current_lib.tracks.chunks(100) {
+                    let _ = db.upsert_tracks(&db::Source::Local, chunk).await;
+                    gens.bump_coalesced(hooks::db_reactivity::Table::Tracks);
+                }
+                let _ = db.upsert_albums(&db::Source::Local, &current_lib.albums).await;
+                let keep_keys: Vec<String> = current_lib
+                    .tracks
+                    .iter()
+                    .map(|t| t.id.key().into_owned())
+                    .collect();
+                let keep_albums: Vec<String> =
+                    current_lib.albums.iter().map(|a| a.id.clone()).collect();
+                if !scan_is_current() {
+                    tracing::info!("rescan superseded mid-persist — skipping prune");
+                    return;
+                }
+                let _ = db
+                    .prune_source(&db::Source::Local, &keep_keys, &keep_albums)
+                    .await;
+                for (artist, img) in &current_lib.local_artist_images {
+                    let p = img.to_string_lossy().into_owned();
+                    let _ = db.set_artist_image(artist, "local", Some(&p)).await;
+                }
+                // Drop stored local artist images whose file disappeared (the
+                // old scan rebuilt the whole map each pass, self-healing this).
+                if let Ok((_, local_imgs, _)) = db.artist_images().await {
+                    for (artist, path) in local_imgs {
+                        if !path.exists() {
+                            let _ = db.set_artist_image(&artist, "local", None).await;
+                        }
+                    }
+                }
+                gens.bump(hooks::db_reactivity::Table::Tracks);
+                gens.bump(hooks::db_reactivity::Table::Albums);
+
+                if fetch_covers {
+                    // Fetch missing covers in the background so the UI stays responsive.
+                    // Passing `progress_cb` into the task keeps the scan-progress bar
+                    // alive during fetching; it disappears automatically when the task ends.
+                    // Albums that HAD no cover before the fetch get the fetched one
+                    // written straight to the DB (manual covers were never in the
+                    // missing set, so they can't be overwritten).
+                    let lib_for_fetch = current_lib;
+                    let db = db.clone();
+                    spawn(async move {
+                        let fetcher = reader::cover_fetcher::CoverFetcher::new(
+                            cover_cache(),
+                            fetch_strategy,
+                            lastfm_key,
+                            progress_cb,
+                        );
+                        let mut lib = lib_for_fetch;
+                        let missing_before: std::collections::HashSet<String> = lib
+                            .albums
+                            .iter()
+                            .filter(|a| a.cover_path.is_none() && !a.manual_cover)
+                            .map(|a| a.id.clone())
+                            .collect();
+                        let report = fetcher.fetch_missing_covers(&mut lib).await;
+                        tracing::info!(
+                            "Cover auto-fetch: {} found, {} missing, {} errors",
+                            report.found,
+                            report.missing,
+                            report.errors,
+                        );
+                        let mut changed = false;
+                        for album in lib.albums.iter() {
+                            if !missing_before.contains(&album.id) {
+                                continue;
+                            }
+                            let Some(cover) = album.cover_path.as_ref() else {
+                                continue;
+                            };
+                            let p = cover.to_string_lossy().into_owned();
+                            if db
+                                .update_album_cover(&db::Source::Local, &album.id, Some(&p), false)
+                                .await
+                                .is_ok()
+                            {
+                                changed = true;
+                            }
+                        }
+                        if changed {
+                            gens.bump(hooks::db_reactivity::Table::Albums);
+                        }
+                    }.instrument(tracing::info_span!("library.fetch_covers")));
+                } else {
+                    // No cover fetching — drop the callback so the progress bar closes.
+                    drop(progress_cb);
+                }
+            } else {
+                // No music directories configured: the local library is empty.
+                let _ = db.prune_source(&db::Source::Local, &[], &[]).await;
+                gens.bump(hooks::db_reactivity::Table::Tracks);
+                gens.bump(hooks::db_reactivity::Table::Albums);
+            }
+        }.instrument(tracing::info_span!("library.rescan")));
     });
 
     use_effect(move || {
@@ -2196,8 +2247,6 @@ fn App() -> Element {
 
             if config.read().player_bar_position == config::PlayerBarPosition::Top {
                 Bottombar {
-                    library: library,
-                    favorites_store,
                     config,
                     current_song_cover_url: current_song_cover_url,
                     current_song_title: current_song_title,
@@ -2314,9 +2363,6 @@ fn App() -> Element {
                     match *current_route.read() {
                         Route::Home => rsx! {
                             pages::home::Home {
-                                library,
-                                playlist_store,
-                                favorites_store,
                                 on_select_album: move |id: String| {
                                     selected_album_id.set(id);
                                     current_route.set(Route::Album);
@@ -2324,26 +2370,40 @@ fn App() -> Element {
                                 on_play_album: move |id: String| {
                                     selected_album_id.set(id.clone());
 
-                                    let lib = library.peek();
-                                    let is_jelly = id.starts_with("jellyfin:");
-                                    let mut tracks: Vec<reader::Track> = if is_jelly {
-                                        lib.jellyfin_tracks.iter().filter(|t| t.album_id == id).cloned().collect()
-                                    } else {
-                                        lib.tracks.iter().filter(|t| t.album_id == id).cloned().collect()
+                                    // Key on the active source, not an id-prefix
+                                    // sniff — Subsonic/Custom album ids carry
+                                    // their own prefixes and Home only emits the
+                                    // active source's ids anyway.
+                                    let source = {
+                                        let c = config.peek();
+                                        let server_active =
+                                            matches!(c.active_source, config::MusicSource::Server);
+                                        match c
+                                            .active_server_id
+                                            .clone()
+                                            .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
+                                        {
+                                            Some(sid) if server_active => db::Source::Server(sid),
+                                            _ => db::Source::Local,
+                                        }
                                     };
-
-                                    if !tracks.is_empty() {
-                                        tracks.sort_by(|a, b| {
-                                            let disc_cmp = a.disc_number.unwrap_or(1).cmp(&b.disc_number.unwrap_or(1));
-                                            if disc_cmp == std::cmp::Ordering::Equal {
-                                                a.track_number.unwrap_or(0).cmp(&b.track_number.unwrap_or(0))
-                                            } else {
-                                                disc_cmp
-                                            }
-                                        });
-                                        queue.set(tracks);
-                                        ctrl.play_track(0);
-                                    }
+                                    let db = db_for_play_album.clone();
+                                    spawn(async move {
+                                        let mut tracks =
+                                            db.album_tracks(&source, &id).await.unwrap_or_default();
+                                        if !tracks.is_empty() {
+                                            tracks.sort_by(|a, b| {
+                                                let disc_cmp = a.disc_number.unwrap_or(1).cmp(&b.disc_number.unwrap_or(1));
+                                                if disc_cmp == std::cmp::Ordering::Equal {
+                                                    a.track_number.unwrap_or(0).cmp(&b.track_number.unwrap_or(0))
+                                                } else {
+                                                    disc_cmp
+                                                }
+                                            });
+                                            queue.set(tracks);
+                                            ctrl.play_track(0);
+                                        }
+                                    });
                                     current_route.set(Route::Album);
                                 },
                                 on_select_playlist: move |id: String| {
@@ -2359,7 +2419,6 @@ fn App() -> Element {
                         },
                         Route::Discover => rsx! {
                             pages::server::discover::DiscoverPage {
-                                library: library,
                                 on_select_album: move |id: String| {
                                     selected_album_id.set(id);
                                     current_route.set(Route::Album);
@@ -2395,9 +2454,7 @@ fn App() -> Element {
                         },
                         Route::Search => rsx! {
                             pages::search::Search {
-                                library: library,
                                 config: config,
-                                playlist_store: playlist_store,
                                 search_query: search_query,
                                 player: player,
                                 is_playing: is_playing,
@@ -2417,9 +2474,7 @@ fn App() -> Element {
                         },
                         Route::Library => rsx! {
                             pages::library::LibraryPage {
-                                library: library,
                                 config: config,
-                                playlist_store: playlist_store,
                                 on_rescan: move |_| *trigger_rescan.write() += 1,
                                 player: player,
                                 is_playing: is_playing,
@@ -2435,10 +2490,8 @@ fn App() -> Element {
                         },
                         Route::Album => rsx! {
                             pages::album::Album {
-                                library: library,
                                 config: config,
                                 album_id: selected_album_id,
-                                playlist_store: playlist_store,
                                 queue: queue,
                                 current_queue_index: current_queue_index,
                             }
@@ -2494,10 +2547,8 @@ fn App() -> Element {
                             } else {
                                 rsx! {
                                     pages::artist::Artist {
-                                        library: library,
                                         config: config,
                                         artist_name: selected_artist_name,
-                                        playlist_store: playlist_store,
                                         player: player,
                                         on_navigate: move |album_id| {
                                             selected_album_id.set(album_id);
@@ -2518,10 +2569,7 @@ fn App() -> Element {
                         },
                         Route::Favorites => rsx! {
                             pages::favorites::FavoritesPage {
-                                favorites_store,
-                                library,
                                 config,
-                                playlist_store,
                                 player,
                                 is_playing,
                                 current_playing,
@@ -2536,15 +2584,12 @@ fn App() -> Element {
                         },
                         Route::Playlists => rsx! {
                             pages::playlists::PlaylistsPage {
-                                playlist_store: playlist_store,
-                                library: library,
                                 config: config,
                                 selected_playlist_id: selected_playlist_id,
                             }
                         },
                         Route::Activity => rsx! {
                           pages::activity::Activity {
-                              library: library,
                               config: config,
                           }
                         },
@@ -2554,7 +2599,7 @@ fn App() -> Element {
                             }
                         },
                         #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-                        Route::Ytdlp => rsx! { pages::ytdlp::YtdlpPage { config, trigger_rescan } },
+                        Route::Ytdlp => rsx! { pages::ytdlp::YtdlpPage { config } },
                         #[cfg(target_arch = "wasm32")]
                         Route::Ytdlp => rsx! { pages::settings::Settings { config } },
                         Route::Settings => rsx! { pages::settings::Settings { config } },
@@ -2564,7 +2609,6 @@ fn App() -> Element {
                     }
                 }
                 Rightbar {
-                    library: library,
                     is_rightbar_open: is_rightbar_open,
                     width: rightbar_width,
                     current_song_duration: current_song_duration,
@@ -2577,7 +2621,6 @@ fn App() -> Element {
                 }
             }
             Fullscreen {
-                library: library,
                 player: player,
                 is_playing: is_playing,
                 is_fullscreen: is_fullscreen,
@@ -2597,8 +2640,6 @@ fn App() -> Element {
             DownloadOverlay { queue: download_queue }
             if config.read().player_bar_position == config::PlayerBarPosition::Bottom {
                 Bottombar {
-                    library: library,
-                    favorites_store,
                     config,
                     current_song_cover_url: current_song_cover_url,
                     current_song_title: current_song_title,

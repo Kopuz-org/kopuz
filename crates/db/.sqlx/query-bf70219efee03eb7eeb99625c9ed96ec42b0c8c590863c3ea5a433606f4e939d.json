@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, name, url, service, access_token, user_id, yt_browser, yt_anonymous FROM servers WHERE id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "url",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "service",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "access_token",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "user_id",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "yt_browser",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "yt_anonymous",
+        "ordinal": 7,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "bf70219efee03eb7eeb99625c9ed96ec42b0c8c590863c3ea5a433606f4e939d"
+}

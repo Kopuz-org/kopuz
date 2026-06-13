@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT artist, COUNT(*) AS \"cnt!: i64\" FROM tracks WHERE source = ?1 AND artist != ''\n         GROUP BY artist ORDER BY artist COLLATE NOCASE",
+  "describe": {
+    "columns": [
+      {
+        "name": "artist",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "cnt!: i64",
+        "ordinal": 1,
+        "type_info": "Null"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "77b606a9d0e7a1849723ff74d85e61d06ccdfe7ad2556438e0e0af2228a7bafe"
+}

@@ -4,7 +4,7 @@ use config::MusicService;
 use dioxus::logger::tracing::Instrument;
 use dioxus::{logger::tracing, prelude::*};
 use player::player::{NowPlayingMeta, Player};
-use reader::{Library, Track};
+use reader::Track;
 use scrobble;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -52,7 +52,9 @@ pub struct PlayerController {
     pub current_song_cover_url: Signal<String>,
     pub current_track_snapshot: Signal<Option<Track>>,
     pub volume: Signal<f32>,
-    pub library: Signal<Library>,
+    /// Local albums snapshot, hydrated from the DB by the host (a slim stand-in
+    /// for the old whole-Library signal — only the sync cover lookups need it).
+    pub local_albums: Signal<Vec<reader::Album>>,
     pub config: Signal<AppConfig>,
     pub play_generation: Signal<usize>,
     pending_resume: Signal<Option<PendingResumeState>>,
@@ -82,7 +84,7 @@ pub struct PendingCrossfadeUiState {
 
 impl PlayerController {
     fn track_key(track: &Track) -> String {
-        track.path.to_string_lossy().to_string()
+        track.id.uid().to_string()
     }
 
     fn shift_indices_at_or_after(indices: &mut [usize], at: usize, by: usize) {
@@ -134,8 +136,9 @@ impl PlayerController {
                 .server
                 .as_ref()
                 .and_then(|server| {
-                    utils::jellyfin_image::track_cover_url_with_album_fallback(
-                        &path_str,
+                    utils::jellyfin_image::resolve_track_cover(
+                        track.cover.as_deref(),
+                        &track.id.key(),
                         &track.album_id,
                         &server.url,
                         server.access_token.as_deref(),
@@ -150,8 +153,12 @@ impl PlayerController {
                 .server
                 .as_ref()
                 .and_then(|server| {
+                    let subsonic_path = match track.cover.as_deref() {
+                        Some(c) => format!("{}:{}", track.id.uid(), c),
+                        None => track.id.uid(),
+                    };
                     utils::subsonic_image::subsonic_image_url_from_path(
-                        &path_str,
+                        &subsonic_path,
                         &server.url,
                         server.access_token.as_deref(),
                         800,
@@ -159,26 +166,19 @@ impl PlayerController {
                     )
                 })
                 .unwrap_or_default(),
-            "ytmusic" => {
-                // YT tracks carry their thumbnail in album_id as
-                // `ytmusic:_:urlhex_HEX`. Pass empty server_url so
-                // `track_cover_url_with_album_fallback` skips its
-                // jellyfin-URL fallback path and only returns the
-                // embedded URL via decode_embedded_cover_url.
-                utils::jellyfin_image::track_cover_url_with_album_fallback(
-                    &path_str,
-                    &track.album_id,
-                    "",
-                    None,
-                    800,
-                    90,
-                )
-                .unwrap_or_default()
-            }
+            "ytmusic" => utils::jellyfin_image::resolve_track_cover(
+                track.cover.as_deref(),
+                &track.id.key(),
+                &track.album_id,
+                "",
+                None,
+                800,
+                90,
+            )
+            .unwrap_or_default(),
             _ => self
-                .library
+                .local_albums
                 .read()
-                .albums
                 .iter()
                 .find(|album| album.id == track.album_id)
                 .and_then(|album| utils::format_artwork_url(album.cover_path.as_ref()))
@@ -406,7 +406,7 @@ impl PlayerController {
         self.cancel_radio_task();
 
         if let Some(track) = self.get_track_at(idx) {
-            let path_str = track.path.to_string_lossy().to_string();
+            let path_str = track.id.uid().to_string();
             let (restore_seek_secs, clear_pending_resume_on_success) =
                 self.pending_resume_seek(&track);
             let use_crossfade = allow_crossfade
@@ -567,18 +567,16 @@ impl PlayerController {
                                     stream_url.push_str(&format!("&api_key={}", token));
                                 }
 
-                                let cover_url = {
-                                    let path_str = track.path.to_string_lossy();
-                                    utils::jellyfin_image::track_cover_url_with_album_fallback(
-                                        &path_str,
-                                        &track.album_id,
-                                        &server.url,
-                                        server.access_token.as_deref(),
-                                        800,
-                                        90,
-                                    )
-                                    .unwrap_or_default()
-                                };
+                                let cover_url = utils::jellyfin_image::resolve_track_cover(
+                                    track.cover.as_deref(),
+                                    &track.id.key(),
+                                    &track.album_id,
+                                    &server.url,
+                                    server.access_token.as_deref(),
+                                    800,
+                                    90,
+                                )
+                                .unwrap_or_default();
 
                                 (stream_url, cover_url)
                             }
@@ -593,9 +591,13 @@ impl PlayerController {
                                             password,
                                         );
                                         let stream_url = remote.stream_url(&id).unwrap_or_default();
+                                        let subsonic_path = match track.cover.as_deref() {
+                                            Some(c) => format!("{}:{}", track.id.uid(), c),
+                                            None => track.id.uid(),
+                                        };
                                         let cover_url =
                                             utils::subsonic_image::subsonic_image_url_from_path(
-                                                &path_str,
+                                                &subsonic_path,
                                                 &server.url,
                                                 server.access_token.as_deref(),
                                                 800,
@@ -619,16 +621,16 @@ impl PlayerController {
                             // can produce it synchronously here so the
                             // bottombar shows artwork immediately on click.
                             MusicService::YtMusic => {
-                                let cover_url =
-                                    utils::jellyfin_image::track_cover_url_with_album_fallback(
-                                        &path_str,
-                                        &track.album_id,
-                                        "",
-                                        None,
-                                        800,
-                                        90,
-                                    )
-                                    .unwrap_or_default();
+                                let cover_url = utils::jellyfin_image::resolve_track_cover(
+                                    track.cover.as_deref(),
+                                    &track.id.key(),
+                                    &track.album_id,
+                                    "",
+                                    None,
+                                    800,
+                                    90,
+                                )
+                                .unwrap_or_default();
                                 (format!("__YT_PENDING:{id}"), cover_url)
                             }
                         })
@@ -678,7 +680,7 @@ impl PlayerController {
 
                     self.is_loading.set(true);
 
-                    let is_radio = track.path.to_string_lossy().starts_with("radio:");
+                    let is_radio = track.id.uid().starts_with("radio:");
 
                     #[cfg(not(target_arch = "wasm32"))]
                     spawn(async move {
@@ -736,7 +738,11 @@ impl PlayerController {
                                             current_song_bitrate_for_yt.set(kbps);
                                         }
                                     }
-                                    (info.url, Some(info.format), Some(info.user_agent))
+                                    (
+                                        info.url,
+                                        Some((info.format, info.range_safe)),
+                                        Some(info.user_agent),
+                                    )
                                 }
                                 Err(e) => {
                                     // Same guard: a stale error must NOT post a banner
@@ -768,19 +774,39 @@ impl PlayerController {
                                 );
                                 let (source, hint) = decoder::from_stream_with_hint(stream, "ogg");
                                 Ok::<_, std::io::Error>((source, hint))
-                            } else if let Some(fmt) = yt_format_for_blocking {
-                                // YT: HTTP Range-backed source. Symphonia
-                                // can seek freely (Matroska Cues at the
-                                // end, scrub anywhere) and startup probes
-                                // only fetch the ~512 KiB they need.
-                                let range = utils::range_source::RangeStreamSource::new(
-                                    stream_url_for_blocking,
-                                    yt_ua_for_blocking,
-                                )?;
-                                let len = Some(range.total_size());
-                                let (source, mut hint) = decoder::from_stream_with_len(range, len);
-                                hint.with_extension(fmt.extension());
-                                Ok::<_, std::io::Error>((source, hint))
+                            } else if let Some((fmt, range_safe)) = yt_format_for_blocking {
+                                if range_safe {
+                                    // YT: HTTP Range-backed source. Symphonia
+                                    // can seek freely (Matroska Cues at the
+                                    // end, scrub anywhere) and startup probes
+                                    // only fetch the ~512 KiB they need.
+                                    let range = utils::range_source::RangeStreamSource::new(
+                                        stream_url_for_blocking,
+                                        yt_ua_for_blocking,
+                                    )?;
+                                    let len = Some(range.total_size());
+                                    let (source, mut hint) =
+                                        decoder::from_stream_with_len(range, len);
+                                    hint.with_extension(fmt.extension());
+                                    Ok::<_, std::io::Error>((source, hint))
+                                } else {
+                                    // No-pot fallback: googlevideo 403s deep
+                                    // ranges, and the probe reads the webm tail
+                                    // — stream sequentially instead of failing
+                                    // outright (issue #386). No scrubbing.
+                                    let stream =
+                                        utils::stream_buffer::StreamBuffer::with_user_agent(
+                                            stream_url_for_blocking,
+                                            false,
+                                            yt_ua_for_blocking,
+                                        );
+                                    stream.wait_for_total_size();
+                                    let len = stream.known_total_size();
+                                    let (source, mut hint) =
+                                        decoder::from_stream_with_len(stream, len);
+                                    hint.with_extension(fmt.extension());
+                                    Ok::<_, std::io::Error>((source, hint))
+                                }
                             } else {
                                 let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
                                     stream_url_for_blocking,
@@ -847,8 +873,8 @@ impl PlayerController {
                                 skip_in_progress.set(false);
 
                                 let is_radio_item =
-                                    track.path.to_string_lossy().starts_with("radio:");
-                                let path_lossy = track.path.to_string_lossy().to_string();
+                                    track.id.uid().starts_with("radio:");
+                                let path_lossy = track.id.uid().to_string();
                                 let parts: Vec<&str> = path_lossy.split(':').collect();
                                 let (station_id, stream_id) = if is_radio_item {
                                     (
@@ -1210,7 +1236,7 @@ impl PlayerController {
                                                 player.write().update_metadata(new_meta);
                                             }
                                         }
-                                    });
+                                    }.instrument(tracing::info_span!("player.cover_fetch")));
                                 }
                             }
                         } else {
@@ -1496,11 +1522,13 @@ impl PlayerController {
                     return;
                 } // local files not supported on web
                 #[cfg(not(target_arch = "wasm32"))]
-                if let Ok((source, hint)) = decoder::open_file(&track.path) {
+                if let Some(track_path) = track.id.local_path()
+                    && let Ok((source, hint)) = decoder::open_file(track_path)
+                {
                     {
                         let artwork = {
-                            let lib = self.library.peek();
-                            lib.albums
+                            let albums = self.local_albums.peek();
+                            albums
                                 .iter()
                                 .find(|a| a.id == track.album_id)
                                 .and_then(|a| {
@@ -1563,137 +1591,144 @@ impl PlayerController {
                             let duration_secs = scrobble_track.duration;
                             let threshold_secs = std::cmp::min(240, duration_secs / 2);
 
-                            spawn(async move {
-                                // track must be longer than 30 seconds
-                                if duration_secs < 30 {
-                                    return;
-                                }
-
-                                let mut map: HashMap<&str, &str> = HashMap::new();
-                                if let Some(ref mbid) = scrobble_track.musicbrainz_release_id {
-                                    map.insert("release_mbid", mbid.as_str());
-                                }
-                                if let Some(ref mbid) = scrobble_track.musicbrainz_recording_id {
-                                    map.insert("recording_mbid", mbid.as_str());
-                                }
-                                if let Some(ref mbid) = scrobble_track.musicbrainz_track_id {
-                                    map.insert("track_mbid", mbid.as_str());
-                                }
-
-                                // Last.fm now-playing
-                                let lastfm_api_key = cfg_signal.read().lastfm_api_key.clone();
-                                let lastfm_api_secret = cfg_signal.read().lastfm_api_secret.clone();
-                                let lastfm_session_key =
-                                    cfg_signal.read().lastfm_session_key.clone();
-                                let has_lastfm =
-                                    !lastfm_api_key.is_empty() && !lastfm_api_secret.is_empty();
-
-                                if has_lastfm {
-                                    let playing_now = scrobble::lastfm::make_playing_now(
-                                        &scrobble_track.artist,
-                                        &scrobble_track.title,
-                                        Some(&scrobble_track.album),
-                                    );
-                                    if let Err(e) = scrobble::lastfm::submit_now_playing(
-                                        &lastfm_api_key,
-                                        &lastfm_api_secret,
-                                        &lastfm_session_key,
-                                        &playing_now,
-                                    )
-                                    .await
-                                    {
-                                        tracing::warn!("Last.fm now playing failed: {}", e);
+                            spawn(
+                                async move {
+                                    // track must be longer than 30 seconds
+                                    if duration_secs < 30 {
+                                        return;
                                     }
-                                }
 
-                                // MusicBrainz playing_now
-                                let token_raw = cfg_signal.read().musicbrainz_token.clone();
-                                if !token_raw.is_empty() {
-                                    let auth = if token_raw.contains(' ') {
-                                        token_raw.clone()
-                                    } else {
-                                        format!("Token {}", token_raw)
-                                    };
-                                    let playing_now = scrobble::musicbrainz::make_playing_now(
-                                        &scrobble_track.artist,
-                                        &scrobble_track.title,
-                                        Some(&scrobble_track.album),
-                                        Some(map.clone()),
-                                    );
-                                    if let Err(e) = scrobble::musicbrainz::submit_listens(
-                                        &auth,
-                                        vec![playing_now],
-                                        "playing_now",
-                                    )
-                                    .await
-                                    {
-                                        tracing::warn!("MusicBrainz playing_now failed: {}", e);
+                                    let mut map: HashMap<&str, &str> = HashMap::new();
+                                    if let Some(ref mbid) = scrobble_track.musicbrainz_release_id {
+                                        map.insert("release_mbid", mbid.as_str());
                                     }
-                                }
+                                    if let Some(ref mbid) = scrobble_track.musicbrainz_recording_id
+                                    {
+                                        map.insert("recording_mbid", mbid.as_str());
+                                    }
+                                    if let Some(ref mbid) = scrobble_track.musicbrainz_track_id {
+                                        map.insert("track_mbid", mbid.as_str());
+                                    }
 
-                                tokio::time::sleep(std::time::Duration::from_secs(threshold_secs))
+                                    // Last.fm now-playing
+                                    let lastfm_api_key = cfg_signal.read().lastfm_api_key.clone();
+                                    let lastfm_api_secret =
+                                        cfg_signal.read().lastfm_api_secret.clone();
+                                    let lastfm_session_key =
+                                        cfg_signal.read().lastfm_session_key.clone();
+                                    let has_lastfm =
+                                        !lastfm_api_key.is_empty() && !lastfm_api_secret.is_empty();
+
+                                    if has_lastfm {
+                                        let playing_now = scrobble::lastfm::make_playing_now(
+                                            &scrobble_track.artist,
+                                            &scrobble_track.title,
+                                            Some(&scrobble_track.album),
+                                        );
+                                        if let Err(e) = scrobble::lastfm::submit_now_playing(
+                                            &lastfm_api_key,
+                                            &lastfm_api_secret,
+                                            &lastfm_session_key,
+                                            &playing_now,
+                                        )
+                                        .await
+                                        {
+                                            tracing::warn!("Last.fm now playing failed: {}", e);
+                                        }
+                                    }
+
+                                    // MusicBrainz playing_now
+                                    let token_raw = cfg_signal.read().musicbrainz_token.clone();
+                                    if !token_raw.is_empty() {
+                                        let auth = if token_raw.contains(' ') {
+                                            token_raw.clone()
+                                        } else {
+                                            format!("Token {}", token_raw)
+                                        };
+                                        let playing_now = scrobble::musicbrainz::make_playing_now(
+                                            &scrobble_track.artist,
+                                            &scrobble_track.title,
+                                            Some(&scrobble_track.album),
+                                            Some(map.clone()),
+                                        );
+                                        if let Err(e) = scrobble::musicbrainz::submit_listens(
+                                            &auth,
+                                            vec![playing_now],
+                                            "playing_now",
+                                        )
+                                        .await
+                                        {
+                                            tracing::warn!("MusicBrainz playing_now failed: {}", e);
+                                        }
+                                    }
+
+                                    tokio::time::sleep(std::time::Duration::from_secs(
+                                        threshold_secs,
+                                    ))
                                     .await;
 
-                                if *play_generation_signal.read() != gen_snapshot {
-                                    return;
-                                }
+                                    if *play_generation_signal.read() != gen_snapshot {
+                                        return;
+                                    }
 
-                                if has_lastfm {
-                                    let scrobble = scrobble::lastfm::make_scrobble(
-                                        &scrobble_track.artist,
-                                        &scrobble_track.title,
-                                        Some(&scrobble_track.album),
-                                    );
-                                    match scrobble::lastfm::submit_scrobble(
-                                        &lastfm_api_key,
-                                        &lastfm_api_secret,
-                                        &lastfm_session_key,
-                                        &scrobble,
-                                    )
-                                    .await
-                                    {
-                                        Ok(_) => tracing::info!(
-                                            "Last.fm scrobbled: {} - {}",
-                                            scrobble_track.artist,
-                                            scrobble_track.title
-                                        ),
-                                        Err(e) => {
-                                            tracing::warn!("Last.fm scrobble failed: {}", e)
+                                    if has_lastfm {
+                                        let scrobble = scrobble::lastfm::make_scrobble(
+                                            &scrobble_track.artist,
+                                            &scrobble_track.title,
+                                            Some(&scrobble_track.album),
+                                        );
+                                        match scrobble::lastfm::submit_scrobble(
+                                            &lastfm_api_key,
+                                            &lastfm_api_secret,
+                                            &lastfm_session_key,
+                                            &scrobble,
+                                        )
+                                        .await
+                                        {
+                                            Ok(_) => tracing::info!(
+                                                "Last.fm scrobbled: {} - {}",
+                                                scrobble_track.artist,
+                                                scrobble_track.title
+                                            ),
+                                            Err(e) => {
+                                                tracing::warn!("Last.fm scrobble failed: {}", e)
+                                            }
+                                        }
+                                    }
+
+                                    let token_raw = cfg_signal.read().musicbrainz_token.clone();
+                                    if !token_raw.is_empty() {
+                                        let auth = if token_raw.contains(' ') {
+                                            token_raw
+                                        } else {
+                                            format!("Token {}", token_raw)
+                                        };
+                                        let listen = scrobble::musicbrainz::make_listen(
+                                            &scrobble_track.artist,
+                                            &scrobble_track.title,
+                                            Some(&scrobble_track.album),
+                                            Some(map.clone()),
+                                        );
+                                        match scrobble::musicbrainz::submit_listens(
+                                            &auth,
+                                            vec![listen],
+                                            "single",
+                                        )
+                                        .await
+                                        {
+                                            Ok(_) => tracing::info!(
+                                                "MusicBrainz scrobbled: {} - {}",
+                                                scrobble_track.artist,
+                                                scrobble_track.title
+                                            ),
+                                            Err(e) => {
+                                                tracing::warn!("MusicBrainz scrobble failed: {}", e)
+                                            }
                                         }
                                     }
                                 }
-
-                                let token_raw = cfg_signal.read().musicbrainz_token.clone();
-                                if !token_raw.is_empty() {
-                                    let auth = if token_raw.contains(' ') {
-                                        token_raw
-                                    } else {
-                                        format!("Token {}", token_raw)
-                                    };
-                                    let listen = scrobble::musicbrainz::make_listen(
-                                        &scrobble_track.artist,
-                                        &scrobble_track.title,
-                                        Some(&scrobble_track.album),
-                                        Some(map.clone()),
-                                    );
-                                    match scrobble::musicbrainz::submit_listens(
-                                        &auth,
-                                        vec![listen],
-                                        "single",
-                                    )
-                                    .await
-                                    {
-                                        Ok(_) => tracing::info!(
-                                            "MusicBrainz scrobbled: {} - {}",
-                                            scrobble_track.artist,
-                                            scrobble_track.title
-                                        ),
-                                        Err(e) => {
-                                            tracing::warn!("MusicBrainz scrobble failed: {}", e)
-                                        }
-                                    }
-                                }
-                            });
+                                .instrument(tracing::info_span!("scrobble.submit")),
+                            );
                         }
                     }
                 }
@@ -1923,7 +1958,8 @@ impl PlayerController {
     pub fn play_radio(&mut self, station_id: &str, stream_id: &str) {
         let path = format!("radio:{}:{}", station_id, stream_id);
         let track = Track {
-            path: std::path::PathBuf::from(path),
+            id: reader::models::TrackId::Local(std::path::PathBuf::from(path)),
+            cover: None,
             album_id: "".to_string(),
             title: stream_id.to_string(),
             artist: station_id.to_string(),
@@ -1982,7 +2018,7 @@ impl PlayerController {
         let idx = *self.current_queue_index.peek();
         let is_radio = self
             .get_track_at(idx)
-            .is_some_and(|t| t.path.to_string_lossy().starts_with("radio:"));
+            .is_some_and(|t| t.id.uid().starts_with("radio:"));
 
         if is_radio {
             self.player.write().stop_for_transition();
@@ -1996,7 +2032,7 @@ impl PlayerController {
         let idx = *self.current_queue_index.peek();
         let is_radio = self
             .get_track_at(idx)
-            .is_some_and(|t| t.path.to_string_lossy().starts_with("radio:"));
+            .is_some_and(|t| t.id.uid().starts_with("radio:"));
 
         if is_radio || !self.player.peek().can_resume() {
             if let Some(track) = self.get_track_at(idx) {
@@ -2167,7 +2203,7 @@ pub fn use_player_controller(
     current_song_cover_url: Signal<String>,
     current_track_snapshot: Signal<Option<Track>>,
     volume: Signal<f32>,
-    library: Signal<Library>,
+    local_albums: Signal<Vec<reader::Album>>,
     config: Signal<AppConfig>,
 ) -> PlayerController {
     let play_generation = use_signal(|| 0);
@@ -2204,7 +2240,7 @@ pub fn use_player_controller(
         current_song_cover_url,
         current_track_snapshot,
         volume,
-        library,
+        local_albums,
         config,
         play_generation,
         pending_resume,

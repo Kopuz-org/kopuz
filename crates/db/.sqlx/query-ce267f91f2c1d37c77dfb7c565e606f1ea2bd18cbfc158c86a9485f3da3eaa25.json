@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO metadata_cache (cache_key, kind, payload) VALUES ('yt_sync', 'timestamps', ?1) ON CONFLICT(cache_key, kind) DO UPDATE SET payload = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "ce267f91f2c1d37c77dfb7c565e606f1ea2bd18cbfc158c86a9485f3da3eaa25"
+}

@@ -1,18 +1,20 @@
 use dioxus::prelude::*;
-use reader::PlaylistStore;
+use hooks::db_reactivity::Table;
+use hooks::use_db_queries::{use_active_server_id, use_playlists};
 
 #[component]
-pub fn FolderPickerModal(
-    mut playlist_store: Signal<PlaylistStore>,
-    playlist_id: String,
-    on_close: EventHandler<()>,
-) -> Element {
+pub fn FolderPickerModal(playlist_id: String, on_close: EventHandler<()>) -> Element {
     let mut new_folder_name = use_signal(String::new);
     let mut show_create = use_signal(|| false);
+    let gens = hooks::db_reactivity::use_generations();
+    let active_server_id = use_active_server_id();
+    let playlists_res = use_playlists(active_server_id);
 
-    let store = playlist_store.read();
-    let folders = store.folders.clone();
-    drop(store);
+    let folders = playlists_res
+        .read()
+        .as_ref()
+        .map(|s| s.folders.clone())
+        .unwrap_or_default();
 
     let pid = playlist_id.clone();
     let pid_keydown = pid.clone();
@@ -43,14 +45,24 @@ pub fn FolderPickerModal(
                                         key: "{fid}",
                                         class: "w-full text-left px-3 py-2 rounded-lg text-sm text-white hover:bg-white/10 flex items-center gap-2 transition-colors",
                                         onclick: move |_| {
-                                            let mut store = playlist_store.write();
-                                            for f in &mut store.folders {
+                                            let mut folders = playlists_res
+                                                .read()
+                                                .as_ref()
+                                                .map(|s| s.folders.clone())
+                                                .unwrap_or_default();
+                                            for f in &mut folders {
                                                 f.playlist_ids.retain(|id| id != &pid2);
                                             }
-                                            if let Some(f) = store.folders.iter_mut().find(|f| f.id == fid)
+                                            if let Some(f) = folders.iter_mut().find(|f| f.id == fid)
                                                 && !f.playlist_ids.contains(&pid2) {
                                                     f.playlist_ids.push(pid2.clone());
                                                 }
+                                            let db = consume_context::<db::Db>();
+                                            spawn(async move {
+                                                if db.set_folders(&folders).await.is_ok() {
+                                                    gens.bump(Table::Folders);
+                                                }
+                                            });
                                             on_close.call(());
                                         },
                                         i { class: "fa-solid fa-folder text-amber-400 text-xs" }
@@ -75,14 +87,24 @@ pub fn FolderPickerModal(
                                     if !name.is_empty() {
                                         let new_id = uuid::Uuid::new_v4().to_string();
                                         let pid3 = pid_keydown.clone();
-                                        let mut store = playlist_store.write();
-                                        for f in &mut store.folders {
+                                        let mut folders = playlists_res
+                                            .read()
+                                            .as_ref()
+                                            .map(|s| s.folders.clone())
+                                            .unwrap_or_default();
+                                        for f in &mut folders {
                                             f.playlist_ids.retain(|id| id != &pid3);
                                         }
-                                        store.folders.push(reader::PlaylistFolder {
+                                        folders.push(reader::PlaylistFolder {
                                             id: new_id,
                                             name,
                                             playlist_ids: vec![pid3],
+                                        });
+                                        let db = consume_context::<db::Db>();
+                                        spawn(async move {
+                                            if db.set_folders(&folders).await.is_ok() {
+                                                gens.bump(Table::Folders);
+                                            }
                                         });
                                         on_close.call(());
                                     }
@@ -97,14 +119,24 @@ pub fn FolderPickerModal(
                                     let name = new_folder_name.read().trim().to_string();
                                     if !name.is_empty() {
                                         let new_id = uuid::Uuid::new_v4().to_string();
-                                        let mut store = playlist_store.write();
-                                        for f in &mut store.folders {
+                                        let mut folders = playlists_res
+                                            .read()
+                                            .as_ref()
+                                            .map(|s| s.folders.clone())
+                                            .unwrap_or_default();
+                                        for f in &mut folders {
                                             f.playlist_ids.retain(|id| id != &pid4);
                                         }
-                                        store.folders.push(reader::PlaylistFolder {
+                                        folders.push(reader::PlaylistFolder {
                                             id: new_id,
                                             name,
                                             playlist_ids: vec![pid4.clone()],
+                                        });
+                                        let db = consume_context::<db::Db>();
+                                        spawn(async move {
+                                            if db.set_folders(&folders).await.is_ok() {
+                                                gens.bump(Table::Folders);
+                                            }
                                         });
                                         on_close.call(());
                                     }

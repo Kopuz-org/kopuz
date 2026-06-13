@@ -1,4 +1,4 @@
-use reader::models::Track;
+use reader::models::{Track, TrackId};
 use serde_json::Value;
 
 pub mod botguard;
@@ -18,6 +18,14 @@ pub mod verify_session_keepalive;
 pub use player::YtStreamInfo;
 
 pub const SOURCE_PREFIX: &str = "ytmusic";
+
+/// Build the typed id for a YouTube Music track (video id).
+pub(crate) fn yt_id(video_id: impl Into<String>) -> TrackId {
+    TrackId::Server {
+        service: config::MusicService::YtMusic,
+        item_id: video_id.into(),
+    }
+}
 
 /// Surfaced by auth-only operations (like/unlike, add-to-playlist,
 /// liked-songs sync) when the YT backend is in anonymous mode.
@@ -144,6 +152,7 @@ impl YouTubeMusicClient {
     /// so the UI can populate incrementally instead of waiting for the
     /// whole library to download. Walks `continuationItemRenderer`
     /// tokens until exhausted.
+    #[tracing::instrument(name = "yt.liked_stream", skip_all)]
     pub async fn stream_liked_songs<F>(&self, mut on_page: F) -> Result<(), String>
     where
         F: FnMut(Vec<Track>),
@@ -167,13 +176,7 @@ impl YouTubeMusicClient {
             |page: Vec<Track>, seen: &mut std::collections::HashSet<String>| -> Vec<Track> {
                 page.into_iter()
                     .filter(|t| {
-                        let id = t
-                            .path
-                            .to_string_lossy()
-                            .split(':')
-                            .nth(1)
-                            .unwrap_or("")
-                            .to_string();
+                        let id = t.id.key().to_string();
                         !id.is_empty() && seen.insert(id)
                     })
                     .collect()
@@ -249,6 +252,7 @@ impl YouTubeMusicClient {
     /// `/browse?browseId=VLLM` (Liked Music) is the canonical probe: it
     /// returns a `signInEndpoint`-bearing message renderer for anonymous
     /// callers and real playlist content for signed-in ones.
+    #[tracing::instrument(name = "yt.validate", skip_all)]
     pub async fn validate_cookies(&self) -> Result<(), String> {
         // Anonymous mode has no cookies to validate — succeed silently
         // so callers (settings probe, keepalive) treat it as healthy.

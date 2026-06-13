@@ -1,12 +1,11 @@
 use dioxus::prelude::*;
-use reader::PlaylistStore;
+use hooks::use_db_queries::{use_active_server_id, use_playlists};
 
 const DEFAULT_OVERLAY_CLASS: &str =
     "fixed inset-0 bg-black/80 flex items-center justify-center z-50";
 
 #[derive(PartialEq, Clone, Props)]
 pub struct PlaylistModalProps {
-    pub playlist_store: Signal<PlaylistStore>,
     pub is_jellyfin: bool,
     pub on_close: EventHandler,
     pub on_add_to_playlist: EventHandler<String>,
@@ -18,7 +17,9 @@ pub struct PlaylistModalProps {
 #[component]
 pub fn PlaylistModal(props: PlaylistModalProps) -> Element {
     let mut new_playlist_name = use_signal(String::new);
-    let store = props.playlist_store.read();
+    let active_server_id = use_active_server_id();
+    let playlists_res = use_playlists(active_server_id);
+    let store = playlists_res.read().clone().unwrap_or_default();
     let add_to_playlist_text = i18n::t("add_to_playlist").to_string();
     let no_playlists_found_text = i18n::t("no_playlists_found").to_string();
     let create_new_playlist_text = i18n::t("create_new_playlist").to_string();

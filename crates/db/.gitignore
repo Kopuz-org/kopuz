@@ -1,0 +1,7 @@
+# Throwaway dev/prepare databases — never commit. (The .sqlx/ query cache IS committed.)
+*.db
+*.db-wal
+*.db-shm
+*.bak
+*.bak-wal
+*.bak-shm
