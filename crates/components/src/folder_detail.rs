@@ -1,12 +1,12 @@
-use db::Source;
 use dioxus::prelude::*;
-use hooks::use_db_queries::{use_albums, use_folder_tracks};
-use reader::models::Track;
+use reader::{Library, PlaylistStore, models::Track};
 use std::path::PathBuf;
 
 #[component]
 pub fn FolderDetail(
     folder_path: String,
+    library: Signal<Library>,
+    mut playlist_store: Signal<PlaylistStore>,
     config: Signal<config::AppConfig>,
     on_close: EventHandler<()>,
 ) -> Element {
@@ -16,18 +16,13 @@ pub fn FolderDetail(
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| folder_path.clone());
 
-    let source = use_memo(|| Source::Local);
-    let prefix = use_memo(use_reactive!(|folder_path| {
-        if folder_path.ends_with(std::path::MAIN_SEPARATOR) {
-            folder_path
-        } else {
-            format!("{folder_path}{}", std::path::MAIN_SEPARATOR)
-        }
-    }));
-    let tracks_res = use_folder_tracks(prefix);
-    let albums_res = use_albums(source);
-
-    let mut folder_tracks: Vec<Track> = tracks_res.read().clone().unwrap_or_default();
+    let lib = library.read();
+    let mut folder_tracks: Vec<Track> = lib
+        .tracks
+        .iter()
+        .filter(|t| t.path.starts_with(&folder_path_buf))
+        .cloned()
+        .collect();
     folder_tracks.sort_by(|a, b| {
         a.disc_number
             .cmp(&b.disc_number)
@@ -36,12 +31,13 @@ pub fn FolderDetail(
     });
 
     let cover_url = folder_tracks.first().and_then(|t| {
-        albums_res
-            .read()
-            .as_ref()
-            .and_then(|albums| albums.iter().find(|a| a.id == t.album_id))
+        lib.albums
+            .iter()
+            .find(|a| a.id == t.album_id)
             .and_then(|a| utils::format_artwork_url(a.cover_path.as_ref()))
     });
+
+    drop(lib);
 
     let _ = config;
 
@@ -52,6 +48,8 @@ pub fn FolderDetail(
             cover_url,
             back_label: i18n::t("back_to_playlists").to_string(),
             tracks: folder_tracks,
+            library,
+            playlist_store,
             on_close,
             enable_metadata: true,
         }

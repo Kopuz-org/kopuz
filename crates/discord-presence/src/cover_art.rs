@@ -151,58 +151,6 @@ async fn verify_cover_exists(
     Ok(status.is_success() || status.is_redirection())
 }
 
-const COVER_META_KIND: &str = "cover_art";
-const COVER_NEGATIVE_TTL_SECS: u64 = 7 * 24 * 60 * 60;
-
-fn cover_cache_key(mbid: Option<&str>, artist: &str, album: &str) -> String {
-    format!(
-        "{}|{}|{}",
-        mbid.unwrap_or(""),
-        artist.to_lowercase(),
-        album.to_lowercase()
-    )
-}
-
-fn now_unix() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
-}
-
-/// Read-through over [`resolve_cover_art_url`]: the MusicBrainz/iTunes result
-/// (including "no cover", with a TTL) persists in the metadata cache so songs
-/// aren't re-resolved across restarts.
-pub async fn resolve_cover_art_url_cached(
-    mbid: Option<&str>,
-    artist: &str,
-    album: &str,
-) -> Option<String> {
-    let key = cover_cache_key(mbid, artist, album);
-    if let Some(handle) = utils::db_cache::get()
-        && let Ok(Some(payload)) = handle.meta_get(&key, COVER_META_KIND).await
-    {
-        if let Some(url) = payload.strip_prefix("url:") {
-            return Some(url.to_string());
-        }
-        if let Some(ts) = payload.strip_prefix("none:")
-            && now_unix().saturating_sub(ts.parse().unwrap_or(0)) < COVER_NEGATIVE_TTL_SECS
-        {
-            return None;
-        }
-    }
-
-    let resolved = resolve_cover_art_url(mbid, artist, album).await;
-    if let Some(handle) = utils::db_cache::get() {
-        let payload = match &resolved {
-            Some(url) => format!("url:{url}"),
-            None => format!("none:{}", now_unix()),
-        };
-        let _ = handle.meta_put(&key, COVER_META_KIND, &payload).await;
-    }
-    resolved
-}
-
 pub async fn resolve_cover_art_url(
     mbid: Option<&str>,
     artist: &str,

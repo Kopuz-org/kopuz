@@ -6,6 +6,7 @@ use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 use player::player;
+use reader::Library;
 use reader::models::Track;
 
 #[component]
@@ -14,6 +15,8 @@ pub fn SearchGenreDetail(
     genre_tracks: Vec<(Track, Option<utils::CoverUrl>)>,
     genres: Vec<(String, Option<utils::CoverUrl>)>,
     on_back: EventHandler<()>,
+    library: Signal<Library>,
+    playlist_store: Signal<reader::PlaylistStore>,
     player: Signal<player::Player>,
     mut is_playing: Signal<bool>,
     mut current_song_cover_url: Signal<String>,
@@ -29,7 +32,6 @@ pub fn SearchGenreDetail(
 ) -> Element {
     let mut ctrl = use_context::<PlayerController>();
     let config = use_context::<Signal<AppConfig>>();
-    let gens = hooks::db_reactivity::use_generations();
     let offline_tracks = config.read().offline_tracks.clone();
     let is_modern = config.read().ui_style == UiStyle::Modern;
     let sort_state = use_signal(|| None);
@@ -38,7 +40,7 @@ pub fn SearchGenreDetail(
         sorted_genre_tracks.iter().map(|(t, _)| t.clone()).collect();
     let currently_playing_path = {
         let idx = *ctrl.current_queue_index.read();
-        ctrl.get_track_at(idx).map(|track| track.id.uid_path())
+        ctrl.get_track_at(idx).map(|track| track.path.clone())
     };
     let current_song_title = ctrl.current_song_title.read().clone();
     let current_song_artist = ctrl.current_song_artist.read().clone();
@@ -186,13 +188,13 @@ pub fn SearchGenreDetail(
                          for (idx, (track, cover_url)) in sorted_genre_tracks.iter().enumerate().skip(scroll_info.start_index).take(scroll_info.items_to_render) {
                          {
                              let track = track.clone();
-                             let track_key = track.id.uid();
+                             let track_key = track.path.display().to_string();
                              let track_menu = track.clone();
                              let track_add = track.clone();
                              let track_queue = track.clone();
                              let track_delete = track.clone();
                              let queue_source = genre_tracks_list.clone();
-                             let matches_current_path = currently_playing_path.as_ref() == Some(&track.id.uid_path());
+                             let matches_current_path = currently_playing_path.as_ref() == Some(&track.path);
                              let matches_current_metadata = currently_playing_path.is_none()
                                  && !current_song_title.is_empty()
                                  && track.title == current_song_title
@@ -200,9 +202,9 @@ pub fn SearchGenreDetail(
                                  && track.album == current_song_album
                                  && track.duration == current_song_duration;
                              let is_currently_playing: bool = matches_current_path || matches_current_metadata;
-                             let is_menu_open = active_menu_track.read().as_ref() == Some(&track.id.uid_path());
+                             let is_menu_open = active_menu_track.read().as_ref() == Some(&track.path);
                              let item_id: Option<String> = {
-                                 let s = track.id.uid();
+                                 let s = track.path.to_string_lossy();
                                  if s.starts_with("jellyfin:") {
                                      s.split(':').nth(1).map(|id| id.to_string())
                                  } else { None }
@@ -228,14 +230,14 @@ pub fn SearchGenreDetail(
                                      is_downloaded: is_downloaded,
                                      is_currently_playing,
                                      on_click_menu: move |_| {
-                                         if active_menu_track.read().as_ref() == Some(&track_menu.id.uid_path()) {
+                                         if active_menu_track.read().as_ref() == Some(&track_menu.path) {
                                              active_menu_track.set(None);
                                          } else {
-                                             active_menu_track.set(Some(track_menu.id.uid_path()));
+                                             active_menu_track.set(Some(track_menu.path.clone()));
                                          }
                                      },
                                      on_add_to_playlist: move |_| {
-                                         selected_track_for_playlist.set(Some(track_add.id.uid_path()));
+                                         selected_track_for_playlist.set(Some(track_add.path.clone()));
                                          show_playlist_modal.set(true);
                                          active_menu_track.set(None);
                                      },
@@ -246,20 +248,12 @@ pub fn SearchGenreDetail(
                                      on_close_menu: move |_| active_menu_track.set(None),
                                      on_delete: move |_| {
                                          active_menu_track.set(None);
-                                         if let Some(del_path) = track_delete.id.local_path()
-                                             && std::fs::remove_file(del_path).is_ok()
-                                         {
-                                             let db = consume_context::<db::Db>();
-                                             let key = track_delete.id.key().into_owned();
-                                             spawn(async move {
-                                                 if db
-                                                     .delete_tracks(&db::Source::Local, &[key])
-                                                     .await
-                                                     .is_ok()
-                                                 {
-                                                     gens.bump(hooks::db_reactivity::Table::Tracks);
-                                                 }
-                                             });
+                                         if std::fs::remove_file(&track_delete.path).is_ok() {
+                                             library.write().remove_track(&track_delete.path);
+                                             let lib_path = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
+                                                 .map(|d| d.config_dir().join("library.json"))
+                                                 .unwrap_or_else(|| std::path::PathBuf::from("./config/library.json"));
+                                             let _ = library.read().save(&lib_path);
                                          }
                                      },
                                      on_play: move |_| {

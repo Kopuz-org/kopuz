@@ -1,10 +1,8 @@
 use config::{AppConfig, MusicService, UiStyle};
-use db::{Page, Source, TrackFilter, TrackSort};
 use dioxus::prelude::*;
-use hooks::use_db_queries::{use_albums, use_tracks_window};
 use hooks::use_player_controller::PlayerController;
 use kopuz_route::Route;
-use reader::Track;
+use reader::{Library, Track};
 use std::collections::HashMap;
 
 fn format_duration(seconds: u64) -> String {
@@ -14,64 +12,15 @@ fn format_duration(seconds: u64) -> String {
 }
 
 #[component]
-pub fn JellyfinLogs(config: Signal<AppConfig>) -> Element {
+pub fn JellyfinLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Element {
     let mut ctrl = use_context::<PlayerController>();
 
-    let active_server_id = use_memo(move || {
-        let c = config.read();
-        c.active_server_id
-            .clone()
-            .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
-            .unwrap_or_default()
-    });
-    let server_source = use_memo(move || Source::Server(active_server_id()));
-    let filter = use_memo(move || TrackFilter {
-        source: Source::Server(active_server_id()),
-        sort: TrackSort::PlayCount,
-        search: String::new(),
-    });
-    let albums_res = use_albums(server_source);
-
-    let is_modern = config.read().ui_style == UiStyle::Modern;
-    let mut scroll_positions = use_context::<Signal<std::collections::HashMap<Route, f64>>>();
-    let saved_scroll = scroll_positions
-        .peek()
-        .get(&Route::Activity)
-        .copied()
-        .unwrap_or(0.0);
-
-    let scroll_stat = use_signal(move || saved_scroll);
-    let container_height = use_signal(|| 0.0_f64);
-    const ITEM_HEIGHT: f64 = 60.0;
-
-    let mut total_items = use_signal(|| 0usize);
-    let page = use_memo(move || {
-        let info = components::virtual_scroll::use_virtual_scroll(
-            *scroll_stat.read(),
-            *container_height.read(),
-            *total_items.read(),
-            ITEM_HEIGHT,
-        );
-        Page {
-            offset: info.start_index as u32,
-            limit: info.items_to_render as u32,
-        }
-    });
-    let window = use_tracks_window(filter, page);
-    use_effect(move || {
-        let total = (*window.total.read()).unwrap_or(0) as usize;
-        if *total_items.peek() != total {
-            total_items.set(total);
-        }
-    });
-
     let track_data = use_memo(move || {
+        let lib = library.read();
         let conf = config.read();
 
-        let album_genre_map: HashMap<String, String> = albums_res
-            .read()
-            .clone()
-            .unwrap_or_default()
+        let album_genre_map: HashMap<String, String> = lib
+            .jellyfin_albums
             .iter()
             .map(|a| (a.id.clone(), a.genre.clone()))
             .collect();
@@ -81,38 +30,77 @@ pub fn JellyfinLogs(config: Signal<AppConfig>) -> Element {
             .as_ref()
             .map(|s| (s.url.clone(), s.access_token.clone()));
 
-        let window_rows = window.rows.read().clone().unwrap_or_default();
-        let offset = window_rows.offset as usize;
-        window_rows
-            .rows
+        let mut all_tracks = lib.jellyfin_tracks.clone();
+
+        all_tracks.sort_by(|a, b| {
+            let a_plays = conf
+                .listen_counts
+                .get(&a.path.to_string_lossy().to_string())
+                .copied()
+                .unwrap_or(0);
+            let b_plays = conf
+                .listen_counts
+                .get(&b.path.to_string_lossy().to_string())
+                .copied()
+                .unwrap_or(0);
+
+            match b_plays.cmp(&a_plays) {
+                std::cmp::Ordering::Equal => a.title.cmp(&b.title),
+                other => other,
+            }
+        });
+
+        all_tracks
             .into_iter()
-            .enumerate()
-            .map(|(i, track)| {
-                let track_id = track.id.uid();
+            .map(|track| {
+                let track_id = track.path.to_string_lossy().to_string();
                 let plays = conf.listen_counts.get(&track_id).copied().unwrap_or(0);
                 let genre = album_genre_map
                     .get(&track.album_id)
                     .cloned()
                     .unwrap_or_default();
                 let cover_url = if let Some((ref base_url, ref token)) = cover_url_base {
-                    utils::map_cover_url(utils::jellyfin_image::resolve_track_cover(
-                        track.cover.as_deref(),
-                        &track.id.key(),
-                        &track.album_id,
-                        base_url,
-                        token.as_deref(),
-                        64,
-                        90,
-                    ))
+                    utils::map_cover_url(
+                        utils::jellyfin_image::track_cover_url_with_album_fallback(
+                            &track.path.to_string_lossy(),
+                            &track.album_id,
+                            base_url,
+                            token.as_deref(),
+                            64,
+                            90,
+                        ),
+                    )
                 } else {
                     None
                 };
-                (offset + i, track, plays, genre, cover_url)
+                (track, plays, genre, cover_url)
             })
-            .collect::<Vec<(usize, Track, u64, String, Option<utils::CoverUrl>)>>()
+            .collect::<Vec<(Track, u64, String, Option<utils::CoverUrl>)>>()
     });
 
-    let track_data_len = *total_items.read();
+    let queue_tracks = use_memo(move || {
+        std::sync::Arc::new(
+            track_data
+                .read()
+                .iter()
+                .map(|(t, _, _, _)| t.clone())
+                .collect::<Vec<_>>(),
+        )
+    });
+
+    let is_modern = config.read().ui_style == UiStyle::Modern;
+    let mut scroll_positions = use_context::<Signal<std::collections::HashMap<Route, f64>>>();
+    let saved_scroll = scroll_positions
+        .peek()
+        .get(&Route::Activity)
+        .copied()
+        .unwrap_or(0.0);
+
+    let scroll_stat = use_signal(|| 0.0_f64);
+    let container_height = use_signal(|| 0.0_f64);
+    const ITEM_HEIGHT: f64 = 60.0;
+
+    let track_data_len = track_data.read().len();
     let scroll_info = components::virtual_scroll::use_virtual_scroll(
         *scroll_stat.read(),
         *container_height.read(),
@@ -120,8 +108,16 @@ pub fn JellyfinLogs(config: Signal<AppConfig>) -> Element {
         ITEM_HEIGHT,
     );
 
-    let visible_tracks: Vec<(usize, Track, u64, String, Option<utils::CoverUrl>)> =
-        track_data.read().clone();
+    let visible_tracks: Vec<(usize, Track, u64, String, Option<utils::CoverUrl>)> = track_data
+        .read()
+        .iter()
+        .enumerate()
+        .skip(scroll_info.start_index)
+        .take(scroll_info.items_to_render)
+        .map(|(idx, (track, plays, genre, cover_url))| {
+            (idx, track.clone(), *plays, genre.clone(), cover_url.clone())
+        })
+        .collect();
 
     rsx! {
         div { class: if is_modern { "px-6 pt-6 pb-24 absolute inset-0 flex flex-col" } else { "p-8 absolute inset-0 flex flex-col" },
@@ -180,22 +176,15 @@ pub fn JellyfinLogs(config: Signal<AppConfig>) -> Element {
                     } else {
                         for (idx, track, plays, genre, cover_url) in visible_tracks {
                             {
-                                let track_id = track.id.uid();
+                                let track_id = track.path.to_string_lossy().to_string();
+                                let queue = std::sync::Arc::clone(&*queue_tracks.read());
                                 rsx! {
                                     div { key: "{track_id}", style: "height: {ITEM_HEIGHT}px;",
                                         div {
                                             class: "flex items-center h-full px-4 hover:bg-white/5 rounded-xl cursor-pointer transition-colors group",
                                             onclick: move |_| {
-                                                let f = filter.peek().clone();
-                                                let db = consume_context::<db::Db>();
-                                                spawn(async move {
-                                                    let all = db
-                                                        .tracks_page(&f, Page { offset: 0, limit: u32::MAX })
-                                                        .await
-                                                        .unwrap_or_default();
-                                                    ctrl.queue.set(all);
-                                                    ctrl.play_track(idx);
-                                                });
+                                                ctrl.queue.set((*queue).clone());
+                                                ctrl.play_track(idx);
                                             },
                                             div { class: "w-12 shrink-0 flex items-center justify-center tabular-nums text-slate-500 font-medium group-hover:text-white transition-colors relative",
                                                 span { class: "group-hover:opacity-0 transition-opacity", "{idx + 1}" }
@@ -262,7 +251,7 @@ pub fn JellyfinLogs(config: Signal<AppConfig>) -> Element {
 }
 
 #[component]
-pub fn ServerLogs(config: Signal<AppConfig>) -> Element {
+pub fn ServerLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Element {
     let service = config
         .read()
         .active_service()
@@ -273,7 +262,7 @@ pub fn ServerLogs(config: Signal<AppConfig>) -> Element {
         | MusicService::Subsonic
         | MusicService::Custom
         | MusicService::YtMusic => rsx! {
-            JellyfinLogs { config }
+            JellyfinLogs { library, config }
         },
     }
 }

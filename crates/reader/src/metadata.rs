@@ -1,4 +1,4 @@
-use super::models::{Album, CoverChange, Library, Track, TrackEdits, TrackId};
+use super::models::{Album, CoverChange, Library, Track, TrackEdits};
 use super::utils::{find_folder_cover, save_cover};
 use lofty::file::TaggedFileExt;
 use lofty::picture::{Picture, PictureType};
@@ -133,8 +133,7 @@ pub fn extract_metadata(
     let bitrate_kbps = ((file_size * 8) / duration_secs / 1000).min(u16::MAX as u64) as u16;
 
     Track {
-        id: TrackId::Local(track_path.to_path_buf()),
-        cover: None,
+        path: track_path.to_path_buf(),
         album_id: make_album_id(album_title.as_deref().unwrap_or(""), grouping_key),
         title,
         artist,
@@ -472,8 +471,7 @@ fn read_with_symphonia(
         .unwrap_or(0);
 
     let track = Track {
-        id: TrackId::Local(track_path.to_path_buf()),
-        cover: None,
+        path: track_path.to_path_buf(),
         album_id: make_album_id(album_title.as_deref().unwrap_or(""), grouping_key),
         title,
         artist: artist.clone(),

@@ -1,7 +1,7 @@
 use config::{AppConfig, MusicService, MusicSource};
 use dioxus::prelude::*;
+use reader::Library;
 use reader::models::{Album, Track};
-use tracing::Instrument;
 
 type TrackRes = Vec<(Track, Option<utils::CoverUrl>)>;
 type AlbumRes = Vec<(Album, Option<utils::CoverUrl>)>;
@@ -81,32 +81,41 @@ fn search_server(
         .take(100)
         .map(|t| {
             let cover_url = server.as_ref().and_then(|srv| {
+                let path_str = t.path.to_string_lossy();
                 let url = match active_service {
-                    Some(MusicService::Jellyfin) => utils::jellyfin_image::resolve_track_cover(
-                        t.cover.as_deref(),
-                        &t.id.key(),
-                        &t.album_id,
-                        &srv.url,
-                        srv.access_token.as_deref(),
-                        80,
-                        80,
-                    ),
-                    Some(MusicService::Subsonic) | Some(MusicService::Custom) => {
-                        let subsonic_path = match t.cover.as_deref() {
-                            Some(c) => format!("{}:{}", t.id.uid(), c),
-                            None => t.id.uid(),
-                        };
-                        utils::subsonic_image::subsonic_image_url_from_path(
-                            &subsonic_path,
+                    Some(MusicService::Jellyfin) => {
+                        utils::jellyfin_image::track_cover_url_with_album_fallback(
+                            &path_str,
+                            &t.album_id,
                             &srv.url,
                             srv.access_token.as_deref(),
                             80,
                             80,
                         )
                     }
-                    // YT thumbnail now lives in Track.cover (no longer encoded
-                    // into the synthetic path).
-                    Some(MusicService::YtMusic) => t.cover.clone(),
+                    Some(MusicService::Subsonic) | Some(MusicService::Custom) => {
+                        utils::subsonic_image::subsonic_image_url_from_path(
+                            &path_str,
+                            &srv.url,
+                            srv.access_token.as_deref(),
+                            80,
+                            80,
+                        )
+                    }
+                    Some(MusicService::YtMusic) => {
+                        // YT thumbnails are urlhex-encoded into album_id;
+                        // pass empty server_url so the fallback function
+                        // skips its Jellyfin URL constructor and only
+                        // returns the embedded URL via decode.
+                        utils::jellyfin_image::track_cover_url_with_album_fallback(
+                            &path_str,
+                            &t.album_id,
+                            "",
+                            None,
+                            80,
+                            80,
+                        )
+                    }
                     None => None,
                 };
                 utils::map_cover_url(url)
@@ -204,15 +213,16 @@ async fn search_ytmusic(query: &str, cookies: Option<String>) -> Option<(TrackRe
     let result_tracks: TrackRes = tracks
         .into_iter()
         .map(|t| {
-            let cover_url = utils::map_cover_url(utils::jellyfin_image::resolve_track_cover(
-                t.cover.as_deref(),
-                &t.id.key(),
-                &t.album_id,
-                "",
-                None,
-                80,
-                80,
-            ));
+            let path_str = t.path.to_string_lossy();
+            let cover_url =
+                utils::map_cover_url(utils::jellyfin_image::track_cover_url_with_album_fallback(
+                    &path_str,
+                    &t.album_id,
+                    "",
+                    None,
+                    80,
+                    80,
+                ));
             (t, cover_url)
         })
         .collect();
@@ -234,34 +244,21 @@ async fn run_search(
     }
 }
 
-pub fn use_search_data(search_query: Signal<String>, config: Signal<AppConfig>) -> SearchData {
-    let db = use_context::<db::Db>();
-    let source = use_memo(move || {
-        let conf = config.read();
-        if conf.active_source == MusicSource::Server {
-            let sid = conf
-                .active_server_id
-                .clone()
-                .or_else(|| conf.server.as_ref().and_then(|s| s.id.clone()))
-                .unwrap_or_default();
-            db::Source::Server(sid)
-        } else {
-            db::Source::Local
-        }
-    });
-    let albums_res = crate::use_db_queries::use_albums(source);
-    let gens = crate::db_reactivity::use_generations();
-
+pub fn use_search_data(
+    library: Signal<Library>,
+    search_query: Signal<String>,
+    config: Signal<AppConfig>,
+) -> SearchData {
     let genres = use_memo(move || {
         let conf = config.read();
         let active_source = conf.active_source;
         let active_service = conf.active_service();
         let server = conf.server.clone();
-        let albums = albums_res.read().clone().unwrap_or_default();
+        let lib = library.read();
 
         if active_source == MusicSource::Server {
             let mut genre_items = std::collections::HashMap::new();
-            for album in &albums {
+            for album in &lib.jellyfin_albums {
                 for g in album.genre.split(['/', ';', ',']) {
                     let g = g.trim();
                     if !g.is_empty() && !genre_items.contains_key(g) {
@@ -306,7 +303,7 @@ pub fn use_search_data(search_query: Signal<String>, config: Signal<AppConfig>) 
         let mut genre_covers: std::collections::HashMap<String, Vec<std::path::PathBuf>> =
             std::collections::HashMap::new();
 
-        for album in &albums {
+        for album in &lib.albums {
             let genre = album.genre.trim();
             if !genre.is_empty() {
                 if let Some(cover) = &album.cover_path {
@@ -339,8 +336,6 @@ pub fn use_search_data(search_query: Signal<String>, config: Signal<AppConfig>) 
     });
 
     let search_results = use_resource(move || {
-        let _ = gens.generation(crate::db_reactivity::Table::Tracks);
-        let _ = gens.generation(crate::db_reactivity::Table::Albums);
         let query = search_query.read().to_lowercase();
         let (active_source, active_service, server) = {
             let conf = config.read();
@@ -350,20 +345,18 @@ pub fn use_search_data(search_query: Signal<String>, config: Signal<AppConfig>) 
                 conf.server.clone(),
             )
         };
-        let src = source();
-        let db = db.clone();
+        let (tracks, albums) = {
+            let lib = library.read();
+            match &active_source {
+                MusicSource::Local => (lib.tracks.clone(), lib.albums.clone()),
+                MusicSource::Server => (lib.jellyfin_tracks.clone(), lib.jellyfin_albums.clone()),
+            }
+        };
 
         async move {
             if query.trim().is_empty() {
                 return None;
             }
-            let span = tracing::info_span!("query.search_corpus", source = src.as_str());
-            let tracks = db
-                .search_corpus(&src)
-                .instrument(span)
-                .await
-                .unwrap_or_default();
-            let albums = db.albums(&src).await.unwrap_or_default();
             run_search(query, tracks, albums, active_source, active_service, server).await
         }
     });

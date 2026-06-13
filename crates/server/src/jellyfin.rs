@@ -385,7 +385,6 @@ impl JellyfinClient {
         Ok(items_resp.items)
     }
 
-    #[tracing::instrument(name = "jellyfin.playlist_create", skip_all, fields(count = item_ids.len()))]
     pub async fn create_playlist(&self, name: &str, item_ids: &[&str]) -> Result<String, String> {
         let user_id = self.user_id.as_ref().ok_or("No user ID available")?;
         let token = self
@@ -427,7 +426,6 @@ impl JellyfinClient {
         Ok(result.id)
     }
 
-    #[tracing::instrument(name = "jellyfin.playlist_add", skip(self), fields(playlist_id = %playlist_id, item_id = %item_id))]
     pub async fn add_to_playlist(&self, playlist_id: &str, item_id: &str) -> Result<(), String> {
         let user_id = self.user_id.as_ref().ok_or("No user ID available")?;
         let token = self
@@ -468,7 +466,6 @@ impl JellyfinClient {
         Ok(items_resp.items)
     }
 
-    #[tracing::instrument(name = "jellyfin.playlist_remove", skip(self), fields(playlist_id = %playlist_id, entry_id = %entry_id))]
     pub async fn remove_from_playlist(
         &self,
         playlist_id: &str,
@@ -505,7 +502,6 @@ impl JellyfinClient {
         Ok(())
     }
 
-    #[tracing::instrument(name = "jellyfin.playlist_move", skip(self), fields(playlist_id = %playlist_id, item_id = %item_id, new_index))]
     pub async fn move_playlist_item(
         &self,
         playlist_id: &str,
@@ -543,7 +539,6 @@ impl JellyfinClient {
         Ok(())
     }
 
-    #[tracing::instrument(name = "jellyfin.set_playlist_image", skip_all, fields(playlist_id = %playlist_id))]
     pub async fn set_playlist_image(
         &self,
         playlist_id: &str,
@@ -606,7 +601,6 @@ impl JellyfinClient {
         Ok((albums_resp.items, albums_resp.total_record_count))
     }
 
-    #[tracing::instrument(name = "jellyfin.playback_report", skip(self), fields(item_id = %item_id))]
     pub async fn report_playback_start(&self, item_id: &str) -> Result<(), String> {
         let token = self
             .access_token
@@ -645,7 +639,6 @@ impl JellyfinClient {
         Ok(())
     }
 
-    #[tracing::instrument(name = "jellyfin.playback_report", skip(self), fields(item_id = %item_id))]
     pub async fn report_playback_progress(
         &self,
         item_id: &str,
@@ -689,7 +682,6 @@ impl JellyfinClient {
         Ok(())
     }
 
-    #[tracing::instrument(name = "jellyfin.playback_report", skip(self), fields(item_id = %item_id))]
     pub async fn report_playback_stopped(
         &self,
         item_id: &str,
@@ -730,7 +722,6 @@ impl JellyfinClient {
         Ok(())
     }
 
-    #[tracing::instrument(name = "jellyfin.ping", skip_all)]
     pub async fn ping(&self) -> Result<(), String> {
         let token = self
             .access_token

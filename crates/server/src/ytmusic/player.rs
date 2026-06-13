@@ -17,7 +17,6 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use tokio::sync::OnceCell;
-use tracing::Instrument;
 
 use super::botguard;
 use super::clients::{ANDROID_VR_1_61_48, STREAM_FALLBACK_CLIENTS, WEB_REMIX, YouTubeClient};
@@ -61,12 +60,6 @@ pub struct YtStreamInfo {
     pub bitrate: Option<u32>,
     /// YouTube format id of the chosen stream.
     pub itag: Option<u32>,
-    /// Whether arbitrary HTTP range requests are safe on this URL. False for
-    /// the no-pot decipher fallback: googlevideo 403s deep ranges without a
-    /// content pot, and symphonia's probe reads the webm tail (Cues) before
-    /// playing — a range-backed source would fail outright instead of playing
-    /// sequentially (issue #386).
-    pub range_safe: bool,
 }
 
 /// Process-wide anonymous visitor_data cache (the ANDROID_VR + pot path).
@@ -97,9 +90,6 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
     let mut decipher_fallback: Option<YtStreamInfo> = None;
     if let Some(c) = cookies {
         let uid = super::derive_user_id(c);
-        if let Some(u) = &uid {
-            seed_tier_from_db(u).await;
-        }
         // Skip the Premium decipher attempt for accounts already known to be
         // non-Premium — but only when a pot can actually be minted (the decipher
         // stream is our fallback when it can't). Saves a /player round-trip per
@@ -186,12 +176,10 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
             Err(e) => last_err = format!("{}: {e}", client.client_name),
         }
     }
-    if let Some(mut info) = decipher_fallback {
+    if let Some(info) = decipher_fallback {
         tracing::warn!(
-            "no content pot available (minter not running?) — using the non-Premium decipher \
-             stream sequentially (range requests 403 without a pot, so seeking is disabled)"
+            "no content pot available (minter not running?) — using the non-Premium decipher stream; deep seeks may 403"
         );
-        info.range_safe = false;
         return Ok(info);
     }
     Err(format!("all stream paths failed; last error: {last_err}"))
@@ -212,30 +200,13 @@ fn is_premium_itag(itag: Option<u32>) -> bool {
     matches!(itag, Some(774 | 141 | 256 | 258))
 }
 
-/// Premium-tier memo, keyed by Google user id (so switching accounts re-learns)
-/// and PERSISTED through the metadata cache so a restart doesn't re-probe.
+/// Premium-tier memo, keyed by Google user id (so switching accounts re-learns).
 /// Lets us skip the redundant Premium decipher attempt for accounts already
-/// known to be non-Premium.
-///
-/// Trust is asymmetric, because the free signal is weak: ONE non-premium itag
-/// can mean a free account — but also a track with no premium encodes, or a
-/// /player response served unauthenticated by a transient cookie hiccup. So a
-/// premium verdict survives contradictions (a real downgrade just costs one
-/// extra /player attempt per track until tiers re-learn at sign-in), and the
-/// free pin is short — a mis-pinned Premium account recovers in minutes,
-/// while a truly free account merely re-pays one probe per window.
+/// known to be non-Premium. The "free" verdict carries a timestamp and expires
+/// so that an account upgraded free→Premium (same id, no re-sign-in) is
+/// re-checked rather than pinned to ANDROID_VR for the session.
 static ACCOUNT_PREMIUM: OnceLock<Mutex<HashMap<String, (Instant, bool)>>> = OnceLock::new();
-static TIER_DB: OnceLock<db::Db> = OnceLock::new();
-const FREE_TIER_TTL: Duration = Duration::from_secs(30 * 60);
-// v2: "yt_tier" rows were poisoned by the 774-only is_premium_itag (a Premium
-// account deciphering an AAC-only track got a persisted "free" verdict, pinning
-// it to anonymous 251 for a day). New kind orphans those rows.
-const TIER_META_KIND: &str = "yt_tier_v2";
-
-/// Register the database used to persist account tiers. Called once at startup.
-pub fn init_tier_store(handle: db::Db) {
-    let _ = TIER_DB.set(handle);
-}
+const TIER_TTL: Duration = Duration::from_secs(5 * 60);
 
 fn account_premium() -> &'static Mutex<HashMap<String, (Instant, bool)>> {
     ACCOUNT_PREMIUM.get_or_init(|| Mutex::new(HashMap::new()))
@@ -244,79 +215,13 @@ fn account_premium() -> &'static Mutex<HashMap<String, (Instant, bool)>> {
 fn known_non_premium(user_id: &str) -> bool {
     matches!(
         account_premium().lock().ok().and_then(|m| m.get(user_id).copied()),
-        Some((at, false)) if at.elapsed() < FREE_TIER_TTL
+        Some((at, false)) if at.elapsed() < TIER_TTL
     )
 }
 
-/// Warm the in-memory memo from the persisted tier, if this account hasn't been
-/// seen this session. `"premium:<ts>"` seeds fresh; `"free:<ts>"` seeds with its
-/// real age so the daily re-check still happens on schedule.
-async fn seed_tier_from_db(user_id: &str) {
-    {
-        let Ok(m) = account_premium().lock() else {
-            return;
-        };
-        if m.contains_key(user_id) {
-            return;
-        }
-    }
-    let Some(handle) = TIER_DB.get() else { return };
-    let Ok(Some(payload)) = handle.meta_get(user_id, TIER_META_KIND).await else {
-        return;
-    };
-    let (verdict, ts) = match payload.split_once(':') {
-        Some((v, t)) => (v.to_string(), t.parse::<u64>().unwrap_or(0)),
-        None => (payload, 0),
-    };
-    let premium = verdict == "premium";
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let age = Duration::from_secs(now.saturating_sub(ts));
-    if !premium && age >= FREE_TIER_TTL {
-        return; // stale free verdict — let the probe re-learn
-    }
-    let seeded_at = Instant::now().checked_sub(age).unwrap_or_else(Instant::now);
-    if let Ok(mut m) = account_premium().lock() {
-        m.entry(user_id.to_string()).or_insert((seeded_at, premium));
-    }
-}
-
 fn remember_tier(user_id: &str, premium: bool) {
-    if !premium {
-        // Asymmetric trust (see ACCOUNT_PREMIUM): a known-premium account is
-        // never downgraded by a single non-premium itag — the track may just
-        // lack premium encodes. The pot path still serves THIS stream fine.
-        let was_premium = account_premium()
-            .lock()
-            .ok()
-            .and_then(|m| m.get(user_id).map(|(_, p)| *p))
-            .unwrap_or(false);
-        if was_premium {
-            tracing::info!(
-                "yt: non-premium itag from a known-Premium account — keeping the premium verdict (track without premium encodes, or a transient auth hiccup)"
-            );
-            return;
-        }
-    }
     if let Ok(mut m) = account_premium().lock() {
         m.insert(user_id.to_string(), (Instant::now(), premium));
-    }
-    if let Some(handle) = TIER_DB.get() {
-        let handle = handle.clone();
-        let uid = user_id.to_string();
-        tokio::spawn(
-            async move {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-                let payload = format!("{}:{now}", if premium { "premium" } else { "free" });
-                let _ = handle.meta_put(&uid, TIER_META_KIND, &payload).await;
-            }
-            .instrument(tracing::info_span!("yt.tier_persist")),
-        );
     }
 }
 
@@ -440,7 +345,6 @@ fn pick_plain_format(json: &Value, client: YouTubeClient) -> Option<YtStreamInfo
         duration_secs,
         bitrate: Some(bitrate as u32),
         itag,
-        range_safe: true,
     })
 }
 
@@ -501,7 +405,6 @@ fn stream_info_from(
         duration_secs,
         bitrate,
         itag,
-        range_safe: true,
     })
 }
 

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
+use std::fs;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum FetchStrategy {
@@ -132,7 +133,7 @@ pub struct CustomTheme {
     pub name: String,
     pub vars: HashMap<String, String>,
 }
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum MusicSource {
@@ -148,7 +149,7 @@ impl MusicSource {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum MusicService {
     #[default]
     Jellyfin,
@@ -506,13 +507,6 @@ pub struct AppConfig {
     pub server: Option<MusicServer>,
     #[serde(default)]
     pub servers: Vec<SavedServer>,
-    /// Id of the active server (`servers.id`), or `None` for local. The DB-backed
-    /// source of truth for "which server is active"; `server`/`servers` above are
-    /// hydrated from the `servers` table around it. (`server` stays for now so the
-    /// ~90 existing `config.server` readers keep working — they migrate to id-based
-    /// resolution with the auth-gate work.)
-    #[serde(default)]
-    pub active_server_id: Option<String>,
     #[serde(default)]
     pub active_source: MusicSource,
     #[serde(default)]
@@ -847,7 +841,6 @@ impl Default for AppConfig {
         Self {
             server: None,
             servers: Vec::new(),
-            active_server_id: None,
             active_source: MusicSource::Local,
             source_explicitly_set: false,
             music_directory: vec![music_directory],
@@ -1030,6 +1023,54 @@ impl AppConfig {
 
     pub fn uses_jellyfin_server(&self) -> bool {
         self.active_service() == Some(MusicService::Jellyfin)
+    }
+
+    #[tracing::instrument(name = "config.load", skip_all)]
+    pub fn load(path: &Path) -> Self {
+        if !path.exists() {
+            return Self::default();
+        }
+        match fs::read_to_string(path) {
+            Ok(data) => match serde_json::from_str::<Self>(&data) {
+                Ok(mut config) => {
+                    config.migrate_home_sections();
+                    config.migrate_sidebar_order();
+                    config.migrate_registry_paths();
+                    config.migrate_servers();
+                    config
+                }
+                Err(e) => {
+                    tracing::error!(?path, error = %e, "failed to parse config — using defaults");
+                    Self::default()
+                }
+            },
+            Err(e) => {
+                tracing::warn!(?path, error = %e, "failed to read config — using defaults");
+                Self::default()
+            }
+        }
+    }
+
+    #[tracing::instrument(name = "config.save", skip_all)]
+    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+        if let Some(parent) = path.parent()
+            && let Err(e) = fs::create_dir_all(parent)
+        {
+            tracing::error!(?parent, error = %e, "failed to create config directory");
+            return Err(e);
+        }
+        let data = match serde_json::to_string_pretty(self) {
+            Ok(d) => d,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to serialize config");
+                return Err(std::io::Error::other(e));
+            }
+        };
+        if let Err(e) = fs::write(path, data) {
+            tracing::error!(?path, error = %e, "failed to write config");
+            return Err(e);
+        }
+        Ok(())
     }
 }
 

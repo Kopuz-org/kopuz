@@ -55,13 +55,11 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
     let mut cover_change = use_signal(|| CoverChange::Keep);
 
     {
-        let path = props.track.id.local_path().map(|p| p.to_path_buf());
+        let path = props.track.path.clone();
         use_hook(move || {
             #[cfg(not(target_arch = "wasm32"))]
             spawn(async move {
-                if let Some(p) = &path
-                    && let Some((bytes, mime)) = reader::read_cover(p)
-                {
+                if let Some((bytes, mime)) = reader::read_cover(&path) {
                     cover_preview.set(Some(data_url(&bytes, &mime)));
                 }
             });
@@ -122,7 +120,7 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
         &musicbrainz_track_text,
         t.musicbrainz_track_id.clone().unwrap_or_default(),
     );
-    push(&path_text, t.id.uid());
+    push(&path_text, t.path.display().to_string());
 
     let input_class = "w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-white/20";
 

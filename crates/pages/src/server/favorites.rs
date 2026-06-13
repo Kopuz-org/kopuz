@@ -5,36 +5,24 @@ use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
 use components::showcase::{self, SortField};
 use components::track_row::TrackRow;
-use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use config::{AppConfig, MusicService, UiStyle};
-use db::Source;
 use dioxus::prelude::*;
-use hooks::db_reactivity::Table;
-use hooks::use_db_queries::{use_favorites, use_tracks_by_keys};
 use hooks::use_player_controller::PlayerController;
-use kopuz_route::Route;
+use reader::{FavoritesStore, Library, PlaylistStore};
 use std::collections::HashSet;
 use std::path::PathBuf;
-use std::rc::Rc;
 use tracing::Instrument;
-
-const ITEM_HEIGHT: f64 = 60.0;
 
 #[component]
 pub fn JellyfinFavorites(
+    favorites_store: Signal<FavoritesStore>,
+    library: Signal<Library>,
     config: Signal<AppConfig>,
+    playlist_store: Signal<PlaylistStore>,
     mut queue: Signal<Vec<reader::models::Track>>,
 ) -> Element {
     let mut ctrl = use_context::<PlayerController>();
     let mut active_menu_track = use_signal(|| None::<PathBuf>);
-    let mut scroll_positions = use_context::<Signal<std::collections::HashMap<Route, f64>>>();
-    let saved_scroll = scroll_positions
-        .peek()
-        .get(&Route::Favorites)
-        .copied()
-        .unwrap_or(0.0);
-    let scroll_stat = use_signal(move || saved_scroll);
-    let container_height = use_signal(|| 0.0_f64);
     // YT sync state:
     // - `is_syncing`: true while a fetch is in flight
     // - `synced_so_far`: count of tracks streamed into the library so far
@@ -52,19 +40,6 @@ pub fn JellyfinFavorites(
     let mut selected_track_for_playlist = use_signal(|| None::<PathBuf>);
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
-    let gens = hooks::db_reactivity::use_generations();
-    let active_server_id = use_memo(move || {
-        let c = config.read();
-        c.active_server_id
-            .clone()
-            .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
-            .unwrap_or_default()
-    });
-    let server_source = use_memo(move || Source::Server(active_server_id()));
-    let favorites_res = use_favorites(active_server_id);
-    let fav_keys = use_memo(move || favorites_res.read().clone().unwrap_or_default());
-    let fav_tracks_res = use_tracks_by_keys(server_source, fav_keys);
-
     use_effect(move || {
         let nonce = *refresh_nonce.read();
 
@@ -80,54 +55,14 @@ pub fn JellyfinFavorites(
         let service = config.peek().server.as_ref().map(|s| s.service);
         let is_ytmusic = service == Some(MusicService::YtMusic);
 
-        let db = consume_context::<db::Db>();
-        let sid = active_server_id();
+        if is_ytmusic && nonce == 0 && library.peek().last_yt_sync_at.is_some() {
+            return;
+        }
+
+        is_syncing.set(true);
+        synced_so_far.set(0);
         spawn(
             async move {
-                if nonce == 0 {
-                    if is_ytmusic {
-                        let stamps: Option<serde_json::Value> = db
-                            .meta_get("yt_sync", "timestamps")
-                            .await
-                            .ok()
-                            .flatten()
-                            .and_then(|s| serde_json::from_str(&s).ok());
-                        // Stamp present, OR a CLEAN favorite row already exists for
-                        // this server (covers DBs migrated before the stamp was
-                        // written) — either proves a prior sync; the reconciler
-                        // keeps it fresh. Dirty rows don't count: a locally-hearted
-                        // never-pushed like must not suppress the initial import.
-                        let favorites = db.favorites(&sid).await.unwrap_or_default().len();
-                        let dirty = db.dirty_favorites(&sid).await.unwrap_or_default().len();
-                        let already_synced = stamps
-                            .as_ref()
-                            .and_then(|v| v.get("last_yt_sync_at"))
-                            .and_then(|v| v.as_u64())
-                            .is_some()
-                            || favorites > dirty;
-                        if already_synced {
-                            return;
-                        }
-                    } else {
-                        let now = std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|d| d.as_secs())
-                            .unwrap_or(0);
-                        let last_pull: u64 = db
-                            .meta_get("fav_pull", &sid)
-                            .await
-                            .ok()
-                            .flatten()
-                            .and_then(|s| s.parse().ok())
-                            .unwrap_or(0);
-                        if last_pull <= now && now - last_pull < 30 * 60 {
-                            return;
-                        }
-                    }
-                }
-
-                is_syncing.set(true);
-                synced_so_far.set(0);
                 let device_id = config.peek().device_id.clone();
                 let server_snapshot = config.peek().server.clone();
                 let Some(server) = server_snapshot else {
@@ -136,119 +71,97 @@ pub fn JellyfinFavorites(
                 };
                 let user_id = server.user_id.clone().unwrap_or_default();
                 let url = server.url.clone();
-                let source = Source::Server(sid.clone());
 
-                match server.service {
-                    MusicService::Jellyfin | MusicService::Subsonic | MusicService::Custom => {
-                        let ids: Vec<String> = if server.service == MusicService::Jellyfin {
-                            let remote =
-                                JellyfinClient::new(&url, Some(&token), &device_id, Some(&user_id));
-                            remote
-                                .get_favorite_items()
-                                .await
-                                .map(|items| items.into_iter().map(|i| i.id).collect())
-                                .unwrap_or_default()
-                        } else {
-                            let remote = SubsonicClient::new(&url, &user_id, &token);
-                            remote.get_starred_song_ids().await.unwrap_or_default()
-                        };
-                        // Mirror the reconciler's pull (see server::sync): dirty
-                        // local rows survive the replace.
-                        if db.replace_favorites_clean(&sid, &ids).await.is_ok() {
-                            let now = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_secs())
-                                .unwrap_or(0);
-                            let _ = db.meta_put("fav_pull", &sid, &now.to_string()).await;
-                            gens.bump(Table::Favorites);
-                        }
+                let ids: Vec<String> = match server.service {
+                    MusicService::Jellyfin => {
+                        let remote =
+                            JellyfinClient::new(&url, Some(&token), &device_id, Some(&user_id));
+                        remote
+                            .get_favorite_items()
+                            .await
+                            .map(|items| items.into_iter().map(|i| i.id).collect())
+                            .unwrap_or_default()
+                    }
+                    MusicService::Subsonic | MusicService::Custom => {
+                        let remote = SubsonicClient::new(&url, &user_id, &token);
+                        remote.get_starred_song_ids().await.unwrap_or_default()
                     }
                     MusicService::YtMusic => {
                         let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(token);
 
-                        // Each page is upserted and DROPPED — nothing accumulates in
-                        // memory. Only the lightweight identities survive the stream
-                        // (for the end-of-sync prune + Liked Songs membership).
-                        let mut ids: Vec<String> = Vec::new();
-                        let mut keep_albums: Vec<String> = Vec::new();
-                        let mut first_cover: Option<String> = None;
+                        {
+                            let mut lib = library.write();
+                            lib.jellyfin_tracks.clear();
+                            lib.jellyfin_albums.clear();
+                        }
+
+                        let mut accumulated: Vec<reader::models::Track> = Vec::new();
                         let result = yt
                             .stream_liked_songs(|page| {
-                                if first_cover.is_none() {
-                                    first_cover = page.first().and_then(|t| t.cover.clone());
+                                accumulated.extend(page.iter().cloned());
+                                let albums = synthesize_albums(&accumulated);
+                                {
+                                    let mut lib = library.write();
+                                    lib.jellyfin_tracks.extend(page);
+                                    lib.jellyfin_albums = albums;
                                 }
-                                ids.extend(page.iter().filter_map(|t| {
-                                    let k = t.id.key();
-                                    (!k.is_empty()).then(|| k.to_string())
-                                }));
-                                keep_albums.extend(page.iter().map(|t| t.album_id.clone()));
-                                let albums = synthesize_albums(&page);
-                                synced_so_far.set(ids.len());
-                                let db = db.clone();
-                                let source = Source::Server(sid.clone());
-                                spawn(async move {
-                                    for chunk in page.chunks(100) {
-                                        let _ = db.upsert_tracks(&source, chunk).await;
-                                    }
-                                    let _ = db.upsert_albums(&source, &albums).await;
-                                    gens.bump_coalesced(Table::Tracks);
-                                });
+                                synced_so_far.set(accumulated.len());
                             })
                             .await;
 
                         match result {
                             Ok(()) => {
-                                // Full stream completed — drop YT rows no longer
-                                // liked remotely (replaces the legacy clear).
-                                keep_albums.sort();
-                                keep_albums.dedup();
-                                let _ = db.prune_source(&source, &ids, &keep_albums).await;
+                                let ids: Vec<String> = accumulated
+                                    .iter()
+                                    .filter_map(|t| {
+                                        t.path
+                                            .to_string_lossy()
+                                            .split(':')
+                                            .nth(1)
+                                            .map(|s| s.to_string())
+                                    })
+                                    .collect();
                                 let now = std::time::SystemTime::now()
                                     .duration_since(std::time::UNIX_EPOCH)
                                     .map(|d| d.as_secs())
                                     .unwrap_or(0);
-                                let mut stamps: serde_json::Value = db
-                                    .meta_get("yt_sync", "timestamps")
-                                    .await
-                                    .ok()
-                                    .flatten()
-                                    .and_then(|s| serde_json::from_str(&s).ok())
-                                    .unwrap_or_else(|| serde_json::json!({}));
-                                stamps["last_yt_sync_at"] = serde_json::json!(now);
-                                let _ = db
-                                    .meta_put("yt_sync", "timestamps", &stamps.to_string())
-                                    .await;
-                                let liked_cover = first_cover.as_deref().map(|c| {
-                                    if c.starts_with("http://") || c.starts_with("https://") {
-                                        utils::jellyfin_image::encode_cover_url(c)
-                                    } else {
-                                        c.to_string()
-                                    }
+                                library.write().last_yt_sync_at = Some(now);
+                                let liked_cover = accumulated.first().and_then(|t| {
+                                    t.path
+                                        .to_string_lossy()
+                                        .split(':')
+                                        .nth(2)
+                                        .filter(|s| s.starts_with("urlhex_"))
+                                        .map(|s| s.to_string())
                                 });
-                                if db
-                                    .upsert_playlist_meta(
-                                        &source,
-                                        "LM",
-                                        "Liked Songs",
-                                        None,
-                                        liked_cover.as_deref(),
-                                    )
-                                    .await
-                                    .is_ok()
-                                    && db.set_playlist_tracks(&source, "LM", &ids).await.is_ok()
+                                let liked_entry = reader::models::JellyfinPlaylist {
+                                    id: "LM".to_string(),
+                                    name: "Liked Songs".to_string(),
+                                    tracks: ids.clone(),
+                                    image_tag: liked_cover,
+                                    cover_path: None,
+                                };
                                 {
-                                    gens.bump(Table::Playlists);
+                                    let mut ps = playlist_store.write();
+                                    if let Some(existing) =
+                                        ps.jellyfin_playlists.iter_mut().find(|p| p.id == "LM")
+                                    {
+                                        *existing = liked_entry;
+                                    } else {
+                                        ps.jellyfin_playlists.insert(0, liked_entry);
+                                    }
                                 }
-                                gens.bump(Table::Tracks);
-                                gens.bump(Table::Albums);
+                                ids
                             }
                             Err(e) => {
                                 tracing::warn!(error = %e, "YT favorites sync failed");
+                                Vec::new()
                             }
                         }
                     }
-                }
+                };
 
+                favorites_store.write().jellyfin_favorites = ids;
                 is_syncing.set(false);
             }
             .instrument(tracing::info_span!("favorites.sync")),
@@ -256,29 +169,43 @@ pub fn JellyfinFavorites(
     });
 
     let displayed_tracks: Vec<(reader::models::Track, Option<utils::CoverUrl>)> = {
+        let store = favorites_store.read();
+        let lib = library.read();
         let server = config.read();
         let server_ref = server.server.as_ref().cloned();
 
-        fav_tracks_res
-            .read()
-            .clone()
-            .unwrap_or_default()
-            .into_iter()
+        let fav_set: std::collections::HashSet<&str> = store
+            .jellyfin_favorites
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
+        lib.jellyfin_tracks
+            .iter()
+            .filter(|t| {
+                let path_str = t.path.to_string_lossy();
+                path_str
+                    .split(':')
+                    .nth(1)
+                    .map(|id| fav_set.contains(id))
+                    .unwrap_or(false)
+            })
             .map(|t| {
                 let cover_url = if let Some(ref srv) = server_ref {
-                    utils::map_cover_url(utils::jellyfin_image::resolve_track_cover(
-                        t.cover.as_deref(),
-                        &t.id.key(),
-                        &t.album_id,
-                        &srv.url,
-                        srv.access_token.as_deref(),
-                        80,
-                        80,
-                    ))
+                    let path_str = t.path.to_string_lossy();
+                    utils::map_cover_url(
+                        utils::jellyfin_image::track_cover_url_with_album_fallback(
+                            &path_str,
+                            &t.album_id,
+                            &srv.url,
+                            srv.access_token.as_deref(),
+                            80,
+                            80,
+                        ),
+                    )
                 } else {
                     None
                 };
-                (t, cover_url)
+                (t.clone(), cover_url)
             })
             .collect()
     };
@@ -286,53 +213,38 @@ pub fn JellyfinFavorites(
     let sorted_displayed_tracks =
         showcase::sorted_track_pairs(&displayed_tracks, *sort_state.read());
 
-    // Rc, not a Vec clone per row: the play handler needs the whole sorted
-    // list as the queue, and cloning 800+ tracks × 800+ rows was quadratic.
-    let queue_tracks: Rc<Vec<reader::models::Track>> = Rc::new(
-        sorted_displayed_tracks
-            .iter()
-            .map(|(t, _)| t.clone())
-            .collect(),
-    );
+    let queue_tracks: Vec<reader::models::Track> = sorted_displayed_tracks
+        .iter()
+        .map(|(t, _)| t.clone())
+        .collect();
 
     let currently_playing_path = {
         let idx = *ctrl.current_queue_index.read();
-        ctrl.get_track_at(idx).map(|track| track.id.uid_path())
+        ctrl.get_track_at(idx).map(|track| track.path.clone())
     };
 
     let displayed_tracks_for_selection = sorted_displayed_tracks.clone();
     let is_empty = displayed_tracks.is_empty();
     let is_modern = config.read().ui_style == UiStyle::Modern;
 
-    // Window the rows: only the visible slice (plus buffer) exists in the
-    // DOM — the full 800+ row list made every scroll frame repaint a huge
-    // layer and re-run per-row work.
-    let scroll_info = use_virtual_scroll(
-        *scroll_stat.read(),
-        *container_height.read(),
-        sorted_displayed_tracks.len(),
-        ITEM_HEIGHT,
-    );
-
     let tracks_nodes = sorted_displayed_tracks
         .iter()
+        .cloned()
         .enumerate()
-        .skip(scroll_info.start_index)
-        .take(scroll_info.items_to_render)
-        .map(|(idx, pair)| (idx, pair.clone()))
         .map(|(idx, (track, cover_url))| {
             let track_menu = track.clone();
-            let track_path = track.id.uid_path();
-            let track_select = track.id.uid_path();
+            let track_path = track.path.clone();
+            let track_select = track.path.clone();
             let track_add = track.clone();
             let track_queue = track.clone();
             let queue_source = queue_tracks.clone();
-            let track_key = track.id.uid();
-            let is_menu_open = active_menu_track.read().as_ref() == Some(&track.id.uid_path());
+            let track_key = format!("{}-{}", track.path.display(), idx);
+            let is_menu_open = active_menu_track.read().as_ref() == Some(&track.path);
             let is_selected = selected_tracks.read().contains(&track_path);
-            let matches_current_path = currently_playing_path.as_ref() == Some(&track.id.uid_path());
+            let matches_current_path = currently_playing_path.as_ref() == Some(&track.path);
 
-            let item_id: String = track.id.key().to_string();
+            let path_str = track.path.to_string_lossy().to_string();
+            let item_id: String = path_str.split(':').nth(1).unwrap_or("").to_string();
             let is_downloaded = if let Some(path_str) = config.read().offline_tracks.get(&item_id) {
                 std::path::Path::new(path_str).exists()
             } else {
@@ -344,8 +256,8 @@ pub fn JellyfinFavorites(
             let track_artist = track.artist.clone();
 
             rsx! {
-                div { key: "{track_key}", style: "height: {ITEM_HEIGHT}px;",
                 TrackRow {
+                    key: "{track_key}",
                     track: track.clone(),
                     cover_url: cover_url.clone(),
                     row_num: Some(idx + 1),
@@ -372,14 +284,14 @@ pub fn JellyfinFavorites(
                         }
                     },
                     on_click_menu: move |_| {
-                        if active_menu_track.read().as_ref() == Some(&track_menu.id.uid_path()) {
+                        if active_menu_track.read().as_ref() == Some(&track_menu.path) {
                             active_menu_track.set(None);
                         } else {
-                            active_menu_track.set(Some(track_menu.id.uid_path()));
+                            active_menu_track.set(Some(track_menu.path.clone()));
                         }
                     },
                     on_add_to_playlist: move |_| {
-                        selected_track_for_playlist.set(Some(track_add.id.uid_path()));
+                        selected_track_for_playlist.set(Some(track_add.path.clone()));
                         show_playlist_modal.set(true);
                         active_menu_track.set(None);
                     },
@@ -401,19 +313,18 @@ pub fn JellyfinFavorites(
                         }
                     },
                     on_play: move |_| {
-                        queue.set((*queue_source).clone());
+                        queue.set(queue_source.clone());
                         ctrl.play_track(idx);
                     },
-                }
                 }
             }
         });
 
     rsx! {
         div {
-            class: "flex-1 min-h-0 flex flex-col",
             if *show_playlist_modal.read() {
                 PlaylistModal {
+                    playlist_store,
                     is_jellyfin: true,
                     on_close: move |_| {
                         show_playlist_modal.set(false);
@@ -508,7 +419,7 @@ pub fn JellyfinFavorites(
                         }
                         let tracks: Vec<_> = displayed_tracks_for_selection
                             .iter()
-                            .filter(|(t, _)| selected.contains(&t.id.uid_path()))
+                            .filter(|(t, _)| selected.contains(&t.path))
                             .map(|(track, _)| track.clone())
                             .collect();
                         if !tracks.is_empty() {
@@ -600,32 +511,26 @@ pub fn JellyfinFavorites(
             }
 
             if is_empty && !*is_syncing.read() {
-                if fav_tracks_res.read().is_none() {
-                    div { class: "flex items-center justify-center py-12",
-                        i { class: "fa-solid fa-spinner fa-spin text-3xl text-white/20" }
-                    }
-                } else {
-                    {
-                        let yt_anon = config
-                            .read()
-                            .server
-                            .as_ref()
-                            .map(|s| {
-                                s.service == config::MusicService::YtMusic && s.yt_anonymous
-                            })
-                            .unwrap_or(false);
-                        rsx! {
-                            div {
-                                class: "flex flex-col items-center justify-center h-64 text-slate-500 text-center px-6",
-                                if yt_anon {
-                                    i { class: "fa-solid fa-right-to-bracket text-4xl mb-4 opacity-50" }
-                                    p { class: "text-base", "{i18n::t(\"yt_anon_favorites\")}" }
-                                } else {
-                                    i { class: "fa-regular fa-heart text-4xl mb-4 opacity-30" }
-                                    p { class: "text-base", "{i18n::t(\"no_favorites\")}" }
-                                    p { class: "text-sm mt-1 opacity-70",
-                                        "{i18n::t(\"heart_track_to_add_server\")}"
-                                    }
+                {
+                    let yt_anon = config
+                        .read()
+                        .server
+                        .as_ref()
+                        .map(|s| {
+                            s.service == config::MusicService::YtMusic && s.yt_anonymous
+                        })
+                        .unwrap_or(false);
+                    rsx! {
+                        div {
+                            class: "flex flex-col items-center justify-center h-64 text-slate-500 text-center px-6",
+                            if yt_anon {
+                                i { class: "fa-solid fa-right-to-bracket text-4xl mb-4 opacity-50" }
+                                p { class: "text-base", "{i18n::t(\"yt_anon_favorites\")}" }
+                            } else {
+                                i { class: "fa-regular fa-heart text-4xl mb-4 opacity-30" }
+                                p { class: "text-base", "{i18n::t(\"no_favorites\")}" }
+                                p { class: "text-sm mt-1 opacity-70",
+                                    "{i18n::t(\"heart_track_to_add_server\")}"
                                 }
                             }
                         }
@@ -635,23 +540,23 @@ pub fn JellyfinFavorites(
                 div {
                     class: "flex items-center gap-3 mb-4 px-2 text-sm font-medium text-slate-500 uppercase tracking-wider",
                     button {
-                        class: if displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.id.uid_path())) {
+                        class: if displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.path)) {
                             "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
                         } else {
                             "w-4 h-4 rounded border border-white/20 bg-white/5 hover:border-white/50 transition-colors"
                         },
                         aria_label: i18n::t("select_all_tracks"),
                         onclick: move |_| {
-                            let all_selected = !displayed_tracks.is_empty() && displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.id.uid_path()));
+                            let all_selected = !displayed_tracks.is_empty() && displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.path));
                             if all_selected {
                                 selected_tracks.write().clear();
                                 is_selection_mode.set(false);
                             } else {
-                                selected_tracks.set(displayed_tracks.iter().map(|(track, _)| track.id.uid_path()).collect());
+                                selected_tracks.set(displayed_tracks.iter().map(|(track, _)| track.path.clone()).collect());
                                 is_selection_mode.set(true);
                             }
                         },
-                        if displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.id.uid_path())) {
+                        if displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.path)) {
                             i { class: "fa-solid fa-check", style: "font-size: 9px;" }
                         }
                     }
@@ -695,18 +600,8 @@ pub fn JellyfinFavorites(
                     }
                     div {}
                 }
-                VirtualScrollView {
-                    id: "favorites-scroll".to_string(),
-                    class: if cfg!(target_os = "android") { "flex-1 overflow-y-auto overflow-x-hidden pb-20".to_string() } else { "flex-1 overflow-y-auto pb-20".to_string() },
-                    scroll_stat,
-                    container_height,
-                    item_height: ITEM_HEIGHT,
-                    saved_scroll,
-                    top_pad: scroll_info.top_pad,
-                    bottom_pad: scroll_info.bottom_pad,
-                    onscroll: move |scroll| {
-                        scroll_positions.write().insert(Route::Favorites, scroll);
-                    },
+                div {
+                    class: if is_modern { "" } else { "space-y-1" },
                     {tracks_nodes}
                 }
             }
@@ -734,16 +629,17 @@ fn synthesize_albums(tracks: &[reader::models::Track]) -> Vec<reader::models::Al
     by_album
         .into_iter()
         .map(|(album_id, t)| {
-            // Reuse the first track's thumbnail as the album cover, in the
-            // form `jellyfin_image_url_from_path` decodes: a raw URL via the
-            // `directurl:` prefix, an already-embedded tag via `ytmusic:_:`.
-            let cover_path = t.cover.as_deref().map(|c| {
-                if c.starts_with("http://") || c.starts_with("https://") {
-                    PathBuf::from(format!("directurl:{c}"))
-                } else {
-                    PathBuf::from(format!("ytmusic:_:{c}"))
-                }
-            });
+            // Reuse the first track's encoded thumbnail (3rd segment of
+            // its path: `ytmusic:VID:urlhex_HEX`) as the album cover.
+            // `jellyfin_image_url_from_path` will decode the embedded
+            // URL out of this PathBuf the same way it does for tracks.
+            let cover_path = t
+                .path
+                .to_string_lossy()
+                .split(':')
+                .nth(2)
+                .filter(|s| s.starts_with("urlhex_"))
+                .map(|tag| PathBuf::from(format!("ytmusic:_:{tag}")));
             reader::models::Album {
                 id: album_id,
                 title: if t.album.is_empty() {

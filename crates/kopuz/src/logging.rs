@@ -37,7 +37,7 @@ use tracing_subscriber::{
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 struct LogGuards {
     _file: tracing_appender::non_blocking::WorkerGuard,
-    _chrome: Option<crate::chrome_trace::FlushGuard>,
+    _chrome: Option<tracing_chrome::FlushGuard>,
 }
 
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
@@ -119,28 +119,28 @@ pub fn init(log_dir: &Path, config_tracing_enabled: bool) {
     let trace_path = log_dir.join("kopuz-trace.json");
 
     let chrome_guard = if config_tracing_enabled {
-        match crate::chrome_trace::ChromeTraceLayer::new(&trace_path) {
-            Ok((chrome_layer, guard)) => {
-                tracing_subscriber::registry()
-                    .with(file_layer)
-                    .with(console_layer)
-                    // Filter the chrome layer the same as the file so the
-                    // trace isn't 30MB of h2/wgpu/dioxus-internal spans
-                    // burying the kopuz spans you actually want to analyze.
-                    .with(chrome_layer.with_filter(file_filter()))
-                    .init();
-                tracing::info!(trace = %trace_path.display(), "chrome span trace enabled");
-                Some(guard)
-            }
-            Err(err) => {
-                tracing_subscriber::registry()
-                    .with(file_layer)
-                    .with(console_layer)
-                    .init();
-                tracing::warn!(trace = %trace_path.display(), %err, "failed to open chrome trace file — tracing disabled this session");
-                None
-            }
-        }
+        let (chrome_layer, guard) = tracing_chrome::ChromeLayerBuilder::new()
+            .file(&trace_path)
+            .include_args(true)
+            // Async style nests spans by their tracing parent/child
+            // relationship on a single track instead of splitting them
+            // across per-thread rows. This is what makes an
+            // `.instrument()`'d span that hops to a worker thread (e.g.
+            // playlist.load_entries -> yt.playlist_entries ->
+            // yt.browse_continuation) render as one nested tree you can
+            // read without hunting through the worker tracks.
+            .trace_style(tracing_chrome::TraceStyle::Async)
+            .build();
+        tracing_subscriber::registry()
+            .with(file_layer)
+            .with(console_layer)
+            // Filter the chrome layer the same as the file so the
+            // trace isn't 30MB of h2/wgpu/dioxus-internal spans
+            // burying the kopuz spans you actually want to analyze.
+            .with(chrome_layer.with_filter(file_filter()))
+            .init();
+        tracing::info!(trace = %trace_path.display(), "chrome span trace enabled");
+        Some(guard)
     } else {
         tracing_subscriber::registry()
             .with(file_layer)

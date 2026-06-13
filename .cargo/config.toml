@@ -1,9 +1,5 @@
 [build]
 rustc-wrapper = ""
 
-[env]
-# Use the committed crates/db/.sqlx query cache instead of a live DB at build time.
-SQLX_OFFLINE = "true"
-
 [target.wasm32-unknown-unknown]
 rustflags = ["-C", "debuginfo=0", "--cfg", "getrandom_backend=\"wasm_js\""]

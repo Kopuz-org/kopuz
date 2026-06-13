@@ -1,11 +1,15 @@
 use config::{AppConfig, MusicSource, UiStyle};
 use dioxus::prelude::*;
+use reader::{FavoritesStore, Library, PlaylistStore};
 
 use crate::local::home::LocalHome;
 use crate::server::home::ServerHome;
 
 #[component]
 pub fn Home(
+    library: Signal<Library>,
+    playlist_store: Signal<PlaylistStore>,
+    favorites_store: Signal<FavoritesStore>,
     on_select_album: EventHandler<String>,
     on_play_album: EventHandler<String>,
     on_select_playlist: EventHandler<String>,
@@ -61,6 +65,9 @@ pub fn Home(
 
             if is_server {
                 ServerHome {
+                    library,
+                    playlist_store,
+                    favorites_store,
                     edit_mode,
                     on_select_album,
                     on_play_album,
@@ -69,6 +76,9 @@ pub fn Home(
                 }
             } else {
                 LocalHome {
+                    library,
+                    playlist_store,
+                    favorites_store,
                     edit_mode,
                     on_select_album,
                     on_play_album,

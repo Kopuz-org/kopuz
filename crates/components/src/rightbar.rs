@@ -4,11 +4,13 @@ use config::AppConfig;
 use dioxus::document::eval;
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
+use reader::Library;
 use serde_json::Value;
 use tracing::Instrument;
 
 #[component]
 pub fn Rightbar(
+    library: Signal<Library>,
     mut is_rightbar_open: Signal<bool>,
     mut width: Signal<usize>,
     mut current_song_duration: Signal<u64>,
@@ -36,7 +38,7 @@ pub fn Rightbar(
                 track.artist,
                 track.album,
                 track.duration,
-                track.id.uid(),
+                track.path.to_string_lossy().into_owned(),
             )
         } else {
             (
@@ -241,6 +243,7 @@ pub fn Rightbar(
             if *active_tab.read() == 0 {
                 QueueListView {
                     items,
+                    library,
                     config,
                     current_queue_index,
                     layout: crate::queue_list_view::LayoutMode::Rightbar,

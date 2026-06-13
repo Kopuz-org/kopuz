@@ -24,7 +24,6 @@ pub struct YtPlaylistSummary {
 /// List the signed-in user's playlists (everything under
 /// "Library → Playlists"). Returns just metadata — call
 /// [`get_playlist_entries`] to fetch each one's tracks lazily.
-#[tracing::instrument(name = "yt.list_playlists", skip(cookies))]
 pub async fn list_playlists(cookies: &str) -> Result<Vec<YtPlaylistSummary>, String> {
     let resp: Value = innertube::browse("FEmusic_liked_playlists", cookies).await?;
     if has_sign_in_endpoint(&resp) {
@@ -186,6 +185,12 @@ fn has_sign_in_endpoint(v: &Value) -> bool {
 }
 
 fn keep_unique(t: &Track, seen: &mut std::collections::HashSet<String>) -> bool {
-    let id = t.id.key().to_string();
+    let id = t
+        .path
+        .to_string_lossy()
+        .split(':')
+        .nth(1)
+        .unwrap_or("")
+        .to_string();
     !id.is_empty() && seen.insert(id)
 }

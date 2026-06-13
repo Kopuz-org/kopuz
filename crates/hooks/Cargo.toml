@@ -10,7 +10,6 @@ workspace = true
 tracing = { workspace = true }
 dioxus = { workspace = true }
 reader = { workspace = true }
-db = { workspace = true }
 utils = { workspace = true }
 player = { workspace = true }
 config = { workspace = true }
@@ -26,4 +25,4 @@ tokio = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 discord-presence = { workspace = true }
-tokio = { workspace = true, features = ["fs", "sync", "macros"] }
+tokio = { workspace = true, features = ["fs"] }

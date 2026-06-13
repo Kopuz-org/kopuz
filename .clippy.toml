@@ -6,7 +6,3 @@ await-holding-invalid-types = [
   "dioxus_signals::WriteLock",
   { path = "dioxus_signals::WriteLock", reason = "Write should not be held over an await point. This will cause any reads or writes to fail while the await is pending since the write borrow is still active." },
 ]
-
-# Dioxus render helpers naturally take many props (title/eyebrow/data + several
-# event handlers + a scroll callback); 8 is a reasonable ceiling for this UI crate.
-too-many-arguments-threshold = 8

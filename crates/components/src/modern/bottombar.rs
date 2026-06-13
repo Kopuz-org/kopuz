@@ -3,11 +3,14 @@ use config::PlayerBarPosition;
 use dioxus::prelude::*;
 use hooks::use_player_controller::{LoopMode, PlayerController};
 use player::player::Player;
+use reader::{FavoritesStore, Library};
 
-use crate::shared::{fmt_time, toggle_favorite};
+use crate::shared::{fmt_time, get_favorite, toggle_favorite};
 
 #[component]
 pub fn BottombarModern(
+    library: Signal<Library>,
+    favorites_store: Signal<FavoritesStore>,
     mut config: Signal<config::AppConfig>,
     mut player: Signal<Player>,
     mut is_playing: Signal<bool>,
@@ -51,25 +54,6 @@ pub fn BottombarModern(
     let volume_percent = *volume.read() * 100.0;
     let mut ctrl = use_context::<PlayerController>();
     let nav_ctrl = use_context::<NavigationController>();
-    let fav_sid = use_memo(move || match ctrl.current_track_snapshot.read().as_ref() {
-        Some(t) if t.id.is_server() => {
-            let c = config.read();
-            c.active_server_id
-                .clone()
-                .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
-                .unwrap_or_default()
-        }
-        _ => "local".to_string(),
-    });
-    let favorites_res = hooks::use_db_queries::use_favorites(fav_sid);
-    let track_is_favorite = |t: Option<&reader::models::Track>| {
-        let key = t.map(|t| t.id.key().into_owned()).unwrap_or_default();
-        !key.trim().is_empty()
-            && favorites_res
-                .read()
-                .as_ref()
-                .is_some_and(|favs| favs.contains(&key))
-    };
     if cfg!(target_os = "android") {
         let pct = if *current_song_duration.read() > 0 {
             (*current_song_progress.read() as f64 / *current_song_duration.read() as f64) * 100.0
@@ -78,7 +62,7 @@ pub fn BottombarModern(
         };
         let cover = current_song_cover_url.read().clone();
         let snapshot = ctrl.current_track_snapshot.read().clone();
-        let fav = track_is_favorite(snapshot.as_ref());
+        let fav = get_favorite(snapshot.as_ref(), &favorites_store);
         return rsx! {
             div {
                 class: "shrink-0 h-[68px] bg-black/85 backdrop-blur-2xl border-t border-white/10 flex items-center px-3 gap-3 relative overflow-hidden mb-[env(safe-area-inset-bottom)]",
@@ -100,7 +84,7 @@ pub fn BottombarModern(
                 div { class: "flex items-center gap-0.5 pr-1",
                     button {
                         class: if fav { "w-10 h-10 flex items-center justify-center text-red-400 active:scale-90 transition-transform" } else { "w-10 h-10 flex items-center justify-center text-slate-400 active:scale-90 transition-transform" },
-                        onclick: move |evt| { evt.stop_propagation(); toggle_favorite(ctrl.current_track_snapshot.read().clone(), config); },
+                        onclick: move |evt| { evt.stop_propagation(); toggle_favorite(ctrl.current_track_snapshot.read().clone(), favorites_store, config); },
                         i { class: if fav { "fa-solid fa-heart text-sm" } else { "fa-regular fa-heart text-sm" } }
                     }
                     button {
@@ -119,7 +103,7 @@ pub fn BottombarModern(
     }
 
     let current_track_snapshot = ctrl.current_track_snapshot.read().clone();
-    let is_favorite = track_is_favorite(current_track_snapshot.as_ref());
+    let is_favorite = get_favorite(current_track_snapshot.as_ref(), &favorites_store);
     let heart_class = if is_favorite {
         "text-red-400 hover:text-red-300 transition-colors"
     } else {
@@ -271,7 +255,7 @@ pub fn BottombarModern(
                 button {
                     class: "{heart_class} w-7 h-7 flex items-center justify-center",
                     title: if is_favorite { i18n::t("remove_from_favorites").to_string() } else { i18n::t("add_to_favorites").to_string() },
-                    onclick: move |_| toggle_favorite(ctrl.current_track_snapshot.read().clone(), config),
+                    onclick: move |_| toggle_favorite(ctrl.current_track_snapshot.read().clone(), favorites_store, config),
                     i { class: "{heart_icon} text-xs" }
                 }
                 div {
@@ -360,7 +344,7 @@ pub fn BottombarModern(
                     title: i18n::t("share_musicbrainz").to_string(),
                     onclick: move |_| {
                         if let Some(t) = ctrl.current_track_snapshot.read().clone() {
-                            let path = t.id.uid();
+                            let path = t.path.to_string_lossy();
                             if let Some(vid) = path
                                 .strip_prefix("ytmusic:")
                                 .and_then(|rest| rest.split(':').next())

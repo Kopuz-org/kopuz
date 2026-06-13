@@ -21,7 +21,6 @@ rfd = { workspace = true }
 uuid = { workspace = true }
 player = { workspace = true }
 reader = { workspace = true }
-db = { workspace = true }
 components = { workspace = true }
 hooks = { workspace = true }
 config = { workspace = true }

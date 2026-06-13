@@ -18,9 +18,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     let total_seconds: u64 = props.tracks.iter().map(|t| t.duration).sum();
     let duration_min = total_seconds / 60;
 
-    let source_local = use_memo(|| db::Source::Local);
-    let albums_res = hooks::use_db_queries::use_albums(source_local);
-    let local_albums = albums_res.read().clone().unwrap_or_default();
+    let lib = props.library.read();
     let is_server_source = config.read().active_source == MusicSource::Server;
 
     let offline_tracks = config.read().offline_tracks.clone();
@@ -50,7 +48,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
 
     let currently_playing_path = {
         let idx = *ctrl.current_queue_index.read();
-        ctrl.get_track_at(idx).map(|track| track.id.uid_path())
+        ctrl.get_track_at(idx).map(|track| track.path.clone())
     };
     let current_song_title = ctrl.current_song_title.read().clone();
     let current_song_artist = ctrl.current_song_artist.read().clone();
@@ -59,14 +57,14 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     let tracks_for_play_all = sorted_tracks.clone();
     let selected_queue_tracks: Vec<_> = sorted_tracks
         .iter()
-        .filter(|track| props.selected_tracks.contains(&track.id.uid_path()))
+        .filter(|track| props.selected_tracks.contains(&track.path))
         .cloned()
         .collect();
     let selected_queue_tracks_arc = std::sync::Arc::new(selected_queue_tracks.clone());
 
     let all_downloaded = !props.tracks.is_empty()
         && props.tracks.iter().all(|t| {
-            let p = t.id.uid();
+            let p = t.path.to_string_lossy();
             let id = p.split(':').nth(1).unwrap_or(&p);
             if let Some(path_str) = offline_tracks.get(id) {
                 std::path::Path::new(path_str).exists()
@@ -233,11 +231,11 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                              let idx = *idx;
                              let cover_url = if is_server_source {
                                  if let Some(server) = &config.read().server {
+                                     let path_str = track.path.to_string_lossy();
                                      let url = match server.service {
                                          MusicService::Jellyfin => {
-                                             utils::jellyfin_image::resolve_track_cover(
-                                                 track.cover.as_deref(),
-                                                 &track.id.key(),
+                                             utils::jellyfin_image::track_cover_url_with_album_fallback(
+                                                 &path_str,
                                                  &track.album_id,
                                                  &server.url,
                                                  server.access_token.as_deref(),
@@ -246,30 +244,35 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                              )
                                          }
                                          MusicService::Subsonic | MusicService::Custom => {
-                                             let subsonic_path = match track.cover.as_deref() {
-                                                 Some(c) => format!("{}:{}", track.id.uid(), c),
-                                                 None => track.id.uid(),
-                                             };
                                              utils::subsonic_image::subsonic_image_url_from_path(
-                                                 &subsonic_path,
+                                                 &path_str,
                                                  &server.url,
                                                  server.access_token.as_deref(),
                                                  80,
                                                  80,
                                              )
                                          }
-                                         MusicService::YtMusic => track.cover.clone(),
+                                         MusicService::YtMusic => {
+                                             utils::jellyfin_image::track_cover_url_with_album_fallback(
+                                                 &path_str,
+                                                 &track.album_id,
+                                                 "",
+                                                 None,
+                                                 80,
+                                                 80,
+                                             )
+                                         }
                                      };
                                      utils::map_cover_url(url)
                                  } else { None }
                              } else {
-                                 local_albums.iter()
+                                 lib.albums.iter()
                                     .find(|a| a.id == track.album_id)
                                     .and_then(|a| utils::format_artwork_url(a.cover_path.as_ref()))
                              };
 
-                             let is_selected = props.selected_tracks.contains(&track.id.uid_path());
-                             let matches_current_path = currently_playing_path.as_ref() == Some(&track.id.uid_path());
+                             let is_selected = props.selected_tracks.contains(&track.path);
+                             let matches_current_path = currently_playing_path.as_ref() == Some(&track.path);
                              let matches_current_metadata = currently_playing_path.is_none()
                                  && !current_song_title.is_empty()
                                  && track.title == current_song_title
@@ -281,7 +284,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                              let can_move_up = props.is_reorderable && idx > 0;
                              let can_move_down = props.is_reorderable && idx + 1 < track_count;
 
-                             let path_str = track.id.uid();
+                             let path_str = track.path.to_string_lossy();
                              let item_id_str: String = path_str.split(':').nth(1).unwrap_or(&path_str).to_string();
                              let is_downloaded = if let Some(path_str) = offline_tracks.get(&item_id_str) {
                                  std::path::Path::new(path_str).exists()
@@ -300,7 +303,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
 
                              rsx! {
                                  div {
-                                     key: "{track.id.uid()}",
+                                     key: "{track.path.display()}",
                                      class: "contents",
                                  div {
                                      class: "flex items-center group",
@@ -323,7 +326,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                          TrackRow {
                                              track: track.clone(),
                                              cover_url: cover_url,
-                                             is_menu_open: props.active_track.as_ref() == Some(&track.id.uid_path()),
+                                             is_menu_open: props.active_track.as_ref() == Some(&track.path),
                                              is_album: props.is_album,
                                              is_selection_mode: props.is_selection_mode,
                                              is_selected: is_selected,

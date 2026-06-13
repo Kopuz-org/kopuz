@@ -4,7 +4,7 @@ use std::time::Duration;
 use components::track_row::TrackRow;
 use config::{AppConfig, MusicService};
 use dioxus::prelude::*;
-use reader::models::Track;
+use reader::models::{Library, Track};
 use server::ytmusic::discover::{DiscoverHome, DiscoverItem, DiscoverShelf, YtArtist};
 use std::path::PathBuf;
 use tracing::Instrument;
@@ -31,6 +31,7 @@ pub struct DiscoverPrefetchCache(pub Signal<HashMap<String, Vec<Track>>>);
 #[component]
 #[tracing::instrument(name = "render.discover_home", skip_all)]
 pub fn DiscoverPage(
+    library: Signal<Library>,
     on_select_album: EventHandler<String>,
     on_select_playlist: EventHandler<(String, String)>,
     on_open_artist: EventHandler<(String, String)>,
@@ -281,7 +282,7 @@ fn SongListShelf(
         .items
         .iter()
         .filter_map(|i| match i {
-            DiscoverItem::Song(t) => Some((**t).clone()),
+            DiscoverItem::Song(t) => Some(t.clone()),
             _ => None,
         })
         .collect();
@@ -311,9 +312,8 @@ fn SongListShelf(
                             {
                                 let track = track.clone();
                                 let tracks_for_play = tracks.clone();
-                                let cover_url = utils::jellyfin_image::resolve_track_cover(
-                                    track.cover.as_deref(),
-                                    &track.id.key(),
+                                let cover_url = utils::jellyfin_image::track_cover_url_with_album_fallback(
+                                    &track.path.to_string_lossy(),
                                     &track.album_id,
                                     "",
                                     None,
@@ -323,11 +323,11 @@ fn SongListShelf(
                                 .map(utils::cover_url_from_string);
                                 let track_for_play = track.clone();
                                 let track_for_menu = track.clone();
-                                let track_path_for_match = track.id.uid_path();
+                                let track_path_for_match = track.path.clone();
                                 let is_current = current_playing_path.read().as_ref()
                                     == Some(&track_path_for_match);
                                 let is_menu_open = active_menu_path.read().as_ref()
-                                    == Some(&track.id.uid_path());
+                                    == Some(&track.path);
                                 rsx! {
                                     TrackRow {
                                         key: "{idx}",
@@ -341,10 +341,10 @@ fn SongListShelf(
                                             let mut queue = tracks_for_play.clone();
                                             let start = queue
                                                 .iter()
-                                                .position(|x| x.id == track_for_play.id)
+                                                .position(|x| x.path == track_for_play.path)
                                                 .unwrap_or(0);
                                             queue.rotate_left(start);
-                                            current_playing_path.set(Some(track_for_play.id.uid_path()));
+                                            current_playing_path.set(Some(track_for_play.path.clone()));
                                             // Top Songs is a preview — clear the
                                             // discover source so no album/playlist
                                             // tile incorrectly shows the pause
@@ -353,7 +353,7 @@ fn SongListShelf(
                                             ctrl.play_queue_linear(queue);
                                         },
                                         on_click_menu: move |_| {
-                                            let p = track_for_menu.id.uid_path();
+                                            let p = track_for_menu.path.clone();
                                             if active_menu_path.read().as_ref() == Some(&p) {
                                                 active_menu_path.set(None);
                                             } else {
@@ -390,7 +390,7 @@ fn DiscoverTile(
     let cache = use_context::<DiscoverPrefetchCache>().0;
     match item {
         DiscoverItem::Song(track) => {
-            rsx! { SongCard { track: (*track).clone() } }
+            rsx! { SongCard { track: track.clone() } }
         }
         DiscoverItem::Playlist {
             playlist_id,
@@ -743,9 +743,8 @@ fn Card(
 
 #[component]
 fn SongCard(track: Track) -> Element {
-    let thumbnail = utils::jellyfin_image::resolve_track_cover(
-        track.cover.as_deref(),
-        &track.id.key(),
+    let thumbnail = utils::jellyfin_image::track_cover_url_with_album_fallback(
+        &track.path.to_string_lossy(),
         &track.album_id,
         "",
         None,
@@ -868,11 +867,9 @@ fn SongCard(track: Track) -> Element {
 /// None if the track isn't a YT one (defensive — discover-feed songs
 /// should always be).
 fn track_video_id(track: &Track) -> Option<String> {
-    if track.id.service() != Some(MusicService::YtMusic) {
-        return None;
-    }
-    let id = track.id.key();
-    (!id.is_empty()).then(|| id.to_string())
+    let s = track.path.to_string_lossy();
+    let rest = s.strip_prefix("ytmusic:")?;
+    Some(rest.split(':').next().unwrap_or(rest).to_string())
 }
 
 /// Click a single Discover song → kick off the YT mix radio so "next"
@@ -1100,7 +1097,7 @@ pub fn DiscoverPlaylistDetail(
                                 let mut queue = tracks.read().clone();
                                 let start_idx = queue
                                     .iter()
-                                    .position(|x| x.id == t.id)
+                                    .position(|x| x.path == t.path)
                                     .unwrap_or(0);
                                 queue.rotate_left(start_idx);
                                 if let Some(pid) = selected_playlist_id.read().clone() {
@@ -1118,9 +1115,8 @@ pub fn DiscoverPlaylistDetail(
 
 #[component]
 fn DiscoverPlaylistRow(track: Track, index: usize, on_play: EventHandler<Track>) -> Element {
-    let thumbnail = utils::jellyfin_image::resolve_track_cover(
-        track.cover.as_deref(),
-        &track.id.key(),
+    let thumbnail = utils::jellyfin_image::track_cover_url_with_album_fallback(
+        &track.path.to_string_lossy(),
         &track.album_id,
         "",
         None,
