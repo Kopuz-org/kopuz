@@ -40,8 +40,8 @@ impl RangeStreamSource {
     /// total size and confirm Range support. Returns the source positioned
     /// at byte 0 with an empty cache.
     pub fn new(url: String, user_agent: Option<String>) -> IoResult<Self> {
-        let ua = user_agent
-            .unwrap_or_else(|| concat!("Kopuz/", env!("CARGO_PKG_VERSION")).to_string());
+        let ua =
+            user_agent.unwrap_or_else(|| concat!("Kopuz/", env!("CARGO_PKG_VERSION")).to_string());
         let client = reqwest::blocking::Client::builder()
             .tcp_nodelay(true)
             .user_agent(ua)
@@ -58,13 +58,10 @@ impl RangeStreamSource {
             .map_err(IoError::other)?;
         let status = resp.status();
         if !status.is_success() {
-            return Err(IoError::other(format!(
-                "range probe HTTP {status}"
-            )));
+            return Err(IoError::other(format!("range probe HTTP {status}")));
         }
-        let total_size = parse_total_size(&resp).ok_or_else(|| {
-            IoError::other("server didn't expose total size on range probe")
-        })?;
+        let total_size = parse_total_size(&resp)
+            .ok_or_else(|| IoError::other("server didn't expose total size on range probe"))?;
 
         Ok(Self {
             url,

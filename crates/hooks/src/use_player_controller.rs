@@ -360,9 +360,7 @@ impl PlayerController {
             _ => {
                 if shuffle && queue_len > 1 {
                     !self.shuffle_order.peek().is_empty() || loop_mode == LoopMode::Queue
-                } else if shuffle && queue_len == 1 {
-                    true
-                } else if idx + 1 < queue_len {
+                } else if (shuffle && queue_len == 1) || idx + 1 < queue_len {
                     true
                 } else {
                     loop_mode == LoopMode::Queue
@@ -2154,6 +2152,7 @@ impl PlayerController {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn use_player_controller(
     player: Signal<Player>,
     is_playing: Signal<bool>,

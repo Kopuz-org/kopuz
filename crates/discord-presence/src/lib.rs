@@ -51,7 +51,7 @@ impl Presence {
             Timestamps::new().start(start_time).end(end_time)
         };
 
-        let state = format!("{artist}");
+        let state = artist.to_string();
 
         let mut activity = activity::Activity::new()
             .details(title)

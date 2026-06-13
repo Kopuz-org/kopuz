@@ -46,7 +46,7 @@ pub fn LocalLibrary(
     let mut selected_track_for_playlist = use_signal(|| None::<PathBuf>);
     let mut metadata_track = use_signal(|| None::<reader::models::Track>);
     let mut is_selection_mode = use_signal(|| false);
-    let mut selected_tracks = use_signal(|| HashSet::<PathBuf>::new());
+    let mut selected_tracks = use_signal(HashSet::<PathBuf>::new);
     let displayed_tracks = use_memo(move || (items.all_tracks)());
     // Sort fields to offer, derived from the data actually loaded.
     let available_sort_fields = use_memo(move || {
@@ -199,11 +199,10 @@ pub fn LocalLibrary(
                                         playlist.tracks.push(path.clone());
                                     }
                                 }
-                            } else if let Some(path) = selected_track_for_playlist.read().clone() {
-                                if !playlist.tracks.contains(&path) {
+                            } else if let Some(path) = selected_track_for_playlist.read().clone()
+                                && !playlist.tracks.contains(&path) {
                                     playlist.tracks.push(path);
                                 }
-                            }
                         }
                         show_playlist_modal.set(false);
                         active_menu_track.set(None);

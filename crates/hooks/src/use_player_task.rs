@@ -545,11 +545,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                                 last_title.set(title.clone());
 
                                 let resolved = discord_cover_url.read().clone();
-                                let cover_ref = if let Some(ref url) = resolved {
-                                    Some(url.as_str())
-                                } else {
-                                    None
-                                };
+                                let cover_ref = resolved.as_deref();
 
                                 let _ = p.set_now_playing(
                                     &title, &artist, &album, progress, duration, cover_ref,

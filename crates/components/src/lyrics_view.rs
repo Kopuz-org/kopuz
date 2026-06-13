@@ -496,7 +496,7 @@ pub fn LyricsView(
                             .get(active_main_position.saturating_add(1))
                             .map(|&next_index| lines[next_index].start_time)
                             .map(|next_time| {
-                                ((next_time - current_time) * 1000.0).max(16.0).min(50.0) as u64
+                                ((next_time - current_time) * 1000.0).clamp(16.0, 50.0) as u64
                             })
                             .unwrap_or(50);
                     } else {

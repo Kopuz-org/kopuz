@@ -20,7 +20,6 @@ use dioxus::desktop::tao::platform::windows::WindowExtWindows;
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use dioxus::desktop::tao::window::Icon;
 use dioxus::prelude::*;
-use tracing::Instrument;
 #[cfg(not(target_arch = "wasm32"))]
 use discord_presence::Presence;
 use kopuz_route::Route;
@@ -32,6 +31,7 @@ use reader::FavoritesStore;
 use std::path::PathBuf;
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
+use tracing::Instrument;
 #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
 use windows::Win32::Foundation::HWND;
 
@@ -197,14 +197,17 @@ async fn fetch_available_update() -> Option<AvailableUpdate> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn persist_config_snapshot(config_snapshot: config::AppConfig, path: std::path::PathBuf) {
-    spawn(async move {
-        let result = tokio::task::spawn_blocking(move || config_snapshot.save(&path)).await;
-        match result {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => tracing::error!("Failed to save config: {}", e),
-            Err(e) => tracing::error!("Failed to join config save task: {}", e),
+    spawn(
+        async move {
+            let result = tokio::task::spawn_blocking(move || config_snapshot.save(&path)).await;
+            match result {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => tracing::error!("Failed to save config: {}", e),
+                Err(e) => tracing::error!("Failed to join config save task: {}", e),
+            }
         }
-    }.instrument(tracing::info_span!("config.persist")));
+        .instrument(tracing::info_span!("config.persist")),
+    );
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -503,7 +506,9 @@ fn main() {
         // so the setting is applied at startup. Same path the settings UI
         // writes to. Missing/unreadable config defaults to off.
         let config_tracing_enabled = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
-            .map(|dirs| config::AppConfig::load(&dirs.config_dir().join("config.json")).tracing_enabled)
+            .map(|dirs| {
+                config::AppConfig::load(&dirs.config_dir().join("config.json")).tracing_enabled
+            })
             .unwrap_or(false);
 
         // Guards live in a global inside `logging`; flushed by
@@ -577,184 +582,190 @@ fn main() {
                 |_id, request, responder: RequestAsyncResponder| {
                     let uri = request.uri().clone();
 
-                    tokio::spawn(async move {
-                        let query = uri.query().unwrap_or_default();
-                        let file_path: String = query
-                            .split('&')
-                            .find_map(|kv| kv.strip_prefix("p="))
-                            .map(|encoded| {
-                                percent_encoding::percent_decode_str(encoded)
-                                    .decode_utf8_lossy()
-                                    .into_owned()
-                            })
-                            .unwrap_or_default();
-                        let high_quality = query.split('&').any(|kv| kv == "hq=1");
+                    tokio::spawn(
+                        async move {
+                            let query = uri.query().unwrap_or_default();
+                            let file_path: String = query
+                                .split('&')
+                                .find_map(|kv| kv.strip_prefix("p="))
+                                .map(|encoded| {
+                                    percent_encoding::percent_decode_str(encoded)
+                                        .decode_utf8_lossy()
+                                        .into_owned()
+                                })
+                                .unwrap_or_default();
+                            let high_quality = query.split('&').any(|kv| kv == "hq=1");
 
-                        if file_path.is_empty() {
-                            responder.respond(
-                                http::Response::builder()
-                                    .status(400)
-                                    .body(std::borrow::Cow::from(Vec::new()))
-                                    .unwrap(),
-                            );
-                            return;
-                        }
-
-                        #[cfg(target_os = "windows")]
-                        let file_path = file_path.replace('/', "\\");
-
-                        #[cfg(not(target_os = "windows"))]
-                        let file_path = if file_path.starts_with('~') {
-                            if let Ok(home) = std::env::var("HOME") {
-                                file_path.replacen('~', &home, 1)
-                            } else {
-                                file_path
-                            }
-                        } else {
-                            file_path
-                        };
-
-                        if high_quality {
-                            let hq_path = hq_cache_path(&file_path);
-                            if hq_path.exists()
-                                && let Ok(b) = tokio::fs::read(&hq_path).await
-                            {
+                            if file_path.is_empty() {
                                 responder.respond(
                                     http::Response::builder()
-                                        .header("Content-Type", "image/jpeg")
-                                        .header("Access-Control-Allow-Origin", "*")
-                                        .header("Cache-Control", "public, max-age=31536000")
-                                        .body(std::borrow::Cow::from(b))
+                                        .status(400)
+                                        .body(std::borrow::Cow::from(Vec::new()))
                                         .unwrap(),
                                 );
                                 return;
                             }
-                            match tokio::fs::read(&file_path).await {
-                                Ok(raw) => {
-                                    let file_path_clone = file_path.clone();
-                                    let result = tokio::task::spawn_blocking(move || {
-                                        make_hq_image(&raw, &hq_path)
-                                            .map(|b| (b, "image/jpeg"))
-                                            .unwrap_or_else(|| {
-                                                let mime = if file_path_clone.ends_with(".png") {
-                                                    "image/png"
-                                                } else {
-                                                    "image/jpeg"
-                                                };
-                                                (raw, mime)
-                                            })
-                                    })
-                                    .await;
-                                    match result {
-                                        Ok((bytes, mime)) => responder.respond(
-                                            http::Response::builder()
-                                                .header("Content-Type", mime)
-                                                .header("Access-Control-Allow-Origin", "*")
-                                                .header("Cache-Control", "public, max-age=31536000")
-                                                .body(std::borrow::Cow::from(bytes))
-                                                .unwrap(),
-                                        ),
-                                        Err(_) => responder.respond(
-                                            http::Response::builder()
-                                                .status(500)
-                                                .body(std::borrow::Cow::from(Vec::new()))
-                                                .unwrap(),
-                                        ),
-                                    }
-                                }
-                                Err(_) => responder.respond(
-                                    http::Response::builder()
-                                        .status(404)
-                                        .body(std::borrow::Cow::from(Vec::new()))
-                                        .unwrap(),
-                                ),
-                            }
-                            return;
-                        }
 
-                        let thumb_path = thumb_cache_path(&file_path);
+                            #[cfg(target_os = "windows")]
+                            let file_path = file_path.replace('/', "\\");
 
-                        let (bytes, mime) = if thumb_path.exists() {
-                            match tokio::fs::read(&thumb_path).await {
-                                Ok(b) => (b, "image/jpeg"),
-                                Err(_) => {
-                                    let _ = std::fs::remove_file(&thumb_path);
-                                    match tokio::fs::read(&file_path).await {
-                                        Ok(b) => (
-                                            b,
-                                            if file_path.ends_with(".png") {
-                                                "image/png"
-                                            } else {
-                                                "image/jpeg"
-                                            },
-                                        ),
-                                        Err(_) => {
-                                            responder.respond(
-                                                http::Response::builder()
-                                                    .status(404)
-                                                    .body(std::borrow::Cow::from(Vec::new()))
-                                                    .unwrap(),
-                                            );
-                                            return;
-                                        }
-                                    }
+                            #[cfg(not(target_os = "windows"))]
+                            let file_path = if file_path.starts_with('~') {
+                                if let Ok(home) = std::env::var("HOME") {
+                                    file_path.replacen('~', &home, 1)
+                                } else {
+                                    file_path
                                 }
-                            }
-                        } else {
-                            match tokio::fs::read(&file_path).await {
-                                Ok(raw) => {
-                                    let thumb_path_clone = thumb_path.clone();
-                                    match tokio::task::spawn_blocking(move || match make_thumbnail(
-                                        &raw,
-                                        &thumb_path_clone,
-                                    ) {
-                                        Some(b) => Ok(b),
-                                        None => Err(raw),
-                                    })
-                                    .await
-                                    {
-                                        Ok(Ok(b)) => (b, "image/jpeg"),
-                                        Ok(Err(raw)) => (
-                                            raw,
-                                            if file_path.ends_with(".png") {
-                                                "image/png"
-                                            } else {
-                                                "image/jpeg"
-                                            },
-                                        ),
-                                        Err(_) => {
-                                            responder.respond(
-                                                http::Response::builder()
-                                                    .status(500)
-                                                    .body(std::borrow::Cow::from(Vec::new()))
-                                                    .unwrap(),
-                                            );
-                                            return;
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    tracing::warn!("[artwork] not found {}: {}", file_path, e);
+                            } else {
+                                file_path
+                            };
+
+                            if high_quality {
+                                let hq_path = hq_cache_path(&file_path);
+                                if hq_path.exists()
+                                    && let Ok(b) = tokio::fs::read(&hq_path).await
+                                {
                                     responder.respond(
                                         http::Response::builder()
-                                            .status(404)
-                                            .body(std::borrow::Cow::from(Vec::new()))
+                                            .header("Content-Type", "image/jpeg")
+                                            .header("Access-Control-Allow-Origin", "*")
+                                            .header("Cache-Control", "public, max-age=31536000")
+                                            .body(std::borrow::Cow::from(b))
                                             .unwrap(),
                                     );
                                     return;
                                 }
+                                match tokio::fs::read(&file_path).await {
+                                    Ok(raw) => {
+                                        let file_path_clone = file_path.clone();
+                                        let result = tokio::task::spawn_blocking(move || {
+                                            make_hq_image(&raw, &hq_path)
+                                                .map(|b| (b, "image/jpeg"))
+                                                .unwrap_or_else(|| {
+                                                    let mime = if file_path_clone.ends_with(".png")
+                                                    {
+                                                        "image/png"
+                                                    } else {
+                                                        "image/jpeg"
+                                                    };
+                                                    (raw, mime)
+                                                })
+                                        })
+                                        .await;
+                                        match result {
+                                            Ok((bytes, mime)) => responder.respond(
+                                                http::Response::builder()
+                                                    .header("Content-Type", mime)
+                                                    .header("Access-Control-Allow-Origin", "*")
+                                                    .header(
+                                                        "Cache-Control",
+                                                        "public, max-age=31536000",
+                                                    )
+                                                    .body(std::borrow::Cow::from(bytes))
+                                                    .unwrap(),
+                                            ),
+                                            Err(_) => responder.respond(
+                                                http::Response::builder()
+                                                    .status(500)
+                                                    .body(std::borrow::Cow::from(Vec::new()))
+                                                    .unwrap(),
+                                            ),
+                                        }
+                                    }
+                                    Err(_) => responder.respond(
+                                        http::Response::builder()
+                                            .status(404)
+                                            .body(std::borrow::Cow::from(Vec::new()))
+                                            .unwrap(),
+                                    ),
+                                }
+                                return;
                             }
-                        };
 
-                        responder.respond(
-                            http::Response::builder()
-                                .header("Content-Type", mime)
-                                .header("Access-Control-Allow-Origin", "*")
-                                .header("Cache-Control", "public, max-age=31536000")
-                                .body(std::borrow::Cow::from(bytes))
-                                .unwrap(),
-                        );
-                    }.instrument(tracing::info_span!("artwork.serve")));
+                            let thumb_path = thumb_cache_path(&file_path);
+
+                            let (bytes, mime) = if thumb_path.exists() {
+                                match tokio::fs::read(&thumb_path).await {
+                                    Ok(b) => (b, "image/jpeg"),
+                                    Err(_) => {
+                                        let _ = std::fs::remove_file(&thumb_path);
+                                        match tokio::fs::read(&file_path).await {
+                                            Ok(b) => (
+                                                b,
+                                                if file_path.ends_with(".png") {
+                                                    "image/png"
+                                                } else {
+                                                    "image/jpeg"
+                                                },
+                                            ),
+                                            Err(_) => {
+                                                responder.respond(
+                                                    http::Response::builder()
+                                                        .status(404)
+                                                        .body(std::borrow::Cow::from(Vec::new()))
+                                                        .unwrap(),
+                                                );
+                                                return;
+                                            }
+                                        }
+                                    }
+                                }
+                            } else {
+                                match tokio::fs::read(&file_path).await {
+                                    Ok(raw) => {
+                                        let thumb_path_clone = thumb_path.clone();
+                                        match tokio::task::spawn_blocking(move || {
+                                            match make_thumbnail(&raw, &thumb_path_clone) {
+                                                Some(b) => Ok(b),
+                                                None => Err(raw),
+                                            }
+                                        })
+                                        .await
+                                        {
+                                            Ok(Ok(b)) => (b, "image/jpeg"),
+                                            Ok(Err(raw)) => (
+                                                raw,
+                                                if file_path.ends_with(".png") {
+                                                    "image/png"
+                                                } else {
+                                                    "image/jpeg"
+                                                },
+                                            ),
+                                            Err(_) => {
+                                                responder.respond(
+                                                    http::Response::builder()
+                                                        .status(500)
+                                                        .body(std::borrow::Cow::from(Vec::new()))
+                                                        .unwrap(),
+                                                );
+                                                return;
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!("[artwork] not found {}: {}", file_path, e);
+                                        responder.respond(
+                                            http::Response::builder()
+                                                .status(404)
+                                                .body(std::borrow::Cow::from(Vec::new()))
+                                                .unwrap(),
+                                        );
+                                        return;
+                                    }
+                                }
+                            };
+
+                            responder.respond(
+                                http::Response::builder()
+                                    .header("Content-Type", mime)
+                                    .header("Access-Control-Allow-Origin", "*")
+                                    .header("Cache-Control", "public, max-age=31536000")
+                                    .body(std::borrow::Cow::from(bytes))
+                                    .unwrap(),
+                            );
+                        }
+                        .instrument(tracing::info_span!("artwork.serve")),
+                    );
                 },
             );
 
@@ -1083,11 +1094,14 @@ fn App() -> Element {
     use_effect(move || {
         let url = current_song_cover_url.read().clone();
         if !url.is_empty() {
-            spawn(async move {
-                if let Some(colors) = utils::color::get_palette_from_url(&url).await {
-                    palette.set(Some(colors));
+            spawn(
+                async move {
+                    if let Some(colors) = utils::color::get_palette_from_url(&url).await {
+                        palette.set(Some(colors));
+                    }
                 }
-            }.instrument(tracing::info_span!("ui.palette_fetch")));
+                .instrument(tracing::info_span!("ui.palette_fetch")),
+            );
         } else {
             palette.set(None);
         }
@@ -1129,23 +1143,26 @@ fn App() -> Element {
         }
         last_radio_registry_key.set(Some(key));
 
-        spawn(async move {
-            let mut new_registry = radio::registry::StationRegistry::new();
-            let mut import_count = 0;
+        spawn(
+            async move {
+                let mut new_registry = radio::registry::StationRegistry::new();
+                let mut import_count = 0;
 
-            for path in registry_paths {
-                match new_registry.import_registry(&path).await {
-                    Ok(_) => import_count += 1,
-                    Err(e) => tracing::warn!("Failed to import registry from {}: {}", path, e),
+                for path in registry_paths {
+                    match new_registry.import_registry(&path).await {
+                        Ok(_) => import_count += 1,
+                        Err(e) => tracing::warn!("Failed to import registry from {}: {}", path, e),
+                    }
+                }
+
+                station_registry.set(new_registry);
+
+                if import_count > 0 {
+                    tracing::info!("Imported {} external radio registries", import_count);
                 }
             }
-
-            station_registry.set(new_registry);
-
-            if import_count > 0 {
-                tracing::info!("Imported {} external radio registries", import_count);
-            }
-        }.instrument(tracing::info_span!("radio.registry_load")));
+            .instrument(tracing::info_span!("radio.registry_load")),
+        );
     });
 
     let mut selected_album_id = use_signal(String::new);
@@ -1249,11 +1266,14 @@ fn App() -> Element {
         }
 
         did_check_updates.set(true);
-        spawn(async move {
-            if let Some(update) = fetch_available_update().await {
-                update_banner.set(Some(update));
+        spawn(
+            async move {
+                if let Some(update) = fetch_available_update().await {
+                    update_banner.set(Some(update));
+                }
             }
-        }.instrument(tracing::info_span!("app.update_check")));
+            .instrument(tracing::info_span!("app.update_check")),
+        );
     });
 
     use_effect(move || {
@@ -1318,11 +1338,7 @@ fn App() -> Element {
             run_rotation(config).await;
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(300)).await;
-                if yt_keepalive_identity
-                    .peek()
-                    .as_deref()
-                    != Some(my_identity.as_str())
-                {
+                if yt_keepalive_identity.peek().as_deref() != Some(my_identity.as_str()) {
                     return;
                 }
                 run_rotation(config).await;
@@ -1357,12 +1373,16 @@ fn App() -> Element {
         {
             let store_snapshot = playlist_store.read().clone();
             let path = playlist_path();
-            spawn(async move {
-                let result = tokio::task::spawn_blocking(move || store_snapshot.save(&path)).await;
-                if let Ok(Err(e)) = result {
-                    tracing::error!("Failed to save playlists: {}", e);
+            spawn(
+                async move {
+                    let result =
+                        tokio::task::spawn_blocking(move || store_snapshot.save(&path)).await;
+                    if let Ok(Err(e)) = result {
+                        tracing::error!("Failed to save playlists: {}", e);
+                    }
                 }
-            }.instrument(tracing::info_span!("playlists.persist")));
+                .instrument(tracing::info_span!("playlists.persist")),
+            );
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -1379,12 +1399,16 @@ fn App() -> Element {
         {
             let lib_snapshot = library.read().clone();
             let path = lib_path();
-            spawn(async move {
-                let result = tokio::task::spawn_blocking(move || lib_snapshot.save(&path)).await;
-                if let Ok(Err(e)) = result {
-                    tracing::error!("Failed to save library: {}", e);
+            spawn(
+                async move {
+                    let result =
+                        tokio::task::spawn_blocking(move || lib_snapshot.save(&path)).await;
+                    if let Ok(Err(e)) = result {
+                        tracing::error!("Failed to save library: {}", e);
+                    }
                 }
-            }.instrument(tracing::info_span!("library.persist")));
+                .instrument(tracing::info_span!("library.persist")),
+            );
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -1401,12 +1425,16 @@ fn App() -> Element {
         {
             let store_snapshot = favorites_store.read().clone();
             let path = favorites_path();
-            spawn(async move {
-                let result = tokio::task::spawn_blocking(move || store_snapshot.save(&path)).await;
-                if let Ok(Err(e)) = result {
-                    tracing::error!("Failed to save favorites: {}", e);
+            spawn(
+                async move {
+                    let result =
+                        tokio::task::spawn_blocking(move || store_snapshot.save(&path)).await;
+                    if let Ok(Err(e)) = result {
+                        tracing::error!("Failed to save favorites: {}", e);
+                    }
                 }
-            }.instrument(tracing::info_span!("favorites.persist")));
+                .instrument(tracing::info_span!("favorites.persist")),
+            );
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -1554,74 +1582,81 @@ fn App() -> Element {
             let queue_state_path = queue_state_path();
             let mut ctrl = ctrl;
 
-            spawn(async move {
-                let lib_path_c = lib_path.clone();
-                let config_path_c = config_path.clone();
-                let playlist_path_c = playlist_path.clone();
-                let favorites_path_c = favorites_path.clone();
-                let queue_state_path_c = queue_state_path.clone();
+            spawn(
+                async move {
+                    let lib_path_c = lib_path.clone();
+                    let config_path_c = config_path.clone();
+                    let playlist_path_c = playlist_path.clone();
+                    let favorites_path_c = favorites_path.clone();
+                    let queue_state_path_c = queue_state_path.clone();
 
-                let (lib_res, cfg_res, pl_res, fav_res, queue_res) = tokio::join!(
-                    tokio::task::spawn_blocking(move || reader::Library::load(&lib_path_c)),
-                    tokio::task::spawn_blocking(move || config::AppConfig::load(&config_path_c)),
-                    tokio::task::spawn_blocking(move || reader::PlaylistStore::load(
-                        &playlist_path_c
-                    )),
-                    tokio::task::spawn_blocking(move || FavoritesStore::load(&favorites_path_c)),
-                    tokio::task::spawn_blocking(move || {
-                        PersistedQueueState::load(&queue_state_path_c)
-                    }),
-                );
-
-                if let Ok(Ok(loaded)) = lib_res {
-                    library.set(loaded.clone());
-                }
-                if let Ok(loaded) = cfg_res {
-                    config.set(loaded.clone());
-                    configured_music_dirs.set(loaded.music_directory.clone());
-                    volume.set(loaded.volume);
-                    persisted_volume.set(loaded.volume);
-                    player.write().set_volume(loaded.volume);
-                    player.write().set_channel_mode(loaded.channel_mode);
-                    player.write().set_equalizer(loaded.equalizer.clone());
-                    i18n::set_locale(&loaded.language);
-                }
-                if let Ok(Ok(loaded)) = pl_res {
-                    playlist_store.set(loaded);
-                }
-                if let Ok(Ok(loaded)) = fav_res {
-                    favorites_store.set(loaded);
-                }
-
-                {
-                    let cfg = config.peek();
-                    let no_local_tracks = library.peek().tracks.is_empty();
-                    let server_connected = cfg
-                        .server
-                        .as_ref()
-                        .and_then(|s| s.access_token.as_ref())
-                        .is_some();
-                    let not_explicitly_set = !cfg.source_explicitly_set;
-                    drop(cfg);
-                    if no_local_tracks && server_connected && not_explicitly_set {
-                        config.write().active_source = config::MusicSource::Server;
-                    }
-                }
-
-                if let Ok(Ok(loaded_queue_state)) = queue_res
-                    && let Some(queue_state) = sanitize_queue_state(loaded_queue_state)
-                {
-                    ctrl.restore_queue_state(
-                        queue_state.queue,
-                        queue_state.current_queue_index,
-                        queue_state.progress_secs,
-                        queue_state.shuffle_order,
-                        queue_state.shuffle_enabled,
+                    let (lib_res, cfg_res, pl_res, fav_res, queue_res) = tokio::join!(
+                        tokio::task::spawn_blocking(move || reader::Library::load(&lib_path_c)),
+                        tokio::task::spawn_blocking(move || config::AppConfig::load(
+                            &config_path_c
+                        )),
+                        tokio::task::spawn_blocking(move || reader::PlaylistStore::load(
+                            &playlist_path_c
+                        )),
+                        tokio::task::spawn_blocking(move || FavoritesStore::load(
+                            &favorites_path_c
+                        )),
+                        tokio::task::spawn_blocking(move || {
+                            PersistedQueueState::load(&queue_state_path_c)
+                        }),
                     );
-                }
 
-                initial_load_done.set(true);
-            }.instrument(tracing::info_span!("startup.load")));
+                    if let Ok(Ok(loaded)) = lib_res {
+                        library.set(loaded.clone());
+                    }
+                    if let Ok(loaded) = cfg_res {
+                        config.set(loaded.clone());
+                        configured_music_dirs.set(loaded.music_directory.clone());
+                        volume.set(loaded.volume);
+                        persisted_volume.set(loaded.volume);
+                        player.write().set_volume(loaded.volume);
+                        player.write().set_channel_mode(loaded.channel_mode);
+                        player.write().set_equalizer(loaded.equalizer.clone());
+                        i18n::set_locale(&loaded.language);
+                    }
+                    if let Ok(Ok(loaded)) = pl_res {
+                        playlist_store.set(loaded);
+                    }
+                    if let Ok(Ok(loaded)) = fav_res {
+                        favorites_store.set(loaded);
+                    }
+
+                    {
+                        let cfg = config.peek();
+                        let no_local_tracks = library.peek().tracks.is_empty();
+                        let server_connected = cfg
+                            .server
+                            .as_ref()
+                            .and_then(|s| s.access_token.as_ref())
+                            .is_some();
+                        let not_explicitly_set = !cfg.source_explicitly_set;
+                        drop(cfg);
+                        if no_local_tracks && server_connected && not_explicitly_set {
+                            config.write().active_source = config::MusicSource::Server;
+                        }
+                    }
+
+                    if let Ok(Ok(loaded_queue_state)) = queue_res
+                        && let Some(queue_state) = sanitize_queue_state(loaded_queue_state)
+                    {
+                        ctrl.restore_queue_state(
+                            queue_state.queue,
+                            queue_state.current_queue_index,
+                            queue_state.progress_secs,
+                            queue_state.shuffle_order,
+                            queue_state.shuffle_enabled,
+                        );
+                    }
+
+                    initial_load_done.set(true);
+                }
+                .instrument(tracing::info_span!("startup.load")),
+            );
         }
         #[cfg(target_arch = "wasm32")]
         {
@@ -1730,133 +1765,146 @@ fn App() -> Element {
         last_scan_key.set(Some(scan_key));
 
         #[cfg(not(target_arch = "wasm32"))]
-        spawn(async move {
-            let configured_dirs = configured_dirs;
-            let scannable_dirs: Vec<PathBuf> = configured_dirs
-                .iter()
-                .filter(|d| d.exists())
-                .cloned()
-                .collect();
-            let mut current_lib = library.peek().clone();
+        spawn(
+            async move {
+                let configured_dirs = configured_dirs;
+                let scannable_dirs: Vec<PathBuf> = configured_dirs
+                    .iter()
+                    .filter(|d| d.exists())
+                    .cloned()
+                    .collect();
+                let mut current_lib = library.peek().clone();
 
-            let current_roots: std::collections::HashSet<_> =
-                current_lib.root_paths.iter().cloned().collect();
-            let new_roots: std::collections::HashSet<_> = configured_dirs.iter().cloned().collect();
+                let current_roots: std::collections::HashSet<_> =
+                    current_lib.root_paths.iter().cloned().collect();
+                let new_roots: std::collections::HashSet<_> =
+                    configured_dirs.iter().cloned().collect();
 
-            if current_roots != new_roots {
-                current_lib.root_paths = configured_dirs.clone();
-                current_lib.tracks.clear();
-                current_lib.albums.clear();
-                library.set(current_lib.clone());
-            }
-
-            if !configured_dirs.is_empty() {
-                current_lib.local_artist_images.clear();
-                scan_current_file.set(Some(String::new()));
-
-                let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
-                spawn(async move {
-                    while let Some(file) = rx.recv().await {
-                        scan_current_file.set(Some(file));
-                    }
-                    scan_current_file.set(None);
-                });
-
-                let progress_cb: std::sync::Arc<dyn Fn(String) + Send + Sync> =
-                    std::sync::Arc::new(move |file: String| {
-                        let _ = tx.send(file);
-                    });
-                for dir in &scannable_dirs {
-                    let _ = reader::scan_directory(
-                        dir.clone(),
-                        cover_cache(),
-                        &mut current_lib,
-                        progress_cb.clone(),
-                    )
-                    .await;
+                if current_roots != new_roots {
+                    current_lib.root_paths = configured_dirs.clone();
+                    current_lib.tracks.clear();
+                    current_lib.albums.clear();
+                    library.set(current_lib.clone());
                 }
 
-                current_lib.tracks.retain(|t| {
-                    let in_configured_root = configured_dirs.iter().any(|d| t.path.starts_with(d));
-                    let in_scannable_root = scannable_dirs.iter().any(|d| t.path.starts_with(d));
+                if !configured_dirs.is_empty() {
+                    current_lib.local_artist_images.clear();
+                    scan_current_file.set(Some(String::new()));
 
-                    in_configured_root && (!in_scannable_root || t.path.exists())
-                });
-
-                let valid_album_ids: std::collections::HashSet<_> = current_lib
-                    .tracks
-                    .iter()
-                    .map(|t| t.album_id.clone())
-                    .collect();
-                current_lib
-                    .albums
-                    .retain(|a| valid_album_ids.contains(&a.id));
-
-                // Show the library immediately — before any cover fetching.
-                library.set(current_lib.clone());
-                let _ = current_lib.save(&lib_path());
-
-                if fetch_covers {
-                    // Fetch missing covers in the background so the UI stays responsive.
-                    // Passing `progress_cb` into the task keeps the scan-progress bar
-                    // alive during fetching; it disappears automatically when the task ends.
-                    let lib_for_fetch = current_lib;
+                    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
                     spawn(async move {
-                        let fetcher = reader::cover_fetcher::CoverFetcher::new(
+                        while let Some(file) = rx.recv().await {
+                            scan_current_file.set(Some(file));
+                        }
+                        scan_current_file.set(None);
+                    });
+
+                    let progress_cb: std::sync::Arc<dyn Fn(String) + Send + Sync> =
+                        std::sync::Arc::new(move |file: String| {
+                            let _ = tx.send(file);
+                        });
+                    for dir in &scannable_dirs {
+                        let _ = reader::scan_directory(
+                            dir.clone(),
                             cover_cache(),
-                            fetch_strategy,
-                            lastfm_key,
-                            progress_cb,
-                        );
-                        let mut lib = lib_for_fetch;
-                        let report = fetcher.fetch_missing_covers(&mut lib).await;
-                        tracing::info!(
-                            "Cover auto-fetch: {} found, {} missing, {} errors",
-                            report.found,
-                            report.missing,
-                            report.errors,
-                        );
-                        let merged_lib = {
-                            let mut current = library.write();
-                            let mut changed = false;
+                            &mut current_lib,
+                            progress_cb.clone(),
+                        )
+                        .await;
+                    }
 
-                            for fetched_album in lib.albums.iter() {
-                                let Some(fetched_cover) = fetched_album.cover_path.clone() else {
-                                    continue;
+                    current_lib.tracks.retain(|t| {
+                        let in_configured_root =
+                            configured_dirs.iter().any(|d| t.path.starts_with(d));
+                        let in_scannable_root =
+                            scannable_dirs.iter().any(|d| t.path.starts_with(d));
+
+                        in_configured_root && (!in_scannable_root || t.path.exists())
+                    });
+
+                    let valid_album_ids: std::collections::HashSet<_> = current_lib
+                        .tracks
+                        .iter()
+                        .map(|t| t.album_id.clone())
+                        .collect();
+                    current_lib
+                        .albums
+                        .retain(|a| valid_album_ids.contains(&a.id));
+
+                    // Show the library immediately — before any cover fetching.
+                    library.set(current_lib.clone());
+                    let _ = current_lib.save(&lib_path());
+
+                    if fetch_covers {
+                        // Fetch missing covers in the background so the UI stays responsive.
+                        // Passing `progress_cb` into the task keeps the scan-progress bar
+                        // alive during fetching; it disappears automatically when the task ends.
+                        let lib_for_fetch = current_lib;
+                        spawn(
+                            async move {
+                                let fetcher = reader::cover_fetcher::CoverFetcher::new(
+                                    cover_cache(),
+                                    fetch_strategy,
+                                    lastfm_key,
+                                    progress_cb,
+                                );
+                                let mut lib = lib_for_fetch;
+                                let report = fetcher.fetch_missing_covers(&mut lib).await;
+                                tracing::info!(
+                                    "Cover auto-fetch: {} found, {} missing, {} errors",
+                                    report.found,
+                                    report.missing,
+                                    report.errors,
+                                );
+                                let merged_lib = {
+                                    let mut current = library.write();
+                                    let mut changed = false;
+
+                                    for fetched_album in lib.albums.iter() {
+                                        let Some(fetched_cover) = fetched_album.cover_path.clone()
+                                        else {
+                                            continue;
+                                        };
+
+                                        let Some(current_album) = current
+                                            .albums
+                                            .iter_mut()
+                                            .find(|a| a.id == fetched_album.id)
+                                        else {
+                                            continue;
+                                        };
+
+                                        if current_album.cover_path.is_none()
+                                            && !current_album.manual_cover
+                                        {
+                                            current_album.cover_path = Some(fetched_cover);
+                                            changed = true;
+                                        }
+                                    }
+
+                                    changed.then(|| current.clone())
                                 };
 
-                                let Some(current_album) =
-                                    current.albums.iter_mut().find(|a| a.id == fetched_album.id)
-                                else {
-                                    continue;
-                                };
-
-                                if current_album.cover_path.is_none() && !current_album.manual_cover
-                                {
-                                    current_album.cover_path = Some(fetched_cover);
-                                    changed = true;
+                                if let Some(merged_lib) = merged_lib {
+                                    let _ = merged_lib.save(&lib_path());
                                 }
                             }
-
-                            changed.then(|| current.clone())
-                        };
-
-                        if let Some(merged_lib) = merged_lib {
-                            let _ = merged_lib.save(&lib_path());
-                        }
-                    }.instrument(tracing::info_span!("library.fetch_covers")));
+                            .instrument(tracing::info_span!("library.fetch_covers")),
+                        );
+                    } else {
+                        // No cover fetching — drop the callback so the progress bar closes.
+                        drop(progress_cb);
+                    }
                 } else {
-                    // No cover fetching — drop the callback so the progress bar closes.
-                    drop(progress_cb);
+                    current_lib.tracks.clear();
+                    current_lib.albums.clear();
+                    current_lib.root_paths.clear();
+                    library.set(current_lib.clone());
+                    let _ = current_lib.save(&lib_path());
                 }
-            } else {
-                current_lib.tracks.clear();
-                current_lib.albums.clear();
-                current_lib.root_paths.clear();
-                library.set(current_lib.clone());
-                let _ = current_lib.save(&lib_path());
             }
-        }.instrument(tracing::info_span!("library.rescan")));
+            .instrument(tracing::info_span!("library.rescan")),
+        );
     });
 
     use_effect(move || {

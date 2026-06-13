@@ -21,7 +21,7 @@ pub fn PlaylistsPage(
 
     let mut selected_folder = use_signal(|| Option::<String>::None);
     let mut show_add_playlist = use_signal(|| false);
-    let mut playlist_name = use_signal(|| String::new());
+    let mut playlist_name = use_signal(String::new);
     let mut error = use_signal(|| Option::<String>::None);
     let mut saving = use_signal(|| false);
     let mut playlist_refresh_trigger = use_signal(|| 0u64);
@@ -91,10 +91,10 @@ pub fn PlaylistsPage(
 
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
-    let mut last_source = use_signal(|| config.read().active_source.clone());
+    let mut last_source = use_signal(|| config.read().active_source);
     if *last_source.read() != config.read().active_source {
         selected_playlist_id.set(None);
-        last_source.set(config.read().active_source.clone());
+        last_source.set(config.read().active_source);
     }
 
     let is_modern = config.read().ui_style == UiStyle::Modern;
@@ -210,8 +210,7 @@ pub fn PlaylistsPage(
                                         .jellyfin_playlists
                                         .iter()
                                         .find(|p| p.id == pid_for_dl_track)
-                                    {
-                                        if let Some(tid) = p.tracks.get(idx) {
+                                        && let Some(tid) = p.tracks.get(idx) {
                                             track_id = tid.clone();
                                             if let Some(meta) = lib
                                                 .jellyfin_tracks
@@ -222,7 +221,6 @@ pub fn PlaylistsPage(
                                                 track_artist = meta.artist.clone();
                                             }
                                         }
-                                    }
                                     if !track_id.is_empty() {
                                         let is_downloaded = if let Some(path_str) = config
                                             .read()

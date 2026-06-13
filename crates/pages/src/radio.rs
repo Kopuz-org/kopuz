@@ -15,7 +15,7 @@ pub struct RadioProps {
 #[component]
 pub fn Radio(props: RadioProps) -> Element {
     let mut ctrl = use_context::<PlayerController>();
-    let config = use_context::<Signal<config::AppConfig>>();
+    let config = props.config;
     let is_modern = config.read().ui_style == UiStyle::Modern;
 
     let registry = use_context::<Signal<radio::registry::StationRegistry>>();
@@ -28,11 +28,11 @@ pub fn Radio(props: RadioProps) -> Element {
         .collect();
 
     // Search / filter
-    let mut filter = use_signal(|| String::new());
+    let mut filter = use_signal(String::new);
     let debounce_gen = use_hook(|| Arc::new(AtomicU64::new(0))).clone();
 
     // Expanded stations set for stream overflow
-    let mut expanded_stations = use_signal(|| std::collections::HashSet::<String>::new());
+    let mut expanded_stations = use_signal(std::collections::HashSet::<String>::new);
 
     let query = filter.read().to_lowercase();
     let filtered: Vec<&radio::manifest::StationManifest> = stations

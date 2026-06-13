@@ -37,10 +37,18 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
     });
     let mut album = use_signal(|| props.track.album.clone());
     let mut track_no = use_signal(|| {
-        props.track.track_number.map(|n| n.to_string()).unwrap_or_default()
+        props
+            .track
+            .track_number
+            .map(|n| n.to_string())
+            .unwrap_or_default()
     });
     let mut disc_no = use_signal(|| {
-        props.track.disc_number.map(|n| n.to_string()).unwrap_or_default()
+        props
+            .track
+            .disc_number
+            .map(|n| n.to_string())
+            .unwrap_or_default()
     });
 
     let mut cover_preview = use_signal(|| None::<String>);
@@ -92,14 +100,26 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
         push(&duration_text, fmt_dur(t.duration));
     }
     if t.khz > 0 {
-        push(&sample_rate_text, format!("{:.1} kHz", t.khz as f64 / 1000.0));
+        push(
+            &sample_rate_text,
+            format!("{:.1} kHz", t.khz as f64 / 1000.0),
+        );
     }
     if t.bitrate > 0 {
         push(&bitrate_text, format!("{} kbps", t.bitrate));
     }
-    push(&musicbrainz_release_text, t.musicbrainz_release_id.clone().unwrap_or_default());
-    push(&musicbrainz_recording_text, t.musicbrainz_recording_id.clone().unwrap_or_default());
-    push(&musicbrainz_track_text, t.musicbrainz_track_id.clone().unwrap_or_default());
+    push(
+        &musicbrainz_release_text,
+        t.musicbrainz_release_id.clone().unwrap_or_default(),
+    );
+    push(
+        &musicbrainz_recording_text,
+        t.musicbrainz_recording_id.clone().unwrap_or_default(),
+    );
+    push(
+        &musicbrainz_track_text,
+        t.musicbrainz_track_id.clone().unwrap_or_default(),
+    );
     push(&path_text, t.path.display().to_string());
 
     let input_class = "w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-white/20";

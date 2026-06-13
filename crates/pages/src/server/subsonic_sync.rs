@@ -135,10 +135,10 @@ pub async fn sync_server_library(
 
                     for item in items {
                         let mut path_str = format!("jellyfin:{}", item.id);
-                        if let Some(tags) = &item.image_tags {
-                            if let Some(tag) = tags.get("Primary") {
-                                path_str.push_str(&format!(":{}", tag));
-                            }
+                        if let Some(tags) = &item.image_tags
+                            && let Some(tag) = tags.get("Primary")
+                        {
+                            path_str.push_str(&format!(":{}", tag));
                         }
 
                         let bitrate_kbps = item.bitrate.unwrap_or(0) / 1000;
@@ -190,18 +190,18 @@ pub async fn sync_server_library(
             let mut artist_images = std::collections::HashMap::new();
             if let Ok(artists) = remote.get_artists().await {
                 for artist in artists {
-                    if let Some(tags) = &artist.image_tags {
-                        if let Some(tag) = tags.get("Primary") {
-                            let url = utils::jellyfin_image::jellyfin_image_url(
-                                &server_url,
-                                &artist.id,
-                                Some(tag.as_str()),
-                                Some(&token),
-                                512,
-                                90,
-                            );
-                            artist_images.insert(artist.name, url);
-                        }
+                    if let Some(tags) = &artist.image_tags
+                        && let Some(tag) = tags.get("Primary")
+                    {
+                        let url = utils::jellyfin_image::jellyfin_image_url(
+                            &server_url,
+                            &artist.id,
+                            Some(tag.as_str()),
+                            Some(&token),
+                            512,
+                            90,
+                        );
+                        artist_images.insert(artist.name, url);
                     }
                 }
             }
@@ -374,10 +374,10 @@ pub async fn fetch_subsonic_library(
     let mut artist_images = std::collections::HashMap::new();
     if let Ok(artists) = remote.get_artists().await {
         for artist in artists {
-            if let Some(cover_art_id) = &artist.cover_art {
-                if let Ok(url) = remote.cover_art_url(cover_art_id, Some(512)) {
-                    artist_images.insert(artist.name, url);
-                }
+            if let Some(cover_art_id) = &artist.cover_art
+                && let Ok(url) = remote.cover_art_url(cover_art_id, Some(512))
+            {
+                artist_images.insert(artist.name, url);
             }
         }
     }
@@ -444,10 +444,10 @@ pub async fn fetch_subsonic_library(
                     continue;
                 }
 
-                if let Some(genre) = &song.genre {
-                    if !genre.is_empty() {
-                        genres.insert(genre.clone());
-                    }
+                if let Some(genre) = &song.genre
+                    && !genre.is_empty()
+                {
+                    genres.insert(genre.clone());
                 }
 
                 let bitrate_u16 = song.bit_rate.unwrap_or(0).min(u16::MAX as u32) as u16;
@@ -498,7 +498,7 @@ pub async fn fetch_subsonic_library(
         .into_iter()
         .map(|genre| (genre.clone(), genre))
         .collect();
-    genres_out.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+    genres_out.sort_by_key(|a| a.0.to_lowercase());
 
     Ok(SubsonicLibraryData {
         albums: albums_out,

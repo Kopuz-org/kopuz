@@ -39,7 +39,7 @@ pub fn LocalArtist(
 
     // Multi-selection state
     let mut is_selection_mode = use_signal(|| false);
-    let mut selected_tracks = use_signal(|| HashSet::<PathBuf>::new());
+    let mut selected_tracks = use_signal(HashSet::<PathBuf>::new);
 
     let mut open_album_menu = use_signal(|| None::<String>);
     let mut show_album_playlist_modal = use_signal(|| false);
@@ -86,7 +86,7 @@ pub fn LocalArtist(
             artist_map.insert(normalized, (display_name, Some(image_path.clone())));
         }
         let mut artists: Vec<_> = artist_map.into_values().collect();
-        artists.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+        artists.sort_by_key(|a| a.0.to_lowercase());
         artists
     });
 
@@ -636,11 +636,10 @@ pub fn LocalArtist(
                                     }
                                 },
                                 on_delete_track: move |idx: usize| {
-                                    if let Some(track) = artist_tracks().get(idx) {
-                                        if std::fs::remove_file(&track.path).is_ok() {
+                                    if let Some(track) = artist_tracks().get(idx)
+                                        && std::fs::remove_file(&track.path).is_ok() {
                                             library.write().remove_track(&track.path);
                                         }
-                                    }
                                     active_menu_track.set(None);
                                 },
                                 actions: Some(rsx! {

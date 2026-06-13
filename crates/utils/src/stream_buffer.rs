@@ -44,11 +44,7 @@ impl StreamBuffer {
         Self::with_user_agent(url, is_radio, None)
     }
 
-    pub fn with_user_agent(
-        url: String,
-        is_radio: bool,
-        user_agent: Option<String>,
-    ) -> Self {
+    pub fn with_user_agent(url: String, is_radio: bool, user_agent: Option<String>) -> Self {
         let prebuffer_size = if is_radio {
             16 * 1024
         } else {
