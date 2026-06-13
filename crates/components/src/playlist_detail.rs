@@ -127,10 +127,10 @@ pub fn PlaylistDetail(
                                             let duration_secs =
                                                 item.run_time_ticks.unwrap_or(0) / 10_000_000;
                                             let mut path_str = format!("jellyfin:{}", item.id);
-                                            if let Some(tags) = &item.image_tags {
-                                                if let Some(tag) = tags.get("Primary") {
-                                                    path_str.push_str(&format!(":{}", tag));
-                                                }
+                                            if let Some(tags) = &item.image_tags
+                                                && let Some(tag) = tags.get("Primary")
+                                            {
+                                                path_str.push_str(&format!(":{}", tag));
                                             }
                                             let bitrate_kbps = item.bitrate.unwrap_or(0) / 1000;
                                             let bitrate_u16 =

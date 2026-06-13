@@ -429,7 +429,11 @@ mod tests {
         // Assert
         assert_eq!(
             bare_fields,
-            vec![AlbumSortField::Title, AlbumSortField::Artist, AlbumSortField::PlayCount]
+            vec![
+                AlbumSortField::Title,
+                AlbumSortField::Artist,
+                AlbumSortField::PlayCount
+            ]
         );
         assert_eq!(
             rich_fields,
