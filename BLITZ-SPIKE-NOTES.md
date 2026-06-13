@@ -275,3 +275,11 @@ vello#1707 (vello_hybrid 0-alpha panic); impact comment on blitz#252
   rest). Principled path to persistent bars if still wanted: embedder
   config knobs — blitz DocumentConfig scrollbar mode (engine feature/PR)
   + GtkSettings gtk-overlay-scrolling via gtk API for the webview.
+
+22. **Wide thumbnails letterboxed → background-size cover/contain swapped**
+    (blitz 85b16c7, PR #463): blitz-paint's Cover branch used min ratio
+    (=contain) and Contain used max (=cover) whenever the image exceeded
+    the container in any axis — i.e. for every real photo thumbnail. The
+    <img>/object-fit path was verified correct en route (tests added:
+    explicit/percentage/aspect-ratio-derived heights). WPT
+    css-backgrounds +4 / -0.
