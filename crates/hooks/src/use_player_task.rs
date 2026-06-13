@@ -256,6 +256,8 @@ pub fn use_player_task(ctrl: PlayerController) {
                 utils::sleep(std::time::Duration::from_millis(250)).await;
 
                 nudge_event_loop();
+                #[cfg(target_os = "windows")]
+                ctrl.player.write().refresh_output_stream();
 
                 for cmd in drain_bg_cmds() {
                     match cmd {
