@@ -266,3 +266,12 @@ vello#1707 (vello_hybrid 0-alpha panic); impact comment on blitz#252
   workaround: 1396aa5/ed7fe00). Blitz is the canonical target renderer
   and renders the design correctly. Shelf alternative if ever needed:
   app-level ScrollArea component (pixel-identical everywhere).
+
+- CORRECTION (user catch): "author scrollbar-color => persistent" was an
+  invented semantic no browser implements — persistence is UA/platform
+  policy, orthogonal to the color property (Firefox/WebKit color their
+  autohiding overlay bars). Coupling removed from the local css-scrollbars
+  commit; BOTH renderers now behave identically (themed overlay, hide at
+  rest). Principled path to persistent bars if still wanted: embedder
+  config knobs — blitz DocumentConfig scrollbar mode (engine feature/PR)
+  + GtkSettings gtk-overlay-scrolling via gtk API for the webview.
