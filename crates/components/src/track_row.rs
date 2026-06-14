@@ -5,7 +5,6 @@ use crate::queue_drag::{
     clear_dragged_queue_track, handle_select_click, is_queue_drag_enabled, set_dragged_queue_track,
     set_dragged_queue_tracks,
 };
-use config::MusicSource;
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::PlayerController;
@@ -154,7 +153,7 @@ pub fn TrackRow(
     }
 
     let has_download = on_download.is_some();
-    let is_server = config.read().active_source == MusicSource::Server;
+    let is_server = config.read().active_source.is_server();
     let has_download = has_download && is_server;
 
     if has_download {
@@ -186,7 +185,7 @@ pub fn TrackRow(
         "fa-solid fa-share-nodes",
     ));
 
-    let is_ytmusic_track = track.path.to_string_lossy().starts_with("ytmusic:");
+    let is_ytmusic_track = track.id.uid().starts_with("ytmusic:");
     let mix_idx = if is_ytmusic_track {
         let idx = actions.len();
         actions.push(MenuAction::new(
@@ -503,8 +502,9 @@ pub fn TrackRow(
                                     if let Some(handler) = on_download { handler.call(()); }
                                 } else if idx == share_idx {
                                     if is_ytmusic_track {
-                                        if let Some(vid) = track.path.to_string_lossy().split(':').nth(1) {
-                                            share_youtube_url(vid);
+                                        let vid = track.id.key();
+                                        if !vid.trim().is_empty() {
+                                            share_youtube_url(&vid);
                                         }
                                     } else {
                                         let (rid, artist, title) = share_modern.clone();
@@ -512,7 +512,7 @@ pub fn TrackRow(
                                     }
                                     on_close_menu.call(());
                                 } else if mix_idx == Some(idx) {
-                                    start_radio_from(track.path.clone(), config, ctrl);
+                                    start_radio_from(track.id.uid_path(), config, ctrl);
                                     on_close_menu.call(());
                                 } else if view_metadata_idx == Some(idx) {
                                     if let Some(handler) = on_view_metadata { handler.call(()); }
@@ -775,8 +775,9 @@ pub fn TrackRow(
                                 }
                             } else if idx == share_idx {
                                 if is_ytmusic_track {
-                                    if let Some(vid) = track.path.to_string_lossy().split(':').nth(1) {
-                                        share_youtube_url(vid);
+                                    let vid = track.id.key();
+                                    if !vid.trim().is_empty() {
+                                        share_youtube_url(&vid);
                                     }
                                 } else {
                                     let (rid, artist, title) = share_normal.clone();
@@ -784,7 +785,7 @@ pub fn TrackRow(
                                 }
                                 on_close_menu.call(());
                             } else if mix_idx == Some(idx) {
-                                start_radio_from(track.path.clone(), config, ctrl);
+                                start_radio_from(track.id.uid_path(), config, ctrl);
                                 on_close_menu.call(());
                             } else if view_metadata_idx == Some(idx) {
                                 if let Some(handler) = on_view_metadata {

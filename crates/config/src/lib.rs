@@ -1,6 +1,5 @@
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
-use std::fs;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum FetchStrategy {
@@ -133,23 +132,56 @@ pub struct CustomTheme {
     pub name: String,
     pub vars: HashMap<String, String>,
 }
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Default)]
-pub enum MusicSource {
+/// Where a track/playlist/favorite comes from, and what the app is currently
+/// sourcing from: the local library, or a specific media server (carrying its
+/// id). One type-safe serde value — the old `MusicSource` mode plus the separate
+/// `active_server_id` string, collapsed. The DB persists it as the `source`
+/// column (`"local"` or the server id) and re-exports this type.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
+pub enum Source {
     #[default]
     Local,
-    #[serde(alias = "Jellyfin")]
-    Server,
+    Server(String),
 }
 
-impl MusicSource {
+impl Source {
+    /// The `source` column value: `"local"` or the server id.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Source::Local => "local",
+            Source::Server(id) => id.as_str(),
+        }
+    }
+
+    /// Build from a stored `source` column value.
+    pub fn from_column(s: &str) -> Self {
+        if s == "local" {
+            Source::Local
+        } else {
+            Source::Server(s.to_owned())
+        }
+    }
+
+    pub fn is_local(&self) -> bool {
+        matches!(self, Source::Local)
+    }
+
     pub fn is_server(&self) -> bool {
-        matches!(self, Self::Server)
+        matches!(self, Source::Server(_))
+    }
+
+    /// The server id, if this is a server source.
+    pub fn server_id(&self) -> Option<&str> {
+        match self {
+            Source::Server(id) => Some(id),
+            Source::Local => None,
+        }
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 pub enum MusicService {
     #[default]
     Jellyfin,
@@ -507,8 +539,16 @@ pub struct AppConfig {
     pub server: Option<MusicServer>,
     #[serde(default)]
     pub servers: Vec<SavedServer>,
+    /// Id of the active server (`servers.id`), or `None` for local. The DB-backed
+    /// source of truth for "which server is active"; `server`/`servers` above are
+    /// hydrated from the `servers` table around it. (`server` stays for now so the
+    /// ~90 existing `config.server` readers keep working — they migrate to id-based
+    /// resolution with the auth-gate work.)
+    /// The active source: `Local` or `Server(id)`. Single source of truth for
+    /// "which source/server is active" — `server`/`servers` above are hydrated
+    /// from the `servers` table around it.
     #[serde(default)]
-    pub active_source: MusicSource,
+    pub active_source: Source,
     #[serde(default)]
     pub source_explicitly_set: bool,
     #[serde(default, deserialize_with = "deserialize_music_directories")]
@@ -841,7 +881,7 @@ impl Default for AppConfig {
         Self {
             server: None,
             servers: Vec::new(),
-            active_source: MusicSource::Local,
+            active_source: Source::Local,
             source_explicitly_set: false,
             music_directory: vec![music_directory],
             theme: default_theme(),
@@ -1025,52 +1065,15 @@ impl AppConfig {
         self.active_service() == Some(MusicService::Jellyfin)
     }
 
-    #[tracing::instrument(name = "config.load", skip_all)]
-    pub fn load(path: &Path) -> Self {
-        if !path.exists() {
-            return Self::default();
-        }
-        match fs::read_to_string(path) {
-            Ok(data) => match serde_json::from_str::<Self>(&data) {
-                Ok(mut config) => {
-                    config.migrate_home_sections();
-                    config.migrate_sidebar_order();
-                    config.migrate_registry_paths();
-                    config.migrate_servers();
-                    config
-                }
-                Err(e) => {
-                    tracing::error!(?path, error = %e, "failed to parse config — using defaults");
-                    Self::default()
-                }
-            },
-            Err(e) => {
-                tracing::warn!(?path, error = %e, "failed to read config — using defaults");
-                Self::default()
-            }
-        }
-    }
-
-    #[tracing::instrument(name = "config.save", skip_all)]
-    pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        if let Some(parent) = path.parent()
-            && let Err(e) = fs::create_dir_all(parent)
-        {
-            tracing::error!(?parent, error = %e, "failed to create config directory");
-            return Err(e);
-        }
-        let data = match serde_json::to_string_pretty(self) {
-            Ok(d) => d,
-            Err(e) => {
-                tracing::error!(error = %e, "failed to serialize config");
-                return Err(std::io::Error::other(e));
-            }
-        };
-        if let Err(e) = fs::write(path, data) {
-            tracing::error!(?path, error = %e, "failed to write config");
-            return Err(e);
-        }
-        Ok(())
+    /// The server to activate when toggling into server mode: the current server
+    /// if already on one, else the first saved server. `None` ⇒ no servers, so
+    /// the toggle is a no-op.
+    pub fn server_toggle_target(&self) -> Option<Source> {
+        self.active_source
+            .server_id()
+            .map(String::from)
+            .or_else(|| self.servers.first().map(|s| s.id.clone()))
+            .map(Source::Server)
     }
 }
 

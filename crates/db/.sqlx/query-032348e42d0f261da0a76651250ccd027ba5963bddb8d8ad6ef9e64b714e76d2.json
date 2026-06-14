@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO favorites (server_id, ref, created_at) VALUES (?1, ?2, ?3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "032348e42d0f261da0a76651250ccd027ba5963bddb8d8ad6ef9e64b714e76d2"
+}

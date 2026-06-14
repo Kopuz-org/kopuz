@@ -1,8 +1,14 @@
 use config::{AppConfig, ListenNowStyle, UiStyle};
+use db::Source;
 use dioxus::prelude::*;
+use hooks::db_reactivity::Table;
+use hooks::use_db_queries::{
+    use_album_tracks, use_albums, use_artist_sample_tracks, use_favorites, use_playlists,
+    use_top_genre, use_tracks_by_keys,
+};
 use rand::rng;
 use rand::seq::SliceRandom;
-use reader::{Album, FavoritesStore, Library, PlaylistStore, Track};
+use reader::{Album, Track};
 use std::collections::HashMap;
 
 type AlbumCard = (String, String, String, Option<String>);
@@ -32,17 +38,6 @@ fn section_label(key: &str) -> String {
     i18n::t(i18n_key).to_string()
 }
 
-fn server_track_id(path: &str) -> Option<String> {
-    let mut parts = path.split(':');
-    let prefix = parts.next()?;
-    let id = parts.next()?;
-    if prefix == "jellyfin" || prefix == "subsonic" || prefix == "ytmusic" {
-        Some(id.to_string())
-    } else {
-        None
-    }
-}
-
 fn album_cover_url(conf: &AppConfig, album: &Album) -> Option<String> {
     let server = conf.server.as_ref()?;
     let cover_path = album.cover_path.as_ref()?;
@@ -57,9 +52,9 @@ fn album_cover_url(conf: &AppConfig, album: &Album) -> Option<String> {
 
 fn track_cover_url(conf: &AppConfig, track: &Track) -> Option<String> {
     let server = conf.server.as_ref()?;
-    let path_str = track.path.to_string_lossy();
-    utils::jellyfin_image::track_cover_url_with_album_fallback(
-        &path_str,
+    utils::jellyfin_image::resolve_track_cover(
+        track.cover.as_deref(),
+        &track.id.key(),
         &track.album_id,
         &server.url,
         server.access_token.as_deref(),
@@ -70,9 +65,6 @@ fn track_cover_url(conf: &AppConfig, track: &Track) -> Option<String> {
 
 #[component]
 pub fn JellyfinHome(
-    library: Signal<Library>,
-    playlist_store: Signal<PlaylistStore>,
-    favorites_store: Signal<FavoritesStore>,
     edit_mode: Signal<bool>,
     on_select_album: EventHandler<String>,
     on_play_album: EventHandler<String>,
@@ -83,18 +75,47 @@ pub fn JellyfinHome(
     let mut config = use_context::<Signal<AppConfig>>();
     let mut has_fetched = use_signal(|| false);
 
+    let active_server_id = use_memo(move || {
+        let c = config.read();
+        c.active_source
+            .server_id()
+            .map(String::from)
+            .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
+            .unwrap_or_default()
+    });
+    let server_source = use_memo(move || Source::Server(active_server_id()));
+    let albums_res = use_albums(server_source);
+    let playlists_res = use_playlists();
+    let offline_keys = use_memo(move || -> Vec<String> {
+        if !*is_offline.read() {
+            return Vec::new();
+        }
+        config
+            .read()
+            .offline_tracks
+            .iter()
+            .filter(|(_, path)| std::path::Path::new(path).exists())
+            .map(|(id, _)| id.clone())
+            .collect()
+    });
+    let offline_tracks_res = use_tracks_by_keys(server_source, offline_keys);
+    let recent_keys = use_memo(move || config.read().recently_played_server.clone());
+    let recent_tracks_res = use_tracks_by_keys(server_source, recent_keys);
+    let top_genre_res = use_top_genre(server_source);
+    let artist_samples_res = use_artist_sample_tracks(server_source, 30);
+
     let mut fetch_jellyfin = move || {
         has_fetched.set(true);
         spawn(async move {
-            let _ = crate::server::subsonic_sync::sync_server_library(library, config, false).await;
+            let _ = crate::server::subsonic_sync::sync_server_library(config, false).await;
         });
     };
 
     use_effect(move || {
-        if !*has_fetched.read() {
-            if library.read().jellyfin_tracks.is_empty()
-                && library.read().jellyfin_albums.is_empty()
-            {
+        if !*has_fetched.read()
+            && let Some(albums) = albums_res.read().as_ref()
+        {
+            if albums.is_empty() {
                 fetch_jellyfin();
             } else {
                 has_fetched.set(true);
@@ -103,10 +124,9 @@ pub fn JellyfinHome(
     });
 
     let jellyfin_albums_all = use_memo(move || -> Vec<AlbumCard> {
-        let lib = library.read();
         let conf = config.read();
 
-        let mut albums = lib.jellyfin_albums.clone();
+        let mut albums = albums_res.read().clone().unwrap_or_default();
         albums.sort_by(|a, b| {
             a.title
                 .trim()
@@ -119,17 +139,11 @@ pub fn JellyfinHome(
 
         let offline = *is_offline.read();
         let downloaded_album_ids: std::collections::HashSet<String> = if offline {
-            lib.jellyfin_tracks
+            offline_tracks_res
+                .read()
+                .clone()
+                .unwrap_or_default()
                 .iter()
-                .filter(|t| {
-                    let id = t.path.to_string_lossy();
-                    let id_str = id.split(':').nth(1).unwrap_or(&id);
-                    if let Some(path_str) = conf.offline_tracks.get(id_str) {
-                        std::path::Path::new(path_str).exists()
-                    } else {
-                        false
-                    }
-                })
                 .map(|t| t.album_id.clone())
                 .collect()
         } else {
@@ -174,9 +188,8 @@ pub fn JellyfinHome(
     });
 
     let new_releases = use_memo(move || -> Vec<AlbumCard> {
-        let lib = library.read();
         let conf = config.read();
-        let mut albums = lib.jellyfin_albums.clone();
+        let mut albums = albums_res.read().clone().unwrap_or_default();
         albums.sort_by_key(|b| std::cmp::Reverse(b.year));
         let mut unique = Vec::new();
         let mut seen = std::collections::HashSet::new();
@@ -206,11 +219,11 @@ pub fn JellyfinHome(
     });
 
     let recently_added = use_memo(move || -> Vec<AlbumCard> {
-        let lib = library.read();
         let conf = config.read();
+        let all_albums = albums_res.read().clone().unwrap_or_default();
         let mut unique = Vec::new();
         let mut seen = std::collections::HashSet::new();
-        for album in lib.jellyfin_albums.iter().rev() {
+        for album in all_albums.iter().rev() {
             if is_unknown_album(&album.title) || is_unknown_artist(&album.artist) {
                 continue;
             }
@@ -236,106 +249,64 @@ pub fn JellyfinHome(
     });
 
     let continue_listening = use_memo(move || {
-        let lib = library.read();
         let conf = config.read();
-        let track_by_id: HashMap<String, &Track> = lib
-            .jellyfin_tracks
-            .iter()
-            .filter_map(|t| server_track_id(&t.path.to_string_lossy()).map(|id| (id, t)))
-            .collect();
-        let album_by_id: HashMap<&str, &Album> = lib
-            .jellyfin_albums
-            .iter()
-            .map(|a| (a.id.as_str(), a))
-            .collect();
+        let recent_tracks = recent_tracks_res.read().clone().unwrap_or_default();
+        let all_albums = albums_res.read().clone().unwrap_or_default();
+        let album_by_id: HashMap<&str, &Album> =
+            all_albums.iter().map(|a| (a.id.as_str(), a)).collect();
         let mut out: Vec<(Track, Option<Album>, Option<String>)> = Vec::new();
         let mut seen_albums = std::collections::HashSet::new();
-        for id in conf.recently_played_server.iter() {
-            if let Some(track) = track_by_id.get(id) {
-                if track.title.trim().is_empty() {
+        for track in recent_tracks.iter() {
+            if track.title.trim().is_empty() {
+                continue;
+            }
+            let album = album_by_id.get(track.album_id.as_str()).copied().cloned();
+            if let Some(ref album_ref) = album {
+                if is_unknown_album(&album_ref.title) || is_unknown_artist(&album_ref.artist) {
                     continue;
                 }
-                let album = album_by_id.get(track.album_id.as_str()).copied().cloned();
-                if let Some(ref album_ref) = album {
-                    if is_unknown_album(&album_ref.title) || is_unknown_artist(&album_ref.artist) {
-                        continue;
-                    }
-                } else if is_unknown_artist(&track.artist) {
-                    continue;
-                }
-                if let Some(ref a) = album
-                    && !seen_albums.insert(a.id.clone())
-                {
-                    continue;
-                }
-                let cover = track_cover_url(&conf, track);
-                out.push(((*track).clone(), album, cover));
-                if out.len() >= 10 {
-                    break;
-                }
+            } else if is_unknown_artist(&track.artist) {
+                continue;
+            }
+            if let Some(ref a) = album
+                && !seen_albums.insert(a.id.clone())
+            {
+                continue;
+            }
+            let cover = track_cover_url(&conf, track);
+            out.push((track.clone(), album, cover));
+            if out.len() >= 10 {
+                break;
             }
         }
         out
     });
 
     let hero_entry = use_memo(move || {
-        let lib = library.read();
         let conf = config.read();
-        let track_by_id: HashMap<String, &Track> = lib
-            .jellyfin_tracks
-            .iter()
-            .filter_map(|t| server_track_id(&t.path.to_string_lossy()).map(|id| (id, t)))
-            .collect();
-        let album_by_id: HashMap<&str, &Album> = lib
-            .jellyfin_albums
-            .iter()
-            .map(|a| (a.id.as_str(), a))
-            .collect();
+        let recent_tracks = recent_tracks_res.read().clone().unwrap_or_default();
+        let all_albums = albums_res.read().clone().unwrap_or_default();
+        let album_by_id: HashMap<&str, &Album> =
+            all_albums.iter().map(|a| (a.id.as_str(), a)).collect();
 
-        for id in conf.recently_played_server.iter() {
-            if let Some(track) = track_by_id.get(id) {
-                if track.title.trim().is_empty() {
-                    continue;
-                }
-                let album = album_by_id.get(track.album_id.as_str()).copied().cloned();
-                let cover = track_cover_url(&conf, track);
-                return Some(((*track).clone(), album, cover));
+        for track in recent_tracks.iter() {
+            if track.title.trim().is_empty() {
+                continue;
             }
+            let album = album_by_id.get(track.album_id.as_str()).copied().cloned();
+            let cover = track_cover_url(&conf, track);
+            return Some((track.clone(), album, cover));
         }
         None
     });
 
     let made_for_you = use_memo(move || -> (String, Vec<AlbumCard>) {
-        let lib = library.read();
         let conf = config.read();
-        let mut genre_scores: HashMap<String, u64> = HashMap::new();
-        let album_genre: HashMap<&str, &str> = lib
-            .jellyfin_albums
-            .iter()
-            .map(|a| (a.id.as_str(), a.genre.as_str()))
-            .collect();
-        for track in &lib.jellyfin_tracks {
-            let path = track.path.to_string_lossy().to_string();
-            let plays = conf.listen_counts.get(&path).copied().unwrap_or(0);
-            if plays == 0 {
-                continue;
-            }
-            if let Some(genre) = album_genre.get(track.album_id.as_str()) {
-                if genre.trim().is_empty() {
-                    continue;
-                }
-                *genre_scores.entry(genre.to_string()).or_insert(0) += plays;
-            }
-        }
-        let top_genre = genre_scores
-            .into_iter()
-            .max_by_key(|(_, v)| *v)
-            .map(|(k, _)| k);
-        let Some(top_genre) = top_genre else {
+        let all_albums = albums_res.read().clone().unwrap_or_default();
+        let Some(top_genre) = top_genre_res.read().clone().flatten() else {
             return (String::new(), Vec::new());
         };
-        let mut albums: Vec<Album> = lib
-            .jellyfin_albums
+        let mut albums: Vec<Album> = all_albums
             .iter()
             .filter(|a| {
                 a.genre == top_genre && !is_unknown_album(&a.title) && !is_unknown_artist(&a.artist)
@@ -361,24 +332,17 @@ pub fn JellyfinHome(
     });
 
     let jellyfin_artists = use_memo(move || {
-        let lib = library.read();
         let conf = config.read();
+        let tracks = if *is_offline.read() {
+            let mut downloaded = offline_tracks_res.read().clone().unwrap_or_default();
+            downloaded.sort_by_key(|a| a.artist.to_lowercase());
+            downloaded
+        } else {
+            artist_samples_res.read().clone().unwrap_or_default()
+        };
         let mut unique_artists = std::collections::HashSet::new();
         let mut artist_list = Vec::new();
-        let offline = *is_offline.read();
-        for track in &lib.jellyfin_tracks {
-            if offline {
-                let s = track.path.to_string_lossy();
-                let id = s.split(':').nth(1).unwrap_or(&s);
-                let is_downloaded = if let Some(path_str) = conf.offline_tracks.get(id) {
-                    std::path::Path::new(path_str).exists()
-                } else {
-                    false
-                };
-                if !is_downloaded {
-                    continue;
-                }
-            }
+        for track in &tracks {
             if is_unknown_artist(&track.artist) {
                 continue;
             }
@@ -393,12 +357,23 @@ pub fn JellyfinHome(
         artist_list
     });
 
+    let playlist_cover_keys = use_memo(move || -> Vec<String> {
+        let store = playlists_res.read().clone().unwrap_or_default();
+        store
+            .playlists
+            .iter()
+            .filter_map(|p| p.tracks.first().cloned())
+            .collect()
+    });
+    let playlist_cover_tracks_res = use_tracks_by_keys(server_source, playlist_cover_keys);
+
     let recent_playlists = use_memo(move || {
-        let store = playlist_store.read();
+        let store = playlists_res.read().clone().unwrap_or_default();
+        let cover_tracks = playlist_cover_tracks_res.read().clone().unwrap_or_default();
         let conf = config.read();
         let offline = *is_offline.read();
         store
-            .jellyfin_playlists
+            .playlists
             .iter()
             .filter(|p| {
                 if !offline {
@@ -416,7 +391,18 @@ pub fn JellyfinHome(
             .rev()
             .take(10)
             .cloned()
-            .map(|p| (p.id, p.name, p.tracks.len(), p.tracks.first().cloned()))
+            .map(|p| {
+                let cover_url = p.tracks.first().and_then(|tid| {
+                    cover_tracks
+                        .iter()
+                        .find(|t| {
+                            let id = t.id.key();
+                            !id.is_empty() && id.as_ref() == tid.as_str()
+                        })
+                        .and_then(|t| track_cover_url(&conf, t))
+                });
+                (p.id, p.name, p.tracks.len(), cover_url)
+            })
             .collect::<Vec<_>>()
     });
 
@@ -540,8 +526,6 @@ pub fn JellyfinHome(
                                 }
                                 {render_server_section(
                                     &key_for_render,
-                                    library,
-                                    favorites_store,
                                     config,
                                     edit,
                                     is_modern,
@@ -573,8 +557,6 @@ pub fn JellyfinHome(
 #[allow(clippy::too_many_arguments)]
 fn render_server_section(
     key: &str,
-    library: Signal<Library>,
-    favorites_store: Signal<FavoritesStore>,
     config: Signal<AppConfig>,
     edit: bool,
     is_modern: bool,
@@ -597,8 +579,6 @@ fn render_server_section(
     match key {
         "hero" => rsx! {
             ServerHeroBanner {
-                library,
-                favorites_store,
                 config,
                 edit,
                 is_modern,
@@ -661,7 +641,6 @@ fn render_server_section(
             scroll_container,
         ),
         "playlists" => render_playlists(
-            library,
             config,
             is_modern,
             recent_playlists,
@@ -674,8 +653,6 @@ fn render_server_section(
 
 #[component]
 fn ServerHeroBanner(
-    library: Signal<Library>,
-    favorites_store: Signal<FavoritesStore>,
     mut config: Signal<AppConfig>,
     edit: bool,
     is_modern: bool,
@@ -686,6 +663,28 @@ fn ServerHeroBanner(
     let mut is_resizing = use_signal(|| false);
     let mut start_y = use_signal(|| 0.0_f64);
     let mut start_h = use_signal(|| 0_u32);
+
+    let gens = hooks::db_reactivity::use_generations();
+    let active_server_id = use_memo(move || {
+        let c = config.read();
+        c.active_source
+            .server_id()
+            .map(String::from)
+            .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
+            .unwrap_or_default()
+    });
+    let hero_album_id_val = hero_entry
+        .as_ref()
+        .and_then(|(_, a, _)| a.as_ref().map(|a| a.id.clone()))
+        .unwrap_or_default();
+    let mut hero_album_id = use_signal(|| hero_album_id_val.clone());
+    if *hero_album_id.peek() != hero_album_id_val {
+        hero_album_id.set(hero_album_id_val);
+    }
+    let server_source = use_memo(move || Source::Server(active_server_id()));
+    let hero_album_id_memo = use_memo(move || hero_album_id.read().clone());
+    let hero_tracks_res = use_album_tracks(server_source, hero_album_id_memo);
+    let favorites_res = use_favorites(active_server_id);
 
     use_effect(move || {
         if *is_resizing.read() {
@@ -780,17 +779,21 @@ fn ServerHeroBanner(
                             span { class: "text-sm", "{i18n::t(\"start_listening\")}" }
                         }
                         {
-                            let album_id_hero = hero_entry.as_ref().and_then(|(_, a, _)| a.as_ref().map(|a| a.id.clone()));
                             let jelly_hero_fav = {
-                                let lib = library.read();
-                                let store = favorites_store.read();
-                                let tracks: Vec<_> = lib.jellyfin_tracks.iter()
-                                    .filter(|t| album_id_hero.as_deref() == Some(t.album_id.as_str()))
+                                let tracks = if hero_album_id.read().is_empty() {
+                                    Vec::new()
+                                } else {
+                                    hero_tracks_res.read().clone().unwrap_or_default()
+                                };
+                                let favs: std::collections::HashSet<String> = favorites_res
+                                    .read()
+                                    .clone()
+                                    .unwrap_or_default()
+                                    .into_iter()
                                     .collect();
                                 !tracks.is_empty() && tracks.iter().all(|t| {
-                                    let path_str = t.path.to_string_lossy();
-                                    let parts: Vec<&str> = path_str.split(':').collect();
-                                    parts.len() >= 2 && store.is_jellyfin_favorite(parts[1])
+                                    let id = t.id.key();
+                                    !id.is_empty() && favs.contains(id.as_ref())
                                 })
                             };
                             let hero_heart_class = if jelly_hero_fav {
@@ -799,32 +802,27 @@ fn ServerHeroBanner(
                                 "w-11 h-11 rounded-full bg-white/10 border border-white/20 flex items-center justify-center text-white hover:bg-white/20 transition-all"
                             };
                             let hero_heart_icon = if jelly_hero_fav { "fa-solid fa-heart" } else { "fa-regular fa-heart" };
-                            let mut favorites_store = favorites_store;
                             rsx! {
                                 button {
                                     class: "{hero_heart_class}",
                                     onclick: move |_| {
-                                        let tracks: Vec<_> = {
-                                            let lib = library.read();
-                                            lib.jellyfin_tracks.iter()
-                                                .filter(|t| album_id_hero.as_deref() == Some(t.album_id.as_str()))
-                                                .cloned()
-                                                .collect()
+                                        let tracks: Vec<_> = if hero_album_id.peek().is_empty() {
+                                            Vec::new()
+                                        } else {
+                                            hero_tracks_res.read().clone().unwrap_or_default()
                                         };
                                         let new_fav = !jelly_hero_fav;
-                                        for track in &tracks {
-                                            let path_str = track.path.to_string_lossy().to_string();
-                                            let parts: Vec<&str> = path_str.split(':').collect();
-                                            if parts.len() >= 2 {
-                                                favorites_store.write().set_jellyfin(parts[1].to_string(), new_fav);
-                                            }
-                                        }
                                         let track_ids: Vec<String> = tracks.iter().filter_map(|t| {
-                                            let path_str = t.path.to_string_lossy().to_string();
-                                            let parts: Vec<&str> = path_str.split(':').collect();
-                                            if parts.len() >= 2 { Some(parts[1].to_string()) } else { None }
+                                            let id = t.id.key();
+                                            (!id.is_empty()).then(|| id.to_string())
                                         }).collect();
+                                        let sid = active_server_id();
+                                        let db = consume_context::<db::Db>();
                                         spawn(async move {
+                                            for id in &track_ids {
+                                                let _ = db.set_favorite(&sid, id, new_fav).await;
+                                            }
+                                            gens.bump(Table::Favorites);
                                             let Some(conn) =
                                                 ::server::server_ops::ServerConn::resolve(&config.peek())
                                             else {
@@ -910,7 +908,7 @@ fn render_continue_listening(
                         let album_id_opt = album_opt.as_ref().map(|a| a.id.clone());
                         let album_id_click = album_id_opt.clone();
                         let album_id_play = album_id_opt.clone();
-                        let key = track.path.to_string_lossy().to_string();
+                        let key = track.id.uid();
                         rsx! {
                             div {
                                 key: "{key}",
@@ -1107,7 +1105,6 @@ fn render_top_artists(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn render_albums_row(
     scroll_id: &'static str,
     title: String,
@@ -1184,8 +1181,7 @@ fn render_albums_row(
 }
 
 fn render_playlists(
-    library: Signal<Library>,
-    config: Signal<AppConfig>,
+    _config: Signal<AppConfig>,
     is_modern: bool,
     recent_playlists: Vec<(String, String, usize, Option<String>)>,
     on_select_playlist: EventHandler<String>,
@@ -1219,35 +1215,8 @@ fn render_playlists(
             div {
                 id: "jelly-playlists-scroll",
                 class: "flex overflow-x-auto gap-6 pb-6 pt-2 scrollbar-hide scroll-smooth -mx-2 px-2",
-                for (id, name, track_count, first_track_id) in recent_playlists {
+                for (id, name, track_count, cover_url) in recent_playlists {
                     {
-                        let cover_url = if let Some(tid) = first_track_id {
-                            let lib = library.peek();
-                            lib.jellyfin_tracks
-                                .iter()
-                                .find(|t| {
-                                    let s = t.path.to_string_lossy();
-                                    s.split(':').nth(1).map(|id| id == tid).unwrap_or(false)
-                                })
-                                .and_then(|t| {
-                                    let conf = config.peek();
-                                    if let Some(server) = &conf.server {
-                                        let path_str = t.path.to_string_lossy();
-                                        utils::jellyfin_image::track_cover_url_with_album_fallback(
-                                            &path_str,
-                                            &t.album_id,
-                                            &server.url,
-                                            server.access_token.as_deref(),
-                                            384,
-                                            80,
-                                        )
-                                    } else {
-                                        None
-                                    }
-                                })
-                        } else {
-                            None
-                        };
                         rsx! {
                             div {
                                 key: "{id}",

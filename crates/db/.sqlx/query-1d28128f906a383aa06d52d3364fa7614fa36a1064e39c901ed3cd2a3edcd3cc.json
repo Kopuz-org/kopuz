@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO artist_images (artist_norm, kind, image_ref) VALUES (?1, ?2, ?3) ON CONFLICT(artist_norm, kind) DO UPDATE SET image_ref = ?3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "1d28128f906a383aa06d52d3364fa7614fa36a1064e39c901ed3cd2a3edcd3cc"
+}

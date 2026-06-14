@@ -19,6 +19,9 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
     let duration_min = total_seconds / 60;
 
     let offline_tracks = config.read().offline_tracks.clone();
+    let source_local = use_memo(|| db::Source::Local);
+    let albums_res = hooks::use_db_queries::use_albums(source_local);
+    let local_albums = albums_res.read().clone().unwrap_or_default();
     let _fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
     let sort_state = use_signal(|| None);
     let indexed_tracks: Vec<_> = props
@@ -44,7 +47,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
         > 1;
     let currently_playing_path = {
         let idx = *ctrl.current_queue_index.read();
-        ctrl.get_track_at(idx).map(|track| track.path.clone())
+        ctrl.get_track_at(idx).map(|track| track.id.uid_path())
     };
 
     let current_song_title = ctrl.current_song_title.read().clone();
@@ -54,7 +57,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
     let tracks_for_play_all = sorted_tracks.clone();
     let selected_queue_tracks: Vec<_> = sorted_tracks
         .iter()
-        .filter(|track| props.selected_tracks.contains(&track.path))
+        .filter(|track| props.selected_tracks.contains(&track.id.uid_path()))
         .cloned()
         .collect();
     let selected_queue_tracks_arc = std::sync::Arc::new(selected_queue_tracks.clone());
@@ -237,7 +240,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                         {
                             {
                                 let idx = *idx;
-                                let matches_current_path = currently_playing_path.as_ref() == Some(&track.path);
+                                let matches_current_path = currently_playing_path.as_ref() == Some(&track.id.uid_path());
                                 let matches_current_metadata = currently_playing_path.is_none()
                                     && !current_song_title.is_empty()
                                     && track.title == current_song_title
@@ -247,8 +250,8 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                 let is_currently_playing: bool = matches_current_path
                                     || matches_current_metadata;
                                 let is_selected = props.is_selection_mode
-                                    && props.selected_tracks.contains(&track.path);
-                                let path_str = track.path.to_string_lossy();
+                                    && props.selected_tracks.contains(&track.id.uid_path());
+                                let path_str = track.id.uid();
                                 let item_id_str: String = path_str
                                     .split(':')
                                     .nth(1)
@@ -263,14 +266,15 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                 let is_downloading = false;
                                 let play_queue = std::sync::Arc::clone(&sorted_tracks_arc);
                                 let cover_url: Option<utils::CoverUrl> = {
-                                    let path_str = track.path.to_string_lossy();
+                                    let path_str = track.id.uid();
                                     if path_str.starts_with("jellyfin:") {
                                         let conf = config.read();
                                         let url = conf.server
                                             .as_ref()
                                             .and_then(|s| {
-                                                utils::jellyfin_image::track_cover_url_with_album_fallback(
-                                                        &path_str,
+                                                utils::jellyfin_image::resolve_track_cover(
+                                                        track.cover.as_deref(),
+                                                        &track.id.key(),
                                                         &track.album_id,
                                                         &s.url,
                                                         s.access_token.as_deref(),
@@ -280,12 +284,9 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                             });
                                         Some(url.map_or_else(utils::default_cover_url, |u| std::sync::Arc::from(u.as_str())))
                                     } else if path_str.starts_with("ytmusic:") {
-                                        // YT thumbnails come baked into
-                                        // album_id via urlhex; empty
-                                        // server_url skips the Jellyfin
-                                        // URL fallback branch.
-                                        let url = utils::jellyfin_image::track_cover_url_with_album_fallback(
-                                            &path_str,
+                                        let url = utils::jellyfin_image::resolve_track_cover(
+                                            track.cover.as_deref(),
+                                            &track.id.key(),
                                             &track.album_id,
                                             "",
                                             None,
@@ -294,8 +295,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                         );
                                         Some(url.map_or_else(utils::default_cover_url, |u| std::sync::Arc::from(u.as_str())))
                                     } else {
-                                        let lib = props.library.read();
-                                        lib.albums
+                                        local_albums
                                             .iter()
                                             .find(|a| a.id == track.album_id)
                                             .and_then(|a| utils::format_artwork_url(a.cover_path.as_ref()))
@@ -312,7 +312,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                 }
                                 let columns = if props.is_album { COLUMNS_MODERN_ALBUM } else { COLUMNS_MODERN };
                                 rsx! {
-                                    div { key: "{track.path.display()}", class: "contents",
+                                    div { key: "{track.id.uid()}", class: "contents",
                                     div { class: "flex items-center group",
                                         if has_multiple_discs && props.is_album && is_new_disc && sort_state.peek().is_none() {
                                             div { class: "flex-1 min-w-0",
@@ -330,7 +330,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                             TrackRow {
                                                 track: track.clone(),
                                                 cover_url,
-                                                is_menu_open: props.active_track.as_ref() == Some(&track.path),
+                                                is_menu_open: props.active_track.as_ref() == Some(&track.id.uid_path()),
                                                 is_album: props.is_album,
                                                 is_selection_mode: props.is_selection_mode,
                                                 is_selected,

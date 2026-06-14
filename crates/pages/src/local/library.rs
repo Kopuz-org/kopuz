@@ -6,11 +6,12 @@ use components::stat_card::StatCard;
 use components::track_row::TrackRow;
 use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use config::{AppConfig, UiStyle};
+use db::{Page, Source, TrackFilter, TrackSort};
 use dioxus::prelude::*;
-use hooks::use_library_items::use_library_items;
+use hooks::db_reactivity::Table;
+use hooks::use_db_queries::{use_albums, use_artists, use_playlists, use_tracks_window};
 use hooks::use_player_controller::PlayerController;
 use kopuz_route::Route;
-use reader::Library;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
@@ -18,14 +19,26 @@ const ITEM_HEIGHT: f64 = 60.0; // 60px: p-2 padding (16px*2=32) + content height
 
 #[component]
 pub fn LocalLibrary(
-    library: Signal<Library>,
     config: Signal<AppConfig>,
-    playlist_store: Signal<reader::PlaylistStore>,
     on_rescan: EventHandler,
     mut queue: Signal<Vec<reader::models::Track>>,
 ) -> Element {
-    let items = use_library_items(library);
-    let mut sort_order = items.sort_order;
+    let gens = hooks::db_reactivity::use_generations();
+    let initial_sort_order = config.read().sort_order.clone();
+    let mut sort_order = use_signal(move || initial_sort_order);
+    let filter = use_memo(move || TrackFilter {
+        source: Source::Local,
+        sort: match *sort_order.read() {
+            config::SortOrder::Title => TrackSort::Title,
+            config::SortOrder::Artist => TrackSort::Artist,
+            config::SortOrder::Album => TrackSort::Album,
+        },
+        ..Default::default()
+    });
+    let source = use_memo(|| Source::Local);
+    let albums_res = use_albums(source);
+    let artists_res = use_artists(source);
+    let playlists_res = use_playlists();
     let mut scroll_positions = use_context::<Signal<std::collections::HashMap<Route, f64>>>();
     let saved_scroll = scroll_positions
         .peek()
@@ -34,6 +47,26 @@ pub fn LocalLibrary(
         .unwrap_or(0.0);
     let scroll_stat = use_signal(move || saved_scroll);
     let container_height = use_signal(|| 0.0_f64);
+    let mut total_rows = use_signal(|| 0_usize);
+    let page = use_memo(move || {
+        let info = use_virtual_scroll(
+            *scroll_stat.read(),
+            *container_height.read(),
+            total_rows(),
+            ITEM_HEIGHT,
+        );
+        Page {
+            offset: info.start_index as u32,
+            limit: info.items_to_render as u32,
+        }
+    });
+    let window = use_tracks_window(filter, page);
+    use_effect(move || {
+        let total = window.total.read().unwrap_or(0) as usize;
+        if *total_rows.peek() != total {
+            total_rows.set(total);
+        }
+    });
     use_effect(move || {
         let curr = sort_order.read().clone();
         if config.peek().sort_order != curr {
@@ -47,61 +80,64 @@ pub fn LocalLibrary(
     let mut metadata_track = use_signal(|| None::<reader::models::Track>);
     let mut is_selection_mode = use_signal(|| false);
     let mut selected_tracks = use_signal(HashSet::<PathBuf>::new);
-    let displayed_tracks = use_memo(move || (items.all_tracks)());
-    let album_covers = use_memo(move || (items.album_covers)());
+    let album_covers = use_memo(move || {
+        albums_res
+            .read()
+            .clone()
+            .unwrap_or_default()
+            .iter()
+            .map(|a| {
+                (
+                    a.id.clone(),
+                    a.cover_path
+                        .as_ref()
+                        .and_then(|p| utils::format_artwork_url(Some(p))),
+                )
+            })
+            .collect::<std::collections::HashMap<String, Option<utils::CoverUrl>>>()
+    });
     let cover_urls_memo = use_memo(move || std::sync::Arc::new(album_covers()));
     let cover_urls = cover_urls_memo();
-    let (total_tracks, is_empty) = {
-        let t = displayed_tracks.read();
-        (t.len(), t.is_empty())
-    };
+    let total_tracks = total_rows();
+    let is_empty = total_tracks == 0;
     let scroll_info = use_virtual_scroll(
         *scroll_stat.read(),
         *container_height.read(),
         total_tracks,
         ITEM_HEIGHT,
     );
-    let all_selected = !is_empty && {
-        let tracks = displayed_tracks.read();
-        let sel = selected_tracks.read();
-        sel.len() >= tracks.len() && tracks.iter().all(|track| sel.contains(&track.path))
-    };
-    let currently_playing_idx: Option<usize> = use_memo(move || {
-        let queue = ctrl.queue.read();
+    let all_selected = !is_empty && selected_tracks.read().len() >= total_tracks;
+    let currently_playing_idx: Option<usize> = {
         let current_index = *ctrl.current_queue_index.read();
-        if let Some(q_idx) = ctrl.get_queue_index(current_index) {
-            let all = displayed_tracks.read();
-            if queue.len() == all.len()
-                && queue.iter().zip(all.iter()).all(|(q, t)| q.path == t.path)
-            {
-                Some(q_idx)
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    })();
+        ctrl.get_queue_index(current_index)
+            .filter(|_| ctrl.queue.read().len() == total_tracks)
+    };
     let tracks_nodes = {
-        let all_tracks = displayed_tracks.read();
-        all_tracks
-            .iter()
+        let window_rows = window.rows.read().clone().unwrap_or_default();
+        let row_offset = window_rows.offset as usize;
+        window_rows
+            .rows
+            .into_iter()
             .enumerate()
-            .skip(scroll_info.start_index)
-            .take(scroll_info.items_to_render)
-            .map(|(idx, track)| {
-                let track = track.clone();
+            .map(|(i, track)| {
+                let idx = row_offset + i;
                 let track_menu = track.clone();
                 let track_add = track.clone();
                 let track_queue = track.clone();
                 let track_meta = track.clone();
                 let track_delete = track.clone();
-                let track_path = track.path.clone();
-                let is_currently_playing = currently_playing_idx == Some(idx);
-                let track_select = track.path.clone();
+                let track_path = track.id.uid_path();
+                let is_currently_playing = currently_playing_idx == Some(idx)
+                    && ctrl
+                        .queue
+                        .read()
+                        .get(idx)
+                        .map(|q| q.id == track.id)
+                        .unwrap_or(false);
+                let track_select = track.id.uid_path();
                 let cover_urls = std::sync::Arc::clone(&cover_urls);
-                let track_key = track.path.display().to_string();
-                let is_menu_open = active_menu_track.read().as_ref() == Some(&track.path);
+                let track_key = track.id.uid();
+                let is_menu_open = active_menu_track.read().as_ref() == Some(&track.id.uid_path());
                 let is_selected = selected_tracks.read().contains(&track_path);
                 let cover_url = cover_urls.get(&track.album_id).cloned().flatten();
                 rsx! {
@@ -133,14 +169,14 @@ pub fn LocalLibrary(
                                 }
                             },
                             on_click_menu: move |_| {
-                                if active_menu_track.read().as_ref() == Some(&track_menu.path) {
+                                if active_menu_track.read().as_ref() == Some(&track_menu.id.uid_path()) {
                                     active_menu_track.set(None);
                                 } else {
-                                    active_menu_track.set(Some(track_menu.path.clone()));
+                                    active_menu_track.set(Some(track_menu.id.uid_path()));
                                 }
                             },
                             on_add_to_playlist: move |_| {
-                                selected_track_for_playlist.set(Some(track_add.path.clone()));
+                                selected_track_for_playlist.set(Some(track_add.id.uid_path()));
                                 show_playlist_modal.set(true);
                                 active_menu_track.set(None);
                             },
@@ -155,13 +191,29 @@ pub fn LocalLibrary(
                             },
                             on_delete: move |_| {
                                 active_menu_track.set(None);
-                                if std::fs::remove_file(&track_delete.path).is_ok() {
-                                    library.write().remove_track(&track_delete.path);
-                                }
+                                if let Some(p) = track_delete.id.local_path()
+                                    && std::fs::remove_file(p).is_ok() {
+                                        let db = consume_context::<db::Db>();
+                                        let key = track_delete.id.key().into_owned();
+                                        spawn(async move {
+                                            if db.delete_tracks(&Source::Local, &[key]).await.is_ok() {
+                                                gens.bump(Table::Tracks);
+                                            }
+                                        });
+                                    }
                             },
                             on_play: move |_| {
-                                queue.set(displayed_tracks());
-                                ctrl.play_track(idx);
+                                let db = consume_context::<db::Db>();
+                                let f = filter();
+                                spawn(async move {
+                                    let total = db.tracks_count(&f).await.unwrap_or(0);
+                                    let tracks = db
+                                        .tracks_page(&f, Page { offset: 0, limit: total })
+                                        .await
+                                        .unwrap_or_default();
+                                    queue.set(tracks);
+                                    ctrl.play_track(idx);
+                                });
                             },
                         }
                     }
@@ -175,7 +227,6 @@ pub fn LocalLibrary(
             class: if cfg!(target_os = "android") { "px-3 pt-3 absolute inset-0 flex flex-col overflow-x-hidden" } else if is_modern { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
             if *show_playlist_modal.read() {
                 PlaylistModal {
-                    playlist_store,
                     is_jellyfin: false,
                     on_close: move |_| {
                         show_playlist_modal.set(false);
@@ -185,18 +236,26 @@ pub fn LocalLibrary(
                         }
                     },
                     on_add_to_playlist: move |playlist_id: String| {
-                        let mut store = playlist_store.write();
-                        if let Some(playlist) = store.playlists.iter_mut().find(|p| p.id == playlist_id) {
-                            if is_selection_mode() {
-                                for path in selected_tracks.read().iter() {
-                                    if !playlist.tracks.contains(path) {
-                                        playlist.tracks.push(path.clone());
-                                    }
+                        let refs: Vec<String> = if is_selection_mode() {
+                            selected_tracks
+                                .read()
+                                .iter()
+                                .map(|p| p.to_string_lossy().into_owned())
+                                .collect()
+                        } else {
+                            selected_track_for_playlist
+                                .read()
+                                .iter()
+                                .map(|p| p.to_string_lossy().into_owned())
+                                .collect()
+                        };
+                        if !refs.is_empty() {
+                            let db = consume_context::<db::Db>();
+                            spawn(async move {
+                                if db.add_playlist_tracks(&Source::Local, &playlist_id, &refs).await.is_ok() {
+                                    gens.bump(Table::Playlists);
                                 }
-                            } else if let Some(path) = selected_track_for_playlist.read().clone()
-                                && !playlist.tracks.contains(&path) {
-                                    playlist.tracks.push(path);
-                                }
+                            });
                         }
                         show_playlist_modal.set(false);
                         active_menu_track.set(None);
@@ -210,12 +269,18 @@ pub fn LocalLibrary(
                         } else if let Some(path) = selected_track_for_playlist.read().clone() {
                             tracks.push(path);
                         }
-                        let mut store = playlist_store.write();
-                        store.playlists.push(reader::models::Playlist {
-                            id: uuid::Uuid::new_v4().to_string(),
-                            name,
-                            tracks,
-                            cover_path: None,
+                        let refs: Vec<String> = tracks
+                            .iter()
+                            .map(|p| p.to_string_lossy().into_owned())
+                            .collect();
+                        let id = uuid::Uuid::new_v4().to_string();
+                        let db = consume_context::<db::Db>();
+                        spawn(async move {
+                            if db.upsert_playlist_meta(&Source::Local, &id, &name, None, None).await.is_ok()
+                                && db.set_playlist_tracks(&Source::Local, &id, &refs).await.is_ok()
+                            {
+                                gens.bump(Table::Playlists);
+                            }
                         });
                         show_playlist_modal.set(false);
                         active_menu_track.set(None);
@@ -229,28 +294,33 @@ pub fn LocalLibrary(
                     track: track.clone(),
                     on_close: move |_| metadata_track.set(None),
                     on_save: move |edits: reader::models::TrackEdits| {
-                        let path = track.path.clone();
+                        let Some(path) = track.id.local_path().map(|p| p.to_path_buf()) else {
+                            return;
+                        };
                         match reader::write_tags(&path, &edits) {
                             Ok(()) => {
-                                let mut lib = library.write();
-                                if let Some(t) = lib.tracks.iter_mut().find(|t| t.path == path) {
-                                    t.title = edits.title.trim().to_string();
-                                    t.artist = edits.artist.trim().to_string();
-                                    t.artists = edits
-                                        .artist
-                                        .split([';', ','])
-                                        .map(|a| a.trim().to_string())
-                                        .filter(|s| !s.is_empty())
-                                        .collect();
-                                    t.album = edits.album.trim().to_string();
-                                    t.track_number = edits.track_number;
-                                    t.disc_number = edits.disc_number;
-                                    t.album_id = reader::metadata::make_album_id(
-                                        edits.album.trim(),
-                                        edits.artist.trim(),
-                                    );
-                                }
-                                drop(lib);
+                                let mut t = track.clone();
+                                t.title = edits.title.trim().to_string();
+                                t.artist = edits.artist.trim().to_string();
+                                t.artists = edits
+                                    .artist
+                                    .split([';', ','])
+                                    .map(|a| a.trim().to_string())
+                                    .filter(|s| !s.is_empty())
+                                    .collect();
+                                t.album = edits.album.trim().to_string();
+                                t.track_number = edits.track_number;
+                                t.disc_number = edits.disc_number;
+                                t.album_id = reader::metadata::make_album_id(
+                                    edits.album.trim(),
+                                    edits.artist.trim(),
+                                );
+                                let db = consume_context::<db::Db>();
+                                spawn(async move {
+                                    if db.upsert_tracks(&Source::Local, &[t]).await.is_ok() {
+                                        gens.bump(Table::Tracks);
+                                    }
+                                });
                                 metadata_track.set(None);
                             }
                             Err(e) => {
@@ -268,15 +338,21 @@ pub fn LocalLibrary(
                         if selected.is_empty() {
                             return;
                         }
-                        let tracks: Vec<_> = displayed_tracks
-                            .read()
-                            .iter()
-                            .filter(|t| selected.contains(&t.path))
-                            .cloned()
-                            .collect();
-                        if !tracks.is_empty() {
-                            ctrl.add_to_queue(tracks);
-                        }
+                        let db = consume_context::<db::Db>();
+                        let f = filter();
+                        spawn(async move {
+                            let total = db.tracks_count(&f).await.unwrap_or(0);
+                            let tracks: Vec<_> = db
+                                .tracks_page(&f, Page { offset: 0, limit: total })
+                                .await
+                                .unwrap_or_default()
+                                .into_iter()
+                                .filter(|t| selected.contains(&t.id.uid_path()))
+                                .collect();
+                            if !tracks.is_empty() {
+                                ctrl.add_to_queue(tracks);
+                            }
+                        });
                         selected_tracks.write().clear();
                         is_selection_mode.set(false);
                     },
@@ -285,10 +361,19 @@ pub fn LocalLibrary(
                     },
                     on_delete: move |_| {
                         let paths: Vec<_> = selected_tracks.read().iter().cloned().collect();
+                        let mut keys = Vec::new();
                         for path in paths {
                             if std::fs::remove_file(&path).is_ok() {
-                                library.write().remove_track(&path);
+                                keys.push(path.to_string_lossy().into_owned());
                             }
+                        }
+                        if !keys.is_empty() {
+                            let db = consume_context::<db::Db>();
+                            spawn(async move {
+                                if db.delete_tracks(&Source::Local, &keys).await.is_ok() {
+                                    gens.bump(Table::Tracks);
+                                }
+                            });
                         }
                         selected_tracks.write().clear();
                         is_selection_mode.set(false);
@@ -322,20 +407,27 @@ pub fn LocalLibrary(
             div {
                 class: if cfg!(target_os = "android") { "grid grid-cols-4 gap-2 mb-4" } else { "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-12" },
                 {
-                    let lib = library.read();
-                    let album_count = lib
-                        .albums
+                    let album_count = albums_res
+                        .read()
+                        .clone()
+                        .unwrap_or_default()
                         .iter()
                         .map(|a| a.title.to_lowercase())
                         .collect::<std::collections::HashSet<_>>()
                         .len();
+                    let artist_count = artists_res.read().as_ref().map(|a| a.len()).unwrap_or(0);
+                    let playlist_count = playlists_res
+                        .read()
+                        .as_ref()
+                        .map(|s| s.playlists.len())
+                        .unwrap_or(0);
                     rsx! {
-                        StatCard { label: i18n::t("tracks").to_string(), value: "{lib.tracks.len()}", icon: "fa-music" }
+                        StatCard { label: i18n::t("tracks").to_string(), value: "{total_tracks}", icon: "fa-music" }
                         StatCard { label: i18n::t("albums").to_string(), value: "{album_count}", icon: "fa-compact-disc" }
-                        StatCard { label: i18n::t("artists").to_string(), value: "{(items.artist_count)()}", icon: "fa-user" }
+                        StatCard { label: i18n::t("artists").to_string(), value: "{artist_count}", icon: "fa-user" }
                         StatCard {
                             label: i18n::t("playlists").to_string(),
-                            value: "{playlist_store.read().playlists.len()}",
+                            value: "{playlist_count}",
                             icon: "fa-list",
                         }
                     }
@@ -353,14 +445,22 @@ pub fn LocalLibrary(
                         aria_label: "Select all tracks",
                         disabled: is_empty,
                         onclick: move |_| {
-                            let tracks = displayed_tracks();
                             if all_selected {
                                 selected_tracks.write().clear();
                                 is_selection_mode.set(false);
                             } else {
-                                selected_tracks
-                                    .set(tracks.into_iter().map(|track| track.path).collect());
-                                is_selection_mode.set(true);
+                                let db = consume_context::<db::Db>();
+                                let f = filter();
+                                spawn(async move {
+                                    let total = db.tracks_count(&f).await.unwrap_or(0);
+                                    let tracks = db
+                                        .tracks_page(&f, Page { offset: 0, limit: total })
+                                        .await
+                                        .unwrap_or_default();
+                                    selected_tracks
+                                        .set(tracks.into_iter().map(|track| track.id.uid_path()).collect());
+                                    is_selection_mode.set(true);
+                                });
                             }
                         },
                         if all_selected {
@@ -414,7 +514,13 @@ pub fn LocalLibrary(
                     scroll_positions.write().insert(Route::Library, scroll);
                 },
                 if is_empty {
-                    p { class: "text-slate-500 italic", "{i18n::t(\"no_tracks_found\")}" }
+                    if window.total.read().is_none() {
+                        div { class: "flex items-center justify-center py-12",
+                            i { class: "fa-solid fa-spinner fa-spin text-3xl text-white/20" }
+                        }
+                    } else {
+                        p { class: "text-slate-500 italic", "{i18n::t(\"no_tracks_found\")}" }
+                    }
                 } else {
                     {tracks_nodes.into_iter()}
                 }

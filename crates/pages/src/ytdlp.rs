@@ -1,8 +1,43 @@
 use config::{AppConfig, YtdlpOptions};
+use dioxus::core::spawn_forever;
 use dioxus::prelude::*;
 use std::fs::{self, OpenOptions};
 use std::io::BufRead;
 use std::path::PathBuf;
+
+/// App-lifetime job list: downloads keep running (and keep their live
+/// progress) when the user navigates away from the page (#327).
+static JOBS: GlobalSignal<Vec<DownloadJob>> = Signal::global(Vec::new);
+
+/// Completions waiting to be applied to config history / the rescan trigger.
+/// The detached job driver can't write those directly — they're owned by the
+/// App component's scope, and a ROOT-scoped task using them trips Dioxus's
+/// cross-scope lint — so it pushes here and [`use_ytdlp_completion_sink`]
+/// (installed once in App) drains in the owning scope.
+static FINISHED: GlobalSignal<Vec<(config::YtdlpHistoryEntry, bool)>> = Signal::global(Vec::new);
+
+/// Install in App: applies finished yt-dlp jobs to the config history and
+/// bumps the rescan trigger for successful ones.
+pub fn use_ytdlp_completion_sink(mut config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) {
+    use_effect(move || {
+        if FINISHED.read().is_empty() {
+            return;
+        }
+        let drained: Vec<_> = FINISHED.write().drain(..).collect();
+        let mut rescan = false;
+        {
+            let mut cfg = config.write();
+            for (entry, ok) in drained {
+                rescan |= ok;
+                cfg.ytdlp_history.insert(0, entry);
+                cfg.ytdlp_history.truncate(200);
+            }
+        }
+        if rescan {
+            *trigger_rescan.write() += 1;
+        }
+    });
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DownloadJob {
@@ -393,35 +428,37 @@ fn parse_line(line: &str) -> Option<LineInfo> {
 }
 
 #[component]
-pub fn YtdlpPage(config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) -> Element {
+pub fn YtdlpPage(config: Signal<AppConfig>) -> Element {
     let mut url_input = use_signal(String::new);
     let mut format = use_signal(|| AudioFormat::BestAudio);
-    let mut jobs = use_signal(Vec::<DownloadJob>::new);
     let mut out_dir = use_signal(|| config.peek().ytdlp_output_dir.clone());
     let mut show_opts = use_signal(|| false);
     let mut preflight_error = use_signal(|| Option::<String>::None);
 
     use_hook(move || {
+        // Seed from history only while the session list is empty — a remount
+        // must not clobber jobs that are still running.
+        if !JOBS.read().is_empty() {
+            return;
+        }
         let history = config.peek().ytdlp_history.clone();
-        jobs.set(
-            history
-                .iter()
-                .map(|e| DownloadJob {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    url: e.url.clone(),
-                    title: e.title.clone(),
-                    format: AudioFormat::from_str(&e.format),
-                    progress: if e.status == "completed" { 100.0 } else { 0.0 },
-                    status: if e.status == "completed" {
-                        JobStatus::Completed
-                    } else {
-                        JobStatus::Failed(e.error.clone().unwrap_or_default())
-                    },
-                    speed: String::new(),
-                    eta: String::new(),
-                })
-                .collect(),
-        );
+        *JOBS.write() = history
+            .iter()
+            .map(|e| DownloadJob {
+                id: uuid::Uuid::new_v4().to_string(),
+                url: e.url.clone(),
+                title: e.title.clone(),
+                format: AudioFormat::from_str(&e.format),
+                progress: if e.status == "completed" { 100.0 } else { 0.0 },
+                status: if e.status == "completed" {
+                    JobStatus::Completed
+                } else {
+                    JobStatus::Failed(e.error.clone().unwrap_or_default())
+                },
+                speed: String::new(),
+                eta: String::new(),
+            })
+            .collect();
     });
 
     let mut do_download = move || {
@@ -432,7 +469,7 @@ pub fn YtdlpPage(config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) -
 
         preflight_error.set(None);
 
-        if let Err(error) = run_preflight_checks(&url, &out_dir(), &jobs.read()) {
+        if let Err(error) = run_preflight_checks(&url, &out_dir(), &JOBS.read()) {
             preflight_error.set(Some(error));
             return;
         }
@@ -442,7 +479,7 @@ pub fn YtdlpPage(config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) -
         let opts = config.peek().ytdlp_options.clone();
         let job_id = uuid::Uuid::new_v4().to_string();
 
-        jobs.write().insert(
+        JOBS.write().insert(
             0,
             DownloadJob {
                 id: job_id.clone(),
@@ -457,8 +494,11 @@ pub fn YtdlpPage(config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) -
         );
         url_input.set(String::new());
 
-        spawn(async move {
-            if let Some(j) = jobs.write().iter_mut().find(|j| j.id == job_id) {
+        // spawn_forever: the driver must outlive the page or navigating away
+        // kills the download mid-flight (#327). It only writes globals (JOBS,
+        // FINISHED) — App-scoped signals would trip the cross-scope lint.
+        spawn_forever(async move {
+            if let Some(j) = JOBS.write().iter_mut().find(|j| j.id == job_id) {
                 j.status = JobStatus::Downloading;
             }
 
@@ -520,7 +560,7 @@ pub fn YtdlpPage(config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) -
                 let id = &job_id;
                 match info {
                     LineInfo::Progress { pct, speed, eta } => {
-                        if let Some(j) = jobs.write().iter_mut().find(|j| &j.id == id) {
+                        if let Some(j) = JOBS.write().iter_mut().find(|j| &j.id == id) {
                             j.progress = pct;
                             j.speed = speed;
                             j.eta = eta;
@@ -528,18 +568,18 @@ pub fn YtdlpPage(config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) -
                         }
                     }
                     LineInfo::Title(title) => {
-                        if let Some(j) = jobs.write().iter_mut().find(|j| &j.id == id) {
+                        if let Some(j) = JOBS.write().iter_mut().find(|j| &j.id == id) {
                             j.title = title;
                         }
                     }
                     LineInfo::Processing => {
-                        if let Some(j) = jobs.write().iter_mut().find(|j| &j.id == id) {
+                        if let Some(j) = JOBS.write().iter_mut().find(|j| &j.id == id) {
                             j.status = JobStatus::Processing;
                             j.progress = 100.0;
                         }
                     }
                     LineInfo::Done => {
-                        let entry = jobs.read().iter().find(|j| &j.id == id).map(|j| {
+                        let entry = JOBS.read().iter().find(|j| &j.id == id).map(|j| {
                             config::YtdlpHistoryEntry {
                                 url: j.url.clone(),
                                 title: j.title.clone(),
@@ -548,22 +588,19 @@ pub fn YtdlpPage(config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) -
                                 error: None,
                             }
                         });
-                        if let Some(j) = jobs.write().iter_mut().find(|j| &j.id == id) {
+                        if let Some(j) = JOBS.write().iter_mut().find(|j| &j.id == id) {
                             j.status = JobStatus::Completed;
                             j.progress = 100.0;
                             j.speed = String::new();
                             j.eta = String::new();
                         }
                         if let Some(e) = entry {
-                            let mut cfg = config.write();
-                            cfg.ytdlp_history.insert(0, e);
-                            cfg.ytdlp_history.truncate(200);
+                            FINISHED.write().push((e, true));
                         }
-                        *trigger_rescan.write() += 1;
                         break;
                     }
                     LineInfo::Error(msg) => {
-                        let entry = jobs.read().iter().find(|j| &j.id == id).map(|j| {
+                        let entry = JOBS.read().iter().find(|j| &j.id == id).map(|j| {
                             config::YtdlpHistoryEntry {
                                 url: j.url.clone(),
                                 title: j.title.clone(),
@@ -572,13 +609,11 @@ pub fn YtdlpPage(config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) -
                                 error: Some(msg.clone()),
                             }
                         });
-                        if let Some(j) = jobs.write().iter_mut().find(|j| &j.id == id) {
+                        if let Some(j) = JOBS.write().iter_mut().find(|j| &j.id == id) {
                             j.status = JobStatus::Failed(msg);
                         }
                         if let Some(e) = entry {
-                            let mut cfg = config.write();
-                            cfg.ytdlp_history.insert(0, e);
-                            cfg.ytdlp_history.truncate(200);
+                            FINISHED.write().push((e, false));
                         }
                         break;
                     }
@@ -684,13 +719,13 @@ pub fn YtdlpPage(config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) -
                 OptionsPanel { config }
             }
 
-            if !jobs.read().is_empty() {
+            if !JOBS.read().is_empty() {
                 div { class: "space-y-2 mt-2",
                     div { class: "flex justify-end mb-1",
                         button {
                             class: "text-slate-600 hover:text-slate-400 text-xs transition-colors",
                             onclick: move |_| {
-                                jobs.write().retain(|j| matches!(
+                                JOBS.write().retain(|j| matches!(
                                     j.status,
                                     JobStatus::Downloading | JobStatus::Processing | JobStatus::Pending
                                 ));
@@ -699,7 +734,7 @@ pub fn YtdlpPage(config: Signal<AppConfig>, mut trigger_rescan: Signal<usize>) -
                             "{i18n::t(\"ytdlp_clear_history\")}"
                         }
                     }
-                    for job in jobs.read().clone().into_iter() {
+                    for job in JOBS.read().clone().into_iter() {
                         JobRow { job }
                     }
                 }

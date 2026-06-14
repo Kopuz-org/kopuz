@@ -1,0 +1,56 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT source_album_id, title, artist, genre, year, cover_path, manual_cover FROM albums WHERE source = ?1 ORDER BY artist COLLATE NOCASE, title COLLATE NOCASE",
+  "describe": {
+    "columns": [
+      {
+        "name": "source_album_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "title",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "artist",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "genre",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "year",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "cover_path",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "manual_cover",
+        "ordinal": 6,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "a228caa23069b1337d7fb5ff4f505ec9f06db367493e02da998a0cceb7ba9494"
+}

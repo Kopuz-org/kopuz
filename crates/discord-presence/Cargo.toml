@@ -12,6 +12,7 @@ reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tracing.workspace = true
+utils.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 reader.workspace = true

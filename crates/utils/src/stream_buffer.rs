@@ -3,6 +3,7 @@ use std::io::{Error as IoError, ErrorKind, Read, Result as IoResult, Seek, SeekF
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, Notify};
+use tracing::Instrument;
 
 // Architecture:
 // - A background download task (tokio::spawn) fetches audio chunks via HTTP
@@ -69,99 +70,102 @@ impl StreamBuffer {
         // Shared state access uses tokio::sync::Mutex::lock().await (never blocks
         // a worker thread). The sync reader side uses blocking_lock() + polling.
         let handle = tokio::runtime::Handle::current();
-        handle.spawn(async move {
-            let ua = user_agent
-                .unwrap_or_else(|| concat!("Kopuz/", env!("CARGO_PKG_VERSION")).to_string());
-            let client = reqwest::Client::builder()
-                .tcp_nodelay(true)
-                .user_agent(ua)
-                .build()
-                .unwrap_or_else(|_| reqwest::Client::new());
+        handle.spawn(
+            async move {
+                let ua = user_agent
+                    .unwrap_or_else(|| concat!("Kopuz/", env!("CARGO_PKG_VERSION")).to_string());
+                let client = reqwest::Client::builder()
+                    .tcp_nodelay(true)
+                    .user_agent(ua)
+                    .build()
+                    .unwrap_or_else(|_| reqwest::Client::new());
 
-            match client.get(&url).send().await {
-                Ok(mut response) => {
-                    tracing::trace!(
-                        status = %response.status(),
-                        content_length = ?response.content_length(),
-                        content_type = ?response
-                            .headers()
-                            .get("content-type")
-                            .and_then(|v| v.to_str().ok()),
-                        "stream buffer HTTP response",
-                    );
-                    if !response.status().is_success() {
-                        let (lock, notify) = &*state_clone;
-                        let mut state = lock.lock().await;
-                        state.error = Some(format!("HTTP {}", response.status()));
-                        state.done = true;
-                        state.prebuffer_ready = true;
-                        notify.notify_waiters();
-                        return;
-                    }
-
-                    let total_size = response.content_length();
-                    {
-                        let (lock, notify) = &*state_clone;
-                        let mut state = lock.lock().await;
-                        state.total_size = total_size;
-                        notify.notify_waiters();
-                    }
-
-                    let mut total_buffered = 0usize;
-
-                    while let Ok(Some(chunk)) = response.chunk().await {
-                        if Arc::strong_count(&state_clone) == 1 {
-                            break;
-                        }
-                        let chunk_len = chunk.len();
-
-                        if total_buffered + chunk_len > MAX_BUFFER_SIZE {
+                match client.get(&url).send().await {
+                    Ok(mut response) => {
+                        tracing::trace!(
+                            status = %response.status(),
+                            content_length = ?response.content_length(),
+                            content_type = ?response
+                                .headers()
+                                .get("content-type")
+                                .and_then(|v| v.to_str().ok()),
+                            "stream buffer HTTP response",
+                        );
+                        if !response.status().is_success() {
                             let (lock, notify) = &*state_clone;
                             let mut state = lock.lock().await;
-                            state.error = Some("Buffer limit exceeded (1GB)".to_string());
+                            state.error = Some(format!("HTTP {}", response.status()));
                             state.done = true;
                             state.prebuffer_ready = true;
                             notify.notify_waiters();
-                            break;
+                            return;
                         }
 
+                        let total_size = response.content_length();
                         {
                             let (lock, notify) = &*state_clone;
                             let mut state = lock.lock().await;
-                            state.buffer.extend_from_slice(&chunk);
-                            total_buffered += chunk_len;
-
-                            if !state.prebuffer_ready {
-                                let is_small_file = state
-                                    .total_size
-                                    .map(|s| s <= prebuffer_size as u64)
-                                    .unwrap_or(false);
-
-                                if total_buffered >= prebuffer_size || is_small_file {
-                                    state.prebuffer_ready = true;
-                                }
-                            }
-
+                            state.total_size = total_size;
                             notify.notify_waiters();
                         }
-                    }
 
-                    let (lock, notify) = &*state_clone;
-                    let mut state = lock.lock().await;
-                    state.done = true;
-                    state.prebuffer_ready = true;
-                    notify.notify_waiters();
-                }
-                Err(e) => {
-                    let (lock, notify) = &*state_clone;
-                    let mut state = lock.lock().await;
-                    state.error = Some(e.to_string());
-                    state.done = true;
-                    state.prebuffer_ready = true;
-                    notify.notify_waiters();
+                        let mut total_buffered = 0usize;
+
+                        while let Ok(Some(chunk)) = response.chunk().await {
+                            if Arc::strong_count(&state_clone) == 1 {
+                                break;
+                            }
+                            let chunk_len = chunk.len();
+
+                            if total_buffered + chunk_len > MAX_BUFFER_SIZE {
+                                let (lock, notify) = &*state_clone;
+                                let mut state = lock.lock().await;
+                                state.error = Some("Buffer limit exceeded (1GB)".to_string());
+                                state.done = true;
+                                state.prebuffer_ready = true;
+                                notify.notify_waiters();
+                                break;
+                            }
+
+                            {
+                                let (lock, notify) = &*state_clone;
+                                let mut state = lock.lock().await;
+                                state.buffer.extend_from_slice(&chunk);
+                                total_buffered += chunk_len;
+
+                                if !state.prebuffer_ready {
+                                    let is_small_file = state
+                                        .total_size
+                                        .map(|s| s <= prebuffer_size as u64)
+                                        .unwrap_or(false);
+
+                                    if total_buffered >= prebuffer_size || is_small_file {
+                                        state.prebuffer_ready = true;
+                                    }
+                                }
+
+                                notify.notify_waiters();
+                            }
+                        }
+
+                        let (lock, notify) = &*state_clone;
+                        let mut state = lock.lock().await;
+                        state.done = true;
+                        state.prebuffer_ready = true;
+                        notify.notify_waiters();
+                    }
+                    Err(e) => {
+                        let (lock, notify) = &*state_clone;
+                        let mut state = lock.lock().await;
+                        state.error = Some(e.to_string());
+                        state.done = true;
+                        state.prebuffer_ready = true;
+                        notify.notify_waiters();
+                    }
                 }
             }
-        });
+            .instrument(tracing::info_span!("player.stream_buffer")),
+        );
 
         Self { state, pos: 0 }
     }

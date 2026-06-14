@@ -1,19 +1,22 @@
 use components::dots_menu::{DotsMenu, MenuAction};
+use db::Source;
 use dioxus::prelude::*;
-use reader::{Library, PlaylistStore};
+use hooks::db_reactivity::Table;
+use hooks::use_db_queries::use_albums;
 
 #[component]
 pub fn LocalAlbum(
-    library: Signal<Library>,
     album_id: Signal<String>,
-    playlist_store: Signal<PlaylistStore>,
     mut queue: Signal<Vec<reader::models::Track>>,
     mut open_album_menu: Signal<Option<String>>,
     mut show_album_playlist_modal: Signal<bool>,
     mut pending_album_id_for_playlist: Signal<Option<String>>,
 ) -> Element {
+    let gens = hooks::db_reactivity::use_generations();
+    let source = use_memo(|| Source::Local);
+    let albums_res = use_albums(source);
     let local_albums = use_memo(move || {
-        let mut albums = library.read().albums.clone();
+        let mut albums = albums_res.read().clone().unwrap_or_default();
         albums.sort_by(|a, b| {
             a.title
                 .trim()
@@ -32,7 +35,7 @@ pub fn LocalAlbum(
         unique_albums
     });
 
-    let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
+    let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
 
     let add_all_to_queue_text = i18n::t("add_all_to_queue").to_string();
     let add_all_to_playlist_text = i18n::t("add_all_to_playlist").to_string();
@@ -55,7 +58,6 @@ pub fn LocalAlbum(
                             let id_for_nav    = album.id.clone();
                             let id_for_menu   = album.id.clone();
                             let id_for_action = album.id.clone();
-                            let title_for_action = album.title.clone();
                             let is_open = open_album_menu.read().as_deref() == Some(&album.id);
                             let cover_url = utils::format_artwork_url(album.cover_path.as_ref());
                             rsx! {
@@ -114,43 +116,48 @@ pub fn LocalAlbum(
                                             anchor: "right".to_string(),
                                             on_action: {
                                                 let id = id_for_action.clone();
-                                                let title = title_for_action.clone();
                                                 move |idx: usize| {
                                                     open_album_menu.set(None);
                                                     match idx {
                                                         0 => {
-                                                            let mut tracks_for_queue: Vec<_> = library
-                                                                .read()
-                                                                .tracks
-                                                                .iter()
-                                                                .filter(|t| t.album_id == id)
-                                                                .cloned()
-                                                                .collect();
-                                                            tracks_for_queue.sort_by(|a, b| {
-                                                                a.track_number
-                                                                    .cmp(&b.track_number)
-                                                                    .then_with(|| a.title.cmp(&b.title))
+                                                            let db = consume_context::<db::Db>();
+                                                            let album_id = id.clone();
+                                                            spawn(async move {
+                                                                let mut tracks_for_queue = db
+                                                                    .album_tracks(&Source::Local, &album_id)
+                                                                    .await
+                                                                    .unwrap_or_default();
+                                                                tracks_for_queue.sort_by(|a, b| {
+                                                                    a.track_number
+                                                                        .cmp(&b.track_number)
+                                                                        .then_with(|| a.title.cmp(&b.title))
+                                                                });
+                                                                let mut ctrl = ctrl;
+                                                                ctrl.add_to_queue(tracks_for_queue);
                                                             });
-                                                            ctrl.add_to_queue(tracks_for_queue);
                                                         }
                                                         1 => {
                                                             pending_album_id_for_playlist.set(Some(id.clone()));
                                                             show_album_playlist_modal.set(true);
                                                         }
                                                         2 => {
-                                                            let tracks_to_delete: Vec<_> = library
-                                                                .read()
-                                                                .tracks
-                                                                .iter()
-                                                                .filter(|t| t.album == title)
-                                                                .map(|t| t.path.clone())
-                                                                .collect();
-                                                            for path in &tracks_to_delete {
-                                                                let _ = std::fs::remove_file(path);
-                                                            }
-                                                            let mut lib = library.write();
-                                                            lib.albums.retain(|a| a.title != title);
-                                                            lib.tracks.retain(|t| t.album != title);
+                                                            let db = consume_context::<db::Db>();
+                                                            let album_id = id.clone();
+                                                            spawn(async move {
+                                                                let tracks_to_delete = db
+                                                                    .album_tracks(&Source::Local, &album_id)
+                                                                    .await
+                                                                    .unwrap_or_default();
+                                                                for track in &tracks_to_delete {
+                                                                    if let Some(path) = track.id.local_path() {
+                                                                        let _ = std::fs::remove_file(path);
+                                                                    }
+                                                                }
+                                                                if db.delete_album(&Source::Local, &album_id).await.is_ok() {
+                                                                    gens.bump(Table::Tracks);
+                                                                    gens.bump(Table::Albums);
+                                                                }
+                                                            });
                                                         }
                                                         _ => {}
                                                     }

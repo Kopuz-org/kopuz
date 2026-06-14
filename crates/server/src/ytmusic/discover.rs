@@ -4,15 +4,12 @@
 //! back per page; the section-list-level continuation token feeds the
 //! next three.
 
-use std::path::PathBuf;
-
 use reader::models::Track;
 use serde_json::{Value, json};
 
-use super::SOURCE_PREFIX;
 use super::clients::{ORIGIN_YOUTUBE_MUSIC, WEB_REMIX};
 use super::innertube::{http_client, sapisid_hash};
-use super::search::{encode_url_tag, synthesize_album_id};
+use super::search::synthesize_album_id;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DiscoverHome {
@@ -35,7 +32,7 @@ pub struct DiscoverShelf {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum DiscoverItem {
-    Song(Track),
+    Song(Box<Track>),
     Playlist {
         playlist_id: String,
         title: String,
@@ -278,7 +275,7 @@ fn parse_artist_song_list(section: &Value) -> Option<DiscoverShelf> {
             arr.iter()
                 .filter_map(|i| i.get("musicResponsiveListItemRenderer"))
                 .filter_map(parse_artist_song_row)
-                .map(DiscoverItem::Song)
+                .map(|t| DiscoverItem::Song(Box::new(t)))
                 .collect()
         })
         .unwrap_or_default();
@@ -350,20 +347,15 @@ fn parse_artist_song_row(row: &Value) -> Option<Track> {
         .and_then(|t| t.get("url").and_then(|u| u.as_str()))
         .map(|s| normalize_yt_thumbnail(s.to_string()));
 
-    let path = match thumbnail.as_deref() {
-        Some(url) if !url.is_empty() => PathBuf::from(format!(
-            "{SOURCE_PREFIX}:{video_id}:{}",
-            encode_url_tag(url)
-        )),
-        _ => PathBuf::from(format!("{SOURCE_PREFIX}:{video_id}")),
-    };
+    let cover = thumbnail.map(|u| u.to_string()).filter(|u| !u.is_empty());
     let artists = if artist.is_empty() {
         Vec::new()
     } else {
         vec![artist.clone()]
     };
     Some(Track {
-        path,
+        id: super::yt_id(video_id.clone()),
+        cover,
         album_id: synthesize_album_id(&album, &artist),
         title,
         artist,
@@ -670,16 +662,13 @@ fn parse_album_row(
     } else {
         vec![primary_artist.clone()]
     };
-    let path = match album_thumbnail {
-        Some(url) if !url.is_empty() => PathBuf::from(format!(
-            "{SOURCE_PREFIX}:{video_id}:{}",
-            encode_url_tag(url)
-        )),
-        _ => PathBuf::from(format!("{SOURCE_PREFIX}:{video_id}")),
-    };
+    let cover = album_thumbnail
+        .map(|u| u.to_string())
+        .filter(|u| !u.is_empty());
     let album_id = synthesize_album_id(album_title, &primary_artist);
     Some(Track {
-        path,
+        id: super::yt_id(video_id.clone()),
+        cover,
         album_id,
         title,
         artist: primary_artist,
@@ -857,12 +846,12 @@ fn parse_tile(item: &Value) -> Option<DiscoverItem> {
         .pointer("/navigationEndpoint/watchEndpoint/videoId")
         .and_then(|v| v.as_str())
     {
-        return Some(DiscoverItem::Song(build_song_track(
+        return Some(DiscoverItem::Song(Box::new(build_song_track(
             video_id,
             &title,
             &subtitle,
             thumbnail.as_deref(),
-        )));
+        ))));
     }
 
     if let Some(playlist_id) = r
@@ -926,16 +915,11 @@ fn build_song_track(video_id: &str, title: &str, subtitle: &str, thumbnail: Opti
     } else {
         vec![primary_artist.clone()]
     };
-    let path = match thumbnail {
-        Some(url) if !url.is_empty() => PathBuf::from(format!(
-            "{SOURCE_PREFIX}:{video_id}:{}",
-            encode_url_tag(url)
-        )),
-        _ => PathBuf::from(format!("{SOURCE_PREFIX}:{video_id}")),
-    };
+    let cover = thumbnail.map(|u| u.to_string()).filter(|u| !u.is_empty());
     let album_id = synthesize_album_id("", &primary_artist);
     Track {
-        path,
+        id: super::yt_id(video_id),
+        cover,
         album_id,
         title: title.to_string(),
         artist: primary_artist,

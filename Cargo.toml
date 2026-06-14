@@ -9,6 +9,7 @@ members = [
    "crates/server",
    "crates/utils",
    "crates/config",
+   "crates/db",
    "crates/kopuz_route",
    "crates/discord-presence",
    "crates/scrobble",
@@ -56,7 +57,6 @@ directories = "6.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
 tracing-appender = "0.2"
-tracing-chrome = "0.7"
 ctrlc = "3.5"
 i18n = { path = "./crates/i18n" }
 player = { path = "./crates/player" }
@@ -66,6 +66,7 @@ hooks = { path = "./crates/hooks" }
 pages = { path = "./crates/pages" }
 utils = { path = "./crates/utils" }
 config = { path = "./crates/config" }
+db = { path = "./crates/db" }
 kopuz = { path = "./crates/kopuz" }
 server = { path = "./crates/server" }
 kopuz_route = { path = "./crates/kopuz_route" }

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT OR IGNORE INTO folder_playlists (folder_id, playlist_ref, position) SELECT ?1, ?2, COALESCE(MAX(position) + 1, 0) FROM folder_playlists WHERE folder_id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "a094a1a59683880bc34cc63cb52bbce46a76ee26d11f37addd1506b09173bfba"
+}

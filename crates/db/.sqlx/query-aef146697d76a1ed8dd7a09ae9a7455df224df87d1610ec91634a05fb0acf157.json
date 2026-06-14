@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT json FROM app_config WHERE id = 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "json",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "aef146697d76a1ed8dd7a09ae9a7455df224df87d1610ec91634a05fb0acf157"
+}

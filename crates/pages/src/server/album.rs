@@ -6,28 +6,51 @@ use components::selection_bar::SelectionBar;
 use components::track_row::TrackRow;
 use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use config::{AppConfig, MusicService, UiStyle};
+use db::Source;
 use dioxus::prelude::*;
-use reader::{Library, PlaylistStore};
+use hooks::db_reactivity::Table;
+use hooks::use_db_queries::{use_album, use_albums, use_tracks_by_keys};
 use std::collections::HashSet;
 use std::path::PathBuf;
 
 #[component]
 pub fn JellyfinAlbum(
-    library: Signal<Library>,
     config: Signal<AppConfig>,
     mut album_id: Signal<String>,
-    playlist_store: Signal<PlaylistStore>,
     mut queue: Signal<Vec<reader::models::Track>>,
     mut open_album_menu: Signal<Option<String>>,
     mut show_album_playlist_modal: Signal<bool>,
     mut pending_album_id_for_playlist: Signal<Option<String>>,
 ) -> Element {
     let is_offline = use_context::<Signal<bool>>();
+    let gens = hooks::db_reactivity::use_generations();
+    let active_server_id = use_memo(move || {
+        let c = config.read();
+        c.active_source
+            .server_id()
+            .map(String::from)
+            .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
+            .unwrap_or_default()
+    });
+    let server_source = use_memo(move || Source::Server(active_server_id()));
+    let albums_res = use_albums(server_source);
+    let offline_keys = use_memo(move || -> Vec<String> {
+        if !*is_offline.read() {
+            return Vec::new();
+        }
+        config
+            .read()
+            .offline_tracks
+            .iter()
+            .filter(|(_, path)| std::path::Path::new(path).exists())
+            .map(|(id, _)| id.clone())
+            .collect()
+    });
+    let offline_tracks_res = use_tracks_by_keys(server_source, offline_keys);
     let jellyfin_albums = use_memo(move || {
-        let lib = library.read();
         let conf = config.read();
 
-        let mut albums = lib.jellyfin_albums.clone();
+        let mut albums = albums_res.read().clone().unwrap_or_default();
         albums.sort_by(|a, b| {
             a.title
                 .trim()
@@ -40,17 +63,11 @@ pub fn JellyfinAlbum(
 
         let offline = *is_offline.read();
         let downloaded_album_ids: std::collections::HashSet<String> = if offline {
-            lib.jellyfin_tracks
+            offline_tracks_res
+                .read()
+                .clone()
+                .unwrap_or_default()
                 .iter()
-                .filter(|t| {
-                    let id = t.path.to_string_lossy();
-                    let id_str = id.split(':').nth(1).unwrap_or(&id);
-                    if let Some(path_str) = conf.offline_tracks.get(id_str) {
-                        std::path::Path::new(path_str).exists()
-                    } else {
-                        false
-                    }
-                })
                 .map(|t| t.album_id.clone())
                 .collect()
         } else {
@@ -169,36 +186,42 @@ pub fn JellyfinAlbum(
                                                     open_album_menu.set(None);
                                                     match idx {
                                                         0 => {
-                                                            let mut tracks_for_queue: Vec<_> = library
-                                                                .read()
-                                                                .jellyfin_tracks
-                                                                .iter()
-                                                                .filter(|t| t.album_id == id)
-                                                                .cloned()
-                                                                .collect();
-                                                            tracks_for_queue.sort_by(|a, b| {
-                                                                let disc_cmp =
-                                                                    a.disc_number.unwrap_or(1).cmp(&b.disc_number.unwrap_or(1));
-                                                                if disc_cmp == std::cmp::Ordering::Equal {
-                                                                    a.track_number.unwrap_or(0).cmp(&b.track_number.unwrap_or(0))
-                                                                } else {
-                                                                    disc_cmp
-                                                                }
+                                                            let aid = id.clone();
+                                                            let s = server_source.peek().clone();
+                                                            let db = consume_context::<db::Db>();
+                                                            spawn(async move {
+                                                                let tracks_for_queue = db
+                                                                    .album_tracks(&s, &aid)
+                                                                    .await
+                                                                    .unwrap_or_default();
+                                                                ctrl.add_to_queue(tracks_for_queue);
                                                             });
-                                                            ctrl.add_to_queue(tracks_for_queue);
                                                         }
                                                         1 => {
                                                             pending_album_id_for_playlist.set(Some(id.clone()));
                                                             show_album_playlist_modal.set(true);
                                                         }
                                                         2 => {
-                                                            let mut lib = library.write();
-                                                            let title = lib.jellyfin_albums.iter()
+                                                            let albums = albums_res.read().clone().unwrap_or_default();
+                                                            let title = albums.iter()
                                                                 .find(|a| a.id == id)
                                                                 .map(|a| a.title.clone());
                                                             if let Some(t) = title {
-                                                                lib.jellyfin_albums.retain(|a| a.title != t);
-                                                                lib.jellyfin_tracks.retain(|tr| tr.album != t);
+                                                                let ids: Vec<String> = albums
+                                                                    .iter()
+                                                                    .filter(|a| a.title == t)
+                                                                    .map(|a| a.id.clone())
+                                                                    .collect();
+                                                                let sid = active_server_id();
+                                                                let db = consume_context::<db::Db>();
+                                                                spawn(async move {
+                                                                    let source = Source::Server(sid);
+                                                                    for aid in &ids {
+                                                                        let _ = db.delete_album(&source, aid).await;
+                                                                    }
+                                                                    gens.bump(Table::Tracks);
+                                                                    gens.bump(Table::Albums);
+                                                                });
                                                             }
                                                         }
                                                         _ => {}
@@ -220,9 +243,7 @@ pub fn JellyfinAlbum(
 #[component]
 pub fn JellyfinAlbumDetails(
     album_jellyfin_id: String,
-    library: Signal<Library>,
     config: Signal<AppConfig>,
-    playlist_store: Signal<PlaylistStore>,
     mut queue: Signal<Vec<reader::models::Track>>,
     on_close: EventHandler<()>,
 ) -> Element {
@@ -238,53 +259,81 @@ pub fn JellyfinAlbumDetails(
     let mut selected_tracks = use_signal(HashSet::<PathBuf>::new);
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
-    let mut album_id_sig = use_signal(|| album_jellyfin_id.clone());
-    use_effect(move || {
-        album_id_sig.set(album_jellyfin_id.clone());
-    });
+    let album_id_memo = use_memo(use_reactive!(|album_jellyfin_id| album_jellyfin_id));
 
     let scroll_stat = use_signal(|| 0.0_f64);
     let container_height = use_signal(|| 0.0_f64);
     const ITEM_HEIGHT: f64 = 60.0;
 
-    let album_info = use_memo(move || {
-        let lib = library.read();
-        let id = album_id_sig.read();
-        lib.jellyfin_albums.iter().find(|a| a.id == *id).cloned()
+    let active_server_id = use_memo(move || {
+        let c = config.read();
+        c.active_source
+            .server_id()
+            .map(String::from)
+            .or_else(|| c.server.as_ref().and_then(|s| s.id.clone()))
+            .unwrap_or_default()
+    });
+    let server_source = use_memo(move || Source::Server(active_server_id()));
+    let album_res = use_album(server_source, album_id_memo);
+    let albums_res = use_albums(server_source);
+
+    let album_info = use_memo(move || album_res.read().clone().flatten());
+
+    // The grid dedupes albums by title, so this view shows every same-titled
+    // album's tracks — resolve the title to its album ids, then query each.
+    let matching_album_ids = use_memo(move || -> Vec<String> {
+        let Some(info) = album_info() else {
+            return Vec::new();
+        };
+        let ids: Vec<String> = albums_res
+            .read()
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|a| a.title == info.title)
+            .map(|a| a.id)
+            .collect();
+        if ids.is_empty() { vec![info.id] } else { ids }
+    });
+    let gens = hooks::db_reactivity::use_generations();
+    let db = use_context::<db::Db>();
+    let album_tracks_res = use_resource(move || {
+        let _ = gens.generation(Table::Tracks);
+        let (db, s, ids) = (db.clone(), server_source(), matching_album_ids());
+        async move {
+            let mut out = Vec::new();
+            for id in &ids {
+                out.extend(db.album_tracks(&s, id).await.unwrap_or_default());
+            }
+            out
+        }
     });
 
     let album_tracks = use_memo(move || {
-        let lib = library.read();
+        let all_tracks = album_tracks_res.read().clone().unwrap_or_default();
         let conf = config.read();
         let offline = *is_offline.read();
-        let info = album_info();
-        let album_name = info.as_ref().map(|a| a.title.clone()).unwrap_or_default();
 
-        let mut tracks: Vec<_> = lib
-            .jellyfin_tracks
+        let mut tracks: Vec<_> = all_tracks
             .iter()
-            .filter(|t| !album_name.is_empty() && t.album == album_name)
             .filter(|t| {
                 if !offline {
                     return true;
                 }
-                let s = t.path.to_string_lossy();
-                let id = s.split(':').nth(1).unwrap_or(&s);
-                conf.offline_tracks.contains_key(id)
+                let id = t.id.key();
+                conf.offline_tracks.contains_key(id.as_ref())
             })
             .map(|t| {
                 let cover_url = if let Some(server) = &conf.server {
-                    let path_str = t.path.to_string_lossy();
-                    utils::map_cover_url(
-                        utils::jellyfin_image::track_cover_url_with_album_fallback(
-                            &path_str,
-                            &t.album_id,
-                            &server.url,
-                            server.access_token.as_deref(),
-                            80,
-                            80,
-                        ),
-                    )
+                    utils::map_cover_url(utils::jellyfin_image::resolve_track_cover(
+                        t.cover.as_deref(),
+                        &t.id.key(),
+                        &t.album_id,
+                        &server.url,
+                        server.access_token.as_deref(),
+                        80,
+                        80,
+                    ))
                 } else {
                     None
                 };
@@ -345,10 +394,7 @@ pub fn JellyfinAlbumDetails(
         if let Some(q_idx) = ctrl.get_queue_index(current_index) {
             let tracks: Vec<_> = album_tracks().into_iter().map(|(t, _)| t).collect();
             if queue.len() == tracks.len()
-                && queue
-                    .iter()
-                    .zip(tracks.iter())
-                    .all(|(q, t)| q.path == t.path)
+                && queue.iter().zip(tracks.iter()).all(|(q, t)| q.id == t.id)
             {
                 Some(q_idx)
             } else {
@@ -374,7 +420,6 @@ pub fn JellyfinAlbumDetails(
 
             if *show_playlist_modal.read() {
                 PlaylistModal {
-                    playlist_store,
                     is_jellyfin: true,
                     on_close: move |_| {
                         show_playlist_modal.set(false);
@@ -469,7 +514,7 @@ pub fn JellyfinAlbumDetails(
                         }
                         let tracks: Vec<_> = album_tracks()
                             .iter()
-                            .filter(|(t, _)| selected.contains(&t.path))
+                            .filter(|(t, _)| selected.contains(&t.id.uid_path()))
                             .map(|(track, _)| track.clone())
                             .collect();
                         if !album_tracks.is_empty() {
@@ -576,15 +621,13 @@ pub fn JellyfinAlbumDetails(
                                     let is_album_dl = {
                                         let q = download_queue.read();
                                         album_tracks().iter().any(|(t, _)| {
-                                            let s = t.path.to_string_lossy();
-                                            let id = s.split(':').nth(1).unwrap_or("");
-                                            q.items.iter().any(|i| i.id == id && matches!(i.status, DownloadStatus::Queued | DownloadStatus::Downloading))
+                                            let id = t.id.key();
+                                            q.items.iter().any(|i| i.id == id.as_ref() && matches!(i.status, DownloadStatus::Queued | DownloadStatus::Downloading))
                                         })
                                     };
                                     let all_downloaded = !album_tracks().is_empty() && album_tracks().iter().all(|(t, _)| {
-                                        let s = t.path.to_string_lossy();
-                                        let id = s.split(':').nth(1).unwrap_or("");
-                                        if let Some(path_str) = config.read().offline_tracks.get(id) {
+                                        let id = t.id.key();
+                                        if let Some(path_str) = config.read().offline_tracks.get(id.as_ref()) {
                                             std::path::Path::new(path_str).exists()
                                         } else {
                                             false
@@ -600,8 +643,8 @@ pub fn JellyfinAlbumDetails(
                                                 let ids_only: Vec<String> = album_tracks()
                                                     .iter()
                                                     .filter_map(|(t, _)| {
-                                                        let s = t.path.to_string_lossy().to_string();
-                                                        s.split(':').nth(1).map(|id| id.to_string())
+                                                        let k = t.id.key();
+                                                        (!k.is_empty()).then(|| k.to_string())
                                                     })
                                                     .collect();
                                                 if all_downloaded {
@@ -610,9 +653,9 @@ pub fn JellyfinAlbumDetails(
                                                     let requests: Vec<(String, String, String)> = album_tracks()
                                                         .iter()
                                                         .filter_map(|(t, _)| {
-                                                            let s = t.path.to_string_lossy().to_string();
-                                                            s.split(':').nth(1).map(|id| (
-                                                                id.to_string(),
+                                                            let k = t.id.key();
+                                                            (!k.is_empty()).then(|| (
+                                                                k.to_string(),
                                                                 t.title.clone(),
                                                                 t.artist.clone(),
                                                             ))
@@ -696,15 +739,13 @@ pub fn JellyfinAlbumDetails(
                                 let is_album_dl = {
                                     let q = download_queue.read();
                                     album_tracks().iter().any(|(t, _)| {
-                                        let s = t.path.to_string_lossy();
-                                        let id = s.split(':').nth(1).unwrap_or("");
-                                        q.items.iter().any(|i| i.id == id && matches!(i.status, DownloadStatus::Queued | DownloadStatus::Downloading))
+                                        let id = t.id.key();
+                                        q.items.iter().any(|i| i.id == id.as_ref() && matches!(i.status, DownloadStatus::Queued | DownloadStatus::Downloading))
                                     })
                                 };
                                 let all_downloaded = !album_tracks().is_empty() && album_tracks().iter().all(|(t, _)| {
-                                    let s = t.path.to_string_lossy();
-                                    let id = s.split(':').nth(1).unwrap_or("");
-                                    if let Some(path_str) = config.read().offline_tracks.get(id) {
+                                    let id = t.id.key();
+                                    if let Some(path_str) = config.read().offline_tracks.get(id.as_ref()) {
                                         std::path::Path::new(path_str).exists()
                                     } else {
                                         false
@@ -719,8 +760,8 @@ pub fn JellyfinAlbumDetails(
                                             let ids_only: Vec<String> = album_tracks()
                                                 .iter()
                                                 .filter_map(|(t, _)| {
-                                                    let s = t.path.to_string_lossy().to_string();
-                                                    s.split(':').nth(1).map(|id| id.to_string())
+                                                    let k = t.id.key();
+                                                    (!k.is_empty()).then(|| k.to_string())
                                                 })
                                                 .collect();
                                             if all_downloaded {
@@ -729,9 +770,9 @@ pub fn JellyfinAlbumDetails(
                                                 let requests: Vec<(String, String, String)> = album_tracks()
                                                     .iter()
                                                     .filter_map(|(t, _)| {
-                                                        let s = t.path.to_string_lossy().to_string();
-                                                        s.split(':').nth(1).map(|id| (
-                                                            id.to_string(),
+                                                        let k = t.id.key();
+                                                        (!k.is_empty()).then(|| (
+                                                            k.to_string(),
                                                             t.title.clone(),
                                                             t.artist.clone(),
                                                         ))
@@ -777,7 +818,7 @@ pub fn JellyfinAlbumDetails(
                             div { class: "flex items-center w-24 shrink-0",
                                 div { class: "mr-4 flex items-center justify-center w-6 h-6 shrink-0",
                                     button {
-                                        class: if !album_tracks().is_empty() && album_tracks().iter().all(|(track, _)| selected_tracks.read().contains(&track.path)) {
+                                        class: if !album_tracks().is_empty() && album_tracks().iter().all(|(track, _)| selected_tracks.read().contains(&track.id.uid_path())) {
                                             "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
                                         } else {
                                             "w-4 h-4 rounded border border-white/20 bg-white/5 hover:border-white/50 transition-colors"
@@ -785,16 +826,16 @@ pub fn JellyfinAlbumDetails(
                                         aria_label: "Select all tracks",
                                         onclick: move |_| {
                                             let tracks = album_tracks();
-                                            let all_selected = !tracks.is_empty() && tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.path));
+                                            let all_selected = !tracks.is_empty() && tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.id.uid_path()));
                                             if all_selected {
                                                 selected_tracks.write().clear();
                                                 is_selection_mode.set(false);
                                             } else {
-                                                selected_tracks.set(tracks.into_iter().map(|(track, _)| track.path).collect());
+                                                selected_tracks.set(tracks.into_iter().map(|(track, _)| track.id.uid_path()).collect());
                                                 is_selection_mode.set(true);
                                             }
                                         },
-                                        if !album_tracks().is_empty() && album_tracks().iter().all(|(track, _)| selected_tracks.read().contains(&track.path)) {
+                                        if !album_tracks().is_empty() && album_tracks().iter().all(|(track, _)| selected_tracks.read().contains(&track.id.uid_path())) {
                                             i { class: "fa-solid fa-check", style: "font-size: 9px;" }
                                         }
                                     }
@@ -817,18 +858,17 @@ pub fn JellyfinAlbumDetails(
                         bottom_pad: scroll_info.bottom_pad,
                         for (idx, (track, track_cover_url)) in album_tracks().into_iter().enumerate().skip(scroll_info.start_index).take(scroll_info.items_to_render) {
                             {
-                            let track_key = track.path.display().to_string();
+                            let track_key = track.id.uid();
                             let track_menu = track.clone();
                             let track_add  = track.clone();
                             let track_queue = track.clone();
-                            let track_path = track.path.clone();
-                            let track_select = track.path.clone();
-                            let is_menu_open = active_menu_track.read().as_ref() == Some(&track.path);
+                            let track_path = track.id.uid_path();
+                            let track_select = track.id.uid_path();
+                            let is_menu_open = active_menu_track.read().as_ref() == Some(&track.id.uid_path());
                             let album_queue: Vec<reader::models::Track> =
                                 album_tracks().iter().map(|(t, _)| t.clone()).collect();
 
-                            let path_str = track.path.to_string_lossy().to_string();
-                            let item_id: String = path_str.split(':').nth(1).unwrap_or("").to_string();
+                            let item_id: String = track.id.key().to_string();
                             let is_downloaded = if let Some(path_str) = config.read().offline_tracks.get(&item_id) {
                                 std::path::Path::new(path_str).exists()
                             } else {
@@ -868,14 +908,14 @@ pub fn JellyfinAlbumDetails(
                                         }
                                     },
                                     on_click_menu: move |_| {
-                                        if active_menu_track.read().as_ref() == Some(&track_menu.path) {
+                                        if active_menu_track.read().as_ref() == Some(&track_menu.id.uid_path()) {
                                             active_menu_track.set(None);
                                         } else {
-                                            active_menu_track.set(Some(track_menu.path.clone()));
+                                            active_menu_track.set(Some(track_menu.id.uid_path()));
                                         }
                                     },
                                     on_add_to_playlist: move |_| {
-                                        selected_track_for_playlist.set(Some(track_add.path.clone()));
+                                        selected_track_for_playlist.set(Some(track_add.id.uid_path()));
                                         show_playlist_modal.set(true);
                                         active_menu_track.set(None);
                                     },
@@ -919,10 +959,8 @@ pub fn JellyfinAlbumDetails(
 
 #[component]
 pub fn ServerAlbum(
-    library: Signal<Library>,
     config: Signal<AppConfig>,
     album_id: Signal<String>,
-    playlist_store: Signal<PlaylistStore>,
     queue: Signal<Vec<reader::models::Track>>,
     open_album_menu: Signal<Option<String>>,
     show_album_playlist_modal: Signal<bool>,
@@ -936,10 +974,8 @@ pub fn ServerAlbum(
     match service {
         MusicService::Jellyfin => rsx! {
             JellyfinAlbum {
-                library,
                 config,
                 album_id,
-                playlist_store,
                 queue,
                 open_album_menu,
                 show_album_playlist_modal,
@@ -948,10 +984,8 @@ pub fn ServerAlbum(
         },
         MusicService::Subsonic => rsx! {
             SubsonicAlbum {
-                library,
                 config,
                 album_id,
-                playlist_store,
                 queue,
                 open_album_menu,
                 show_album_playlist_modal,
@@ -960,10 +994,8 @@ pub fn ServerAlbum(
         },
         MusicService::Custom | MusicService::YtMusic => rsx! {
             CustomAlbum {
-                library,
                 config,
                 album_id,
-                playlist_store,
                 queue,
                 open_album_menu,
                 show_album_playlist_modal,
@@ -975,10 +1007,8 @@ pub fn ServerAlbum(
 
 #[component]
 pub fn SubsonicAlbum(
-    library: Signal<Library>,
     config: Signal<AppConfig>,
     album_id: Signal<String>,
-    playlist_store: Signal<PlaylistStore>,
     queue: Signal<Vec<reader::models::Track>>,
     open_album_menu: Signal<Option<String>>,
     show_album_playlist_modal: Signal<bool>,
@@ -986,10 +1016,8 @@ pub fn SubsonicAlbum(
 ) -> Element {
     rsx! {
         JellyfinAlbum {
-            library,
             config,
             album_id,
-            playlist_store,
             queue,
             open_album_menu,
             show_album_playlist_modal,
@@ -1000,10 +1028,8 @@ pub fn SubsonicAlbum(
 
 #[component]
 pub fn CustomAlbum(
-    library: Signal<Library>,
     config: Signal<AppConfig>,
     album_id: Signal<String>,
-    playlist_store: Signal<PlaylistStore>,
     queue: Signal<Vec<reader::models::Track>>,
     open_album_menu: Signal<Option<String>>,
     show_album_playlist_modal: Signal<bool>,
@@ -1011,10 +1037,8 @@ pub fn CustomAlbum(
 ) -> Element {
     rsx! {
         JellyfinAlbum {
-            library,
             config,
             album_id,
-            playlist_store,
             queue,
             open_album_menu,
             show_album_playlist_modal,
@@ -1026,9 +1050,7 @@ pub fn CustomAlbum(
 #[component]
 pub fn ServerAlbumDetails(
     album_jellyfin_id: String,
-    library: Signal<Library>,
     config: Signal<AppConfig>,
-    playlist_store: Signal<PlaylistStore>,
     queue: Signal<Vec<reader::models::Track>>,
     on_close: EventHandler<()>,
 ) -> Element {
@@ -1041,9 +1063,7 @@ pub fn ServerAlbumDetails(
         MusicService::Jellyfin => rsx! {
             JellyfinAlbumDetails {
                 album_jellyfin_id,
-                library,
                 config,
-                playlist_store,
                 queue,
                 on_close,
             }
@@ -1051,9 +1071,7 @@ pub fn ServerAlbumDetails(
         MusicService::Subsonic => rsx! {
             SubsonicAlbumDetails {
                 album_jellyfin_id,
-                library,
                 config,
-                playlist_store,
                 queue,
                 on_close,
             }
@@ -1061,9 +1079,7 @@ pub fn ServerAlbumDetails(
         MusicService::Custom | MusicService::YtMusic => rsx! {
             CustomAlbumDetails {
                 album_jellyfin_id,
-                library,
                 config,
-                playlist_store,
                 queue,
                 on_close,
             }
@@ -1074,18 +1090,14 @@ pub fn ServerAlbumDetails(
 #[component]
 pub fn SubsonicAlbumDetails(
     album_jellyfin_id: String,
-    library: Signal<Library>,
     config: Signal<AppConfig>,
-    playlist_store: Signal<PlaylistStore>,
     queue: Signal<Vec<reader::models::Track>>,
     on_close: EventHandler<()>,
 ) -> Element {
     rsx! {
         JellyfinAlbumDetails {
             album_jellyfin_id,
-            library,
             config,
-            playlist_store,
             queue,
             on_close,
         }
@@ -1095,18 +1107,14 @@ pub fn SubsonicAlbumDetails(
 #[component]
 pub fn CustomAlbumDetails(
     album_jellyfin_id: String,
-    library: Signal<Library>,
     config: Signal<AppConfig>,
-    playlist_store: Signal<PlaylistStore>,
     queue: Signal<Vec<reader::models::Track>>,
     on_close: EventHandler<()>,
 ) -> Element {
     rsx! {
         JellyfinAlbumDetails {
             album_jellyfin_id,
-            library,
             config,
-            playlist_store,
             queue,
             on_close,
         }

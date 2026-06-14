@@ -1,12 +1,9 @@
-use std::path::PathBuf;
-
 use reader::models::Track;
 use serde_json::{Value, json};
 
-use super::SOURCE_PREFIX;
 use super::clients::WEB_REMIX;
 use super::innertube::sapisid_hash;
-use super::search::{encode_url_tag, synthesize_album_id};
+use super::search::synthesize_album_id;
 
 const ORIGIN: &str = "https://music.youtube.com";
 
@@ -180,17 +177,12 @@ fn parse_queue_row(row: &Value) -> Option<Track> {
         .and_then(|u| u.as_str())
         .map(normalize_yt_thumbnail);
 
-    let path = match thumbnail {
-        Some(ref url) if !url.is_empty() => PathBuf::from(format!(
-            "{SOURCE_PREFIX}:{video_id}:{}",
-            encode_url_tag(url)
-        )),
-        _ => PathBuf::from(format!("{SOURCE_PREFIX}:{video_id}")),
-    };
+    let cover = thumbnail.filter(|u| !u.is_empty());
     let album_id = synthesize_album_id(&album, &primary_artist);
 
     Some(Track {
-        path,
+        id: super::yt_id(video_id.to_string()),
+        cover,
         album_id,
         title,
         artist: primary_artist,

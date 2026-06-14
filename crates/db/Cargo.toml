@@ -1,0 +1,25 @@
+[package]
+name = "db"
+version.workspace = true
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+config = { workspace = true }
+reader = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+async-trait = "0.1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "migrate"] }
+tokio = { workspace = true, features = ["rt", "sync"] }
+arc-swap = "1.7"
+directories = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"] }

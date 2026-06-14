@@ -1,16 +1,13 @@
-use config::{AppConfig, MusicSource};
+use config::AppConfig;
 use dioxus::prelude::*;
 use player::player;
-use reader::Library;
 
 use crate::local::search::LocalSearch;
 use crate::server::search::ServerSearch;
 
 #[component]
 pub fn Search(
-    library: Signal<Library>,
     config: Signal<AppConfig>,
-    playlist_store: Signal<reader::PlaylistStore>,
     search_query: Signal<String>,
     player: Signal<player::Player>,
     is_playing: Signal<bool>,
@@ -24,14 +21,12 @@ pub fn Search(
     current_queue_index: Signal<usize>,
     on_select_album: EventHandler<String>,
 ) -> Element {
-    let is_server = config.read().active_source == MusicSource::Server;
+    let is_server = config.read().active_source.is_server();
 
     rsx! {
         if is_server {
             ServerSearch {
-                library,
                 config,
-                playlist_store,
                 search_query,
                 player,
                 is_playing,
@@ -47,9 +42,7 @@ pub fn Search(
             }
         } else {
             LocalSearch {
-                library,
                 config,
-                playlist_store,
                 search_query,
                 player,
                 is_playing,

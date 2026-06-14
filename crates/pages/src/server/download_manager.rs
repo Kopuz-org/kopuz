@@ -1,4 +1,5 @@
 use config::{AppConfig, MusicService};
+use dioxus::core::spawn_forever;
 use dioxus::prelude::*;
 use std::cell::Cell;
 use std::sync::Arc;
@@ -96,7 +97,10 @@ pub fn queue_downloads(
 
     let session_start = Instant::now();
     let session_span = tracing::info_span!("downloads.session");
-    spawn(
+    // spawn_forever: queue_downloads is called from page event handlers, and a
+    // scope-tied spawn dies with the page — navigating away from the downloads
+    // view cancelled the whole session mid-download (#327).
+    spawn_forever(
         async move {
             tokio::join!(
                 download_worker(queue, config, session_start, cancel_flag.clone()),
@@ -202,10 +206,14 @@ async fn download_worker(
         .await
         {
             Ok(path) => {
-                config
-                    .write()
-                    .offline_tracks
-                    .insert(id.clone(), path.to_string_lossy().into_owned());
+                let path_str = path.to_string_lossy().into_owned();
+                // Durable FIRST as a single json_set (the whole-config save per
+                // completed song was the audio-stutter bug), then the in-memory
+                // mirror for live reads.
+                if let Some(db) = try_consume_context::<db::Db>() {
+                    let _ = db.set_offline_track(&id, Some(&path_str)).await;
+                }
+                config.write().offline_tracks.insert(id.clone(), path_str);
                 if let Some(item) = queue.write().items.iter_mut().find(|i| i.id == id) {
                     item.status = DownloadStatus::Done;
                 }
@@ -228,6 +236,7 @@ pub fn delete_downloads(
     mut config: Signal<AppConfig>,
     mut queue: Signal<DownloadQueue>,
 ) {
+    let db = try_consume_context::<db::Db>();
     let mut conf = config.write();
     let mut q = queue.write();
 
@@ -237,6 +246,14 @@ pub fn delete_downloads(
             if path.exists() {
                 let _ = std::fs::remove_file(path);
             }
+        }
+        if let Some(db) = db.clone() {
+            let id = id.clone();
+            // The file is already deleted above — the DB row removal must
+            // outlive the calling page or the registry points at nothing.
+            spawn_forever(async move {
+                let _ = db.set_offline_track(&id, None).await;
+            });
         }
         q.items.retain(|i| i.id != id);
     }
@@ -248,7 +265,6 @@ pub fn delete_downloads(
     skip(url, user_agent, queue, session_start, cancel_flag),
     fields(item_id = %item_id, content_length)
 )]
-#[allow(clippy::too_many_arguments)]
 async fn download_with_progress(
     item_id: &str,
     url: &str,
