@@ -20,6 +20,7 @@ pub fn get_favorite(
             || path_str.starts_with("subsonic:")
             || path_str.starts_with("custom:")
             || path_str.starts_with("ytmusic:")
+            || path_str.starts_with("soundcloud:")
         {
             let parts: Vec<&str> = path_str.split(':').collect();
             if parts.len() >= 2 && !parts[1].trim().is_empty() {
@@ -45,7 +46,8 @@ pub fn toggle_favorite(
         let is_server_item = path_str.starts_with("jellyfin:")
             || path_str.starts_with("subsonic:")
             || path_str.starts_with("custom:")
-            || path_str.starts_with("ytmusic:");
+            || path_str.starts_with("ytmusic:")
+            || path_str.starts_with("soundcloud:");
         if is_server_item {
             let parts: Vec<String> = path_str.split(':').map(|s| s.to_string()).collect();
             if parts.len() >= 2 && !parts[1].trim().is_empty() {
