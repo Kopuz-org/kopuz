@@ -1,4 +1,6 @@
 pub mod color;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod hls_source;
 pub mod jellyfin_image;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod logs;

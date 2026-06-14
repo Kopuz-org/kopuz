@@ -132,9 +132,7 @@ pub async fn create_server_playlist(
             let yt = YouTubeMusicClient::with_cookies(conn.token.clone());
             yt.create_playlist(name, "", &id_refs).await
         }
-        MusicService::SoundCloud => {
-            Err("SoundCloud doesn't support server playlists".to_string())
-        }
+        MusicService::SoundCloud => Err("SoundCloud doesn't support server playlists".to_string()),
     }
 }
 
@@ -198,7 +196,12 @@ pub async fn set_tracks_favorite(
             }
         }
         MusicService::SoundCloud => {
-            return Err("SoundCloud doesn't support favorites".to_string());
+            if conn.token.is_empty() {
+                return Err("Sign in to SoundCloud to like tracks".to_string());
+            }
+            for id in item_ids {
+                record!(crate::soundcloud::set_track_like(id, favorite, &conn.token).await);
+            }
         }
     }
     match first_err {

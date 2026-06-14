@@ -48,9 +48,7 @@ fn http_client() -> reqwest::Client {
 /// `force` is set after a stale-id error) and caching it for the process.
 async fn client_id(http: &reqwest::Client, force: bool) -> Result<String, String> {
     let mut guard = CLIENT_ID.lock().await;
-    if !force
-        && let Some(id) = guard.as_ref()
-    {
+    if !force && let Some(id) = guard.as_ref() {
         return Ok(id.clone());
     }
     let id = scrape_client_id(http).await?;
@@ -185,16 +183,25 @@ async fn api_search(http: &reqwest::Client, query: &str, cid: &str) -> Result<Va
         .map_err(|e| format!("SoundCloud search JSON: {e}"))
 }
 
-/// Resolve a track id to a playable progressive MP3 stream URL via the `/tracks`
-/// lookup endpoint. Called lazily at play time (the search results don't need to
-/// round-trip every stream URL through the queue).
-#[tracing::instrument(name = "soundcloud.resolve_stream", fields(track_id = %track_id))]
-pub async fn resolve_stream(track_id: &str) -> Result<String, String> {
+/// A resolved, playable SoundCloud stream. Progressive is the keyless 128 kbps
+/// MP3 every track exposes; `HlsAac` is the 256 kbps AAC HLS playlist that only
+/// surfaces for an authenticated SoundCloud Go+ subscriber.
+pub enum ResolvedStream {
+    Progressive(String),
+    HlsAac(String),
+}
+
+/// Resolve a track id to a playable stream via the `/tracks` lookup endpoint,
+/// called lazily at play time. When `token` is an authenticated Go+ session the
+/// track's AAC HLS transcoding is preferred for higher quality; otherwise it
+/// falls back to the universal progressive MP3.
+#[tracing::instrument(name = "soundcloud.resolve_stream", skip(token), fields(track_id = %track_id))]
+pub async fn resolve_stream(track_id: &str, token: Option<&str>) -> Result<ResolvedStream, String> {
     let http = http_client();
 
-    let track = match lookup_track(&http, track_id, &client_id(&http, false).await?).await {
+    let track = match lookup_track(&http, track_id, &client_id(&http, false).await?, token).await {
         Ok(v) => v,
-        Err(_) => lookup_track(&http, track_id, &client_id(&http, true).await?).await?,
+        Err(_) => lookup_track(&http, track_id, &client_id(&http, true).await?, token).await?,
     };
 
     let transcodings = track
@@ -203,17 +210,43 @@ pub async fn resolve_stream(track_id: &str) -> Result<String, String> {
         .and_then(|t| t.as_array())
         .ok_or("SoundCloud track exposes no media transcodings")?;
 
+    let track_auth = track.get("track_authorization").and_then(|v| v.as_str());
+
+    if let Some(tc) = transcodings.iter().find(|tc| {
+        transcoding_protocol(tc) == Some("hls") && transcoding_mime(tc) == Some("audio/mp4")
+    }) {
+        let hls_url = tc
+            .get("url")
+            .and_then(|v| v.as_str())
+            .ok_or("SoundCloud AAC transcoding has no url")?;
+        let media = resolve_media_url(&http, hls_url, track_auth, token).await?;
+        return Ok(ResolvedStream::HlsAac(media));
+    }
+
     let progressive_url = transcodings
         .iter()
         .find(|tc| transcoding_protocol(tc) == Some("progressive"))
         .and_then(|tc| tc.get("url"))
         .and_then(|v| v.as_str())
         .ok_or("SoundCloud track has no progressive (non-HLS) stream")?;
+    let media = resolve_media_url(&http, progressive_url, track_auth, token).await?;
+    Ok(ResolvedStream::Progressive(media))
+}
 
-    let track_auth = track.get("track_authorization").and_then(|v| v.as_str());
-    let cid = client_id(&http, false).await?;
-
-    let mut req = http.get(progressive_url).query(&[("client_id", cid.as_str())]);
+/// Exchange a transcoding URL for its time-limited CDN media URL (a direct MP3
+/// for progressive, or an `.m3u8` playlist for HLS).
+async fn resolve_media_url(
+    http: &reqwest::Client,
+    transcoding_url: &str,
+    track_auth: Option<&str>,
+    token: Option<&str>,
+) -> Result<String, String> {
+    let cid = client_id(http, false).await?;
+    let mut req = apply_auth(
+        http.get(transcoding_url)
+            .query(&[("client_id", cid.as_str())]),
+        token,
+    );
     if let Some(auth) = track_auth {
         req = req.query(&[("track_authorization", auth)]);
     }
@@ -236,23 +269,46 @@ pub async fn resolve_stream(track_id: &str) -> Result<String, String> {
         .ok_or_else(|| "SoundCloud returned no stream URL for this track".to_string())
 }
 
-async fn lookup_track(http: &reqwest::Client, id: &str, cid: &str) -> Result<Value, String> {
-    http.get(format!("{API_V2}/tracks/{id}"))
-        .query(&[("client_id", cid)])
-        .send()
-        .await
-        .map_err(|e| format!("SoundCloud lookup HTTP: {e}"))?
-        .error_for_status()
-        .map_err(|e| format!("SoundCloud lookup HTTP: {e}"))?
-        .json::<Value>()
-        .await
-        .map_err(|e| format!("SoundCloud lookup JSON: {e}"))
+async fn lookup_track(
+    http: &reqwest::Client,
+    id: &str,
+    cid: &str,
+    token: Option<&str>,
+) -> Result<Value, String> {
+    apply_auth(
+        http.get(format!("{API_V2}/tracks/{id}"))
+            .query(&[("client_id", cid)]),
+        token,
+    )
+    .send()
+    .await
+    .map_err(|e| format!("SoundCloud lookup HTTP: {e}"))?
+    .error_for_status()
+    .map_err(|e| format!("SoundCloud lookup HTTP: {e}"))?
+    .json::<Value>()
+    .await
+    .map_err(|e| format!("SoundCloud lookup JSON: {e}"))
+}
+
+/// Attach the web-app `Authorization: OAuth <token>` header for a signed-in
+/// session. A `None`/empty token leaves the request anonymous (keyless mode).
+fn apply_auth(req: reqwest::RequestBuilder, token: Option<&str>) -> reqwest::RequestBuilder {
+    match token {
+        Some(t) if !t.is_empty() => req.header("Authorization", format!("OAuth {t}")),
+        _ => req,
+    }
 }
 
 fn transcoding_protocol(tc: &Value) -> Option<&str> {
     tc.get("format")
         .and_then(|f| f.get("protocol"))
         .and_then(|p| p.as_str())
+}
+
+fn transcoding_mime(tc: &Value) -> Option<&str> {
+    tc.get("format")
+        .and_then(|f| f.get("mime_type"))
+        .and_then(|m| m.as_str())
 }
 
 /// Pull the id segment out of a `soundcloud:<id>[:tag]` track path.
@@ -341,6 +397,366 @@ fn parse_track(item: &Value) -> Option<Track> {
             vec![artist]
         },
     })
+}
+
+/// A SoundCloud playlist as listed in the user's library — enough to seed a
+/// store entry; the tracks are loaded lazily via [`get_playlist_entries`].
+pub struct PlaylistSummary {
+    pub id: String,
+    pub title: String,
+    pub artwork_url: Option<String>,
+}
+
+async fn auth_get_json(
+    http: &reqwest::Client,
+    url: &str,
+    token: Option<&str>,
+) -> Result<Value, String> {
+    apply_auth(http.get(url), token)
+        .send()
+        .await
+        .map_err(|e| format!("SoundCloud API HTTP: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("SoundCloud API HTTP: {e}"))?
+        .json::<Value>()
+        .await
+        .map_err(|e| format!("SoundCloud API JSON: {e}"))
+}
+
+/// Fetch the signed-in user's profile (`/me`).
+pub async fn get_me(token: &str) -> Result<Value, String> {
+    let http = http_client();
+    let cid = client_id(&http, false).await?;
+    auth_get_json(&http, &format!("{API_V2}/me?client_id={cid}"), Some(token)).await
+}
+
+/// Resolve a signed-in session to its numeric user id (used as `user_id`).
+pub async fn derive_user_id(token: &str) -> Option<String> {
+    get_me(token)
+        .await
+        .ok()
+        .and_then(|me| me.get("id").and_then(|v| v.as_u64()))
+        .map(|n| n.to_string())
+}
+
+/// Stream the user's liked tracks page-by-page, mirroring the YT Music
+/// `stream_liked_songs` shape so the favorites view can render incrementally.
+pub async fn stream_liked_tracks<F: FnMut(Vec<Track>)>(
+    token: &str,
+    mut on_page: F,
+) -> Result<(), String> {
+    let http = http_client();
+    let cid = client_id(&http, false).await?;
+    let mut next = Some(format!(
+        "{API_V2}/me/likes/tracks?client_id={cid}&limit=200&linked_partitioning=1"
+    ));
+    let mut pages = 0;
+    while let Some(url) = next.take() {
+        if pages >= 20 {
+            break;
+        }
+        pages += 1;
+        let json = auth_get_json(&http, &url, Some(token)).await?;
+        let page: Vec<Track> = json
+            .get("collection")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(parse_track).collect())
+            .unwrap_or_default();
+        if !page.is_empty() {
+            on_page(page);
+        }
+        next = json
+            .get("next_href")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+    }
+    Ok(())
+}
+
+/// List the signed-in user's own playlists.
+pub async fn list_playlists(token: &str) -> Result<Vec<PlaylistSummary>, String> {
+    let http = http_client();
+    let cid = client_id(&http, false).await?;
+    let mut next = Some(format!(
+        "{API_V2}/me/playlists?client_id={cid}&limit=50&linked_partitioning=1"
+    ));
+    let mut out = Vec::new();
+    let mut pages = 0;
+    while let Some(url) = next.take() {
+        if pages >= 10 {
+            break;
+        }
+        pages += 1;
+        let json = auth_get_json(&http, &url, Some(token)).await?;
+        if let Some(arr) = json.get("collection").and_then(|v| v.as_array()) {
+            for p in arr {
+                let Some(id) = p.get("id").and_then(|v| v.as_u64()) else {
+                    continue;
+                };
+                out.push(PlaylistSummary {
+                    id: id.to_string(),
+                    title: p
+                        .get("title")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
+                    artwork_url: p
+                        .get("artwork_url")
+                        .and_then(|v| v.as_str())
+                        .filter(|s| !s.is_empty())
+                        .map(upscale_artwork),
+                });
+            }
+        }
+        next = json
+            .get("next_href")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string());
+    }
+    Ok(out)
+}
+
+/// Load a playlist's full track list. SoundCloud returns most entries as bare
+/// `{id}` stubs, so the ids are collected in order and batch-hydrated through
+/// `/tracks?ids=` (capped at 50 per request) before parsing.
+pub async fn get_playlist_entries(playlist_id: &str, token: &str) -> Result<Vec<Track>, String> {
+    let http = http_client();
+    let cid = client_id(&http, false).await?;
+    let json = auth_get_json(
+        &http,
+        &format!("{API_V2}/playlists/{playlist_id}?client_id={cid}"),
+        Some(token),
+    )
+    .await?;
+
+    let ids: Vec<u64> = json
+        .get("tracks")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|t| t.get("id").and_then(|v| v.as_u64()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let mut by_id: std::collections::HashMap<u64, Value> = std::collections::HashMap::new();
+    for chunk in ids.chunks(50) {
+        let ids_str = chunk
+            .iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(",");
+        let url = format!("{API_V2}/tracks?ids={ids_str}&client_id={cid}");
+        if let Ok(arr) = auth_get_json(&http, &url, Some(token)).await
+            && let Some(items) = arr.as_array()
+        {
+            for t in items {
+                if let Some(id) = t.get("id").and_then(|v| v.as_u64()) {
+                    by_id.insert(id, t.clone());
+                }
+            }
+        }
+    }
+
+    Ok(ids
+        .iter()
+        .filter_map(|id| by_id.get(id))
+        .filter_map(parse_track)
+        .collect())
+}
+
+/// Like or unlike a track on the signed-in account.
+pub async fn set_track_like(track_id: &str, like: bool, token: &str) -> Result<(), String> {
+    let http = http_client();
+    let cid = client_id(&http, false).await?;
+    let uid = derive_user_id(token)
+        .await
+        .ok_or("SoundCloud: couldn't resolve the signed-in user id")?;
+    let url = format!("{API_V2}/users/{uid}/track_likes/{track_id}?client_id={cid}");
+    let req = if like {
+        http.put(url)
+    } else {
+        http.delete(url)
+    };
+    apply_auth(req, Some(token))
+        .send()
+        .await
+        .map_err(|e| format!("SoundCloud like HTTP: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("SoundCloud like HTTP: {e}"))?;
+    Ok(())
+}
+
+/// One-time SoundCloud sign-in via an isolated browser profile. Reuses the YT
+/// Music browser-launch machinery; the only differences are the sign-in URL,
+/// the cookie domain, and that we extract the single `oauth_token` cookie that
+/// the web app sends as `Authorization: OAuth <token>`.
+pub mod signin {
+    use std::path::{Path, PathBuf};
+    use std::time::{Duration, Instant};
+
+    use config::Browser;
+
+    use crate::ytmusic::isolated_profile as ip;
+
+    const SIGNIN_URL: &str = "https://soundcloud.com/signin";
+
+    pub fn profile_dir(server_id: &str) -> PathBuf {
+        let safe: String = server_id
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+            .collect();
+        let leaf = if safe.is_empty() {
+            "sc-profile".to_string()
+        } else {
+            format!("sc-profile-{safe}")
+        };
+        directories::ProjectDirs::from("com", "temidaradev", "kopuz")
+            .map(|d| {
+                #[cfg(target_os = "windows")]
+                let base = d.data_local_dir();
+                #[cfg(not(target_os = "windows"))]
+                let base = d.config_dir();
+                base.join(&leaf)
+            })
+            .unwrap_or_else(|| PathBuf::from(format!("./{leaf}")))
+    }
+
+    pub fn delete_profile(server_id: &str) -> std::io::Result<()> {
+        match std::fs::remove_dir_all(profile_dir(server_id)) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Launch the chosen browser at the SoundCloud sign-in page and poll the
+    /// isolated profile's cookie store until `oauth_token` appears. The browser
+    /// is always killed before returning.
+    #[tracing::instrument(name = "sc.signin", skip(server_id, signin_timeout), fields(browser = %browser))]
+    pub async fn launch_signin_and_extract(
+        browser: Browser,
+        server_id: &str,
+        signin_timeout: Duration,
+    ) -> Result<String, String> {
+        let profile = profile_dir(server_id);
+        match tokio::fs::remove_dir_all(&profile).await {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("wipe sc-profile: {e}")),
+        }
+        tokio::fs::create_dir_all(&profile)
+            .await
+            .map_err(|e| format!("mkdir sc-profile: {e}"))?;
+
+        let bin = if ip::in_flatpak() {
+            ip::find_host_browser_bin(browser).await.ok_or_else(|| {
+                format!(
+                    "{browser} not found on the host (looked for: {}). Install it on the host system.",
+                    ip::browser_candidates(browser).join(", ")
+                )
+            })?
+        } else {
+            ip::find_browser_bin(browser).ok_or_else(|| {
+                format!(
+                    "{browser} not found in PATH (looked for: {}). Install it, or set $KOPUZ_{}_BIN.",
+                    ip::browser_candidates(browser).join(", "),
+                    browser.id().to_uppercase().replace('-', "_")
+                )
+            })?
+        };
+
+        let mut cmd = ip::browser_command(&bin);
+        cmd.arg("--no-first-run")
+            .arg("--no-default-browser-check")
+            .arg(format!("--user-data-dir={}", profile.display()));
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0100_0000);
+        }
+        let mut child = cmd
+            .arg(SIGNIN_URL)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|e| format!("spawn {bin}: {e}"))?;
+
+        let deadline = Instant::now() + signin_timeout;
+        let outcome = loop {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            if Instant::now() > deadline {
+                break Err(format!(
+                    "Sign-in not detected within {}s",
+                    signin_timeout.as_secs()
+                ));
+            }
+            let _ = child.try_wait();
+            if let Ok(Some(token)) = extract_oauth_token(browser, &profile).await {
+                break Ok(token);
+            }
+        };
+        let _ = child.kill().await;
+        outcome
+    }
+
+    /// Pull the `oauth_token` cookie value out of the isolated profile's cookie
+    /// store (decrypted by `rookie`, exactly like the YT cookie reader).
+    pub async fn extract_oauth_token(
+        browser: Browser,
+        profile_root: &Path,
+    ) -> Result<Option<String>, String> {
+        let db_path =
+            pick_cookies_path(profile_root).ok_or_else(|| "no Cookies database yet".to_string())?;
+        let profile_owned = profile_root.to_path_buf();
+        let browser_name = rookie_browser_name(browser);
+
+        let cookies =
+            tokio::task::spawn_blocking(move || -> Result<Vec<rookie::enums::Cookie>, String> {
+                let domains = Some(vec!["soundcloud.com".to_string()]);
+                #[cfg(not(target_os = "windows"))]
+                {
+                    let _ = profile_owned;
+                    let config = rookie::config::get_browser_config(browser_name);
+                    rookie::chromium_based(config, db_path, domains).map_err(|e| e.to_string())
+                }
+                #[cfg(target_os = "windows")]
+                {
+                    let _ = browser_name;
+                    let key_path = profile_owned.join("Local State");
+                    rookie::chromium_based(key_path, db_path, domains).map_err(|e| e.to_string())
+                }
+            })
+            .await
+            .map_err(|e| format!("cookie extract task: {e}"))??;
+
+        Ok(cookies
+            .into_iter()
+            .find(|c| c.name == "oauth_token" && !c.value.is_empty())
+            .map(|c| c.value))
+    }
+
+    fn rookie_browser_name(browser: Browser) -> &'static str {
+        match browser {
+            Browser::Brave => "brave",
+            Browser::Chrome => "chrome",
+            Browser::Chromium => "chromium",
+            Browser::Edge => "edge",
+            Browser::Vivaldi => "vivaldi",
+        }
+    }
+
+    fn pick_cookies_path(profile_root: &Path) -> Option<PathBuf> {
+        [
+            profile_root.join("Default").join("Network").join("Cookies"),
+            profile_root.join("Default").join("Cookies"),
+        ]
+        .into_iter()
+        .find(|p| p.exists())
+    }
 }
 
 #[cfg(test)]

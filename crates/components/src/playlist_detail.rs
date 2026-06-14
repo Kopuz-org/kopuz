@@ -244,7 +244,18 @@ pub fn PlaylistDetail(
                                         has_loaded_jellyfin_tracks.set(true);
                                     }
                                 }
-                                MusicService::SoundCloud => {}
+                                MusicService::SoundCloud => {
+                                    if !token.is_empty()
+                                        && let Ok(sc_tracks) =
+                                            server::soundcloud::get_playlist_entries(
+                                                &pid_clone, &token,
+                                            )
+                                            .await
+                                    {
+                                        tracks.set(sc_tracks);
+                                        has_loaded_jellyfin_tracks.set(true);
+                                    }
+                                }
                             }
                         }
                     }

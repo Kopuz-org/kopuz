@@ -171,10 +171,10 @@ impl MusicService {
         }
     }
 
-    /// Backends that authenticate with no server URL and no username/password
-    /// (YT Music anonymous, SoundCloud). Adding one of these marks the server
-    /// immediately active/playable instead of opening a login form.
-    pub fn is_tokenless(&self) -> bool {
+    /// Backends that authenticate via an isolated-browser sign-in (or run
+    /// anonymously) instead of a server URL + username/password. Adding one
+    /// opens the browser/anonymous selector rather than a login form.
+    pub fn uses_browser_signin(&self) -> bool {
         matches!(self, Self::YtMusic | Self::SoundCloud)
     }
 }
@@ -629,17 +629,16 @@ pub struct MusicServer {
     pub user_id: Option<String>,
     #[serde(default)]
     pub id: Option<String>,
-    /// For `MusicService::YtMusic` only: which Chromium-family browser
-    /// the cookies were extracted from. Lets boot-time refresh hit the
-    /// right browser directly instead of falling through every
-    /// candidate.
+    /// For browser-sign-in backends (`YtMusic`, `SoundCloud`): which
+    /// Chromium-family browser the token/cookies were extracted from. Lets
+    /// boot-time refresh hit the right browser directly instead of falling
+    /// through every candidate.
     #[serde(default)]
     pub yt_browser: Option<Browser>,
-    /// For `MusicService::YtMusic` only: anonymous mode — no sign-in,
-    /// no cookies. Browse + play public surfaces work; Liked / Library
-    /// Playlists / follow / like are disabled. Set when the user picks
-    /// "Continue without signing in" (the only option on Windows for
-    /// now — see isolated_profile.rs).
+    /// For browser-sign-in backends (`YtMusic`, `SoundCloud`): anonymous mode
+    /// — no sign-in, no token. Browse + play public surfaces work; the user's
+    /// likes / library playlists / follow / like are disabled. Set when the
+    /// user picks "Continue without signing in".
     #[serde(default)]
     pub yt_anonymous: bool,
 }

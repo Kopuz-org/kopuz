@@ -767,8 +767,20 @@ impl PlayerController {
                                 }
                             }
                         } else if let Some(track_id) = stream_url.strip_prefix("__SC_PENDING:") {
-                            match ::server::soundcloud::resolve_stream(track_id).await {
-                                Ok(url) => (url, None, None),
+                            let token = cfg_signal
+                                .peek()
+                                .server
+                                .as_ref()
+                                .and_then(|s| s.access_token.clone())
+                                .filter(|t| !t.is_empty());
+                            use ::server::soundcloud::ResolvedStream;
+                            match ::server::soundcloud::resolve_stream(track_id, token.as_deref())
+                                .await
+                            {
+                                Ok(ResolvedStream::Progressive(url)) => (url, None, None),
+                                Ok(ResolvedStream::HlsAac(m3u8)) => {
+                                    (format!("__SC_HLS:{m3u8}"), None, None)
+                                }
                                 Err(e) => {
                                     if *play_generation.read() != current_gen {
                                         return;
@@ -809,6 +821,16 @@ impl PlayerController {
                                 let len = Some(range.total_size());
                                 let (source, mut hint) = decoder::from_stream_with_len(range, len);
                                 hint.with_extension(fmt.extension());
+                                Ok::<_, std::io::Error>((source, hint))
+                            } else if let Some(hls_url) =
+                                stream_url_for_blocking.strip_prefix("__SC_HLS:")
+                            {
+                                let bytes = utils::hls_source::assemble(hls_url, None)?;
+                                let len = Some(bytes.len() as u64);
+                                let cursor = std::io::Cursor::new(bytes);
+                                let (source, mut hint) =
+                                    decoder::from_stream_with_len(cursor, len);
+                                hint.with_extension("m4a");
                                 Ok::<_, std::io::Error>((source, hint))
                             } else {
                                 let stream = utils::stream_buffer::StreamBuffer::with_user_agent(

@@ -41,7 +41,7 @@ pub fn profile_dir(server_id: &str) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(format!("./{leaf}")))
 }
 
-fn browser_candidates(browser: Browser) -> &'static [&'static str] {
+pub(crate) fn browser_candidates(browser: Browser) -> &'static [&'static str] {
     match browser {
         Browser::Brave => &["brave", "brave-browser"],
         Browser::Chrome => &["google-chrome", "google-chrome-stable", "chrome"],
@@ -109,7 +109,7 @@ fn windows_install_paths(browser: Browser) -> Vec<PathBuf> {
     out
 }
 
-fn find_browser_bin(browser: Browser) -> Option<String> {
+pub(crate) fn find_browser_bin(browser: Browser) -> Option<String> {
     let env_key = format!(
         "KOPUZ_{}_BIN",
         browser.id().to_uppercase().replace('-', "_")
@@ -147,13 +147,13 @@ fn find_browser_bin(browser: Browser) -> Option<String> {
 /// True when running inside a flatpak sandbox. The host browser binary isn't
 /// reachable from the sandbox `/usr`, so launches are proxied to the host via
 /// `flatpak-spawn --host` (which the runtime provides at `/usr/bin`).
-fn in_flatpak() -> bool {
+pub(crate) fn in_flatpak() -> bool {
     std::path::Path::new("/.flatpak-info").exists()
 }
 
 /// Resolve the browser command on the *host* PATH (the sandbox can't stat host
 /// binaries). Probes each candidate with `flatpak-spawn --host command -v`.
-async fn find_host_browser_bin(browser: Browser) -> Option<String> {
+pub(crate) async fn find_host_browser_bin(browser: Browser) -> Option<String> {
     // Honour an explicit override (e.g. a non-standard host install path) — same
     // escape hatch as the native `find_browser_bin`. `flatpak-spawn --host` runs
     // it in the host environment, so an absolute host path works.
@@ -187,7 +187,7 @@ async fn find_host_browser_bin(browser: Browser) -> Option<String> {
 /// `flatpak-spawn --host` when packaged, a plain `Command` natively.
 /// `--watch-bus` ties the host browser's lifetime to ours, so `child.kill()`
 /// (and `kill_on_drop`) still tears it down.
-fn browser_command(bin: &str) -> Command {
+pub(crate) fn browser_command(bin: &str) -> Command {
     if in_flatpak() {
         let mut c = Command::new("flatpak-spawn");
         c.args(["--host", "--watch-bus", bin]);

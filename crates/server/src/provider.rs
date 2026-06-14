@@ -58,9 +58,9 @@ impl ProviderClient {
                 "YouTube Music uses OAuth device flow; call login_ytmusic_device() instead"
                     .to_string(),
             ),
-            MusicService::SoundCloud => Err(
-                "SoundCloud needs no login; the server entry is active on add".to_string(),
-            ),
+            MusicService::SoundCloud => {
+                Err("SoundCloud needs no login; the server entry is active on add".to_string())
+            }
         }
     }
 

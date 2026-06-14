@@ -157,9 +157,7 @@ fn search_server(
                                 80,
                             )
                         }
-                        Some(MusicService::YtMusic)
-                        | Some(MusicService::SoundCloud)
-                        | None => None,
+                        Some(MusicService::YtMusic) | Some(MusicService::SoundCloud) | None => None,
                     };
                     utils::map_cover_url(url)
                 })
@@ -320,8 +318,8 @@ pub fn use_search_data(
                                         )
                                     }
                                     Some(MusicService::YtMusic)
-                        | Some(MusicService::SoundCloud)
-                        | None => None,
+                                    | Some(MusicService::SoundCloud)
+                                    | None => None,
                                 }
                             })
                         } else {
