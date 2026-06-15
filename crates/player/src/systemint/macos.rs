@@ -106,9 +106,8 @@ fn get_tokio_waker() -> Arc<StdMutex<Option<Box<dyn Fn() + Send + Sync>>>> {
 
 pub fn set_tokio_waker(waker: impl Fn() + Send + Sync + 'static) {
     let arc = get_tokio_waker();
-    if let Ok(mut guard) = arc.lock() {
-        *guard = Some(Box::new(waker));
-    }
+    let mut guard = arc.lock().unwrap_or_else(|e| e.into_inner());
+    *guard = Some(Box::new(waker));
 }
 
 fn wake_tokio() {
@@ -121,9 +120,8 @@ fn wake_tokio() {
 
 pub fn set_background_handler(handler: impl Fn(SystemEvent) + Send + Sync + 'static) {
     let arc = get_bg_handler();
-    if let Ok(mut guard) = arc.lock() {
-        *guard = Some(Box::new(handler));
-    }
+    let mut guard = arc.lock().unwrap_or_else(|e| e.into_inner());
+    *guard = Some(Box::new(handler));
 }
 
 fn dispatch_event(event: SystemEvent) {
@@ -204,17 +202,17 @@ pub fn init() {
             }
 
             let session = AVAudioSession::sharedInstance();
-            let Some(category) = AVAudioSessionCategoryPlayback else {
-                tracing::error!("AVAudioSessionCategoryPlayback not available");
-                return;
-            };
-            if let Err(e) = session.setCategory_error(category) {
-                tracing::warn!(error = ?e, "failed to set AVAudioSession category");
-            }
-            if let Err(e) = session.setActive_error(true) {
-                tracing::warn!(error = ?e, "failed to activate AVAudioSession");
+            if let Some(category) = AVAudioSessionCategoryPlayback {
+                if let Err(e) = session.setCategory_error(category) {
+                    tracing::warn!(error = ?e, "failed to set AVAudioSession category");
+                }
+                if let Err(e) = session.setActive_error(true) {
+                    tracing::warn!(error = ?e, "failed to activate AVAudioSession");
+                } else {
+                    tracing::debug!("AVAudioSession configured for background playback");
+                }
             } else {
-                tracing::debug!("AVAudioSession configured for background playback");
+                tracing::error!("AVAudioSessionCategoryPlayback not available");
             }
 
             let center = MPRemoteCommandCenter::sharedCommandCenter();

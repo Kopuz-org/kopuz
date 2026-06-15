@@ -166,6 +166,7 @@ pub fn JellyfinPlaylists(
                         let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(token.clone());
                         let list_result = yt.list_playlists().await;
                         if *fetch_request_id.read() != request_id {
+                            yt_is_syncing.set(false);
                             return;
                         }
                         match list_result.as_ref() {
@@ -218,6 +219,7 @@ pub fn JellyfinPlaylists(
                             std::collections::HashSet::new();
                         for (i, summary) in summaries.into_iter().enumerate() {
                             if *fetch_request_id.read() != request_id {
+                                yt_is_syncing.set(false);
                                 return;
                             }
                             yt_synced_so_far.set(i + 1);
@@ -248,6 +250,7 @@ pub fn JellyfinPlaylists(
                         }
 
                         if *fetch_request_id.read() != request_id {
+                            yt_is_syncing.set(false);
                             return;
                         }
                         let now = std::time::SystemTime::now()
@@ -270,6 +273,7 @@ pub fn JellyfinPlaylists(
                 }
 
                 if *fetch_request_id.read() != request_id {
+                    yt_is_syncing.set(false);
                     return;
                 }
 

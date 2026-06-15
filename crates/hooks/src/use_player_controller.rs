@@ -792,7 +792,23 @@ impl PlayerController {
                             })
                             .await;
 
-                            if let Ok(Ok((source, hint))) = source_res {
+                            let source_res = match source_res {
+                                Ok(source_res) => source_res,
+                                Err(e) => {
+                                    tracing::error!(error = %e, "stream setup task failed");
+                                    is_loading.set(false);
+                                    skip_in_progress.set(false);
+                                    return;
+                                }
+                            };
+                            if let Err(e) = &source_res {
+                                tracing::error!(error = %e, "stream setup failed");
+                                is_loading.set(false);
+                                skip_in_progress.set(false);
+                                return;
+                            }
+
+                            if let Ok((source, hint)) = source_res {
                                 if *play_generation.read() == current_gen {
                                     let meta = NowPlayingMeta {
                                         title: track.title.clone(),
@@ -1155,9 +1171,6 @@ impl PlayerController {
                                         });
                                     }
                                 }
-                            } else {
-                                is_loading.set(false);
-                                skip_in_progress.set(false);
                             }
                         }
                         .instrument(tracing::info_span!("player.resolve_stream", idx)),

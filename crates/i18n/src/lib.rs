@@ -82,9 +82,8 @@ pub fn init(lang: &str) {
 }
 
 pub fn set_locale(lang: &str) {
-    if let Ok(mut w) = state().write() {
-        *w = I18nState::new(lang);
-    }
+    let mut w = state().write().unwrap_or_else(|e| e.into_inner());
+    *w = I18nState::new(lang);
 }
 
 pub fn t(key: &str) -> String {
