@@ -58,7 +58,7 @@ static MUSIXMATCH_TOKEN: OnceLock<Mutex<Option<MusixmatchToken>>> = OnceLock::ne
 macro_rules! lyrics_debug {
     ($($arg:tt)*) => {
         if lyrics_terminal_debug_enabled() {
-            eprintln!("[lyrics] {}", format_args!($($arg)*));
+            tracing::debug!("[lyrics] {}", format_args!($($arg)*));
         }
     };
 }

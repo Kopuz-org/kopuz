@@ -1,3 +1,6 @@
+//! Configuration management for Kopuz: loads, saves, and migrates user settings
+//! (audio, theme, media servers, shortcuts) from a JSON config file.
+
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::fs;

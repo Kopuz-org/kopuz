@@ -276,17 +276,18 @@ impl YouTubeMusicClient {
 }
 
 fn has_playlist_shelf(json: &Value) -> bool {
-    json.pointer(
-        "/contents/twoColumnBrowseResultsRenderer/secondaryContents/sectionListRenderer/contents",
-    )
-    .or_else(|| {
-        json.pointer(
-            "/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents",
-        )
-    })
-    .and_then(|v| v.as_array())
-    .map(|arr| arr.iter().any(|shelf| shelf.get("musicPlaylistShelfRenderer").is_some()))
-    .unwrap_or(false)
+    json.pointer("/contents/twoColumnBrowseResultsRenderer/secondaryContents/sectionListRenderer/contents")
+        .or_else(|| {
+            json.pointer(
+                "/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents",
+            )
+        })
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .any(|shelf| shelf.get("musicPlaylistShelfRenderer").is_some())
+        })
+        .unwrap_or(false)
 }
 
 impl Default for YouTubeMusicClient {

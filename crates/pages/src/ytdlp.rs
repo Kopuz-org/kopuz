@@ -286,9 +286,8 @@ fn build_command(
     }
     if opts.postprocess_thumbnail_square {
         cmd.arg("--convert-thumbnails").arg("png");
-        cmd.arg("--postprocessor-args").arg(
-            r#"ThumbnailsConvertor+FFmpeg_o:-c:v png -vf crop="'if(gt(ih,iw),iw,ih)':'if(gt(iw,ih),ih,iw)'""#,
-        );
+        cmd.arg("--postprocessor-args")
+            .arg(r#"ThumbnailsConvertor+FFmpeg_o:-c:v png -vf crop="'if(gt(ih,iw),iw,ih)':'if(gt(iw,ih),ih,iw)'""#);
     } else if !opts.convert_thumbnail.is_empty() {
         cmd.arg("--convert-thumbnails").arg(&opts.convert_thumbnail);
     }

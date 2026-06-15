@@ -196,9 +196,7 @@ async fn do_search(
 
 fn walk_tracks(resp: &Value) -> Vec<Track> {
     let shelves = resp
-        .pointer(
-            "/contents/tabbedSearchResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents",
-        )
+        .pointer("/contents/tabbedSearchResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents")
         .and_then(|v| v.as_array());
     let Some(shelves) = shelves else {
         return Vec::new();
@@ -511,9 +509,7 @@ fn walk_items(items: &[Value]) -> (Vec<Track>, Option<String>) {
 
 pub fn walk_playlist_shelf(resp: &Value) -> (Vec<Track>, Option<String>) {
     let shelves = resp
-        .pointer(
-            "/contents/twoColumnBrowseResultsRenderer/secondaryContents/sectionListRenderer/contents",
-        )
+        .pointer("/contents/twoColumnBrowseResultsRenderer/secondaryContents/sectionListRenderer/contents")
         .or_else(|| {
             resp.pointer(
                 "/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents",

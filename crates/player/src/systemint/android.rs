@@ -37,8 +37,9 @@ fn get_bg_handler() -> Arc<Mutex<Option<Box<dyn Fn(SystemEvent) + Send + Sync>>>
 
 pub fn set_background_handler(handler: impl Fn(SystemEvent) + Send + Sync + 'static) {
     let binding = get_bg_handler();
-    let mut guard = binding.lock().unwrap();
-    *guard = Some(Box::new(handler));
+    if let Ok(mut guard) = binding.lock() {
+        *guard = Some(Box::new(handler));
+    }
 }
 
 fn dispatch_event(event: SystemEvent) {

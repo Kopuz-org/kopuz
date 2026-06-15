@@ -93,11 +93,10 @@ async fn fetch_content(
             let url = if is_http(url_or_path) {
                 url_or_path.to_string()
             } else {
-                format!(
-                    "{}/{}",
-                    base_url_or_dir.unwrap(),
-                    url_or_path.trim_start_matches("./")
-                )
+                let base = base_url_or_dir
+                    .filter(|s| s.starts_with("http://") || s.starts_with("https://"))
+                    .unwrap_or("http://localhost");
+                format!("{}/{}", base, url_or_path.trim_start_matches("./"))
             };
 
             let client = reqwest::Client::builder()

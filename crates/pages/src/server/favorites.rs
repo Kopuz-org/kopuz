@@ -250,7 +250,10 @@ pub fn JellyfinFavorites(
             } else {
                 false
             };
-            let is_downloading = download_queue.read().items.iter().any(|i| i.id == item_id && matches!(i.status, DownloadStatus::Queued | DownloadStatus::Downloading));
+            let is_downloading =
+                download_queue.read().items.iter().any(|i| {
+                    i.id == item_id && matches!(i.status, DownloadStatus::Queued | DownloadStatus::Downloading)
+                });
             let item_id_dl = item_id.clone();
             let track_title = track.title.clone();
             let track_artist = track.artist.clone();

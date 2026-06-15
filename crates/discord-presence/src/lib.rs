@@ -1,3 +1,6 @@
+//! Discord Rich Presence integration for Kopuz: publishes now-playing state
+//! (track, artist, album art) to the Discord client via RPC.
+
 pub mod cover_art;
 
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
@@ -27,7 +30,10 @@ impl Presence {
     }
 
     pub fn disconnect(&self) -> Result<(), Box<dyn std::error::Error>> {
-        self.client.lock().unwrap().close()?;
+        self.client
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .close()?;
         Ok(())
     }
 
@@ -65,7 +71,10 @@ impl Presence {
             activity = activity.assets(assets);
         }
 
-        self.client.lock().unwrap().set_activity(activity)?;
+        self.client
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .set_activity(activity)?;
         Ok(())
     }
 
@@ -88,12 +97,18 @@ impl Presence {
             activity = activity.assets(assets);
         }
 
-        self.client.lock().unwrap().set_activity(activity)?;
+        self.client
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .set_activity(activity)?;
         Ok(())
     }
 
     pub fn clear_activity(&self) -> Result<(), Box<dyn std::error::Error>> {
-        self.client.lock().unwrap().clear_activity()?;
+        self.client
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear_activity()?;
         Ok(())
     }
 }

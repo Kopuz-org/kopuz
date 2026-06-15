@@ -1,3 +1,6 @@
+//! Shared utility crate for Kopuz: color helpers, image processing (artwork,
+//! thumbnails, subsonic images), lyrics fetching, and terminal logging.
+
 pub mod color;
 pub mod jellyfin_image;
 #[cfg(not(target_arch = "wasm32"))]

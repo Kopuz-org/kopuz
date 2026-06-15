@@ -148,7 +148,8 @@ pub fn SidebarModern(props: SidebarProps) -> Element {
     };
     let root_style = if is_android {
         if *mobile_collapsed.read() {
-            "position: fixed; left: 0; top: 0; z-index: 100; height: 100%; width: 0px; background: rgba(10,10,10,0.97);".to_string()
+            "position: fixed; left: 0; top: 0; z-index: 100; height: 100%; width: 0px; background: rgba(10,10,10,0.97);"
+                .to_string()
         } else {
             "position: fixed; left: 0; top: 0; z-index: 100; height: 100%; width: 280px; background: rgba(10,10,10,0.97);".to_string()
         }

@@ -1,3 +1,6 @@
+//! Media file reader for Kopuz: parses audio metadata (tags, cover art),
+//! manages favorites, and provides library scanning utilities.
+
 #[cfg(not(target_arch = "wasm32"))]
 pub mod cover_fetcher;
 #[cfg(not(target_arch = "wasm32"))]

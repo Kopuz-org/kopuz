@@ -479,7 +479,7 @@ mod tests {
         let info = resolve("dQw4w9WgXcQ", None)
             .await
             .expect("resolve should succeed");
-        eprintln!(
+        tracing::debug!(
             "[test] resolved itag={:?} bitrate={:?} kbps duration={:?}s",
             info.itag,
             info.bitrate.map(|b| b / 1000),

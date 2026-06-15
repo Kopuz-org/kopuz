@@ -150,7 +150,7 @@ pub fn init(log_dir: &Path, config_tracing_enabled: bool) {
     };
 
     let trace_enabled = chrome_guard.is_some();
-    *GUARDS.lock().unwrap() = Some(LogGuards {
+    *GUARDS.lock().unwrap_or_else(|e| e.into_inner()) = Some(LogGuards {
         _file: file_guard,
         _chrome: chrome_guard,
     });

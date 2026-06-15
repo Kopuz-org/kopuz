@@ -1,3 +1,6 @@
+//! Page-level Dioxus components for Kopuz: album, artist, discover, home,
+//! search, settings, playlist views, and associated sub-components.
+
 pub mod activity;
 pub mod album;
 pub mod artist;
