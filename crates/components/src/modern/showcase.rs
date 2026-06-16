@@ -279,9 +279,11 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                                     )
                                             });
                                         Some(url.map_or_else(utils::default_cover_url, |u| std::sync::Arc::from(u.as_str())))
-                                    } else if path_str.starts_with("ytmusic:") {
-                                        // YT thumbnails come baked into
-                                        // album_id via urlhex; empty
+                                    } else if path_str.starts_with("ytmusic:")
+                                        || path_str.starts_with("soundcloud:")
+                                    {
+                                        // YT/SoundCloud thumbnails come baked
+                                        // into album_id via urlhex; empty
                                         // server_url skips the Jellyfin
                                         // URL fallback branch.
                                         let url = utils::jellyfin_image::track_cover_url_with_album_fallback(

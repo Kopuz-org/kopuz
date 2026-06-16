@@ -102,10 +102,10 @@ fn search_server(
                             80,
                         )
                     }
-                    Some(MusicService::YtMusic) => {
-                        // YT thumbnails are urlhex-encoded into album_id;
-                        // pass empty server_url so the fallback function
-                        // skips its Jellyfin URL constructor and only
+                    Some(MusicService::YtMusic) | Some(MusicService::SoundCloud) => {
+                        // YT/SoundCloud thumbnails are urlhex-encoded into
+                        // album_id; pass empty server_url so the fallback
+                        // function skips its Jellyfin URL constructor and only
                         // returns the embedded URL via decode.
                         utils::jellyfin_image::track_cover_url_with_album_fallback(
                             &path_str,
@@ -157,7 +157,7 @@ fn search_server(
                                 80,
                             )
                         }
-                        Some(MusicService::YtMusic) | None => None,
+                        Some(MusicService::YtMusic) | Some(MusicService::SoundCloud) | None => None,
                     };
                     utils::map_cover_url(url)
                 })
@@ -183,6 +183,11 @@ async fn run_search(
     {
         let cookies = server.as_ref().and_then(|s| s.access_token.clone());
         return search_ytmusic(&query, cookies).await;
+    }
+    if matches!(active_source, MusicSource::Server)
+        && matches!(active_service, Some(MusicService::SoundCloud))
+    {
+        return search_soundcloud(&query).await;
     }
     tokio::task::spawn_blocking(move || match active_source {
         MusicSource::Local => search_local(&query, tracks, albums),
@@ -210,6 +215,34 @@ async fn search_ytmusic(query: &str, cookies: Option<String>) -> Option<(TrackRe
     // Each track's `album_id` carries its YT thumbnail as
     // `ytmusic:_:urlhex_HEX`; the standard fallback resolver decodes
     // that embedded URL when we pass an empty server_url.
+    let result_tracks: TrackRes = tracks
+        .into_iter()
+        .map(|t| {
+            let path_str = t.path.to_string_lossy();
+            let cover_url =
+                utils::map_cover_url(utils::jellyfin_image::track_cover_url_with_album_fallback(
+                    &path_str,
+                    &t.album_id,
+                    "",
+                    None,
+                    80,
+                    80,
+                ));
+            (t, cover_url)
+        })
+        .collect();
+    Some((result_tracks, Vec::new()))
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+async fn search_soundcloud(query: &str) -> Option<(TrackRes, AlbumRes)> {
+    if query.trim().is_empty() {
+        return Some((Vec::new(), Vec::new()));
+    }
+    let tracks = server::soundcloud::search_tracks(query)
+        .await
+        .map_err(|e| tracing::warn!(error = %e, "SoundCloud search failed"))
+        .ok()?;
     let result_tracks: TrackRes = tracks
         .into_iter()
         .map(|t| {
@@ -284,7 +317,9 @@ pub fn use_search_data(
                                             80,
                                         )
                                     }
-                                    Some(MusicService::YtMusic) | None => None,
+                                    Some(MusicService::YtMusic)
+                                    | Some(MusicService::SoundCloud)
+                                    | None => None,
                                 }
                             })
                         } else {

@@ -159,9 +159,9 @@ impl PlayerController {
                     )
                 })
                 .unwrap_or_default(),
-            "ytmusic" => {
-                // YT tracks carry their thumbnail in album_id as
-                // `ytmusic:_:urlhex_HEX`. Pass empty server_url so
+            "ytmusic" | "soundcloud" => {
+                // YT/SoundCloud tracks carry their thumbnail in album_id as
+                // `<src>:_:urlhex_HEX`. Pass empty server_url so
                 // `track_cover_url_with_album_fallback` skips its
                 // jellyfin-URL fallback path and only returns the
                 // embedded URL via decode_embedded_cover_url.
@@ -428,7 +428,7 @@ impl PlayerController {
             let is_radio_item = scheme.as_str() == "radio";
             let is_server_item = matches!(
                 scheme.as_str(),
-                "jellyfin" | "subsonic" | "custom" | "ytmusic"
+                "jellyfin" | "subsonic" | "custom" | "ytmusic" | "soundcloud"
             );
 
             if is_server_item || is_radio_item {
@@ -631,6 +631,19 @@ impl PlayerController {
                                     .unwrap_or_default();
                                 (format!("__YT_PENDING:{id}"), cover_url)
                             }
+                            MusicService::SoundCloud => {
+                                let cover_url =
+                                    utils::jellyfin_image::track_cover_url_with_album_fallback(
+                                        &path_str,
+                                        &track.album_id,
+                                        "",
+                                        None,
+                                        800,
+                                        90,
+                                    )
+                                    .unwrap_or_default();
+                                (format!("__SC_PENDING:{id}"), cover_url)
+                            }
                         })
                     }
                 } {
@@ -750,95 +763,130 @@ impl PlayerController {
                                         return;
                                     }
                                 }
-                            } else {
-                                (stream_url, None, None)
-                            };
-                            let yt_format_for_blocking = yt_format;
-                            let stream_url_for_blocking = stream_url.clone();
-                            let yt_ua_for_blocking = yt_user_agent.clone();
-                            let source_res = tokio::task::spawn_blocking(move || {
-                                if is_radio {
-                                    let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
-                                        stream_url_for_blocking,
-                                        true,
-                                        yt_ua_for_blocking,
-                                    );
-                                    let (source, hint) = decoder::from_stream_with_hint(stream, "ogg");
-                                    Ok::<_, std::io::Error>((source, hint))
-                                } else if let Some(fmt) = yt_format_for_blocking {
-                                    // YT: HTTP Range-backed source. Symphonia
-                                    // can seek freely (Matroska Cues at the
-                                    // end, scrub anywhere) and startup probes
-                                    // only fetch the ~512 KiB they need.
-                                    let range = utils::range_source::RangeStreamSource::new(
-                                        stream_url_for_blocking,
-                                        yt_ua_for_blocking,
-                                    )?;
-                                    let len = Some(range.total_size());
-                                    let (source, mut hint) = decoder::from_stream_with_len(range, len);
-                                    hint.with_extension(fmt.extension());
-                                    Ok::<_, std::io::Error>((source, hint))
-                                } else {
-                                    let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
-                                        stream_url_for_blocking,
-                                        false,
-                                        yt_ua_for_blocking,
-                                    );
-                                    stream.wait_for_total_size();
-                                    let len = stream.known_total_size();
-                                    let (source, hint) = decoder::from_stream_with_len(stream, len);
-                                    Ok::<_, std::io::Error>((source, hint))
-                                }
-                            })
-                            .await;
-
-                            let source_res = match source_res {
-                                Ok(source_res) => source_res,
-                                Err(e) => {
-                                    tracing::error!(error = %e, "stream setup task failed");
-                                    is_loading.set(false);
-                                    skip_in_progress.set(false);
-                                    return;
-                                }
-                            };
-                            if let Err(e) = &source_res {
-                                tracing::error!(error = %e, "stream setup failed");
-                                is_loading.set(false);
-                                skip_in_progress.set(false);
-                                return;
-                            }
-
-                            if let Ok((source, hint)) = source_res
-                                && *play_generation.read() == current_gen
-                            {
-                                    let meta = NowPlayingMeta {
-                                        title: track.title.clone(),
-                                        artist: track.artist.clone(),
-                                        album: track.album.clone(),
-                                        duration: std::time::Duration::from_secs(track.duration),
-                                        artwork: Some(cover_url.clone()),
-                                    };
-
-                                    let result = if use_crossfade {
-                                        player.write().crossfade_to(source, meta, hint, crossfade_duration)
-                                    } else {
-                                        player.write().play(source, meta, hint)
-                                    };
-                                    if let Err(e) = result {
-                                        tracing::error!(error = %e, "playback failed");
+                            } else if let Some(track_id) = stream_url.strip_prefix("__SC_PENDING:") {
+                                let token = cfg_signal
+                                    .peek()
+                                    .server
+                                    .as_ref()
+                                    .and_then(|s| s.access_token.clone())
+                                    .filter(|t| !t.is_empty());
+                                use ::server::soundcloud::ResolvedStream;
+                                match ::server::soundcloud::resolve_stream(track_id, token.as_deref())
+                                    .await
+                                {
+                                    Ok(ResolvedStream::Progressive(url)) => (url, None, None),
+                                    Ok(ResolvedStream::HlsAac(m3u8)) => {
+                                        (format!("__SC_HLS:{m3u8}"), None, None)
+                                    }
+                                    Err(e) => {
+                                        if *play_generation.read() != current_gen {
+                                            return;
+                                        }
+                                        tracing::error!(error = %e, "SoundCloud stream URL fetch failed");
+                                        playback_error.set(Some(format!(
+                                            "SoundCloud couldn't load this track:\n{e}"
+                                        )));
                                         is_loading.set(false);
                                         skip_in_progress.set(false);
                                         return;
                                     }
-                                    player.write().set_volume(*volume.peek());
-                                    if let Some(seek_secs) = restore_seek_secs
-                                        && seek_secs > 0
-                                    {
-                                        player.write().seek(Duration::from_secs(seek_secs));
-                                        current_song_progress.set(seek_secs);
-                                    }
-                                    if use_crossfade {
-                                        pending_crossfade_ui.set(Some(PlayerController::build_pending_crossfade_ui(
+                                }
+                            } else {
+                                (stream_url, None, None)
+                            };
+                        let yt_format_for_blocking = yt_format;
+                        let stream_url_for_blocking = stream_url.clone();
+                        let yt_ua_for_blocking = yt_user_agent.clone();
+                        let source_res = tokio::task::spawn_blocking(move || {
+                            if is_radio {
+                                let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
+                                    stream_url_for_blocking,
+                                    true,
+                                    yt_ua_for_blocking,
+                                );
+                                let (source, hint) = decoder::from_stream_with_hint(stream, "ogg");
+                                Ok::<_, std::io::Error>((source, hint))
+                            } else if let Some(fmt) = yt_format_for_blocking {
+                                let range = utils::range_source::RangeStreamSource::new(
+                                    stream_url_for_blocking,
+                                    yt_ua_for_blocking,
+                                )?;
+                                let len = Some(range.total_size());
+                                let (source, mut hint) = decoder::from_stream_with_len(range, len);
+                                hint.with_extension(fmt.extension());
+                                Ok::<_, std::io::Error>((source, hint))
+                            } else if let Some(hls_url) =
+                                stream_url_for_blocking.strip_prefix("__SC_HLS:")
+                            {
+                                let bytes = utils::hls_source::assemble(hls_url, None)?;
+                                let len = Some(bytes.len() as u64);
+                                let cursor = std::io::Cursor::new(bytes);
+                                let (source, mut hint) =
+                                    decoder::from_stream_with_len(cursor, len);
+                                hint.with_extension("m4a");
+                                Ok::<_, std::io::Error>((source, hint))
+                            } else {
+                                let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
+                                    stream_url_for_blocking,
+                                    false,
+                                    yt_ua_for_blocking,
+                                );
+                                stream.wait_for_total_size();
+                                let len = stream.known_total_size();
+                                let (source, hint) = decoder::from_stream_with_len(stream, len);
+                                Ok::<_, std::io::Error>((source, hint))
+                            }
+                        })
+                        .await;
+
+                        if let Err(_) | Ok(Err(_)) = &source_res {
+                            if *play_generation.read() == current_gen {
+                                let msg = match &source_res {
+                                    Ok(Err(e)) => format!("Couldn't load this track:\n{e}"),
+                                    _ => "Playback failed unexpectedly".to_string(),
+                                };
+                                playback_error.set(Some(msg));
+                                is_loading.set(false);
+                                skip_in_progress.set(false);
+                            }
+                            return;
+                        }
+                        if let Ok(Ok((source, hint))) = source_res {
+                            if *play_generation.read() == current_gen {
+                                let meta = NowPlayingMeta {
+                                    title: track.title.clone(),
+                                    artist: track.artist.clone(),
+                                    album: track.album.clone(),
+                                    duration: std::time::Duration::from_secs(track.duration),
+                                    artwork: Some(cover_url.clone()),
+                                };
+
+                                let result = if use_crossfade {
+                                    player.write().crossfade_to(
+                                        source,
+                                        meta,
+                                        hint,
+                                        crossfade_duration,
+                                    )
+                                } else {
+                                    player.write().play(source, meta, hint)
+                                };
+                                if let Err(e) = result {
+                                    tracing::error!(error = %e, "playback failed");
+                                    is_loading.set(false);
+                                    skip_in_progress.set(false);
+                                    return;
+                                }
+                                player.write().set_volume(*volume.peek());
+                                if let Some(seek_secs) = restore_seek_secs
+                                    && seek_secs > 0
+                                {
+                                    player.write().seek(Duration::from_secs(seek_secs));
+                                    current_song_progress.set(seek_secs);
+                                }
+                                if use_crossfade {
+                                    pending_crossfade_ui.set(Some(
+                                        PlayerController::build_pending_crossfade_ui(
                                             idx,
                                             outgoing_duration_secs,
                                             outgoing_progress_secs,
@@ -1171,6 +1219,363 @@ impl PlayerController {
                                             }
                                         });
                                     }
+                                }
+                                // Don't scrobble if the track is a radio item
+                                if !is_radio_item {
+                                    let scrobble_track = track.clone();
+                                    let scrobble_gen = current_gen;
+                                    let scrobble_play_gen = play_generation;
+                                    let scrobble_cfg = cfg_signal;
+                                    let scrobble_id = id.clone();
+                                    let duration_secs = scrobble_track.duration;
+                                    let threshold_secs = std::cmp::min(240, duration_secs / 2);
+
+                                    let scrobble_span =
+                                        tracing::info_span!("scrobble.submit", track = %scrobble_id);
+                                    spawn(async move {
+                                        // track must be longer than 30 seconds
+                                        if duration_secs < 30 {
+                                            return;
+                                        }
+
+                                        {
+                                            let subsonic_creds = {
+                                                let conf = scrobble_cfg.read();
+                                                conf.server.as_ref().and_then(|s| {
+                                                    if matches!(
+                                                        s.service,
+                                                        MusicService::Subsonic
+                                                            | MusicService::Custom
+                                                    ) {
+                                                        if let (Some(pw), Some(un)) =
+                                                            (&s.access_token, &s.user_id)
+                                                        {
+                                                            Some((
+                                                                s.url.clone(),
+                                                                un.clone(),
+                                                                pw.clone(),
+                                                            ))
+                                                        } else {
+                                                            None
+                                                        }
+                                                    } else {
+                                                        None
+                                                    }
+                                                })
+                                            };
+                                            if let Some((url, username, password)) = subsonic_creds
+                                            {
+                                                let client =
+                                                    ::server::subsonic::SubsonicClient::new(
+                                                        &url, &username, &password,
+                                                    );
+                                                if let Err(e) =
+                                                    client.scrobble_now_playing(&scrobble_id).await
+                                                {
+                                                    tracing::warn!(
+                                                        "Subsonic now-playing failed: {}",
+                                                        e
+                                                    );
+                                                }
+                                            }
+                                        }
+
+                                        // Last.fm now-playing
+                                        let lastfm_api_key =
+                                            scrobble_cfg.read().lastfm_api_key.clone();
+                                        let lastfm_api_secret =
+                                            scrobble_cfg.read().lastfm_api_secret.clone();
+                                        let lastfm_session_key =
+                                            scrobble_cfg.read().lastfm_session_key.clone();
+                                        let has_lastfm = !lastfm_api_key.is_empty()
+                                            && !lastfm_api_secret.is_empty();
+
+                                        if has_lastfm {
+                                            let playing_now = scrobble::lastfm::make_playing_now(
+                                                &scrobble_track.artist,
+                                                &scrobble_track.title,
+                                                Some(&scrobble_track.album),
+                                            );
+                                            if let Err(e) = scrobble::lastfm::submit_now_playing(
+                                                &lastfm_api_key,
+                                                &lastfm_api_secret,
+                                                &lastfm_session_key,
+                                                &playing_now,
+                                            )
+                                            .await
+                                            {
+                                                tracing::warn!("Last.fm now playing failed: {}", e);
+                                            }
+                                        }
+
+                                        // Libre.fm now-playing
+                                        let librefm_session_key =
+                                            scrobble_cfg.read().librefm_session_key.clone();
+                                        let has_librefm = !librefm_session_key.is_empty();
+
+                                        if has_librefm {
+                                            let playing_now = scrobble::librefm::make_playing_now(
+                                                &scrobble_track.artist,
+                                                &scrobble_track.title,
+                                                Some(&scrobble_track.album),
+                                            );
+                                            if let Err(e) = scrobble::librefm::submit_now_playing(
+                                                scrobble::librefm::API_KEY,
+                                                scrobble::librefm::API_SECRET,
+                                                &librefm_session_key,
+                                                &playing_now,
+                                            )
+                                            .await
+                                            {
+                                                tracing::warn!(
+                                                    "Libre.fm now playing failed: {}",
+                                                    e
+                                                );
+                                            }
+                                        }
+
+                                        // MusicBrainz playing_now
+                                        let token_raw =
+                                            scrobble_cfg.read().musicbrainz_token.clone();
+                                        if !token_raw.is_empty() {
+                                            let auth = if token_raw.contains(' ') {
+                                                token_raw.clone()
+                                            } else {
+                                                format!("Token {}", token_raw)
+                                            };
+                                            let playing_now =
+                                                scrobble::musicbrainz::make_playing_now(
+                                                    &scrobble_track.artist,
+                                                    &scrobble_track.title,
+                                                    Some(&scrobble_track.album),
+                                                    None,
+                                                );
+                                            if let Err(e) = scrobble::musicbrainz::submit_listens(
+                                                &auth,
+                                                vec![playing_now],
+                                                "playing_now",
+                                            )
+                                            .await
+                                            {
+                                                tracing::warn!(
+                                                    "MusicBrainz playing_now failed: {}",
+                                                    e
+                                                );
+                                            }
+                                        }
+
+                                        // threshold sleep
+                                        tokio::time::sleep(Duration::from_secs(threshold_secs))
+                                            .await;
+
+                                        if *scrobble_play_gen.read() != scrobble_gen {
+                                            return;
+                                        }
+
+                                        // post-threshold: actual scrobbles
+
+                                        // Subsonic scrobble
+                                        {
+                                            let subsonic_creds = {
+                                                let conf = scrobble_cfg.read();
+                                                conf.server.as_ref().and_then(|s| {
+                                                    if matches!(
+                                                        s.service,
+                                                        MusicService::Subsonic
+                                                            | MusicService::Custom
+                                                    ) {
+                                                        if let (Some(pw), Some(un)) =
+                                                            (&s.access_token, &s.user_id)
+                                                        {
+                                                            Some((
+                                                                s.url.clone(),
+                                                                un.clone(),
+                                                                pw.clone(),
+                                                            ))
+                                                        } else {
+                                                            None
+                                                        }
+                                                    } else {
+                                                        None
+                                                    }
+                                                })
+                                            };
+                                            if let Some((url, username, password)) = subsonic_creds
+                                            {
+                                                let client =
+                                                    ::server::subsonic::SubsonicClient::new(
+                                                        &url, &username, &password,
+                                                    );
+                                                match client.scrobble(&scrobble_id).await {
+                                                    Ok(_) => tracing::info!(
+                                                        "Subsonic scrobbled: {} - {}",
+                                                        scrobble_track.artist,
+                                                        scrobble_track.title
+                                                    ),
+                                                    Err(e) => tracing::warn!(
+                                                        "Subsonic scrobble failed: {}",
+                                                        e
+                                                    ),
+                                                }
+                                            }
+                                        }
+
+                                        // Last.fm scrobble
+                                        if has_lastfm {
+                                            let scrobble = scrobble::lastfm::make_scrobble(
+                                                &scrobble_track.artist,
+                                                &scrobble_track.title,
+                                                Some(&scrobble_track.album),
+                                            );
+                                            match scrobble::lastfm::submit_scrobble(
+                                                &lastfm_api_key,
+                                                &lastfm_api_secret,
+                                                &lastfm_session_key,
+                                                &scrobble,
+                                            )
+                                            .await
+                                            {
+                                                Ok(_) => tracing::info!(
+                                                    "Last.fm scrobbled: {} - {}",
+                                                    scrobble_track.artist,
+                                                    scrobble_track.title
+                                                ),
+                                                Err(e) => {
+                                                    tracing::warn!("Last.fm scrobble failed: {}", e)
+                                                }
+                                            }
+                                        }
+
+                                        // Libre.fm scrobble
+                                        if has_librefm {
+                                            let scrobble = scrobble::librefm::make_scrobble(
+                                                &scrobble_track.artist,
+                                                &scrobble_track.title,
+                                                Some(&scrobble_track.album),
+                                            );
+                                            match scrobble::librefm::submit_scrobble(
+                                                scrobble::librefm::API_KEY,
+                                                scrobble::librefm::API_SECRET,
+                                                &librefm_session_key,
+                                                &scrobble,
+                                            )
+                                            .await
+                                            {
+                                                Ok(_) => tracing::info!(
+                                                    "Libre.fm scrobbled: {} - {}",
+                                                    scrobble_track.artist,
+                                                    scrobble_track.title
+                                                ),
+                                                Err(e) => {
+                                                    tracing::warn!(
+                                                        "Libre.fm scrobble failed: {}",
+                                                        e
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        // MusicBrainz single listen
+                                        let token_raw =
+                                            scrobble_cfg.read().musicbrainz_token.clone();
+                                        if !token_raw.is_empty() {
+                                            let auth = if token_raw.contains(' ') {
+                                                token_raw
+                                            } else {
+                                                format!("Token {}", token_raw)
+                                            };
+                                            let listen = scrobble::musicbrainz::make_listen(
+                                                &scrobble_track.artist,
+                                                &scrobble_track.title,
+                                                Some(&scrobble_track.album),
+                                                None,
+                                            );
+                                            match scrobble::musicbrainz::submit_listens(
+                                                &auth,
+                                                vec![listen],
+                                                "single",
+                                            )
+                                            .await
+                                            {
+                                                Ok(_) => tracing::info!(
+                                                    "MusicBrainz scrobbled: {} - {}",
+                                                    scrobble_track.artist,
+                                                    scrobble_track.title
+                                                ),
+                                                Err(e) => {
+                                                    tracing::warn!(
+                                                        "MusicBrainz scrobble failed: {}",
+                                                        e
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }.instrument(scrobble_span));
+
+                                    let cover_url = cover_url.clone();
+                                    let track = track.clone();
+                                    let mut player = player;
+                                    let play_generation = play_generation;
+
+                                    spawn(async move {
+                                        if let Ok(response) = reqwest::get(&cover_url).await
+                                            && let Ok(bytes) = response.bytes().await
+                                        {
+                                            #[cfg(target_os = "android")]
+                                            let cover_dir = {
+                                                let mut base = player::systemint::get_files_dir()
+                                                    .map(std::path::PathBuf::from)
+                                                    .unwrap_or_else(|| {
+                                                        std::path::PathBuf::from(".")
+                                                    })
+                                                    .join("cache");
+                                                if tokio::fs::create_dir_all(&base)
+                                                    .await
+                                                    .is_err()
+                                                {
+                                                    base = std::path::PathBuf::from("./cache");
+                                                }
+                                                base.join("covers")
+                                            };
+                                            #[cfg(all(
+                                                not(target_arch = "wasm32"),
+                                                not(target_os = "android")
+                                            ))]
+                                            let cover_dir = directories::ProjectDirs::from(
+                                                "com",
+                                                "temidaradev",
+                                                "kopuz",
+                                            )
+                                            .map(|d| d.cache_dir().join("covers"))
+                                            .unwrap_or_else(std::env::temp_dir);
+
+                                            let mut hasher =
+                                                std::collections::hash_map::DefaultHasher::new();
+                                            std::hash::Hash::hash(&cover_url, &mut hasher);
+                                            let cover_hash = std::hash::Hasher::finish(&hasher);
+                                            let file_path = cover_dir
+                                                .join(format!("kopuz_cover_{cover_hash:x}.jpg"));
+
+                                            if tokio::fs::create_dir_all(&cover_dir).await.is_ok()
+                                                && tokio::fs::write(&file_path, bytes).await.is_ok()
+                                                && *play_generation.read() == current_gen
+                                            {
+                                                let path_str =
+                                                    file_path.to_string_lossy().to_string();
+                                                let new_meta = NowPlayingMeta {
+                                                    title: track.title,
+                                                    artist: track.artist,
+                                                    album: track.album,
+                                                    duration: std::time::Duration::from_secs(
+                                                        track.duration,
+                                                    ),
+                                                    artwork: Some(path_str),
+                                                };
+                                                player.write().update_metadata(new_meta);
+                                            }
+                                        }
+                                    });
+                                }
                             }
                         }
                         .instrument(tracing::info_span!("player.resolve_stream", idx)),

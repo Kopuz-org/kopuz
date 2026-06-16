@@ -282,7 +282,8 @@ pub fn use_player_task(ctrl: PlayerController) {
                         last_recent_path = Some(path.clone());
                         let is_server = path.starts_with("jellyfin:")
                             || path.starts_with("subsonic:")
-                            || path.starts_with("ytmusic:");
+                            || path.starts_with("ytmusic:")
+                            || path.starts_with("soundcloud:");
                         let id = if is_server {
                             path.split(':').nth(1).unwrap_or(&path).to_string()
                         } else {

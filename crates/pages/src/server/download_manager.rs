@@ -174,6 +174,22 @@ async fn download_worker(
                         None
                     }
                 }
+            } else if matches!(service, Some(MusicService::SoundCloud)) {
+                // Resolve anonymously (token = None) so we always get the
+                // keyless progressive MP3 rather than a Go+ HLS playlist, which
+                // can't be saved as a single offline file.
+                match ::server::soundcloud::resolve_stream(&id, None).await {
+                    Ok(::server::soundcloud::ResolvedStream::Progressive(url)) => {
+                        Some((url, "mp3", None, None))
+                    }
+                    Ok(::server::soundcloud::ResolvedStream::HlsAac(url)) => {
+                        Some((url, "m4a", None, None))
+                    }
+                    Err(e) => {
+                        tracing::warn!(%id, error = %e, "SoundCloud download URL resolve failed");
+                        None
+                    }
+                }
             } else {
                 let conf = config.read();
                 super::build_download_url(&id, &conf).map(|(u, ext)| (u, ext, None, None))

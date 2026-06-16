@@ -53,9 +53,20 @@ pub fn JellyfinFavorites(
             None => return,
         };
         let service = config.peek().server.as_ref().map(|s| s.service);
-        let is_ytmusic = service == Some(MusicService::YtMusic);
+        let is_account_backend = matches!(
+            service,
+            Some(MusicService::YtMusic) | Some(MusicService::SoundCloud)
+        );
 
-        if is_ytmusic && nonce == 0 && library.peek().last_yt_sync_at.is_some() {
+        // Self-heal: a prior sync that completed but produced zero tracks
+        // (e.g. an API-shape bug) still stamped `last_yt_sync_at`, which would
+        // otherwise wedge this view empty forever. Only honour the cached
+        // stamp when there's actually cached data to show.
+        if is_account_backend
+            && nonce == 0
+            && library.peek().last_yt_sync_at.is_some()
+            && !library.peek().jellyfin_tracks.is_empty()
+        {
             return;
         }
 
@@ -156,6 +167,79 @@ pub fn JellyfinFavorites(
                             Err(e) => {
                                 tracing::warn!(error = %e, "YT favorites sync failed");
                                 Vec::new()
+                            }
+                        }
+                    }
+                    MusicService::SoundCloud => {
+                        if token.is_empty() {
+                            Vec::new()
+                        } else {
+                            {
+                                let mut lib = library.write();
+                                lib.jellyfin_tracks.clear();
+                                lib.jellyfin_albums.clear();
+                            }
+                            let mut accumulated: Vec<reader::models::Track> = Vec::new();
+                            let result =
+                                ::server::soundcloud::stream_liked_tracks(&token, |page| {
+                                    accumulated.extend(page.iter().cloned());
+                                    let albums = synthesize_albums(&accumulated);
+                                    {
+                                        let mut lib = library.write();
+                                        lib.jellyfin_tracks.extend(page);
+                                        lib.jellyfin_albums = albums;
+                                    }
+                                    synced_so_far.set(accumulated.len());
+                                })
+                                .await;
+                            match result {
+                                Ok(()) => {
+                                    let now = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .map(|d| d.as_secs())
+                                        .unwrap_or(0);
+                                    library.write().last_yt_sync_at = Some(now);
+                                    let ids: Vec<String> = accumulated
+                                        .iter()
+                                        .filter_map(|t| {
+                                            t.path
+                                                .to_string_lossy()
+                                                .split(':')
+                                                .nth(1)
+                                                .map(|s| s.to_string())
+                                        })
+                                        .collect();
+                                    let liked_cover = accumulated.first().and_then(|t| {
+                                        t.path
+                                            .to_string_lossy()
+                                            .split(':')
+                                            .nth(2)
+                                            .filter(|s| s.starts_with("urlhex_"))
+                                            .map(|s| s.to_string())
+                                    });
+                                    let liked_entry = reader::models::JellyfinPlaylist {
+                                        id: "LM".to_string(),
+                                        name: "Liked Songs".to_string(),
+                                        tracks: ids.clone(),
+                                        image_tag: liked_cover,
+                                        cover_path: None,
+                                    };
+                                    {
+                                        let mut ps = playlist_store.write();
+                                        if let Some(existing) =
+                                            ps.jellyfin_playlists.iter_mut().find(|p| p.id == "LM")
+                                        {
+                                            *existing = liked_entry;
+                                        } else {
+                                            ps.jellyfin_playlists.insert(0, liked_entry);
+                                        }
+                                    }
+                                    ids
+                                }
+                                Err(e) => {
+                                    tracing::warn!(error = %e, "SoundCloud favorites sync failed");
+                                    Vec::new()
+                                }
                             }
                         }
                     }

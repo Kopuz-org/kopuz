@@ -136,7 +136,7 @@ pub fn JellyfinArtist(
                             }
                         }
                     }
-                    config::MusicService::YtMusic => {}
+                    config::MusicService::YtMusic | config::MusicService::SoundCloud => {}
                 }
 
                 fetched_artist_images.set(images);
@@ -947,7 +947,7 @@ pub fn ServerArtist(
                 current_queue_index,
             }
         },
-        MusicService::Custom | MusicService::YtMusic => rsx! {
+        MusicService::Custom | MusicService::YtMusic | MusicService::SoundCloud => rsx! {
             CustomArtist {
                 library,
                 config,

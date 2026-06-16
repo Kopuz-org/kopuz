@@ -58,6 +58,8 @@ pub fn PlaylistsPage(
                         token,
                         user_id,
                         device_id,
+                        sc_browser: None,
+                        sc_server_id: None,
                     };
                     let result =
                         ::server::server_ops::create_server_playlist(&conn, &name, &[]).await;

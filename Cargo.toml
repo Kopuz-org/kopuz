@@ -40,7 +40,6 @@ lofty = "0.24.0"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 rfd = "0.17.2"
 percent-encoding = "2.3.2"
-dotenvy = "0.15"
 http = "1.4.0"
 uuid = { version = "1.20.0", features = ["v4", "fast-rng", "macro-diagnostics", "js"] }
 cpal = "0.17"
@@ -65,7 +64,6 @@ hooks = { path = "./crates/hooks" }
 pages = { path = "./crates/pages" }
 utils = { path = "./crates/utils" }
 config = { path = "./crates/config" }
-kopuz = { path = "./crates/kopuz" }
 server = { path = "./crates/server" }
 kopuz_route = { path = "./crates/kopuz_route" }
 discord-presence = { path = "./crates/discord-presence" }

@@ -2082,7 +2082,12 @@ fn App() -> Element {
                 .read()
                 .server
                 .as_ref()
-                .map(|s| s.service == config::MusicService::YtMusic)
+                .map(|s| {
+                    matches!(
+                        s.service,
+                        config::MusicService::YtMusic | config::MusicService::SoundCloud
+                    )
+                })
                 .unwrap_or(false)
             {
                 if let Some(msg) = ctrl.playback_error.read().clone() {

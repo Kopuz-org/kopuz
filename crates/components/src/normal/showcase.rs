@@ -252,7 +252,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                                  80,
                                              )
                                          }
-                                         MusicService::YtMusic => {
+                                         MusicService::YtMusic | MusicService::SoundCloud => {
                                              utils::jellyfin_image::track_cover_url_with_album_fallback(
                                                  &path_str,
                                                  &track.album_id,

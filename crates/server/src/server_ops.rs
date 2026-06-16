@@ -18,6 +18,11 @@ pub struct ServerConn {
     pub token: String,
     pub user_id: String,
     pub device_id: String,
+    /// SoundCloud only: the browser + server id needed to re-read the isolated
+    /// profile's `datadome` cookie at write time (required to clear bot
+    /// protection on the like endpoint).
+    pub sc_browser: Option<config::Browser>,
+    pub sc_server_id: Option<String>,
 }
 
 impl ServerConn {
@@ -32,7 +37,9 @@ impl ServerConn {
         let server = config.server.as_ref()?;
         let token = server.access_token.clone()?;
         let user_id = match server.service {
-            MusicService::YtMusic => server.user_id.clone().unwrap_or_default(),
+            MusicService::YtMusic | MusicService::SoundCloud => {
+                server.user_id.clone().unwrap_or_default()
+            }
             _ => server.user_id.clone()?,
         };
         Some(Self {
@@ -41,6 +48,8 @@ impl ServerConn {
             token,
             user_id,
             device_id: config.device_id.clone(),
+            sc_browser: server.yt_browser,
+            sc_server_id: server.id.clone(),
         })
     }
 }
@@ -95,6 +104,7 @@ pub async fn add_tracks_to_playlist(
                 }
             }
         }
+        MusicService::SoundCloud => {}
     }
     added
 }
@@ -129,6 +139,7 @@ pub async fn create_server_playlist(
             let yt = YouTubeMusicClient::with_cookies(conn.token.clone());
             yt.create_playlist(name, "", &id_refs).await
         }
+        MusicService::SoundCloud => Err("SoundCloud doesn't support server playlists".to_string()),
     }
 }
 
@@ -189,6 +200,34 @@ pub async fn set_tracks_favorite(
                 } else {
                     record!(yt.unlike_video(id).await);
                 }
+            }
+        }
+        MusicService::SoundCloud => {
+            if conn.token.is_empty() {
+                return Err("Sign in to SoundCloud to like tracks".to_string());
+            }
+            // DataDome bot-protection gates the like endpoint; re-read the
+            // session cookie from the isolated profile so the write isn't 403'd.
+            let datadome = match (conn.sc_browser, &conn.sc_server_id) {
+                (Some(browser), Some(server_id)) => {
+                    let profile = crate::soundcloud::signin::profile_dir(server_id);
+                    crate::soundcloud::signin::extract_datadome(browser, &profile)
+                        .await
+                        .ok()
+                        .flatten()
+                }
+                _ => None,
+            };
+            for id in item_ids {
+                record!(
+                    crate::soundcloud::set_track_like(
+                        id,
+                        favorite,
+                        &conn.token,
+                        datadome.as_deref()
+                    )
+                    .await
+                );
             }
         }
     }
@@ -256,5 +295,10 @@ mod tests {
         let yt = ServerConn::resolve(&cfg("YtMusic", Some("cookie"), None)).unwrap();
         assert_eq!(yt.token, "cookie");
         assert!(yt.user_id.is_empty());
+
+        // SoundCloud authenticates by token — user_id optional, still resolves.
+        let sc = ServerConn::resolve(&cfg("SoundCloud", Some("oauth"), None)).unwrap();
+        assert_eq!(sc.token, "oauth");
+        assert!(sc.user_id.is_empty());
     }
 }

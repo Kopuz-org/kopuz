@@ -3192,6 +3192,7 @@ version = "0.6.7"
 dependencies = [
  "config",
  "dioxus",
+ "directories",
  "discord-presence",
  "player",
  "radio",

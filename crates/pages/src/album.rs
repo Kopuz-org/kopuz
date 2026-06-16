@@ -138,6 +138,8 @@ pub fn Album(
                                                     token,
                                                     user_id,
                                                     device_id,
+                                                    sc_browser: None,
+                                                    sc_server_id: None,
                                                 };
                                                 let item_ids: Vec<String> = paths
                                                     .iter()
@@ -242,6 +244,8 @@ pub fn Album(
                                                     token,
                                                     user_id,
                                                     device_id,
+                                                    sc_browser: None,
+                                                    sc_server_id: None,
                                                 };
                                                 let item_ids: Vec<String> = paths
                                                     .iter()

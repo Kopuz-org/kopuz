@@ -23,15 +23,16 @@ pub fn PlaylistDetail(
     let mut tracks = use_signal(Vec::<reader::models::Track>::new);
     let mut has_loaded_jellyfin_tracks = use_signal(|| false);
 
-    // YT Music's InnerTube has no playlist-reorder mutation, so reorder
-    // affordances need to be hidden / no-op on YT playlists. Doing the
-    // optimistic local swap and then no-op'ing the server side leaves a
-    // visual ghost that reverts on next sync — silent UX loss.
-    let active_service_is_ytmusic = config
+    // Neither YT Music's InnerTube nor SoundCloud's API exposes a
+    // playlist-reorder mutation, so reorder affordances need to be hidden /
+    // no-op on those playlists. Doing the optimistic local swap and then
+    // no-op'ing the server side leaves a visual ghost that reverts on next
+    // sync — silent UX loss.
+    let active_service_blocks_reorder = config
         .peek()
         .server
         .as_ref()
-        .map(|s| s.service == MusicService::YtMusic)
+        .map(|s| matches!(s.service, MusicService::YtMusic | MusicService::SoundCloud))
         .unwrap_or(false);
 
     let (playlist_name, local_tracks_paths, is_jellyfin, playlist_custom_cover, playlist_image_tag) =
@@ -242,6 +243,33 @@ pub fn PlaylistDetail(
                                         );
                                         tracks.set(new_tracks);
                                         has_loaded_jellyfin_tracks.set(true);
+                                    }
+                                }
+                                MusicService::SoundCloud => {
+                                    if !token.is_empty() {
+                                        // "LM" is the synthetic Liked Songs
+                                        // entry (mirrors YT Music), not a real
+                                        // SoundCloud playlist id — hydrate it
+                                        // from the account's likes instead of
+                                        // the playlists endpoint.
+                                        if pid_clone == "LM" {
+                                            let mut acc = Vec::new();
+                                            let _ = server::soundcloud::stream_liked_tracks(
+                                                &token,
+                                                |page| acc.extend(page),
+                                            )
+                                            .await;
+                                            tracks.set(acc);
+                                            has_loaded_jellyfin_tracks.set(true);
+                                        } else if let Ok(sc_tracks) =
+                                            server::soundcloud::get_playlist_entries(
+                                                &pid_clone, &token,
+                                            )
+                                            .await
+                                        {
+                                            tracks.set(sc_tracks);
+                                            has_loaded_jellyfin_tracks.set(true);
+                                        }
                                     }
                                 }
                             }
@@ -484,6 +512,7 @@ pub fn PlaylistDetail(
                                             .await
                                             .is_ok()
                                     }
+                                    MusicService::SoundCloud => false,
                                 };
                                 if removed && remove_idx < tracks.read().len() {
                                     tracks.write().remove(remove_idx);
@@ -493,9 +522,9 @@ pub fn PlaylistDetail(
                     }
                 }
             },
-            is_reorderable: !active_service_is_ytmusic,
+            is_reorderable: !active_service_blocks_reorder,
             on_move_up: move |idx: usize| {
-                if idx == 0 || active_service_is_ytmusic { return; }
+                if idx == 0 || active_service_blocks_reorder { return; }
                 tracks.write().swap(idx - 1, idx);
                 if !is_jellyfin {
                     let mut store = playlist_store.write();
@@ -530,7 +559,7 @@ pub fn PlaylistDetail(
                             let moved_item =
                                 track_list.get(idx - 1).and_then(|t| t.playlist_item_id.clone());
                             match service {
-                                MusicService::YtMusic => {}
+                                MusicService::YtMusic | MusicService::SoundCloud => {}
                                 MusicService::Jellyfin => {
                                     if let Some(item_id) = moved_item {
                                         let remote = server::jellyfin::JellyfinClient::new(
@@ -575,7 +604,7 @@ pub fn PlaylistDetail(
             },
             on_move_down: move |idx: usize| {
                 let len = tracks.read().len();
-                if idx + 1 >= len || active_service_is_ytmusic { return; }
+                if idx + 1 >= len || active_service_blocks_reorder { return; }
                 tracks.write().swap(idx, idx + 1);
                 if !is_jellyfin {
                     let mut store = playlist_store.write();
@@ -610,7 +639,7 @@ pub fn PlaylistDetail(
                             let moved_item =
                                 track_list.get(idx + 1).and_then(|t| t.playlist_item_id.clone());
                             match service {
-                                MusicService::YtMusic => {}
+                                MusicService::YtMusic | MusicService::SoundCloud => {}
                                 MusicService::Jellyfin => {
                                     if let Some(item_id) = moved_item {
                                         let remote = server::jellyfin::JellyfinClient::new(

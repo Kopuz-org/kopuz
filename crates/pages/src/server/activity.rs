@@ -261,7 +261,8 @@ pub fn ServerLogs(library: Signal<Library>, config: Signal<AppConfig>) -> Elemen
         MusicService::Jellyfin
         | MusicService::Subsonic
         | MusicService::Custom
-        | MusicService::YtMusic => rsx! {
+        | MusicService::YtMusic
+        | MusicService::SoundCloud => rsx! {
             JellyfinLogs { library, config }
         },
     }

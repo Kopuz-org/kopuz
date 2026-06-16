@@ -259,11 +259,19 @@ pub fn JellyfinAlbumDetails(
         let offline = *is_offline.read();
         let info = album_info();
         let album_name = info.as_ref().map(|a| a.title.clone()).unwrap_or_default();
+        // Match tracks by album name (Jellyfin/Subsonic) OR album_id. Synthetic
+        // albums (YT/SoundCloud "Singles" from `synthesize_albums`) carry an
+        // empty track `album` field, so they only join on `album_id` — the same
+        // canonical album↔track key used in artist.rs and the album menus.
+        let album_id = info.as_ref().map(|a| a.id.clone()).unwrap_or_default();
 
         let mut tracks: Vec<_> = lib
             .jellyfin_tracks
             .iter()
-            .filter(|t| !album_name.is_empty() && t.album == album_name)
+            .filter(|t| {
+                (!album_name.is_empty() && t.album == album_name)
+                    || (!album_id.is_empty() && t.album_id == album_id)
+            })
             .filter(|t| {
                 if !offline {
                     return true;
@@ -958,7 +966,7 @@ pub fn ServerAlbum(
                 pending_album_id_for_playlist,
             }
         },
-        MusicService::Custom | MusicService::YtMusic => rsx! {
+        MusicService::Custom | MusicService::YtMusic | MusicService::SoundCloud => rsx! {
             CustomAlbum {
                 library,
                 config,
@@ -1058,7 +1066,7 @@ pub fn ServerAlbumDetails(
                 on_close,
             }
         },
-        MusicService::Custom | MusicService::YtMusic => rsx! {
+        MusicService::Custom | MusicService::YtMusic | MusicService::SoundCloud => rsx! {
             CustomAlbumDetails {
                 album_jellyfin_id,
                 library,

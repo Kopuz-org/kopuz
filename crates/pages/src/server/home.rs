@@ -36,7 +36,8 @@ fn server_track_id(path: &str) -> Option<String> {
     let mut parts = path.split(':');
     let prefix = parts.next()?;
     let id = parts.next()?;
-    if prefix == "jellyfin" || prefix == "subsonic" || prefix == "ytmusic" {
+    if prefix == "jellyfin" || prefix == "subsonic" || prefix == "ytmusic" || prefix == "soundcloud"
+    {
         Some(id.to_string())
     } else {
         None

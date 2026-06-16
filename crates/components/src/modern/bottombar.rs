@@ -84,7 +84,7 @@ pub fn BottombarModern(
                 div { class: "flex items-center gap-0.5 pr-1",
                     button {
                         class: if fav { "w-10 h-10 flex items-center justify-center text-red-400 active:scale-90 transition-transform" } else { "w-10 h-10 flex items-center justify-center text-slate-400 active:scale-90 transition-transform" },
-                        onclick: move |evt| { evt.stop_propagation(); toggle_favorite(ctrl.current_track_snapshot.read().clone(), favorites_store, config); },
+                        onclick: move |evt| { evt.stop_propagation(); toggle_favorite(ctrl.current_track_snapshot.read().clone(), favorites_store, config, ctrl.playback_error); },
                         i { class: if fav { "fa-solid fa-heart text-sm" } else { "fa-regular fa-heart text-sm" } }
                     }
                     button {
@@ -255,7 +255,7 @@ pub fn BottombarModern(
                 button {
                     class: "{heart_class} w-7 h-7 flex items-center justify-center",
                     title: if is_favorite { i18n::t("remove_from_favorites").to_string() } else { i18n::t("add_to_favorites").to_string() },
-                    onclick: move |_| toggle_favorite(ctrl.current_track_snapshot.read().clone(), favorites_store, config),
+                    onclick: move |_| toggle_favorite(ctrl.current_track_snapshot.read().clone(), favorites_store, config, ctrl.playback_error),
                     i { class: "{heart_icon} text-xs" }
                 }
                 div {

@@ -16,13 +16,6 @@ pub fn AddServerPopup(
     on_close: EventHandler<()>,
     on_save: EventHandler<()>,
 ) -> Element {
-    let _service_value = match server_service() {
-        MusicService::Jellyfin => "jellyfin",
-        MusicService::Subsonic => "subsonic",
-        MusicService::Custom => "custom",
-        MusicService::YtMusic => "ytmusic",
-    };
-
     let server_name_optional = i18n::t("server_name_optional").to_string();
     let server_url_placeholder = i18n::t("server_url_placeholder").to_string();
     let custom_manual = i18n::t("custom_manual").to_string();
@@ -65,6 +58,7 @@ pub fn AddServerPopup(
                             "subsonic" => MusicService::Subsonic,
                             "custom" => MusicService::Custom,
                             "ytmusic" => MusicService::YtMusic,
+                            "soundcloud" => MusicService::SoundCloud,
                             _ => MusicService::Jellyfin,
                         };
                         server_service.set(service);
@@ -89,6 +83,11 @@ pub fn AddServerPopup(
                         value: "ytmusic",
                         selected: server_service() == MusicService::YtMusic,
                         "YouTube Music"
+                    }
+                    option {
+                        value: "soundcloud",
+                        selected: server_service() == MusicService::SoundCloud,
+                        "SoundCloud"
                     }
                 }
 
@@ -244,16 +243,21 @@ fn ServerServiceFields(
     });
 
     match server_service() {
-        MusicService::YtMusic => {
+        service @ (MusicService::YtMusic | MusicService::SoundCloud) => {
             let anon = yt_anonymous();
+            let service_name = service.display_name();
+            let hq_note = if service == MusicService::SoundCloud {
+                " Signing in also unlocks Go+ high-quality (256 kbps AAC) playback if your account has it."
+            } else {
+                ""
+            };
             rsx! {
-                // Auth method selector (sign-in row hidden on Windows).
                 div { class: "flex flex-col gap-2 mb-2",
                     if !windows {
                         label { class: "flex items-center gap-2 text-sm text-white cursor-pointer",
                             input {
                                 r#type: "radio",
-                                name: "yt-auth-method",
+                                name: "server-auth-method",
                                 checked: !anon,
                                 onchange: move |_| yt_anonymous.set(false),
                             }
@@ -263,7 +267,7 @@ fn ServerServiceFields(
                     label { class: "flex items-center gap-2 text-sm text-white cursor-pointer",
                         input {
                             r#type: "radio",
-                            name: "yt-auth-method",
+                            name: "server-auth-method",
                             checked: anon,
                             onchange: move |_| yt_anonymous.set(true),
                         }
@@ -274,14 +278,14 @@ fn ServerServiceFields(
                 if anon {
                     p { class: "text-xs text-white/60",
                         if windows {
-                            "On Windows, kopuz uses YouTube Music anonymously (browser sign-in isn't supported here yet). You can browse, search, and play — but Liked Music, library playlists, and following/liking are disabled."
+                            "On Windows, kopuz uses {service_name} anonymously (browser sign-in isn't supported here yet). You can browse, search, and play — but your likes, library playlists, and following are disabled."
                         } else {
-                            "kopuz will use YouTube Music without signing in. You can browse, search, and play — but Liked Music, your library playlists, and following/liking are disabled."
+                            "kopuz will use {service_name} without signing in. You can browse, search, and play — but your likes, library playlists, and following are disabled."
                         }
                     }
                 } else {
                     p { class: "text-xs text-white/60",
-                        "Pick which browser kopuz should use for the YouTube Music sign-in window. It opens in an isolated profile (a fresh, separate session) — your normal browsing is untouched. Make sure the browser is installed."
+                        "Pick which browser kopuz should use for the {service_name} sign-in window. It opens in an isolated profile (a fresh, separate session) — your normal browsing is untouched. Make sure the browser is installed.{hq_note}"
                     }
                     select {
                         onchange: move |e| {
