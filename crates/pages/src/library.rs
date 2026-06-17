@@ -12,13 +12,13 @@ use components::stat_card::StatCard;
 use components::track_row::TrackRow;
 use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use config::{AppConfig, UiStyle};
-use db::{Page, TrackFilter, TrackSort};
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{
     use_active_source, use_albums, use_artists, use_playlists, use_tracks_window,
 };
 use hooks::use_player_controller::PlayerController;
+use hooks::{Page, TrackFilter, TrackSort};
 use kopuz_route::Route;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -304,7 +304,7 @@ pub fn LibraryPage(
                             })),
                             on_start_radio: components::track_row::radio_handler(track_radio.clone()),
                             on_play: move |_| {
-                                let read_db = consume_context::<db::ReadDb>();
+                                let read_db = consume_context::<hooks::ReadDb>();
                                 let f = filter();
                                 spawn(async move {
                                     let all = read_db
@@ -428,7 +428,7 @@ pub fn LibraryPage(
                         if selected.is_empty() {
                             return;
                         }
-                        let read_db = consume_context::<db::ReadDb>();
+                        let read_db = consume_context::<hooks::ReadDb>();
                         let f = filter();
                         spawn(async move {
                             let total = read_db.tracks_count(&f).await.unwrap_or(0);
@@ -547,7 +547,7 @@ pub fn LibraryPage(
                                 selected_tracks.write().clear();
                                 is_selection_mode.set(false);
                             } else {
-                                let read_db = consume_context::<db::ReadDb>();
+                                let read_db = consume_context::<hooks::ReadDb>();
                                 let f = filter();
                                 spawn(async move {
                                     let total = read_db.tracks_count(&f).await.unwrap_or(0);

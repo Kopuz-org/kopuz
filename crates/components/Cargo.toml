@@ -21,7 +21,6 @@ scrobble = { workspace = true }
 uuid = { workspace = true }
 player = { workspace = true }
 reader = { workspace = true }
-db = { workspace = true }
 utils = { workspace = true }
 kopuz_route = { workspace = true }
 config = { workspace = true }

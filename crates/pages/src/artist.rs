@@ -546,7 +546,7 @@ pub fn Artist(
                                     on_add_to_playlist: move |playlist_id: String| {
                                         if let Some(album_id) = pending_album_id_for_playlist.read().clone() {
                                             let s_src = source.peek().clone();
-                                            let read_db = consume_context::<db::ReadDb>();
+                                            let read_db = consume_context::<hooks::ReadDb>();
                                             let s = active_source.peek().clone();
                                             spawn(async move {
                                                 let refs: Vec<String> = read_db
@@ -572,7 +572,7 @@ pub fn Artist(
                                     on_create_playlist: move |playlist_name: String| {
                                         let album_id = pending_album_id_for_playlist.read().clone();
                                         let s_src = source.peek().clone();
-                                        let read_db = consume_context::<db::ReadDb>();
+                                        let read_db = consume_context::<hooks::ReadDb>();
                                         let s = active_source.peek().clone();
                                         spawn(async move {
                                             let refs: Vec<String> = match album_id {
@@ -701,7 +701,7 @@ pub fn Artist(
                                                                     match tag {
                                                                         AlbumAction::Queue => {
                                                                             let s_src = source.peek().clone();
-                                                                            let read_db = consume_context::<db::ReadDb>();
+                                                                            let read_db = consume_context::<hooks::ReadDb>();
                                                                             let album_id = id.clone();
                                                                             spawn(async move {
                                                                                 let mut tracks = read_db.album_tracks(&s_src, &album_id).await.unwrap_or_default();
@@ -718,7 +718,7 @@ pub fn Artist(
                                                                             show_album_playlist_modal.set(true);
                                                                         }
                                                                         AlbumAction::DeleteAlbum => {
-                                                                            let read_db = consume_context::<db::ReadDb>();
+                                                                            let read_db = consume_context::<hooks::ReadDb>();
                                                                             let s = active_source.peek().clone();
                                                                             let s_src = source.peek().clone();
                                                                             let album_id = id.clone();
@@ -737,7 +737,7 @@ pub fn Artist(
                                                                         }
                                                                         AlbumAction::Download { downloaded } => {
                                                                             let s_src = source.peek().clone();
-                                                                            let read_db = consume_context::<db::ReadDb>();
+                                                                            let read_db = consume_context::<hooks::ReadDb>();
                                                                             let album_id = id.clone();
                                                                             spawn(async move {
                                                                                 let tracks = read_db.album_tracks(&s_src, &album_id).await.unwrap_or_default();

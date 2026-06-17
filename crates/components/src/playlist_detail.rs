@@ -1,4 +1,4 @@
-use db::Source;
+use config::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_playlists, use_tracks_by_keys};
@@ -67,7 +67,7 @@ pub fn PlaylistDetail(
         if !is_j {
             tracks.set(local_tracks_res.read().clone().unwrap_or_default());
         } else if !*has_loaded_jellyfin_tracks.read() && !refs.is_empty() {
-            let read_db = consume_context::<db::ReadDb>();
+            let read_db = consume_context::<hooks::ReadDb>();
             let server_id = {
                 let conf = config.peek();
                 conf.active_source

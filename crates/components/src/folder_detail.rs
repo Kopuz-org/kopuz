@@ -1,4 +1,4 @@
-use db::Source;
+use config::Source;
 use dioxus::prelude::*;
 use hooks::use_db_queries::{use_albums, use_folder_tracks};
 use reader::models::Track;

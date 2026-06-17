@@ -8,8 +8,7 @@ use components::dots_menu::{DotsMenu, MenuAction};
 use components::folder_picker::FolderPickerModal;
 use components::playlist_detail::PlaylistDetail;
 use components::playlist_popups::AddPlaylistPopup;
-use config::{AppConfig, MusicService, UiStyle};
-use db::Source;
+use config::{AppConfig, MusicService, Source, UiStyle};
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_active_source, use_albums, use_playlists, use_tracks_by_keys};
@@ -280,7 +279,7 @@ pub fn PlaylistsPage(
                             } else {
                                 format!("{folder_path}{}", std::path::MAIN_SEPARATOR)
                             };
-                            let read_db = consume_context::<db::ReadDb>();
+                            let read_db = consume_context::<hooks::ReadDb>();
                             let local = consume_context::<::server::source::LocalHandle>().0.clone();
                             spawn(async move {
                                 let tracks = read_db.folder_tracks(&prefix).await.unwrap_or_default();
@@ -394,7 +393,7 @@ fn PlaylistsGrid(
         };
 
         let source = active_source.peek().clone();
-        let read_db = consume_context::<db::ReadDb>();
+        let read_db = consume_context::<hooks::ReadDb>();
         let sid = active_server_id();
         spawn(
             async move {
@@ -715,7 +714,7 @@ fn PlaylistsGrid(
                                             } else {
                                                 let ids = playlist.tracks.clone();
                                                 let s = source.peek().clone();
-                                                let read_db = consume_context::<db::ReadDb>();
+                                                let read_db = consume_context::<hooks::ReadDb>();
                                                 spawn(async move {
                                                     let meta = read_db.tracks_by_keys(&s, &ids).await.unwrap_or_default();
                                                     let requests: Vec<(String, String, String)> = ids.iter().map(|tid| {

@@ -82,7 +82,7 @@ pub fn FavoritesBody(
         let nonce = *refresh_nonce.read();
         // The capability — not the service — decides how favorites sync.
         let sync_mode = caps().favorites_sync;
-        let read_db = consume_context::<db::ReadDb>();
+        let read_db = consume_context::<hooks::ReadDb>();
         let source = active_source.peek().clone();
         let sid = active_server_id();
         spawn(

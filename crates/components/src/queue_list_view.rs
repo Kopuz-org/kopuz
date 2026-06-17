@@ -235,7 +235,7 @@ pub fn QueueListView(
     };
     let scroll_stat = use_signal(|| 0.0_f64);
     let container_height = use_signal(|| 0.0_f64);
-    let source_local = use_memo(|| db::Source::Local);
+    let source_local = use_memo(|| config::Source::Local);
     let albums_res = hooks::use_db_queries::use_albums(source_local);
 
     use_effect(move || {

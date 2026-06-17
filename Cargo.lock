@@ -953,7 +953,6 @@ version = "0.6.7"
 dependencies = [
  "base64 0.22.1",
  "config",
- "db",
  "dioxus",
  "directories",
  "hooks",
@@ -5344,7 +5343,6 @@ version = "0.6.7"
 dependencies = [
  "components",
  "config",
- "db",
  "dioxus",
  "directories",
  "hooks",

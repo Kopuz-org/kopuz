@@ -287,7 +287,7 @@ fn AlbumGrid(
                                                     match tag {
                                                         AlbumAction::Queue => {
                                                             let s_src = source.peek().clone();
-                                                            let read_db = consume_context::<db::ReadDb>();
+                                                            let read_db = consume_context::<hooks::ReadDb>();
                                                             let album_id = id.clone();
                                                             spawn(async move {
                                                                 let mut tracks = read_db.album_tracks(&s_src, &album_id).await.unwrap_or_default();
@@ -305,7 +305,7 @@ fn AlbumGrid(
                                                         AlbumAction::Remove => {
                                                             if cap.delete_from_disk {
                                                                 let s_src = source.peek().clone();
-                                                                let read_db = consume_context::<db::ReadDb>();
+                                                                let read_db = consume_context::<hooks::ReadDb>();
                                                                 let album_src = active_source.peek().clone();
                                                                 let album_id = id.clone();
                                                                 spawn(async move {
@@ -396,7 +396,7 @@ fn AlbumDetail(
         ids
     });
     let tracks_res = {
-        let read_db = use_context::<db::ReadDb>();
+        let read_db = use_context::<hooks::ReadDb>();
         use_resource(move || {
             let _ = gens.generation(Table::Tracks);
             let (read_db, s, ids) = (read_db.clone(), source(), matching_ids());

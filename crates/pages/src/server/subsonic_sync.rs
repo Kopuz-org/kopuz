@@ -21,7 +21,7 @@ fn normalize_album_id(id: &str) -> String {
 /// streaming in — merges manual covers, and prunes rows the server dropped.
 #[tracing::instrument(name = "library.sync", skip_all, fields(clear_first = clear_first))]
 pub async fn sync_server_library(clear_first: bool) -> Result<(), String> {
-    let read_db = consume_context::<db::ReadDb>();
+    let read_db = consume_context::<hooks::ReadDb>();
     let gens = hooks::db_reactivity::use_generations();
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let source = active_source.peek().clone();

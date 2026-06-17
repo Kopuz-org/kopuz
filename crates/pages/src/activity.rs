@@ -1,8 +1,8 @@
 use config::{AppConfig, UiStyle};
-use db::{Page, TrackFilter, TrackSort};
 use dioxus::prelude::*;
 use hooks::use_db_queries::{use_active_source, use_albums, use_tracks_window};
 use hooks::use_player_controller::PlayerController;
+use hooks::{Page, TrackFilter, TrackSort};
 use kopuz_route::Route;
 use reader::Track;
 use std::collections::HashMap;
@@ -183,7 +183,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
                                             class: "flex items-center h-full px-4 hover:bg-white/5 rounded-xl cursor-pointer transition-colors group",
                                             onclick: move |_| {
                                                 let f = filter.peek().clone();
-                                                let read_db = consume_context::<db::ReadDb>();
+                                                let read_db = consume_context::<hooks::ReadDb>();
                                                 spawn(async move {
                                                     let all = read_db
                                                         .tracks_page(&f, Page { offset: 0, limit: u32::MAX })
