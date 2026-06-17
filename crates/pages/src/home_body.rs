@@ -65,10 +65,9 @@ pub fn HomeBody(
 ) -> Element {
     let is_offline = use_context::<Signal<bool>>();
     let mut config = use_context::<Signal<AppConfig>>();
-    let db = use_context::<db::Db>();
     let source = use_active_source();
-    let caps =
-        use_memo(move || ::server::source::resolve(db.clone(), &config.read()).capabilities());
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let caps = use_memo(move || active_source.read().capabilities());
     let mut has_fetched = use_signal(|| false);
 
     let albums_res = use_albums(source);
@@ -104,7 +103,7 @@ pub fn HomeBody(
     let mut fetch_remote = move || {
         has_fetched.set(true);
         spawn(async move {
-            let _ = crate::server::subsonic_sync::sync_server_library(config, false).await;
+            let _ = crate::server::subsonic_sync::sync_server_library(false).await;
         });
     };
 
@@ -678,6 +677,7 @@ fn ServerHeroBanner(
 
     let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     // The track's own `album_id` (not the resolved `Album`, which lags behind a
     // separate albums query) — so the play button and the favorite-state heart
     // work the instant the hero track renders, not only once albums load.
@@ -823,10 +823,7 @@ fn ServerHeroBanner(
                                             let id = t.id.key();
                                             (!id.is_empty()).then(|| id.to_string())
                                         }).collect();
-                                        let source = ::server::source::resolve(
-                                            consume_context::<db::Db>(),
-                                            &config.peek(),
-                                        );
+                                        let source = active_source.peek().clone();
                                         spawn(async move {
                                             for id in &track_ids {
                                                 let _ = source.set_favorite(id, new_fav).await;

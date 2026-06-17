@@ -14,7 +14,7 @@ pub struct SearchData {
 }
 
 pub fn use_search_data(search_query: Signal<String>, config: Signal<AppConfig>) -> SearchData {
-    let db = use_context::<db::Db>();
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let source = use_memo(move || config.read().active_source.clone());
     let albums_res = crate::use_db_queries::use_albums(source);
     let gens = crate::db_reactivity::use_generations();
@@ -115,7 +115,7 @@ pub fn use_search_data(search_query: Signal<String>, config: Signal<AppConfig>) 
         // YT queries its catalog (see `MediaSource::search`). Covers are resolved
         // here through the cover seam, which dispatches on the source/track.
         let conf = config.read().clone();
-        let source = server::source::resolve(db.clone(), &conf);
+        let source = active_source.read().clone();
         let all_albums = albums_res.read().clone().unwrap_or_default();
 
         async move {

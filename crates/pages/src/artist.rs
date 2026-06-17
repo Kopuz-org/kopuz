@@ -51,13 +51,12 @@ pub fn Artist(
     mut queue: Signal<Vec<reader::models::Track>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
-    let db = use_context::<db::Db>();
     let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     // Capabilities, read off the resolved source — the single seam the page gates
     // its divergent affordances on (no `is_server()` / `match service`).
-    let caps =
-        use_memo(move || ::server::source::resolve(db.clone(), &config.read()).capabilities());
+    let caps = use_memo(move || active_source.read().capabilities());
     // Diagnostic (debug): what source/caps this page is actually rendering, logged
     // whenever they change — confirms the page follows the sidebar source toggle.
     use_effect(move || {
@@ -130,7 +129,7 @@ pub fn Artist(
             return;
         }
         is_fetching_images.set(true);
-        let source = ::server::source::resolve(consume_context::<db::Db>(), &config.peek());
+        let source = active_source.peek().clone();
         spawn(
             async move {
                 let images: std::collections::HashMap<String, String> = source
@@ -412,7 +411,7 @@ pub fn Artist(
                                     };
                                     let refs = refs_for(&paths);
                                     if !refs.is_empty() {
-                                        let s = ::server::source::resolve(consume_context::<db::Db>(), &config.peek());
+                                        let s = active_source.peek().clone();
                                         spawn(async move {
                                             if s.add_to_playlist(&playlist_id, &refs).await.is_ok() {
                                                 gens.bump(Table::Playlists);
@@ -432,7 +431,7 @@ pub fn Artist(
                                     };
                                     let refs = refs_for(&paths);
                                     if !refs.is_empty() {
-                                        let s = ::server::source::resolve(consume_context::<db::Db>(), &config.peek());
+                                        let s = active_source.peek().clone();
                                         spawn(async move {
                                             if s.create_playlist(&name, &refs).await.is_ok() {
                                                 gens.bump(Table::Playlists);
@@ -473,7 +472,7 @@ pub fn Artist(
                                                 edits.album.trim(),
                                                 edits.artist.trim(),
                                             );
-                                            let s = ::server::source::resolve(consume_context::<db::Db>(), &config.peek());
+                                            let s = active_source.peek().clone();
                                             spawn(async move {
                                                 if s.upsert_tracks(&[t]).await.is_ok() {
                                                     gens.bump(Table::Tracks);
@@ -521,7 +520,7 @@ pub fn Artist(
                                             }
                                         }
                                         if !keys.is_empty() {
-                                            let s = ::server::source::resolve(consume_context::<db::Db>(), &config.peek());
+                                            let s = active_source.peek().clone();
                                             spawn(async move {
                                                 if s.delete_tracks(&keys).await.is_ok() {
                                                     gens.bump(Table::Tracks);
@@ -548,7 +547,7 @@ pub fn Artist(
                                         if let Some(album_id) = pending_album_id_for_playlist.read().clone() {
                                             let s_src = source.peek().clone();
                                             let db = consume_context::<db::Db>();
-                                            let s = ::server::source::resolve(db.clone(), &config.peek());
+                                            let s = active_source.peek().clone();
                                             spawn(async move {
                                                 let refs: Vec<String> = db
                                                     .album_tracks(&s_src, &album_id)
@@ -574,7 +573,7 @@ pub fn Artist(
                                         let album_id = pending_album_id_for_playlist.read().clone();
                                         let s_src = source.peek().clone();
                                         let db = consume_context::<db::Db>();
-                                        let s = ::server::source::resolve(db.clone(), &config.peek());
+                                        let s = active_source.peek().clone();
                                         spawn(async move {
                                             let refs: Vec<String> = match album_id {
                                                 Some(id) => db
@@ -720,7 +719,7 @@ pub fn Artist(
                                                                         }
                                                                         AlbumAction::DeleteAlbum => {
                                                                             let db = consume_context::<db::Db>();
-                                                                            let s = ::server::source::resolve(db.clone(), &config.peek());
+                                                                            let s = active_source.peek().clone();
                                                                             let s_src = source.peek().clone();
                                                                             let album_id = id.clone();
                                                                             spawn(async move {
@@ -885,7 +884,7 @@ pub fn Artist(
                                         && let Some(p) = track.id.local_path()
                                         && std::fs::remove_file(p).is_ok()
                                     {
-                                        let s = ::server::source::resolve(consume_context::<db::Db>(), &config.peek());
+                                        let s = active_source.peek().clone();
                                         let key = track.id.key().into_owned();
                                         spawn(async move {
                                             if s.delete_tracks(&[key]).await.is_ok() {

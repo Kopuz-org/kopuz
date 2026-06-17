@@ -26,7 +26,7 @@ pub fn toggle_favorite(
         return;
     };
     let gens = try_consume_context::<hooks::db_reactivity::Generations>();
-    let source = server::source::resolve_for_track(db, &config.peek(), &track);
+    let source = server::source::for_track(db, &config.peek(), &track);
     spawn(async move {
         let new_fav = !source.is_favorite(&ref_).await;
         if new_fav {

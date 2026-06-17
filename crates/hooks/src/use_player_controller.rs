@@ -56,9 +56,13 @@ pub struct PlayerController {
     /// for the old whole-Library signal — only the sync cover lookups need it).
     pub local_albums: Signal<Vec<reader::Album>>,
     pub config: Signal<AppConfig>,
-    /// Storage handle (in a `Signal` so the controller stays `Copy`) — used to
-    /// resolve the active source for stream resolution.
+    /// Storage handle (in a `Signal` so the controller stays `Copy`) — used by
+    /// the still-`Db`-taking factories (`local`/`for_track`) the player calls.
     pub db: Signal<db::Db>,
+    /// The cached active [`MediaSource`](::server::source::ActiveSource) — the
+    /// player reads this shared handle to resolve streams instead of rebuilding
+    /// the source (and its HTTP client) on every play/skip.
+    pub active_source: Signal<::server::source::ActiveSource>,
     pub play_generation: Signal<usize>,
     pending_resume: Signal<Option<PendingResumeState>>,
     pub pending_crossfade_ui: Signal<Option<PendingCrossfadeUiState>>,
@@ -668,7 +672,7 @@ impl PlayerController {
                     let mut pending_crossfade_ui = self.pending_crossfade_ui;
                     let mut pending_resume = self.pending_resume;
                     let cfg_signal = self.config;
-                    let db_signal = self.db;
+                    let active_source = self.active_source;
                     let mut radio_task = self.radio_task;
                     let mut current_song_title = self.current_song_title;
                     let mut current_song_artist = self.current_song_artist;
@@ -701,10 +705,7 @@ impl PlayerController {
                             // The one genuinely per-source op: resolve the playable
                             // stream through the active source's backend (a URL for
                             // Jellyfin/Subsonic, a deciphered stream for YT).
-                            let source = ::server::source::resolve(
-                                db_signal.peek().clone(),
-                                &cfg_signal.peek(),
-                            );
+                            let source = active_source.peek().clone();
                             match source.resolve_stream(item_id).await {
                                 Ok(info) => {
                                     // Stale-resolve guard: don't stamp duration / mutate
@@ -932,7 +933,7 @@ impl PlayerController {
                                     let scrobble_gen = current_gen;
                                     let scrobble_play_gen = play_generation;
                                     let scrobble_cfg = cfg_signal;
-                                    let scrobble_db = db_signal;
+                                    let scrobble_source = active_source;
                                     let scrobble_id = id.clone();
                                     let duration_secs = scrobble_track.duration;
                                     let threshold_secs = std::cmp::min(240, duration_secs / 2);
@@ -946,10 +947,7 @@ impl PlayerController {
                                         }
 
                                         {
-                                            let source = ::server::source::resolve(
-                                                scrobble_db.peek().clone(),
-                                                &scrobble_cfg.peek(),
-                                            );
+                                            let source = scrobble_source.peek().clone();
                                             if let Err(e) =
                                                 source.scrobble_now_playing(&scrobble_id).await
                                             {
@@ -1053,10 +1051,7 @@ impl PlayerController {
 
                                         // Subsonic scrobble
                                         {
-                                            let source = ::server::source::resolve(
-                                                scrobble_db.peek().clone(),
-                                                &scrobble_cfg.peek(),
-                                            );
+                                            let source = scrobble_source.peek().clone();
                                             match source.scrobble(&scrobble_id).await {
                                                 Ok(_) => tracing::info!(
                                                     "scrobbled: {} - {}",
@@ -1237,7 +1232,7 @@ impl PlayerController {
                                     let scrobble_gen = current_gen;
                                     let scrobble_play_gen = play_generation;
                                     let scrobble_cfg = cfg_signal;
-                                    let scrobble_db = db_signal;
+                                    let scrobble_source = active_source;
                                     let scrobble_id = id.clone();
                                     let duration_secs = scrobble_track.duration;
                                     let threshold_secs =
@@ -1249,10 +1244,7 @@ impl PlayerController {
                                         }
 
                                         {
-                                            let source = ::server::source::resolve(
-                                                scrobble_db.peek().clone(),
-                                                &scrobble_cfg.peek(),
-                                            );
+                                            let source = scrobble_source.peek().clone();
                                             if let Err(e) =
                                                 source.scrobble_now_playing(&scrobble_id).await
                                             {
@@ -1329,10 +1321,7 @@ impl PlayerController {
                                         }
 
                                         {
-                                            let source = ::server::source::resolve(
-                                                scrobble_db.peek().clone(),
-                                                &scrobble_cfg.peek(),
-                                            );
+                                            let source = scrobble_source.peek().clone();
                                             match source.scrobble(&scrobble_id).await {
                                                 Ok(_) => tracing::info!(
                                                     "scrobbled: {} - {}",
@@ -2122,6 +2111,7 @@ pub fn use_player_controller(
     let playback_error = use_signal(|| None::<String>);
     let db_ctx = use_context::<db::Db>();
     let db = use_signal(move || db_ctx);
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
 
     PlayerController {
         player,
@@ -2147,6 +2137,7 @@ pub fn use_player_controller(
         local_albums,
         config,
         db,
+        active_source,
         play_generation,
         pending_resume,
         pending_crossfade_ui,

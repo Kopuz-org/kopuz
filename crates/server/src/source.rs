@@ -1827,18 +1827,14 @@ fn remote_source(db: Db, source: Source, conn: &ServerConn) -> Box<dyn MediaSour
     }
 }
 
-/// The active server source: a per-remote impl when creds resolve, else the
-/// offline stand-in (favorites still queue).
-fn server_source(db: Db, config: &AppConfig) -> Box<dyn MediaSource> {
-    let source = Source::Server(active_server_id(config).unwrap_or_default());
-    match ServerConn::resolve(config) {
-        Some(conn) => remote_source(db, source, &conn),
-        None => Box::new(OfflineServerSource { db, source }),
-    }
-}
+/// The active [`MediaSource`], shared and reference-counted. Held once in a
+/// `Signal<ActiveSource>` (context) and swapped only on a source-switch or cred
+/// rotation, so call sites read the cached handle instead of rebuilding — and
+/// for a server, re-standing-up an HTTP client — on every operation.
+pub type ActiveSource = std::sync::Arc<dyn MediaSource>;
 
 /// The configured server's [`MediaSource`], or `None` when no usable creds
-/// exist. Unlike [`resolve`] this ignores the active source — the reconciler
+/// exist. Unlike [`active`] this ignores the active source — the reconciler
 /// syncs the configured server even while a local page is open.
 pub fn configured_server(db: Db, config: &AppConfig) -> Option<Box<dyn MediaSource>> {
     let conn = ServerConn::resolve(config)?;
@@ -1855,29 +1851,45 @@ pub fn local(db: Db) -> Box<dyn MediaSource> {
     })
 }
 
-/// Resolve the [`MediaSource`] for the app's active source. Cheap (clones a
-/// `Db` handle + a few config strings); call it per operation rather than
-/// holding it across an `await` on the config signal.
-pub fn resolve(db: Db, config: &AppConfig) -> Box<dyn MediaSource> {
-    match &config.active_source {
+/// The [`MediaSource`] backing a given [`Source`] key — the single factory.
+/// Local needs no creds; a server resolves its creds from `config` (falling back
+/// to the offline stand-in when none are usable, so favorites still queue).
+/// Building a server source stands up an HTTP client, so resolve once and hold
+/// the result (the cached [`ActiveSource`]) rather than calling per render.
+pub fn resolve(db: Db, config: &AppConfig, source: &Source) -> Box<dyn MediaSource> {
+    match source {
         Source::Local => local(db),
-        Source::Server(_) => server_source(db, config),
+        Source::Server(id) => match ServerConn::resolve(config) {
+            Some(conn) => remote_source(db, Source::Server(id.clone()), &conn),
+            None => Box::new(OfflineServerSource {
+                db,
+                source: Source::Server(id.clone()),
+            }),
+        },
     }
 }
 
-/// Resolve the [`MediaSource`] a specific track belongs to — for context where
-/// the track's origin, not the app's active source, decides the partition (the
-/// now-playing bar can hold a server track while a local page is open).
-pub fn resolve_for_track(
-    db: Db,
-    config: &AppConfig,
-    track: &reader::Track,
-) -> Box<dyn MediaSource> {
+/// The [`MediaSource`] for the app's active source.
+pub fn active(db: Db, config: &AppConfig) -> Box<dyn MediaSource> {
+    resolve(db, config, &config.active_source)
+}
+
+/// The [`Source`] a track belongs to: its owning server (resolved to the
+/// configured one — the in-memory id carries only the service, not the
+/// instance) or local.
+fn track_source(track: &reader::Track, config: &AppConfig) -> Source {
     if track.id.is_server() {
-        server_source(db, config)
+        Source::Server(active_server_id(config).unwrap_or_default())
     } else {
-        local(db)
+        Source::Local
     }
+}
+
+/// The [`MediaSource`] a specific track belongs to — for context where the
+/// track's origin, not the app's active source, decides the partition (the
+/// now-playing bar can hold a server track while a local page is open).
+pub fn for_track(db: Db, config: &AppConfig, track: &reader::Track) -> Box<dyn MediaSource> {
+    resolve(db, config, &track_source(track, config))
 }
 
 // ============================ SoundCloud ===============================

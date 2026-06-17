@@ -997,12 +997,39 @@ fn App() -> Element {
     use_context_provider(|| db.clone());
     hooks::db_reactivity::use_generations_provider();
 
+    // The active source, resolved ONCE and held — every call site reads this
+    // shared handle instead of rebuilding the source (and, for a server, a fresh
+    // HTTP client) per operation. Rotation isn't mutation: an identity change
+    // (source switch or cred change) rebuilds and swaps the `Arc`.
+    let active_source = {
+        let db_init = db.clone();
+        let mut active_source = use_signal(move || {
+            ::server::source::ActiveSource::from(::server::source::active(
+                db_init.clone(),
+                &config.peek(),
+            ))
+        });
+        // Only the resolution-relevant slice of config; a volume/theme change
+        // must not rebuild the client. `Memo`'s `PartialEq` dedup gates the effect.
+        let identity = use_memo(move || {
+            (
+                config.read().active_source.clone(),
+                config.read().server.clone(),
+            )
+        });
+        let db_eff = db.clone();
+        use_effect(move || {
+            let _ = identity.read();
+            active_source.set(::server::source::ActiveSource::from(
+                ::server::source::active(db_eff.clone(), &config.peek()),
+            ));
+        });
+        use_context_provider(|| active_source)
+    };
+
     // Capabilities of the active source — drives source-agnostic routing (e.g.
     // which artist view to render) without hardcoding services in the router.
-    let active_caps = {
-        let db = db.clone();
-        use_memo(move || ::server::source::resolve(db.clone(), &config.read()).capabilities())
-    };
+    let active_caps = use_memo(move || active_source.read().capabilities());
     // Start the PoToken minter whenever a YouTube Music server is active — not
     // just anon. A *signed-in but non-Premium* account streams the same 251 as
     // anon and also needs a content pot for deep ranges; only true Premium

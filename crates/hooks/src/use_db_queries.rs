@@ -407,14 +407,11 @@ pub fn use_cover_resolver(max_width: u32) -> impl Fn(&reader::Track) -> Option<u
 /// switch. The favorites partition is the source's own identity, so it's owned by
 /// [`MediaSource::favorites`] — callers never spell out a `server_id`.
 pub fn use_favorites() -> Resource<Vec<String>> {
-    let db = use_context::<Db>();
-    let config = use_context::<Signal<config::AppConfig>>();
-    let active = use_active_source();
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let gens = use_generations();
     use_resource(move || {
         let _ = gens.generation(Table::Favorites);
-        let _ = active(); // re-resolve on a source switch
-        let source = server::source::resolve(db.clone(), &config.peek());
+        let source = active_source.read().clone();
         async move { source.favorites().await.unwrap_or_default() }
     })
 }
@@ -432,7 +429,7 @@ pub fn use_track_is_favorite(track: Memo<Option<reader::Track>>) -> Resource<boo
         let _ = gens.generation(Table::Favorites);
         let resolved = track().map(|t| {
             let key = t.id.key().into_owned();
-            let source = server::source::resolve_for_track(db.clone(), &config.peek(), &t);
+            let source = server::source::for_track(db.clone(), &config.peek(), &t);
             (source, key)
         });
         async move {

@@ -1,4 +1,3 @@
-use config::AppConfig;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use reader::models::Album;
@@ -21,13 +20,11 @@ fn normalize_album_id(id: &str) -> String {
 /// the snapshot — chunked upsert + coalesced bumps keep the library view
 /// streaming in — merges manual covers, and prunes rows the server dropped.
 #[tracing::instrument(name = "library.sync", skip_all, fields(clear_first = clear_first))]
-pub async fn sync_server_library(
-    config: Signal<AppConfig>,
-    clear_first: bool,
-) -> Result<(), String> {
+pub async fn sync_server_library(clear_first: bool) -> Result<(), String> {
     let db = consume_context::<db::Db>();
     let gens = hooks::db_reactivity::use_generations();
-    let source = ::server::source::resolve(db.clone(), &config.peek());
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let source = active_source.peek().clone();
     let src = source.source().clone();
     if !src.is_server() {
         return Ok(());

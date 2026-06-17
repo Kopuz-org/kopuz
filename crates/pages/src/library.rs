@@ -42,11 +42,10 @@ pub fn LibraryPage(
     mut queue: Signal<Vec<reader::models::Track>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
-    let db = use_context::<db::Db>();
     let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
-    let caps =
-        use_memo(move || ::server::source::resolve(db.clone(), &config.read()).capabilities());
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let caps = use_memo(move || active_source.read().capabilities());
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
     let initial_sort_order = config.read().sort_order.clone();
@@ -111,7 +110,7 @@ pub fn LibraryPage(
         let current_gen = *fetch_generation.peek();
         spawn(async move {
             if *fetch_generation.read() == current_gen {
-                let _ = crate::server::subsonic_sync::sync_server_library(config, true).await;
+                let _ = crate::server::subsonic_sync::sync_server_library(true).await;
                 if *fetch_generation.read() == current_gen {
                     is_loading.set(false);
                 }
@@ -343,7 +342,7 @@ pub fn LibraryPage(
                         };
                         let refs: Vec<String> = paths.iter().map(|p| p.key().into_owned()).collect();
                         if !refs.is_empty() {
-                            let s = ::server::source::resolve(consume_context::<db::Db>(), &config.peek());
+                            let s = active_source.peek().clone();
                             spawn(async move {
                                 if s.add_to_playlist(&playlist_id, &refs).await.is_ok() {
                                     gens.bump(Table::Playlists);
@@ -363,7 +362,7 @@ pub fn LibraryPage(
                         };
                         let refs: Vec<String> = paths.iter().map(|p| p.key().into_owned()).collect();
                         if !refs.is_empty() {
-                            let s = ::server::source::resolve(consume_context::<db::Db>(), &config.peek());
+                            let s = active_source.peek().clone();
                             spawn(async move {
                                 if s.create_playlist(&name, &refs).await.is_ok() {
                                     gens.bump(Table::Playlists);

@@ -36,6 +36,7 @@ pub fn DiscoverPage(
     on_search_artist: EventHandler<String>,
 ) -> Element {
     let config = use_context::<Signal<AppConfig>>();
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let mut shelves = use_signal(Vec::<DiscoverShelf>::new);
     let mut continuation = use_signal(|| None::<String>);
     let mut loading_more = use_signal(|| false);
@@ -44,9 +45,7 @@ pub fn DiscoverPage(
 
     // Discover is a capability of the active source, not a hardcoded service —
     // gate on it (and on the active source, not the configured server).
-    let discover_supported = ::server::source::resolve(use_context::<db::Db>(), &config.read())
-        .capabilities()
-        .discover;
+    let discover_supported = active_source.read().capabilities().discover;
 
     use_effect(move || {
         if !discover_supported {
@@ -68,7 +67,7 @@ pub fn DiscoverPage(
             initial_loading.set(false);
             return;
         }
-        let source = ::server::source::resolve(consume_context::<db::Db>(), &config.peek());
+        let source = active_source.peek().clone();
         spawn(
             async move {
                 match source.discover_home().await {
@@ -101,7 +100,7 @@ pub fn DiscoverPage(
         }
         loading_more.set(true);
         let more_span = tracing::info_span!("discover.load_more");
-        let source = ::server::source::resolve(consume_context::<db::Db>(), &config.peek());
+        let source = active_source.peek().clone();
         spawn(
             async move {
                 match source.discover_continuation(&token).await {
@@ -378,7 +377,6 @@ fn DiscoverTile(
     on_search_artist: EventHandler<String>,
 ) -> Element {
     let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
-    let config = use_context::<Signal<AppConfig>>();
     let now_playing = use_context::<DiscoverNowPlaying>().0;
     let cache = use_context::<DiscoverPrefetchCache>().0;
     match item {
@@ -404,7 +402,7 @@ fn DiscoverTile(
                         on_select_playlist.call((playlist_id.clone(), title_for_click.clone()))
                     },
                     on_play: EventHandler::new(move |_| {
-                        play_playlist_async(pid_for_play.clone(), config, ctrl, now_playing, cache, consume_context::<db::Db>());
+                        play_playlist_async(pid_for_play.clone(), ctrl, now_playing, cache);
                     }),
                     source_id: Some(pid_for_source),
                 }
@@ -429,7 +427,7 @@ fn DiscoverTile(
                         on_select_playlist.call((browse_id.clone(), title_for_click.clone()))
                     },
                     on_play: EventHandler::new(move |_| {
-                        play_playlist_async(bid_for_play.clone(), config, ctrl, now_playing, cache, consume_context::<db::Db>());
+                        play_playlist_async(bid_for_play.clone(), ctrl, now_playing, cache);
                     }),
                     source_id: Some(bid_for_source),
                 }
@@ -482,11 +480,9 @@ fn DiscoverTile(
 /// the fetch fails / returns nothing).
 fn play_playlist_async(
     id: String,
-    config: Signal<AppConfig>,
     mut ctrl: hooks::use_player_controller::PlayerController,
     mut now_playing: Signal<Option<String>>,
     cache: Signal<HashMap<String, Vec<Track>>>,
-    db: db::Db,
 ) {
     ctrl.is_loading.set(true);
     now_playing.set(Some(id.clone()));
@@ -513,7 +509,7 @@ fn play_playlist_async(
                 ctrl.is_loading.set(false);
                 now_playing.set(None);
             };
-            let source = ::server::source::resolve(db, &config.peek());
+            let source = ctrl.active_source.peek().clone();
 
             // Albums come back in a single browse hit.
             if id.starts_with("MPRE") {
@@ -612,8 +608,7 @@ fn Card(
     };
     let now_playing = use_context::<DiscoverNowPlaying>().0;
     let mut cache = use_context::<DiscoverPrefetchCache>().0;
-    let config_ctx = use_context::<Signal<AppConfig>>();
-    let db = use_context::<db::Db>();
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     // Per-tile hover gate that survives across renders so the spawned
     // prefetch task can check whether the cursor is still on the tile
@@ -640,7 +635,7 @@ fn Card(
                 let Some(id) = prefetch_id.clone() else { return; };
                 hover_armed.set(true);
                 let prefetch_span = tracing::info_span!("discover.prefetch", id = %id);
-                let db = db.clone();
+                let source = active_source.peek().clone();
                 spawn(async move {
                     // Short hover delay so the cursor passing over a
                     // shelf doesn't fire a dozen requests. If the user
@@ -653,7 +648,6 @@ fn Card(
                     if cache.peek().contains_key(&id) {
                         return;
                     }
-                    let source = ::server::source::resolve(db, &config_ctx.peek());
                     // Prefetch wants the whole list buffered, so a plain fetch
                     // (no live-batch streaming) is exactly right here.
                     let fetched = if id.starts_with("MPRE") {
@@ -738,8 +732,7 @@ fn SongCard(track: Track) -> Element {
     let artist = track.artist.clone();
     let video_id = track_video_id(&track);
 
-    let config = use_context::<Signal<AppConfig>>();
-    let db = use_context::<db::Db>();
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let now_playing = use_context::<DiscoverNowPlaying>().0;
     let mut cache = use_context::<DiscoverPrefetchCache>().0;
@@ -764,7 +757,7 @@ fn SongCard(track: Track) -> Element {
                 let Some(id) = prefetch_id.clone() else { return; };
                 hover_armed.set(true);
                 let mix_span = tracing::info_span!("discover.prefetch_mix", id = %id);
-                let db = db.clone();
+                let source = active_source.peek().clone();
                 spawn(async move {
                     tokio::time::sleep(Duration::from_millis(250)).await;
                     if !*hover_armed.peek() {
@@ -773,7 +766,6 @@ fn SongCard(track: Track) -> Element {
                     if cache.peek().contains_key(&id) {
                         return;
                     }
-                    let source = ::server::source::resolve(db, &config.peek());
                     if let Ok(mix) = source.start_radio(&id).await
                         && !mix.is_empty()
                     {
@@ -799,11 +791,9 @@ fn SongCard(track: Track) -> Element {
                         play_song_with_mix(
                             track.clone(),
                             vid,
-                            config,
                             ctrl,
                             now_playing,
                             cache,
-                            consume_context::<db::Db>(),
                         );
                     } else {
                         ctrl.play_queue_linear(vec![track.clone()]);
@@ -865,11 +855,9 @@ fn track_video_id(track: &Track) -> Option<String> {
 fn play_song_with_mix(
     seed: Track,
     video_id: String,
-    config: Signal<AppConfig>,
     mut ctrl: hooks::use_player_controller::PlayerController,
     mut now_playing: Signal<Option<String>>,
     cache: Signal<HashMap<String, Vec<Track>>>,
-    db: db::Db,
 ) {
     ctrl.is_loading.set(true);
     now_playing.set(Some(video_id.clone()));
@@ -883,7 +871,7 @@ fn play_song_with_mix(
     let song_span = tracing::info_span!("discover.play_song", video_id = %video_id);
     spawn(
         async move {
-            let source = ::server::source::resolve(db, &config.peek());
+            let source = ctrl.active_source.peek().clone();
             match source.start_radio(&video_id).await {
                 Ok(mix) if !mix.is_empty() => {
                     let mut cache_writer = cache;
@@ -940,6 +928,7 @@ pub fn DiscoverPlaylistDetail(
     on_back: EventHandler<()>,
 ) -> Element {
     let config = use_context::<Signal<AppConfig>>();
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let mut now_playing = use_context::<DiscoverNowPlaying>().0;
     let mut tracks = use_signal(Vec::<Track>::new);
@@ -971,7 +960,7 @@ pub fn DiscoverPlaylistDetail(
         // task via .instrument() so the worker-thread fetch (and its
         // inner yt.* spans) nest under this load instead of orphaning.
         let load_span = tracing::info_span!("playlist.load", playlist_id = %pid);
-        let source = ::server::source::resolve(consume_context::<db::Db>(), &config.peek());
+        let source = active_source.peek().clone();
         spawn(
             async move {
                 tracing::debug!("playlist load started");
@@ -1155,6 +1144,7 @@ pub fn DiscoverArtistPage(
     on_search_artist: EventHandler<String>,
 ) -> Element {
     let config = use_context::<Signal<AppConfig>>();
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let now_playing = use_context::<DiscoverNowPlaying>().0;
     let cache = use_context::<DiscoverPrefetchCache>().0;
@@ -1182,7 +1172,7 @@ pub fn DiscoverArtistPage(
         loading.set(true);
         error.set(None);
         let artist_span = tracing::info_span!("artist.load", artist = %name);
-        let source = ::server::source::resolve(consume_context::<db::Db>(), &config.peek());
+        let source = active_source.peek().clone();
         spawn(
             async move {
                 let signed_in = config
@@ -1292,7 +1282,7 @@ pub fn DiscoverArtistPage(
                                         button {
                                             class: "inline-flex items-center gap-2 bg-white text-black px-6 py-2.5 rounded-full font-bold hover:scale-105 active:scale-95 transition-transform cursor-pointer",
                                             onclick: move |_| {
-                                                play_playlist_async(pid.clone(), config, ctrl, now_playing, cache, consume_context::<db::Db>());
+                                                play_playlist_async(pid.clone(), ctrl, now_playing, cache);
                                             },
                                             i { class: "fa-solid fa-shuffle text-[11px]" }
                                             span { class: "text-sm", "{i18n::t(\"shuffle\")}" }

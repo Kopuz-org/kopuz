@@ -39,6 +39,7 @@ pub fn Search(
 
     let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let albums_res = use_albums(source);
     let selected_genre_memo = use_memo(move || selected_genre.read().clone().unwrap_or_default());
     let genre_tracks_res = use_genre_tracks(source, selected_genre_memo);
@@ -81,8 +82,7 @@ pub fn Search(
                     on_close: move |_| show_playlist_modal.set(false),
                     on_add_to_playlist: move |playlist_id: String| {
                         if let Some(path) = selected_track_for_playlist.read().clone() {
-                            let source =
-                                ::server::source::resolve(consume_context::<db::Db>(), &config.peek());
+                            let source = active_source.peek().clone();
                             spawn(async move {
                                 let refs: Vec<String> = std::iter::once(path.key().into_owned())
                                     .filter(|r| !r.is_empty())
@@ -99,8 +99,7 @@ pub fn Search(
                     },
                     on_create_playlist: move |name: String| {
                         if let Some(path) = selected_track_for_playlist.read().clone() {
-                            let source =
-                                ::server::source::resolve(consume_context::<db::Db>(), &config.peek());
+                            let source = active_source.peek().clone();
                             spawn(async move {
                                 let refs: Vec<String> = std::iter::once(path.key().into_owned())
                                     .filter(|r| !r.is_empty())

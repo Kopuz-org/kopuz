@@ -388,8 +388,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                     // gated to ≥5s/track-change, so resolving a fresh source per
                     // report is cheap — no client cache needed.
                     if last_ping.elapsed().as_secs() >= 30 {
-                        let source =
-                            ::server::source::resolve(ctrl.db.peek().clone(), &config.peek());
+                        let source = ctrl.active_source.peek().clone();
                         spawn(
                             async move {
                                 let _ = source.keepalive().await;
@@ -413,10 +412,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                         {
                             if last_jellyfin_id.as_ref() != Some(&current_id) {
                                 if let Some(old_id) = last_jellyfin_id {
-                                    let source = ::server::source::resolve(
-                                        ctrl.db.peek().clone(),
-                                        &config.peek(),
-                                    );
+                                    let source = ctrl.active_source.peek().clone();
                                     let ticks = pos.as_micros() as u64 * 10;
                                     spawn(
                                         async move {
@@ -427,10 +423,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                                         .instrument(tracing::info_span!("playback.report")),
                                     );
                                 }
-                                let source = ::server::source::resolve(
-                                    ctrl.db.peek().clone(),
-                                    &config.peek(),
-                                );
+                                let source = ctrl.active_source.peek().clone();
                                 let current_id_clone = current_id.clone();
                                 spawn(
                                     async move {
@@ -446,10 +439,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                                 || is_playing != prev_playing
                             {
                                 let ticks = pos.as_micros() as u64 * 10;
-                                let source = ::server::source::resolve(
-                                    ctrl.db.peek().clone(),
-                                    &config.peek(),
-                                );
+                                let source = ctrl.active_source.peek().clone();
                                 let current_id_clone = current_id.clone();
                                 spawn(
                                     async move {
@@ -466,8 +456,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                                 last_progress_report = web_time::Instant::now();
                             }
                         } else if let Some(old_id) = last_jellyfin_id.take() {
-                            let source =
-                                ::server::source::resolve(ctrl.db.peek().clone(), &config.peek());
+                            let source = ctrl.active_source.peek().clone();
                             let ticks = pos.as_micros() as u64 * 10;
                             spawn(
                                 async move {
@@ -477,8 +466,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                             );
                         }
                     } else if let Some(old_id) = last_jellyfin_id.take() {
-                        let source =
-                            ::server::source::resolve(ctrl.db.peek().clone(), &config.peek());
+                        let source = ctrl.active_source.peek().clone();
                         let ticks = pos.as_micros() as u64 * 10;
                         spawn(
                             async move {

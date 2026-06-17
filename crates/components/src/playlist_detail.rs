@@ -21,6 +21,7 @@ pub fn PlaylistDetail(
     let mut tracks = use_signal(Vec::<reader::models::Track>::new);
     let mut has_loaded_jellyfin_tracks = use_signal(|| false);
     let gens = hooks::db_reactivity::use_generations();
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let playlists_res = use_playlists();
     // `source_local` resolves a *local* playlist's track refs (line below); covers
     // go through the source-layer resolver instead of a hand-rolled album lookup.
@@ -50,10 +51,7 @@ pub fn PlaylistDetail(
     // playlists cap (YT's InnerTube has no reorder mutation). Reading the caps is
     // also more correct than `is_server` — e.g. a creds-less offline server has
     // downloads=false.
-    let caps = {
-        let db = use_context::<db::Db>();
-        ::server::source::resolve(db, &config.peek()).capabilities()
-    };
+    let caps = active_source.read().capabilities();
     let can_reorder = caps.playlists == ::server::source::PlaylistOps::Reorder;
 
     // Initial tracks WITHOUT any network round-trip: local playlists resolve
@@ -96,7 +94,7 @@ pub fn PlaylistDetail(
             let pid_clone = pid.clone();
             let load_span = tracing::info_span!("playlist.load_entries", playlist_id = %pid_clone);
             // The facade fetches the entries per service; the page stays agnostic.
-            let source = server::source::resolve(consume_context::<db::Db>(), &config.peek());
+            let source = active_source.peek().clone();
             spawn(
                 async move {
                     if let Ok(entries) = source.fetch_playlist_entries(&pid_clone).await {
@@ -181,7 +179,7 @@ pub fn PlaylistDetail(
                     let pid = pid_for_cover.clone();
                     let pl_name = name_for_cover.clone();
                     let pl_tag = tag_for_cover.clone();
-                    let source = ::server::source::resolve(consume_context::<db::Db>(), &config.peek());
+                    let source = active_source.peek().clone();
                     spawn(async move {
                         let file = AsyncFileDialog::new()
                             .add_filter("Images", &["jpg", "jpeg", "png", "webp"])
@@ -244,8 +242,7 @@ pub fn PlaylistDetail(
             on_remove_from_playlist: move |idx: usize| {
                 if let Some(t) = tracks.read().get(idx).cloned() {
                     let pid = pid_for_remove.clone();
-                    let source =
-                        server::source::resolve(consume_context::<db::Db>(), &config.peek());
+                    let source = active_source.peek().clone();
                     spawn(async move {
                         if source.remove_from_playlist(&pid, &t, idx).await.is_ok() {
                             let mut tw = tracks.write();
@@ -281,7 +278,7 @@ pub fn PlaylistDetail(
                     return;
                 };
                 let pid = pid_for_move_up.clone();
-                let source = server::source::resolve(consume_context::<db::Db>(), &config.peek());
+                let source = active_source.peek().clone();
                 spawn(async move {
                     if source
                         .reorder_playlist(&pid, &refs, &moved, idx - 1)
@@ -316,7 +313,7 @@ pub fn PlaylistDetail(
                     return;
                 };
                 let pid = pid_for_move_down.clone();
-                let source = server::source::resolve(consume_context::<db::Db>(), &config.peek());
+                let source = active_source.peek().clone();
                 spawn(async move {
                     if source
                         .reorder_playlist(&pid, &refs, &moved, idx + 1)

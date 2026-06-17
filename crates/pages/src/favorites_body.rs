@@ -57,10 +57,9 @@ pub fn FavoritesBody(
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
     let gens = hooks::db_reactivity::use_generations();
-    let db = use_context::<db::Db>();
     let source = use_active_source();
-    let caps =
-        use_memo(move || ::server::source::resolve(db.clone(), &config.read()).capabilities());
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let caps = use_memo(move || active_source.read().capabilities());
     // The server id for the remote-sync effect (empty for local, which never syncs).
     let active_server_id = use_memo(move || {
         config
@@ -85,7 +84,7 @@ pub fn FavoritesBody(
         // The capability — not the service — decides how favorites sync.
         let sync_mode = caps().favorites_sync;
         let db = consume_context::<db::Db>();
-        let source = ::server::source::resolve(db.clone(), &config.peek());
+        let source = active_source.peek().clone();
         let sid = active_server_id();
         spawn(
             async move {
@@ -440,10 +439,7 @@ pub fn FavoritesBody(
 
                         if !selected_paths.is_empty() {
                             let pid = playlist_id.clone();
-                            let src = ::server::source::resolve(
-                                consume_context::<db::Db>(),
-                                &config.peek(),
-                            );
+                            let src = active_source.peek().clone();
                             let refs: Vec<String> =
                                 selected_paths.iter().map(|p| p.key().into_owned()).collect();
                             spawn(async move {
@@ -467,10 +463,7 @@ pub fn FavoritesBody(
 
                         if !selected_paths.is_empty() {
                             let playlist_name = name.clone();
-                            let src = ::server::source::resolve(
-                                consume_context::<db::Db>(),
-                                &config.peek(),
-                            );
+                            let src = active_source.peek().clone();
                             let refs: Vec<String> =
                                 selected_paths.iter().map(|p| p.key().into_owned()).collect();
                             spawn(async move {

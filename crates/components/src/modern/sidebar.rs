@@ -134,14 +134,8 @@ pub fn SidebarModern(props: SidebarProps) -> Element {
 
     let is_server = config.read().active_source.is_server();
     // Discover is a capability of the active source (YT), not a config flag.
-    let has_discover = {
-        let db = use_context::<db::Db>();
-        use_memo(move || {
-            ::server::source::resolve(db.clone(), &config.read())
-                .capabilities()
-                .discover
-        })
-    };
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let has_discover = use_memo(move || active_source.read().capabilities().discover);
     let collapsed = if is_android {
         false
     } else {

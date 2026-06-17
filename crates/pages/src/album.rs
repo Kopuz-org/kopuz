@@ -37,11 +37,10 @@ pub fn Album(
     mut queue: Signal<Vec<reader::models::Track>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
-    let db = use_context::<db::Db>();
     let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
-    let caps =
-        use_memo(move || ::server::source::resolve(db.clone(), &config.read()).capabilities());
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let caps = use_memo(move || active_source.read().capabilities());
 
     let open_album_menu = use_signal(|| None::<String>);
     let mut show_album_playlist_modal = use_signal(|| false);
@@ -59,7 +58,7 @@ pub fn Album(
             has_fetched.set(true);
             if albums.is_empty() {
                 spawn(async move {
-                    let _ = crate::server::subsonic_sync::sync_server_library(config, false).await;
+                    let _ = crate::server::subsonic_sync::sync_server_library(false).await;
                 });
             }
         }
@@ -103,10 +102,7 @@ pub fn Album(
                                         .iter()
                                         .map(|t| t.id.key().into_owned())
                                         .collect();
-                                    let s = ::server::source::resolve(
-                                        consume_context::<db::Db>(),
-                                        &config.peek(),
-                                    );
+                                    let s = active_source.peek().clone();
                                     spawn(async move {
                                         if !refs.is_empty()
                                             && s.add_to_playlist(&playlist_id, &refs).await.is_ok()
@@ -126,10 +122,7 @@ pub fn Album(
                                         .iter()
                                         .map(|t| t.id.key().into_owned())
                                         .collect();
-                                    let s = ::server::source::resolve(
-                                        consume_context::<db::Db>(),
-                                        &config.peek(),
-                                    );
+                                    let s = active_source.peek().clone();
                                     spawn(async move {
                                         if !refs.is_empty()
                                             && s.create_playlist(&name, &refs).await.is_ok()
@@ -164,11 +157,10 @@ fn AlbumGrid(
     mut show_album_playlist_modal: Signal<bool>,
     mut pending_album_id_for_playlist: Signal<Option<String>>,
 ) -> Element {
-    let db = use_context::<db::Db>();
     let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
-    let caps =
-        use_memo(move || ::server::source::resolve(db.clone(), &config.read()).capabilities());
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let caps = use_memo(move || active_source.read().capabilities());
     let is_offline = use_context::<Signal<bool>>();
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let albums_res = use_albums(source);
@@ -364,12 +356,11 @@ fn AlbumDetail(
     current_queue_index: Signal<usize>,
     on_close: EventHandler<()>,
 ) -> Element {
-    let db = use_context::<db::Db>();
     let gens = hooks::db_reactivity::use_generations();
     let nav_ctrl = use_context::<components::NavigationController>();
     let source = use_active_source();
-    let caps =
-        use_memo(move || ::server::source::resolve(db.clone(), &config.read()).capabilities());
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let caps = use_memo(move || active_source.read().capabilities());
     let is_offline = use_context::<Signal<bool>>();
     let download_queue = use_context::<Signal<DownloadQueue>>();
 

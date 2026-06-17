@@ -95,6 +95,7 @@ pub fn queue_downloads(
 
     reset_progress_session();
 
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let session_start = Instant::now();
     let session_span = tracing::info_span!("downloads.session");
     // spawn_forever: queue_downloads is called from page event handlers, and a
@@ -103,10 +104,34 @@ pub fn queue_downloads(
     spawn_forever(
         async move {
             tokio::join!(
-                download_worker(queue, config, session_start, cancel_flag.clone()),
-                download_worker(queue, config, session_start, cancel_flag.clone()),
-                download_worker(queue, config, session_start, cancel_flag.clone()),
-                download_worker(queue, config, session_start, cancel_flag.clone()),
+                download_worker(
+                    queue,
+                    config,
+                    active_source,
+                    session_start,
+                    cancel_flag.clone()
+                ),
+                download_worker(
+                    queue,
+                    config,
+                    active_source,
+                    session_start,
+                    cancel_flag.clone()
+                ),
+                download_worker(
+                    queue,
+                    config,
+                    active_source,
+                    session_start,
+                    cancel_flag.clone()
+                ),
+                download_worker(
+                    queue,
+                    config,
+                    active_source,
+                    session_start,
+                    cancel_flag.clone()
+                ),
             );
 
             let mut q = queue.write();
@@ -121,6 +146,7 @@ pub fn queue_downloads(
 async fn download_worker(
     mut queue: Signal<DownloadQueue>,
     mut config: Signal<AppConfig>,
+    active_source: Signal<::server::source::ActiveSource>,
     session_start: Instant,
     cancel_flag: Arc<AtomicBool>,
 ) {
@@ -160,23 +186,18 @@ async fn download_worker(
 
         let resolved: Option<(String, &'static str, Option<String>, Option<u64>)> =
             if matches!(service, Some(MusicService::YtMusic)) {
-                match try_consume_context::<db::Db>() {
-                    Some(db) => {
-                        let source = ::server::source::resolve(db, &config.read());
-                        match source.resolve_stream(&id).await {
-                            Ok(info) => Some((
-                                info.url,
-                                info.format.map(|(f, _)| f.extension()).unwrap_or_default(),
-                                info.user_agent,
-                                info.content_length,
-                            )),
-                            Err(e) => {
-                                tracing::warn!(%id, error = %e, "YT download URL resolve failed");
-                                None
-                            }
-                        }
+                let source = active_source.peek().clone();
+                match source.resolve_stream(&id).await {
+                    Ok(info) => Some((
+                        info.url,
+                        info.format.map(|(f, _)| f.extension()).unwrap_or_default(),
+                        info.user_agent,
+                        info.content_length,
+                    )),
+                    Err(e) => {
+                        tracing::warn!(%id, error = %e, "YT download URL resolve failed");
+                        None
                     }
-                    None => None,
                 }
             } else {
                 let conf = config.read();

@@ -790,9 +790,8 @@ pub fn radio_handler(track: Track) -> Option<EventHandler<()>> {
     let db = consume_context::<db::Db>();
     let config = consume_context::<Signal<AppConfig>>();
     let ctrl = consume_context::<PlayerController>();
-    let can_radio = server::source::resolve(db.clone(), &config.read())
-        .capabilities()
-        .radio;
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let can_radio = active_source.read().capabilities().radio;
     can_radio
         .then(|| EventHandler::new(move |_| play_radio(track.clone(), db.clone(), config, ctrl)))
 }
@@ -805,7 +804,7 @@ pub fn play_radio(track: Track, db: db::Db, config: Signal<AppConfig>, mut ctrl:
     let seed = track.id.key().into_owned();
     spawn(
         async move {
-            let source = server::source::resolve_for_track(db, &config.peek(), &track);
+            let source = server::source::for_track(db, &config.peek(), &track);
             match source.start_radio(&seed).await {
                 Ok(tracks) if !tracks.is_empty() => ctrl.play_queue_linear(tracks),
                 Ok(_) => tracing::debug!(seed = %seed, "radio returned empty queue"),
@@ -820,7 +819,7 @@ pub fn play_radio(track: Track, db: db::Db, config: Signal<AppConfig>, mut ctrl:
 /// one (YT), else fall back to a MusicBrainz lookup by metadata. The provider
 /// URL knowledge lives in the source impl ([`MediaSource::web_url`]), not here.
 pub fn share_track(track: Track, db: db::Db, config: Signal<AppConfig>) {
-    let source = server::source::resolve_for_track(db, &config.peek(), &track);
+    let source = server::source::for_track(db, &config.peek(), &track);
     if let Some(url) = source.web_url(&track) {
         copy_to_clipboard(&url);
         toast("Copied link");

@@ -26,10 +26,9 @@ pub fn PlaylistsPage(
     config: Signal<AppConfig>,
     mut selected_playlist_id: Signal<Option<String>>,
 ) -> Element {
-    let db = use_context::<db::Db>();
     let source = use_active_source();
-    let caps =
-        use_memo(move || ::server::source::resolve(db.clone(), &config.read()).capabilities());
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let caps = use_memo(move || active_source.read().capabilities());
 
     let mut show_add_playlist = use_signal(|| false);
     let mut playlist_name = use_signal(String::new);
@@ -63,7 +62,7 @@ pub fn PlaylistsPage(
             error.set(Some(i18n::t("error_server_not_configured").to_string()));
             return;
         }
-        let s = ::server::source::resolve(consume_context::<db::Db>(), &config.peek());
+        let s = active_source.peek().clone();
         error.set(None);
         saving.set(true);
         spawn(async move {
@@ -319,11 +318,10 @@ fn PlaylistsGrid(
     mut selected_playlist_id: Signal<Option<String>>,
     refresh_trigger: Signal<u64>,
 ) -> Element {
-    let db = use_context::<db::Db>();
     let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
-    let caps =
-        use_memo(move || ::server::source::resolve(db.clone(), &config.read()).capabilities());
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let caps = use_memo(move || active_source.read().capabilities());
     let is_offline = use_context::<Signal<bool>>();
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
@@ -396,7 +394,7 @@ fn PlaylistsGrid(
             }
         };
 
-        let source = ::server::source::resolve(consume_context::<db::Db>(), &config.peek());
+        let source = active_source.peek().clone();
         let db = consume_context::<db::Db>();
         let sid = active_server_id();
         spawn(

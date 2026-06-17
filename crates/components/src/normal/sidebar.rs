@@ -251,14 +251,8 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
 
     // Discover is a capability of the active source (YT), not a config flag —
     // hide the tab when the active source has no discover surface.
-    let has_discover = {
-        let db = use_context::<db::Db>();
-        use_memo(move || {
-            ::server::source::resolve(db.clone(), &config.read())
-                .capabilities()
-                .discover
-        })
-    };
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let has_discover = use_memo(move || active_source.read().capabilities().discover);
     let ordered_items: Vec<SidebarItem> = {
         let order = config.read().sidebar_order.clone();
         let mut items: Vec<SidebarItem> = order
