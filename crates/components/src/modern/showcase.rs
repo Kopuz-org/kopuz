@@ -19,11 +19,9 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
     let duration_min = total_seconds / 60;
 
     let offline_tracks = config.read().offline_tracks.clone();
-    // Albums of the active source — for resolving a track's album cover_path
-    // (local tracks need it; server tracks get their cover from track.cover).
-    let source = hooks::use_db_queries::use_active_source();
-    let albums_res = hooks::use_db_queries::use_albums(source);
-    let source_albums = albums_res.read().clone().unwrap_or_default();
+    // Per-track cover resolver (source dispatch + local-album lookup live in the
+    // source layer; no partition decision here).
+    let cover_for = hooks::use_db_queries::use_cover_resolver(64);
     let _fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
     let sort_state = use_signal(|| None);
     let indexed_tracks: Vec<_> = props
@@ -267,15 +265,8 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                                 };
                                 let is_downloading = false;
                                 let play_queue = std::sync::Arc::clone(&sorted_tracks_arc);
-                                let cover_url: Option<utils::CoverUrl> = {
-                                    let conf = config.read();
-                                    let album_cover = source_albums
-                                        .iter()
-                                        .find(|a| a.id == track.album_id)
-                                        .and_then(|a| a.cover_path.clone());
-                                    server::cover::track(&conf, track, album_cover.as_deref(), 64)
-                                        .or_else(|| Some(utils::default_cover_url()))
-                                };
+                                let cover_url: Option<utils::CoverUrl> =
+                                    cover_for(track).or_else(|| Some(utils::default_cover_url()));
                                 let mut is_new_disc = false;
                                 if track.disc_number != last_disc && sort_state.peek().is_none()
                                     && props.is_album

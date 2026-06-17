@@ -1,7 +1,7 @@
 use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
-use hooks::use_db_queries::{use_albums, use_playlists, use_tracks_by_keys};
+use hooks::use_db_queries::{use_playlists, use_tracks_by_keys};
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use rfd::AsyncFileDialog;
 use std::path::PathBuf;
@@ -22,8 +22,10 @@ pub fn PlaylistDetail(
     let mut has_loaded_jellyfin_tracks = use_signal(|| false);
     let gens = hooks::db_reactivity::use_generations();
     let playlists_res = use_playlists();
+    // `source_local` resolves a *local* playlist's track refs (line below); covers
+    // go through the source-layer resolver instead of a hand-rolled album lookup.
     let source_local = use_memo(|| Source::Local);
-    let albums_res = use_albums(source_local);
+    let cover_for = hooks::use_db_queries::use_cover_resolver(512);
 
     let pid_for_seed = playlist_id.clone();
     let seed_refs = use_memo(move || {
@@ -152,16 +154,7 @@ pub fn PlaylistDetail(
                 .as_str(),
             ))
         })
-        .or_else(|| {
-            tracks_val.first().and_then(|t| {
-                let album_cover = albums_res
-                    .read()
-                    .as_ref()
-                    .and_then(|albums| albums.iter().find(|a| a.id == t.album_id))
-                    .and_then(|a| a.cover_path.clone());
-                server::cover::track(&config.read(), t, album_cover.as_deref(), 512)
-            })
-        });
+        .or_else(|| tracks_val.first().and_then(&cover_for));
 
     let pid_for_remove = playlist_id.clone();
     let pid_for_move_up = playlist_id.clone();

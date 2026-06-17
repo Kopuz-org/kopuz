@@ -18,11 +18,9 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     let total_seconds: u64 = props.tracks.iter().map(|t| t.duration).sum();
     let duration_min = total_seconds / 60;
 
-    // Albums of the active source — for resolving a track's album cover_path
-    // (local tracks need it; server tracks get their cover from track.cover).
-    let source = hooks::use_db_queries::use_active_source();
-    let albums_res = hooks::use_db_queries::use_albums(source);
-    let source_albums = albums_res.read().clone().unwrap_or_default();
+    // Per-track cover resolver (source dispatch + local-album lookup live in the
+    // source layer; no partition decision here).
+    let cover_for = hooks::use_db_queries::use_cover_resolver(80);
 
     let offline_tracks = config.read().offline_tracks.clone();
     let sort_state = use_signal(|| None);
@@ -232,14 +230,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                          for (display_idx, (track, idx)) in sorted_track_pairs.iter().enumerate().skip(scroll_info.start_index).take(scroll_info.items_to_render) {
                          {
                              let idx = *idx;
-                             let cover_url = {
-                                 let conf = config.read();
-                                 let album_cover = source_albums
-                                     .iter()
-                                     .find(|a| a.id == track.album_id)
-                                     .and_then(|a| a.cover_path.clone());
-                                 server::cover::track(&conf, track, album_cover.as_deref(), 80)
-                             };
+                             let cover_url = cover_for(track);
 
                              let is_selected = props.selected_tracks.contains(&track.id.uid_path());
                              let matches_current_path = currently_playing_path.as_ref() == Some(&track.id.uid_path());
