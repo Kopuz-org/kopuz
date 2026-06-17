@@ -82,7 +82,7 @@ pub fn FavoritesBody(
         let nonce = *refresh_nonce.read();
         // The capability — not the service — decides how favorites sync.
         let sync_mode = caps().favorites_sync;
-        let db = consume_context::<db::Db>();
+        let read_db = consume_context::<db::ReadDb>();
         let source = active_source.peek().clone();
         let sid = active_server_id();
         spawn(
@@ -92,7 +92,7 @@ pub fn FavoritesBody(
                 if nonce == 0 {
                     match sync_mode {
                         FavoritesSync::Paginated => {
-                            let stamps: Option<serde_json::Value> = db
+                            let stamps: Option<serde_json::Value> = read_db
                                 .meta_get("yt_sync", "timestamps")
                                 .await
                                 .ok()
@@ -100,8 +100,12 @@ pub fn FavoritesBody(
                                 .and_then(|s| serde_json::from_str(&s).ok());
                             // Dirty rows don't count: a locally-hearted never-pushed
                             // like must not suppress the initial import.
-                            let favorites = db.favorites(&sid).await.unwrap_or_default().len();
-                            let dirty = db.dirty_favorites(&sid).await.unwrap_or_default().len();
+                            let favorites = read_db.favorites(&sid).await.unwrap_or_default().len();
+                            let dirty = read_db
+                                .dirty_favorites(&sid)
+                                .await
+                                .unwrap_or_default()
+                                .len();
                             let already_synced = stamps
                                 .as_ref()
                                 .and_then(|v| v.get("last_yt_sync_at"))
@@ -114,7 +118,7 @@ pub fn FavoritesBody(
                         }
                         FavoritesSync::Instant => {
                             let now = unix_now();
-                            let last_pull: u64 = db
+                            let last_pull: u64 = read_db
                                 .meta_get("fav_pull", &sid)
                                 .await
                                 .ok()
@@ -138,7 +142,9 @@ pub fn FavoritesBody(
                         if let Ok(ids) = source.fetch_favorites().await
                             && source.replace_favorites_clean(&ids).await.is_ok()
                         {
-                            let _ = db.meta_put("fav_pull", &sid, &unix_now().to_string()).await;
+                            let _ = source
+                                .set_meta("fav_pull", &sid, &unix_now().to_string())
+                                .await;
                             gens.bump(Table::Favorites);
                         }
                     }
@@ -195,8 +201,8 @@ pub fn FavoritesBody(
                                 let _ = source.upsert_tracks(chunk).await;
                             }
                             let _ = source.upsert_albums(&albums).await;
-                            let _ = db
-                                .upsert_favorites_page(&sid, &page_refs, start_rank, epoch)
+                            let _ = source
+                                .upsert_favorites_page(&page_refs, start_rank, epoch)
                                 .await;
                             gens.bump_coalesced(Table::Tracks);
                             gens.bump_coalesced(Table::Favorites);
@@ -214,7 +220,7 @@ pub fn FavoritesBody(
                             if source.sweep_favorites(epoch).await.is_ok() {
                                 gens.bump(Table::Favorites);
                             }
-                            let mut stamps: serde_json::Value = db
+                            let mut stamps: serde_json::Value = read_db
                                 .meta_get("yt_sync", "timestamps")
                                 .await
                                 .ok()
@@ -222,8 +228,8 @@ pub fn FavoritesBody(
                                 .and_then(|s| serde_json::from_str(&s).ok())
                                 .unwrap_or_else(|| serde_json::json!({}));
                             stamps["last_yt_sync_at"] = serde_json::json!(unix_now());
-                            let _ = db
-                                .meta_put("yt_sync", "timestamps", &stamps.to_string())
+                            let _ = source
+                                .set_meta("yt_sync", "timestamps", &stamps.to_string())
                                 .await;
                             gens.bump(Table::Tracks);
                             gens.bump(Table::Albums);
@@ -387,7 +393,7 @@ pub fn FavoritesBody(
                             && let Some(p) = track_delete.id.local_path()
                             && std::fs::remove_file(p).is_ok()
                         {
-                            let s = ::server::source::local(consume_context::<db::Db>());
+                            let s = consume_context::<::server::source::LocalHandle>().0.clone();
                             let key = track_delete.id.key().into_owned();
                             spawn(async move {
                                 if s.delete_tracks(&[key]).await.is_ok() {
@@ -504,7 +510,7 @@ pub fn FavoritesBody(
                                     edits.album.trim(),
                                     edits.artist.trim(),
                                 );
-                                let s = ::server::source::local(consume_context::<db::Db>());
+                                let s = consume_context::<::server::source::LocalHandle>().0.clone();
                                 spawn(async move {
                                     if s.upsert_tracks(&[t]).await.is_ok() {
                                         gens.bump(Table::Tracks);
@@ -556,7 +562,7 @@ pub fn FavoritesBody(
                                 }
                             }
                             if !keys.is_empty() {
-                                let s = ::server::source::local(consume_context::<db::Db>());
+                                let s = consume_context::<::server::source::LocalHandle>().0.clone();
                                 spawn(async move {
                                     if s.delete_tracks(&keys).await.is_ok() {
                                         gens.bump(Table::Tracks);

@@ -283,7 +283,7 @@ pub fn LibraryPage(
                                     && let Some(p) = track_delete.id.local_path()
                                     && std::fs::remove_file(p).is_ok()
                                 {
-                                    let s = ::server::source::local(consume_context::<db::Db>());
+                                    let s = consume_context::<::server::source::LocalHandle>().0.clone();
                                     let key = track_delete.id.key().into_owned();
                                     spawn(async move {
                                         if s.delete_tracks(&[key]).await.is_ok() {
@@ -304,10 +304,10 @@ pub fn LibraryPage(
                             })),
                             on_start_radio: components::track_row::radio_handler(track_radio.clone()),
                             on_play: move |_| {
-                                let db = consume_context::<db::Db>();
+                                let read_db = consume_context::<db::ReadDb>();
                                 let f = filter();
                                 spawn(async move {
-                                    let all = db
+                                    let all = read_db
                                         .tracks_page(&f, Page { offset: 0, limit: u32::MAX })
                                         .await
                                         .unwrap_or_default();
@@ -403,7 +403,7 @@ pub fn LibraryPage(
                                     edits.album.trim(),
                                     edits.artist.trim(),
                                 );
-                                let s = ::server::source::local(consume_context::<db::Db>());
+                                let s = consume_context::<::server::source::LocalHandle>().0.clone();
                                 spawn(async move {
                                     if s.upsert_tracks(&[t]).await.is_ok() {
                                         gens.bump(Table::Tracks);
@@ -428,11 +428,11 @@ pub fn LibraryPage(
                         if selected.is_empty() {
                             return;
                         }
-                        let db = consume_context::<db::Db>();
+                        let read_db = consume_context::<db::ReadDb>();
                         let f = filter();
                         spawn(async move {
-                            let total = db.tracks_count(&f).await.unwrap_or(0);
-                            let tracks: Vec<_> = db
+                            let total = read_db.tracks_count(&f).await.unwrap_or(0);
+                            let tracks: Vec<_> = read_db
                                 .tracks_page(&f, Page { offset: 0, limit: total })
                                 .await
                                 .unwrap_or_default()
@@ -460,7 +460,7 @@ pub fn LibraryPage(
                                 }
                             }
                             if !keys.is_empty() {
-                                let s = ::server::source::local(consume_context::<db::Db>());
+                                let s = consume_context::<::server::source::LocalHandle>().0.clone();
                                 spawn(async move {
                                     if s.delete_tracks(&keys).await.is_ok() {
                                         gens.bump(Table::Tracks);
@@ -547,11 +547,11 @@ pub fn LibraryPage(
                                 selected_tracks.write().clear();
                                 is_selection_mode.set(false);
                             } else {
-                                let db = consume_context::<db::Db>();
+                                let read_db = consume_context::<db::ReadDb>();
                                 let f = filter();
                                 spawn(async move {
-                                    let total = db.tracks_count(&f).await.unwrap_or(0);
-                                    let tracks = db
+                                    let total = read_db.tracks_count(&f).await.unwrap_or(0);
+                                    let tracks = read_db
                                         .tracks_page(&f, Page { offset: 0, limit: total })
                                         .await
                                         .unwrap_or_default();

@@ -183,9 +183,9 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
                                             class: "flex items-center h-full px-4 hover:bg-white/5 rounded-xl cursor-pointer transition-colors group",
                                             onclick: move |_| {
                                                 let f = filter.peek().clone();
-                                                let db = consume_context::<db::Db>();
+                                                let read_db = consume_context::<db::ReadDb>();
                                                 spawn(async move {
-                                                    let all = db
+                                                    let all = read_db
                                                         .tracks_page(&f, Page { offset: 0, limit: u32::MAX })
                                                         .await
                                                         .unwrap_or_default();

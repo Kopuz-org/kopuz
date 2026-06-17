@@ -250,11 +250,11 @@ pub fn SearchGenreDetail(
                                          if let Some(del_path) = track_delete.id.local_path()
                                              && std::fs::remove_file(del_path).is_ok()
                                          {
-                                             let db = consume_context::<db::Db>();
+                                             let local = consume_context::<::server::source::LocalHandle>().0.clone();
                                              let key = track_delete.id.key().into_owned();
                                              spawn(async move {
-                                                 if db
-                                                     .delete_tracks(&db::Source::Local, &[key])
+                                                 if local
+                                                     .delete_tracks(&[key])
                                                      .await
                                                      .is_ok()
                                                  {

@@ -233,9 +233,9 @@ pub fn PlaylistsPage(
                                 onclick: move |_| {
                                     let new_id = uuid::Uuid::new_v4().to_string();
                                     let name = i18n::t("new_folder").to_string();
-                                    let db = consume_context::<db::Db>();
+                                    let local = consume_context::<::server::source::LocalHandle>().0.clone();
                                     spawn(async move {
-                                        if ::server::source::local(db)
+                                        if local
                                             .create_folder(&new_id, &name)
                                             .await
                                             .is_ok()
@@ -280,23 +280,15 @@ pub fn PlaylistsPage(
                             } else {
                                 format!("{folder_path}{}", std::path::MAIN_SEPARATOR)
                             };
-                            let db = consume_context::<db::Db>();
+                            let read_db = consume_context::<db::ReadDb>();
+                            let local = consume_context::<::server::source::LocalHandle>().0.clone();
                             spawn(async move {
-                                let tracks = db.folder_tracks(&prefix).await.unwrap_or_default();
+                                let tracks = read_db.folder_tracks(&prefix).await.unwrap_or_default();
                                 let refs: Vec<String> = tracks
                                     .iter()
                                     .map(|track| track.id.key().into_owned())
                                     .collect();
-                                let id = uuid::Uuid::new_v4().to_string();
-                                if db
-                                    .upsert_playlist_meta(&Source::Local, &id, &folder_name, None, None)
-                                    .await
-                                    .is_ok()
-                                    && ::server::source::local(db)
-                                        .set_playlist_tracks(&id, &refs)
-                                        .await
-                                        .is_ok()
-                                {
+                                if local.create_playlist(&folder_name, &refs).await.is_ok() {
                                     gens.bump(Table::Playlists);
                                 }
                             });
@@ -402,12 +394,12 @@ fn PlaylistsGrid(
         };
 
         let source = active_source.peek().clone();
-        let db = consume_context::<db::Db>();
+        let read_db = consume_context::<db::ReadDb>();
         let sid = active_server_id();
         spawn(
             async move {
                 if is_ytmusic && yt_nonce == 0 && trigger == 0 {
-                    let already_synced = db
+                    let already_synced = read_db
                         .meta_get("yt_sync", "timestamps")
                         .await
                         .ok()
@@ -421,8 +413,7 @@ fn PlaylistsGrid(
                 }
 
                 let source_db = Source::Server(sid.clone());
-                let sync_source = ::server::source::resolve(db.clone(), &config.peek(), &source_db);
-                let existing = db
+                let existing = read_db
                     .load_playlists(&source_db)
                     .await
                     .unwrap_or_default()
@@ -471,9 +462,8 @@ fn PlaylistsGrid(
                         .find(|e| e.id == m.id)
                         .and_then(|e| e.cover_path.clone())
                         .map(|p| p.to_string_lossy().into_owned());
-                    let _ = db
+                    let _ = source
                         .upsert_playlist_meta(
-                            &source_db,
                             &m.id,
                             &m.name,
                             existing_cover.as_deref(),
@@ -501,11 +491,7 @@ fn PlaylistsGrid(
                             (!k.is_empty()).then(|| k.to_string())
                         })
                         .collect();
-                    if sync_source
-                        .set_playlist_tracks(&m.id, &track_ids)
-                        .await
-                        .is_ok()
-                    {
+                    if source.set_playlist_tracks(&m.id, &track_ids).await.is_ok() {
                         gens.bump_coalesced(Table::Playlists);
                     }
                     let new_tracks: Vec<reader::models::Track> = entries
@@ -513,7 +499,7 @@ fn PlaylistsGrid(
                         .filter(|t| seen_paths.insert(t.id.clone()))
                         .collect();
                     for chunk in new_tracks.chunks(100) {
-                        let _ = sync_source.upsert_tracks(chunk).await;
+                        let _ = source.upsert_tracks(chunk).await;
                     }
                     gens.bump_coalesced(Table::Tracks);
                 }
@@ -526,14 +512,14 @@ fn PlaylistsGrid(
                     .iter()
                     .filter(|e| !metas.iter().any(|m| m.id == e.id))
                 {
-                    let _ = sync_source.delete_playlist(&stale.id).await;
+                    let _ = source.delete_playlist(&stale.id).await;
                 }
                 if is_ytmusic {
                     let now = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .map(|d| d.as_secs())
                         .unwrap_or(0);
-                    let mut stamps: serde_json::Value = db
+                    let mut stamps: serde_json::Value = read_db
                         .meta_get("yt_sync", "timestamps")
                         .await
                         .ok()
@@ -541,8 +527,8 @@ fn PlaylistsGrid(
                         .and_then(|s| serde_json::from_str(&s).ok())
                         .unwrap_or_else(|| serde_json::json!({}));
                     stamps["last_yt_playlists_sync_at"] = serde_json::json!(now);
-                    let _ = db
-                        .meta_put("yt_sync", "timestamps", &stamps.to_string())
+                    let _ = source
+                        .set_meta("yt_sync", "timestamps", &stamps.to_string())
                         .await;
                 }
                 gens.bump(Table::Tracks);
@@ -729,9 +715,9 @@ fn PlaylistsGrid(
                                             } else {
                                                 let ids = playlist.tracks.clone();
                                                 let s = source.peek().clone();
-                                                let db = consume_context::<db::Db>();
+                                                let read_db = consume_context::<db::ReadDb>();
                                                 spawn(async move {
-                                                    let meta = db.tracks_by_keys(&s, &ids).await.unwrap_or_default();
+                                                    let meta = read_db.tracks_by_keys(&s, &ids).await.unwrap_or_default();
                                                     let requests: Vec<(String, String, String)> = ids.iter().map(|tid| {
                                                         let m = meta.iter().find(|t| t.id.key().as_ref() == tid.as_str());
                                                         (tid.clone(), m.map(|t| t.title.clone()).unwrap_or_default(), m.map(|t| t.artist.clone()).unwrap_or_default())
@@ -894,9 +880,9 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                                         0 => move_target_id.set(Some(pid_action.clone())),
                                         1 => {
                                             let pid = pid_action.clone();
-                                            let db = consume_context::<db::Db>();
+                                            let local = consume_context::<::server::source::LocalHandle>().0.clone();
                                             spawn(async move {
-                                                if ::server::source::local(db)
+                                                if local
                                                     .set_playlist_folder(&pid, None)
                                                     .await
                                                     .is_ok()
@@ -911,9 +897,8 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                                         }
                                         _ => {
                                             let pid = pid_action.clone();
-                                            let db = consume_context::<db::Db>();
+                                            let source = consume_context::<::server::source::LocalHandle>().0.clone();
                                             spawn(async move {
-                                                let source = ::server::source::local(db);
                                                 if source.delete_playlist(&pid).await.is_ok()
                                                     && source.set_playlist_folder(&pid, None).await.is_ok()
                                                 {
@@ -932,7 +917,7 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                                         }
                                         _ => {
                                             let pid = pid_action.clone();
-                                            let s = ::server::source::local(consume_context::<db::Db>());
+                                            let s = consume_context::<::server::source::LocalHandle>().0.clone();
                                             spawn(async move {
                                                 if s.delete_playlist(&pid).await.is_ok() {
                                                     gens.bump(Table::Playlists);
@@ -976,10 +961,10 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                                 .cover_path
                                 .as_ref()
                                 .map(|p| p.to_string_lossy().into_owned());
-                            let db = consume_context::<db::Db>();
+                            let local = consume_context::<::server::source::LocalHandle>().0.clone();
                             spawn(async move {
-                                if db
-                                    .upsert_playlist_meta(&Source::Local, &id, &name, cover.as_deref(), None)
+                                if local
+                                    .upsert_playlist_meta(&id, &name, cover.as_deref(), None)
                                     .await
                                     .is_ok()
                                 {
@@ -1006,9 +991,9 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                             return;
                         }
                         let rename_id = rename_id.clone();
-                        let db = consume_context::<db::Db>();
+                        let local = consume_context::<::server::source::LocalHandle>().0.clone();
                         spawn(async move {
-                            if ::server::source::local(db)
+                            if local
                                 .rename_folder(&rename_id, &name)
                                 .await
                                 .is_ok()
@@ -1112,9 +1097,9 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                                                                 rename_folder_name.set(fname_rename.clone());
                                                             } else {
                                                                 let fid = fid_del.clone();
-                                                                let db = consume_context::<db::Db>();
+                                                                let local = consume_context::<::server::source::LocalHandle>().0.clone();
                                                                 spawn(async move {
-                                                                    if ::server::source::local(db)
+                                                                    if local
                                                                         .delete_folder(&fid)
                                                                         .await
                                                                         .is_ok()

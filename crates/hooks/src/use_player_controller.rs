@@ -2096,6 +2096,7 @@ pub fn use_player_controller(
     volume: Signal<f32>,
     local_albums: Signal<Vec<reader::Album>>,
     config: Signal<AppConfig>,
+    db_handle: db::Db,
 ) -> PlayerController {
     let play_generation = use_signal(|| 0);
     let is_loading = use_signal(|| false);
@@ -2109,8 +2110,7 @@ pub fn use_player_controller(
     let radio_task = use_signal(|| None::<dioxus_core::Task>);
     let station_registry = use_context::<Signal<radio::registry::StationRegistry>>();
     let playback_error = use_signal(|| None::<String>);
-    let db_ctx = use_context::<db::Db>();
-    let db = use_signal(move || db_ctx);
+    let db = use_signal(move || db_handle);
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
 
     PlayerController {

@@ -1,4 +1,3 @@
-use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_player_controller::PlayerController;
@@ -244,7 +243,7 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                                     edits.album.trim(),
                                     edits.artist.trim(),
                                 );
-                                let source = server::source::local(consume_context::<db::Db>());
+                                let source = consume_context::<::server::source::LocalHandle>().0.clone();
                                 spawn(async move {
                                     if source.upsert_tracks(&[t]).await.is_ok() {
                                         gens.bump(Table::Tracks);
@@ -281,7 +280,7 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                                 .iter()
                                 .map(|p| p.key().into_owned())
                                 .collect();
-                            let source = server::source::local(consume_context::<db::Db>());
+                            let source = consume_context::<::server::source::LocalHandle>().0.clone();
                             spawn(async move {
                                 if source.add_to_playlist(&playlist_id, &refs).await.is_ok() {
                                     gens.bump(Table::Playlists);
@@ -304,18 +303,9 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                                 .iter()
                                 .map(|p| p.key().into_owned())
                                 .collect();
-                            let id = uuid::Uuid::new_v4().to_string();
-                            let db = consume_context::<db::Db>();
+                            let source = consume_context::<::server::source::LocalHandle>().0.clone();
                             spawn(async move {
-                                if db
-                                    .upsert_playlist_meta(&Source::Local, &id, &name, None, None)
-                                    .await
-                                    .is_ok()
-                                    && db
-                                        .set_playlist_tracks(&Source::Local, &id, &refs)
-                                        .await
-                                        .is_ok()
-                                {
+                                if source.create_playlist(&name, &refs).await.is_ok() {
                                     gens.bump(Table::Playlists);
                                 }
                             });

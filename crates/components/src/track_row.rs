@@ -83,7 +83,8 @@ pub fn TrackRow(
     #[props(default = None)] row_num: Option<usize>,
 ) -> Element {
     let config = use_context::<Signal<AppConfig>>();
-    let db = use_context::<db::Db>();
+    let local = use_context::<::server::source::LocalHandle>();
+    let server = use_context::<Signal<::server::source::ServerHandle>>();
     let mut ctrl = use_context::<PlayerController>();
     let nav_ctrl = use_context::<NavigationController>();
     let is_modern = config.read().ui_style == UiStyle::Modern;
@@ -492,7 +493,8 @@ pub fn TrackRow(
                                 } else if has_download && idx == download_action_idx {
                                     if let Some(handler) = on_download { handler.call(()); }
                                 } else if idx == share_idx {
-                                    share_track(share_track_modern.clone(), db.clone(), config);
+                                    let src = ::server::source::for_track_cached(&share_track_modern, &local, &server.peek());
+                                    share_track(share_track_modern.clone(), src);
                                     on_close_menu.call(());
                                 } else if mix_idx == Some(idx) {
                                     if let Some(handler) = on_start_radio {
@@ -759,7 +761,8 @@ pub fn TrackRow(
                                     handler.call(());
                                 }
                             } else if idx == share_idx {
-                                share_track(share_track_normal.clone(), db.clone(), config);
+                                let src = ::server::source::for_track_cached(&share_track_normal, &local, &server.peek());
+                                share_track(share_track_normal.clone(), src);
                                 on_close_menu.call(());
                             } else if mix_idx == Some(idx) {
                                 if let Some(handler) = on_start_radio {
@@ -787,24 +790,31 @@ pub fn TrackRow(
 /// "Start radio" action). Lets every call site wire radio in one line without
 /// repeating the capability gate or context plumbing.
 pub fn radio_handler(track: Track) -> Option<EventHandler<()>> {
-    let db = consume_context::<db::Db>();
-    let config = consume_context::<Signal<AppConfig>>();
+    let local = consume_context::<::server::source::LocalHandle>();
+    let server = consume_context::<Signal<::server::source::ServerHandle>>();
     let ctrl = consume_context::<PlayerController>();
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let can_radio = active_source.read().capabilities().radio;
-    can_radio
-        .then(|| EventHandler::new(move |_| play_radio(track.clone(), db.clone(), config, ctrl)))
+    can_radio.then(|| {
+        EventHandler::new(move |_| {
+            let src = ::server::source::for_track_cached(&track, &local, &server.peek());
+            play_radio(track.clone(), src, ctrl)
+        })
+    })
 }
 
 /// Start radio seeded from a track and play the generated queue. The radio
 /// operation lives in the source layer ([`MediaSource::start_radio`]); this just
 /// resolves the track's source, awaits it, and hands the result to the player.
 /// Call sites wire this into `on_start_radio` only when `capabilities().radio`.
-pub fn play_radio(track: Track, db: db::Db, config: Signal<AppConfig>, mut ctrl: PlayerController) {
+pub fn play_radio(
+    track: Track,
+    source: ::server::source::ActiveSource,
+    mut ctrl: PlayerController,
+) {
     let seed = track.id.key().into_owned();
     spawn(
         async move {
-            let source = server::source::for_track(db, &config.peek(), &track);
             match source.start_radio(&seed).await {
                 Ok(tracks) if !tracks.is_empty() => ctrl.play_queue_linear(tracks),
                 Ok(_) => tracing::debug!(seed = %seed, "radio returned empty queue"),
@@ -818,8 +828,7 @@ pub fn play_radio(track: Track, db: db::Db, config: Signal<AppConfig>, mut ctrl:
 /// Copy a shareable link for a track: its source's public web URL when it has
 /// one (YT), else fall back to a MusicBrainz lookup by metadata. The provider
 /// URL knowledge lives in the source impl ([`MediaSource::web_url`]), not here.
-pub fn share_track(track: Track, db: db::Db, config: Signal<AppConfig>) {
-    let source = server::source::for_track(db, &config.peek(), &track);
+pub fn share_track(track: Track, source: ::server::source::ActiveSource) {
     if let Some(url) = source.web_url(&track) {
         copy_to_clipboard(&url);
         toast("Copied link");

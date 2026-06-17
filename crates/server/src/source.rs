@@ -670,6 +670,48 @@ pub trait MediaSource: Send + Sync {
             .await
             .map_err(SourceError::from)
     }
+
+    /// Write a metadata-cache row — e.g. a sync timestamp. DB-cache op.
+    async fn set_meta(
+        &self,
+        cache_key: &str,
+        kind: &str,
+        payload: &str,
+    ) -> Result<(), SourceError> {
+        self.db()
+            .meta_put(cache_key, kind, payload)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    /// Stamp one page of this source's favorites (rank + epoch) during a
+    /// paginated pull. DB-cache op.
+    async fn upsert_favorites_page(
+        &self,
+        refs: &[String],
+        start_rank: i64,
+        epoch: i64,
+    ) -> Result<(), SourceError> {
+        self.db()
+            .upsert_favorites_page(self.source().as_str(), refs, start_rank, epoch)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    /// Upsert this source's playlist listing metadata (name/cover/image tag).
+    /// DB-cache op.
+    async fn upsert_playlist_meta(
+        &self,
+        pl_id: &str,
+        name: &str,
+        cover_path: Option<&str>,
+        image_tag: Option<&str>,
+    ) -> Result<(), SourceError> {
+        self.db()
+            .upsert_playlist_meta(self.source(), pl_id, name, cover_path, image_tag)
+            .await
+            .map_err(SourceError::from)
+    }
 }
 
 /// Mirror a successful remote playlist-add into the DB cache (so the DB-reading
@@ -2003,6 +2045,32 @@ fn track_source(track: &reader::Track, config: &AppConfig) -> Source {
 /// now-playing bar can hold a server track while a local page is open).
 pub fn for_track(db: Db, config: &AppConfig, track: &reader::Track) -> Box<dyn MediaSource> {
     resolve(db, config, &track_source(track, config))
+}
+
+/// The local source, held once in UI context (it never changes) so a component
+/// can run a local op without a `Db` handle.
+#[derive(Clone)]
+pub struct LocalHandle(pub ActiveSource);
+
+/// The configured server's source (`None` when no usable creds), held in UI
+/// context and reswapped on cred change — so a track-scoped op on a now-playing
+/// *server* track works while a *local* page is active, without a `Db` handle.
+#[derive(Clone)]
+pub struct ServerHandle(pub Option<ActiveSource>);
+
+/// The source a track belongs to, from the cached UI handles: local for a local
+/// track, the configured server otherwise (falling back to local if that server
+/// has no creds). The handle-only counterpart of [`for_track`] — no `Db`.
+pub fn for_track_cached(
+    track: &reader::Track,
+    local: &LocalHandle,
+    server: &ServerHandle,
+) -> ActiveSource {
+    if track.id.is_server() {
+        server.0.clone().unwrap_or_else(|| local.0.clone())
+    } else {
+        local.0.clone()
+    }
 }
 
 // ============================ SoundCloud ===============================

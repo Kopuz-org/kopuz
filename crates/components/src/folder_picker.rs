@@ -44,11 +44,11 @@ pub fn FolderPickerModal(playlist_id: String, on_close: EventHandler<()>) -> Ele
                                         key: "{fid}",
                                         class: "w-full text-left px-3 py-2 rounded-lg text-sm text-white hover:bg-white/10 flex items-center gap-2 transition-colors",
                                         onclick: move |_| {
-                                            let db = consume_context::<db::Db>();
+                                            let local = consume_context::<::server::source::LocalHandle>().0.clone();
                                             let pid = pid2.clone();
                                             let fid = fid.clone();
                                             spawn(async move {
-                                                if ::server::source::local(db)
+                                                if local
                                                     .set_playlist_folder(&pid, Some(&fid))
                                                     .await
                                                     .is_ok()
@@ -80,9 +80,8 @@ pub fn FolderPickerModal(playlist_id: String, on_close: EventHandler<()>) -> Ele
                                     if !name.is_empty() {
                                         let new_id = uuid::Uuid::new_v4().to_string();
                                         let pid = pid_keydown.clone();
-                                        let db = consume_context::<db::Db>();
+                                        let source = consume_context::<::server::source::LocalHandle>().0.clone();
                                         spawn(async move {
-                                            let source = ::server::source::local(db);
                                             if source.create_folder(&new_id, &name).await.is_ok()
                                                 && source
                                                     .set_playlist_folder(&pid, Some(&new_id))
@@ -106,9 +105,8 @@ pub fn FolderPickerModal(playlist_id: String, on_close: EventHandler<()>) -> Ele
                                     if !name.is_empty() {
                                         let new_id = uuid::Uuid::new_v4().to_string();
                                         let pid = pid4.clone();
-                                        let db = consume_context::<db::Db>();
+                                        let source = consume_context::<::server::source::LocalHandle>().0.clone();
                                         spawn(async move {
-                                            let source = ::server::source::local(db);
                                             if source.create_folder(&new_id, &name).await.is_ok()
                                                 && source
                                                     .set_playlist_folder(&pid, Some(&new_id))

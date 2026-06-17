@@ -35,10 +35,7 @@ static BG_NOTIFY: std::sync::OnceLock<tokio::sync::Notify> = std::sync::OnceLock
 /// Persist a play-count increment as a single-row upsert. The in-memory
 /// `config.listen_counts` is bumped by the caller for live views; this is the
 /// durable side (no whole-config rewrite on the play hot path).
-fn bump_listen_count_db(track_uid: String) {
-    let Some(db) = try_consume_context::<db::Db>() else {
-        return;
-    };
+fn bump_listen_count_db(track_uid: String, db: db::Db) {
     spawn(async move {
         if let Err(e) = ::server::source::local(db)
             .bump_listen_count(&track_uid)
@@ -588,7 +585,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                                     .entry(track_id.clone())
                                     .or_insert(0) += 1;
                                 drop(config_write);
-                                bump_listen_count_db(track_id);
+                                bump_listen_count_db(track_id, ctrl.db.peek().clone());
                             }
                         }
                         ctrl.play_next_with_crossfade();
@@ -627,7 +624,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                                     .entry(track_id.clone())
                                     .or_insert(0) += 1;
                                 drop(config_write);
-                                bump_listen_count_db(track_id);
+                                bump_listen_count_db(track_id, ctrl.db.peek().clone());
                             }
                         }
                         ctrl.play_next();

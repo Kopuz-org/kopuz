@@ -287,10 +287,10 @@ fn AlbumGrid(
                                                     match tag {
                                                         AlbumAction::Queue => {
                                                             let s_src = source.peek().clone();
-                                                            let db = consume_context::<db::Db>();
+                                                            let read_db = consume_context::<db::ReadDb>();
                                                             let album_id = id.clone();
                                                             spawn(async move {
-                                                                let mut tracks = db.album_tracks(&s_src, &album_id).await.unwrap_or_default();
+                                                                let mut tracks = read_db.album_tracks(&s_src, &album_id).await.unwrap_or_default();
                                                                 tracks.sort_by(|a, b| {
                                                                     a.track_number.cmp(&b.track_number)
                                                                         .then_with(|| a.title.cmp(&b.title))
@@ -305,11 +305,11 @@ fn AlbumGrid(
                                                         AlbumAction::Remove => {
                                                             if cap.delete_from_disk {
                                                                 let s_src = source.peek().clone();
-                                                                let db = consume_context::<db::Db>();
+                                                                let read_db = consume_context::<db::ReadDb>();
                                                                 let album_src = active_source.peek().clone();
                                                                 let album_id = id.clone();
                                                                 spawn(async move {
-                                                                    let to_delete = db.album_tracks(&s_src, &album_id).await.unwrap_or_default();
+                                                                    let to_delete = read_db.album_tracks(&s_src, &album_id).await.unwrap_or_default();
                                                                     for track in &to_delete {
                                                                         if let Some(path) = track.id.local_path() {
                                                                             let _ = std::fs::remove_file(path);
@@ -396,14 +396,14 @@ fn AlbumDetail(
         ids
     });
     let tracks_res = {
-        let db = use_context::<db::Db>();
+        let read_db = use_context::<db::ReadDb>();
         use_resource(move || {
             let _ = gens.generation(Table::Tracks);
-            let (db, s, ids) = (db.clone(), source(), matching_ids());
+            let (read_db, s, ids) = (read_db.clone(), source(), matching_ids());
             async move {
                 let mut out = Vec::new();
                 for id in &ids {
-                    out.extend(db.album_tracks(&s, id).await.unwrap_or_default());
+                    out.extend(read_db.album_tracks(&s, id).await.unwrap_or_default());
                 }
                 out
             }
@@ -459,9 +459,9 @@ fn AlbumDetail(
                     let aid = aid.clone();
                     let delete_cover = delete_cover.clone();
                     let cover_cache = cover_cache.clone();
-                    let db = consume_context::<db::Db>();
+                    let local = consume_context::<::server::source::LocalHandle>().0.clone();
                     spawn(async move {
-                        if ::server::source::local(db).update_album_cover(&aid, None, false).await.is_ok() {
+                        if local.update_album_cover(&aid, None, false).await.is_ok() {
                             gens.bump(Table::Albums);
                         }
                         if let Some(path) = delete_cover
@@ -518,6 +518,8 @@ fn AlbumDetail(
                     let aid = aid_cover.clone();
                     let _ = &aid;
                     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+                    let local = consume_context::<::server::source::LocalHandle>().0.clone();
+                    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
                     spawn(async move {
                         let file = rfd::AsyncFileDialog::new()
                             .add_filter("Images", &["jpg", "jpeg", "png", "webp"])
@@ -531,8 +533,7 @@ fn AlbumDetail(
                                 .unwrap_or_else(|| PathBuf::from("./cache/covers"));
                             if let Ok(saved) = reader::utils::save_cover(&aid, &data, path.extension().and_then(|e| e.to_str()), &cover_cache) {
                                 let saved_str = saved.to_string_lossy().into_owned();
-                                let db = consume_context::<db::Db>();
-                                if ::server::source::local(db).update_album_cover(&aid, Some(&saved_str), true).await.is_ok() {
+                                if local.update_album_cover(&aid, Some(&saved_str), true).await.is_ok() {
                                     gens.bump(Table::Albums);
                                 }
                             }
@@ -545,7 +546,7 @@ fn AlbumDetail(
                         && let Some(track_path) = t.id.local_path()
                         && std::fs::remove_file(track_path).is_ok()
                     {
-                        let s = ::server::source::local(consume_context::<db::Db>());
+                        let s = consume_context::<::server::source::LocalHandle>().0.clone();
                         let key = t.id.key().into_owned();
                         spawn(async move {
                             if s.delete_tracks(&[key]).await.is_ok() {
@@ -562,7 +563,7 @@ fn AlbumDetail(
                         }
                     }
                     if !keys.is_empty() {
-                        let s = ::server::source::local(consume_context::<db::Db>());
+                        let s = consume_context::<::server::source::LocalHandle>().0.clone();
                         spawn(async move {
                             if s.delete_tracks(&keys).await.is_ok() {
                                 gens.bump(Table::Tracks);

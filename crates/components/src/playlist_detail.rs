@@ -67,7 +67,7 @@ pub fn PlaylistDetail(
         if !is_j {
             tracks.set(local_tracks_res.read().clone().unwrap_or_default());
         } else if !*has_loaded_jellyfin_tracks.read() && !refs.is_empty() {
-            let db = consume_context::<db::Db>();
+            let read_db = consume_context::<db::ReadDb>();
             let server_id = {
                 let conf = config.peek();
                 conf.active_source
@@ -77,7 +77,7 @@ pub fn PlaylistDetail(
             };
             spawn(async move {
                 let Some(sid) = server_id else { return };
-                if let Ok(seed) = db.tracks_by_keys(&Source::Server(sid), &refs).await
+                if let Ok(seed) = read_db.tracks_by_keys(&Source::Server(sid), &refs).await
                     && !seed.is_empty()
                     && !*has_loaded_jellyfin_tracks.peek()
                 {
@@ -208,7 +208,7 @@ pub fn PlaylistDetail(
                         if let Some(del_path) = t.id.local_path()
                             && std::fs::remove_file(del_path).is_ok()
                         {
-                            let source = server::source::local(consume_context::<db::Db>());
+                            let source = consume_context::<::server::source::LocalHandle>().0.clone();
                             let key = t.id.key().into_owned();
                             spawn(async move {
                                 if source.delete_tracks(&[key]).await.is_ok() {
@@ -229,7 +229,7 @@ pub fn PlaylistDetail(
                             }
                         }
                         if !keys.is_empty() {
-                            let source = server::source::local(consume_context::<db::Db>());
+                            let source = consume_context::<::server::source::LocalHandle>().0.clone();
                             spawn(async move {
                                 if source.delete_tracks(&keys).await.is_ok() {
                                     gens.bump(Table::Tracks);

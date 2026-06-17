@@ -546,10 +546,10 @@ pub fn Artist(
                                     on_add_to_playlist: move |playlist_id: String| {
                                         if let Some(album_id) = pending_album_id_for_playlist.read().clone() {
                                             let s_src = source.peek().clone();
-                                            let db = consume_context::<db::Db>();
+                                            let read_db = consume_context::<db::ReadDb>();
                                             let s = active_source.peek().clone();
                                             spawn(async move {
-                                                let refs: Vec<String> = db
+                                                let refs: Vec<String> = read_db
                                                     .album_tracks(&s_src, &album_id)
                                                     .await
                                                     .unwrap_or_default()
@@ -572,11 +572,11 @@ pub fn Artist(
                                     on_create_playlist: move |playlist_name: String| {
                                         let album_id = pending_album_id_for_playlist.read().clone();
                                         let s_src = source.peek().clone();
-                                        let db = consume_context::<db::Db>();
+                                        let read_db = consume_context::<db::ReadDb>();
                                         let s = active_source.peek().clone();
                                         spawn(async move {
                                             let refs: Vec<String> = match album_id {
-                                                Some(id) => db
+                                                Some(id) => read_db
                                                     .album_tracks(&s_src, &id)
                                                     .await
                                                     .unwrap_or_default()
@@ -701,10 +701,10 @@ pub fn Artist(
                                                                     match tag {
                                                                         AlbumAction::Queue => {
                                                                             let s_src = source.peek().clone();
-                                                                            let db = consume_context::<db::Db>();
+                                                                            let read_db = consume_context::<db::ReadDb>();
                                                                             let album_id = id.clone();
                                                                             spawn(async move {
-                                                                                let mut tracks = db.album_tracks(&s_src, &album_id).await.unwrap_or_default();
+                                                                                let mut tracks = read_db.album_tracks(&s_src, &album_id).await.unwrap_or_default();
                                                                                 tracks.sort_by(|a, b| {
                                                                                     a.track_number.cmp(&b.track_number)
                                                                                         .then_with(|| a.title.cmp(&b.title))
@@ -718,12 +718,12 @@ pub fn Artist(
                                                                             show_album_playlist_modal.set(true);
                                                                         }
                                                                         AlbumAction::DeleteAlbum => {
-                                                                            let db = consume_context::<db::Db>();
+                                                                            let read_db = consume_context::<db::ReadDb>();
                                                                             let s = active_source.peek().clone();
                                                                             let s_src = source.peek().clone();
                                                                             let album_id = id.clone();
                                                                             spawn(async move {
-                                                                                let to_delete = db.album_tracks(&s_src, &album_id).await.unwrap_or_default();
+                                                                                let to_delete = read_db.album_tracks(&s_src, &album_id).await.unwrap_or_default();
                                                                                 for track in &to_delete {
                                                                                     if let Some(path) = track.id.local_path() {
                                                                                         let _ = std::fs::remove_file(path);
@@ -737,10 +737,10 @@ pub fn Artist(
                                                                         }
                                                                         AlbumAction::Download { downloaded } => {
                                                                             let s_src = source.peek().clone();
-                                                                            let db = consume_context::<db::Db>();
+                                                                            let read_db = consume_context::<db::ReadDb>();
                                                                             let album_id = id.clone();
                                                                             spawn(async move {
-                                                                                let tracks = db.album_tracks(&s_src, &album_id).await.unwrap_or_default();
+                                                                                let tracks = read_db.album_tracks(&s_src, &album_id).await.unwrap_or_default();
                                                                                 if downloaded {
                                                                                     let ids: Vec<String> = tracks.iter().filter_map(|t| {
                                                                                         let k = t.id.key();
@@ -785,6 +785,7 @@ pub fn Artist(
                                         if artist.is_empty() {
                                             return;
                                         }
+                                        let local = consume_context::<::server::source::LocalHandle>().0.clone();
                                         spawn(async move {
                                             let file = rfd::AsyncFileDialog::new()
                                                 .add_filter("Images", &["jpg", "jpeg", "png", "webp"])
@@ -793,8 +794,7 @@ pub fn Artist(
                                             if let Some(file) = file {
                                                 let path = file.path().to_path_buf();
                                                 let key = normalize_artist_key(&artist);
-                                                let db = consume_context::<db::Db>();
-                                                if db
+                                                if local
                                                     .set_artist_image(&key, "custom", Some(&path.to_string_lossy()))
                                                     .await
                                                     .is_ok()

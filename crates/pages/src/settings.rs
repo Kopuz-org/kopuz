@@ -584,7 +584,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         );
     };
 
-    let db_for_switch = use_context::<db::Db>();
+    let db_for_switch = use_context::<db::ReadDb>();
     let handle_switch_server = move |id: String| {
         let server = {
             let cfg = config.read();

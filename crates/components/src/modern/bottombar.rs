@@ -50,7 +50,8 @@ pub fn BottombarModern(
 
     let volume_percent = *volume.read() * 100.0;
     let mut ctrl = use_context::<PlayerController>();
-    let db = use_context::<db::Db>();
+    let local = use_context::<::server::source::LocalHandle>();
+    let server = use_context::<Signal<::server::source::ServerHandle>>();
     let nav_ctrl = use_context::<NavigationController>();
     let fav_track = use_memo(move || ctrl.current_track_snapshot.read().clone());
     let is_fav_res = hooks::use_db_queries::use_track_is_favorite(fav_track);
@@ -83,7 +84,7 @@ pub fn BottombarModern(
                 div { class: "flex items-center gap-0.5 pr-1",
                     button {
                         class: if fav { "w-10 h-10 flex items-center justify-center text-red-400 active:scale-90 transition-transform" } else { "w-10 h-10 flex items-center justify-center text-slate-400 active:scale-90 transition-transform" },
-                        onclick: move |evt| { evt.stop_propagation(); toggle_favorite(ctrl.current_track_snapshot.read().clone(), config); },
+                        onclick: move |evt| { evt.stop_propagation(); toggle_favorite(ctrl.current_track_snapshot.read().clone()); },
                         i { class: if fav { "fa-solid fa-heart text-sm" } else { "fa-regular fa-heart text-sm" } }
                     }
                     button {
@@ -254,7 +255,7 @@ pub fn BottombarModern(
                 button {
                     class: "{heart_class} w-7 h-7 flex items-center justify-center",
                     title: if is_favorite { i18n::t("remove_from_favorites").to_string() } else { i18n::t("add_to_favorites").to_string() },
-                    onclick: move |_| toggle_favorite(ctrl.current_track_snapshot.read().clone(), config),
+                    onclick: move |_| toggle_favorite(ctrl.current_track_snapshot.read().clone()),
                     i { class: "{heart_icon} text-xs" }
                 }
                 div {
@@ -343,7 +344,8 @@ pub fn BottombarModern(
                     title: i18n::t("share_musicbrainz").to_string(),
                     onclick: move |_| {
                         if let Some(t) = ctrl.current_track_snapshot.read().clone() {
-                            crate::track_row::share_track(t, db.clone(), config);
+                            let src = ::server::source::for_track_cached(&t, &local, &server.peek());
+                            crate::track_row::share_track(t, src);
                         }
                     },
                     i { class: "fa-solid fa-share-nodes text-[10px]" }
