@@ -136,7 +136,7 @@ pub fn FavoritesBody(
                         // One shot: the remote set becomes the clean baseline (dirty
                         // local rows survive the replace — mirrors server::sync).
                         if let Ok(ids) = source.fetch_favorites().await
-                            && db.replace_favorites_clean(&sid, &ids).await.is_ok()
+                            && source.replace_favorites_clean(&ids).await.is_ok()
                         {
                             let _ = db.meta_put("fav_pull", &sid, &unix_now().to_string()).await;
                             gens.bump(Table::Favorites);
@@ -211,7 +211,7 @@ pub fn FavoritesBody(
                             keep_albums.sort();
                             keep_albums.dedup();
                             let _ = source.prune(&ids, &keep_albums).await;
-                            if db.sweep_favorites(&sid, epoch).await.is_ok() {
+                            if source.sweep_favorites(epoch).await.is_ok() {
                                 gens.bump(Table::Favorites);
                             }
                             let mut stamps: serde_json::Value = db

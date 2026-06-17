@@ -632,6 +632,44 @@ pub trait MediaSource: Send + Sync {
             .await
             .map_err(SourceError::from)
     }
+
+    /// Set (or clear) this source's album cover, marking it manual or not. DB-cache op.
+    async fn update_album_cover(
+        &self,
+        album_id: &str,
+        cover_path: Option<&str>,
+        manual: bool,
+    ) -> Result<(), SourceError> {
+        self.db()
+            .update_album_cover(self.source(), album_id, cover_path, manual)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    /// Drop this source's favorites not seen since `epoch` (post-pull reconcile).
+    async fn sweep_favorites(&self, epoch: i64) -> Result<(), SourceError> {
+        self.db()
+            .sweep_favorites(self.source().as_str(), epoch)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    /// Replace this source's clean favorites with `refs`, keeping pending (dirty)
+    /// local toggles. DB-cache op.
+    async fn replace_favorites_clean(&self, refs: &[String]) -> Result<(), SourceError> {
+        self.db()
+            .replace_favorites_clean(self.source().as_str(), refs)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    /// Increment a track's play count, keyed by its uid. DB-cache op.
+    async fn bump_listen_count(&self, track_uid: &str) -> Result<(), SourceError> {
+        self.db()
+            .bump_listen_count(track_uid)
+            .await
+            .map_err(SourceError::from)
+    }
 }
 
 /// Mirror a successful remote playlist-add into the DB cache (so the DB-reading

@@ -7,7 +7,6 @@ use components::dots_menu::{DotsMenu, MenuAction};
 use components::playlist_modal::PlaylistModal;
 use components::track_list_view::TrackListView;
 use config::AppConfig;
-use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{
@@ -304,9 +303,10 @@ fn AlbumGrid(
                                                             show_album_playlist_modal.set(true);
                                                         }
                                                         AlbumAction::Remove => {
-                                                            let s_src = source.peek().clone();
-                                                            let db = consume_context::<db::Db>();
                                                             if cap.delete_from_disk {
+                                                                let s_src = source.peek().clone();
+                                                                let db = consume_context::<db::Db>();
+                                                                let album_src = active_source.peek().clone();
                                                                 let album_id = id.clone();
                                                                 spawn(async move {
                                                                     let to_delete = db.album_tracks(&s_src, &album_id).await.unwrap_or_default();
@@ -315,18 +315,19 @@ fn AlbumGrid(
                                                                             let _ = std::fs::remove_file(path);
                                                                         }
                                                                     }
-                                                                    if db.delete_album(&s_src, &album_id).await.is_ok() {
+                                                                    if album_src.delete_album(&album_id).await.is_ok() {
                                                                         gens.bump(Table::Tracks);
                                                                         gens.bump(Table::Albums);
                                                                     }
                                                                 });
                                                             } else {
                                                                 // Server: drop every same-titled album's cache.
+                                                                let album_src = active_source.peek().clone();
                                                                 let all = albums_res.read().clone().unwrap_or_default();
                                                                 let ids: Vec<String> = all.iter().filter(|a| a.title == title).map(|a| a.id.clone()).collect();
                                                                 spawn(async move {
                                                                     for aid in &ids {
-                                                                        let _ = db.delete_album(&s_src, aid).await;
+                                                                        let _ = album_src.delete_album(aid).await;
                                                                     }
                                                                     gens.bump(Table::Tracks);
                                                                     gens.bump(Table::Albums);
@@ -460,7 +461,7 @@ fn AlbumDetail(
                     let cover_cache = cover_cache.clone();
                     let db = consume_context::<db::Db>();
                     spawn(async move {
-                        if db.update_album_cover(&Source::Local, &aid, None, false).await.is_ok() {
+                        if ::server::source::local(db).update_album_cover(&aid, None, false).await.is_ok() {
                             gens.bump(Table::Albums);
                         }
                         if let Some(path) = delete_cover
@@ -531,7 +532,7 @@ fn AlbumDetail(
                             if let Ok(saved) = reader::utils::save_cover(&aid, &data, path.extension().and_then(|e| e.to_str()), &cover_cache) {
                                 let saved_str = saved.to_string_lossy().into_owned();
                                 let db = consume_context::<db::Db>();
-                                if db.update_album_cover(&Source::Local, &aid, Some(&saved_str), true).await.is_ok() {
+                                if ::server::source::local(db).update_album_cover(&aid, Some(&saved_str), true).await.is_ok() {
                                     gens.bump(Table::Albums);
                                 }
                             }

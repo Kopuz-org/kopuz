@@ -40,7 +40,10 @@ fn bump_listen_count_db(track_uid: String) {
         return;
     };
     spawn(async move {
-        if let Err(e) = db.bump_listen_count(&track_uid).await {
+        if let Err(e) = ::server::source::local(db)
+            .bump_listen_count(&track_uid)
+            .await
+        {
             tracing::warn!(error = %e, "listen count persist failed");
         }
     });
