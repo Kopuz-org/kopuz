@@ -4,7 +4,7 @@
 
 use std::sync::Mutex;
 
-use crate::{DbError, Storage};
+use crate::{DbError, ReadStore, Storage};
 
 pub struct Stub {
     config: Mutex<Option<config::AppConfig>>,
@@ -19,25 +19,9 @@ impl Stub {
 }
 
 #[async_trait::async_trait]
-impl Storage for Stub {
+impl ReadStore for Stub {
     async fn load_config(&self) -> Result<Option<config::AppConfig>, DbError> {
         Ok(self.config.lock().unwrap().clone())
-    }
-
-    async fn save_config(&self, cfg: &config::AppConfig) -> Result<(), DbError> {
-        *self.config.lock().unwrap() = Some(cfg.clone());
-        Ok(())
-    }
-
-    async fn import_legacy_json(
-        &self,
-        _config_dir: &std::path::Path,
-    ) -> Result<crate::ImportReport, DbError> {
-        Ok(crate::ImportReport::default())
-    }
-
-    async fn finalize_migration(&self, _config_dir: &std::path::Path) -> Result<usize, DbError> {
-        Ok(0)
     }
 
     async fn tracks_page(
@@ -139,6 +123,64 @@ impl Storage for Stub {
         DbError,
     > {
         Ok(Default::default())
+    }
+
+    async fn albums(&self, _source: &crate::Source) -> Result<Vec<reader::Album>, DbError> {
+        Ok(Vec::new())
+    }
+
+    async fn load_queue(&self) -> Result<crate::QueueSnapshot, DbError> {
+        Ok(crate::QueueSnapshot::default())
+    }
+
+    async fn load_playlists(
+        &self,
+        _source: &crate::Source,
+    ) -> Result<reader::PlaylistStore, DbError> {
+        Ok(reader::PlaylistStore::default())
+    }
+
+    async fn favorites(&self, _server_id: &str) -> Result<Vec<String>, DbError> {
+        Ok(Vec::new())
+    }
+
+    async fn is_favorite(&self, _server_id: &str, _ref_: &str) -> Result<bool, DbError> {
+        Ok(false)
+    }
+
+    async fn dirty_favorites(&self, _server_id: &str) -> Result<Vec<String>, DbError> {
+        Ok(Vec::new())
+    }
+
+    async fn dirty_unlikes(&self, _server_id: &str) -> Result<Vec<String>, DbError> {
+        Ok(Vec::new())
+    }
+
+    async fn load_server(&self, _id: &str) -> Result<Option<config::MusicServer>, DbError> {
+        Ok(None)
+    }
+
+    async fn meta_get(&self, _cache_key: &str, _kind: &str) -> Result<Option<String>, DbError> {
+        Ok(None)
+    }
+}
+
+#[async_trait::async_trait]
+impl Storage for Stub {
+    async fn save_config(&self, cfg: &config::AppConfig) -> Result<(), DbError> {
+        *self.config.lock().unwrap() = Some(cfg.clone());
+        Ok(())
+    }
+
+    async fn import_legacy_json(
+        &self,
+        _config_dir: &std::path::Path,
+    ) -> Result<crate::ImportReport, DbError> {
+        Ok(crate::ImportReport::default())
+    }
+
+    async fn finalize_migration(&self, _config_dir: &std::path::Path) -> Result<usize, DbError> {
+        Ok(0)
     }
 
     async fn delete_tracks(
@@ -251,31 +293,8 @@ impl Storage for Stub {
         Ok(())
     }
 
-    async fn albums(&self, _source: &crate::Source) -> Result<Vec<reader::Album>, DbError> {
-        Ok(Vec::new())
-    }
-
-    async fn load_queue(&self) -> Result<crate::QueueSnapshot, DbError> {
-        Ok(crate::QueueSnapshot::default())
-    }
-
-    async fn load_playlists(
-        &self,
-        _source: &crate::Source,
-    ) -> Result<reader::PlaylistStore, DbError> {
-        Ok(reader::PlaylistStore::default())
-    }
-
     async fn save_queue(&self, _snap: &crate::QueueSnapshot) -> Result<(), DbError> {
         Ok(())
-    }
-
-    async fn favorites(&self, _server_id: &str) -> Result<Vec<String>, DbError> {
-        Ok(Vec::new())
-    }
-
-    async fn is_favorite(&self, _server_id: &str, _ref_: &str) -> Result<bool, DbError> {
-        Ok(false)
     }
 
     async fn upsert_tracks(
@@ -296,22 +315,6 @@ impl Storage for Stub {
 
     async fn set_favorite(&self, _server_id: &str, _ref_: &str, _on: bool) -> Result<(), DbError> {
         Ok(())
-    }
-
-    async fn dirty_favorites(&self, _server_id: &str) -> Result<Vec<String>, DbError> {
-        Ok(Vec::new())
-    }
-
-    async fn dirty_unlikes(&self, _server_id: &str) -> Result<Vec<String>, DbError> {
-        Ok(Vec::new())
-    }
-
-    async fn load_server(&self, _id: &str) -> Result<Option<config::MusicServer>, DbError> {
-        Ok(None)
-    }
-
-    async fn meta_get(&self, _cache_key: &str, _kind: &str) -> Result<Option<String>, DbError> {
-        Ok(None)
     }
 
     async fn meta_put(&self, _cache_key: &str, _kind: &str, _payload: &str) -> Result<(), DbError> {

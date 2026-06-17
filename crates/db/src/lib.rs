@@ -127,30 +127,13 @@ impl From<sqlx::migrate::MigrateError> for DbError {
     }
 }
 
-/// The persistence API. One impl per target (sqlx native / in-mem stub). Grows
-/// as the migration lands more domains; this is the foundation slice.
+/// The read side of the persistence API — every query, no mutation. Carried as
+/// a supertrait of [`Storage`], so any `dyn Storage` is also a `dyn ReadStore`.
 #[async_trait::async_trait]
-pub trait Storage: Send + Sync {
+pub trait ReadStore: Send + Sync {
     /// Load the persisted `AppConfig` (the single-row JSON blob), or `None` if
     /// the app has never been configured.
     async fn load_config(&self) -> Result<Option<config::AppConfig>, DbError>;
-
-    /// Persist the whole `AppConfig` as the single-row JSON blob.
-    async fn save_config(&self, cfg: &config::AppConfig) -> Result<(), DbError>;
-
-    /// One-shot import of the legacy `*.json` store at `config_dir` into the DB,
-    /// then rename each imported file to `*.json.bak` and drop a sentinel. No-op
-    /// if the DB already holds data or the sentinel exists. Idempotent; safe to
-    /// call on every launch. (Native only; the wasm stub no-ops.)
-    async fn import_legacy_json(
-        &self,
-        config_dir: &std::path::Path,
-    ) -> Result<ImportReport, DbError>;
-
-    /// Point of no return: rename each imported `X.json` → `X.json.bak` (kept for
-    /// downgrade). Call only once every domain reads from the DB. Idempotent;
-    /// no-op until a real import has happened. Returns how many files moved.
-    async fn finalize_migration(&self, config_dir: &std::path::Path) -> Result<usize, DbError>;
 
     /// One window of a track listing (sorted + filtered in SQL — only this slice
     /// is materialized).
@@ -244,6 +227,60 @@ pub trait Storage: Send + Sync {
         ),
         DbError,
     >;
+
+    /// All albums for a source, ordered by artist then title.
+    async fn albums(&self, source: &Source) -> Result<Vec<reader::Album>, DbError>;
+
+    /// Reconstruct the queue/progress snapshot from the `queue_state` row.
+    async fn load_queue(&self) -> Result<QueueSnapshot, DbError>;
+
+    /// The `PlaylistStore` (the active source's playlists + folders) — the read
+    /// side of the playlists UI (`use_playlists`). Writes go through the
+    /// playlist-scoped ops, never a whole-store save. Scoped to `source`, the
+    /// caller's in-memory active source.
+    async fn load_playlists(&self, source: &Source) -> Result<reader::PlaylistStore, DbError>;
+
+    /// Hydrate one server row (creds included) into the in-memory shape — used
+    /// by server switching so stored creds are reused instead of re-prompting.
+    async fn load_server(&self, id: &str) -> Result<Option<config::MusicServer>, DbError>;
+
+    /// Generic metadata-cache read (`metadata_cache` table): the `payload` for
+    /// `(cache_key, kind)`, if cached.
+    async fn meta_get(&self, cache_key: &str, kind: &str) -> Result<Option<String>, DbError>;
+
+    /// The favorite refs (`track_key`s) for a server (`"local"` for filesystem).
+    async fn favorites(&self, server_id: &str) -> Result<Vec<String>, DbError>;
+
+    /// Whether `ref_` is favorited under `server_id`.
+    async fn is_favorite(&self, server_id: &str, ref_: &str) -> Result<bool, DbError>;
+
+    /// Pending-like refs (`dirty=1`) not yet pushed to the server.
+    async fn dirty_favorites(&self, server_id: &str) -> Result<Vec<String>, DbError>;
+
+    /// Pending-unlike tombstones (`dirty=2`) not yet pushed to the server.
+    async fn dirty_unlikes(&self, server_id: &str) -> Result<Vec<String>, DbError>;
+}
+
+/// The persistence API: every mutation plus admin/dev ops, layered on top of the
+/// read-only [`ReadStore`]. One impl per target (sqlx native / in-mem stub).
+#[async_trait::async_trait]
+pub trait Storage: ReadStore {
+    /// Persist the whole `AppConfig` as the single-row JSON blob.
+    async fn save_config(&self, cfg: &config::AppConfig) -> Result<(), DbError>;
+
+    /// One-shot import of the legacy `*.json` store at `config_dir` into the DB,
+    /// then rename each imported file to `*.json.bak` and drop a sentinel. No-op
+    /// if the DB already holds data or the sentinel exists. Idempotent; safe to
+    /// call on every launch. (Native only; the wasm stub no-ops.)
+    async fn import_legacy_json(
+        &self,
+        config_dir: &std::path::Path,
+    ) -> Result<ImportReport, DbError>;
+
+    /// Point of no return: rename each imported `X.json` → `X.json.bak` (kept for
+    /// downgrade). Call only once every domain reads from the DB. Idempotent;
+    /// no-op until a real import has happened. Returns how many files moved.
+    async fn finalize_migration(&self, config_dir: &std::path::Path) -> Result<usize, DbError>;
 
     /// Delete tracks by key for a source. Returns rows removed.
     async fn delete_tracks(&self, source: &Source, keys: &[String]) -> Result<u64, DbError>;
@@ -345,28 +382,8 @@ pub trait Storage: Send + Sync {
     /// whole config per finished song).
     async fn set_offline_track(&self, id: &str, path: Option<&str>) -> Result<(), DbError>;
 
-    /// All albums for a source, ordered by artist then title.
-    async fn albums(&self, source: &Source) -> Result<Vec<reader::Album>, DbError>;
-
-    /// Reconstruct the queue/progress snapshot from the `queue_state` row.
-    async fn load_queue(&self) -> Result<QueueSnapshot, DbError>;
-
-    /// The `PlaylistStore` (the active source's playlists + folders) — the read
-    /// side of the playlists UI (`use_playlists`). Writes go through the
-    /// playlist-scoped ops, never a whole-store save. Scoped to `source`, the
-    /// caller's in-memory active source.
-    async fn load_playlists(&self, source: &Source) -> Result<reader::PlaylistStore, DbError>;
-
     /// Persist the queue/progress snapshot to the single `queue_state` row.
     async fn save_queue(&self, snap: &QueueSnapshot) -> Result<(), DbError>;
-
-    /// Hydrate one server row (creds included) into the in-memory shape — used
-    /// by server switching so stored creds are reused instead of re-prompting.
-    async fn load_server(&self, id: &str) -> Result<Option<config::MusicServer>, DbError>;
-
-    /// Generic metadata-cache read (`metadata_cache` table): the `payload` for
-    /// `(cache_key, kind)`, if cached.
-    async fn meta_get(&self, cache_key: &str, kind: &str) -> Result<Option<String>, DbError>;
 
     /// Generic metadata-cache write (upsert of `payload` for `(cache_key, kind)`).
     async fn meta_put(&self, cache_key: &str, kind: &str, payload: &str) -> Result<(), DbError>;
@@ -394,24 +411,12 @@ pub trait Storage: Send + Sync {
     /// VACUUM.
     async fn debug_vacuum(&self) -> Result<(), DbError>;
 
-    /// The favorite refs (`track_key`s) for a server (`"local"` for filesystem).
-    async fn favorites(&self, server_id: &str) -> Result<Vec<String>, DbError>;
-
-    /// Whether `ref_` is favorited under `server_id`.
-    async fn is_favorite(&self, server_id: &str, ref_: &str) -> Result<bool, DbError>;
-
     /// Toggle a favorite locally, optimistically. `on` upserts the row as a
     /// pending-like (`dirty=1`). `!on` deletes a never-pushed like outright and
     /// turns a synced row into a pending-unlike tombstone (`dirty=2`) so the
     /// removal can be pushed later. Works while unauthenticated — the reconciler
     /// flushes pending rows once a server is active.
     async fn set_favorite(&self, server_id: &str, ref_: &str, on: bool) -> Result<(), DbError>;
-
-    /// Pending-like refs (`dirty=1`) not yet pushed to the server.
-    async fn dirty_favorites(&self, server_id: &str) -> Result<Vec<String>, DbError>;
-
-    /// Pending-unlike tombstones (`dirty=2`) not yet pushed to the server.
-    async fn dirty_unlikes(&self, server_id: &str) -> Result<Vec<String>, DbError>;
 
     /// Resolve a ref after a successful remote push: a pending-like becomes
     /// clean, a pending-unlike tombstone is deleted.
@@ -463,6 +468,25 @@ impl std::ops::Deref for Db {
     type Target = dyn Storage;
     fn deref(&self) -> &Self::Target {
         &*self.0
+    }
+}
+
+/// Read-only view of the storage backend — the surface the UI gets, so it
+/// cannot reach a write method (those live on `Storage`, not `ReadStore`).
+#[derive(Clone)]
+pub struct ReadDb(std::sync::Arc<dyn ReadStore>);
+
+impl std::ops::Deref for ReadDb {
+    type Target = dyn ReadStore;
+    fn deref(&self) -> &Self::Target {
+        &*self.0
+    }
+}
+
+impl Db {
+    /// A read-only view of the same backend (cheap Arc upcast).
+    pub fn reads(&self) -> ReadDb {
+        ReadDb(self.0.clone())
     }
 }
 

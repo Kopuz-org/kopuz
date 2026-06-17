@@ -9,7 +9,7 @@ use arc_swap::ArcSwap;
 use sqlx::SqlitePool;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 
-use crate::{DbError, Storage};
+use crate::{DbError, ReadStore, Storage};
 
 mod cfg_store;
 mod dump;
@@ -121,21 +121,9 @@ fn backup_name(path: &Path, stamp: i64, suffix: &str) -> std::path::PathBuf {
 }
 
 #[async_trait::async_trait]
-impl Storage for Native {
+impl ReadStore for Native {
     async fn load_config(&self) -> Result<Option<config::AppConfig>, DbError> {
         cfg_store::load_config(&self.pool()).await
-    }
-
-    async fn save_config(&self, cfg: &config::AppConfig) -> Result<(), DbError> {
-        cfg_store::save_config(&self.pool(), cfg).await
-    }
-
-    async fn import_legacy_json(&self, config_dir: &Path) -> Result<crate::ImportReport, DbError> {
-        migrate::run_json_import(&self.pool(), config_dir).await
-    }
-
-    async fn finalize_migration(&self, config_dir: &Path) -> Result<usize, DbError> {
-        migrate::finalize_migration(&self.pool(), config_dir).await
     }
 
     async fn tracks_page(
@@ -237,6 +225,60 @@ impl Storage for Native {
         DbError,
     > {
         dump::artist_images(&self.pool()).await
+    }
+
+    async fn albums(&self, source: &crate::Source) -> Result<Vec<reader::Album>, DbError> {
+        queries::albums(&self.pool(), source).await
+    }
+
+    async fn load_queue(&self) -> Result<crate::QueueSnapshot, DbError> {
+        dump::load_queue(&self.pool()).await
+    }
+
+    async fn load_playlists(
+        &self,
+        source: &crate::Source,
+    ) -> Result<reader::PlaylistStore, DbError> {
+        dump::load_playlists(&self.pool(), source).await
+    }
+
+    async fn favorites(&self, server_id: &str) -> Result<Vec<String>, DbError> {
+        queries::favorites(&self.pool(), server_id).await
+    }
+
+    async fn is_favorite(&self, server_id: &str, ref_: &str) -> Result<bool, DbError> {
+        queries::is_favorite(&self.pool(), server_id, ref_).await
+    }
+
+    async fn dirty_favorites(&self, server_id: &str) -> Result<Vec<String>, DbError> {
+        writes::dirty_favorites(&self.pool(), server_id).await
+    }
+
+    async fn dirty_unlikes(&self, server_id: &str) -> Result<Vec<String>, DbError> {
+        writes::dirty_unlikes(&self.pool(), server_id).await
+    }
+
+    async fn load_server(&self, id: &str) -> Result<Option<config::MusicServer>, DbError> {
+        cfg_store::load_server(&self.pool(), id).await
+    }
+
+    async fn meta_get(&self, cache_key: &str, kind: &str) -> Result<Option<String>, DbError> {
+        writes::meta_get(&self.pool(), cache_key, kind).await
+    }
+}
+
+#[async_trait::async_trait]
+impl Storage for Native {
+    async fn save_config(&self, cfg: &config::AppConfig) -> Result<(), DbError> {
+        cfg_store::save_config(&self.pool(), cfg).await
+    }
+
+    async fn import_legacy_json(&self, config_dir: &Path) -> Result<crate::ImportReport, DbError> {
+        migrate::run_json_import(&self.pool(), config_dir).await
+    }
+
+    async fn finalize_migration(&self, config_dir: &Path) -> Result<usize, DbError> {
+        migrate::finalize_migration(&self.pool(), config_dir).await
     }
 
     async fn delete_tracks(&self, source: &crate::Source, keys: &[String]) -> Result<u64, DbError> {
@@ -345,31 +387,8 @@ impl Storage for Native {
         writes::set_offline_track(&self.pool(), id, path).await
     }
 
-    async fn albums(&self, source: &crate::Source) -> Result<Vec<reader::Album>, DbError> {
-        queries::albums(&self.pool(), source).await
-    }
-
-    async fn load_queue(&self) -> Result<crate::QueueSnapshot, DbError> {
-        dump::load_queue(&self.pool()).await
-    }
-
-    async fn load_playlists(
-        &self,
-        source: &crate::Source,
-    ) -> Result<reader::PlaylistStore, DbError> {
-        dump::load_playlists(&self.pool(), source).await
-    }
-
     async fn save_queue(&self, snap: &crate::QueueSnapshot) -> Result<(), DbError> {
         writes::save_queue(&self.pool(), snap).await
-    }
-
-    async fn favorites(&self, server_id: &str) -> Result<Vec<String>, DbError> {
-        queries::favorites(&self.pool(), server_id).await
-    }
-
-    async fn is_favorite(&self, server_id: &str, ref_: &str) -> Result<bool, DbError> {
-        queries::is_favorite(&self.pool(), server_id, ref_).await
     }
 
     async fn upsert_tracks(
@@ -390,22 +409,6 @@ impl Storage for Native {
 
     async fn set_favorite(&self, server_id: &str, ref_: &str, on: bool) -> Result<(), DbError> {
         writes::set_favorite(&self.pool(), server_id, ref_, on).await
-    }
-
-    async fn dirty_favorites(&self, server_id: &str) -> Result<Vec<String>, DbError> {
-        writes::dirty_favorites(&self.pool(), server_id).await
-    }
-
-    async fn dirty_unlikes(&self, server_id: &str) -> Result<Vec<String>, DbError> {
-        writes::dirty_unlikes(&self.pool(), server_id).await
-    }
-
-    async fn load_server(&self, id: &str) -> Result<Option<config::MusicServer>, DbError> {
-        cfg_store::load_server(&self.pool(), id).await
-    }
-
-    async fn meta_get(&self, cache_key: &str, kind: &str) -> Result<Option<String>, DbError> {
-        writes::meta_get(&self.pool(), cache_key, kind).await
     }
 
     async fn meta_put(&self, cache_key: &str, kind: &str, payload: &str) -> Result<(), DbError> {
