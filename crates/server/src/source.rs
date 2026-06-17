@@ -557,6 +557,81 @@ pub trait MediaSource: Send + Sync {
             .await
             .map_err(SourceError::from)
     }
+
+    /// Upsert this source's albums into the DB cache. DB-cache op.
+    async fn upsert_albums(&self, albums: &[reader::Album]) -> Result<(), SourceError> {
+        self.db()
+            .upsert_albums(self.source(), albums)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    /// Drop this source's rows absent from the kept sets — the post-sync reconcile
+    /// against the remote's current contents. DB-cache op.
+    async fn prune(
+        &self,
+        keep_track_keys: &[String],
+        keep_album_ids: &[String],
+    ) -> Result<(), SourceError> {
+        self.db()
+            .prune_source(self.source(), keep_track_keys, keep_album_ids)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    /// Record (or clear) the cached image for an artist. DB-cache op.
+    async fn set_artist_image(
+        &self,
+        artist_norm: &str,
+        kind: &str,
+        image_ref: Option<&str>,
+    ) -> Result<(), SourceError> {
+        self.db()
+            .set_artist_image(artist_norm, kind, image_ref)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    /// Mark a track downloaded at `path` (or clear it with `None`). DB-cache op.
+    async fn set_offline_track(&self, id: &str, path: Option<&str>) -> Result<(), SourceError> {
+        self.db()
+            .set_offline_track(id, path)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    /// Create a playlist folder (local organisation). DB-cache op.
+    async fn create_folder(&self, id: &str, name: &str) -> Result<(), SourceError> {
+        self.db()
+            .create_folder(id, name)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    /// Rename a playlist folder. DB-cache op.
+    async fn rename_folder(&self, id: &str, name: &str) -> Result<(), SourceError> {
+        self.db()
+            .rename_folder(id, name)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    /// Delete a playlist folder (its playlists become unfiled). DB-cache op.
+    async fn delete_folder(&self, id: &str) -> Result<(), SourceError> {
+        self.db().delete_folder(id).await.map_err(SourceError::from)
+    }
+
+    /// Move a playlist into a folder (or out of one with `None`). DB-cache op.
+    async fn set_playlist_folder(
+        &self,
+        playlist_ref: &str,
+        folder_id: Option<&str>,
+    ) -> Result<(), SourceError> {
+        self.db()
+            .set_playlist_folder(playlist_ref, folder_id)
+            .await
+            .map_err(SourceError::from)
+    }
 }
 
 /// Mirror a successful remote playlist-add into the DB cache (so the DB-reading

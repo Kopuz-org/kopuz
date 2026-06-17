@@ -25,10 +25,10 @@ pub async fn sync_server_library(clear_first: bool) -> Result<(), String> {
     let gens = hooks::db_reactivity::use_generations();
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let source = active_source.peek().clone();
-    let src = source.source().clone();
-    if !src.is_server() {
+    if !source.source().is_server() {
         return Ok(());
     }
+    let src = source.source().clone();
 
     // Preserve manual / already-cached covers across a re-sync.
     let existing_albums = db.albums(&src).await.unwrap_or_default();
@@ -52,19 +52,22 @@ pub async fn sync_server_library(clear_first: bool) -> Result<(), String> {
 
     let merged_albums: Vec<Album> = snapshot.albums.into_iter().map(merge_cover).collect();
     for chunk in merged_albums.chunks(100) {
-        db.upsert_albums(&src, chunk)
+        source
+            .upsert_albums(chunk)
             .await
             .map_err(|e| e.to_string())?;
         gens.bump_coalesced(Table::Albums);
     }
     for chunk in snapshot.tracks.chunks(100) {
-        db.upsert_tracks(&src, chunk)
+        source
+            .upsert_tracks(chunk)
             .await
             .map_err(|e| e.to_string())?;
         gens.bump_coalesced(Table::Tracks);
     }
     for (name, url) in &snapshot.artist_images {
-        db.set_artist_image(name, "server", Some(url))
+        source
+            .set_artist_image(name, "server", Some(url))
             .await
             .map_err(|e| e.to_string())?;
     }
@@ -76,7 +79,7 @@ pub async fn sync_server_library(clear_first: bool) -> Result<(), String> {
         .map(|t| t.id.key().into_owned())
         .collect();
     let keep_albums: Vec<String> = merged_albums.iter().map(|a| a.id.clone()).collect();
-    let _ = db.prune_source(&src, &keep_keys, &keep_albums).await;
+    let _ = source.prune(&keep_keys, &keep_albums).await;
     gens.bump(Table::Tracks);
     gens.bump(Table::Albums);
     info!("Server library sync completed.");

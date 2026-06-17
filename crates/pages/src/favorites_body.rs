@@ -7,7 +7,6 @@ use components::showcase::{self, SortField};
 use components::track_row::TrackRow;
 use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use config::{AppConfig, UiStyle};
-use db::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_active_source, use_albums, use_favorites, use_tracks_by_keys};
@@ -131,7 +130,6 @@ pub fn FavoritesBody(
 
                 is_syncing.set(true);
                 synced_so_far.set(0);
-                let source_db = Source::Server(sid.clone());
 
                 match sync_mode {
                     FavoritesSync::Instant => {
@@ -194,9 +192,9 @@ pub fn FavoritesBody(
                             let albums = synthesize_albums(&fresh);
                             synced_so_far.set(ids.len());
                             for chunk in fresh.chunks(100) {
-                                let _ = db.upsert_tracks(&source_db, chunk).await;
+                                let _ = source.upsert_tracks(chunk).await;
                             }
-                            let _ = db.upsert_albums(&source_db, &albums).await;
+                            let _ = source.upsert_albums(&albums).await;
                             let _ = db
                                 .upsert_favorites_page(&sid, &page_refs, start_rank, epoch)
                                 .await;
@@ -212,7 +210,7 @@ pub fn FavoritesBody(
                             // not re-stamped this epoch. Dirty local toggles survive.
                             keep_albums.sort();
                             keep_albums.dedup();
-                            let _ = db.prune_source(&source_db, &ids, &keep_albums).await;
+                            let _ = source.prune(&ids, &keep_albums).await;
                             if db.sweep_favorites(&sid, epoch).await.is_ok() {
                                 gens.bump(Table::Favorites);
                             }

@@ -231,9 +231,8 @@ async fn download_worker(
                 // Durable FIRST as a single json_set (the whole-config save per
                 // completed song was the audio-stutter bug), then the in-memory
                 // mirror for live reads.
-                if let Some(db) = try_consume_context::<db::Db>() {
-                    let _ = db.set_offline_track(&id, Some(&path_str)).await;
-                }
+                let source = active_source.peek().clone();
+                let _ = source.set_offline_track(&id, Some(&path_str)).await;
                 config.write().offline_tracks.insert(id.clone(), path_str);
                 if let Some(item) = queue.write().items.iter_mut().find(|i| i.id == id) {
                     item.status = DownloadStatus::Done;
@@ -257,7 +256,7 @@ pub fn delete_downloads(
     mut config: Signal<AppConfig>,
     mut queue: Signal<DownloadQueue>,
 ) {
-    let db = try_consume_context::<db::Db>();
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let mut conf = config.write();
     let mut q = queue.write();
 
@@ -268,14 +267,13 @@ pub fn delete_downloads(
                 let _ = std::fs::remove_file(path);
             }
         }
-        if let Some(db) = db.clone() {
-            let id = id.clone();
-            // The file is already deleted above — the DB row removal must
-            // outlive the calling page or the registry points at nothing.
-            spawn_forever(async move {
-                let _ = db.set_offline_track(&id, None).await;
-            });
-        }
+        let source = active_source.peek().clone();
+        let spawn_id = id.clone();
+        // The file is already deleted above — the DB row removal must
+        // outlive the calling page or the registry points at nothing.
+        spawn_forever(async move {
+            let _ = source.set_offline_track(&spawn_id, None).await;
+        });
         q.items.retain(|i| i.id != id);
     }
 }

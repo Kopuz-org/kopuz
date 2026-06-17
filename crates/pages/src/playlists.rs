@@ -235,7 +235,11 @@ pub fn PlaylistsPage(
                                     let name = i18n::t("new_folder").to_string();
                                     let db = consume_context::<db::Db>();
                                     spawn(async move {
-                                        if db.create_folder(&new_id, &name).await.is_ok() {
+                                        if ::server::source::local(db)
+                                            .create_folder(&new_id, &name)
+                                            .await
+                                            .is_ok()
+                                        {
                                             gens.bump(Table::Folders);
                                         }
                                     });
@@ -288,7 +292,10 @@ pub fn PlaylistsPage(
                                     .upsert_playlist_meta(&Source::Local, &id, &folder_name, None, None)
                                     .await
                                     .is_ok()
-                                    && db.set_playlist_tracks(&Source::Local, &id, &refs).await.is_ok()
+                                    && ::server::source::local(db)
+                                        .set_playlist_tracks(&id, &refs)
+                                        .await
+                                        .is_ok()
                                 {
                                     gens.bump(Table::Playlists);
                                 }
@@ -414,6 +421,7 @@ fn PlaylistsGrid(
                 }
 
                 let source_db = Source::Server(sid.clone());
+                let sync_source = ::server::source::resolve(db.clone(), &config.peek(), &source_db);
                 let existing = db
                     .load_playlists(&source_db)
                     .await
@@ -493,8 +501,8 @@ fn PlaylistsGrid(
                             (!k.is_empty()).then(|| k.to_string())
                         })
                         .collect();
-                    if db
-                        .set_playlist_tracks(&source_db, &m.id, &track_ids)
+                    if sync_source
+                        .set_playlist_tracks(&m.id, &track_ids)
                         .await
                         .is_ok()
                     {
@@ -505,7 +513,7 @@ fn PlaylistsGrid(
                         .filter(|t| seen_paths.insert(t.id.clone()))
                         .collect();
                     for chunk in new_tracks.chunks(100) {
-                        let _ = db.upsert_tracks(&source_db, chunk).await;
+                        let _ = sync_source.upsert_tracks(chunk).await;
                     }
                     gens.bump_coalesced(Table::Tracks);
                 }
@@ -518,7 +526,7 @@ fn PlaylistsGrid(
                     .iter()
                     .filter(|e| !metas.iter().any(|m| m.id == e.id))
                 {
-                    let _ = db.delete_playlist(&source_db, &stale.id).await;
+                    let _ = sync_source.delete_playlist(&stale.id).await;
                 }
                 if is_ytmusic {
                     let now = std::time::SystemTime::now()
@@ -888,7 +896,11 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                                             let pid = pid_action.clone();
                                             let db = consume_context::<db::Db>();
                                             spawn(async move {
-                                                if db.set_playlist_folder(&pid, None).await.is_ok() {
+                                                if ::server::source::local(db)
+                                                    .set_playlist_folder(&pid, None)
+                                                    .await
+                                                    .is_ok()
+                                                {
                                                     gens.bump(Table::Folders);
                                                 }
                                             });
@@ -901,8 +913,9 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                                             let pid = pid_action.clone();
                                             let db = consume_context::<db::Db>();
                                             spawn(async move {
-                                                if db.delete_playlist(&Source::Local, &pid).await.is_ok()
-                                                    && db.set_playlist_folder(&pid, None).await.is_ok()
+                                                let source = ::server::source::local(db);
+                                                if source.delete_playlist(&pid).await.is_ok()
+                                                    && source.set_playlist_folder(&pid, None).await.is_ok()
                                                 {
                                                     gens.bump(Table::Playlists);
                                                     gens.bump(Table::Folders);
@@ -995,7 +1008,11 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                         let rename_id = rename_id.clone();
                         let db = consume_context::<db::Db>();
                         spawn(async move {
-                            if db.rename_folder(&rename_id, &name).await.is_ok() {
+                            if ::server::source::local(db)
+                                .rename_folder(&rename_id, &name)
+                                .await
+                                .is_ok()
+                            {
                                 gens.bump(Table::Folders);
                             }
                         });
@@ -1097,7 +1114,11 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                                                                 let fid = fid_del.clone();
                                                                 let db = consume_context::<db::Db>();
                                                                 spawn(async move {
-                                                                    if db.delete_folder(&fid).await.is_ok() {
+                                                                    if ::server::source::local(db)
+                                                                        .delete_folder(&fid)
+                                                                        .await
+                                                                        .is_ok()
+                                                                    {
                                                                         gens.bump(Table::Folders);
                                                                     }
                                                                 });

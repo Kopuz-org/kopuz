@@ -48,7 +48,11 @@ pub fn FolderPickerModal(playlist_id: String, on_close: EventHandler<()>) -> Ele
                                             let pid = pid2.clone();
                                             let fid = fid.clone();
                                             spawn(async move {
-                                                if db.set_playlist_folder(&pid, Some(&fid)).await.is_ok() {
+                                                if ::server::source::local(db)
+                                                    .set_playlist_folder(&pid, Some(&fid))
+                                                    .await
+                                                    .is_ok()
+                                                {
                                                     gens.bump(Table::Folders);
                                                 }
                                             });
@@ -78,8 +82,9 @@ pub fn FolderPickerModal(playlist_id: String, on_close: EventHandler<()>) -> Ele
                                         let pid = pid_keydown.clone();
                                         let db = consume_context::<db::Db>();
                                         spawn(async move {
-                                            if db.create_folder(&new_id, &name).await.is_ok()
-                                                && db
+                                            let source = ::server::source::local(db);
+                                            if source.create_folder(&new_id, &name).await.is_ok()
+                                                && source
                                                     .set_playlist_folder(&pid, Some(&new_id))
                                                     .await
                                                     .is_ok()
@@ -103,8 +108,9 @@ pub fn FolderPickerModal(playlist_id: String, on_close: EventHandler<()>) -> Ele
                                         let pid = pid4.clone();
                                         let db = consume_context::<db::Db>();
                                         spawn(async move {
-                                            if db.create_folder(&new_id, &name).await.is_ok()
-                                                && db
+                                            let source = ::server::source::local(db);
+                                            if source.create_folder(&new_id, &name).await.is_ok()
+                                                && source
                                                     .set_playlist_folder(&pid, Some(&new_id))
                                                     .await
                                                     .is_ok()
