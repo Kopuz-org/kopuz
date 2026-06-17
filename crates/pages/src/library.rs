@@ -23,7 +23,6 @@ use kopuz_route::Route;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
-use crate::ref_from_uid_path;
 use crate::server::download_manager::{DownloadQueue, DownloadStatus, queue_downloads};
 
 const ITEM_HEIGHT: f64 = 60.0; // 60px: p-2 padding (16px*2=32) + content height (~28px)
@@ -136,12 +135,12 @@ pub fn LibraryPage(
     });
 
     let mut ctrl = use_context::<PlayerController>();
-    let mut active_menu_track = use_signal(|| None::<PathBuf>);
+    let mut active_menu_track = use_signal(|| None::<reader::TrackId>);
     let mut show_playlist_modal = use_signal(|| false);
-    let mut selected_track_for_playlist = use_signal(|| None::<PathBuf>);
+    let mut selected_track_for_playlist = use_signal(|| None::<reader::TrackId>);
     let mut metadata_track = use_signal(|| None::<reader::models::Track>);
     let mut is_selection_mode = use_signal(|| false);
-    let mut selected_tracks = use_signal(HashSet::<PathBuf>::new);
+    let mut selected_tracks = use_signal(HashSet::<reader::TrackId>::new);
 
     // album_id → cover-path, for the per-row cover seam (local uses it, a server
     // ignores it and resolves from the track's own ref).
@@ -188,8 +187,8 @@ pub fn LibraryPage(
                 let track_meta = track.clone();
                 let track_delete = track.clone();
                 let track_radio = track.clone();
-                let track_path = track.id.uid_path();
-                let track_select = track.id.uid_path();
+                let track_path = track.id.clone();
+                let track_select = track.id.clone();
                 let track_key = track.id.uid();
                 let is_currently_playing = currently_playing_idx == Some(idx)
                     && ctrl
@@ -198,7 +197,7 @@ pub fn LibraryPage(
                         .get(idx)
                         .map(|q| q.id == track.id)
                         .unwrap_or(false);
-                let is_menu_open = active_menu_track.read().as_ref() == Some(&track.id.uid_path());
+                let is_menu_open = active_menu_track.read().as_ref() == Some(&track.id);
                 let is_selected = selected_tracks.read().contains(&track_path);
                 let cover_url = ::server::cover::track(
                     &conf,
@@ -259,14 +258,14 @@ pub fn LibraryPage(
                                 }
                             },
                             on_click_menu: move |_| {
-                                if active_menu_track.read().as_ref() == Some(&track_menu.id.uid_path()) {
+                                if active_menu_track.read().as_ref() == Some(&track_menu.id) {
                                     active_menu_track.set(None);
                                 } else {
-                                    active_menu_track.set(Some(track_menu.id.uid_path()));
+                                    active_menu_track.set(Some(track_menu.id.clone()));
                                 }
                             },
                             on_add_to_playlist: move |_| {
-                                selected_track_for_playlist.set(Some(track_add.id.uid_path()));
+                                selected_track_for_playlist.set(Some(track_add.id.clone()));
                                 show_playlist_modal.set(true);
                                 active_menu_track.set(None);
                             },
@@ -337,12 +336,12 @@ pub fn LibraryPage(
                         selected_tracks.write().clear();
                     },
                     on_add_to_playlist: move |playlist_id: String| {
-                        let paths: Vec<PathBuf> = if is_selection_mode() {
+                        let paths: Vec<reader::TrackId> = if is_selection_mode() {
                             selected_tracks.read().iter().cloned().collect()
                         } else {
                             selected_track_for_playlist.read().iter().cloned().collect()
                         };
-                        let refs: Vec<String> = paths.iter().map(|p| ref_from_uid_path(p)).collect();
+                        let refs: Vec<String> = paths.iter().map(|p| p.key().into_owned()).collect();
                         if !refs.is_empty() {
                             let s = ::server::source::resolve(consume_context::<db::Db>(), &config.peek());
                             spawn(async move {
@@ -357,12 +356,12 @@ pub fn LibraryPage(
                         selected_tracks.write().clear();
                     },
                     on_create_playlist: move |name: String| {
-                        let paths: Vec<PathBuf> = if is_selection_mode() {
+                        let paths: Vec<reader::TrackId> = if is_selection_mode() {
                             selected_tracks.read().iter().cloned().collect()
                         } else {
                             selected_track_for_playlist.read().iter().cloned().collect()
                         };
-                        let refs: Vec<String> = paths.iter().map(|p| ref_from_uid_path(p)).collect();
+                        let refs: Vec<String> = paths.iter().map(|p| p.key().into_owned()).collect();
                         if !refs.is_empty() {
                             let s = ::server::source::resolve(consume_context::<db::Db>(), &config.peek());
                             spawn(async move {
@@ -439,7 +438,7 @@ pub fn LibraryPage(
                                 .await
                                 .unwrap_or_default()
                                 .into_iter()
-                                .filter(|t| selected.contains(&t.id.uid_path()))
+                                .filter(|t| selected.contains(&t.id))
                                 .collect();
                             if !tracks.is_empty() {
                                 ctrl.add_to_queue(tracks);
@@ -453,9 +452,12 @@ pub fn LibraryPage(
                         if caps().delete_from_disk {
                             let paths: Vec<_> = selected_tracks.read().iter().cloned().collect();
                             let mut keys = Vec::new();
-                            for path in paths {
-                                if std::fs::remove_file(&path).is_ok() {
-                                    keys.push(path.to_string_lossy().into_owned());
+                            for id in paths {
+                                let Some(path) = id.local_path() else {
+                                    continue;
+                                };
+                                if std::fs::remove_file(path).is_ok() {
+                                    keys.push(id.key().into_owned());
                                 }
                             }
                             if !keys.is_empty() {
@@ -555,7 +557,7 @@ pub fn LibraryPage(
                                         .await
                                         .unwrap_or_default();
                                     selected_tracks
-                                        .set(tracks.into_iter().map(|track| track.id.uid_path()).collect());
+                                        .set(tracks.into_iter().map(|track| track.id).collect());
                                     is_selection_mode.set(true);
                                 });
                             }

@@ -43,11 +43,11 @@ pub struct TrackListViewProps {
 #[component]
 pub fn TrackListView(props: TrackListViewProps) -> Element {
     let mut ctrl = use_context::<PlayerController>();
-    let mut active_menu_track = use_signal(|| None::<PathBuf>);
+    let mut active_menu_track = use_signal(|| None::<reader::TrackId>);
     let mut show_playlist_modal = use_signal(|| false);
-    let mut selected_track_for_playlist = use_signal(|| None::<PathBuf>);
+    let mut selected_track_for_playlist = use_signal(|| None::<reader::TrackId>);
     let mut is_selection_mode = use_signal(|| false);
-    let mut selected_tracks = use_signal(HashSet::<PathBuf>::new);
+    let mut selected_tracks = use_signal(HashSet::<reader::TrackId>::new);
     let mut metadata_track = use_signal(|| None::<Track>);
     let gens = hooks::db_reactivity::use_generations();
 
@@ -97,13 +97,13 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                 is_selection_mode: is_selection_mode(),
                 selected_tracks: selected_tracks.read().clone(),
                 all_selected: !props.tracks.is_empty()
-                    && props.tracks.iter().all(|t| selected_tracks.read().contains(&t.id.uid_path())),
+                    && props.tracks.iter().all(|t| selected_tracks.read().contains(&t.id)),
                 on_cover_click: props.on_cover_click,
                 actions: props.actions,
                 on_select_all: move |selected: bool| {
                     if selected {
                         selected_tracks
-                            .set(tracks_select_all.iter().map(|t| t.id.uid_path()).collect());
+                            .set(tracks_select_all.iter().map(|t| t.id.clone()).collect());
                         is_selection_mode.set(true);
                     }
                     else {
@@ -114,16 +114,16 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                 on_long_press: move |idx: usize| {
                     if let Some(t) = tracks_long_press.get(idx) {
                         is_selection_mode.set(true);
-                        selected_tracks.write().insert(t.id.uid_path());
+                        selected_tracks.write().insert(t.id.clone());
                     }
                 },
                 on_select: move |(idx, sel): (usize, bool)| {
                     if let Some(t) = tracks_select.get(idx) {
                         if sel {
                             is_selection_mode.set(true);
-                            selected_tracks.write().insert(t.id.uid_path());
+                            selected_tracks.write().insert(t.id.clone());
                         } else {
-                            selected_tracks.write().remove(&t.id.uid_path());
+                            selected_tracks.write().remove(&t.id);
                             if selected_tracks.read().is_empty() {
                                 is_selection_mode.set(false);
                             }
@@ -144,7 +144,7 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                 },
                 on_add_to_playlist: move |idx: usize| {
                     if let Some(t) = tracks_add.get(idx) {
-                        selected_track_for_playlist.set(Some(t.id.uid_path()));
+                        selected_track_for_playlist.set(Some(t.id.clone()));
                         show_playlist_modal.set(true);
                         active_menu_track.set(None);
                     }
@@ -158,10 +158,10 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                 active_track: active_menu_track.read().clone(),
                 on_click_menu: move |idx: usize| {
                     if let Some(t) = tracks_menu.get(idx) {
-                        if active_menu_track.read().as_ref() == Some(&t.id.uid_path()) {
+                        if active_menu_track.read().as_ref() == Some(&t.id) {
                             active_menu_track.set(None);
                         } else {
-                            active_menu_track.set(Some(t.id.uid_path()));
+                            active_menu_track.set(Some(t.id.clone()));
                         }
                     }
                 },
@@ -189,7 +189,7 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                         }
                         let tracks: Vec<_> = tracks_sel_queue
                             .iter()
-                            .filter(|t| selected.contains(&t.id.uid_path()))
+                            .filter(|t| selected.contains(&t.id))
                             .cloned()
                             .collect();
                         if !tracks.is_empty() {
@@ -202,8 +202,8 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                     on_delete: move |_| {
                         let paths: Vec<PathBuf> = tracks_sel_delete
                             .iter()
-                            .filter(|t| selected_tracks.read().contains(&t.id.uid_path()))
-                            .map(|t| t.id.uid_path())
+                            .filter(|t| selected_tracks.read().contains(&t.id))
+                            .filter_map(|t| t.id.local_path().map(|p| p.to_path_buf()))
                             .collect();
                         if let Some(ref h) = props.on_selection_delete {
                             h.call(paths);
@@ -279,7 +279,7 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                         if !paths.is_empty() {
                             let refs: Vec<String> = paths
                                 .iter()
-                                .map(|p| p.to_string_lossy().into_owned())
+                                .map(|p| p.key().into_owned())
                                 .collect();
                             let source = server::source::local(consume_context::<db::Db>());
                             spawn(async move {
@@ -302,7 +302,7 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                         if !paths.is_empty() {
                             let refs: Vec<String> = paths
                                 .iter()
-                                .map(|p| p.to_string_lossy().into_owned())
+                                .map(|p| p.key().into_owned())
                                 .collect();
                             let id = uuid::Uuid::new_v4().to_string();
                             let db = consume_context::<db::Db>();

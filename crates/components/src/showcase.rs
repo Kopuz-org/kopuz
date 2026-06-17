@@ -3,7 +3,6 @@ use dioxus::prelude::*;
 use reader::Track;
 use std::cmp::Ordering;
 use std::collections::HashSet;
-use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SortField {
@@ -119,7 +118,7 @@ pub struct ShowcaseProps {
     pub on_remove_from_playlist: Option<EventHandler<usize>>,
     pub on_view_metadata: Option<EventHandler<usize>>,
     pub on_download_track: Option<EventHandler<usize>>,
-    pub active_track: Option<std::path::PathBuf>,
+    pub active_track: Option<reader::TrackId>,
     pub on_click_menu: Option<EventHandler<usize>>,
     pub on_close_menu: Option<EventHandler<()>>,
     pub actions: Option<Element>,
@@ -132,7 +131,7 @@ pub struct ShowcaseProps {
     #[props(default = false)]
     pub is_selection_mode: bool,
     #[props(default = HashSet::new())]
-    pub selected_tracks: HashSet<PathBuf>,
+    pub selected_tracks: HashSet<reader::TrackId>,
     pub on_select: Option<EventHandler<(usize, bool)>>,
     pub on_select_all: Option<EventHandler<bool>>,
     #[props(default = false)]

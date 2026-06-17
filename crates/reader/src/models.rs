@@ -71,12 +71,6 @@ impl TrackId {
         }
     }
 
-    /// The [`uid`](Self::uid) wrapped in a `PathBuf` — for the still-`PathBuf`-keyed
-    /// selection/menu collections during the migration. (Transitional.)
-    pub fn uid_path(&self) -> PathBuf {
-        PathBuf::from(self.uid())
-    }
-
     /// Parse a legacy `Track.path` string (`"service:id[:cover]"` or a real
     /// path). Used ONLY by the migration importer; the 3rd cover segment is
     /// dropped here (the importer sets `Track.cover` separately).

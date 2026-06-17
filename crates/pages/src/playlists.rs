@@ -477,7 +477,7 @@ fn PlaylistsGrid(
                 }
                 gens.bump(Table::Playlists);
 
-                let mut seen_paths: std::collections::HashSet<std::path::PathBuf> =
+                let mut seen_paths: std::collections::HashSet<reader::TrackId> =
                     std::collections::HashSet::new();
                 for (i, m) in metas.iter().enumerate() {
                     if *fetch_request_id.peek() != request_id {
@@ -504,7 +504,7 @@ fn PlaylistsGrid(
                     }
                     let new_tracks: Vec<reader::models::Track> = entries
                         .into_iter()
-                        .filter(|t| seen_paths.insert(t.id.uid_path()))
+                        .filter(|t| seen_paths.insert(t.id.clone()))
                         .collect();
                     for chunk in new_tracks.chunks(100) {
                         let _ = db.upsert_tracks(&source_db, chunk).await;

@@ -10,8 +10,6 @@ use hooks::use_db_queries::{use_active_source, use_albums, use_genre_tracks};
 use hooks::use_search_data::use_search_data;
 use player::player;
 
-use crate::ref_from_uid_path;
-
 /// Source-agnostic search. The data path (`use_search_data`, `use_genre_tracks`)
 /// is already source-scoped; the only per-source bits are the genre-detail cover
 /// (local file vs remote URL), the add-to-playlist ref, and the modal flag — all
@@ -35,9 +33,9 @@ pub fn Search(
     let data = use_search_data(search_query, config);
     let mut selected_genre = use_signal(|| None::<String>);
 
-    let mut active_menu_track = use_signal(|| None::<std::path::PathBuf>);
+    let mut active_menu_track = use_signal(|| None::<reader::TrackId>);
     let mut show_playlist_modal = use_signal(|| false);
-    let selected_track_for_playlist = use_signal(|| None::<std::path::PathBuf>);
+    let selected_track_for_playlist = use_signal(|| None::<reader::TrackId>);
 
     let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
@@ -86,7 +84,7 @@ pub fn Search(
                             let source =
                                 ::server::source::resolve(consume_context::<db::Db>(), &config.peek());
                             spawn(async move {
-                                let refs: Vec<String> = std::iter::once(ref_from_uid_path(&path))
+                                let refs: Vec<String> = std::iter::once(path.key().into_owned())
                                     .filter(|r| !r.is_empty())
                                     .collect();
                                 if !refs.is_empty()
@@ -104,7 +102,7 @@ pub fn Search(
                             let source =
                                 ::server::source::resolve(consume_context::<db::Db>(), &config.peek());
                             spawn(async move {
-                                let refs: Vec<String> = std::iter::once(ref_from_uid_path(&path))
+                                let refs: Vec<String> = std::iter::once(path.key().into_owned())
                                     .filter(|r| !r.is_empty())
                                     .collect();
                                 if !refs.is_empty()

@@ -49,7 +49,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
 
     let currently_playing_path = {
         let idx = *ctrl.current_queue_index.read();
-        ctrl.get_track_at(idx).map(|track| track.id.uid_path())
+        ctrl.get_track_at(idx).map(|track| track.id.clone())
     };
     let current_song_title = ctrl.current_song_title.read().clone();
     let current_song_artist = ctrl.current_song_artist.read().clone();
@@ -58,7 +58,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     let tracks_for_play_all = sorted_tracks.clone();
     let selected_queue_tracks: Vec<_> = sorted_tracks
         .iter()
-        .filter(|track| props.selected_tracks.contains(&track.id.uid_path()))
+        .filter(|track| props.selected_tracks.contains(&track.id))
         .cloned()
         .collect();
     let selected_queue_tracks_arc = std::sync::Arc::new(selected_queue_tracks.clone());
@@ -232,8 +232,8 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                              let idx = *idx;
                              let cover_url = cover_for(track);
 
-                             let is_selected = props.selected_tracks.contains(&track.id.uid_path());
-                             let matches_current_path = currently_playing_path.as_ref() == Some(&track.id.uid_path());
+                             let is_selected = props.selected_tracks.contains(&track.id);
+                             let matches_current_path = currently_playing_path.as_ref() == Some(&track.id);
                              let matches_current_metadata = currently_playing_path.is_none()
                                  && !current_song_title.is_empty()
                                  && track.title == current_song_title
@@ -288,7 +288,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                              track: track.clone(),
                                              on_start_radio: crate::track_row::radio_handler(track.clone()),
                                              cover_url: cover_url,
-                                             is_menu_open: props.active_track.as_ref() == Some(&track.id.uid_path()),
+                                             is_menu_open: props.active_track.as_ref() == Some(&track.id),
                                              is_album: props.is_album,
                                              is_selection_mode: props.is_selection_mode,
                                              is_selected: is_selected,

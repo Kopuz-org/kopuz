@@ -23,9 +23,9 @@ pub fn SearchGenreDetail(
     mut current_song_progress: Signal<u64>,
     mut queue: Signal<Vec<Track>>,
     mut current_queue_index: Signal<usize>,
-    mut active_menu_track: Signal<Option<std::path::PathBuf>>,
+    mut active_menu_track: Signal<Option<reader::TrackId>>,
     mut show_playlist_modal: Signal<bool>,
-    mut selected_track_for_playlist: Signal<Option<std::path::PathBuf>>,
+    mut selected_track_for_playlist: Signal<Option<reader::TrackId>>,
 ) -> Element {
     let mut ctrl = use_context::<PlayerController>();
     let config = use_context::<Signal<AppConfig>>();
@@ -38,7 +38,7 @@ pub fn SearchGenreDetail(
         sorted_genre_tracks.iter().map(|(t, _)| t.clone()).collect();
     let currently_playing_path = {
         let idx = *ctrl.current_queue_index.read();
-        ctrl.get_track_at(idx).map(|track| track.id.uid_path())
+        ctrl.get_track_at(idx).map(|track| track.id.clone())
     };
     let current_song_title = ctrl.current_song_title.read().clone();
     let current_song_artist = ctrl.current_song_artist.read().clone();
@@ -192,7 +192,7 @@ pub fn SearchGenreDetail(
                              let track_queue = track.clone();
                              let track_delete = track.clone();
                              let queue_source = genre_tracks_list.clone();
-                             let matches_current_path = currently_playing_path.as_ref() == Some(&track.id.uid_path());
+                             let matches_current_path = currently_playing_path.as_ref() == Some(&track.id);
                              let matches_current_metadata = currently_playing_path.is_none()
                                  && !current_song_title.is_empty()
                                  && track.title == current_song_title
@@ -200,7 +200,7 @@ pub fn SearchGenreDetail(
                                  && track.album == current_song_album
                                  && track.duration == current_song_duration;
                              let is_currently_playing: bool = matches_current_path || matches_current_metadata;
-                             let is_menu_open = active_menu_track.read().as_ref() == Some(&track.id.uid_path());
+                             let is_menu_open = active_menu_track.read().as_ref() == Some(&track.id);
                              let item_id: Option<String> = {
                                  let s = track.id.uid();
                                  if s.starts_with("jellyfin:") {
@@ -229,14 +229,14 @@ pub fn SearchGenreDetail(
                                      is_downloaded: is_downloaded,
                                      is_currently_playing,
                                      on_click_menu: move |_| {
-                                         if active_menu_track.read().as_ref() == Some(&track_menu.id.uid_path()) {
+                                         if active_menu_track.read().as_ref() == Some(&track_menu.id) {
                                              active_menu_track.set(None);
                                          } else {
-                                             active_menu_track.set(Some(track_menu.id.uid_path()));
+                                             active_menu_track.set(Some(track_menu.id.clone()));
                                          }
                                      },
                                      on_add_to_playlist: move |_| {
-                                         selected_track_for_playlist.set(Some(track_add.id.uid_path()));
+                                         selected_track_for_playlist.set(Some(track_add.id.clone()));
                                          show_playlist_modal.set(true);
                                          active_menu_track.set(None);
                                      },

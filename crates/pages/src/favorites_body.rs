@@ -1,4 +1,3 @@
-use crate::ref_from_uid_path;
 use crate::server::download_manager::{DownloadQueue, DownloadStatus, queue_downloads};
 use ::server::source::FavoritesSync;
 use components::metadata_modal::MetadataModal;
@@ -30,7 +29,7 @@ pub fn FavoritesBody(
     mut queue: Signal<Vec<reader::models::Track>>,
 ) -> Element {
     let mut ctrl = use_context::<PlayerController>();
-    let mut active_menu_track = use_signal(|| None::<PathBuf>);
+    let mut active_menu_track = use_signal(|| None::<reader::TrackId>);
     let mut metadata_track = use_signal(|| None::<reader::models::Track>);
     let mut scroll_positions = use_context::<Signal<std::collections::HashMap<Route, f64>>>();
     let saved_scroll = scroll_positions
@@ -51,10 +50,10 @@ pub fn FavoritesBody(
 
     // Multi-selection state
     let mut is_selection_mode = use_signal(|| false);
-    let mut selected_tracks = use_signal(HashSet::<PathBuf>::new);
+    let mut selected_tracks = use_signal(HashSet::<reader::TrackId>::new);
     let sort_state = use_signal(|| None);
     let mut show_playlist_modal = use_signal(|| false);
-    let mut selected_track_for_playlist = use_signal(|| None::<PathBuf>);
+    let mut selected_track_for_playlist = use_signal(|| None::<reader::TrackId>);
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
     let gens = hooks::db_reactivity::use_generations();
@@ -283,7 +282,7 @@ pub fn FavoritesBody(
 
     let currently_playing_path = {
         let idx = *ctrl.current_queue_index.read();
-        ctrl.get_track_at(idx).map(|track| track.id.uid_path())
+        ctrl.get_track_at(idx).map(|track| track.id.clone())
     };
 
     let displayed_tracks_for_selection = sorted_displayed_tracks.clone();
@@ -309,17 +308,17 @@ pub fn FavoritesBody(
         .map(|(idx, (track, cover_url))| {
             let cap = caps();
             let track_menu = track.clone();
-            let track_path = track.id.uid_path();
-            let track_select = track.id.uid_path();
+            let track_path = track.id.clone();
+            let track_select = track.id.clone();
             let track_add = track.clone();
             let track_queue = track.clone();
             let track_meta = track.clone();
             let track_delete = track.clone();
             let queue_source = queue_tracks.clone();
             let track_key = track.id.uid();
-            let is_menu_open = active_menu_track.read().as_ref() == Some(&track.id.uid_path());
+            let is_menu_open = active_menu_track.read().as_ref() == Some(&track.id);
             let is_selected = selected_tracks.read().contains(&track_path);
-            let matches_current_path = currently_playing_path.as_ref() == Some(&track.id.uid_path());
+            let matches_current_path = currently_playing_path.as_ref() == Some(&track.id);
 
             let item_id: String = track.id.key().to_string();
             let is_downloaded = cap.downloads
@@ -364,14 +363,14 @@ pub fn FavoritesBody(
                         }
                     },
                     on_click_menu: move |_| {
-                        if active_menu_track.read().as_ref() == Some(&track_menu.id.uid_path()) {
+                        if active_menu_track.read().as_ref() == Some(&track_menu.id) {
                             active_menu_track.set(None);
                         } else {
-                            active_menu_track.set(Some(track_menu.id.uid_path()));
+                            active_menu_track.set(Some(track_menu.id.clone()));
                         }
                     },
                     on_add_to_playlist: move |_| {
-                        selected_track_for_playlist.set(Some(track_add.id.uid_path()));
+                        selected_track_for_playlist.set(Some(track_add.id.clone()));
                         show_playlist_modal.set(true);
                         active_menu_track.set(None);
                     },
@@ -446,7 +445,7 @@ pub fn FavoritesBody(
                                 &config.peek(),
                             );
                             let refs: Vec<String> =
-                                selected_paths.iter().map(|p| ref_from_uid_path(p)).collect();
+                                selected_paths.iter().map(|p| p.key().into_owned()).collect();
                             spawn(async move {
                                 if !refs.is_empty() {
                                     let _ = src.add_to_playlist(&pid, &refs).await;
@@ -473,7 +472,7 @@ pub fn FavoritesBody(
                                 &config.peek(),
                             );
                             let refs: Vec<String> =
-                                selected_paths.iter().map(|p| ref_from_uid_path(p)).collect();
+                                selected_paths.iter().map(|p| p.key().into_owned()).collect();
                             spawn(async move {
                                 if !refs.is_empty() {
                                     let _ = src.create_playlist(&playlist_name, &refs).await;
@@ -541,7 +540,7 @@ pub fn FavoritesBody(
                         }
                         let tracks: Vec<_> = displayed_tracks_for_selection
                             .iter()
-                            .filter(|(t, _)| selected.contains(&t.id.uid_path()))
+                            .filter(|(t, _)| selected.contains(&t.id))
                             .map(|(track, _)| track.clone())
                             .collect();
                         if !tracks.is_empty() {
@@ -557,9 +556,12 @@ pub fn FavoritesBody(
                         if caps().delete_from_disk {
                             let paths: Vec<_> = selected_tracks.read().iter().cloned().collect();
                             let mut keys = Vec::new();
-                            for path in paths {
-                                if std::fs::remove_file(&path).is_ok() {
-                                    keys.push(path.to_string_lossy().into_owned());
+                            for id in paths {
+                                let Some(path) = id.local_path() else {
+                                    continue;
+                                };
+                                if std::fs::remove_file(path).is_ok() {
+                                    keys.push(id.key().into_owned());
                                 }
                             }
                             if !keys.is_empty() {
@@ -677,23 +679,23 @@ pub fn FavoritesBody(
                 div {
                     class: "flex items-center gap-3 mb-4 px-2 text-sm font-medium text-slate-500 uppercase tracking-wider",
                     button {
-                        class: if displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.id.uid_path())) {
+                        class: if displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.id)) {
                             "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
                         } else {
                             "w-4 h-4 rounded border border-white/20 bg-white/5 hover:border-white/50 transition-colors"
                         },
                         aria_label: i18n::t("select_all_tracks"),
                         onclick: move |_| {
-                            let all_selected = !displayed_tracks.is_empty() && displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.id.uid_path()));
+                            let all_selected = !displayed_tracks.is_empty() && displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.id));
                             if all_selected {
                                 selected_tracks.write().clear();
                                 is_selection_mode.set(false);
                             } else {
-                                selected_tracks.set(displayed_tracks.iter().map(|(track, _)| track.id.uid_path()).collect());
+                                selected_tracks.set(displayed_tracks.iter().map(|(track, _)| track.id.clone()).collect());
                                 is_selection_mode.set(true);
                             }
                         },
-                        if displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.id.uid_path())) {
+                        if displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.id)) {
                             i { class: "fa-solid fa-check", style: "font-size: 9px;" }
                         }
                     }

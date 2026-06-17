@@ -105,12 +105,12 @@ pub fn Artist(
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
 
     let mut show_playlist_modal = use_signal(|| false);
-    let mut active_menu_track = use_signal(|| None::<PathBuf>);
-    let mut selected_track_for_playlist = use_signal(|| None::<PathBuf>);
+    let mut active_menu_track = use_signal(|| None::<reader::TrackId>);
+    let mut selected_track_for_playlist = use_signal(|| None::<reader::TrackId>);
     let mut metadata_track = use_signal(|| None::<reader::models::Track>);
 
     let mut is_selection_mode = use_signal(|| false);
-    let mut selected_tracks = use_signal(HashSet::<PathBuf>::new);
+    let mut selected_tracks = use_signal(HashSet::<reader::TrackId>::new);
 
     let mut open_album_menu = use_signal(|| None::<String>);
     let mut show_album_playlist_modal = use_signal(|| false);
@@ -329,10 +329,10 @@ pub fn Artist(
 
     // The refs (item ids / local paths) of the currently-selected tracks — derived
     // from the in-hand `Track`s via the typed id, so it's source-uniform.
-    let refs_for = move |paths: &HashSet<PathBuf>| -> Vec<String> {
+    let refs_for = move |paths: &HashSet<reader::TrackId>| -> Vec<String> {
         artist_tracks()
             .iter()
-            .filter(|t| paths.contains(&t.id.uid_path()))
+            .filter(|t| paths.contains(&t.id))
             .map(|t| t.id.key().into_owned())
             .collect()
     };
@@ -405,7 +405,7 @@ pub fn Artist(
                                     selected_tracks.write().clear();
                                 },
                                 on_add_to_playlist: move |playlist_id: String| {
-                                    let paths: HashSet<PathBuf> = if is_selection_mode() {
+                                    let paths: HashSet<reader::TrackId> = if is_selection_mode() {
                                         selected_tracks.read().clone()
                                     } else {
                                         selected_track_for_playlist.read().iter().cloned().collect()
@@ -425,7 +425,7 @@ pub fn Artist(
                                     selected_tracks.write().clear();
                                 },
                                 on_create_playlist: move |name: String| {
-                                    let paths: HashSet<PathBuf> = if is_selection_mode() {
+                                    let paths: HashSet<reader::TrackId> = if is_selection_mode() {
                                         selected_tracks.read().clone()
                                     } else {
                                         selected_track_for_playlist.read().iter().cloned().collect()
@@ -498,7 +498,7 @@ pub fn Artist(
                                     let selected = selected_tracks.read().clone();
                                     let tracks: Vec<_> = artist_tracks()
                                         .iter()
-                                        .filter(|t| selected.contains(&t.id.uid_path()))
+                                        .filter(|t| selected.contains(&t.id))
                                         .cloned()
                                         .collect();
                                     if !tracks.is_empty() {
@@ -512,9 +512,12 @@ pub fn Artist(
                                     if caps().delete_from_disk {
                                         let paths: Vec<_> = selected_tracks.read().iter().cloned().collect();
                                         let mut keys = Vec::new();
-                                        for path in &paths {
+                                        for id in &paths {
+                                            let Some(path) = id.local_path() else {
+                                                continue;
+                                            };
                                             if std::fs::remove_file(path).is_ok() {
-                                                keys.push(path.to_string_lossy().into_owned());
+                                                keys.push(id.key().into_owned());
                                             }
                                         }
                                         if !keys.is_empty() {
@@ -806,10 +809,10 @@ pub fn Artist(
                                 active_track: active_menu_track.read().clone(),
                                 is_selection_mode: is_selection_mode(),
                                 selected_tracks: selected_tracks.read().clone(),
-                                all_selected: !artist_tracks().is_empty() && artist_tracks().iter().all(|track| selected_tracks.read().contains(&track.id.uid_path())),
+                                all_selected: !artist_tracks().is_empty() && artist_tracks().iter().all(|track| selected_tracks.read().contains(&track.id)),
                                 on_select_all: move |selected: bool| {
                                     if selected {
-                                        selected_tracks.set(artist_tracks().into_iter().map(|track| track.id.uid_path()).collect());
+                                        selected_tracks.set(artist_tracks().into_iter().map(|track| track.id).collect());
                                         is_selection_mode.set(true);
                                     } else {
                                         selected_tracks.write().clear();
@@ -819,16 +822,16 @@ pub fn Artist(
                                 on_long_press: move |idx: usize| {
                                     if let Some(track) = artist_tracks().get(idx) {
                                         is_selection_mode.set(true);
-                                        selected_tracks.write().insert(track.id.uid_path());
+                                        selected_tracks.write().insert(track.id.clone());
                                     }
                                 },
                                 on_select: move |(idx, selected): (usize, bool)| {
                                     if let Some(track) = artist_tracks().get(idx) {
                                         if selected {
                                             is_selection_mode.set(true);
-                                            selected_tracks.write().insert(track.id.uid_path());
+                                            selected_tracks.write().insert(track.id.clone());
                                         } else {
-                                            selected_tracks.write().remove(&track.id.uid_path());
+                                            selected_tracks.write().remove(&track.id);
                                             if selected_tracks.read().is_empty() {
                                                 is_selection_mode.set(false);
                                             }
@@ -851,7 +854,7 @@ pub fn Artist(
                                 },
                                 on_click_menu: move |idx: usize| {
                                     if let Some(track) = artist_tracks().get(idx) {
-                                        let path = track.id.uid_path();
+                                        let path = track.id.clone();
                                         let already_open = active_menu_track.read().as_ref() == Some(&path);
                                         active_menu_track.set((!already_open).then(|| path.clone()));
                                     }
@@ -859,7 +862,7 @@ pub fn Artist(
                                 on_close_menu: move |_| active_menu_track.set(None),
                                 on_add_to_playlist: move |idx: usize| {
                                     if let Some(track) = artist_tracks().get(idx) {
-                                        selected_track_for_playlist.set(Some(track.id.uid_path()));
+                                        selected_track_for_playlist.set(Some(track.id.clone()));
                                         show_playlist_modal.set(true);
                                         active_menu_track.set(None);
                                     }

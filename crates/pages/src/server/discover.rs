@@ -6,7 +6,6 @@ use config::{AppConfig, MusicService};
 use dioxus::prelude::*;
 use reader::models::Track;
 use server::ytmusic::discover::{DiscoverHome, DiscoverItem, DiscoverShelf, YtArtist};
-use std::path::PathBuf;
 use tracing::Instrument;
 
 /// Tracks the id (playlist_id or MPRE… album browse id) that last
@@ -297,8 +296,8 @@ fn SongListShelf(
             div { class: "flex flex-col",
                 {
                     // Shared menu / playing state across the rows.
-                    let mut active_menu_path = use_signal(|| None::<PathBuf>);
-                    let mut current_playing_path = use_signal(|| None::<PathBuf>);
+                    let mut active_menu_path = use_signal(|| None::<reader::TrackId>);
+                    let mut current_playing_path = use_signal(|| None::<reader::TrackId>);
                     rsx! {
                         for (idx, track) in tracks.iter().enumerate() {
                             {
@@ -316,11 +315,11 @@ fn SongListShelf(
                                 .map(utils::cover_url_from_string);
                                 let track_for_play = track.clone();
                                 let track_for_menu = track.clone();
-                                let track_path_for_match = track.id.uid_path();
+                                let track_path_for_match = track.id.clone();
                                 let is_current = current_playing_path.read().as_ref()
                                     == Some(&track_path_for_match);
                                 let is_menu_open = active_menu_path.read().as_ref()
-                                    == Some(&track.id.uid_path());
+                                    == Some(&track.id);
                                 rsx! {
                                     TrackRow {
                                         key: "{idx}",
@@ -338,7 +337,7 @@ fn SongListShelf(
                                                 .position(|x| x.id == track_for_play.id)
                                                 .unwrap_or(0);
                                             queue.rotate_left(start);
-                                            current_playing_path.set(Some(track_for_play.id.uid_path()));
+                                            current_playing_path.set(Some(track_for_play.id.clone()));
                                             // Top Songs is a preview — clear the
                                             // discover source so no album/playlist
                                             // tile incorrectly shows the pause
@@ -347,7 +346,7 @@ fn SongListShelf(
                                             ctrl.play_queue_linear(queue);
                                         },
                                         on_click_menu: move |_| {
-                                            let p = track_for_menu.id.uid_path();
+                                            let p = track_for_menu.id.clone();
                                             if active_menu_path.read().as_ref() == Some(&p) {
                                                 active_menu_path.set(None);
                                             } else {
