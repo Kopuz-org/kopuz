@@ -44,7 +44,7 @@ pub fn FolderPickerModal(playlist_id: String, on_close: EventHandler<()>) -> Ele
                                         key: "{fid}",
                                         class: "w-full text-left px-3 py-2 rounded-lg text-sm text-white hover:bg-white/10 flex items-center gap-2 transition-colors",
                                         onclick: move |_| {
-                                            let local = consume_context::<::server::source::LocalHandle>().0.clone();
+                                            let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                                             let pid = pid2.clone();
                                             let fid = fid.clone();
                                             spawn(async move {
@@ -80,7 +80,7 @@ pub fn FolderPickerModal(playlist_id: String, on_close: EventHandler<()>) -> Ele
                                     if !name.is_empty() {
                                         let new_id = uuid::Uuid::new_v4().to_string();
                                         let pid = pid_keydown.clone();
-                                        let source = consume_context::<::server::source::LocalHandle>().0.clone();
+                                        let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                                         spawn(async move {
                                             if source.create_folder(&new_id, &name).await.is_ok()
                                                 && source
@@ -105,7 +105,7 @@ pub fn FolderPickerModal(playlist_id: String, on_close: EventHandler<()>) -> Ele
                                     if !name.is_empty() {
                                         let new_id = uuid::Uuid::new_v4().to_string();
                                         let pid = pid4.clone();
-                                        let source = consume_context::<::server::source::LocalHandle>().0.clone();
+                                        let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                                         spawn(async move {
                                             if source.create_folder(&new_id, &name).await.is_ok()
                                                 && source

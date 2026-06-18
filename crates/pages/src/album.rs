@@ -459,7 +459,7 @@ fn AlbumDetail(
                     let aid = aid.clone();
                     let delete_cover = delete_cover.clone();
                     let cover_cache = cover_cache.clone();
-                    let local = consume_context::<::server::source::LocalHandle>().0.clone();
+                    let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                     spawn(async move {
                         if local.update_album_cover(&aid, None, false).await.is_ok() {
                             gens.bump(Table::Albums);
@@ -518,7 +518,7 @@ fn AlbumDetail(
                     let aid = aid_cover.clone();
                     let _ = &aid;
                     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-                    let local = consume_context::<::server::source::LocalHandle>().0.clone();
+                    let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
                     spawn(async move {
                         let file = rfd::AsyncFileDialog::new()
@@ -546,7 +546,7 @@ fn AlbumDetail(
                         && let Some(track_path) = t.id.local_path()
                         && std::fs::remove_file(track_path).is_ok()
                     {
-                        let s = consume_context::<::server::source::LocalHandle>().0.clone();
+                        let s = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                         let key = t.id.key().into_owned();
                         spawn(async move {
                             if s.delete_tracks(&[key]).await.is_ok() {
@@ -563,7 +563,7 @@ fn AlbumDetail(
                         }
                     }
                     if !keys.is_empty() {
-                        let s = consume_context::<::server::source::LocalHandle>().0.clone();
+                        let s = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                         spawn(async move {
                             if s.delete_tracks(&keys).await.is_ok() {
                                 gens.bump(Table::Tracks);

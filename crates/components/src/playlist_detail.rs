@@ -208,7 +208,7 @@ pub fn PlaylistDetail(
                         if let Some(del_path) = t.id.local_path()
                             && std::fs::remove_file(del_path).is_ok()
                         {
-                            let source = consume_context::<::server::source::LocalHandle>().0.clone();
+                            let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                             let key = t.id.key().into_owned();
                             spawn(async move {
                                 if source.delete_tracks(&[key]).await.is_ok() {
@@ -229,7 +229,7 @@ pub fn PlaylistDetail(
                             }
                         }
                         if !keys.is_empty() {
-                            let source = consume_context::<::server::source::LocalHandle>().0.clone();
+                            let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                             spawn(async move {
                                 if source.delete_tracks(&keys).await.is_ok() {
                                     gens.bump(Table::Tracks);

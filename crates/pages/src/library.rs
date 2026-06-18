@@ -283,7 +283,7 @@ pub fn LibraryPage(
                                     && let Some(p) = track_delete.id.local_path()
                                     && std::fs::remove_file(p).is_ok()
                                 {
-                                    let s = consume_context::<::server::source::LocalHandle>().0.clone();
+                                    let s = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                                     let key = track_delete.id.key().into_owned();
                                     spawn(async move {
                                         if s.delete_tracks(&[key]).await.is_ok() {
@@ -403,7 +403,7 @@ pub fn LibraryPage(
                                     edits.album.trim(),
                                     edits.artist.trim(),
                                 );
-                                let s = consume_context::<::server::source::LocalHandle>().0.clone();
+                                let s = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                                 spawn(async move {
                                     if s.upsert_tracks(&[t]).await.is_ok() {
                                         gens.bump(Table::Tracks);
@@ -460,7 +460,7 @@ pub fn LibraryPage(
                                 }
                             }
                             if !keys.is_empty() {
-                                let s = consume_context::<::server::source::LocalHandle>().0.clone();
+                                let s = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                                 spawn(async move {
                                     if s.delete_tracks(&keys).await.is_ok() {
                                         gens.bump(Table::Tracks);

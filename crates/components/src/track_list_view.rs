@@ -243,7 +243,7 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                                     edits.album.trim(),
                                     edits.artist.trim(),
                                 );
-                                let source = consume_context::<::server::source::LocalHandle>().0.clone();
+                                let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                                 spawn(async move {
                                     if source.upsert_tracks(&[t]).await.is_ok() {
                                         gens.bump(Table::Tracks);
@@ -280,7 +280,7 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                                 .iter()
                                 .map(|p| p.key().into_owned())
                                 .collect();
-                            let source = consume_context::<::server::source::LocalHandle>().0.clone();
+                            let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                             spawn(async move {
                                 if source.add_to_playlist(&playlist_id, &refs).await.is_ok() {
                                     gens.bump(Table::Playlists);
@@ -303,7 +303,7 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                                 .iter()
                                 .map(|p| p.key().into_owned())
                                 .collect();
-                            let source = consume_context::<::server::source::LocalHandle>().0.clone();
+                            let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                             spawn(async move {
                                 if source.create_playlist(&name, &refs).await.is_ok() {
                                     gens.bump(Table::Playlists);

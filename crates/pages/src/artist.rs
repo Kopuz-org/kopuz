@@ -785,7 +785,7 @@ pub fn Artist(
                                         if artist.is_empty() {
                                             return;
                                         }
-                                        let local = consume_context::<::server::source::LocalHandle>().0.clone();
+                                        let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                                         spawn(async move {
                                             let file = rfd::AsyncFileDialog::new()
                                                 .add_filter("Images", &["jpg", "jpeg", "png", "webp"])

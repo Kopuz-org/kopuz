@@ -232,7 +232,7 @@ pub fn PlaylistsPage(
                                 onclick: move |_| {
                                     let new_id = uuid::Uuid::new_v4().to_string();
                                     let name = i18n::t("new_folder").to_string();
-                                    let local = consume_context::<::server::source::LocalHandle>().0.clone();
+                                    let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                                     spawn(async move {
                                         if local
                                             .create_folder(&new_id, &name)
@@ -280,7 +280,7 @@ pub fn PlaylistsPage(
                                 format!("{folder_path}{}", std::path::MAIN_SEPARATOR)
                             };
                             let read_db = consume_context::<hooks::ReadDb>();
-                            let local = consume_context::<::server::source::LocalHandle>().0.clone();
+                            let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                             spawn(async move {
                                 let tracks = read_db.folder_tracks(&prefix).await.unwrap_or_default();
                                 let refs: Vec<String> = tracks
@@ -879,7 +879,7 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                                         0 => move_target_id.set(Some(pid_action.clone())),
                                         1 => {
                                             let pid = pid_action.clone();
-                                            let local = consume_context::<::server::source::LocalHandle>().0.clone();
+                                            let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                                             spawn(async move {
                                                 if local
                                                     .set_playlist_folder(&pid, None)
@@ -896,7 +896,7 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                                         }
                                         _ => {
                                             let pid = pid_action.clone();
-                                            let source = consume_context::<::server::source::LocalHandle>().0.clone();
+                                            let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                                             spawn(async move {
                                                 if source.delete_playlist(&pid).await.is_ok()
                                                     && source.set_playlist_folder(&pid, None).await.is_ok()
@@ -916,7 +916,7 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                                         }
                                         _ => {
                                             let pid = pid_action.clone();
-                                            let s = consume_context::<::server::source::LocalHandle>().0.clone();
+                                            let s = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                                             spawn(async move {
                                                 if s.delete_playlist(&pid).await.is_ok() {
                                                     gens.bump(Table::Playlists);
@@ -960,7 +960,7 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                                 .cover_path
                                 .as_ref()
                                 .map(|p| p.to_string_lossy().into_owned());
-                            let local = consume_context::<::server::source::LocalHandle>().0.clone();
+                            let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                             spawn(async move {
                                 if local
                                     .upsert_playlist_meta(&id, &name, cover.as_deref(), None)
@@ -990,7 +990,7 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                             return;
                         }
                         let rename_id = rename_id.clone();
-                        let local = consume_context::<::server::source::LocalHandle>().0.clone();
+                        let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                         spawn(async move {
                             if local
                                 .rename_folder(&rename_id, &name)
@@ -1096,7 +1096,7 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                                                                 rename_folder_name.set(fname_rename.clone());
                                                             } else {
                                                                 let fid = fid_del.clone();
-                                                                let local = consume_context::<::server::source::LocalHandle>().0.clone();
+                                                                let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                                                                 spawn(async move {
                                                                     if local
                                                                         .delete_folder(&fid)

@@ -180,7 +180,7 @@ pub fn SearchResults(
                                             if let Some(del_path) = track_delete.id.local_path()
                                                 && std::fs::remove_file(del_path).is_ok()
                                             {
-                                                let local = consume_context::<::server::source::LocalHandle>().0.clone();
+                                                let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                                                 let key = track_delete.id.key().into_owned();
                                                 spawn(async move {
                                                     if local

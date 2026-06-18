@@ -50,8 +50,7 @@ pub fn BottombarModern(
 
     let volume_percent = *volume.read() * 100.0;
     let mut ctrl = use_context::<PlayerController>();
-    let local = use_context::<::server::source::LocalHandle>();
-    let server = use_context::<Signal<::server::source::ServerHandle>>();
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let nav_ctrl = use_context::<NavigationController>();
     let fav_track = use_memo(move || ctrl.current_track_snapshot.read().clone());
     let is_fav_res = hooks::use_db_queries::use_track_is_favorite(fav_track);
@@ -344,7 +343,7 @@ pub fn BottombarModern(
                     title: i18n::t("share_musicbrainz").to_string(),
                     onclick: move |_| {
                         if let Some(t) = ctrl.current_track_snapshot.read().clone() {
-                            let src = ::server::source::for_track_cached(&t, &local, &server.peek());
+                            let src = active_source.peek().clone();
                             crate::track_row::share_track(t, src);
                         }
                     },

@@ -2029,50 +2029,6 @@ pub fn active(db: Db, config: &AppConfig) -> Box<dyn MediaSource> {
     resolve(db, config, &config.active_source)
 }
 
-/// The [`Source`] a track belongs to: its owning server (resolved to the
-/// configured one — the in-memory id carries only the service, not the
-/// instance) or local.
-fn track_source(track: &reader::Track, config: &AppConfig) -> Source {
-    if track.id.is_server() {
-        Source::Server(active_server_id(config).unwrap_or_default())
-    } else {
-        Source::Local
-    }
-}
-
-/// The [`MediaSource`] a specific track belongs to — for context where the
-/// track's origin, not the app's active source, decides the partition (the
-/// now-playing bar can hold a server track while a local page is open).
-pub fn for_track(db: Db, config: &AppConfig, track: &reader::Track) -> Box<dyn MediaSource> {
-    resolve(db, config, &track_source(track, config))
-}
-
-/// The local source, held once in UI context (it never changes) so a component
-/// can run a local op without a `Db` handle.
-#[derive(Clone)]
-pub struct LocalHandle(pub ActiveSource);
-
-/// The configured server's source (`None` when no usable creds), held in UI
-/// context and reswapped on cred change — so a track-scoped op on a now-playing
-/// *server* track works while a *local* page is active, without a `Db` handle.
-#[derive(Clone)]
-pub struct ServerHandle(pub Option<ActiveSource>);
-
-/// The source a track belongs to, from the cached UI handles: local for a local
-/// track, the configured server otherwise (falling back to local if that server
-/// has no creds). The handle-only counterpart of [`for_track`] — no `Db`.
-pub fn for_track_cached(
-    track: &reader::Track,
-    local: &LocalHandle,
-    server: &ServerHandle,
-) -> ActiveSource {
-    if track.id.is_server() {
-        server.0.clone().unwrap_or_else(|| local.0.clone())
-    } else {
-        local.0.clone()
-    }
-}
-
 // ============================ SoundCloud ===============================
 
 struct SoundcloudSource {

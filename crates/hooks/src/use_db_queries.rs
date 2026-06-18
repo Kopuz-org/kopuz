@@ -422,19 +422,17 @@ pub fn use_favorites() -> Resource<Vec<String>> {
 /// this for single-item checks; a list view should load [`use_favorites`] once
 /// and test membership instead.
 pub fn use_track_is_favorite(track: Memo<Option<reader::Track>>) -> Resource<bool> {
-    let db = use_context::<Db>();
-    let config = use_context::<Signal<config::AppConfig>>();
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let gens = use_generations();
     use_resource(move || {
         let _ = gens.generation(Table::Favorites);
-        let resolved = track().map(|t| {
-            let key = t.id.key().into_owned();
-            let source = server::source::for_track(db.clone(), &config.peek(), &t);
-            (source, key)
-        });
+        // Same source the now-playing favorite toggle writes through (the active
+        // one), so the heart's displayed state and toggling can't disagree.
+        let source = active_source.read().clone();
+        let key = track().map(|t| t.id.key().into_owned());
         async move {
-            match resolved {
-                Some((source, key)) if !key.trim().is_empty() => source.is_favorite(&key).await,
+            match key {
+                Some(k) if !k.trim().is_empty() => source.is_favorite(&k).await,
                 _ => false,
             }
         }

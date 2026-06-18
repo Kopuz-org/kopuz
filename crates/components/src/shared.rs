@@ -19,14 +19,11 @@ pub fn toggle_favorite(current_track: Option<reader::models::Track>) {
     if ref_.trim().is_empty() {
         return;
     }
-    let Some(local) = try_consume_context::<::server::source::LocalHandle>() else {
-        return;
-    };
-    let Some(server) = try_consume_context::<Signal<::server::source::ServerHandle>>() else {
+    let Some(source_sig) = try_consume_context::<Signal<::server::source::ActiveSource>>() else {
         return;
     };
     let gens = try_consume_context::<hooks::db_reactivity::Generations>();
-    let source = server::source::for_track_cached(&track, &local, &server.peek());
+    let source = source_sig.peek().clone();
     spawn(async move {
         let new_fav = !source.is_favorite(&ref_).await;
         if new_fav {

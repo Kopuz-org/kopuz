@@ -83,8 +83,7 @@ pub fn TrackRow(
     #[props(default = None)] row_num: Option<usize>,
 ) -> Element {
     let config = use_context::<Signal<AppConfig>>();
-    let local = use_context::<::server::source::LocalHandle>();
-    let server = use_context::<Signal<::server::source::ServerHandle>>();
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let mut ctrl = use_context::<PlayerController>();
     let nav_ctrl = use_context::<NavigationController>();
     let is_modern = config.read().ui_style == UiStyle::Modern;
@@ -493,7 +492,7 @@ pub fn TrackRow(
                                 } else if has_download && idx == download_action_idx {
                                     if let Some(handler) = on_download { handler.call(()); }
                                 } else if idx == share_idx {
-                                    let src = ::server::source::for_track_cached(&share_track_modern, &local, &server.peek());
+                                    let src = active_source.peek().clone();
                                     share_track(share_track_modern.clone(), src);
                                     on_close_menu.call(());
                                 } else if mix_idx == Some(idx) {
@@ -761,7 +760,7 @@ pub fn TrackRow(
                                     handler.call(());
                                 }
                             } else if idx == share_idx {
-                                let src = ::server::source::for_track_cached(&share_track_normal, &local, &server.peek());
+                                let src = active_source.peek().clone();
                                 share_track(share_track_normal.clone(), src);
                                 on_close_menu.call(());
                             } else if mix_idx == Some(idx) {
@@ -790,14 +789,12 @@ pub fn TrackRow(
 /// "Start radio" action). Lets every call site wire radio in one line without
 /// repeating the capability gate or context plumbing.
 pub fn radio_handler(track: Track) -> Option<EventHandler<()>> {
-    let local = consume_context::<::server::source::LocalHandle>();
-    let server = consume_context::<Signal<::server::source::ServerHandle>>();
     let ctrl = consume_context::<PlayerController>();
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let can_radio = active_source.read().capabilities().radio;
     can_radio.then(|| {
         EventHandler::new(move |_| {
-            let src = ::server::source::for_track_cached(&track, &local, &server.peek());
+            let src = active_source.peek().clone();
             play_radio(track.clone(), src, ctrl)
         })
     })

@@ -1004,22 +1004,12 @@ fn App() -> Element {
     use_context_provider(|| db.clone());
     hooks::db_reactivity::use_generations_provider();
 
-    // The constant local source, held in context so a component runs a local op
-    // without a `Db`.
-    {
-        let db_local = db.clone();
-        use_context_provider(|| {
-            ::server::source::LocalHandle(::server::source::ActiveSource::from(
-                ::server::source::local(db_local),
-            ))
-        });
-    }
-
-    // The active source + the configured-server source, resolved ONCE and held —
-    // every call site reads these shared handles instead of rebuilding the source
-    // (and, for a server, a fresh HTTP client) per operation. Rotation isn't
-    // mutation: an identity change (source switch or cred change) rebuilds and
-    // swaps the `Arc`.
+    // The active source — the single source the UI operates through — resolved
+    // ONCE and held, so call sites read this shared handle instead of rebuilding
+    // the source (and, for a server, a fresh HTTP client) per operation. Rotation
+    // isn't mutation: an identity change (source switch or cred change) rebuilds
+    // and swaps the `Arc`. Capability gating guarantees an op is only reachable
+    // when the active source can do it (no local-only op offered under a server).
     let active_source = {
         let db_init = db.clone();
         let mut active_source = use_signal(move || {
@@ -1028,14 +1018,6 @@ fn App() -> Element {
                 &config.peek(),
             ))
         });
-        let db_srv = db.clone();
-        let mut server_handle = use_signal(move || {
-            ::server::source::ServerHandle(
-                ::server::source::configured_server(db_srv.clone(), &config.peek())
-                    .map(::server::source::ActiveSource::from),
-            )
-        });
-        use_context_provider(|| server_handle);
         // Only the resolution-relevant slice of config; a volume/theme change
         // must not rebuild the client. `Memo`'s `PartialEq` dedup gates the effect.
         let identity = use_memo(move || {
@@ -1049,10 +1031,6 @@ fn App() -> Element {
             let _ = identity.read();
             active_source.set(::server::source::ActiveSource::from(
                 ::server::source::active(db_eff.clone(), &config.peek()),
-            ));
-            server_handle.set(::server::source::ServerHandle(
-                ::server::source::configured_server(db_eff.clone(), &config.peek())
-                    .map(::server::source::ActiveSource::from),
             ));
         });
         use_context_provider(|| active_source)
