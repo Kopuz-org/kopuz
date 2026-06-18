@@ -416,18 +416,18 @@ pub fn use_favorites() -> Resource<Vec<String>> {
     })
 }
 
-/// Whether a single track is favorited — re-run on track change or a favorites
-/// bump. The partition is the *track's* own source (the now-playing bar can hold
-/// a server track while a local page is open), resolved by the source layer. Use
-/// this for single-item checks; a list view should load [`use_favorites`] once
-/// and test membership instead.
-pub fn use_track_is_favorite(track: Memo<Option<reader::Track>>) -> Resource<bool> {
+/// Whether a single track is favorited — re-run on track change, a favorites
+/// bump, or a source swap. Resolved against the active source (the same one the
+/// favorite toggle writes through, so display and toggle can't disagree).
+/// Returns a `Memo<bool>`: the in-flight state collapses to `false` (hollow
+/// heart until known) here, once, so call sites just read the bool. Use this for
+/// single-item checks; a list view should load [`use_favorites`] once and test
+/// membership instead.
+pub fn use_track_is_favorite(track: Memo<Option<reader::Track>>) -> Memo<bool> {
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let gens = use_generations();
-    use_resource(move || {
+    let res = use_resource(move || {
         let _ = gens.generation(Table::Favorites);
-        // Same source the now-playing favorite toggle writes through (the active
-        // one), so the heart's displayed state and toggling can't disagree.
         let source = active_source.read().clone();
         let key = track().map(|t| t.id.key().into_owned());
         async move {
@@ -436,5 +436,6 @@ pub fn use_track_is_favorite(track: Memo<Option<reader::Track>>) -> Resource<boo
                 _ => false,
             }
         }
-    })
+    });
+    use_memo(move || res.read().unwrap_or(false))
 }

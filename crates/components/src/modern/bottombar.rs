@@ -53,7 +53,7 @@ pub fn BottombarModern(
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let nav_ctrl = use_context::<NavigationController>();
     let fav_track = use_memo(move || ctrl.current_track_snapshot.read().clone());
-    let is_fav_res = hooks::use_db_queries::use_track_is_favorite(fav_track);
+    let is_fav = hooks::use_db_queries::use_track_is_favorite(fav_track);
     if cfg!(target_os = "android") {
         let pct = if *current_song_duration.read() > 0 {
             (*current_song_progress.read() as f64 / *current_song_duration.read() as f64) * 100.0
@@ -61,7 +61,7 @@ pub fn BottombarModern(
             0.0
         };
         let cover = current_song_cover_url.read().clone();
-        let fav = (*is_fav_res.read()).unwrap_or(false);
+        let fav = is_fav();
         return rsx! {
             div {
                 class: "shrink-0 h-[68px] bg-black/85 backdrop-blur-2xl border-t border-white/10 flex items-center px-3 gap-3 relative overflow-hidden mb-[env(safe-area-inset-bottom)]",
@@ -102,7 +102,7 @@ pub fn BottombarModern(
     }
 
     let current_track_snapshot = ctrl.current_track_snapshot.read().clone();
-    let is_favorite = (*is_fav_res.read()).unwrap_or(false);
+    let is_favorite = is_fav();
     let heart_class = if is_favorite {
         "text-red-400 hover:text-red-300 transition-colors"
     } else {
