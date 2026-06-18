@@ -54,6 +54,7 @@ pub fn BottombarNormal(
     let volume_percent = *volume.read() * 100.0;
     let mut ctrl = use_context::<PlayerController>();
     let nav_ctrl = use_context::<NavigationController>();
+    let crate::CompactMode(mut compact_mode) = use_context::<crate::CompactMode>();
 
     if cfg!(target_os = "android") {
         let progress_percent = if *current_song_duration.read() > 0 {
@@ -347,6 +348,14 @@ pub fn BottombarNormal(
                         }
                     },
                     i { class: "fa-solid fa-share-nodes text-xs" }
+                }
+                if cfg!(all(not(target_arch = "wasm32"), not(target_os = "android"))) {
+                    button {
+                        class: "text-slate-400 hover:text-white",
+                        title: i18n::t("mini_player").to_string(),
+                        onclick: move |_| { let c = *compact_mode.read(); compact_mode.set(!c); },
+                        i { class: "fa-solid fa-compress text-xs" }
+                    }
                 }
                 button {
                     class: "text-slate-400 hover:text-white",

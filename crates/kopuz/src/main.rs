@@ -6,8 +6,8 @@ use crate::web_storage::{
     save_web_ui_state,
 };
 use components::{
-    bottombar::Bottombar, download_overlay::DownloadOverlay, fullscreen::Fullscreen,
-    rightbar::Rightbar, sidebar::Sidebar, titlebar::Titlebar,
+    bottombar::Bottombar, compact_player::CompactPlayer, download_overlay::DownloadOverlay,
+    fullscreen::Fullscreen, rightbar::Rightbar, sidebar::Sidebar, titlebar::Titlebar,
 };
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use dioxus::desktop::RequestAsyncResponder;
@@ -769,6 +769,42 @@ fn main() {
                 },
             );
 
+        #[cfg(target_os = "macos")]
+        let config = {
+            use dioxus::desktop::muda::{Menu, PredefinedMenuItem, Submenu};
+            let menu = Menu::new();
+            let window_menu = Submenu::new("Window", true);
+            window_menu
+                .append_items(&[
+                    &PredefinedMenuItem::fullscreen(None),
+                    &PredefinedMenuItem::separator(),
+                    &PredefinedMenuItem::hide(None),
+                    &PredefinedMenuItem::hide_others(None),
+                    &PredefinedMenuItem::show_all(None),
+                    &PredefinedMenuItem::maximize(None),
+                    &PredefinedMenuItem::close_window(None),
+                    &PredefinedMenuItem::separator(),
+                    &PredefinedMenuItem::quit(None),
+                ])
+                .unwrap();
+            let edit_menu = Submenu::new("Edit", true);
+            edit_menu
+                .append_items(&[
+                    &PredefinedMenuItem::undo(None),
+                    &PredefinedMenuItem::redo(None),
+                    &PredefinedMenuItem::separator(),
+                    &PredefinedMenuItem::cut(None),
+                    &PredefinedMenuItem::copy(None),
+                    &PredefinedMenuItem::paste(None),
+                    &PredefinedMenuItem::separator(),
+                    &PredefinedMenuItem::select_all(None),
+                ])
+                .unwrap();
+            menu.append_items(&[&window_menu, &edit_menu]).unwrap();
+            window_menu.set_as_windows_menu_for_nsapp();
+            config.with_menu(Some(menu))
+        };
+
         dioxus::LaunchBuilder::desktop()
             .with_cfg(config)
             .launch(App);
@@ -1040,6 +1076,7 @@ fn App() -> Element {
 
     let is_playing = use_signal(|| false);
     let mut is_fullscreen = use_signal(|| false);
+    let mut compact_mode = use_signal(|| false);
     let is_rightbar_open = use_signal(|| false);
     let rightbar_width = use_signal(|| 320usize);
     let mut palette = use_signal(|| Option::<Vec<utils::color::Color>>::None);
@@ -1959,6 +1996,41 @@ fn App() -> Element {
     let mut is_sidebar_collapsed = use_signal(|| cfg!(target_os = "android"));
     use_context_provider(|| components::sidebar::SidebarCollapsed(is_sidebar_collapsed));
 
+    use_context_provider(|| components::CompactMode(compact_mode));
+    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+    {
+        let mut saved_window_size = use_signal(|| None::<LogicalSize<f64>>);
+        use_effect(move || {
+            let active = *compact_mode.read();
+            let win = dioxus::desktop::use_window();
+            if active {
+                let scale = win.window.scale_factor();
+                let current = win.window.inner_size().to_logical::<f64>(scale);
+                saved_window_size.set(Some(current));
+                win.window.set_always_on_top(true);
+                let compact_h = if cfg!(target_os = "macos") {
+                    170.0
+                } else {
+                    148.0
+                };
+                win.window.set_resizable(true);
+                win.window
+                    .set_min_inner_size(Some(LogicalSize::new(260.0, compact_h)));
+                win.window.set_max_inner_size(None::<LogicalSize<f64>>);
+                win.window
+                    .set_inner_size(LogicalSize::new(380.0, compact_h));
+            } else {
+                win.window.set_always_on_top(false);
+                win.window.set_resizable(true);
+                win.window.set_min_inner_size(None::<LogicalSize<f64>>);
+                win.window.set_max_inner_size(None::<LogicalSize<f64>>);
+                if let Some(size) = saved_window_size.take() {
+                    win.window.set_inner_size(size);
+                }
+            }
+        });
+    }
+
     hooks::use_player_task(ctrl);
 
     // Inject CSS for all custom themes reactively
@@ -2042,8 +2114,18 @@ fn App() -> Element {
             onkeydown: move |evt| {
                 use dioxus::prelude::Key;
                 let key = evt.key();
+                let mods = evt.modifiers();
                 if key == Key::Escape {
                     is_fullscreen.set(false);
+                    if *compact_mode.read() {
+                        compact_mode.set(false);
+                    }
+                } else if (mods.meta() || mods.ctrl())
+                    && matches!(&key, Key::Character(s) if s.eq_ignore_ascii_case("m"))
+                {
+                    let c = *compact_mode.read();
+                    compact_mode.set(!c);
+                    evt.prevent_default();
                 } else if key == Key::Character(" ".into()) {
                     ctrl.toggle();
                     evt.prevent_default();
@@ -2600,6 +2682,7 @@ fn App() -> Element {
                 palette: palette,
             }
             DownloadOverlay { queue: download_queue }
+            CompactPlayer {}
             if config.read().player_bar_position == config::PlayerBarPosition::Bottom {
                 Bottombar {
                     library: library,
