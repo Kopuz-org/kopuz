@@ -154,7 +154,10 @@ pub fn SidebarModern(props: SidebarProps) -> Element {
             "position: fixed; left: 0; top: 0; z-index: 100; height: 100%; width: 280px; background: rgba(10,10,10,0.97);".to_string()
         }
     } else {
-        format!("width: {current_width}px; background: rgba(0,0,0,0.5);")
+        // Theme-following surface (not a fixed black overlay) so the Vaxry chrome
+        // harmonises with the active palette and the switcher text stays readable
+        // on light themes.
+        format!("width: {current_width}px; background: var(--color-neutral-900);")
     };
 
     rsx! {

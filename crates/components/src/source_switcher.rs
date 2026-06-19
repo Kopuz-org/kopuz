@@ -8,7 +8,7 @@
 //! carries its service's accent colour (a CSS `--accent` var the styles read);
 //! the active row glows with it. Mono micro-labels use the app's JetBrains Mono.
 
-use config::{AppConfig, MusicService, Source, UiStyle};
+use config::{AppConfig, MusicService, Source};
 use dioxus::prelude::*;
 
 /// Set by the switcher's "Manage sources" button to a Settings section's element
@@ -20,15 +20,12 @@ pub struct SettingsAnchor(pub Signal<Option<String>>);
 /// Static styles for the switcher (keyframes + classes that read a per-element
 /// `--accent`/`--active` CSS variable). Injected once; rendered with the trigger
 /// so the closed control is styled too.
-// Colours route through two indirection vars set per UI style on the wrapper:
-// `--ss-surface` (the popover/tile base) and `--ss-fg` (the foreground). The
-// dimmed tones are `--ss-fg`-based `color-mix` (foreground at reduced alpha), so
-// they track whichever polarity the wrapper picked. The switcher must match the
-// chrome it sits in, and that differs by UI style: the Modern ("Vaxry") sidebar
-// is a hardcoded dark surface on every colour theme, so it gets fixed dark
-// values; the Normal sidebar follows the theme, so it gets the theme tokens
-// (`--color-neutral-900` / `--color-white`) and tracks light/dark themes.
-// Per-service brand accents stay fixed regardless.
+// Colours route through two indirection vars set on the wrapper: `--ss-surface`
+// (the popover/tile base) and `--ss-fg` (the foreground). Both follow the active
+// theme palette (`--color-neutral-900` / `--color-white`), and the dimmed tones
+// are `--ss-fg`-based `color-mix` (foreground at reduced alpha), so the switcher
+// harmonises with the theme (e.g. gruvbox) in both UI styles and tracks
+// light/dark. Per-service brand accents stay fixed regardless.
 const SWITCHER_CSS: &str = r#"
 .ss-tr{width:100%;display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:12px;background:color-mix(in oklab,var(--ss-fg) 4%,transparent);border:1px solid color-mix(in oklab,var(--ss-fg) 12%,transparent);cursor:pointer;color:inherit;transition:background .15s,border-color .15s}
 .ss-tr:hover{background:color-mix(in oklab,var(--ss-fg) 8%,transparent)}
@@ -107,12 +104,9 @@ pub fn SourceSwitcher(
     let sources = entries(&config.read());
     let count = sources.len();
     let active = config.read().active_source.clone();
-    // Match the chrome: the Modern ("Vaxry") sidebar is a fixed dark surface on
-    // every colour theme; the Normal sidebar follows the theme tokens.
-    let surface_vars = match config.read().ui_style {
-        UiStyle::Modern => "--ss-surface:#16161d;--ss-fg:#ffffff;",
-        UiStyle::Normal => "--ss-surface:var(--color-neutral-900);--ss-fg:var(--color-white);",
-    };
+    // Follow the active theme palette in both UI styles (the chrome does too), so
+    // the switcher harmonises with the theme instead of a fixed dark.
+    let surface_vars = "--ss-surface:var(--color-neutral-900);--ss-fg:var(--color-white);";
     let (active_label, active_icon, active_accent) = sources
         .iter()
         .find(|(s, ..)| *s == active)
