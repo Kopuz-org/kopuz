@@ -8,7 +8,6 @@ pub mod bottombar;
 pub mod constants;
 pub mod dots_menu;
 pub mod download_overlay;
-pub mod folder_detail;
 pub mod folder_picker;
 pub mod fullscreen;
 pub mod header;
