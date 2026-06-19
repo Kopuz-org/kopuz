@@ -44,7 +44,7 @@ pub fn toggle_favorite(current_track: Option<reader::models::Track>) {
             // the next sync upserts it. Harmless for a track already cached.
             let _ = source.upsert_tracks(std::slice::from_ref(&track)).await;
         }
-        if let Err(e) = source.set_favorite(&ref_, new_fav).await {
+        if let Err(e) = track.set_favorite(&source, new_fav).await {
             tracing::warn!(error = %e, "failed to record favorite toggle");
         }
         if let Some(gens) = gens {

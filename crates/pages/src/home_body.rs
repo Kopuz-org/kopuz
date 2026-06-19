@@ -1,3 +1,4 @@
+use ::server::source::TrackFavorite;
 use config::{AppConfig, ListenNowStyle, UiStyle};
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
@@ -810,14 +811,10 @@ fn ServerHeroBanner(
                                             hero_tracks_res.read().clone().unwrap_or_default()
                                         };
                                         let new_fav = !jelly_hero_fav;
-                                        let track_ids: Vec<String> = tracks.iter().filter_map(|t| {
-                                            let id = t.id.key();
-                                            (!id.is_empty()).then(|| id.to_string())
-                                        }).collect();
                                         let source = active_source.peek().clone();
                                         spawn(async move {
-                                            for id in &track_ids {
-                                                let _ = source.set_favorite(id, new_fav).await;
+                                            for t in &tracks {
+                                                let _ = t.set_favorite(&source, new_fav).await;
                                             }
                                             gens.bump(Table::Favorites);
                                             // Pending DB rows; the reconciler pushes them.

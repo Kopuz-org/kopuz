@@ -2005,6 +2005,9 @@ pub trait TrackFavorite {
     /// Whether this track is currently favorited for `source` (an empty key —
     /// e.g. an unresolved track — is never a favorite).
     async fn is_favorite(&self, source: &ActiveSource) -> bool;
+
+    /// Set this track's favorite state for `source` (an empty key is a no-op).
+    async fn set_favorite(&self, source: &ActiveSource, on: bool) -> Result<(), SourceError>;
 }
 
 #[async_trait]
@@ -2012,6 +2015,14 @@ impl TrackFavorite for reader::Track {
     async fn is_favorite(&self, source: &ActiveSource) -> bool {
         let key = self.id.key();
         !key.trim().is_empty() && source.is_favorite(key.as_ref()).await
+    }
+
+    async fn set_favorite(&self, source: &ActiveSource, on: bool) -> Result<(), SourceError> {
+        let key = self.id.key();
+        if key.trim().is_empty() {
+            return Ok(());
+        }
+        source.set_favorite(key.as_ref(), on).await
     }
 }
 
