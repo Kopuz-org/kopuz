@@ -1,7 +1,6 @@
 pub mod discover;
 pub mod download_manager;
 pub mod subsonic_sync;
-pub mod unsupported;
 
 use config::{AppConfig, MusicService};
 use dioxus::prelude::{ReadableExt, WritableExt};

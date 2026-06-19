@@ -170,13 +170,6 @@ pub trait ReadStore: Send + Sync {
     /// Local tracks under a directory (path-prefix match), path-ordered.
     async fn folder_tracks(&self, prefix: &str) -> Result<Vec<reader::Track>, DbError>;
 
-    /// Albums by most-recently-added track, newest first.
-    async fn recent_albums(
-        &self,
-        source: &Source,
-        limit: u32,
-    ) -> Result<Vec<reader::Album>, DbError>;
-
     /// This source's recently-played track keys, newest first (capped).
     async fn recently_played(&self, source: &Source, limit: u32) -> Result<Vec<String>, DbError>;
 

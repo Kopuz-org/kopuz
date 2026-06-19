@@ -166,14 +166,6 @@ impl ReadStore for Native {
         queries::folder_tracks(&self.pool(), prefix).await
     }
 
-    async fn recent_albums(
-        &self,
-        source: &crate::Source,
-        limit: u32,
-    ) -> Result<Vec<reader::Album>, DbError> {
-        queries::recent_albums(&self.pool(), source, limit).await
-    }
-
     async fn recently_played(
         &self,
         source: &crate::Source,

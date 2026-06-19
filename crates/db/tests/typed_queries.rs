@@ -116,13 +116,6 @@ async fn typed_queries_smoke() {
     let none = db.folder_tracks("/music/ja_z/").await.unwrap();
     assert!(none.is_empty(), "LIKE metachars are escaped");
 
-    let recent = db.recent_albums(&local, 10).await.unwrap();
-    assert_eq!(
-        recent.iter().map(|a| a.title.as_str()).collect::<Vec<_>>(),
-        ["Jazz One", "Rock One"],
-        "newest-track-first"
-    );
-
     let samples = db.artist_sample_tracks(&local, 10).await.unwrap();
     assert_eq!(
         samples

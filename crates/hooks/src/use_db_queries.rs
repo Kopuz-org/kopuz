@@ -166,50 +166,6 @@ pub fn use_genre_tracks(source: Memo<Source>, genre: Memo<String>) -> Resource<V
     })
 }
 
-/// Local tracks under a directory, path-ordered.
-pub fn use_folder_tracks(prefix: Memo<String>) -> Resource<Vec<reader::Track>> {
-    let db = use_context::<ReadDb>();
-    let gens = use_generations();
-    use_resource(move || {
-        let _ = gens.generation(Table::Tracks);
-        let (db, p) = (db.clone(), prefix());
-        let span = tracing::info_span!(
-            "query.folder_tracks",
-            prefix = %p,
-            rows = tracing::field::Empty
-        );
-        async move {
-            let rows = db.folder_tracks(&p).await.unwrap_or_default();
-            tracing::Span::current().record("rows", rows.len());
-            rows
-        }
-        .instrument(span)
-    })
-}
-
-/// Albums by most-recently-added track, newest first.
-pub fn use_recent_albums(source: Memo<Source>, limit: u32) -> Resource<Vec<reader::Album>> {
-    let db = use_context::<ReadDb>();
-    let gens = use_generations();
-    use_resource(move || {
-        let _ = gens.generation(Table::Tracks);
-        let _ = gens.generation(Table::Albums);
-        let (db, s) = (db.clone(), source());
-        let span = tracing::info_span!(
-            "query.recent_albums",
-            source = s.as_str(),
-            limit,
-            rows = tracing::field::Empty,
-        );
-        async move {
-            let rows = db.recent_albums(&s, limit).await.unwrap_or_default();
-            tracing::Span::current().record("rows", rows.len());
-            rows
-        }
-        .instrument(span)
-    })
-}
-
 /// One representative track per artist, A→Z — artist tiles with covers.
 pub fn use_artist_sample_tracks(source: Memo<Source>, limit: u32) -> Resource<Vec<reader::Track>> {
     let db = use_context::<ReadDb>();
@@ -331,12 +287,6 @@ pub fn use_artists(source: Memo<Source>) -> Resource<Vec<(String, u32)>> {
 pub fn use_active_source() -> Memo<config::Source> {
     let config = use_context::<Signal<config::AppConfig>>();
     use_memo(move || config.read().active_source.clone())
-}
-
-/// The active server id (`None` ⇒ local) — derived from the active source.
-pub fn use_active_server_id() -> Memo<Option<String>> {
-    let config = use_context::<Signal<config::AppConfig>>();
-    use_memo(move || config.read().active_source.server_id().map(String::from))
 }
 
 /// The playlist store for the active source, re-queried on a playlists/folders

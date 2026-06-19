@@ -173,26 +173,6 @@ pub async fn folder_tracks(pool: &SqlitePool, prefix: &str) -> Result<Vec<Track>
     Ok(rows.into_iter().map(Into::into).collect())
 }
 
-pub async fn recent_albums(
-    pool: &SqlitePool,
-    source: &Source,
-    limit: u32,
-) -> Result<Vec<Album>, DbError> {
-    let rows = sqlx::query_as::<_, AlbumRow>(
-        "SELECT a.source_album_id, a.title, a.artist, a.genre, a.year, a.cover_path, a.manual_cover \
-         FROM albums a \
-         JOIN (SELECT source_album_id, MAX(rowid_pk) AS latest FROM tracks \
-               WHERE source = ?1 GROUP BY source_album_id) t \
-           ON t.source_album_id = a.source_album_id \
-         WHERE a.source = ?1 ORDER BY t.latest DESC LIMIT ?2",
-    )
-    .bind(source.as_str())
-    .bind(limit as i64)
-    .fetch_all(pool)
-    .await?;
-    Ok(rows.into_iter().map(Into::into).collect())
-}
-
 pub async fn artist_sample_tracks(
     pool: &SqlitePool,
     source: &Source,

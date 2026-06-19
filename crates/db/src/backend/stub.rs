@@ -64,14 +64,6 @@ impl ReadStore for Stub {
         Ok(Vec::new())
     }
 
-    async fn recent_albums(
-        &self,
-        _source: &crate::Source,
-        _limit: u32,
-    ) -> Result<Vec<reader::Album>, DbError> {
-        Ok(Vec::new())
-    }
-
     async fn recently_played(
         &self,
         _source: &crate::Source,
