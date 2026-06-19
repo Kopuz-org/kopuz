@@ -204,7 +204,11 @@ pub fn SidebarModern(props: SidebarProps) -> Element {
             }
 
             if !cfg!(target_arch = "wasm32") && config.read().show_source_toggle {
-                crate::source_switcher::SourceSwitcher { config, collapsed }
+                crate::source_switcher::SourceSwitcher {
+                    config,
+                    collapsed,
+                    on_manage: move |_| props.on_navigate.call(Route::Settings),
+                }
             }
 
             div { class: "flex-1 overflow-y-auto overflow-x-hidden py-2",

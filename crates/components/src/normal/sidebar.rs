@@ -322,7 +322,10 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
                 class: "flex-1 flex flex-col overflow-y-auto overflow-x-hidden pt-2",
 
                 if !*is_collapsed.read() && !cfg!(target_arch = "wasm32") && config.read().show_source_toggle {
-                    crate::source_switcher::SourceSwitcher { config }
+                    crate::source_switcher::SourceSwitcher {
+                        config,
+                        on_manage: move |_| props.on_navigate.call(Route::Settings),
+                    }
                 }
 
                 nav {
