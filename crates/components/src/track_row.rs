@@ -788,9 +788,14 @@ pub fn TrackRow(
 /// supports radio ([`Capabilities::radio`]), else `None` (so the row hides the
 /// "Start radio" action). Lets every call site wire radio in one line without
 /// repeating the capability gate or context plumbing.
+///
+/// Reads context via `consume_context`, never a `use_*` hook: call sites invoke
+/// this once per visible row, so a hook here would register a per-row-count
+/// number of hooks and panic the parent on rules-of-hooks when the row count
+/// changes (e.g. an empty server library filling in after a sync).
 pub fn radio_handler(track: Track) -> Option<EventHandler<()>> {
     let ctrl = consume_context::<PlayerController>();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let active_source = consume_context::<Signal<::server::source::ActiveSource>>();
     let can_radio = active_source.read().capabilities().radio;
     can_radio.then(|| {
         EventHandler::new(move |_| {
