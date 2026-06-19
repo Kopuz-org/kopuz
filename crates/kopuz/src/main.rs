@@ -960,6 +960,9 @@ fn App() -> Element {
     // scroll from clobbering the list scroll the user expects back on return.
     let mut detail_scroll_positions: Signal<std::collections::HashMap<String, f64>> =
         use_signal(std::collections::HashMap::new);
+    // Set by the source switcher's "Manage sources" to scroll Settings to a
+    // section (an element id) instead of restoring its last scroll position.
+    let mut settings_anchor: Signal<Option<String>> = use_signal(|| None);
     let cache_dir = use_memo(move || {
         // Android: external/ProjectDirs paths aren't writable; use the app-internal files
         // dir (getFilesDir via JNI) so saves don't fail with EACCES.
@@ -1983,6 +1986,11 @@ fn App() -> Element {
         // on route change (album/artist list and detail are the same Route).
         let album_sel = selected_album_id.read().clone();
         let artist_sel = selected_artist_name.read().clone();
+        // A pending section anchor (peeked, so this effect doesn't subscribe to it)
+        // takes over scrolling — skip the saved-scroll restore for this navigation.
+        if settings_anchor.peek().is_some() {
+            return;
+        }
         let pos = match route {
             Route::Album if !album_sel.is_empty() => detail_scroll_positions
                 .peek()
@@ -2001,6 +2009,20 @@ fn App() -> Element {
         ));
     });
 
+    // Scroll Settings to a requested section once the page is on screen, then
+    // clear the request. Subscribes to the anchor so setting it (from any page)
+    // drives the scroll; the restore effect above stands down while it's set.
+    use_effect(move || {
+        let anchor = settings_anchor.read().clone();
+        if let Some(id) = anchor {
+            let _ = dioxus::document::eval(&format!(
+                "requestAnimationFrame(() => {{ const el = document.getElementById('{id}'); \
+                 if (el) el.scrollIntoView({{ block: 'start' }}); }});"
+            ));
+            settings_anchor.set(None);
+        }
+    });
+
     provide_context(ctrl);
     provide_context(config);
     let discover_now_playing = use_signal(|| None::<String>);
@@ -2014,6 +2036,7 @@ fn App() -> Element {
     provide_context(download_queue);
     provide_context(download_progress);
     provide_context(scroll_positions);
+    provide_context(components::source_switcher::SettingsAnchor(settings_anchor));
     provide_context(fetched_artist_images);
     provide_context(components::NavigationController {
         current_route,

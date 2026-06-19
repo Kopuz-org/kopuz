@@ -669,28 +669,30 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             }
                         }
 
-                        SettingItem {
-                            title: i18n::t("media_servers").to_string(),
-                            control: rsx! {
-                                ServerSettings {
-                                    active: config.read().server.clone(),
-                                    servers: config.read().servers.clone(),
-                                    on_add: move |_| show_add_server.set(true),
-                                    on_delete: handle_delete_saved,
-                                    on_switch: handle_switch_server,
-                                    on_login: move |_| {
-                                        let is_ytmusic = config
-                                            .read()
-                                            .server
-                                            .as_ref()
-                                            .map(|s| s.service == MusicService::YtMusic)
-                                            .unwrap_or(false);
-                                        if is_ytmusic {
-                                            ytmusic_auto_login();
-                                        } else {
-                                            show_login.set(true);
-                                        }
-                                    },
+                        div { id: "settings-media-servers",
+                            SettingItem {
+                                title: i18n::t("media_servers").to_string(),
+                                control: rsx! {
+                                    ServerSettings {
+                                        active: config.read().server.clone(),
+                                        servers: config.read().servers.clone(),
+                                        on_add: move |_| show_add_server.set(true),
+                                        on_delete: handle_delete_saved,
+                                        on_switch: handle_switch_server,
+                                        on_login: move |_| {
+                                            let is_ytmusic = config
+                                                .read()
+                                                .server
+                                                .as_ref()
+                                                .map(|s| s.service == MusicService::YtMusic)
+                                                .unwrap_or(false);
+                                            if is_ytmusic {
+                                                ytmusic_auto_login();
+                                            } else {
+                                                show_login.set(true);
+                                            }
+                                        },
+                                    }
                                 }
                             }
                         }

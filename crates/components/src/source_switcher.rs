@@ -11,6 +11,12 @@
 use config::{AppConfig, MusicService, Source, UiStyle};
 use dioxus::prelude::*;
 
+/// Set by the switcher's "Manage sources" button to a Settings section's element
+/// id, asking the Settings page to scroll there instead of restoring its last
+/// scroll position. Provided by the app root.
+#[derive(Clone, Copy)]
+pub struct SettingsAnchor(pub Signal<Option<String>>);
+
 /// Static styles for the switcher (keyframes + classes that read a per-element
 /// `--accent`/`--active` CSS variable). Injected once; rendered with the trigger
 /// so the closed control is styled too.
@@ -184,6 +190,13 @@ pub fn SourceSwitcher(
                         div { class: "ss-foot",
                             button {
                                 onclick: move |_| {
+                                    // Ask Settings to land on the sources section instead of
+                                    // restoring its last scroll position.
+                                    if let Some(SettingsAnchor(mut anchor)) =
+                                        try_consume_context::<SettingsAnchor>()
+                                    {
+                                        anchor.set(Some("settings-media-servers".to_string()));
+                                    }
                                     open.set(false);
                                     manage.call(());
                                 },
