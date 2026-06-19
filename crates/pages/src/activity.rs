@@ -30,17 +30,15 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
         search: String::new(),
     });
 
-    // album_id → (genre, cover-path). Cover resolution itself is delegated to
-    // the source layer below (local file vs remote URL), so this just carries
-    // the album's stored cover-path for the local case.
+    // album_id → genre (covers resolve via the source seam off the track itself).
     let album_map = use_memo(move || {
         albums_res
             .read()
             .clone()
             .unwrap_or_default()
             .iter()
-            .map(|a| (a.id.clone(), (a.genre.clone(), a.cover_path.clone())))
-            .collect::<HashMap<String, (String, Option<std::path::PathBuf>)>>()
+            .map(|a| (a.id.clone(), a.genre.clone()))
+            .collect::<HashMap<String, String>>()
     });
 
     let is_modern = config.read().ui_style == UiStyle::Modern;
@@ -99,8 +97,8 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
                     .get(&track.id.uid())
                     .copied()
                     .unwrap_or(0);
-                let (genre, cover_path) = albums.get(&track.album_id).cloned().unwrap_or_default();
-                let cover_url = ::server::cover::track(&conf, &track, cover_path.as_deref(), 64);
+                let genre = albums.get(&track.album_id).cloned().unwrap_or_default();
+                let cover_url = ::server::cover::track(&conf, &track, 64);
                 (row_offset + i, track, plays, genre, cover_url)
             })
             .collect()

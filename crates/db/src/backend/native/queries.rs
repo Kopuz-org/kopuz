@@ -12,16 +12,21 @@ use sqlx::SqlitePool;
 use super::rows::{AlbumRow, TrackRow};
 use crate::{DbError, Page, Source, TrackFilter, TrackSort};
 
-pub(super) const TRACK_COLUMNS: &str = "source, track_key, service, cover_path, source_album_id, title, \
-    artist, album, duration, khz, bitrate, track_number, disc_number, mb_release_id, \
-    mb_recording_id, mb_track_id, playlist_item_id, artists_json";
+/// Track columns for a `TrackRow`, `t.`-aliased and read via [`TRACKS_FROM`] so a
+/// local track's `cover_path` (NULL on the row — the cover is owned by the album)
+/// falls back to its album's cover. The track self-resolves its cover with no
+/// caller-side album lookup; a server row keeps its own non-NULL `cover_path`.
+const TRACK_COLUMNS: &str = "t.source, t.track_key, t.service, \
+    COALESCE(t.cover_path, a.cover_path) AS cover_path, t.source_album_id, t.title, \
+    t.artist, t.album, t.duration, t.khz, t.bitrate, t.track_number, t.disc_number, \
+    t.mb_release_id, t.mb_recording_id, t.mb_track_id, t.playlist_item_id, t.artists_json";
 
-/// `TRACK_COLUMNS` qualified with the `t.` alias — for queries that join
-/// (`listen_counts` also has a `track_key` column).
-const TRACK_COLUMNS_T: &str = "t.source, t.track_key, t.service, t.cover_path, \
-    t.source_album_id, t.title, t.artist, t.album, t.duration, t.khz, t.bitrate, \
-    t.track_number, t.disc_number, t.mb_release_id, t.mb_recording_id, t.mb_track_id, \
-    t.playlist_item_id, t.artists_json";
+/// `FROM tracks t` + the album join that backs the `COALESCE` in [`TRACK_COLUMNS`].
+/// LEFT so a track whose album row is missing still returns (cover → NULL → default).
+/// `albums` shares column names with `tracks` (`artist`/`title`/`cover_path`/…), so
+/// every query using this must `t.`-qualify its WHERE/ORDER BY columns.
+const TRACKS_FROM: &str = "FROM tracks t LEFT JOIN albums a \
+    ON a.source = t.source AND a.source_album_id = t.source_album_id";
 
 /// SQL for a track row's listen-count key: the local path, or the lowercase
 /// legacy `service:item_id` uid the `listen_counts` table is keyed by.
@@ -32,13 +37,13 @@ const UID_EXPR: &str = "(CASE WHEN t.source = 'local' THEN t.track_key ELSE \
 fn order_by(sort: TrackSort) -> &'static str {
     match sort {
         TrackSort::ArtistAlbum => {
-            "artist COLLATE NOCASE, album COLLATE NOCASE, disc_number, track_number, title COLLATE NOCASE"
+            "t.artist COLLATE NOCASE, t.album COLLATE NOCASE, t.disc_number, t.track_number, t.title COLLATE NOCASE"
         }
-        TrackSort::Title => "title COLLATE NOCASE",
-        TrackSort::Artist => "artist COLLATE NOCASE, album COLLATE NOCASE, track_number",
-        TrackSort::Album => "album COLLATE NOCASE, disc_number, track_number",
-        TrackSort::DateAdded => "rowid_pk DESC",
-        TrackSort::PlayCount => "COALESCE(lc.count, 0) DESC, title COLLATE NOCASE",
+        TrackSort::Title => "t.title COLLATE NOCASE",
+        TrackSort::Artist => "t.artist COLLATE NOCASE, t.album COLLATE NOCASE, t.track_number",
+        TrackSort::Album => "t.album COLLATE NOCASE, t.disc_number, t.track_number",
+        TrackSort::DateAdded => "t.rowid_pk DESC",
+        TrackSort::PlayCount => "COALESCE(lc.count, 0) DESC, t.title COLLATE NOCASE",
     }
 }
 
@@ -49,7 +54,7 @@ fn filter_clauses(filter: &TrackFilter) -> (String, Vec<String>) {
     if !filter.search.trim().is_empty() {
         let n = binds.len() + 2;
         sql.push_str(&format!(
-            " AND (title LIKE ?{n} ESCAPE '\\' OR artist LIKE ?{n} ESCAPE '\\' OR album LIKE ?{n} ESCAPE '\\')"
+            " AND (t.title LIKE ?{n} ESCAPE '\\' OR t.artist LIKE ?{n} ESCAPE '\\' OR t.album LIKE ?{n} ESCAPE '\\')"
         ));
         binds.push(format!("%{}%", escape_like(filter.search.trim())));
     }
@@ -67,7 +72,7 @@ pub async fn tracks_page(
     // so they read straight off the tracks indexes.
     let sql = if filter.sort == TrackSort::PlayCount {
         format!(
-            "SELECT {TRACK_COLUMNS_T} FROM tracks t \
+            "SELECT {TRACK_COLUMNS} {TRACKS_FROM} \
              LEFT JOIN listen_counts lc ON lc.track_key = {UID_EXPR} \
              WHERE t.source = ?1{clauses} ORDER BY {} LIMIT ?{limit_n} OFFSET ?{}",
             order_by(filter.sort),
@@ -75,7 +80,7 @@ pub async fn tracks_page(
         )
     } else {
         format!(
-            "SELECT {TRACK_COLUMNS} FROM tracks WHERE source = ?1{clauses} ORDER BY {} LIMIT ?{limit_n} OFFSET ?{}",
+            "SELECT {TRACK_COLUMNS} {TRACKS_FROM} WHERE t.source = ?1{clauses} ORDER BY {} LIMIT ?{limit_n} OFFSET ?{}",
             order_by(filter.sort),
             limit_n + 1,
         )
@@ -98,8 +103,8 @@ pub async fn album_tracks(
     album_id: &str,
 ) -> Result<Vec<Track>, DbError> {
     let sql = format!(
-        "SELECT {TRACK_COLUMNS} FROM tracks WHERE source = ?1 AND source_album_id = ?2 \
-         ORDER BY disc_number, track_number, title COLLATE NOCASE"
+        "SELECT {TRACK_COLUMNS} {TRACKS_FROM} WHERE t.source = ?1 AND t.source_album_id = ?2 \
+         ORDER BY t.disc_number, t.track_number, t.title COLLATE NOCASE"
     );
     let rows = sqlx::query_as::<_, TrackRow>(&sql)
         .bind(source.as_str())
@@ -118,7 +123,7 @@ pub async fn artist_tracks(
     // secondary credits (artists_json — featured artists get their own tiles),
     // and tracks on albums credited to the artist; all case-insensitively.
     let sql = format!(
-        "SELECT {TRACK_COLUMNS_T} FROM tracks t WHERE t.source = ?1 AND ( \
+        "SELECT {TRACK_COLUMNS} {TRACKS_FROM} WHERE t.source = ?1 AND ( \
             t.artist = ?2 COLLATE NOCASE \
             OR EXISTS (SELECT 1 FROM json_each(t.artists_json) WHERE value = ?2 COLLATE NOCASE) \
             OR t.source_album_id IN \
@@ -139,7 +144,7 @@ pub async fn genre_tracks(
     genre: &str,
 ) -> Result<Vec<Track>, DbError> {
     let sql = format!(
-        "SELECT {TRACK_COLUMNS_T} FROM tracks t \
+        "SELECT {TRACK_COLUMNS} FROM tracks t \
          JOIN albums a ON a.source = t.source AND a.source_album_id = t.source_album_id \
          WHERE t.source = ?1 AND a.genre = ?2 \
          ORDER BY t.artist COLLATE NOCASE, t.album COLLATE NOCASE, t.disc_number, t.track_number"
@@ -163,8 +168,8 @@ pub async fn folder_tracks(pool: &SqlitePool, prefix: &str) -> Result<Vec<Track>
     // "100%" doesn't widen the match.
     let escaped = escape_like(prefix);
     let sql = format!(
-        "SELECT {TRACK_COLUMNS} FROM tracks WHERE source = 'local' \
-         AND track_key LIKE ?1 ESCAPE '\\' ORDER BY track_key"
+        "SELECT {TRACK_COLUMNS} {TRACKS_FROM} WHERE t.source = 'local' \
+         AND t.track_key LIKE ?1 ESCAPE '\\' ORDER BY t.track_key"
     );
     let rows = sqlx::query_as::<_, TrackRow>(&sql)
         .bind(format!("{escaped}%"))
@@ -179,9 +184,9 @@ pub async fn artist_sample_tracks(
     limit: u32,
 ) -> Result<Vec<Track>, DbError> {
     let sql = format!(
-        "SELECT {TRACK_COLUMNS} FROM tracks WHERE rowid_pk IN \
+        "SELECT {TRACK_COLUMNS} {TRACKS_FROM} WHERE t.rowid_pk IN \
            (SELECT MIN(rowid_pk) FROM tracks WHERE source = ?1 GROUP BY artist) \
-         ORDER BY artist COLLATE NOCASE LIMIT ?2"
+         ORDER BY t.artist COLLATE NOCASE LIMIT ?2"
     );
     let rows = sqlx::query_as::<_, TrackRow>(&sql)
         .bind(source.as_str())
@@ -210,8 +215,8 @@ pub async fn top_genre(pool: &SqlitePool, source: &Source) -> Result<Option<Stri
 /// Runs only when a query is typed — never on page mount.
 pub async fn search_corpus(pool: &SqlitePool, source: &Source) -> Result<Vec<Track>, DbError> {
     let sql = format!(
-        "SELECT {TRACK_COLUMNS} FROM tracks WHERE source = ?1 \
-         ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE, disc_number, track_number"
+        "SELECT {TRACK_COLUMNS} {TRACKS_FROM} WHERE t.source = ?1 \
+         ORDER BY t.artist COLLATE NOCASE, t.album COLLATE NOCASE, t.disc_number, t.track_number"
     );
     let rows = sqlx::query_as::<_, TrackRow>(&sql)
         .bind(source.as_str())
@@ -222,7 +227,7 @@ pub async fn search_corpus(pool: &SqlitePool, source: &Source) -> Result<Vec<Tra
 
 pub async fn tracks_count(pool: &SqlitePool, filter: &TrackFilter) -> Result<u32, DbError> {
     let (clauses, binds) = filter_clauses(filter);
-    let sql = format!("SELECT COUNT(*) FROM tracks WHERE source = ?1{clauses}");
+    let sql = format!("SELECT COUNT(*) FROM tracks t WHERE t.source = ?1{clauses}");
     let mut q = sqlx::query_scalar::<_, i64>(&sql).bind(filter.source.as_str());
     for b in &binds {
         q = q.bind(b);
@@ -240,8 +245,8 @@ pub async fn tracks_by_keys(
     }
     let keys_json = serde_json::to_string(keys)?;
     let sql = format!(
-        "SELECT {TRACK_COLUMNS} FROM tracks WHERE source = ?1 \
-         AND track_key IN (SELECT value FROM json_each(?2))"
+        "SELECT {TRACK_COLUMNS} {TRACKS_FROM} WHERE t.source = ?1 \
+         AND t.track_key IN (SELECT value FROM json_each(?2))"
     );
     let rows = sqlx::query_as::<_, TrackRow>(&sql)
         .bind(source.as_str())

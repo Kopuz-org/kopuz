@@ -10,7 +10,7 @@
 //! `Box<dyn>` per cover. Capabilities are a trait method (resolved once); cover
 //! resolution is a hot, allocation-light function keyed on the config + service.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use config::{AppConfig, MusicService, Source};
 use reader::{ArtistImageRef, Track};
@@ -80,19 +80,14 @@ pub fn artist(
 
 /// Resolve a track's cover, dispatching on the **track's own source** (not the
 /// active source) so a mixed list — e.g. a server track in the now-playing queue
-/// while Local is active — still resolves correctly. A local track uses its album
-/// art (the caller passes the album cover-path it has in hand); a server track
-/// uses the per-service remote form (Jellyfin/Subsonic image endpoints, YT's
-/// thumbnail URL), built against the configured server's creds.
-pub fn track(
-    config: &AppConfig,
-    track: &Track,
-    album_cover_path: Option<&Path>,
-    max_width: u32,
-) -> Option<CoverUrl> {
+/// while Local is active — still resolves correctly. Every track self-describes
+/// its cover via `track.cover`: a local row's `cover_path` is projected from its
+/// album by the DB read layer (so it's a filesystem path), a server row carries
+/// the per-service remote ref. No caller-side album lookup.
+pub fn track(config: &AppConfig, track: &Track, max_width: u32) -> Option<CoverUrl> {
     let Some(service) = track.id.service() else {
-        // Local track → its album art as a sized asset.
-        let owned = album_cover_path.map(Path::to_path_buf);
+        // Local track → its (album) art file as a sized asset.
+        let owned = track.cover.as_deref().map(PathBuf::from);
         return utils::format_artwork_thumb_url(owned.as_ref(), max_width);
     };
     let server = config.server.as_ref()?;

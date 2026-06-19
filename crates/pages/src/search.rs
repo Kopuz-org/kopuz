@@ -6,7 +6,7 @@ use components::search_results::SearchResults;
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
-use hooks::use_db_queries::{use_active_source, use_albums, use_genre_tracks};
+use hooks::use_db_queries::{use_active_source, use_genre_tracks};
 use hooks::use_search_data::use_search_data;
 use player::player;
 
@@ -40,7 +40,6 @@ pub fn Search(
     let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let albums_res = use_albums(source);
     let selected_genre_memo = use_memo(move || selected_genre.read().clone().unwrap_or_default());
     let genre_tracks_res = use_genre_tracks(source, selected_genre_memo);
 
@@ -49,23 +48,12 @@ pub fn Search(
         if tracks.is_empty() {
             return Vec::new();
         }
-        let all_albums = albums_res.read().clone().unwrap_or_default();
-        let album_map: std::collections::HashMap<&String, &reader::models::Album> =
-            all_albums.iter().map(|a| (&a.id, a)).collect();
         let conf = config.read();
         tracks
             .iter()
             .map(|track| {
-                // Cover resolution is source-agnostic: the source layer knows
-                // whether the cover is a local file or a remote image URL.
-                let cover = ::server::cover::track(
-                    &conf,
-                    track,
-                    album_map
-                        .get(&track.album_id)
-                        .and_then(|a| a.cover_path.as_deref()),
-                    80,
-                );
+                // Source-agnostic via the cover seam — the track self-describes.
+                let cover = ::server::cover::track(&conf, track, 80);
                 (track.clone(), cover)
             })
             .collect()

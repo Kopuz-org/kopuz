@@ -21,7 +21,6 @@ use hooks::use_player_controller::PlayerController;
 use hooks::{Page, TrackFilter, TrackSort};
 use kopuz_route::Route;
 use std::collections::HashSet;
-use std::path::PathBuf;
 
 use crate::server::download_manager::{DownloadQueue, DownloadStatus, queue_downloads};
 
@@ -143,16 +142,6 @@ pub fn LibraryPage(
 
     // album_id → cover-path, for the per-row cover seam (local uses it, a server
     // ignores it and resolves from the track's own ref).
-    let album_cover_paths = use_memo(move || {
-        albums_res
-            .read()
-            .clone()
-            .unwrap_or_default()
-            .iter()
-            .map(|a| (a.id.clone(), a.cover_path.clone()))
-            .collect::<std::collections::HashMap<String, Option<PathBuf>>>()
-    });
-
     let total_tracks = total_rows();
     let is_empty = total_tracks == 0;
     let scroll_info = use_virtual_scroll(
@@ -171,7 +160,6 @@ pub fn LibraryPage(
     let tracks_nodes = {
         let cap = caps();
         let conf = config.read();
-        let covers = album_cover_paths.read();
         let window_rows = window.rows.read().clone().unwrap_or_default();
         let row_offset = window_rows.offset as usize;
         window_rows
@@ -198,12 +186,7 @@ pub fn LibraryPage(
                         .unwrap_or(false);
                 let is_menu_open = active_menu_track.read().as_ref() == Some(&track.id);
                 let is_selected = selected_tracks.read().contains(&track_path);
-                let cover_url = ::server::cover::track(
-                    &conf,
-                    &track,
-                    covers.get(&track.album_id).and_then(|p| p.as_deref()),
-                    80,
-                );
+                let cover_url = ::server::cover::track(&conf, &track, 80);
 
                 // Download state (servers only).
                 let item_id: String = track.id.key().to_string();

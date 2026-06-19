@@ -42,15 +42,10 @@ fn album_cover_url(conf: &AppConfig, album: &Album) -> Option<String> {
     ::server::cover::from_path(conf, album.cover_path.as_deref(), 384).map(|c| c.to_string())
 }
 
-/// A track's cover. `album_cover_path` is the track's album art, which the local
-/// source resolves from (a server resolves from the track's own ref and ignores
-/// it). Resolution itself is source-agnostic via the source cover seam.
-fn track_cover_url(
-    conf: &AppConfig,
-    track: &Track,
-    album_cover_path: Option<&std::path::Path>,
-) -> Option<String> {
-    ::server::cover::track(conf, track, album_cover_path, 384).map(|c| c.to_string())
+/// A track's cover, source-agnostic via the cover seam — the track self-describes
+/// its cover (a local row's path is projected from its album by the DB read layer).
+fn track_cover_url(conf: &AppConfig, track: &Track) -> Option<String> {
+    ::server::cover::track(conf, track, 384).map(|c| c.to_string())
 }
 
 /// The source-agnostic Home body (sections + hero). Rendered for local and any
@@ -262,11 +257,7 @@ pub fn HomeBody(
             {
                 continue;
             }
-            let cover = track_cover_url(
-                &conf,
-                track,
-                album.as_ref().and_then(|a| a.cover_path.as_deref()),
-            );
+            let cover = track_cover_url(&conf, track);
             out.push((track.clone(), album, cover));
             if out.len() >= 10 {
                 break;
@@ -287,11 +278,7 @@ pub fn HomeBody(
                 continue;
             }
             let album = album_by_id.get(track.album_id.as_str()).copied().cloned();
-            let cover = track_cover_url(
-                &conf,
-                track,
-                album.as_ref().and_then(|a| a.cover_path.as_deref()),
-            );
+            let cover = track_cover_url(&conf, track);
             return Some((track.clone(), album, cover));
         }
         None
@@ -337,9 +324,6 @@ pub fn HomeBody(
         } else {
             artist_samples_res.read().clone().unwrap_or_default()
         };
-        let all_albums = albums_res.read().clone().unwrap_or_default();
-        let album_by_id: HashMap<&str, &Album> =
-            all_albums.iter().map(|a| (a.id.as_str(), a)).collect();
         let mut unique_artists = std::collections::HashSet::new();
         let mut artist_list = Vec::new();
         for track in &tracks {
@@ -347,10 +331,7 @@ pub fn HomeBody(
                 continue;
             }
             if unique_artists.insert(track.artist.clone()) {
-                let album_cover = album_by_id
-                    .get(track.album_id.as_str())
-                    .and_then(|a| a.cover_path.as_deref());
-                let cover_url = track_cover_url(&conf, track, album_cover);
+                let cover_url = track_cover_url(&conf, track);
                 artist_list.push((track.artist.clone(), cover_url));
             }
             if artist_list.len() >= 10 {
@@ -375,9 +356,6 @@ pub fn HomeBody(
         let cover_tracks = playlist_cover_tracks_res.read().clone().unwrap_or_default();
         let conf = config.read();
         let offline = caps().downloads && *is_offline.read();
-        let all_albums = albums_res.read().clone().unwrap_or_default();
-        let album_by_id: HashMap<&str, &Album> =
-            all_albums.iter().map(|a| (a.id.as_str(), a)).collect();
         store
             .playlists
             .iter()
@@ -405,15 +383,7 @@ pub fn HomeBody(
                             let id = t.id.key();
                             !id.is_empty() && id.as_ref() == tid.as_str()
                         })
-                        .and_then(|t| {
-                            track_cover_url(
-                                &conf,
-                                t,
-                                album_by_id
-                                    .get(t.album_id.as_str())
-                                    .and_then(|a| a.cover_path.as_deref()),
-                            )
-                        })
+                        .and_then(|t| track_cover_url(&conf, t))
                 });
                 (p.id, p.name, p.tracks.len(), cover_url)
             })

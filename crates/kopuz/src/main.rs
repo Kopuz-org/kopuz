@@ -949,9 +949,8 @@ fn App() -> Element {
     });
 
     // The whole-Library signal is GONE — pages/components read the DB through
-    // query hooks. The player controller's synchronous cover lookups get this
-    // slim local-albums snapshot, kept fresh off the Albums generation.
-    let mut local_albums = use_signal(Vec::<reader::Album>::new);
+    // query hooks, and every track self-resolves its cover via the cover seam
+    // (a local row's cover_path is projected from its album in the DB read layer).
     let mut current_route = use_signal(|| Route::Home);
     let mut scroll_positions: Signal<std::collections::HashMap<Route, f64>> =
         use_signal(std::collections::HashMap::new);
@@ -1328,24 +1327,13 @@ fn App() -> Element {
         current_song_cover_url,
         current_track_snapshot,
         volume,
-        local_albums,
         config,
         db.clone(),
     );
 
-    // Hydrate the controller's slim local-albums snapshot from the DB,
-    // re-querying when the albums table changes.
+    // Generations handle the rescan task bumps after writing scanned tracks/albums,
+    // so the DB-backed query hooks re-run and the UI refreshes.
     let gens_for_albums = hooks::db_reactivity::use_generations();
-    let db_for_albums = db.clone();
-    use_effect(move || {
-        let _ = gens_for_albums.generation(hooks::db_reactivity::Table::Albums);
-        let db = db_for_albums.clone();
-        spawn(async move {
-            if let Ok(albums) = db.albums(&db::Source::Local).await {
-                local_albums.set(albums);
-            }
-        });
-    });
 
     use_effect(move || {
         if !*initial_load_done.read() {

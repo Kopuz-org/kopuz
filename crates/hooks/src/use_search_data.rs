@@ -54,7 +54,6 @@ pub fn use_search_data(search_query: Signal<String>, config: Signal<AppConfig>) 
         // here through the cover seam, which dispatches on the source/track.
         let conf = config.read().clone();
         let source = active_source.read().clone();
-        let all_albums = albums_res.read().clone().unwrap_or_default();
 
         async move {
             if query.trim().is_empty() {
@@ -62,17 +61,9 @@ pub fn use_search_data(search_query: Signal<String>, config: Signal<AppConfig>) 
             }
             let span = tracing::info_span!("query.search", source = conf.active_source.as_str());
             let (tracks, albums) = source.search(&query).instrument(span).await.ok()?;
-            let album_cover: std::collections::HashMap<&String, Option<&std::path::Path>> =
-                all_albums
-                    .iter()
-                    .map(|a| (&a.id, a.cover_path.as_deref()))
-                    .collect();
             let result_tracks: TrackRes = tracks
                 .iter()
-                .map(|t| {
-                    let ac = album_cover.get(&t.album_id).copied().flatten();
-                    (t.clone(), server::cover::track(&conf, t, ac, 80))
-                })
+                .map(|t| (t.clone(), server::cover::track(&conf, t, 80)))
                 .collect();
             let result_albums: AlbumRes = albums
                 .iter()

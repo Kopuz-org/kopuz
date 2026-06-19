@@ -235,8 +235,6 @@ pub fn QueueListView(
     };
     let scroll_stat = use_signal(|| 0.0_f64);
     let container_height = use_signal(|| 0.0_f64);
-    let source_local = use_memo(|| config::Source::Local);
-    let albums_res = hooks::use_db_queries::use_albums(source_local);
 
     use_effect(move || {
         if layout == LayoutMode::Rightbar {
@@ -381,16 +379,10 @@ pub fn QueueListView(
     };
 
     let get_track_cover = |track: &reader::Track| -> Option<utils::CoverUrl> {
-        // `peek()`, not reactive reads — cover lookup shouldn't subscribe to
-        // library/config updates. Resolution is source-agnostic via the source
-        // cover seam (local album art vs the per-service remote URL).
-        let conf = config.peek();
-        let album_cover = albums_res
-            .peek()
-            .as_ref()
-            .and_then(|albums| albums.iter().find(|a| a.id == track.album_id))
-            .and_then(|a| a.cover_path.clone());
-        server::cover::track(&conf, track, album_cover.as_deref(), cover_max_width)
+        // `peek()`, not a reactive read — cover lookup shouldn't subscribe to
+        // config updates. Source-agnostic via the cover seam; the track
+        // self-describes its cover (local path projected from its album by the DB).
+        server::cover::track(&config.peek(), track, cover_max_width)
     };
 
     let mut play_song_at_index = move |index: usize| {

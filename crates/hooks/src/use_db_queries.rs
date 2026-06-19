@@ -338,35 +338,13 @@ pub fn use_albums(source: Memo<Source>) -> Resource<Vec<reader::Album>> {
 }
 
 /// A per-track display-cover resolver: call `resolve(&track)` for any track and
-/// get its cover, with no source/partition decision at the call site.
-///
-/// The per-track dispatch lives in the source-layer seam ([`server::cover::track`]):
-/// server tracks resolve from `track.cover`; a **local** track needs its album's
-/// `cover_path`, which only exists in the local partition — so this fetches the
-/// local album corpus *once* (the one correct place for that `Source::Local`),
-/// builds an `album_id → cover_path` map, and closes over it. A mixed-source list
-/// (e.g. the play queue) resolves correctly — each track via its own source — and
-/// it's O(albums) once + O(1) per track (vs the old per-row `.find`).
+/// get its cover, with no source/partition decision at the call site. Every track
+/// self-describes its cover via the source-layer seam ([`server::cover::track`])
+/// — a local row's `cover_path` is projected from its album by the DB read layer
+/// — so this needs no album lookup; a mixed-source list resolves correctly.
 pub fn use_cover_resolver(max_width: u32) -> impl Fn(&reader::Track) -> Option<utils::CoverUrl> {
     let config = use_context::<Signal<config::AppConfig>>();
-    let local_albums = use_albums(use_memo(|| Source::Local));
-    let album_cover: std::sync::Arc<std::collections::HashMap<String, std::path::PathBuf>> = {
-        let albums = local_albums.read();
-        std::sync::Arc::new(
-            albums
-                .as_ref()
-                .map(|v| v.as_slice())
-                .unwrap_or(&[])
-                .iter()
-                .filter_map(|a| a.cover_path.clone().map(|p| (a.id.clone(), p)))
-                .collect(),
-        )
-    };
-    move |track: &reader::Track| {
-        let conf = config.read();
-        let ac = album_cover.get(&track.album_id).map(|p| p.as_path());
-        ::server::cover::track(&conf, track, ac, max_width)
-    }
+    move |track: &reader::Track| ::server::cover::track(&config.read(), track, max_width)
 }
 
 /// The active source's favorite refs, re-queried on a favorites bump or a source

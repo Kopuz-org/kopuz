@@ -52,9 +52,6 @@ pub struct PlayerController {
     pub current_song_cover_url: Signal<String>,
     pub current_track_snapshot: Signal<Option<Track>>,
     pub volume: Signal<f32>,
-    /// Local albums snapshot, hydrated from the DB by the host (a slim stand-in
-    /// for the old whole-Library signal — only the sync cover lookups need it).
-    pub local_albums: Signal<Vec<reader::Album>>,
     pub config: Signal<AppConfig>,
     /// Storage handle (in a `Signal` so the controller stays `Copy`) — used by
     /// the still-`Db`-taking factories (`local`/`for_track`) the player calls.
@@ -129,75 +126,12 @@ impl PlayerController {
     }
 
     fn cover_url_for_track(&self, track: &Track) -> String {
-        let path_str = Self::track_key(track);
-        let scheme = path_str
-            .split(':')
-            .next()
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-
-        let url = match scheme.as_str() {
-            "jellyfin" => self
-                .config
-                .read()
-                .server
-                .as_ref()
-                .and_then(|server| {
-                    utils::jellyfin_image::resolve_track_cover(
-                        track.cover.as_deref(),
-                        &track.id.key(),
-                        &track.album_id,
-                        &server.url,
-                        server.access_token.as_deref(),
-                        800,
-                        90,
-                    )
-                })
-                .unwrap_or_default(),
-            "subsonic" | "custom" => self
-                .config
-                .read()
-                .server
-                .as_ref()
-                .and_then(|server| {
-                    let subsonic_path = match track.cover.as_deref() {
-                        Some(c) => format!("{}:{}", track.id.uid(), c),
-                        None => track.id.uid(),
-                    };
-                    utils::subsonic_image::subsonic_image_url_from_path(
-                        &subsonic_path,
-                        &server.url,
-                        server.access_token.as_deref(),
-                        800,
-                        90,
-                    )
-                })
-                .unwrap_or_default(),
-            "ytmusic" => utils::jellyfin_image::resolve_track_cover(
-                track.cover.as_deref(),
-                &track.id.key(),
-                &track.album_id,
-                "",
-                None,
-                800,
-                90,
-            )
-            .unwrap_or_default(),
-            _ => self
-                .local_albums
-                .read()
-                .iter()
-                .find(|album| album.id == track.album_id)
-                .and_then(|album| utils::format_artwork_url(album.cover_path.as_ref()))
-                .map(|url| url.as_ref().to_string())
-                .unwrap_or_default(),
-        };
-
-        if url.is_empty() {
-            utils::default_cover_url().as_ref().to_string()
-        } else {
-            url
-        }
+        // Dispatch on the track's own source through the cover seam. Every track
+        // self-describes its cover (a local row's path is projected from its album
+        // by the DB read layer), so this sync path needs no album lookup.
+        ::server::cover::track(&self.config.read(), track, 800)
+            .map(|cover| cover.as_ref().to_string())
+            .unwrap_or_else(|| utils::default_cover_url().as_ref().to_string())
     }
 
     fn clear_current_track_metadata(&mut self) {
@@ -1417,17 +1351,9 @@ impl PlayerController {
                     && let Ok((source, hint)) = decoder::open_file(track_path)
                 {
                     {
-                        let artwork = {
-                            let albums = self.local_albums.peek();
-                            albums
-                                .iter()
-                                .find(|a| a.id == track.album_id)
-                                .and_then(|a| {
-                                    a.cover_path
-                                        .as_ref()
-                                        .map(|p| p.to_string_lossy().into_owned())
-                                })
-                        };
+                        // For a local track `track.cover` is its album-art file
+                        // path (projected from the album by the DB read layer).
+                        let artwork = track.cover.clone();
 
                         let meta = NowPlayingMeta {
                             title: track.title.clone(),
@@ -2094,7 +2020,6 @@ pub fn use_player_controller(
     current_song_cover_url: Signal<String>,
     current_track_snapshot: Signal<Option<Track>>,
     volume: Signal<f32>,
-    local_albums: Signal<Vec<reader::Album>>,
     config: Signal<AppConfig>,
     db_handle: db::Db,
 ) -> PlayerController {
@@ -2134,7 +2059,6 @@ pub fn use_player_controller(
         current_song_cover_url,
         current_track_snapshot,
         volume,
-        local_albums,
         config,
         db,
         active_source,

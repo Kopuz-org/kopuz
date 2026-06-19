@@ -162,3 +162,49 @@ async fn typed_queries_smoke() {
 
     assert_eq!(db.search_corpus(&local).await.unwrap().len(), 4);
 }
+
+/// A track self-resolves its cover: a local row (NULL `cover_path`) gets its
+/// album's cover via the read-layer JOIN; a server row keeps its own `cover_path`
+/// even when its album has a different one (COALESCE must not clobber it).
+#[tokio::test]
+async fn track_cover_projects_from_album_for_local_keeps_own_for_server() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    let mut conn = SqliteConnectOptions::new()
+        .filename(&db_path)
+        .connect()
+        .await
+        .unwrap();
+    conn.execute(
+        "INSERT INTO albums (source, source_album_id, title, artist, genre, cover_path) VALUES \
+           ('local', 'al-x', 'X', 'A', 'Rock', '/covers/al-x.jpg'), \
+           ('srv-1', 'al-srv', 'SrvAlbum', 'B', 'Pop', '/album/should-not-win.jpg'); \
+         INSERT INTO tracks (rowid_pk, source, track_key, source_album_id, title, artist, album, artists_json) \
+           VALUES (1, 'local', '/music/x.flac', 'al-x', 'Song', 'A', 'X', '[]'); \
+         INSERT INTO tracks (rowid_pk, source, track_key, service, source_album_id, title, artist, album, cover_path, artists_json) \
+           VALUES (2, 'srv-1', 'vid9', 'YtMusic', 'al-srv', 'SrvSong', 'B', 'SrvAlbum', 'own-ref', '[]');",
+    )
+    .await
+    .unwrap();
+
+    let local = db.album_tracks(&Source::Local, "al-x").await.unwrap();
+    assert_eq!(local.len(), 1);
+    assert_eq!(
+        local[0].cover.as_deref(),
+        Some("/covers/al-x.jpg"),
+        "local track's NULL cover_path falls back to its album's cover via JOIN"
+    );
+
+    let srv = db
+        .album_tracks(&Source::Server("srv-1".into()), "al-srv")
+        .await
+        .unwrap();
+    assert_eq!(srv.len(), 1);
+    assert_eq!(
+        srv[0].cover.as_deref(),
+        Some("own-ref"),
+        "server track keeps its own cover ref; COALESCE doesn't pull the album's"
+    );
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}

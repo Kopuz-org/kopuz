@@ -11,8 +11,7 @@ use components::playlist_popups::AddPlaylistPopup;
 use config::{AppConfig, MusicService, Source, UiStyle};
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
-use hooks::use_db_queries::{use_active_source, use_albums, use_playlists, use_tracks_by_keys};
-use std::path::PathBuf;
+use hooks::use_db_queries::{use_active_source, use_playlists, use_tracks_by_keys};
 use tracing::Instrument;
 
 use crate::server::download_manager::{
@@ -322,7 +321,6 @@ fn PlaylistsGrid(
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
     let playlists_res = use_playlists();
-    let albums_res = use_albums(source);
     // First track of each playlist — the cover-of-last-resort for a playlist with
     // no explicit cover / image tag (resolved through the source cover seam).
     let first_keys = use_memo(move || {
@@ -539,13 +537,6 @@ fn PlaylistsGrid(
 
     let store = playlists_res.read().clone().unwrap_or_default();
     let first_tracks = first_tracks_res.read().clone().unwrap_or_default();
-    let album_cover_paths: std::collections::HashMap<String, Option<PathBuf>> = albums_res
-        .read()
-        .clone()
-        .unwrap_or_default()
-        .iter()
-        .map(|a| (a.id.clone(), a.cover_path.clone()))
-        .collect();
 
     // A playlist's cover, source-uniform: an explicit cover, then a server image
     // tag, then the first track's cover (all resolved through the source layer).
@@ -570,14 +561,7 @@ fn PlaylistsGrid(
         let track = first_tracks
             .iter()
             .find(|t| t.id.key().as_ref() == first_ref.as_str())?;
-        ::server::cover::track(
-            &conf,
-            track,
-            album_cover_paths
-                .get(&track.album_id)
-                .and_then(|p| p.as_deref()),
-            384,
-        )
+        ::server::cover::track(&conf, track, 384)
     };
 
     if caps().folders {

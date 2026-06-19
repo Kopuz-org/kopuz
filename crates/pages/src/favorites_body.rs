@@ -9,11 +9,10 @@ use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
-use hooks::use_db_queries::{use_active_source, use_albums, use_favorites, use_tracks_by_keys};
+use hooks::use_db_queries::{use_active_source, use_favorites, use_tracks_by_keys};
 use hooks::use_player_controller::PlayerController;
 use kopuz_route::Route;
-use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::collections::HashSet;
 use std::rc::Rc;
 use tracing::Instrument;
 
@@ -71,7 +70,6 @@ pub fn FavoritesBody(
     let favorites_res = use_favorites();
     let fav_keys = use_memo(move || favorites_res.read().clone().unwrap_or_default());
     let fav_tracks_res = use_tracks_by_keys(source, fav_keys);
-    let albums_res = use_albums(source);
 
     use_effect(move || {
         // Only the active server syncs — a configured-but-inactive server (e.g. a
@@ -245,27 +243,13 @@ pub fn FavoritesBody(
 
     let displayed_tracks: Vec<(reader::models::Track, Option<utils::CoverUrl>)> = {
         let conf = config.read();
-        let album_cover_paths: HashMap<String, Option<PathBuf>> = albums_res
-            .read()
-            .clone()
-            .unwrap_or_default()
-            .iter()
-            .map(|a| (a.id.clone(), a.cover_path.clone()))
-            .collect();
         fav_tracks_res
             .read()
             .clone()
             .unwrap_or_default()
             .into_iter()
             .map(|t| {
-                let cover_url = ::server::cover::track(
-                    &conf,
-                    &t,
-                    album_cover_paths
-                        .get(&t.album_id)
-                        .and_then(|p| p.as_deref()),
-                    80,
-                );
+                let cover_url = ::server::cover::track(&conf, &t, 80);
                 (t, cover_url)
             })
             .collect()
