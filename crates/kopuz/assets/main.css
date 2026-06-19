@@ -62,9 +62,11 @@ button:focus {
 }
 
 #main-scroll-area {
-    /* No `contain` here: layout/paint containment makes this a containing block
-       for position:fixed descendants, which would clip a modal's full-screen
-       `.overlay` to the scroll area (only the top of the page darkens). */
+    /* `position: relative` (not `contain`/`transform`) so this is the containing
+       block for the page's `absolute inset-0` container, WITHOUT also becoming
+       one for position:fixed descendants — otherwise a modal's full-screen
+       `.overlay` gets clipped to the scroll area (only the top darkens). */
+    position: relative;
     /* Don't chain scroll to the document when hitting top/bottom */
     overscroll-behavior: none;
 }
