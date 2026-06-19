@@ -8,6 +8,44 @@
 use config::{AppConfig, MusicServer, MusicService, Source};
 use db::ReadDb;
 use dioxus::prelude::*;
+use server::source::{ActiveSource, AuthOutcome};
+
+/// Live connection status of the active source, for the switcher's indicator.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ConnStatus {
+    /// Verifying auth / reaching the server (the loading state).
+    Connecting,
+    /// Verified and reachable.
+    Online,
+    /// Unreachable, or auth expired/invalid.
+    Offline,
+}
+
+/// Connection status of the active source: Local is always Online (no auth); a
+/// server runs `validate()` on each switch — `Connecting` until it resolves to
+/// `Online` (valid) or `Offline` (expired/unreachable).
+pub fn use_connection_status() -> Memo<ConnStatus> {
+    let active_source = use_context::<Signal<ActiveSource>>();
+    let config = use_context::<Signal<AppConfig>>();
+    let mut status = use_signal(|| ConnStatus::Connecting);
+    use_effect(move || {
+        // Subscribe to the active source (rebuilds on switch); `peek` the config
+        // so a volume/theme change doesn't trigger a re-validation.
+        let src = active_source.read().clone();
+        if matches!(config.peek().active_source, Source::Local) {
+            status.set(ConnStatus::Online);
+            return;
+        }
+        status.set(ConnStatus::Connecting);
+        spawn(async move {
+            status.set(match src.validate().await {
+                AuthOutcome::Valid => ConnStatus::Online,
+                AuthOutcome::Expired | AuthOutcome::Unreachable => ConnStatus::Offline,
+            });
+        });
+    });
+    use_memo(move || *status.read())
+}
 
 /// Apply a source switch. For a server it loads the stored creds from the DB (so
 /// the connection is the new server's, not a leftover one) and writes

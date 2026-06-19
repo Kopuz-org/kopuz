@@ -10,6 +10,7 @@
 
 use config::{AppConfig, MusicService, Source};
 use dioxus::prelude::*;
+use hooks::source_switch::ConnStatus;
 
 /// Set by the switcher's "Manage sources" button to a Settings section's element
 /// id, asking the Settings page to scroll there instead of restoring its last
@@ -35,6 +36,14 @@ const SWITCHER_CSS: &str = r#"
 .ss-tile i{font-size:12px;color:var(--accent)}
 .ss-stk{flex:1;text-align:left;min-width:0}
 .ss-kick{display:block;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:8.5px;letter-spacing:.2em;text-transform:uppercase;color:color-mix(in oklab,var(--ss-fg) 42%,transparent);margin-bottom:2px}
+.ss-stat{display:flex;align-items:center;gap:6px;height:11px;margin-bottom:2px}
+.ss-stat .ss-kick{margin-bottom:0}
+.ss-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;transition:background .2s}
+.ss-on{background:#36d399;box-shadow:0 0 6px color-mix(in oklab,#36d399 70%,transparent)}
+.ss-off{background:#ff5f56;box-shadow:0 0 6px color-mix(in oklab,#ff5f56 55%,transparent)}
+.ss-bar{position:relative;width:42px;height:3px;border-radius:2px;overflow:hidden;background:color-mix(in oklab,var(--ss-fg) 14%,transparent)}
+.ss-bar::after{content:"";position:absolute;top:0;bottom:0;left:0;width:45%;border-radius:2px;background:#ff5f56;animation:ss-load 1.1s ease-in-out infinite}
+@keyframes ss-load{0%{transform:translateX(-110%)}100%{transform:translateX(235%)}}
 .ss-tname{display:block;font-size:13px;font-weight:600;letter-spacing:-.01em;color:var(--ss-fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ss-chev{font-size:9px;color:color-mix(in oklab,var(--ss-fg) 42%,transparent);transition:transform .18s}
 .ss-tr.ss-open .ss-chev{transform:rotate(180deg);color:var(--accent)}
@@ -104,6 +113,8 @@ pub fn SourceSwitcher(
     // Full switch (loads server creds + syncs config.server), so a sidebar switch
     // is identical to the Settings one — not just an active_source flip.
     let switch = hooks::source_switch::use_switch_source();
+    // Live auth/connection status of the active source, for the status indicator.
+    let conn = hooks::source_switch::use_connection_status();
     let sources = entries(&config.read());
     let count = sources.len();
     let active = config.read().active_source.clone();
@@ -140,7 +151,16 @@ pub fn SourceSwitcher(
                 span { class: "ss-tile", i { class: "{active_icon}" } }
                 if !collapsed {
                     span { class: "ss-stk",
-                        span { class: "ss-kick", "{i18n::t(\"source\")}" }
+                        span { class: "ss-stat",
+                            span {
+                                class: if conn() == ConnStatus::Online { "ss-dot ss-on" } else { "ss-dot ss-off" },
+                            }
+                            if conn() == ConnStatus::Connecting {
+                                span { class: "ss-bar" }
+                            } else {
+                                span { class: "ss-kick", "{i18n::t(\"source\")}" }
+                            }
+                        }
                         span { class: "ss-tname", "{active_label}" }
                     }
                     i { class: "fa-solid fa-chevron-down ss-chev" }
