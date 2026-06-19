@@ -444,55 +444,29 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
 
     let db_for_switch = use_context::<hooks::ReadDb>();
     let handle_switch_server = move |id: String| {
-        let server = {
-            let cfg = config.read();
-            cfg.find_saved_server(&id).cloned()
-        };
-        if let Some(saved) = server {
-            let db = db_for_switch.clone();
-            spawn(async move {
-                let is_ytmusic = saved.service == MusicService::YtMusic;
-                let is_anon = is_ytmusic && saved.yt_anonymous;
-
-                // Creds live with the server: reuse the stored token instead of
-                // re-prompting sign-in on every switch.
-                let stored = db.load_server(&saved.id).await.ok().flatten();
-                let stored_token = stored.as_ref().and_then(|s| s.access_token.clone());
-                let stored_user = stored.as_ref().and_then(|s| s.user_id.clone());
-                let has_creds = stored_token.as_deref().is_some_and(|t| !t.is_empty());
-
-                let active = config::MusicServer {
-                    name: saved.name,
-                    url: saved.url,
-                    service: saved.service,
-                    // Anonymous YT keeps an empty (non-None) token so the
-                    // backend treats it as anon rather than "needs sign-in".
-                    access_token: if is_anon {
-                        Some(String::new())
-                    } else {
-                        stored_token
-                    },
-                    user_id: stored_user,
-                    id: Some(saved.id.clone()),
-                    // Carry the saved browser choice over so the sign-in
-                    // launch hits the binary the user picked, not whatever
-                    // the popup's default selector happens to be.
-                    yt_browser: saved.yt_browser,
-                    yt_anonymous: is_anon,
-                };
-                {
-                    let mut cfg = config.write();
-                    cfg.active_source = config::Source::Server(saved.id);
-                    cfg.server = Some(active);
-                }
-                // Only launch a sign-in flow when there are no stored creds.
-                if is_ytmusic && !is_anon && !has_creds {
+        let db = db_for_switch.clone();
+        spawn(async move {
+            let Some(is_ytmusic) = config
+                .peek()
+                .find_saved_server(&id)
+                .map(|s| s.service == MusicService::YtMusic)
+            else {
+                return;
+            };
+            // Shared switch (sidebar + Settings): loads creds and sets the active
+            // source + server snapshot together. `usable` ⇒ has stored creds or is
+            // anonymous YT; otherwise launch the right sign-in flow.
+            let usable =
+                hooks::source_switch::apply_source_switch(config, db, config::Source::Server(id))
+                    .await;
+            if !usable {
+                if is_ytmusic {
                     ytmusic_auto_login();
-                } else if !is_ytmusic && !has_creds {
+                } else {
                     show_login.set(true);
                 }
-            });
-        }
+            }
+        });
     };
 
     let handle_delete_saved = move |id: String| {

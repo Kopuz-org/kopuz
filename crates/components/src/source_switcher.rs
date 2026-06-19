@@ -101,6 +101,9 @@ pub fn SourceSwitcher(
     #[props(default)] on_manage: Option<EventHandler<()>>,
 ) -> Element {
     let mut open = use_signal(|| false);
+    // Full switch (loads server creds + syncs config.server), so a sidebar switch
+    // is identical to the Settings one — not just an active_source flip.
+    let switch = hooks::source_switch::use_switch_source();
     let sources = entries(&config.read());
     let count = sources.len();
     let active = config.read().active_source.clone();
@@ -156,13 +159,14 @@ pub fn SourceSwitcher(
                         for (src , label , icon , accent , sub) in sources.into_iter() {
                             {
                                 let is_active = src == active;
+                                let switch = switch.clone();
                                 rsx! {
                                     button {
                                         key: "{src.as_str()}",
                                         class: if is_active { "ss-row ss-act" } else { "ss-row" },
                                         style: "--accent:{accent};",
                                         onclick: move |_| {
-                                            crate::shared::set_active_source(config, src.clone());
+                                            switch(src.clone());
                                             open.set(false);
                                         },
                                         span { class: "ss-tile", i { class: "{icon}" } }
