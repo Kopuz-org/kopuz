@@ -10,10 +10,13 @@
 
 use std::collections::HashSet;
 
-use config::{AppConfig, Browser, MusicServer, MusicService, SavedServer};
+use config::{AppConfig, Browser, MusicServer, MusicService, SavedServer, Source};
 use sqlx::SqlitePool;
 
 use crate::DbError;
+
+/// How many recent entries to keep per source.
+const RECENT_LIMIT: i64 = 50;
 
 pub async fn load_config(pool: &SqlitePool) -> Result<Option<AppConfig>, DbError> {
     let Some(json): Option<String> =
@@ -226,6 +229,52 @@ pub async fn bump_listen_count(pool: &SqlitePool, key: &str) -> Result<(), DbErr
     Ok(())
 }
 
+/// One source's recently-played track keys, newest first.
+pub async fn recently_played(
+    pool: &SqlitePool,
+    source: &Source,
+    limit: u32,
+) -> Result<Vec<String>, DbError> {
+    let rows: Vec<String> = sqlx::query_scalar(
+        "SELECT track_key FROM recently_played WHERE source = ?1 \
+         ORDER BY played_at DESC LIMIT ?2",
+    )
+    .bind(source.as_str())
+    .bind(limit as i64)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// Record a play for this source: move the key to the front, then trim the
+/// source's history to [`RECENT_LIMIT`]. A per-play handful of statements — no
+/// whole-blob rewrite (recently-played used to live in the config blob).
+pub async fn push_recent(pool: &SqlitePool, source: &Source, key: &str) -> Result<(), DbError> {
+    let src = source.as_str();
+    let now = now_millis();
+    let mut tx = pool.begin().await?;
+    sqlx::query(
+        "INSERT INTO recently_played (source, track_key, played_at) VALUES (?1, ?2, ?3) \
+         ON CONFLICT(source, track_key) DO UPDATE SET played_at = ?3",
+    )
+    .bind(src)
+    .bind(key)
+    .bind(now)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "DELETE FROM recently_played WHERE source = ?1 AND track_key NOT IN \
+         (SELECT track_key FROM recently_played WHERE source = ?1 \
+          ORDER BY played_at DESC LIMIT ?2)",
+    )
+    .bind(src)
+    .bind(RECENT_LIMIT)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(())
+}
+
 fn parse_service(s: &str) -> MusicService {
     match s {
         "Subsonic" => MusicService::Subsonic,
@@ -265,5 +314,12 @@ fn now_secs() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+fn now_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
 }

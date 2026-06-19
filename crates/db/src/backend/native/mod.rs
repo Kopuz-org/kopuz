@@ -174,6 +174,14 @@ impl ReadStore for Native {
         queries::recent_albums(&self.pool(), source, limit).await
     }
 
+    async fn recently_played(
+        &self,
+        source: &crate::Source,
+        limit: u32,
+    ) -> Result<Vec<String>, DbError> {
+        cfg_store::recently_played(&self.pool(), source, limit).await
+    }
+
     async fn artist_sample_tracks(
         &self,
         source: &crate::Source,
@@ -381,6 +389,10 @@ impl Storage for Native {
 
     async fn bump_listen_count(&self, track_uid: &str) -> Result<(), DbError> {
         cfg_store::bump_listen_count(&self.pool(), track_uid).await
+    }
+
+    async fn push_recent(&self, source: &crate::Source, track_key: &str) -> Result<(), DbError> {
+        cfg_store::push_recent(&self.pool(), source, track_key).await
     }
 
     async fn set_offline_track(&self, id: &str, path: Option<&str>) -> Result<(), DbError> {

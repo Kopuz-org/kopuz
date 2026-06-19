@@ -164,14 +164,6 @@ impl Source {
         }
     }
 
-    pub fn is_local(&self) -> bool {
-        matches!(self, Source::Local)
-    }
-
-    pub fn is_server(&self) -> bool {
-        matches!(self, Source::Server(_))
-    }
-
     /// The server id, if this is a server source.
     pub fn server_id(&self) -> Option<&str> {
         match self {
@@ -537,10 +529,6 @@ pub fn default_home_sections() -> Vec<HomeSection> {
         .collect()
 }
 
-fn default_recently_played_limit() -> usize {
-    50
-}
-
 fn default_hero_height() -> u32 {
     300
 }
@@ -642,10 +630,6 @@ pub struct AppConfig {
     pub hero_height: u32,
     #[serde(default = "default_home_sections")]
     pub home_sections: Vec<HomeSection>,
-    #[serde(default)]
-    pub recently_played: Vec<String>,
-    #[serde(default)]
-    pub recently_played_server: Vec<String>,
     #[serde(default)]
     pub listen_now_style: ListenNowStyle,
     #[serde(default)]
@@ -933,8 +917,6 @@ impl Default for AppConfig {
             ui_style: UiStyle::Normal,
             hero_height: default_hero_height(),
             home_sections: default_home_sections(),
-            recently_played: Vec::new(),
-            recently_played_server: Vec::new(),
             listen_now_style: ListenNowStyle::default(),
             artist_photo_source: ArtistPhotoSource::AlbumCover,
             auto_fetch_covers: false,
@@ -1033,20 +1015,6 @@ impl AppConfig {
             );
         }
     }
-
-    pub fn push_recent(&mut self, id: String, server: bool) {
-        let list = if server {
-            &mut self.recently_played_server
-        } else {
-            &mut self.recently_played
-        };
-        list.retain(|x| x != &id);
-        list.insert(0, id);
-        let limit = default_recently_played_limit();
-        if list.len() > limit {
-            list.truncate(limit);
-        }
-    }
 }
 
 impl Default for MusicServer {
@@ -1066,11 +1034,8 @@ impl Default for MusicServer {
 
 impl AppConfig {
     pub fn active_service(&self) -> Option<MusicService> {
-        if self.active_source.is_server() {
-            self.server.as_ref().map(|server| server.service)
-        } else {
-            None
-        }
+        self.active_source.server_id()?;
+        self.server.as_ref().map(|server| server.service)
     }
 
     pub fn uses_jellyfin_server(&self) -> bool {

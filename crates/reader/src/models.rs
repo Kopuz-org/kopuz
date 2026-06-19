@@ -51,14 +51,6 @@ impl TrackId {
         }
     }
 
-    pub fn is_server(&self) -> bool {
-        matches!(self, TrackId::Server { .. })
-    }
-
-    pub fn is_local(&self) -> bool {
-        matches!(self, TrackId::Local(_))
-    }
-
     /// A stable, source-qualified identity string (no cover): the file path for
     /// local, or `"<service-prefix>:<item_id>"` for server. For logging /
     /// cross-source string keys.

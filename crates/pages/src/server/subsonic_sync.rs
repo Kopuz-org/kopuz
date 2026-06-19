@@ -25,7 +25,7 @@ pub async fn sync_server_library(clear_first: bool) -> Result<(), String> {
     let gens = hooks::db_reactivity::use_generations();
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let source = active_source.peek().clone();
-    if !source.source().is_server() {
+    if !source.capabilities().sync {
         return Ok(());
     }
     let src = source.source().clone();

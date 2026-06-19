@@ -72,6 +72,14 @@ impl ReadStore for Stub {
         Ok(Vec::new())
     }
 
+    async fn recently_played(
+        &self,
+        _source: &crate::Source,
+        _limit: u32,
+    ) -> Result<Vec<String>, DbError> {
+        Ok(Vec::new())
+    }
+
     async fn artist_sample_tracks(
         &self,
         _source: &crate::Source,
@@ -286,6 +294,10 @@ impl Storage for Stub {
     }
 
     async fn bump_listen_count(&self, _track_uid: &str) -> Result<(), DbError> {
+        Ok(())
+    }
+
+    async fn push_recent(&self, _source: &crate::Source, _track_key: &str) -> Result<(), DbError> {
         Ok(())
     }
 

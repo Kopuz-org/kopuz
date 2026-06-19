@@ -1,4 +1,3 @@
-use config::Source;
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_playlists, use_tracks_by_keys};
@@ -19,32 +18,26 @@ pub fn PlaylistDetail(
     #[props(default = false)] is_downloading_all: bool,
 ) -> Element {
     let mut tracks = use_signal(Vec::<reader::models::Track>::new);
-    let mut has_loaded_jellyfin_tracks = use_signal(|| false);
+    let mut has_loaded_remote = use_signal(|| false);
     let gens = hooks::db_reactivity::use_generations();
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let playlists_res = use_playlists();
-    // `source_local` resolves a *local* playlist's track refs (line below); covers
-    // go through the source-layer resolver instead of a hand-rolled album lookup.
-    let source_local = use_memo(|| Source::Local);
     let cover_for = hooks::use_db_queries::use_cover_resolver(512);
 
+    // Seed = the stored playlist's track refs, resolved from the ACTIVE source's
+    // partition (the store only holds the active source's playlists).
     let pid_for_seed = playlist_id.clone();
     let seed_refs = use_memo(move || {
         let store = playlists_res.read().clone().unwrap_or_default();
-        // The store holds only the active source's playlists, so a found
-        // playlist is a server one iff the active source is a server.
-        let is_server = config.read().active_source.is_server();
-        if let Some(p) = store.playlists.iter().find(|p| p.id == pid_for_seed) {
-            (is_server, p.tracks.clone())
-        } else {
-            (false, Vec::new())
-        }
+        store
+            .playlists
+            .iter()
+            .find(|p| p.id == pid_for_seed)
+            .map(|p| p.tracks.clone())
+            .unwrap_or_default()
     });
-    let local_seed_refs = use_memo(move || {
-        let (is_j, refs) = seed_refs.read().clone();
-        if is_j { Vec::new() } else { refs }
-    });
-    let local_tracks_res = use_tracks_by_keys(source_local, local_seed_refs);
+    let active_partition = use_memo(move || config.read().active_source.clone());
+    let seed_tracks_res = use_tracks_by_keys(active_partition, seed_refs);
 
     // Affordances are capability-driven, not source-kind-driven: tag-edit and
     // delete-from-disk are local-only, downloads server-only, reorder per the
@@ -54,75 +47,46 @@ pub fn PlaylistDetail(
     let caps = active_source.read().capabilities();
     let can_reorder = caps.playlists == ::server::source::PlaylistOps::Reorder;
 
-    // Initial tracks WITHOUT any network round-trip: local playlists resolve
-    // their refs through the tracks-by-keys hook; server playlists seed from
-    // the cached server rows in the DB. For server playlists this is a SEED —
-    // the network fetch below still runs once in the background and replaces
-    // it. Previously the page sat empty until the whole remote walk finished
-    // (837 liked songs = many sequential continuation requests).
-    // One unconditional effect for both kinds, so the hook order can't change
-    // if this component instance is re-rendered with the other playlist kind.
+    // Initial tracks with no network round-trip: resolve the playlist's refs from
+    // the active source's cached/local rows. A server's live entries (below)
+    // replace this once they arrive; local has no remote entries, so this stands.
     use_effect(move || {
-        let (is_j, refs) = seed_refs.read().clone();
-        if !is_j {
-            tracks.set(local_tracks_res.read().clone().unwrap_or_default());
-        } else if !*has_loaded_jellyfin_tracks.read() && !refs.is_empty() {
-            let read_db = consume_context::<hooks::ReadDb>();
-            let server_id = {
-                let conf = config.peek();
-                conf.active_source
-                    .server_id()
-                    .map(String::from)
-                    .or_else(|| conf.server.as_ref().and_then(|s| s.id.clone()))
-            };
-            spawn(async move {
-                let Some(sid) = server_id else { return };
-                if let Ok(seed) = read_db.tracks_by_keys(&Source::Server(sid), &refs).await
-                    && !seed.is_empty()
-                    && !*has_loaded_jellyfin_tracks.peek()
-                {
-                    tracks.set(seed);
-                }
-            });
+        if !*has_loaded_remote.read() {
+            tracks.set(seed_tracks_res.read().clone().unwrap_or_default());
         }
     });
 
     let pid = playlist_id.clone();
     use_effect(move || {
-        let is_j = seed_refs.read().0;
-        if is_j && !*has_loaded_jellyfin_tracks.read() {
-            let pid_clone = pid.clone();
-            let load_span = tracing::info_span!("playlist.load_entries", playlist_id = %pid_clone);
-            // The facade fetches the entries per service; the page stays agnostic.
-            let source = active_source.peek().clone();
-            spawn(
-                async move {
-                    if let Ok(entries) = source.fetch_playlist_entries(&pid_clone).await {
-                        tracing::debug!(count = entries.len(), "playlist entries loaded");
-                        if !entries.is_empty() && !*has_loaded_jellyfin_tracks.peek() {
-                            tracks.set(entries);
-                        }
-                        has_loaded_jellyfin_tracks.set(true);
-                    }
-                }
-                .instrument(load_span),
-            );
+        if *has_loaded_remote.read() {
+            return;
         }
+        let pid_clone = pid.clone();
+        let load_span = tracing::info_span!("playlist.load_entries", playlist_id = %pid_clone);
+        // The source fetches its own entries — servers hit the network; local
+        // returns the empty default (its tracks come from the seed above). The
+        // non-empty guard keeps local from being wiped, so this stays agnostic.
+        let source = active_source.peek().clone();
+        spawn(
+            async move {
+                if let Ok(entries) = source.fetch_playlist_entries(&pid_clone).await
+                    && !entries.is_empty()
+                    && !*has_loaded_remote.peek()
+                {
+                    tracing::debug!(count = entries.len(), "playlist entries loaded");
+                    tracks.set(entries);
+                    has_loaded_remote.set(true);
+                }
+            }
+            .instrument(load_span),
+        );
     });
 
     let store_loading = playlists_res.read().is_none();
     let store = playlists_res.read().clone().unwrap_or_default();
-    let (playlist_name, is_server_playlist, playlist_custom_cover, playlist_image_tag) =
+    let (playlist_name, playlist_custom_cover, playlist_image_tag) =
         if let Some(p) = store.playlists.iter().find(|p| p.id == playlist_id) {
-            // Presentation only (the "server playlist" subtitle) — affordances
-            // gate on `caps`, not this.
-            let is_server = config.read().active_source.is_server();
-            (
-                p.name.clone(),
-                is_server,
-                p.cover_path.clone(),
-                p.image_tag.clone(),
-            )
+            (p.name.clone(), p.cover_path.clone(), p.image_tag.clone())
         } else if store_loading {
             return rsx! { div {} };
         } else {
@@ -164,7 +128,7 @@ pub fn PlaylistDetail(
     rsx! {
         crate::track_list_view::TrackListView {
             name: playlist_name.clone(),
-            description: if is_server_playlist { i18n::t("server_playlist").to_string() } else { String::new() },
+            description: String::new(),
             cover_url: playlist_cover,
             back_label: i18n::t("back_to_playlists").to_string(),
             tracks: tracks_val,

@@ -1,5 +1,16 @@
 use dioxus::prelude::*;
 
+/// Make `source` the active source (the sidebar source switcher's action).
+pub fn set_active_source(mut config: Signal<config::AppConfig>, source: config::Source) {
+    let label = source.as_str().to_string();
+    {
+        let mut cfg = config.write();
+        cfg.active_source = source;
+        cfg.source_explicitly_set = true;
+    }
+    tracing::info!(target: "kopuz::source", source = %label, "source switched");
+}
+
 pub fn fmt_time(secs: u64) -> String {
     if secs == u64::MAX {
         return "--:--".to_string();

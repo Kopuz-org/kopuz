@@ -106,12 +106,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
             .collect()
     };
 
-    let is_local = source().is_local();
-    let subtitle = if is_local {
-        i18n::t("most_played_local_tracks")
-    } else {
-        i18n::t("most_played_tracks")
-    };
+    let subtitle = i18n::t("most_played_tracks");
 
     rsx! {
         div { class: if is_modern { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
@@ -209,12 +204,8 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
                                                 }
                                                 div { class: "flex-1 min-w-0",
                                                     div {
-                                                        class: if is_modern { "text-white font-medium truncate text-sm flex items-center gap-2" } else { "text-white font-medium truncate text-[15px] mb-0.5 flex items-center gap-2" },
+                                                        class: if is_modern { "text-white font-medium truncate text-sm" } else { "text-white font-medium truncate text-[15px] mb-0.5" },
                                                         "{track.title}"
-                                                        i {
-                                                            class: if is_local { "fa-solid fa-hard-drive text-[10px] text-slate-500" } else { "fa-solid fa-database text-[10px] text-slate-500" },
-                                                            title: if is_local { i18n::t("local").to_string() } else { i18n::t("server").to_string() },
-                                                        }
                                                     }
                                                     div {
                                                         class: if is_modern { "text-slate-400 text-xs truncate group-hover:text-slate-300 transition-colors" } else { "text-slate-400 text-sm truncate group-hover:text-slate-300 transition-colors" },

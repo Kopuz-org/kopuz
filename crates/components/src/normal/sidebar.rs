@@ -231,24 +231,6 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
     let is_rtl = i18n::is_rtl();
     let border_side = if is_rtl { "border-l" } else { "border-r" };
 
-    let is_server = config.read().active_source.is_server();
-    let local_class = if !is_server {
-        "text-white"
-    } else {
-        "text-slate-500 hover:text-slate-300"
-    };
-    let server_class = if is_server {
-        "text-white"
-    } else {
-        "text-slate-500 hover:text-slate-300"
-    };
-    let slider_style = match (is_rtl, is_server) {
-        (false, false) => "left: 4px; width: calc(50% - 4px);",
-        (false, true) => "left: calc(50% + 2px); width: calc(50% - 4px);",
-        (true, false) => "right: 4px; width: calc(50% - 4px);",
-        (true, true) => "right: calc(50% + 2px); width: calc(50% - 4px);",
-    };
-
     // Discover is a capability of the active source (YT), not a config flag —
     // hide the tab when the active source has no discover surface.
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
@@ -340,41 +322,7 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
                 class: "flex-1 flex flex-col overflow-y-auto overflow-x-hidden pt-2",
 
                 if !*is_collapsed.read() && !cfg!(target_arch = "wasm32") && config.read().show_source_toggle {
-                    div {
-                        class: "px-4 mb-6",
-                        div {
-                            class: "bg-white/5 p-1 rounded-xl flex relative h-10 items-center border border-white/5",
-                            div {
-                                class: "absolute h-8 bg-white/10 rounded-lg transition-all duration-300 ease-out",
-                                style: "{slider_style}"
-                            }
-                            button {
-                                class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 {local_class}",
-                                onclick: move |_| {
-                                    let mut cfg = config.write();
-                                    cfg.active_source = config::Source::Local;
-                                    cfg.source_explicitly_set = true;
-                                    drop(cfg);
-                                    tracing::info!(target: "kopuz::source", "sidebar toggle → local");
-                                },
-                                "{i18n::t(\"local\").to_uppercase()}"
-                            }
-                            button {
-                                class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 {server_class}",
-                                onclick: move |_| {
-                                    let mut cfg = config.write();
-                                    if let Some(s) = cfg.server_toggle_target() {
-                                        cfg.active_source = s;
-                                        cfg.source_explicitly_set = true;
-                                        let label = cfg.active_source.as_str().to_string();
-                                        drop(cfg);
-                                        tracing::info!(target: "kopuz::source", source = %label, "sidebar toggle → server");
-                                    }
-                                },
-                                "{i18n::t(\"server\").to_uppercase()}"
-                            }
-                        }
-                    }
+                    crate::source_switcher::SourceSwitcher { config }
                 }
 
                 nav {

@@ -53,11 +53,9 @@ pub fn PlaylistsPage(
             return;
         }
         let name = playlist_name();
-        // Preserve the friendly "configure a server first" message — the facade
-        // would otherwise surface a generic connection error.
-        if source().is_server()
-            && ::server::server_ops::ServerConn::resolve(&config.peek()).is_none()
-        {
+        // A source that can't mutate playlists (a creds-less/offline server, or a
+        // read-only source) gets the friendly message instead of a raw error.
+        if caps().playlists == ::server::source::PlaylistOps::None {
             error.set(Some(i18n::t("error_server_not_configured").to_string()));
             return;
         }

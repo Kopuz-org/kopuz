@@ -177,6 +177,9 @@ pub trait ReadStore: Send + Sync {
         limit: u32,
     ) -> Result<Vec<reader::Album>, DbError>;
 
+    /// This source's recently-played track keys, newest first (capped).
+    async fn recently_played(&self, source: &Source, limit: u32) -> Result<Vec<String>, DbError>;
+
     /// One representative (first-inserted) track per artist, artist A→Z — for
     /// artist tiles that need a cover without pulling the whole source.
     async fn artist_sample_tracks(
@@ -376,6 +379,9 @@ pub trait Storage: ReadStore {
 
     /// Increment one track's play count (single-row upsert; key = `TrackId::uid()`).
     async fn bump_listen_count(&self, track_uid: &str) -> Result<(), DbError>;
+
+    /// Record a play for this source's recently-played history (caps + trims).
+    async fn push_recent(&self, source: &Source, track_key: &str) -> Result<(), DbError>;
 
     /// Register/unregister one offline download in the config blob (single
     /// `json_set`/`json_remove` — the downloads hot path must not rewrite the

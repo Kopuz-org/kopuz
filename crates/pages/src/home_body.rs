@@ -85,17 +85,8 @@ pub fn HomeBody(
             .collect()
     });
     let offline_tracks_res = use_tracks_by_keys(source, offline_keys);
-    // The recently-played list is the active source's: local and server keep
-    // separate histories.
-    let recent_keys = use_memo(move || {
-        let conf = config.read();
-        if conf.active_source.is_local() {
-            conf.recently_played.clone()
-        } else {
-            conf.recently_played_server.clone()
-        }
-    });
-    let recent_tracks_res = use_tracks_by_keys(source, recent_keys);
+    // Recently-played for the active source (each source keeps its own history).
+    let recent_tracks_res = hooks::use_db_queries::use_recently_played(source);
     let top_genre_res = use_top_genre(source);
     let artist_samples_res = use_artist_sample_tracks(source, 30);
 

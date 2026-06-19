@@ -671,6 +671,14 @@ pub trait MediaSource: Send + Sync {
             .map_err(SourceError::from)
     }
 
+    /// Record a play in this source's recently-played history. DB-cache op.
+    async fn record_recent(&self, track_key: &str) -> Result<(), SourceError> {
+        self.db()
+            .push_recent(self.source(), track_key)
+            .await
+            .map_err(SourceError::from)
+    }
+
     /// Write a metadata-cache row — e.g. a sync timestamp. DB-cache op.
     async fn set_meta(
         &self,

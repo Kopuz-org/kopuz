@@ -228,6 +228,7 @@ pub fn use_player_task(ctrl: PlayerController) {
         });
     });
 
+    let gens = crate::db_reactivity::use_generations();
     use_future(move || {
         let mut ctrl = ctrl;
         #[cfg(not(target_arch = "wasm32"))]
@@ -275,24 +276,26 @@ pub fn use_player_task(ctrl: PlayerController) {
                 let is_playing = *ctrl.is_playing.read();
 
                 {
-                    let current_path: Option<String> = {
+                    let current_track = {
                         let idx = *ctrl.current_queue_index.read();
-                        ctrl.get_track_at(idx).map(|t| t.id.uid().to_string())
+                        ctrl.get_track_at(idx)
                     };
-                    if let Some(path) = current_path
+                    if let Some(track) = current_track
                         && is_playing
-                        && last_recent_path.as_ref() != Some(&path)
                     {
-                        last_recent_path = Some(path.clone());
-                        let is_server = path.starts_with("jellyfin:")
-                            || path.starts_with("subsonic:")
-                            || path.starts_with("ytmusic:");
-                        let id = if is_server {
-                            path.split(':').nth(1).unwrap_or(&path).to_string()
-                        } else {
-                            path.clone()
-                        };
-                        config.write().push_recent(id, is_server);
+                        let uid = track.id.uid().to_string();
+                        if last_recent_path.as_ref() != Some(&uid) {
+                            last_recent_path = Some(uid);
+                            // Records under the active source's partition — same
+                            // source the rest of now-playing resolves through.
+                            let key = track.id.key().into_owned();
+                            let source = ctrl.active_source.peek().clone();
+                            spawn(async move {
+                                if source.record_recent(&key).await.is_ok() {
+                                    gens.bump(crate::db_reactivity::Table::Recents);
+                                }
+                            });
+                        }
                     }
                 }
 

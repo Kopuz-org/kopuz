@@ -652,11 +652,7 @@ pub fn FavoritesBody(
                                 .as_ref()
                                 .map(|s| s.yt_anonymous)
                                 .unwrap_or(false);
-                        let add_hint = if source().is_local() {
-                            i18n::t("heart_track_to_add")
-                        } else {
-                            i18n::t("heart_track_to_add_server")
-                        };
+                        let add_hint = i18n::t("heart_track_to_add");
                         rsx! {
                             div {
                                 class: "flex flex-col items-center justify-center h-64 text-slate-500 text-center px-6",

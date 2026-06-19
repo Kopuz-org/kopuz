@@ -11,7 +11,7 @@
 //! screen path is visible in a trace: each re-run (input change or generation
 //! bump) is one slice with its inputs and result count.
 
-use db::{Db, Page, Source, TrackFilter};
+use db::{Page, ReadDb, Source, TrackFilter};
 use dioxus::prelude::*;
 use tracing::Instrument;
 
@@ -38,7 +38,7 @@ pub struct TracksWindow {
 /// Window into a track listing. `filter` selects source/sort/search; `page` is
 /// the visible slice (wire it from `virtual_scroll`'s `start_index`/window).
 pub fn use_tracks_window(filter: Memo<TrackFilter>, page: Memo<Page>) -> TracksWindow {
-    let db = use_context::<Db>();
+    let db = use_context::<ReadDb>();
     let gens = use_generations();
 
     let rows = use_resource({
@@ -89,7 +89,7 @@ pub fn use_album_tracks(
     source: Memo<Source>,
     album_id: Memo<String>,
 ) -> Resource<Vec<reader::Track>> {
-    let db = use_context::<Db>();
+    let db = use_context::<ReadDb>();
     let gens = use_generations();
     use_resource(move || {
         let _ = gens.generation(Table::Tracks);
@@ -118,7 +118,7 @@ pub fn use_artist_tracks(
     source: Memo<Source>,
     artist: Memo<String>,
 ) -> Resource<Vec<reader::Track>> {
-    let db = use_context::<Db>();
+    let db = use_context::<ReadDb>();
     let gens = use_generations();
     use_resource(move || {
         let _ = gens.generation(Table::Tracks);
@@ -141,7 +141,7 @@ pub fn use_artist_tracks(
 /// Tracks whose album has this genre. An empty genre resolves to empty
 /// without touching the DB.
 pub fn use_genre_tracks(source: Memo<Source>, genre: Memo<String>) -> Resource<Vec<reader::Track>> {
-    let db = use_context::<Db>();
+    let db = use_context::<ReadDb>();
     let gens = use_generations();
     use_resource(move || {
         let _ = gens.generation(Table::Tracks);
@@ -167,7 +167,7 @@ pub fn use_genre_tracks(source: Memo<Source>, genre: Memo<String>) -> Resource<V
 
 /// Local tracks under a directory, path-ordered.
 pub fn use_folder_tracks(prefix: Memo<String>) -> Resource<Vec<reader::Track>> {
-    let db = use_context::<Db>();
+    let db = use_context::<ReadDb>();
     let gens = use_generations();
     use_resource(move || {
         let _ = gens.generation(Table::Tracks);
@@ -188,7 +188,7 @@ pub fn use_folder_tracks(prefix: Memo<String>) -> Resource<Vec<reader::Track>> {
 
 /// Albums by most-recently-added track, newest first.
 pub fn use_recent_albums(source: Memo<Source>, limit: u32) -> Resource<Vec<reader::Album>> {
-    let db = use_context::<Db>();
+    let db = use_context::<ReadDb>();
     let gens = use_generations();
     use_resource(move || {
         let _ = gens.generation(Table::Tracks);
@@ -211,7 +211,7 @@ pub fn use_recent_albums(source: Memo<Source>, limit: u32) -> Resource<Vec<reade
 
 /// One representative track per artist, A→Z — artist tiles with covers.
 pub fn use_artist_sample_tracks(source: Memo<Source>, limit: u32) -> Resource<Vec<reader::Track>> {
-    let db = use_context::<Db>();
+    let db = use_context::<ReadDb>();
     let gens = use_generations();
     use_resource(move || {
         let _ = gens.generation(Table::Tracks);
@@ -233,7 +233,7 @@ pub fn use_artist_sample_tracks(source: Memo<Source>, limit: u32) -> Resource<Ve
 
 /// The genre with the highest summed play count for a source.
 pub fn use_top_genre(source: Memo<Source>) -> Resource<Option<String>> {
-    let db = use_context::<Db>();
+    let db = use_context::<ReadDb>();
     let gens = use_generations();
     use_resource(move || {
         let _ = gens.generation(Table::Tracks);
@@ -248,7 +248,7 @@ pub fn use_tracks_by_keys(
     source: Memo<Source>,
     keys: Memo<Vec<String>>,
 ) -> Resource<Vec<reader::Track>> {
-    let db = use_context::<Db>();
+    let db = use_context::<ReadDb>();
     let gens = use_generations();
     use_resource(move || {
         let _ = gens.generation(Table::Tracks);
@@ -272,9 +272,29 @@ pub fn use_tracks_by_keys(
     })
 }
 
+/// This source's recently-played tracks, newest first — reads the recent keys
+/// then resolves them, re-running on a source switch or a new play (`Recents`).
+pub fn use_recently_played(source: Memo<Source>) -> Resource<Vec<reader::Track>> {
+    let db = use_context::<ReadDb>();
+    let gens = use_generations();
+    use_resource(move || {
+        let _ = gens.generation(Table::Recents);
+        let (db, s) = (db.clone(), source());
+        let span = tracing::info_span!("query.recently_played", source = s.as_str());
+        async move {
+            let keys = db.recently_played(&s, 50).await.unwrap_or_default();
+            if keys.is_empty() {
+                return Vec::new();
+            }
+            db.tracks_by_keys(&s, &keys).await.unwrap_or_default()
+        }
+        .instrument(span)
+    })
+}
+
 /// One album by id.
 pub fn use_album(source: Memo<Source>, album_id: Memo<String>) -> Resource<Option<reader::Album>> {
-    let db = use_context::<Db>();
+    let db = use_context::<ReadDb>();
     let gens = use_generations();
     use_resource(move || {
         let _ = gens.generation(Table::Albums);
@@ -286,7 +306,7 @@ pub fn use_album(source: Memo<Source>, album_id: Memo<String>) -> Resource<Optio
 
 /// Distinct artists for a source with track counts, A→Z.
 pub fn use_artists(source: Memo<Source>) -> Resource<Vec<(String, u32)>> {
-    let db = use_context::<Db>();
+    let db = use_context::<ReadDb>();
     let gens = use_generations();
     use_resource(move || {
         let _ = gens.generation(Table::Tracks);
@@ -321,7 +341,7 @@ pub fn use_active_server_id() -> Memo<Option<String>> {
 /// The playlist store for the active source, re-queried on a playlists/folders
 /// bump or a source switch. Resolves the in-memory active source itself.
 pub fn use_playlists() -> Resource<reader::PlaylistStore> {
-    let db = use_context::<Db>();
+    let db = use_context::<ReadDb>();
     let gens = use_generations();
     let source = use_active_source();
     use_resource(move || {
@@ -340,7 +360,7 @@ pub fn use_artist_images() -> Resource<(
     std::collections::HashMap<String, std::path::PathBuf>,
     std::collections::HashMap<String, std::path::PathBuf>,
 )> {
-    let db = use_context::<Db>();
+    let db = use_context::<ReadDb>();
     let gens = use_generations();
     use_resource(move || {
         let _ = gens.generation(Table::Tracks);
@@ -352,7 +372,7 @@ pub fn use_artist_images() -> Resource<(
 
 /// All albums for a source, re-queried when the albums table changes.
 pub fn use_albums(source: Memo<Source>) -> Resource<Vec<reader::Album>> {
-    let db = use_context::<Db>();
+    let db = use_context::<ReadDb>();
     let gens = use_generations();
     use_resource(move || {
         let _ = gens.generation(Table::Albums);

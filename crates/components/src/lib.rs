@@ -30,6 +30,7 @@ pub mod settings_items;
 pub mod settings_popups;
 pub mod showcase;
 pub mod sidebar;
+pub mod source_switcher;
 pub mod stat_card;
 pub mod titlebar;
 pub mod track_list_view;
