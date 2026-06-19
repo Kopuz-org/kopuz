@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "trt_turku",
+  "name": "TRT Türkü",
+  "description": "Türk Halk Müziği",
+  "icon": "fa-solid fa-radio",
+  "streams": [
+    { "id": "main", "name": "Canlı Yayın", "url": "https://radio-trtturku.live.trt.com.tr/master.m3u8", "icon": "fa-solid fa-play" }
+  ],
+  "metadata": { "type": "static", "title": "TRT Türkü", "artist": "Canlı Yayın" }
+}

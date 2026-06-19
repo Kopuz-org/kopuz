@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "powerfm",
+  "name": "Power FM",
+  "description": "En İyi En Yeni Müzik",
+  "icon": "fa-solid fa-radio",
+  "streams": [
+    { "id": "main", "name": "Canlı Yayın", "url": "https://listen.powerapp.com.tr/powerfm/abr/powerfm/128/playlist.m3u8", "icon": "fa-solid fa-play" }
+  ],
+  "metadata": { "type": "static", "title": "Power FM", "artist": "Canlı Yayın" }
+}
