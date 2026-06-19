@@ -69,6 +69,33 @@ async fn seed_active_server(db: &db::Db, id: &str) {
 }
 
 #[tokio::test]
+async fn recently_played_round_trip() {
+    let db = db::init(&unique_db()).await.unwrap();
+    let local = Source::Local;
+
+    for k in ["a", "b", "c"] {
+        db.push_recent(&local, k).await.unwrap();
+    }
+    // Re-playing "a" moves it back to the front (monotonic rank, no tie).
+    db.push_recent(&local, "a").await.unwrap();
+    assert_eq!(
+        db.recently_played(&local, 50).await.unwrap(),
+        vec!["a", "c", "b"]
+    );
+    // The limit caps the result, newest first.
+    assert_eq!(db.recently_played(&local, 1).await.unwrap(), vec!["a"]);
+
+    // Per-source isolation: a server keeps its own history.
+    let srv = Source::Server("srv-1".into());
+    db.push_recent(&srv, "VID1").await.unwrap();
+    assert_eq!(db.recently_played(&srv, 50).await.unwrap(), vec!["VID1"]);
+    assert_eq!(
+        db.recently_played(&local, 50).await.unwrap(),
+        vec!["a", "c", "b"]
+    );
+}
+
+#[tokio::test]
 async fn playlists_round_trip() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();

@@ -75,6 +75,10 @@ pub async fn load_config(pool: &SqlitePool) -> Result<Option<AppConfig>, DbError
         .map(|r| (r.track_key, r.count.max(0) as u64))
         .collect();
 
+    // First launch after recently-played moved to its own table: lift the old
+    // config-blob lists in (one-time; no-op once the table has rows).
+    import_legacy_recents(pool, &json, &cfg.active_source).await?;
+
     Ok(Some(cfg))
 }
 
@@ -246,20 +250,26 @@ pub async fn recently_played(
     Ok(rows)
 }
 
-/// Record a play for this source: move the key to the front, then trim the
-/// source's history to [`RECENT_LIMIT`]. A per-play handful of statements — no
-/// whole-blob rewrite (recently-played used to live in the config blob).
+/// Record a play for this source: move the key to the front (a monotonic
+/// per-source rank — `MAX+1`, so rapid plays can't tie like a ms timestamp
+/// would), then trim the source's history to [`RECENT_LIMIT`]. A per-play
+/// handful of statements — no whole-blob rewrite.
 pub async fn push_recent(pool: &SqlitePool, source: &Source, key: &str) -> Result<(), DbError> {
     let src = source.as_str();
-    let now = now_millis();
     let mut tx = pool.begin().await?;
+    let next: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(MAX(played_at), 0) + 1 FROM recently_played WHERE source = ?1",
+    )
+    .bind(src)
+    .fetch_one(&mut *tx)
+    .await?;
     sqlx::query(
         "INSERT INTO recently_played (source, track_key, played_at) VALUES (?1, ?2, ?3) \
          ON CONFLICT(source, track_key) DO UPDATE SET played_at = ?3",
     )
     .bind(src)
     .bind(key)
-    .bind(now)
+    .bind(next)
     .execute(&mut *tx)
     .await?;
     sqlx::query(
@@ -272,6 +282,55 @@ pub async fn push_recent(pool: &SqlitePool, source: &Source, key: &str) -> Resul
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
+    Ok(())
+}
+
+/// One-time migration of the legacy config-blob recently-played lists (the
+/// fields were removed from `AppConfig`) into the `recently_played` table —
+/// runs only while the table is empty. The lists are newest-first, so the
+/// head gets the highest rank; later real plays (`MAX+1`) sort above them.
+async fn import_legacy_recents(
+    pool: &SqlitePool,
+    raw_json: &str,
+    active: &Source,
+) -> Result<(), DbError> {
+    let existing: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM recently_played")
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
+    if existing > 0 {
+        return Ok(());
+    }
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(raw_json) else {
+        return Ok(());
+    };
+    for (field, source) in [
+        ("recently_played", Source::Local),
+        // The old server list was shared across servers; best-effort onto the active one.
+        ("recently_played_server", active.clone()),
+    ] {
+        if field == "recently_played_server" && active.server_id().is_none() {
+            continue;
+        }
+        let Some(arr) = v.get(field).and_then(|x| x.as_array()) else {
+            continue;
+        };
+        let n = arr.len() as i64;
+        let src = source.as_str();
+        for (i, item) in arr.iter().enumerate() {
+            if let Some(k) = item.as_str() {
+                let rank = n - i as i64; // newest (i=0) → highest rank
+                sqlx::query(
+                    "INSERT OR IGNORE INTO recently_played (source, track_key, played_at) VALUES (?1, ?2, ?3)",
+                )
+                .bind(src)
+                .bind(k)
+                .bind(rank)
+                .execute(pool)
+                .await?;
+            }
+        }
+    }
     Ok(())
 }
 
@@ -314,12 +373,5 @@ fn now_secs() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
-}
-
-fn now_millis() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
 }
