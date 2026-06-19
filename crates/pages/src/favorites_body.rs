@@ -123,7 +123,12 @@ pub fn FavoritesBody(
                                 .flatten()
                                 .and_then(|s| s.parse().ok())
                                 .unwrap_or(0);
-                            if last_pull <= now && now - last_pull < 30 * 60 {
+                            // Re-pull if the last sync is older than 15 min. The window
+                            // can be this tight because the Instant pull
+                            // (replace_favorites_clean) now diffs in place instead of
+                            // clearing then re-adding, so a refresh is invisible — no
+                            // flicker to ration against.
+                            if last_pull <= now && now - last_pull < 15 * 60 {
                                 return;
                             }
                         }
