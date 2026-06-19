@@ -732,31 +732,18 @@ impl JellyfinClient {
         Ok(())
     }
 
+    /// Validate the connection + token. Hits `GET /Users/Me` (token-gated, present
+    /// on every Jellyfin) rather than `POST /Sessions/Ping`, which 404s on 10.11+.
+    /// A 401/403 surfaces in the error string so callers can tell auth-expired
+    /// (`Expired`) from unreachable.
     #[tracing::instrument(name = "jellyfin.ping", skip_all)]
     pub async fn ping(&self) -> Result<(), String> {
-        let token = self
-            .access_token
-            .as_ref()
-            .ok_or("No access token available")?;
-        let url = format!("{}/Sessions/Ping", self.base_url);
-
-        let auth_header = format!(
-            "MediaBrowser Client=\"Kopuz\", Device=\"Kopuz\", DeviceId=\"{}\", Version=\"{}\", Token=\"{}\"",
-            self.device_id, APP_VERSION, token
-        );
-
         let resp = self
-            .http_client
-            .post(&url)
-            .header("X-Emby-Authorization", auth_header)
+            .authorized_request(reqwest::Method::GET, "/Users/Me")?
             .send()
             .await
             .map_err(|e| e.to_string())?;
-
-        if !resp.status().is_success() {
-            return Err(format!("Ping failed: {}", resp.status()));
-        }
-
+        Self::ensure_success(resp, "Ping failed").await?;
         Ok(())
     }
 
