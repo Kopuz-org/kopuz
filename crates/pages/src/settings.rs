@@ -675,6 +675,11 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 control: rsx! {
                                     ServerSettings {
                                         active: config.read().server.clone(),
+                                        active_source_id: config
+                                            .read()
+                                            .active_source
+                                            .server_id()
+                                            .map(String::from),
                                         servers: config.read().servers.clone(),
                                         on_add: move |_| show_add_server.set(true),
                                         on_delete: handle_delete_saved,

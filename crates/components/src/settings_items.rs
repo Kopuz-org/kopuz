@@ -197,6 +197,11 @@ fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -
 #[component]
 pub fn ServerSettings(
     active: Option<MusicServer>,
+    /// The active source's server id (`None` ⇒ Local) — the authoritative "which
+    /// server is active", reactive to the sidebar source switcher too. The
+    /// `active` snapshot (`config.server`) is only updated by the Settings switch
+    /// path, so keying the badge off it alone misses a switch made from the sidebar.
+    active_source_id: Option<String>,
     servers: Vec<SavedServer>,
     on_add: EventHandler<()>,
     on_delete: EventHandler<String>,
@@ -207,7 +212,6 @@ pub fn ServerSettings(
     let delete_text = i18n::t("delete");
     let switch_text = i18n::t("switch_to_server");
     let active_text = i18n::t("active_server");
-    let active_id = active.as_ref().and_then(|s| s.id.clone());
 
     rsx! {
         div { class: "flex flex-col gap-2 w-full",
@@ -217,10 +221,14 @@ pub fn ServerSettings(
             for srv in servers.iter().cloned() {
                 {
                     let id = srv.id.clone();
-                    let is_active = active_id.as_deref() == Some(srv.id.as_str());
+                    let is_active = active_source_id.as_deref() == Some(srv.id.as_str());
+                    // "Connected" only when the active server snapshot is actually
+                    // this server (and carries a token) — after a sidebar switch the
+                    // snapshot can lag, so don't claim a stale connection.
                     let connected = is_active
                         && active
                             .as_ref()
+                            .filter(|s| s.id.as_deref() == Some(srv.id.as_str()))
                             .and_then(|s| s.access_token.clone())
                             .is_some();
                     let id_switch = id.clone();
