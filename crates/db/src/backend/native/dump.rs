@@ -7,38 +7,35 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use reader::PlaylistStore;
-use reader::models::{Playlist, PlaylistFolder};
+use reader::models::{ArtistImageRef, Playlist, PlaylistFolder};
 use sqlx::SqlitePool;
 
-use crate::{DbError, QueueSnapshot, Source};
-
-type ArtistImages = (
-    HashMap<String, String>,
-    HashMap<String, PathBuf>,
-    HashMap<String, PathBuf>,
-);
+use crate::{ArtistImages, DbError, QueueSnapshot, Source};
 
 pub async fn artist_images(pool: &SqlitePool) -> Result<ArtistImages, DbError> {
     let rows = sqlx::query!("SELECT artist_norm, kind, image_ref FROM artist_images")
         .fetch_all(pool)
         .await?;
-    let mut server = HashMap::new();
-    let mut local = HashMap::new();
-    let mut custom = HashMap::new();
+    let mut overrides = HashMap::new();
+    let mut photos: HashMap<String, ArtistImageRef> = HashMap::new();
     for r in rows {
         match r.kind.as_str() {
-            "local" => {
-                local.insert(r.artist_norm, PathBuf::from(r.image_ref));
-            }
             "custom" => {
-                custom.insert(r.artist_norm, PathBuf::from(r.image_ref));
+                overrides.insert(r.artist_norm, PathBuf::from(r.image_ref));
+            }
+            // Server photo wins over a local one for the same artist: `insert`
+            // always overwrites, `or_insert` for local never clobbers a server.
+            "server" => {
+                photos.insert(r.artist_norm, ArtistImageRef::Remote(r.image_ref));
             }
             _ => {
-                server.insert(r.artist_norm, r.image_ref);
+                photos
+                    .entry(r.artist_norm)
+                    .or_insert_with(|| ArtistImageRef::Local(PathBuf::from(r.image_ref)));
             }
         }
     }
-    Ok((server, local, custom))
+    Ok((overrides, photos))
 }
 
 pub async fn load_playlists(pool: &SqlitePool, source: &Source) -> Result<PlaylistStore, DbError> {

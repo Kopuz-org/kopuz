@@ -304,13 +304,8 @@ pub fn use_playlists() -> Resource<reader::PlaylistStore> {
     })
 }
 
-/// The artist image maps: (server urls, local paths, custom paths).
-#[allow(clippy::type_complexity)]
-pub fn use_artist_images() -> Resource<(
-    std::collections::HashMap<String, String>,
-    std::collections::HashMap<String, std::path::PathBuf>,
-    std::collections::HashMap<String, std::path::PathBuf>,
-)> {
+/// Per-artist images: `(overrides, photos)` — see [`db::ArtistImages`].
+pub fn use_artist_images() -> Resource<db::ArtistImages> {
     let db = use_context::<ReadDb>();
     let gens = use_generations();
     use_resource(move || {

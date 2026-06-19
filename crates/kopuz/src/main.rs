@@ -1906,9 +1906,11 @@ fn App() -> Element {
                 }
                 // Drop stored local artist images whose file disappeared (the
                 // old scan rebuilt the whole map each pass, self-healing this).
-                if let Ok((_, local_imgs, _)) = db.artist_images().await {
-                    for (artist, path) in local_imgs {
-                        if !path.exists() {
+                if let Ok((_, photos)) = db.artist_images().await {
+                    for (artist, photo) in photos {
+                        if let reader::ArtistImageRef::Local(path) = photo
+                            && !path.exists()
+                        {
                             let _ = db.set_artist_image(&artist, "local", None).await;
                         }
                     }

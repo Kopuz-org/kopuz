@@ -13,7 +13,7 @@
 use std::path::Path;
 
 use config::{AppConfig, MusicService, Source};
-use reader::Track;
+use reader::{ArtistImageRef, Track};
 use utils::CoverUrl;
 
 /// Resolve a cover from a stored cover-path ref — album covers and artist-grid
@@ -41,6 +41,41 @@ pub fn from_path(
             ))
         }
     }
+}
+
+/// Resolve one artist's photo, source-agnostic. Priority: a custom `override_path`
+/// (always), then — when `use_photo` is set — the synced `photo`, with a server
+/// photo outranking a freshly-`fetched_url` outranking a local file, then the
+/// album cover. The UI passes the candidates and never branches on
+/// local-vs-remote — that resolution lives here.
+pub fn artist(
+    config: &AppConfig,
+    override_path: Option<&Path>,
+    photo: Option<&ArtistImageRef>,
+    fetched_url: Option<&str>,
+    album_cover_path: Option<&Path>,
+    use_photo: bool,
+    max_width: u32,
+) -> Option<CoverUrl> {
+    let override_owned = override_path.map(Path::to_path_buf);
+    if let Some(cover) = utils::format_artwork_url(override_owned.as_ref()) {
+        return Some(cover);
+    }
+    if use_photo {
+        let resolved = match photo {
+            Some(ArtistImageRef::Remote(url)) => Some(utils::cover_url_from_string(url.clone())),
+            other => fetched_url
+                .map(|u| utils::cover_url_from_string(u.to_string()))
+                .or_else(|| match other {
+                    Some(ArtistImageRef::Local(path)) => utils::format_artwork_url(Some(path)),
+                    _ => None,
+                }),
+        };
+        if resolved.is_some() {
+            return resolved;
+        }
+    }
+    from_path(config, album_cover_path, max_width)
 }
 
 /// Resolve a track's cover, dispatching on the **track's own source** (not the

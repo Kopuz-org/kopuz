@@ -214,16 +214,7 @@ impl ReadStore for Native {
         queries::album(&self.pool(), source, album_id).await
     }
 
-    async fn artist_images(
-        &self,
-    ) -> Result<
-        (
-            std::collections::HashMap<String, String>,
-            std::collections::HashMap<String, std::path::PathBuf>,
-            std::collections::HashMap<String, std::path::PathBuf>,
-        ),
-        DbError,
-    > {
+    async fn artist_images(&self) -> Result<crate::ArtistImages, DbError> {
         dump::artist_images(&self.pool()).await
     }
 

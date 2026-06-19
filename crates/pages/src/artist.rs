@@ -151,8 +151,7 @@ pub fn Artist(
     let artists = use_memo(move || -> Vec<(String, Option<utils::CoverUrl>)> {
         let albums = albums_res.read().clone().unwrap_or_default();
         let sample = sample_tracks_res.read().clone().unwrap_or_default();
-        let (server_imgs, local_imgs, custom_imgs) =
-            artist_images_res.read().clone().unwrap_or_default();
+        let (overrides, photos) = artist_images_res.read().clone().unwrap_or_default();
         let fetched = fetched_artist_images.read();
         let conf = config.read();
         let use_photo = conf.artist_photo_source == ArtistPhotoSource::ArtistPhoto;
@@ -193,29 +192,15 @@ pub fn Artist(
             .into_iter()
             .filter(|(_, (display, _))| !offline || downloaded.contains(&display.to_lowercase()))
             .map(|(norm, (display, album_cover))| {
-                let cover = custom_imgs
-                    .get(&norm)
-                    .and_then(|p| utils::format_artwork_url(Some(p)))
-                    .or_else(|| {
-                        if use_photo {
-                            server_imgs
-                                .get(&norm)
-                                .map(|u| utils::cover_url_from_string(u.clone()))
-                                .or_else(|| {
-                                    fetched
-                                        .get(&display)
-                                        .map(|u| utils::cover_url_from_string(u.clone()))
-                                })
-                                .or_else(|| {
-                                    local_imgs
-                                        .get(&norm)
-                                        .and_then(|p| utils::format_artwork_url(Some(p)))
-                                })
-                        } else {
-                            None
-                        }
-                    })
-                    .or_else(|| ::server::cover::from_path(&conf, album_cover.as_deref(), 320));
+                let cover = ::server::cover::artist(
+                    &conf,
+                    overrides.get(&norm).map(|p| p.as_path()),
+                    photos.get(&norm),
+                    fetched.get(&display).map(|u| u.as_str()),
+                    album_cover.as_deref(),
+                    use_photo,
+                    320,
+                );
                 (display, cover)
             })
             .collect();
@@ -250,8 +235,7 @@ pub fn Artist(
             return None;
         }
         let norm = normalize_artist_key(&artist);
-        let (server_imgs, local_imgs, custom_imgs) =
-            artist_images_res.read().clone().unwrap_or_default();
+        let (overrides, photos) = artist_images_res.read().clone().unwrap_or_default();
         let fetched = fetched_artist_images.read();
         let conf = config.read();
         let use_photo = conf.artist_photo_source == ArtistPhotoSource::ArtistPhoto;
@@ -262,29 +246,15 @@ pub fn Artist(
             .iter()
             .find(|a| a.artist.to_lowercase() == artist.to_lowercase())
             .and_then(|a| a.cover_path.clone());
-        custom_imgs
-            .get(&norm)
-            .and_then(|p| utils::format_artwork_url(Some(p)))
-            .or_else(|| {
-                if use_photo {
-                    server_imgs
-                        .get(&norm)
-                        .map(|u| utils::cover_url_from_string(u.clone()))
-                        .or_else(|| {
-                            fetched
-                                .get(artist.as_str())
-                                .map(|u| utils::cover_url_from_string(u.clone()))
-                        })
-                        .or_else(|| {
-                            local_imgs
-                                .get(&norm)
-                                .and_then(|p| utils::format_artwork_url(Some(p)))
-                        })
-                } else {
-                    None
-                }
-            })
-            .or_else(|| ::server::cover::from_path(&conf, album_cover.as_deref(), 512))
+        ::server::cover::artist(
+            &conf,
+            overrides.get(&norm).map(|p| p.as_path()),
+            photos.get(&norm),
+            fetched.get(artist.as_str()).map(|u| u.as_str()),
+            album_cover.as_deref(),
+            use_photo,
+            512,
+        )
     });
 
     let artist_albums = use_memo(move || {

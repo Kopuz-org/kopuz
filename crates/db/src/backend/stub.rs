@@ -112,16 +112,7 @@ impl ReadStore for Stub {
         Ok(None)
     }
 
-    async fn artist_images(
-        &self,
-    ) -> Result<
-        (
-            std::collections::HashMap<String, String>,
-            std::collections::HashMap<String, std::path::PathBuf>,
-            std::collections::HashMap<String, std::path::PathBuf>,
-        ),
-        DbError,
-    > {
+    async fn artist_images(&self) -> Result<crate::ArtistImages, DbError> {
         Ok(Default::default())
     }
 

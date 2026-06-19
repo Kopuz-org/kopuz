@@ -127,6 +127,16 @@ impl From<sqlx::migrate::MigrateError> for DbError {
     }
 }
 
+/// Per-artist images, source-agnostic: `(overrides, photos)`. `overrides` are
+/// user-set custom photos (always a local path, highest priority); `photos` are
+/// the synced photo per artist as a uniform [`reader::ArtistImageRef`] (a server
+/// URL or a local path — server wins when both exist), resolved by the cover
+/// seam so callers never branch on origin. Both keyed by normalized artist name.
+pub type ArtistImages = (
+    std::collections::HashMap<String, std::path::PathBuf>,
+    std::collections::HashMap<String, reader::ArtistImageRef>,
+);
+
 /// The read side of the persistence API — every query, no mutation. Carried as
 /// a supertrait of [`Storage`], so any `dyn Storage` is also a `dyn ReadStore`.
 #[async_trait::async_trait]
@@ -211,18 +221,8 @@ pub trait ReadStore: Send + Sync {
         album_id: &str,
     ) -> Result<Option<reader::Album>, DbError>;
 
-    /// The artist-image maps: (server urls, local paths, custom paths).
-    #[allow(clippy::type_complexity)]
-    async fn artist_images(
-        &self,
-    ) -> Result<
-        (
-            std::collections::HashMap<String, String>,
-            std::collections::HashMap<String, std::path::PathBuf>,
-            std::collections::HashMap<String, std::path::PathBuf>,
-        ),
-        DbError,
-    >;
+    /// Per-artist images: `(overrides, photos)` — see [`ArtistImages`].
+    async fn artist_images(&self) -> Result<ArtistImages, DbError>;
 
     /// All albums for a source, ordered by artist then title.
     async fn albums(&self, source: &Source) -> Result<Vec<reader::Album>, DbError>;
