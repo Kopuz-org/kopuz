@@ -1996,6 +1996,25 @@ fn remote_source(db: Db, source: Source, conn: &ServerConn) -> Box<dyn MediaSour
 /// for a server, re-standing-up an HTTP client — on every operation.
 pub type ActiveSource = std::sync::Arc<dyn MediaSource>;
 
+/// Ergonomic, track-centric wrappers over the source's DB-backed favorite truth,
+/// so call sites read `track.is_favorite(&source).await` instead of pulling the
+/// key out by hand. Defined here (not on `reader::Track`) because the truth lives
+/// on [`MediaSource`], and `reader` can't depend on `server`.
+#[async_trait]
+pub trait TrackFavorite {
+    /// Whether this track is currently favorited for `source` (an empty key —
+    /// e.g. an unresolved track — is never a favorite).
+    async fn is_favorite(&self, source: &ActiveSource) -> bool;
+}
+
+#[async_trait]
+impl TrackFavorite for reader::Track {
+    async fn is_favorite(&self, source: &ActiveSource) -> bool {
+        let key = self.id.key();
+        !key.trim().is_empty() && source.is_favorite(key.as_ref()).await
+    }
+}
+
 /// The configured server's [`MediaSource`], or `None` when no usable creds
 /// exist. Unlike [`active`] this ignores the active source — the reconciler
 /// syncs the configured server even while a local page is open.

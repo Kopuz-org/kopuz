@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use server::source::TrackFavorite;
 
 /// Make `source` the active source (the sidebar source switcher's action).
 pub fn set_active_source(mut config: Signal<config::AppConfig>, source: config::Source) {
@@ -36,7 +37,7 @@ pub fn toggle_favorite(current_track: Option<reader::models::Track>) {
     let gens = try_consume_context::<hooks::db_reactivity::Generations>();
     let source = source_sig.peek().clone();
     spawn(async move {
-        let new_fav = !source.is_favorite(&ref_).await;
+        let new_fav = !track.is_favorite(&source).await;
         if new_fav {
             // Cache the track so the favorites view (which resolves refs → the
             // `tracks` table) can display it immediately, instead of only after

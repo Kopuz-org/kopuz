@@ -13,6 +13,7 @@
 
 use db::{Page, ReadDb, Source, TrackFilter};
 use dioxus::prelude::*;
+use server::source::TrackFavorite;
 use tracing::Instrument;
 
 use crate::db_reactivity::{Table, use_generations};
@@ -449,11 +450,11 @@ pub fn use_track_is_favorite(track: Memo<Option<reader::Track>>) -> Memo<bool> {
     let res = use_resource(move || {
         let _ = gens.generation(Table::Favorites);
         let source = active_source.read().clone();
-        let key = track().map(|t| t.id.key().into_owned());
+        let track = track();
         async move {
-            match key {
-                Some(k) if !k.trim().is_empty() => source.is_favorite(&k).await,
-                _ => false,
+            match track {
+                Some(t) => t.is_favorite(&source).await,
+                None => false,
             }
         }
     });
