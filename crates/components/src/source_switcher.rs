@@ -8,46 +8,50 @@
 //! carries its service's accent colour (a CSS `--accent` var the styles read);
 //! the active row glows with it. Mono micro-labels use the app's JetBrains Mono.
 
-use config::{AppConfig, MusicService, Source};
+use config::{AppConfig, MusicService, Source, UiStyle};
 use dioxus::prelude::*;
 
 /// Static styles for the switcher (keyframes + classes that read a per-element
 /// `--accent`/`--active` CSS variable). Injected once; rendered with the trigger
 /// so the closed control is styled too.
-// Colours are driven off the app's theme tokens so the switcher tracks every
-// theme (dark and light): solid surfaces from `--color-neutral-900`, text from
-// `--color-white`, and the dimmed overlay tones as `--color-white`-based
-// `color-mix` (the foreground at reduced alpha) so they invert with the theme
-// instead of assuming a dark background. Per-service brand accents stay fixed.
+// Colours route through two indirection vars set per UI style on the wrapper:
+// `--ss-surface` (the popover/tile base) and `--ss-fg` (the foreground). The
+// dimmed tones are `--ss-fg`-based `color-mix` (foreground at reduced alpha), so
+// they track whichever polarity the wrapper picked. The switcher must match the
+// chrome it sits in, and that differs by UI style: the Modern ("Vaxry") sidebar
+// is a hardcoded dark surface on every colour theme, so it gets fixed dark
+// values; the Normal sidebar follows the theme, so it gets the theme tokens
+// (`--color-neutral-900` / `--color-white`) and tracks light/dark themes.
+// Per-service brand accents stay fixed regardless.
 const SWITCHER_CSS: &str = r#"
-.ss-tr{width:100%;display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:12px;background:color-mix(in oklab,var(--color-white) 4%,transparent);border:1px solid color-mix(in oklab,var(--color-white) 12%,transparent);cursor:pointer;color:inherit;transition:background .15s,border-color .15s}
-.ss-tr:hover{background:color-mix(in oklab,var(--color-white) 8%,transparent)}
+.ss-tr{width:100%;display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:12px;background:color-mix(in oklab,var(--ss-fg) 4%,transparent);border:1px solid color-mix(in oklab,var(--ss-fg) 12%,transparent);cursor:pointer;color:inherit;transition:background .15s,border-color .15s}
+.ss-tr:hover{background:color-mix(in oklab,var(--ss-fg) 8%,transparent)}
 .ss-tr.ss-open{border-color:color-mix(in oklab,var(--accent) 45%,transparent)}
 .ss-mini{width:40px;height:40px;padding:0;justify-content:center;border-radius:11px}
-.ss-tile{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;flex-shrink:0;background:color-mix(in oklab,var(--accent) 16%,var(--color-neutral-900));border:1px solid color-mix(in oklab,var(--accent) 32%,transparent)}
+.ss-tile{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;flex-shrink:0;background:color-mix(in oklab,var(--accent) 16%,var(--ss-surface));border:1px solid color-mix(in oklab,var(--accent) 32%,transparent)}
 .ss-tile i{font-size:12px;color:var(--accent)}
 .ss-stk{flex:1;text-align:left;min-width:0}
-.ss-kick{display:block;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:8.5px;letter-spacing:.2em;text-transform:uppercase;color:color-mix(in oklab,var(--color-white) 42%,transparent);margin-bottom:2px}
-.ss-tname{display:block;font-size:13px;font-weight:600;letter-spacing:-.01em;color:var(--color-white);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ss-chev{font-size:9px;color:color-mix(in oklab,var(--color-white) 42%,transparent);transition:transform .18s}
+.ss-kick{display:block;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:8.5px;letter-spacing:.2em;text-transform:uppercase;color:color-mix(in oklab,var(--ss-fg) 42%,transparent);margin-bottom:2px}
+.ss-tname{display:block;font-size:13px;font-weight:600;letter-spacing:-.01em;color:var(--ss-fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ss-chev{font-size:9px;color:color-mix(in oklab,var(--ss-fg) 42%,transparent);transition:transform .18s}
 .ss-tr.ss-open .ss-chev{transform:rotate(180deg);color:var(--accent)}
-.ss-pop{position:absolute;top:calc(100% + 7px);left:0;right:0;z-index:50;border-radius:12px;border:1px solid color-mix(in oklab,var(--color-white) 12%,transparent);overflow:hidden auto;max-height:60vh;background:var(--color-neutral-900);box-shadow:0 16px 40px -20px rgba(0,0,0,.7)}
+.ss-pop{position:absolute;top:calc(100% + 7px);left:0;right:0;z-index:50;border-radius:12px;border:1px solid color-mix(in oklab,var(--ss-fg) 12%,transparent);overflow:hidden auto;max-height:60vh;background:var(--ss-surface);box-shadow:0 16px 40px -20px rgba(0,0,0,.7)}
 .ss-pop-mini{left:calc(100% + 12px);right:auto;top:-4px;width:218px}
-.ss-head{display:flex;align-items:center;justify-content:space-between;padding:11px 13px 9px;border-bottom:1px solid color-mix(in oklab,var(--color-white) 10%,transparent)}
-.ss-head .t{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:color-mix(in oklab,var(--color-white) 42%,transparent)}
-.ss-head .c{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9px;color:color-mix(in oklab,var(--color-white) 32%,transparent)}
+.ss-head{display:flex;align-items:center;justify-content:space-between;padding:11px 13px 9px;border-bottom:1px solid color-mix(in oklab,var(--ss-fg) 10%,transparent)}
+.ss-head .t{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:color-mix(in oklab,var(--ss-fg) 42%,transparent)}
+.ss-head .c{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9px;color:color-mix(in oklab,var(--ss-fg) 32%,transparent)}
 .ss-list{padding:5px}
 .ss-row{position:relative;width:100%;display:flex;align-items:center;gap:11px;padding:8px 9px;border-radius:9px;cursor:pointer;color:inherit;background:none;border:0;text-align:left;transition:background .12s}
-.ss-row:hover{background:color-mix(in oklab,var(--color-white) 7%,transparent)}
+.ss-row:hover{background:color-mix(in oklab,var(--ss-fg) 7%,transparent)}
 .ss-meta{flex:1;min-width:0}
-.ss-rname{display:block;font-size:13px;font-weight:550;letter-spacing:-.01em;color:color-mix(in oklab,var(--color-white) 82%,transparent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ss-rsub{display:block;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9px;letter-spacing:.04em;text-transform:uppercase;color:color-mix(in oklab,var(--color-white) 42%,transparent);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ss-row.ss-act{background:color-mix(in oklab,var(--color-white) 7%,transparent)}
-.ss-row.ss-act .ss-rname{color:var(--color-white);font-weight:650}
+.ss-rname{display:block;font-size:13px;font-weight:550;letter-spacing:-.01em;color:color-mix(in oklab,var(--ss-fg) 82%,transparent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ss-rsub{display:block;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9px;letter-spacing:.04em;text-transform:uppercase;color:color-mix(in oklab,var(--ss-fg) 42%,transparent);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ss-row.ss-act{background:color-mix(in oklab,var(--ss-fg) 7%,transparent)}
+.ss-row.ss-act .ss-rname{color:var(--ss-fg);font-weight:650}
 .ss-check{font-size:10px;color:var(--accent)}
-.ss-foot{padding:5px;border-top:1px solid color-mix(in oklab,var(--color-white) 10%,transparent)}
-.ss-foot button{width:100%;display:flex;align-items:center;gap:10px;padding:8px 9px;border-radius:9px;color:color-mix(in oklab,var(--color-white) 60%,transparent);font-size:12px;font-weight:550;background:none;border:0;cursor:pointer;text-align:left;transition:background .12s,color .12s}
-.ss-foot button:hover{background:color-mix(in oklab,var(--color-white) 7%,transparent);color:var(--color-white)}
+.ss-foot{padding:5px;border-top:1px solid color-mix(in oklab,var(--ss-fg) 10%,transparent)}
+.ss-foot button{width:100%;display:flex;align-items:center;gap:10px;padding:8px 9px;border-radius:9px;color:color-mix(in oklab,var(--ss-fg) 60%,transparent);font-size:12px;font-weight:550;background:none;border:0;cursor:pointer;text-align:left;transition:background .12s,color .12s}
+.ss-foot button:hover{background:color-mix(in oklab,var(--ss-fg) 7%,transparent);color:var(--ss-fg)}
 .ss-foot button .ar{margin-left:auto;font-size:9px}
 "#;
 
@@ -97,6 +101,12 @@ pub fn SourceSwitcher(
     let sources = entries(&config.read());
     let count = sources.len();
     let active = config.read().active_source.clone();
+    // Match the chrome: the Modern ("Vaxry") sidebar is a fixed dark surface on
+    // every colour theme; the Normal sidebar follows the theme tokens.
+    let surface_vars = match config.read().ui_style {
+        UiStyle::Modern => "--ss-surface:#16161d;--ss-fg:#ffffff;",
+        UiStyle::Normal => "--ss-surface:var(--color-neutral-900);--ss-fg:var(--color-white);",
+    };
     let (active_label, active_icon, active_accent) = sources
         .iter()
         .find(|(s, ..)| *s == active)
@@ -112,7 +122,7 @@ pub fn SourceSwitcher(
     rsx! {
         div {
             class: if collapsed { "relative flex justify-center py-3 border-b border-white/5" } else { "relative px-3 pt-3 pb-2 border-b border-white/5" },
-            style: "--accent:{active_accent};",
+            style: "--accent:{active_accent};{surface_vars}",
             style { dangerous_inner_html: SWITCHER_CSS }
 
             button {
