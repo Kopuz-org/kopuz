@@ -62,9 +62,16 @@ button:focus {
 }
 
 #main-scroll-area {
-    contain: layout paint;
+    /* No `contain` here: layout/paint containment makes this a containing block
+       for position:fixed descendants, which would clip a modal's full-screen
+       `.overlay` to the scroll area (only the top of the page darkens). */
     /* Don't chain scroll to the document when hitting top/bottom */
     overscroll-behavior: none;
+}
+
+/* While a modal overlay is open, lock background scrolling. */
+#main-scroll-area:has(.overlay) {
+    overflow: hidden;
 }
 
 /* CSS-native virtualization: browser skips paint/layout for off-screen sections */
