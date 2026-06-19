@@ -197,6 +197,8 @@ featured_album = Wyróżniony Album
 minimize = Zminimalizuj
 maximize = Maksymalizuj
 close = Zamknij
+mini_player = Mini odtwarzacz
+restore_full_player = Przywróć pełny odtwarzacz
 shuffle_on = Odtwarzanie losowe: Włączone
 shuffle_off = Odtwarzanie losowe: Wyłączone
 repeat_off = Powtarzanie: Wyłączone
@@ -405,6 +407,7 @@ radio_asiadreamradio_desc = Serce muzyki J-Pop - J-Pop, J-Rock, J-HipHop, J-Jazz
 radio_live_stream = Transmisja na żywo
 
 auto_check_updates = Automatycznie sprawdzaj aktualizacje
+minimize_to_tray = Minimalizuj do zasobnika systemowego
 update_available = Dostępna aktualizacja
 update_banner_message = Kopuz { $version } jest dostępny.
 view_release = Zobacz wydanie

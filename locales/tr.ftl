@@ -197,6 +197,8 @@ featured_album = Öne Çıkan Albüm
 minimize = Küçült
 maximize = Büyüt
 close = Kapat
+mini_player = Mini oynatıcı
+restore_full_player = Tam oynatıcıyı geri yükle
 shuffle_on = Karıştır: Açık
 shuffle_off = Karıştır: Kapalı
 repeat_off = Tekrar: Kapalı
@@ -405,6 +407,7 @@ radio_asiadreamradio_desc = J-Pop müziğinin kalbi - J-Pop, J-Rock, J-HipHop, J
 radio_live_stream = Canlı Yayın
 
 auto_check_updates = Güncellemeleri otomatik denetle
+minimize_to_tray = Sistem tepsisine küçült
 update_available = Güncelleme mevcut
 update_banner_message = Kopuz { $version } kullanılabilir.
 view_release = Sürümü görüntüle

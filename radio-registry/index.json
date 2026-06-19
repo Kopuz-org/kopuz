@@ -6,6 +6,8 @@
     { "id": "j1", "manifest_url": "./stations/j1.json" },
     { "id": "doujinstyle", "manifest_url": "./stations/doujinstyle.json" },
     { "id": "vocaloid", "manifest_url": "./stations/vocaloid.json" },
-    { "id": "asiadreamradio", "manifest_url": "./stations/asiadreamradio.json" }
+    { "id": "asiadreamradio", "manifest_url": "./stations/asiadreamradio.json" },
+    { "id": "radyo7", "manifest_url": "./stations/radyo7.json" },
+    { "id": "radyo7_nostalji", "manifest_url": "./stations/radyo7_nostalji.json" }
   ]
 }

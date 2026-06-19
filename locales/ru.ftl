@@ -198,6 +198,8 @@ featured_album = Избранный альбом
 minimize = Свернуть
 maximize = Развернуть
 close = Закрыть
+mini_player = Мини-плеер
+restore_full_player = Восстановить полный плеер
 shuffle_on = Перемешивание: Вкл
 shuffle_off = Перемешивание: Выкл
 repeat_off = Повтор: Выкл
@@ -406,6 +408,7 @@ radio_asiadreamradio_desc = Сердце Джей-поп музыки - Джей
 radio_live_stream = Прямой эфир
 
 auto_check_updates = Автоматически проверять обновления
+minimize_to_tray = Свернуть в системный трей
 update_available = Доступно обновление
 update_banner_message = Доступна версия Kopuz { $version }.
 view_release = Открыть релиз

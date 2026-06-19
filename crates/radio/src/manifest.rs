@@ -226,7 +226,10 @@ impl StationManifest {
             if !seen_stream_ids.insert(stream.id.clone()) {
                 return Err(ManifestError::DuplicateStreamId(stream.id.clone()));
             }
-            if !stream.url.starts_with("https://") && !stream.url.starts_with("wss://") {
+            if !stream.url.starts_with("https://")
+                && !stream.url.starts_with("http://")
+                && !stream.url.starts_with("wss://")
+            {
                 return Err(ManifestError::InsecureUrl(stream.url.clone()));
             }
         }
@@ -385,7 +388,7 @@ mod tests {
                 {
                     "id": "main",
                     "name": "Main",
-                    "url": "http://example.com/stream"
+                    "url": "ftp://example.com/stream"
                 }
             ]
         }"#;

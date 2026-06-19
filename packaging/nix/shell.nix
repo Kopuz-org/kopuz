@@ -12,6 +12,7 @@
   glib-networking,
   glib,
   gtk3,
+  libayatana-appindicator,
 }:
 let
   kopuzPkg = self.packages.${stdenv.hostPlatform.system}.kopuz;
@@ -36,7 +37,7 @@ mkShell {
   env = {
     GIO_MODULE_DIR = "${glib-networking}/lib/gio/modules/";
     GSETTINGS_SCHEMA_DIR = "${glib.getSchemaPath gtk3}";
-    LD_LIBRARY_PATH = "${lib.makeLibraryPath kopuzPkg.buildInputs}:$LD_LIBRARY_PATH";
+    LD_LIBRARY_PATH = "${lib.makeLibraryPath kopuzPkg.buildInputs}:${libayatana-appindicator}/lib:$LD_LIBRARY_PATH";
     WEBKIT_DISABLE_COMPOSITING_MODE = "1";
   }
   // lib.optionalAttrs stdenv.hostPlatform.isLinux {

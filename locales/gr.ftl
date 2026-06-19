@@ -197,6 +197,8 @@ featured_album = Προτεινόμενο άλμπουμ
 minimize = Ελαχιστοποίηση
 maximize = Μεγιστοποίηση
 close = Κλείσιμο
+mini_player = Μίνι αναπαραγωγή
+restore_full_player = Επαναφορά πλήρους αναπαραγωγής
 shuffle_on = Τυχαία Αναπαραγωγή: Ανοιχτή
 shuffle_off = Τυχαία Αναπαραγωγή: Κλειστή
 repeat_off = Επανάληψη: Κλειστή
@@ -405,6 +407,7 @@ radio_asiadreamradio_desc = Η καρδιά της μουσικής J-Pop - J-Po
 radio_live_stream = Ζωντανή μετάδοση
 
 auto_check_updates = Αυτόματος έλεγχος ενημερώσεων
+minimize_to_tray = Ελαχιστοποίηση στη γραμμή συστήματος
 update_available = Διαθέσιμη ενημέρωση
 update_banner_message = Το Kopuz { $version } είναι διαθέσιμο.
 view_release = Προβολή έκδοσης

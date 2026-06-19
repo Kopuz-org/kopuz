@@ -197,6 +197,8 @@ featured_album = 精选专辑
 minimize = 最小化
 maximize = 最大化
 close = 关闭
+mini_player = 迷你播放器
+restore_full_player = 恢复完整播放器
 shuffle_on = 随机播放：开
 shuffle_off = 随机播放：关
 repeat_off = 重复播放：关
@@ -405,6 +407,7 @@ radio_asiadreamradio_desc = J-Pop音乐的心脏 - J-Pop, J-Rock, J-HipHop, J-Ja
 radio_live_stream = 直播
 
 auto_check_updates = 自动检查更新
+minimize_to_tray = 最小化到系统托盘
 update_available = 有可用更新
 update_banner_message = Kopuz { $version } 现已可用。
 view_release = 查看发行版

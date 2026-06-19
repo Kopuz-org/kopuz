@@ -592,6 +592,10 @@ pub struct AppConfig {
     pub tracing_enabled: bool,
     #[serde(default = "default_auto_check_updates")]
     pub auto_check_updates: bool,
+    /// Desktop-only: when enabled, closing the window hides it to the system
+    /// tray instead of quitting, so playback keeps running in the background.
+    #[serde(default)]
+    pub minimize_to_tray: bool,
     #[serde(default = "default_show_source_toggle")]
     pub show_source_toggle: bool,
     #[serde(default = "default_sidebar_order")]
@@ -898,6 +902,7 @@ impl Default for AppConfig {
             reduce_animations: false,
             tracing_enabled: false,
             auto_check_updates: default_auto_check_updates(),
+            minimize_to_tray: false,
             show_source_toggle: default_show_source_toggle(),
             sidebar_order: default_sidebar_order(),
             volume: default_volume(),

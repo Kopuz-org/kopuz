@@ -201,7 +201,9 @@ discover
 
 > [!IMPORTANT]
 > The AppImage requires `webkit2gtk-4.1` and `gtk3` installed on your system.
-> Those dependencies are **not** bundled.
+> Those dependencies are **not** bundled. The system tray icon additionally
+> needs the **appindicator** library (e.g. `libayatana-appindicator`); without
+> it Kopuz runs fine but shows no tray icon.
 >
 > On most distros with a modern desktop environment, these are already present.
 > You will need to install them manually if they are not yet installed.
@@ -248,16 +250,23 @@ direnv allow
 Direnv is recommended if you want to keep using your usershell within the
 development environment.
 
+> [!NOTE]
+> The system tray icon (used by **minimize to tray**) requires the
+> **appindicator** library at runtime. It is included in the package
+> dependencies below. Without it the tray icon simply won't appear and closing
+> the window quits the app instead of hiding it — Kopuz still runs normally. The
+> Nix dev shell already provides it.
+
 **Arch Linux Based Systems**
 
 ```bash
-sudo pacman -S rust cargo dioxus-cli base-devel cmake pkgconf opus alsa-lib xdotool webkit2gtk-4.1 gtk3 libsoup3 openssl
+sudo pacman -S rust cargo dioxus-cli base-devel cmake pkgconf opus alsa-lib xdotool webkit2gtk-4.1 gtk3 libsoup3 openssl libayatana-appindicator
 ```
 
 **Debian Based Systems**
 
 ```bash
-sudo apt install rustc cargo build-essential cmake pkg-config libopus-dev libasound2-dev libxdo-dev libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libssl-dev
+sudo apt install rustc cargo build-essential cmake pkg-config libopus-dev libasound2-dev libxdo-dev libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libssl-dev libayatana-appindicator3-1
 cargo install dioxus-cli
 ```
 
@@ -265,14 +274,14 @@ cargo install dioxus-cli
 
 ```bash
 sudo dnf groupinstall "Development Tools" "Development Libraries"
-sudo dnf install rust cargo cmake pkgconf-pkg-config opus-devel alsa-lib-devel libxdo-devel webkit2gtk4.1-devel gtk3-devel libsoup3-devel openssl-devel
+sudo dnf install rust cargo cmake pkgconf-pkg-config opus-devel alsa-lib-devel libxdo-devel webkit2gtk4.1-devel gtk3-devel libsoup3-devel openssl-devel libayatana-appindicator-gtk3
 cargo install --locked dioxus-cli
 ```
 
 **openSUSE Based Systems**
 
 ```bash
-sudo zypper install rust cargo cmake pkg-config libopus-devel alsa-devel xdotool webkit2gtk3-soup2-devel gtk3-devel libsoup3-devel libopenssl-devel
+sudo zypper install rust cargo cmake pkg-config libopus-devel alsa-devel xdotool webkit2gtk3-soup2-devel gtk3-devel libsoup3-devel libopenssl-devel libayatana-appindicator3-1
 cargo install --locked dioxus-cli
 ```
 

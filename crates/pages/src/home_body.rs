@@ -717,11 +717,16 @@ fn ServerHeroBanner(
         section { class: "{section_class}", style: "{section_style}",
             if !show_empty_state {
                 if let Some((_, _album_opt, entry_cover)) = hero_entry.as_ref() {
-                    div { class: "absolute inset-0",
+                    div { class: "absolute inset-0 overflow-hidden",
                         if let Some(url) = hero_cover.clone().or(entry_cover.clone()) {
-                            img { src: "{url}", class: "w-full h-full object-cover", decoding: "async" }
+                            img {
+                                src: "{url}",
+                                class: "absolute inset-0 w-full h-full object-cover object-center",
+                                decoding: "async",
+                            }
                         }
-                        div { class: "absolute inset-0 bg-gradient-to-r from-black/90 via-black/40 to-transparent" }
+                        div { class: "absolute inset-0 bg-gradient-to-r from-black/95 via-black/60 to-black/20" }
+                        div { class: "absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" }
                     }
                 }
                 div { class: "relative h-full flex flex-col justify-center p-8 md:p-12",

@@ -716,6 +716,17 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+                        if !cfg!(any(target_arch = "wasm32", target_os = "android")) {
+                            SettingItem {
+                                title: i18n::t("minimize_to_tray").to_string(),
+                                control: rsx! {
+                                    ToggleSetting {
+                                        enabled: config.read().minimize_to_tray,
+                                        on_change: move |val| config.write().minimize_to_tray = val,
+                                    }
+                                }
+                            }
+                        }
                         if !cfg!(target_arch = "wasm32") {
                             SettingItem {
                                 title: i18n::t("show_source_toggle").to_string(),

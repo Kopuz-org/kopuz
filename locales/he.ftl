@@ -197,6 +197,8 @@ featured_album = אלבום מומלץ
 minimize = מזער
 maximize = הגדל
 close = סגור
+mini_player = נגן מוקטן
+restore_full_player = שחזר נגן מלא
 shuffle_on = ערבוב: פעיל
 shuffle_off = ערבוב: כבוי
 repeat_off = חזרה: כבויה
@@ -405,6 +407,7 @@ radio_asiadreamradio_desc = הלב של מוזיקת ג'יי-פופ - ג'יי-פ
 radio_live_stream = שידור חי
 
 auto_check_updates = בדיקה אוטומטית לעדכונים
+minimize_to_tray = מזער למגש המערכת
 update_available = עדכון זמין
 update_banner_message = ‏Kopuz { $version } זמין.
 view_release = הצג גרסה

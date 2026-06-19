@@ -5,6 +5,8 @@ pub mod shared;
 pub use navigation_controller::NavigationController;
 pub mod album_play_button;
 pub mod bottombar;
+pub mod compact_player;
+pub use compact_player::{CompactMode, CompactPlayer};
 pub mod constants;
 pub mod dots_menu;
 pub mod download_overlay;

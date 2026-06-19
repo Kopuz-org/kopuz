@@ -4014,6 +4014,7 @@ dependencies = [
  "i18n",
  "image",
  "kopuz_route",
+ "libloading 0.8.9",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",

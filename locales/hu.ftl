@@ -197,6 +197,8 @@ featured_album = Kiemelt Album
 minimize = Minimalizálás
 maximize = Maximalizálás
 close = Bezárás
+mini_player = Mini lejátszó
+restore_full_player = Teljes lejátszó visszaállítása
 shuffle_on = Véletlenszerű: Be
 shuffle_off = Véletlenszerű: Ki
 repeat_off = Ismétlés: Ki
@@ -405,6 +407,7 @@ radio_asiadreamradio_desc = A J-Pop zene szíve - J-Pop, J-Rock, J-HipHop, J-Jaz
 radio_live_stream = Élő adás
 
 auto_check_updates = Frissítések automatikus keresése
+minimize_to_tray = Kicsinyítés a tálcára
 update_available = Elérhető frissítés
 update_banner_message = A Kopuz { $version } elérhető.
 view_release = Kiadás megtekintése
