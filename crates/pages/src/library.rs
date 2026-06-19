@@ -140,8 +140,6 @@ pub fn LibraryPage(
     let mut is_selection_mode = use_signal(|| false);
     let mut selected_tracks = use_signal(HashSet::<reader::TrackId>::new);
 
-    // album_id → cover-path, for the per-row cover seam (local uses it, a server
-    // ignores it and resolves from the track's own ref).
     let total_tracks = total_rows();
     let is_empty = total_tracks == 0;
     let scroll_info = use_virtual_scroll(

@@ -1595,14 +1595,14 @@ fn App() -> Element {
     ))]
     use_effect(move || {
         let mode = config.read().titlebar_mode;
-        let win = dioxus::desktop::use_window();
+        let win = dioxus::desktop::window();
         win.set_decorations(mode == config::TitlebarMode::System);
     });
 
     #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
     use_effect(move || {
         let mode = config.read().titlebar_mode;
-        let win = dioxus::desktop::use_window();
+        let win = dioxus::desktop::window();
         let hwnd = HWND(win.window.hwnd() as _);
         windows_titlebar::install(hwnd);
         windows_titlebar::set_custom_titlebar_enabled(mode == config::TitlebarMode::Custom);
@@ -2240,7 +2240,7 @@ fn App() -> Element {
         let mut saved_window_size = use_signal(|| None::<LogicalSize<f64>>);
         use_effect(move || {
             let active = *compact_mode.read();
-            let win = dioxus::desktop::use_window();
+            let win = dioxus::desktop::window();
             if active {
                 let scale = win.window.scale_factor();
                 let current = win.window.inner_size().to_logical::<f64>(scale);
