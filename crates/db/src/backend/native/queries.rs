@@ -15,9 +15,17 @@ use crate::{DbError, Page, Source, TrackFilter, TrackSort};
 /// Track columns for a `TrackRow`, `t.`-aliased and read via [`TRACKS_FROM`] so a
 /// local track's `cover_path` (NULL on the row — the cover is owned by the album)
 /// falls back to its album's cover. The track self-resolves its cover with no
-/// caller-side album lookup; a server row keeps its own non-NULL `cover_path`.
+/// caller-side album lookup.
+///
+/// The album fallback is gated to local tracks: their `a.cover_path` is a
+/// filesystem path the cover resolver uses directly. A server row's `a.cover_path`
+/// is instead a service-encoded ref (e.g. `jellyfin:{albumId}:{tag}`) that the
+/// resolver would misread as the *track's* own image tag — so server rows keep
+/// their own `t.cover_path` and fall back to the album via `album_id` at resolve
+/// time (`server::cover::track`), where the encoding is understood.
 const TRACK_COLUMNS: &str = "t.source, t.track_key, t.service, \
-    COALESCE(t.cover_path, a.cover_path) AS cover_path, t.source_album_id, t.title, \
+    COALESCE(t.cover_path, CASE WHEN t.source = 'local' THEN a.cover_path END) AS cover_path, \
+    t.source_album_id, t.title, \
     t.artist, t.album, t.duration, t.khz, t.bitrate, t.track_number, t.disc_number, \
     t.mb_release_id, t.mb_recording_id, t.mb_track_id, t.playlist_item_id, t.artists_json";
 
