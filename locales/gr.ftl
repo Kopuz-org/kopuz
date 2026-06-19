@@ -53,6 +53,10 @@ titlebar_system = Διακοσμήσεις συστήματος
 titlebar_off = Χωρίς γραμμή τίτλου
 volume = Ένταση
 local = Τοπικά
+source = Source
+sources = Sources
+manage_sources = Manage sources
+source_on_this_device = On this device
 server = Διακομιστής
 ytdlp = Λήψεις
 

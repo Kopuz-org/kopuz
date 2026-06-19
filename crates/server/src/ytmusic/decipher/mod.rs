@@ -331,13 +331,17 @@ fn detect_runtime() -> Option<Runtime> {
             },
         ];
         CANDIDATES.iter().copied().find(|c| {
-            std::process::Command::new(c.bin)
-                .arg("--version")
+            let mut cmd = std::process::Command::new(c.bin);
+            cmd.arg("--version")
                 .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false)
+                .stderr(std::process::Stdio::null());
+            // Don't flash a console window on Windows for the version probe.
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+            }
+            cmd.status().map(|s| s.success()).unwrap_or(false)
         })
     })
 }
@@ -374,14 +378,16 @@ impl JsEngine for SubprocessEngine {
                     .await
                     .map_err(|e| format!("write solver temp: {e}"))?;
             }
-            let child = match tokio::process::Command::new(rt.bin)
-                .args(rt.args)
+            let mut cmd = tokio::process::Command::new(rt.bin);
+            cmd.args(rt.args)
                 .arg(&path)
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
-                .kill_on_drop(true)
-                .spawn()
-            {
+                .kill_on_drop(true);
+            // Don't flash a console window on Windows for the solver subprocess.
+            #[cfg(target_os = "windows")]
+            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+            let child = match cmd.spawn() {
                 Ok(c) => c,
                 Err(e) => {
                     let _ = tokio::fs::remove_file(&path).await;

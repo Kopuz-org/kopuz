@@ -53,6 +53,10 @@ titlebar_system = Rendszerdekorációk
 titlebar_off = Nincs címsor
 volume = Hangerő
 local = Helyi
+source = Source
+sources = Sources
+manage_sources = Manage sources
+source_on_this_device = On this device
 server = Szerver
 ytdlp = Letöltések
 

@@ -53,6 +53,10 @@ titlebar_system = Sistem süslemeleri
 titlebar_off = Başlık çubuğu yok
 volume = Ses
 local = Yerel
+source = Kaynak
+sources = Kaynaklar
+manage_sources = Kaynakları yönet
+source_on_this_device = Bu cihazda
 server = Sunucu
 ytdlp = İndirmeler
 

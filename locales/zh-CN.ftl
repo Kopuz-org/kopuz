@@ -53,6 +53,10 @@ titlebar_system = 系统装饰
 titlebar_off = 无标题栏
 volume = 音量
 local = 本地
+source = Source
+sources = Sources
+manage_sources = Manage sources
+source_on_this_device = On this device
 server = 服务器
 ytdlp = 下载
 

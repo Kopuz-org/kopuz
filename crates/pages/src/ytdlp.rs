@@ -236,6 +236,12 @@ fn build_command(
     let binary = find_ytdlp();
     let mut cmd = std::process::Command::new(&binary);
     cmd.env("PATH", augmented_path());
+    // Suppress the console window when yt-dlp spawns on Windows.
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
 
     let work_dir = if !out.is_empty() {
         PathBuf::from(out)
