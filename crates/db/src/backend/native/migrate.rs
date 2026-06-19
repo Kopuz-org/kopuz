@@ -125,6 +125,7 @@ pub async fn run_json_import(
     // --- app_config blob (minus servers/creds/listen_counts) + listen_counts -
     import_config_blob(&mut tx, &cfg_val, &active_server_id, &lib).await?;
     import_listen_counts(&mut tx, &cfg_val).await?;
+    import_recently_played(&mut tx, &cfg_val, &active_server_id).await?;
 
     // The YT sync timestamps ALSO go to the metadata cache — that's where the
     // runtime reads them ("yt_sync"/"timestamps"); blob keys alone would make
@@ -517,6 +518,41 @@ async fn import_listen_counts(
         )
         .execute(&mut **tx)
         .await?;
+    }
+    Ok(())
+}
+
+/// Lift the legacy recently-played lists into the per-source `recently_played`
+/// table (the importer predated it). The local list keys the local partition;
+/// the single legacy server list keys the active server. Lists are newest-first,
+/// so the head gets the highest rank (matching `push_recent`'s MAX+1 ordering).
+async fn import_recently_played(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    cfg: &serde_json::Value,
+    active_server_id: &Option<String>,
+) -> Result<(), DbError> {
+    let mut lists: Vec<(String, &str)> = vec![("local".to_string(), "recently_played")];
+    if let Some(id) = active_server_id {
+        lists.push((id.clone(), "recently_played_server"));
+    }
+    for (source, field) in lists {
+        let Some(arr) = cfg.get(field).and_then(|v| v.as_array()) else {
+            continue;
+        };
+        let n = arr.len() as i64;
+        for (i, item) in arr.iter().enumerate() {
+            if let Some(key) = item.as_str() {
+                let rank = n - i as i64; // newest (i=0) → highest rank
+                sqlx::query(
+                    "INSERT OR IGNORE INTO recently_played (source, track_key, played_at) VALUES (?1, ?2, ?3)",
+                )
+                .bind(&source)
+                .bind(key)
+                .bind(rank)
+                .execute(&mut **tx)
+                .await?;
+            }
+        }
     }
     Ok(())
 }
