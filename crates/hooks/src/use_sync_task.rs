@@ -34,8 +34,7 @@ pub fn nudge_activate() {
     nudge_handle().notify_one();
 }
 
-pub fn use_sync_task(config: Signal<config::AppConfig>) {
-    let db = use_context::<Db>();
+pub fn use_sync_task(config: Signal<config::AppConfig>, db: Db) {
     let gens = use_generations();
 
     use_future(move || {

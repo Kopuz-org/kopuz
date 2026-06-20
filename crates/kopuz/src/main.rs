@@ -1149,7 +1149,7 @@ fn App() -> Element {
             crate::pot_minter::request();
         }
     });
-    hooks::use_sync_task::use_sync_task(config);
+    hooks::use_sync_task::use_sync_task(config, db.clone());
     let mut initial_load_done = use_signal(|| false);
     #[allow(unused_variables)]
     let cover_cache = use_memo(move || cache_dir().join("covers"));
