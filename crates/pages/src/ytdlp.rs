@@ -136,6 +136,16 @@ fn search_dirs() -> &'static [PathBuf] {
             }
         }
 
+        // Fallback for portable installs: a `yt-dlp(.exe)` dropped next to the app.
+        // On Linux the package puts it on PATH (flatpak/AUR/nix); Windows bundles
+        // nothing, so this lets a user just place the binary beside kopuz.exe.
+        if let Ok(exe) = std::env::current_exe()
+            && let Some(exe_dir) = exe.parent()
+            && !dirs.iter().any(|d| d == exe_dir)
+        {
+            dirs.push(exe_dir.to_path_buf());
+        }
+
         dirs
     })
 }
@@ -236,7 +246,10 @@ fn build_command(
     let binary = find_ytdlp();
     let mut cmd = std::process::Command::new(&binary);
     cmd.env("PATH", augmented_path());
-    // Suppress the console window when yt-dlp spawns on Windows.
+    // Suppress the console window when yt-dlp spawns on Windows. CREATE_NO_WINDOW
+    // gives the child no console, so its standard handles are only valid if we
+    // redirect them — see the `stdin(null)` below, without which yt-dlp's Python
+    // hits "[Errno 22] Invalid argument" on file I/O via the broken fd 0.
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
@@ -355,8 +368,24 @@ fn build_command(
     }
 
     cmd.arg(url)
+        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
+
+    // Log the fully-resolved invocation so a failure (e.g. a Windows "[Errno 22]
+    // unable to open for writing" path) is diagnosable from the log alone.
+    let args: Vec<String> = cmd
+        .get_args()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
+    tracing::info!(
+        target: "ytdlp",
+        binary = %binary,
+        located = std::path::Path::new(&binary).is_absolute(),
+        cwd = ?cmd.get_current_dir(),
+        args = ?args,
+        "yt-dlp: built download command"
+    );
 
     cmd
 }
@@ -516,7 +545,9 @@ pub fn YtdlpPage(config: Signal<AppConfig>) -> Element {
                 let mut child = match cmd.spawn() {
                     Ok(c) => c,
                     Err(e) => {
-                        let msg = if e.kind() == std::io::ErrorKind::NotFound {
+                        let not_found = e.kind() == std::io::ErrorKind::NotFound;
+                        tracing::error!(target: "ytdlp", error = %e, not_found, "yt-dlp: spawn failed");
+                        let msg = if not_found {
                             i18n::t("ytdlp_error_not_found")
                         } else {
                             i18n::t_with("ytdlp_error_start", &[("error", e.to_string())])
@@ -525,6 +556,19 @@ pub fn YtdlpPage(config: Signal<AppConfig>) -> Element {
                         return;
                     }
                 };
+
+                // Drain stderr on its own thread: reading stdout to completion
+                // first and stderr second deadlocks if yt-dlp fills the stderr pipe
+                // buffer (~64 KB, common on a failing download) before stdout closes.
+                let stderr_thread = child.stderr.take().map(|stderr| {
+                    std::thread::spawn(move || {
+                        std::io::BufReader::new(stderr)
+                            .lines()
+                            .map_while(Result::ok)
+                            .filter(|l| l.contains("ERROR"))
+                            .collect::<Vec<_>>()
+                    })
+                });
 
                 if let Some(stdout) = child.stdout.take() {
                     for line in std::io::BufReader::new(stdout)
@@ -536,27 +580,28 @@ pub fn YtdlpPage(config: Signal<AppConfig>) -> Element {
                         }
                     }
                 }
-                if let Some(stderr) = child.stderr.take() {
-                    let errs: Vec<String> = std::io::BufReader::new(stderr)
-                        .lines()
-                        .map_while(Result::ok)
-                        .filter(|l| l.contains("ERROR"))
-                        .collect();
-                    if !errs.is_empty() {
-                        let _ = tx.send(LineInfo::Error(errs.join("\n")));
-                    }
+
+                let errs = stderr_thread
+                    .map(|t| t.join().unwrap_or_default())
+                    .unwrap_or_default();
+                if !errs.is_empty() {
+                    tracing::warn!(target: "ytdlp", "yt-dlp stderr: {}", errs.join(" | "));
+                    let _ = tx.send(LineInfo::Error(errs.join("\n")));
                 }
                 match child.wait() {
                     Ok(s) if s.success() => {
+                        tracing::info!(target: "ytdlp", "yt-dlp: download finished");
                         let _ = tx.send(LineInfo::Done);
                     }
                     Ok(s) => {
+                        tracing::warn!(target: "ytdlp", status = %s, "yt-dlp: exited non-zero");
                         let _ = tx.send(LineInfo::Error(i18n::t_with(
                             "ytdlp_error_exit",
                             &[("status", s.to_string())],
                         )));
                     }
                     Err(e) => {
+                        tracing::error!(target: "ytdlp", error = %e, "yt-dlp: wait failed");
                         let _ = tx.send(LineInfo::Error(e.to_string()));
                     }
                 }
