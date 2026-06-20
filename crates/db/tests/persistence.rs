@@ -452,6 +452,49 @@ async fn streaming_favorites_upsert_then_sweep() {
 }
 
 #[tokio::test]
+async fn streaming_playlist_tracks_upsert_then_sweep() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    seed_active_server(&db, "srv-1").await;
+    let srv = Source::Server("srv-1".into());
+    db.upsert_playlist_meta(&srv, "PLX", "Mix", None, None)
+        .await
+        .unwrap();
+
+    async fn entries(db: &db::Db, srv: &Source) -> Vec<String> {
+        db.load_playlists(srv)
+            .await
+            .unwrap()
+            .playlists
+            .into_iter()
+            .find(|p| p.id == "PLX")
+            .map(|p| p.tracks)
+            .unwrap_or_default()
+    }
+
+    // First walk (epoch 1), streamed in two pages — order accumulates by position.
+    db.upsert_playlist_tracks_page(&srv, "PLX", &["A".into(), "B".into()], 0, 1)
+        .await
+        .unwrap();
+    db.upsert_playlist_tracks_page(&srv, "PLX", &["C".into()], 2, 1)
+        .await
+        .unwrap();
+    assert_eq!(entries(&db, &srv).await, vec!["A", "B", "C"]);
+
+    // Second walk (epoch 2): B removed remotely, C/A reordered, list now shorter.
+    db.upsert_playlist_tracks_page(&srv, "PLX", &["C".into(), "A".into()], 0, 2)
+        .await
+        .unwrap();
+    db.sweep_playlist_tracks(&srv, "PLX", 2).await.unwrap();
+
+    // Positions 0,1 overwritten to C,A this epoch; position 2 (old C) kept the
+    // stale epoch and was swept — so the shrunk, reordered list survives.
+    assert_eq!(entries(&db, &srv).await, vec!["C", "A"]);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
 async fn liked_music_playlist_is_hidden_from_the_grid() {
     let db_path = unique_db();
     let db = db::init(&db_path).await.unwrap();

@@ -602,6 +602,68 @@ pub async fn remove_playlist_tracks(
     Ok(())
 }
 
+#[tracing::instrument(skip(pool, refs), fields(pl_id = %pl_id, count = refs.len(), start = start_position))]
+pub async fn upsert_playlist_tracks_page(
+    pool: &SqlitePool,
+    source: &Source,
+    pl_id: &str,
+    refs: &[String],
+    start_position: i64,
+    epoch: i64,
+) -> Result<(), DbError> {
+    let src = source.as_str();
+    let mut tx = pool.begin().await?;
+    let pk = resolve_or_create_pk(&mut tx, src, pl_id).await?;
+    for (i, r) in refs.iter().enumerate() {
+        let pos = start_position + i as i64;
+        // Overwrite by position: re-walking in order re-stamps positions 0..N with
+        // the current epoch; a now-shorter playlist leaves its tail at the old
+        // epoch for the sweep. Position is the entry order, so this also applies
+        // reorders in place.
+        sqlx::query!(
+            "INSERT INTO playlist_tracks (playlist_pk, position, track_ref, epoch) VALUES (?1, ?2, ?3, ?4) \
+             ON CONFLICT(playlist_pk, position) DO UPDATE SET track_ref = excluded.track_ref, epoch = excluded.epoch",
+            pk,
+            pos,
+            r,
+            epoch
+        )
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
+#[tracing::instrument(skip(pool), fields(pl_id = %pl_id))]
+pub async fn sweep_playlist_tracks(
+    pool: &SqlitePool,
+    source: &Source,
+    pl_id: &str,
+    epoch: i64,
+) -> Result<(), DbError> {
+    let src = source.as_str();
+    let pk: Option<i64> = sqlx::query_scalar!(
+        "SELECT rowid_pk FROM playlists WHERE source = ?1 AND source_pl_id = ?2",
+        src,
+        pl_id
+    )
+    .fetch_optional(pool)
+    .await?
+    .flatten();
+    let Some(pk) = pk else {
+        return Ok(());
+    };
+    sqlx::query!(
+        "DELETE FROM playlist_tracks WHERE playlist_pk = ?1 AND epoch != ?2",
+        pk,
+        epoch
+    )
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 #[tracing::instrument(skip(pool), fields(id = %id))]
 pub async fn create_folder(pool: &SqlitePool, id: &str, name: &str) -> Result<(), DbError> {
     sqlx::query!(

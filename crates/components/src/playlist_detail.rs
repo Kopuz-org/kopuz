@@ -3,8 +3,25 @@ use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_playlists, use_tracks_by_keys};
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use rfd::AsyncFileDialog;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use tracing::Instrument;
+
+/// Wall-clock seconds since the epoch — the playlist-pull staleness stamp.
+fn unix_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Wall-clock millis since the epoch — one reconcile's sweep epoch token.
+fn unix_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
 
 #[component]
 #[tracing::instrument(name = "render.playlist_detail", skip_all)]
@@ -57,25 +74,110 @@ pub fn PlaylistDetail(
     });
 
     let pid = playlist_id.clone();
+    // Only sources with remote entries reconcile; a local playlist's tracks live
+    // entirely in the seed, and the end-of-walk sweep would wipe them.
+    let remote_entries = caps.sync;
     use_effect(move || {
         if *has_loaded_remote.read() {
             return;
         }
+        if !remote_entries {
+            return;
+        }
         let pid_clone = pid.clone();
-        let load_span = tracing::info_span!("playlist.load_entries", playlist_id = %pid_clone);
-        // The source fetches its own entries — servers hit the network; local
-        // returns the empty default (its tracks come from the seed above). The
-        // non-empty guard keeps local from being wiped, so this stays agnostic.
+        let load_span = tracing::info_span!("playlist.reconcile", playlist_id = %pid_clone);
         let source = active_source.peek().clone();
+        let read_db = consume_context::<hooks::ReadDb>();
         spawn(
             async move {
-                if let Ok(entries) = source.fetch_playlist_entries(&pid_clone).await
-                    && !entries.is_empty()
-                    && !*has_loaded_remote.peek()
-                {
-                    tracing::debug!(count = entries.len(), "playlist entries loaded");
-                    tracks.set(entries);
+                // Staleness gate (mirrors the favorites pull): the cached seed shows
+                // instantly; only re-walk the remote when the last reconcile is
+                // older than 15 min. First visit (last_pull == 0) always pulls.
+                let now = unix_secs();
+                let last_pull: u64 = read_db
+                    .meta_get("pl_pull", &pid_clone)
+                    .await
+                    .ok()
+                    .flatten()
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
+                if last_pull <= now && now - last_pull < 15 * 60 {
+                    return;
+                }
+
+                // Stream the entries page by page under one epoch. Each page upserts
+                // its tracks + positions into the cache (and grows the visible list);
+                // the end sweep drops entries the remote no longer has. The visible
+                // list only grows mid-walk, so re-reconciling an already-cached
+                // playlist never blinks shorter — removals/reorders land at the end.
+                let epoch = unix_millis();
+                let mut cursor: Option<String> = None;
+                let mut seen: HashSet<String> = HashSet::new();
+                let mut acc: Vec<reader::models::Track> = Vec::new();
+                let mut position: i64 = 0;
+                let mut completed = true;
+                loop {
+                    let page = match source
+                        .fetch_playlist_entries_page(&pid_clone, cursor.clone())
+                        .await
+                    {
+                        Ok(p) => p,
+                        Err(e) => {
+                            tracing::warn!(error = %e, "playlist page fetch failed");
+                            completed = false;
+                            break;
+                        }
+                    };
+                    let next = page.next.clone();
+                    // YT repeats tracks at page boundaries — dedup across the walk.
+                    let fresh: Vec<reader::models::Track> = page
+                        .tracks
+                        .into_iter()
+                        .filter(|t| {
+                            let k = t.id.key().to_string();
+                            !k.is_empty() && seen.insert(k)
+                        })
+                        .collect();
+                    if fresh.is_empty() {
+                        match next {
+                            Some(n) => {
+                                cursor = Some(n);
+                                continue;
+                            }
+                            None => break,
+                        }
+                    }
+                    let page_refs: Vec<String> =
+                        fresh.iter().map(|t| t.id.key().to_string()).collect();
+                    let start = position;
+                    position += fresh.len() as i64;
+                    for chunk in fresh.chunks(100) {
+                        let _ = source.upsert_tracks(chunk).await;
+                    }
+                    let _ = source
+                        .upsert_playlist_tracks_page(&pid_clone, &page_refs, start, epoch)
+                        .await;
+                    acc.extend(fresh);
+                    // Grow-only: never shrink the visible list mid-walk.
+                    if acc.len() > tracks.peek().len() {
+                        tracks.set(acc.clone());
+                    }
                     has_loaded_remote.set(true);
+                    gens.bump_coalesced(Table::Tracks);
+                    match next {
+                        Some(n) => cursor = Some(n),
+                        None => break,
+                    }
+                }
+                if completed {
+                    tracing::debug!(count = acc.len(), "playlist reconciled");
+                    tracks.set(acc);
+                    let _ = source.sweep_playlist_tracks(&pid_clone, epoch).await;
+                    let _ = source
+                        .set_meta("pl_pull", &pid_clone, &unix_secs().to_string())
+                        .await;
+                    gens.bump(Table::Playlists);
+                    gens.bump(Table::Tracks);
                 }
             }
             .instrument(load_span),

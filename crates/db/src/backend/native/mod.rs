@@ -350,6 +350,34 @@ impl Storage for Native {
         writes::remove_playlist_tracks(&self.pool(), source, pl_id, refs).await
     }
 
+    async fn upsert_playlist_tracks_page(
+        &self,
+        source: &crate::Source,
+        pl_id: &str,
+        refs: &[String],
+        start_position: i64,
+        epoch: i64,
+    ) -> Result<(), DbError> {
+        writes::upsert_playlist_tracks_page(
+            &self.pool(),
+            source,
+            pl_id,
+            refs,
+            start_position,
+            epoch,
+        )
+        .await
+    }
+
+    async fn sweep_playlist_tracks(
+        &self,
+        source: &crate::Source,
+        pl_id: &str,
+        epoch: i64,
+    ) -> Result<(), DbError> {
+        writes::sweep_playlist_tracks(&self.pool(), source, pl_id, epoch).await
+    }
+
     async fn create_folder(&self, id: &str, name: &str) -> Result<(), DbError> {
         writes::create_folder(&self.pool(), id, name).await
     }

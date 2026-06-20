@@ -133,6 +133,14 @@ pub struct FavoritesPage {
     pub next: Option<String>,
 }
 
+/// One page of a playlist's entries: the tracks plus the cursor for the next page
+/// (`None` once exhausted). Cross-page dedup is the caller's job. Sources that
+/// can't page return everything in a single page (the default impl does this).
+pub struct PlaylistPage {
+    pub tracks: Vec<reader::Track>,
+    pub next: Option<String>,
+}
+
 /// A full remote library pull: albums, tracks, and artist `(name, image_url)`
 /// pairs, already transformed into the generic model types (each source applies
 /// its own id-prefix / cover encoding). The caller persists + prunes; keeping the
@@ -383,6 +391,22 @@ pub trait MediaSource: Send + Sync {
         _playlist_id: &str,
     ) -> Result<Vec<reader::Track>, SourceError> {
         Ok(Vec::new())
+    }
+
+    /// One page of a playlist's entries, for the streaming reconcile. The caller
+    /// passes `None` then each returned cursor. The default returns all entries in
+    /// a single page (`next = None`) via [`fetch_playlist_entries`] — fine for
+    /// sources whose listing isn't paginated (Jellyfin/Subsonic); YT overrides it
+    /// with a true per-page InnerTube walk so a 700-track list streams in.
+    async fn fetch_playlist_entries_page(
+        &self,
+        playlist_id: &str,
+        _cursor: Option<String>,
+    ) -> Result<PlaylistPage, SourceError> {
+        Ok(PlaylistPage {
+            tracks: self.fetch_playlist_entries(playlist_id).await?,
+            next: None,
+        })
     }
 
     /// Fetch the source's playlists (id, name, image tag) from the remote — the
@@ -702,6 +726,34 @@ pub trait MediaSource: Send + Sync {
     ) -> Result<(), SourceError> {
         self.db()
             .upsert_favorites_page(self.source().as_str(), refs, start_rank, epoch)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    /// Streaming upsert of one page of a playlist's entries, stamped with `epoch`
+    /// (mirrors [`upsert_favorites_page`]). Resolved against this source's
+    /// partition — callers never spell out a `source`.
+    async fn upsert_playlist_tracks_page(
+        &self,
+        playlist_id: &str,
+        refs: &[String],
+        start_position: i64,
+        epoch: i64,
+    ) -> Result<(), SourceError> {
+        self.db()
+            .upsert_playlist_tracks_page(self.source(), playlist_id, refs, start_position, epoch)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    /// End-of-walk sweep for a playlist: drop entries not re-stamped with `epoch`.
+    async fn sweep_playlist_tracks(
+        &self,
+        playlist_id: &str,
+        epoch: i64,
+    ) -> Result<(), SourceError> {
+        self.db()
+            .sweep_playlist_tracks(self.source(), playlist_id, epoch)
             .await
             .map_err(SourceError::from)
     }
@@ -1935,6 +1987,20 @@ impl MediaSource for YtSource {
     ) -> Result<Vec<reader::Track>, SourceError> {
         // The YT client already returns typed tracks.
         Ok(self.client.get_playlist_entries(playlist_id).await?)
+    }
+
+    async fn fetch_playlist_entries_page(
+        &self,
+        playlist_id: &str,
+        cursor: Option<String>,
+    ) -> Result<PlaylistPage, SourceError> {
+        // True per-page InnerTube walk so a long playlist streams into the cache
+        // (and the UI) instead of blocking on a full fetch every visit.
+        let (tracks, next) = self
+            .client
+            .playlist_page(playlist_id, cursor.as_deref())
+            .await?;
+        Ok(PlaylistPage { tracks, next })
     }
 
     async fn fetch_favorites_page(

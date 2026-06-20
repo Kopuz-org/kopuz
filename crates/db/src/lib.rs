@@ -353,6 +353,29 @@ pub trait Storage: ReadStore {
         refs: &[String],
     ) -> Result<(), DbError>;
 
+    /// Streaming upsert of one page of a playlist's entries (creating the playlist
+    /// row if absent): each ref is written at `start_position + i` and stamped with
+    /// the current walk's `epoch`. On position conflict the ref and epoch are
+    /// overwritten — so re-walking in order applies adds, reorders, and (with the
+    /// trailing sweep) removals, all without rewriting the whole list up front.
+    async fn upsert_playlist_tracks_page(
+        &self,
+        source: &Source,
+        pl_id: &str,
+        refs: &[String],
+        start_position: i64,
+        epoch: i64,
+    ) -> Result<(), DbError>;
+
+    /// End-of-walk sweep: drop one playlist's rows NOT re-stamped with `epoch` —
+    /// entries removed remotely, plus the stale tail when the playlist shrank.
+    async fn sweep_playlist_tracks(
+        &self,
+        source: &Source,
+        pl_id: &str,
+        epoch: i64,
+    ) -> Result<(), DbError>;
+
     /// Create one (local) playlist folder.
     async fn create_folder(&self, id: &str, name: &str) -> Result<(), DbError>;
 

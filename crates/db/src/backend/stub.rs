@@ -256,6 +256,26 @@ impl Storage for Stub {
         Ok(())
     }
 
+    async fn upsert_playlist_tracks_page(
+        &self,
+        _source: &crate::Source,
+        _pl_id: &str,
+        _refs: &[String],
+        _start_position: i64,
+        _epoch: i64,
+    ) -> Result<(), DbError> {
+        Ok(())
+    }
+
+    async fn sweep_playlist_tracks(
+        &self,
+        _source: &crate::Source,
+        _pl_id: &str,
+        _epoch: i64,
+    ) -> Result<(), DbError> {
+        Ok(())
+    }
+
     async fn create_folder(&self, _id: &str, _name: &str) -> Result<(), DbError> {
         Ok(())
     }
