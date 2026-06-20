@@ -18,13 +18,10 @@
 //! `__SC_PENDING:` sentinel, just like `__YT_PENDING:`).
 
 use std::collections::HashSet;
-use std::path::PathBuf;
 
 use reader::models::Track;
 use serde_json::Value;
 use tokio::sync::Mutex;
-
-pub const SOURCE_PREFIX: &str = "soundcloud";
 
 /// SoundCloud's internal web-player API. Keyless apart from the scraped
 /// `client_id` query param.
@@ -138,16 +135,9 @@ fn upscale_artwork(url: &str) -> String {
     url.replace("-large.", "-t500x500.")
 }
 
-/// Hex-encode a remote artwork URL into the `urlhex_<hex>` tag the shared cover
-/// resolver decodes. Inlined here for the same reason `ytmusic` inlines its own
-/// copy: the `server` crate doesn't depend on `utils`.
-fn encode_cover_url(url: &str) -> String {
-    format!("urlhex_{}", hex::encode(url.as_bytes()))
-}
-
 /// Search the SoundCloud catalog for tracks matching `query`.
 #[tracing::instrument(name = "soundcloud.search", fields(query = %query))]
-pub async fn search_tracks(query: &str) -> Result<Vec<Track>, String> {
+pub(crate) async fn search_tracks(query: &str) -> Result<Vec<Track>, String> {
     if query.trim().is_empty() {
         return Ok(Vec::new());
     }
@@ -196,7 +186,7 @@ async fn api_search(http: &reqwest::Client, query: &str, cid: &str) -> Result<Va
 /// A resolved, playable SoundCloud stream. Progressive is the keyless 128 kbps
 /// MP3 every track exposes; `HlsAac` is the 256 kbps AAC HLS playlist that only
 /// surfaces for an authenticated SoundCloud Go+ subscriber.
-pub enum ResolvedStream {
+pub(crate) enum ResolvedStream {
     Progressive(String),
     HlsAac(String),
 }
@@ -206,7 +196,10 @@ pub enum ResolvedStream {
 /// track's AAC HLS transcoding is preferred for higher quality; otherwise it
 /// falls back to the universal progressive MP3.
 #[tracing::instrument(name = "soundcloud.resolve_stream", skip(token), fields(track_id = %track_id))]
-pub async fn resolve_stream(track_id: &str, token: Option<&str>) -> Result<ResolvedStream, String> {
+pub(crate) async fn resolve_stream(
+    track_id: &str,
+    token: Option<&str>,
+) -> Result<ResolvedStream, String> {
     let http = http_client();
 
     let track = match lookup_track(&http, track_id, &client_id(&http, false).await?, token).await {
@@ -328,14 +321,9 @@ fn transcoding_mime(tc: &Value) -> Option<&str> {
         .and_then(|m| m.as_str())
 }
 
-/// Pull the id segment out of a `soundcloud:<id>[:tag]` track path.
+/// The SoundCloud track id (the typed identity's key).
 fn track_id(t: &Track) -> String {
-    t.path
-        .to_string_lossy()
-        .split(':')
-        .nth(1)
-        .unwrap_or("")
-        .to_string()
+    t.id.key().into_owned()
 }
 
 fn parse_track(item: &Value) -> Option<Track> {
@@ -383,19 +371,16 @@ fn parse_track(item: &Value) -> Option<Track> {
         .map(|ms| ms / 1000)
         .unwrap_or(0);
 
-    let cover_tag = artwork.as_ref().map(|url| encode_cover_url(url));
-    let path = match &cover_tag {
-        Some(tag) => PathBuf::from(format!("{SOURCE_PREFIX}:{track_id}:{tag}")),
-        None => PathBuf::from(format!("{SOURCE_PREFIX}:{track_id}")),
-    };
-    let album_id = match &cover_tag {
-        Some(tag) => format!("{SOURCE_PREFIX}:_:{tag}"),
-        None => format!("{SOURCE_PREFIX}:_"),
-    };
-
     Some(Track {
-        path,
-        album_id,
+        // Typed identity (replaces the old `soundcloud:<id>:urlhex_…` path hack);
+        // the artwork URL lives in `cover`, resolved straight through by the
+        // SoundCloud arm of the cover seam.
+        id: reader::models::TrackId::Server {
+            service: config::MusicService::SoundCloud,
+            item_id: track_id.to_string(),
+        },
+        cover: artwork,
+        album_id: String::new(),
         title,
         artist: artist.clone(),
         album: String::new(),
@@ -418,7 +403,7 @@ fn parse_track(item: &Value) -> Option<Track> {
 
 /// A SoundCloud playlist as listed in the user's library — enough to seed a
 /// store entry; the tracks are loaded lazily via [`get_playlist_entries`].
-pub struct PlaylistSummary {
+pub(crate) struct PlaylistSummary {
     pub id: String,
     pub title: String,
     pub artwork_url: Option<String>,
@@ -441,7 +426,7 @@ async fn auth_get_json(
 }
 
 /// Fetch the signed-in user's profile (`/me`).
-pub async fn get_me(token: &str) -> Result<Value, String> {
+pub(crate) async fn get_me(token: &str) -> Result<Value, String> {
     let http = http_client();
     let cid = client_id(&http, false).await?;
     auth_get_json(&http, &format!("{API_V2}/me?client_id={cid}"), Some(token)).await
@@ -456,61 +441,52 @@ pub async fn derive_user_id(token: &str) -> Option<String> {
         .map(|n| n.to_string())
 }
 
-/// Stream the user's liked tracks page-by-page, mirroring the YT Music
-/// `stream_liked_songs` shape so the favorites view can render incrementally.
-pub async fn stream_liked_tracks<F: FnMut(Vec<Track>)>(
+/// One page of the user's liked tracks: pass `cursor = None` for the first page
+/// (built from the resolved user id), then the returned `next_href` for each
+/// subsequent page (`None` once exhausted). Cursor-based + `Send` so a
+/// `MediaSource::fetch_favorites_page` impl can pull it; mirrors YT's
+/// `liked_songs_page`. The `/me/likes/tracks` route 404s, so the web player's
+/// `/users/{id}/track_likes` is used.
+pub(crate) async fn liked_tracks_page(
     token: &str,
-    mut on_page: F,
-) -> Result<(), String> {
+    cursor: Option<&str>,
+) -> Result<(Vec<Track>, Option<String>), String> {
     let http = http_client();
-    let cid = client_id(&http, false).await?;
-    // `/me/likes/tracks` 404s; the web player reads likes from
-    // `/users/{id}/track_likes` (same base the like-write endpoint uses).
-    let uid = derive_user_id(token)
-        .await
-        .ok_or("SoundCloud: couldn't resolve the signed-in user id")?;
-    let mut next = Some(format!(
-        "{API_V2}/users/{uid}/track_likes?client_id={cid}&limit=200&linked_partitioning=1"
-    ));
-    let mut pages = 0;
-    while let Some(url) = next.take() {
-        if pages >= 20 {
-            tracing::warn!(
-                pages,
-                "SoundCloud liked-tracks pagination cap hit; sync is partial"
-            );
-            break;
+    let url = match cursor {
+        Some(c) => c.to_string(),
+        None => {
+            let cid = client_id(&http, false).await?;
+            let uid = derive_user_id(token)
+                .await
+                .ok_or("SoundCloud: couldn't resolve the signed-in user id")?;
+            format!(
+                "{API_V2}/users/{uid}/track_likes?client_id={cid}&limit=200&linked_partitioning=1"
+            )
         }
-        pages += 1;
-        let json = auth_get_json(&http, &url, Some(token)).await?;
-        let page: Vec<Track> = json
-            .get("collection")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    // `/me/likes/tracks` wraps each entry as
-                    // `{created_at, kind:"like", track:{…}}`; the actual
-                    // track object is nested under "track". Fall back to the
-                    // item itself for endpoints that return bare tracks.
-                    .map(|item| item.get("track").unwrap_or(item))
-                    .filter_map(parse_track)
-                    .collect()
-            })
-            .unwrap_or_default();
-        if !page.is_empty() {
-            on_page(page);
-        }
-        next = json
-            .get("next_href")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string());
-    }
-    Ok(())
+    };
+    let json = auth_get_json(&http, &url, Some(token)).await?;
+    let page: Vec<Track> = json
+        .get("collection")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                // Each entry is `{created_at, kind:"like", track:{…}}`; the track
+                // object is nested under "track". Fall back to the bare item.
+                .map(|item| item.get("track").unwrap_or(item))
+                .filter_map(parse_track)
+                .collect()
+        })
+        .unwrap_or_default();
+    let next = json
+        .get("next_href")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    Ok((page, next))
 }
 
 /// List the signed-in user's own playlists.
-pub async fn list_playlists(token: &str) -> Result<Vec<PlaylistSummary>, String> {
+pub(crate) async fn list_playlists(token: &str) -> Result<Vec<PlaylistSummary>, String> {
     let http = http_client();
     let cid = client_id(&http, false).await?;
     // `/me/playlists` 404s like `/me/likes/tracks`; the web player reads a
@@ -565,7 +541,10 @@ pub async fn list_playlists(token: &str) -> Result<Vec<PlaylistSummary>, String>
 /// Load a playlist's full track list. SoundCloud returns most entries as bare
 /// `{id}` stubs, so the ids are collected in order and batch-hydrated through
 /// `/tracks?ids=` (capped at 50 per request) before parsing.
-pub async fn get_playlist_entries(playlist_id: &str, token: &str) -> Result<Vec<Track>, String> {
+pub(crate) async fn get_playlist_entries(
+    playlist_id: &str,
+    token: &str,
+) -> Result<Vec<Track>, String> {
     let http = http_client();
     let cid = client_id(&http, false).await?;
     let json = auth_get_json(
@@ -625,15 +604,12 @@ pub async fn get_playlist_entries(playlist_id: &str, token: &str) -> Result<Vec<
 /// the web player's `api-v2` host) isn't behind DataDome bot-protection — so a
 /// plain request with the `OAuth` token works without matching a browser TLS
 /// fingerprint. `datadome` is kept only for the legacy `api-v2` fallback.
-pub async fn set_track_like(
-    track_id: &str,
-    like: bool,
-    token: &str,
-    datadome: Option<&str>,
-) -> Result<(), String> {
+pub(crate) async fn set_track_like(track_id: &str, like: bool, token: &str) -> Result<(), String> {
     let http = http_client();
 
-    // Public API: POST/DELETE https://api.soundcloud.com/likes/tracks/{id}
+    // Public API: POST/DELETE https://api.soundcloud.com/likes/tracks/{id}. Unlike
+    // the web player's api-v2 host it isn't DataDome-gated, so the OAuth token
+    // alone authorizes the write.
     let url = format!("{API_V1}/likes/tracks/{track_id}");
     let req = if like {
         http.post(&url)
@@ -641,61 +617,12 @@ pub async fn set_track_like(
         http.delete(&url)
     }
     .header("Accept", "application/json; charset=utf-8");
-    let resp = apply_auth(req, Some(token))
+    apply_auth(req, Some(token))
         .send()
         .await
+        .map_err(|e| format!("SoundCloud like HTTP: {e}"))?
+        .error_for_status()
         .map_err(|e| format!("SoundCloud like HTTP: {e}"))?;
-    if resp.status().is_success() {
-        return Ok(());
-    }
-    let pub_status = resp.status();
-    let pub_body: String = resp
-        .text()
-        .await
-        .unwrap_or_default()
-        .chars()
-        .take(200)
-        .collect();
-    tracing::warn!(%pub_status, pub_body = %pub_body, "soundcloud public-api like failed; trying api-v2");
-
-    // Fallback: the web player's api-v2 endpoint (DataDome-gated; needs the
-    // browser session's datadome cookie + a real Chrome fingerprint, so this
-    // usually only succeeds from the browser itself).
-    let cid = client_id(&http, false).await?;
-    let uid = derive_user_id(token)
-        .await
-        .ok_or("SoundCloud: couldn't resolve the signed-in user id")?;
-    let url = format!("{API_V2}/users/{uid}/track_likes/{track_id}?client_id={cid}");
-    let mut req = if like {
-        http.put(url)
-    } else {
-        http.delete(url)
-    }
-    .header("Origin", WEB_HOST)
-    .header("Referer", format!("{WEB_HOST}/"));
-    if let Some(dd) = datadome.filter(|s| !s.is_empty()) {
-        req = req.header("Cookie", format!("datadome={dd}"));
-    }
-    let resp = apply_auth(req, Some(token))
-        .send()
-        .await
-        .map_err(|e| format!("SoundCloud like HTTP: {e}"))?;
-    let status = resp.status();
-    if !status.is_success() {
-        let body = resp.text().await.unwrap_or_default();
-        // DataDome answers blocked writes with a captcha-challenge redirect
-        // (HTTP 403 + a geo.captcha-delivery.com URL). Surface a readable
-        // reason instead of dumping the raw challenge payload.
-        if status.as_u16() == 403 || body.contains("captcha-delivery.com") {
-            return Err(
-                "SoundCloud blocks likes outside its web player (DataDome bot \
-                 protection). Like this track in the SoundCloud app or website."
-                    .to_string(),
-            );
-        }
-        let body: String = body.chars().take(300).collect();
-        return Err(format!("SoundCloud like HTTP {status}: {body}"));
-    }
     Ok(())
 }
 
@@ -822,17 +749,6 @@ pub mod signin {
         extract_cookie(browser, profile_root, "oauth_token").await
     }
 
-    /// Pull the `datadome` cookie set by SoundCloud's DataDome bot-protection
-    /// during the human sign-in. api-v2 *write* endpoints (like/repost) 403 with
-    /// a captcha challenge unless the request carries this session cookie; reads
-    /// aren't gated, so this is only needed on mutations.
-    pub async fn extract_datadome(
-        browser: Browser,
-        profile_root: &Path,
-    ) -> Result<Option<String>, String> {
-        extract_cookie(browser, profile_root, "datadome").await
-    }
-
     /// Decrypt the isolated profile's cookie store (via `rookie`) and return the
     /// value of the named cookie, if present and non-empty.
     pub async fn extract_cookie(
@@ -948,10 +864,8 @@ mod tests {
         assert_eq!(t.artist, "Artist");
         assert_eq!(t.duration, 215);
         assert_eq!(track_id(&t), "42");
-        assert!(
-            t.path
-                .to_string_lossy()
-                .starts_with("soundcloud:42:urlhex_")
-        );
+        assert_eq!(t.id.service(), Some(config::MusicService::SoundCloud));
+        // The artwork URL lives in `cover` now (not a path-encoded tag).
+        assert!(t.cover.as_deref().is_some_and(|c| c.contains("sndcdn.com")));
     }
 }

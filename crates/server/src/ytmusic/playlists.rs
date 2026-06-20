@@ -24,6 +24,7 @@ pub struct YtPlaylistSummary {
 /// List the signed-in user's playlists (everything under
 /// "Library → Playlists"). Returns just metadata — call
 /// [`get_playlist_entries`] to fetch each one's tracks lazily.
+#[tracing::instrument(name = "yt.list_playlists", skip(cookies))]
 pub async fn list_playlists(cookies: &str) -> Result<Vec<YtPlaylistSummary>, String> {
     let resp: Value = innertube::browse("FEmusic_liked_playlists", cookies).await?;
     if has_sign_in_endpoint(&resp) {
@@ -171,6 +172,39 @@ where
     Ok(())
 }
 
+/// One page of a playlist walk: pass `continuation = None` for the first page
+/// (an initial browse of `VL{playlist_id}`) and the returned token for each
+/// subsequent page (`None` once exhausted). Stateless — cross-page dedup is the
+/// caller's job — so it can back a `Send`-safe source method that a UI loop pulls
+/// at its own pace (vs. `stream_playlist_entries`' non-`Send` callback).
+pub async fn playlist_page(
+    playlist_id: &str,
+    cookies: &str,
+    continuation: Option<&str>,
+) -> Result<(Vec<Track>, Option<String>), String> {
+    let auth = if cookies.is_empty() {
+        None
+    } else {
+        Some(cookies)
+    };
+    let page = match continuation {
+        None => {
+            let browse_id = if playlist_id.starts_with("VL") {
+                playlist_id.to_string()
+            } else {
+                format!("VL{playlist_id}")
+            };
+            let resp: Value = innertube::browse_maybe_auth(&browse_id, auth).await?;
+            walk_playlist_shelf(&resp)
+        }
+        Some(token) => {
+            let resp = innertube::browse_continuation_maybe_auth(token, auth).await?;
+            super::search::walk_playlist_continuation(&resp)
+        }
+    };
+    Ok(page)
+}
+
 /// Recursively look for a `signInEndpoint` object key in the response.
 /// Cheaper and structurally correct vs. serialising the whole tree and
 /// substring-searching the JSON.
@@ -185,12 +219,6 @@ fn has_sign_in_endpoint(v: &Value) -> bool {
 }
 
 fn keep_unique(t: &Track, seen: &mut std::collections::HashSet<String>) -> bool {
-    let id = t
-        .path
-        .to_string_lossy()
-        .split(':')
-        .nth(1)
-        .unwrap_or("")
-        .to_string();
+    let id = t.id.key().to_string();
     !id.is_empty() && seen.insert(id)
 }

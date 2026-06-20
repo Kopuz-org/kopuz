@@ -1,5 +1,5 @@
 use percent_encoding::NON_ALPHANUMERIC;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
@@ -13,7 +13,7 @@ struct LrcLibResponse {
     plain_lyrics: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LyricChunk {
     /// A timed lyric chunk. Most providers use whole words; Apple Music can
     /// return smaller syllable-level chunks.
@@ -21,14 +21,19 @@ pub struct LyricChunk {
     pub text: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct LyricLine {
     pub start_time: f64,
+    #[serde(default)]
     pub end_time: Option<f64>,
     pub text: String,
+    #[serde(default)]
     pub chunks: Vec<LyricChunk>,
+    #[serde(default)]
     pub parent_line_index: Option<usize>,
+    #[serde(default)]
     pub background: bool,
+    #[serde(default)]
     pub opposite_turn: bool,
 }
 
@@ -125,6 +130,72 @@ impl LyricsCache {
             self.order.remove(pos);
         }
         self.order.push_back(key.to_string());
+    }
+}
+
+// --- Persistent layer (metadata cache, kind="lyrics") ---------------------
+// The in-memory LRU stays the hot path; the DB makes lyrics survive restarts.
+// Negative results carry a TTL so a song that gains lyrics on a provider
+// later isn't permanently "no lyrics".
+
+const LYRICS_META_KIND: &str = "lyrics";
+const NEGATIVE_TTL_SECS: u64 = 7 * 24 * 60 * 60;
+
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn lyrics_to_payload(value: &Option<Lyrics>) -> String {
+    let v = match value {
+        // "synced2": full word-synced LyricLine shape. The pre-word-sync
+        // "synced" payloads parse as a miss below and simply refetch once.
+        Some(Lyrics::Synced(lines)) => serde_json::json!({
+            "kind": "synced2",
+            "lines": lines,
+        }),
+        Some(Lyrics::Plain(text)) => serde_json::json!({ "kind": "plain", "text": text }),
+        None => serde_json::json!({ "kind": "none", "ts": now_unix() }),
+    };
+    v.to_string()
+}
+
+fn lyrics_from_payload(payload: &str) -> Option<Option<Lyrics>> {
+    let v: serde_json::Value = serde_json::from_str(payload).ok()?;
+    match v.get("kind").and_then(|k| k.as_str())? {
+        "synced2" => {
+            let lines: Vec<LyricLine> = serde_json::from_value(v.get("lines")?.clone()).ok()?;
+            Some(Some(Lyrics::Synced(lines)))
+        }
+        "plain" => Some(Some(Lyrics::Plain(v.get("text")?.as_str()?.to_string()))),
+        "none" => {
+            let ts = v.get("ts").and_then(|t| t.as_u64()).unwrap_or(0);
+            if now_unix().saturating_sub(ts) < NEGATIVE_TTL_SECS {
+                Some(None) // fresh negative hit — skip the provider chain
+            } else {
+                None // stale negative — re-fetch
+            }
+        }
+        _ => None,
+    }
+}
+
+async fn load_persisted_lyrics(cache_key: &str) -> Option<Option<Lyrics>> {
+    let handle = crate::db_cache::get()?;
+    let payload = handle.meta_get(cache_key, LYRICS_META_KIND).await.ok()??;
+    lyrics_from_payload(&payload)
+}
+
+/// Store a fetch result in both layers: the in-memory LRU and the DB.
+async fn store_lyrics(cache_key: &str, value: &Option<Lyrics>) {
+    if let Ok(mut cache) = lyrics_cache().lock() {
+        cache.put(cache_key.to_string(), value.clone());
+    }
+    if let Some(handle) = crate::db_cache::get() {
+        let payload = lyrics_to_payload(value);
+        let _ = handle.meta_put(cache_key, LYRICS_META_KIND, &payload).await;
     }
 }
 
@@ -402,6 +473,20 @@ where
         return cached;
     }
 
+    // Persistent layer: lyrics survive restarts — a DB hit skips the whole
+    // provider chain and seeds the in-memory LRU.
+    if let Some(persisted) = load_persisted_lyrics(&cache_key).await {
+        lyrics_debug!(
+            "db hit key_hash={} kind={}",
+            cache_key_hash,
+            lyrics_kind(persisted.as_ref())
+        );
+        if let Ok(mut cache) = lyrics_cache().lock() {
+            cache.put(cache_key.clone(), persisted.clone());
+        }
+        return persisted;
+    }
+
     let _inflight_guard = if try_begin_lyrics_fetch(&cache_key) {
         lyrics_debug!("inflight acquired key_hash={}", cache_key_hash);
         Some(LyricsInflightGuard {
@@ -485,9 +570,7 @@ where
         );
         if let Some(lyrics) = local {
             if has_word_timestamps(&lyrics) {
-                if let Ok(mut cache) = lyrics_cache().lock() {
-                    cache.put(cache_key.clone(), Some(lyrics.clone()));
-                }
+                store_lyrics(&cache_key, &Some(lyrics.clone())).await;
                 tracing::info!(
                     target: "kopuz::lyrics",
                     "selected key_hash={} source=local_lrc kind={} total_ms={}",
@@ -508,9 +591,7 @@ where
     }
 
     if prefer_local && !is_server {
-        if let Ok(mut cache) = lyrics_cache().lock() {
-            cache.put(cache_key.clone(), fallback.clone());
-        }
+        store_lyrics(&cache_key, &fallback).await;
         tracing::info!(
             target: "kopuz::lyrics",
             "selected key_hash={} source=prefer_local kind={} total_ms={}",
@@ -549,9 +630,7 @@ where
                 );
                 if let Some(lyrics) = server_lyrics {
                     if has_word_timestamps(&lyrics) {
-                        if let Ok(mut cache) = lyrics_cache().lock() {
-                            cache.put(cache_key.clone(), Some(lyrics.clone()));
-                        }
+                        store_lyrics(&cache_key, &Some(lyrics.clone())).await;
                         tracing::info!(
                             target: "kopuz::lyrics",
                             "selected key_hash={} source=jellyfin kind={} total_ms={}",
@@ -599,9 +678,7 @@ where
                 );
                 if let Some(lyrics) = server_lyrics {
                     if has_word_timestamps(&lyrics) {
-                        if let Ok(mut cache) = lyrics_cache().lock() {
-                            cache.put(cache_key.clone(), Some(lyrics.clone()));
-                        }
+                        store_lyrics(&cache_key, &Some(lyrics.clone())).await;
                         tracing::info!(
                             target: "kopuz::lyrics",
                             "selected key_hash={} source=subsonic kind={} total_ms={}",
@@ -793,9 +870,7 @@ where
     }
 
     let fetched = fallback;
-    if let Ok(mut cache) = lyrics_cache().lock() {
-        cache.put(cache_key.clone(), fetched.clone());
-    }
+    store_lyrics(&cache_key, &fetched).await;
     tracing::info!(
         target: "kopuz::lyrics",
         "selected key_hash={} source=final kind={} total_ms={}",

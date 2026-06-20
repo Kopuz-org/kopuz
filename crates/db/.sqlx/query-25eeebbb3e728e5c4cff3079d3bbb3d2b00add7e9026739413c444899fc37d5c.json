@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO folders (id, source, name) VALUES (?1, 'local', ?2) ON CONFLICT(id) DO UPDATE SET name = excluded.name",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "25eeebbb3e728e5c4cff3079d3bbb3d2b00add7e9026739413c444899fc37d5c"
+}

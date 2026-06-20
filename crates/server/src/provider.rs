@@ -58,30 +58,25 @@ impl ProviderClient {
                 "YouTube Music uses OAuth device flow; call login_ytmusic_device() instead"
                     .to_string(),
             ),
-            MusicService::SoundCloud => {
-                Err("SoundCloud needs no login; the server entry is active on add".to_string())
-            }
+            MusicService::SoundCloud => Err(
+                "SoundCloud uses browser sign-in; extract its OAuth token via the sign-in window \
+                 instead of username/password login"
+                    .to_string(),
+            ),
         }
-    }
-
-    pub fn make_jellyfin_client(&self, access_token: &str, user_id: &str) -> JellyfinClient {
-        JellyfinClient::new(
-            &self.server_url,
-            Some(access_token),
-            &self.device_id,
-            Some(user_id),
-        )
-    }
-
-    pub fn make_subsonic_client(&self, username: &str, password: &str) -> SubsonicClient {
-        SubsonicClient::new(&self.server_url, username, password)
-    }
-
-    pub fn make_ytmusic_client(&self, cookies: &str) -> YouTubeMusicClient {
-        YouTubeMusicClient::with_cookies(cookies.to_string())
     }
 
     pub fn service(&self) -> MusicService {
         self.service
     }
+}
+
+/// Whether a YT Music cookie string is still a valid signed-in session. Used by
+/// the session-resume flow, which has no resolved source yet (the server may not
+/// be the active one), so it can't go through [`MediaSource`](crate::source).
+pub async fn validate_ytmusic_cookies(cookies: &str) -> bool {
+    YouTubeMusicClient::with_cookies(cookies.to_string())
+        .validate_cookies()
+        .await
+        .is_ok()
 }

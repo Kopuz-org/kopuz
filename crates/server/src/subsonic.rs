@@ -26,7 +26,7 @@ struct SubsonicError {
     message: String,
 }
 
-pub struct SubsonicClient {
+pub(crate) struct SubsonicClient {
     http_client: reqwest::Client,
     base_url: String,
     username: String,
@@ -177,6 +177,31 @@ struct GetStarred2Data {
 struct PlaylistCreationData {
     #[serde(default)]
     playlist: Option<SubsonicPlaylist>,
+}
+
+/// Build a Subsonic `getCoverArt` URL without the caller holding a client — the
+/// player's synchronous cover path needs it but must not construct a client.
+pub fn cover_art_url(
+    base_url: &str,
+    username: &str,
+    password: &str,
+    cover_art_id: &str,
+    max_size: Option<u32>,
+) -> Result<String, String> {
+    SubsonicClient::new(base_url, username, password).cover_art_url(cover_art_id, max_size)
+}
+
+/// Build a Subsonic `stream` URL at a bitrate cap, client-free — the synchronous
+/// offline-download URL builder needs it without constructing a client itself.
+pub fn stream_url_with_bitrate(
+    base_url: &str,
+    username: &str,
+    password: &str,
+    item_id: &str,
+    max_bitrate_kbps: Option<u32>,
+) -> Result<String, String> {
+    SubsonicClient::new(base_url, username, password)
+        .stream_url_with_bitrate(item_id, max_bitrate_kbps)
 }
 
 impl SubsonicClient {

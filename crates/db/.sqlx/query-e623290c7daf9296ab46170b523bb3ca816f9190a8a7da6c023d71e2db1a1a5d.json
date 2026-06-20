@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT rowid_pk, source_pl_id, name, cover_path, image_tag FROM playlists WHERE source = ?1 AND source_pl_id != 'LM' ORDER BY position",
+  "describe": {
+    "columns": [
+      {
+        "name": "rowid_pk",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "source_pl_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "name",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "cover_path",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "image_tag",
+        "ordinal": 4,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "e623290c7daf9296ab46170b523bb3ca816f9190a8a7da6c023d71e2db1a1a5d"
+}

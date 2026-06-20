@@ -9,7 +9,6 @@
 )]
 
 use serde_json::Value;
-use server::ytmusic::YouTubeMusicClient;
 
 fn read_kopuz_cookies() -> Result<String, Box<dyn std::error::Error>> {
     let conf: Value = serde_json::from_str(&std::fs::read_to_string(
@@ -28,10 +27,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .nth(1)
         .unwrap_or_else(|| "VwliGCRwAgc".to_string());
     let cookies = read_kopuz_cookies()?;
-    let yt = YouTubeMusicClient::with_cookies(cookies);
 
-    println!("Calling get_stream({video_id})…");
-    let info = yt.get_stream(&video_id).await?;
+    println!("Probing stream for {video_id}…");
+    let info = server::ytmusic::probe_stream(&video_id, Some(&cookies)).await?;
     println!(
         "✓ url             = {}…",
         info.url.chars().take(80).collect::<String>()

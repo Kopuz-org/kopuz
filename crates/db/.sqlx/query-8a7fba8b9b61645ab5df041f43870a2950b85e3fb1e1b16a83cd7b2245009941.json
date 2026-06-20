@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO favorites (server_id, ref, dirty, rank) SELECT ?1, ?2, 1, COALESCE(MIN(rank), 0) - 1 FROM favorites WHERE server_id = ?1 ON CONFLICT(server_id, ref) DO UPDATE SET dirty = 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "8a7fba8b9b61645ab5df041f43870a2950b85e3fb1e1b16a83cd7b2245009941"
+}

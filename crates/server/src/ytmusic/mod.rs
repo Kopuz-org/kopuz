@@ -1,4 +1,4 @@
-use reader::models::Track;
+use reader::models::{Track, TrackId};
 use serde_json::Value;
 
 pub mod botguard;
@@ -18,6 +18,14 @@ pub mod verify_session_keepalive;
 pub use player::YtStreamInfo;
 
 pub const SOURCE_PREFIX: &str = "ytmusic";
+
+/// Build the typed id for a YouTube Music track (video id).
+pub(crate) fn yt_id(video_id: impl Into<String>) -> TrackId {
+    TrackId::Server {
+        service: config::MusicService::YtMusic,
+        item_id: video_id.into(),
+    }
+}
 
 /// Surfaced by auth-only operations (like/unlike, add-to-playlist,
 /// liked-songs sync) when the YT backend is in anonymous mode.
@@ -39,7 +47,13 @@ pub fn derive_user_id(cookies: &str) -> Option<String> {
     Some(format!("yt-{}", hex::encode(&h.finalize()[..6])))
 }
 
-pub struct YouTubeMusicClient {
+/// Resolve a YT stream for diagnostics (the `duration_probe` example) without
+/// holding a client — a thin wrapper over the same resolve [`YouTubeMusicClient::get_stream`] uses.
+pub async fn probe_stream(video_id: &str, cookies: Option<&str>) -> Result<YtStreamInfo, String> {
+    player::resolve(video_id, cookies).await
+}
+
+pub(crate) struct YouTubeMusicClient {
     cookies: Option<String>,
 }
 
@@ -86,18 +100,15 @@ impl YouTubeMusicClient {
         playlists::get_playlist_entries(playlist_id, self.cookies.as_deref().unwrap_or("")).await
     }
 
-    pub async fn stream_playlist_entries<F>(
+    pub async fn playlist_page(
         &self,
         playlist_id: &str,
-        on_batch: F,
-    ) -> Result<(), String>
-    where
-        F: FnMut(Vec<Track>),
-    {
-        playlists::stream_playlist_entries(
+        continuation: Option<&str>,
+    ) -> Result<(Vec<Track>, Option<String>), String> {
+        playlists::playlist_page(
             playlist_id,
             self.cookies.as_deref().unwrap_or(""),
-            on_batch,
+            continuation,
         )
         .await
     }
@@ -129,14 +140,9 @@ impl YouTubeMusicClient {
         mutations::remove_from_playlist(playlist_id, video_id, cookies).await
     }
 
-    pub async fn create_playlist(
-        &self,
-        title: &str,
-        description: &str,
-        video_ids: &[&str],
-    ) -> Result<String, String> {
+    pub async fn create_playlist(&self, title: &str, video_ids: &[&str]) -> Result<String, String> {
         let cookies = self.cookies.as_deref().ok_or(ANON_AUTH_REQUIRED)?;
-        mutations::create_playlist(title, description, video_ids, cookies).await
+        mutations::create_playlist(title, video_ids, cookies).await
     }
 
     /// Stream the user's full Liked Music playlist page by page. The
@@ -144,6 +150,7 @@ impl YouTubeMusicClient {
     /// so the UI can populate incrementally instead of waiting for the
     /// whole library to download. Walks `continuationItemRenderer`
     /// tokens until exhausted.
+    #[tracing::instrument(name = "yt.liked_stream", skip_all)]
     pub async fn stream_liked_songs<F>(&self, mut on_page: F) -> Result<(), String>
     where
         F: FnMut(Vec<Track>),
@@ -167,13 +174,7 @@ impl YouTubeMusicClient {
             |page: Vec<Track>, seen: &mut std::collections::HashSet<String>| -> Vec<Track> {
                 page.into_iter()
                     .filter(|t| {
-                        let id = t
-                            .path
-                            .to_string_lossy()
-                            .split(':')
-                            .nth(1)
-                            .unwrap_or("")
-                            .to_string();
+                        let id = t.id.key().to_string();
                         !id.is_empty() && seen.insert(id)
                     })
                     .collect()
@@ -201,13 +202,30 @@ impl YouTubeMusicClient {
         Ok(())
     }
 
-    /// Buffered convenience around [`stream_liked_songs`] — collects all
-    /// pages before returning. Use only when the caller doesn't care
-    /// about incremental updates.
-    pub async fn get_liked_songs(&self) -> Result<Vec<Track>, String> {
-        let mut all = Vec::new();
-        self.stream_liked_songs(|page| all.extend(page)).await?;
-        Ok(all)
+    /// One page of Liked Music, cursor-driven: pass `None` for the first page,
+    /// then the returned token for each next page (until it's `None`). Lets a
+    /// caller paginate without an internal callback (cross-page dedup is the
+    /// caller's job — YT repeats tracks at page boundaries). Anonymous → empty.
+    pub async fn liked_songs_page(
+        &self,
+        continuation: Option<&str>,
+    ) -> Result<(Vec<Track>, Option<String>), String> {
+        let Some(cookies) = self.cookies.as_deref() else {
+            return Ok((Vec::new(), None));
+        };
+        match continuation {
+            None => {
+                let resp: Value = innertube::browse("VLLM", cookies).await?;
+                if !has_playlist_shelf(&resp) {
+                    return Err("Sign-in prompt returned — cookies expired".to_string());
+                }
+                Ok(search::walk_playlist_shelf(&resp))
+            }
+            Some(token) => {
+                let resp = innertube::browse_continuation(token, cookies).await?;
+                Ok(search::walk_playlist_continuation(&resp))
+            }
+        }
     }
 
     /// Resolves a playable stream URL via native sig/n deciphering against
@@ -249,6 +267,7 @@ impl YouTubeMusicClient {
     /// `/browse?browseId=VLLM` (Liked Music) is the canonical probe: it
     /// returns a `signInEndpoint`-bearing message renderer for anonymous
     /// callers and real playlist content for signed-in ones.
+    #[tracing::instrument(name = "yt.validate", skip_all)]
     pub async fn validate_cookies(&self) -> Result<(), String> {
         // Anonymous mode has no cookies to validate — succeed silently
         // so callers (settings probe, keepalive) treat it as healthy.
@@ -261,17 +280,6 @@ impl YouTubeMusicClient {
         } else {
             Err("YouTube returned no playlist shelf — cookies expired or browser signed out".into())
         }
-    }
-
-    /// True when no cookies are configured — the YT backend is in
-    /// anonymous mode (Browse + play public surfaces work; Liked,
-    /// Library Playlists, follow/like mutations are disabled).
-    /// Used by UI gates to swap auth-only views for a 'sign in to
-    /// enable' empty state.
-    pub fn is_anonymous(&self) -> bool {
-        // with_cookies normalizes "" → None, so absence of cookies is
-        // exactly anonymous mode.
-        self.cookies.is_none()
     }
 }
 

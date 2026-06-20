@@ -53,6 +53,10 @@ titlebar_system = lawa pi ilo sewi
 titlebar_off = lawa ala
 volume = suli kalama
 local = tan ilo ni
+source = Source
+sources = Sources
+manage_sources = Manage sources
+source_on_this_device = On this device
 server = tan pana
 ytdlp = kama jo
 

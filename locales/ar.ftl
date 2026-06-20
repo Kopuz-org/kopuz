@@ -53,6 +53,10 @@ titlebar_system = زخارف النظام
 titlebar_off = بلا شريط عنوان
 volume = الصوت
 local = محلي
+source = Source
+sources = Sources
+manage_sources = Manage sources
+source_on_this_device = On this device
 server = خادم
 ytdlp = التنزيلات
 

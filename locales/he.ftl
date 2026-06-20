@@ -53,6 +53,10 @@ titlebar_system = עיצובי מערכת
 titlebar_off = ללא סרגל כותרת
 volume = עוצמת קול
 local = מקומי
+source = Source
+sources = Sources
+manage_sources = Manage sources
+source_on_this_device = On this device
 server = שרת
 ytdlp = הורדות
 

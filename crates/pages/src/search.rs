@@ -1,16 +1,22 @@
-use config::{AppConfig, MusicSource};
+use components::playlist_modal::PlaylistModal;
+use components::search_bar::SearchBar;
+use components::search_genre_detail::SearchGenreDetail;
+use components::search_genres::SearchGenres;
+use components::search_results::SearchResults;
+use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
+use hooks::db_reactivity::Table;
+use hooks::use_db_queries::{use_active_source, use_genre_tracks};
+use hooks::use_search_data::use_search_data;
 use player::player;
-use reader::Library;
 
-use crate::local::search::LocalSearch;
-use crate::server::search::ServerSearch;
-
+/// Source-agnostic search. The data path (`use_search_data`, `use_genre_tracks`)
+/// is already source-scoped; the only per-source bits are the genre-detail cover
+/// (local file vs remote URL), the add-to-playlist ref, and the modal flag — all
+/// keyed off the active source rather than a hardcoded local/server split.
 #[component]
 pub fn Search(
-    library: Signal<Library>,
     config: Signal<AppConfig>,
-    playlist_store: Signal<reader::PlaylistStore>,
     search_query: Signal<String>,
     player: Signal<player::Player>,
     is_playing: Signal<bool>,
@@ -24,44 +30,128 @@ pub fn Search(
     current_queue_index: Signal<usize>,
     on_select_album: EventHandler<String>,
 ) -> Element {
-    let is_server = config.read().active_source == MusicSource::Server;
+    let data = use_search_data(search_query, config);
+    let mut selected_genre = use_signal(|| None::<String>);
+
+    let mut active_menu_track = use_signal(|| None::<reader::TrackId>);
+    let mut show_playlist_modal = use_signal(|| false);
+    let selected_track_for_playlist = use_signal(|| None::<reader::TrackId>);
+
+    let gens = hooks::db_reactivity::use_generations();
+    let source = use_active_source();
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let selected_genre_memo = use_memo(move || selected_genre.read().clone().unwrap_or_default());
+    let genre_tracks_res = use_genre_tracks(source, selected_genre_memo);
+
+    let genre_tracks = use_memo(move || {
+        let tracks = genre_tracks_res.read().clone().unwrap_or_default();
+        if tracks.is_empty() {
+            return Vec::new();
+        }
+        let conf = config.read();
+        tracks
+            .iter()
+            .map(|track| {
+                // Source-agnostic via the cover seam — the track self-describes.
+                let cover = ::server::cover::track(&conf, track, 80);
+                (track.clone(), cover)
+            })
+            .collect()
+    });
+
+    let is_modern = config.read().ui_style == UiStyle::Modern;
 
     rsx! {
-        if is_server {
-            ServerSearch {
-                library,
-                config,
-                playlist_store,
-                search_query,
-                player,
-                is_playing,
-                current_playing,
-                current_song_cover_url,
-                current_song_title,
-                current_song_artist,
-                current_song_duration,
-                current_song_progress,
-                queue,
-                current_queue_index,
-                on_select_album,
+        div {
+            class: if is_modern { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "p-8 absolute inset-0 flex flex-col" },
+
+            if *show_playlist_modal.read() {
+                PlaylistModal {
+                    on_close: move |_| show_playlist_modal.set(false),
+                    on_add_to_playlist: move |playlist_id: String| {
+                        if let Some(path) = selected_track_for_playlist.read().clone() {
+                            let source = active_source.peek().clone();
+                            spawn(async move {
+                                let refs: Vec<String> = std::iter::once(path.key().into_owned())
+                                    .filter(|r| !r.is_empty())
+                                    .collect();
+                                if !refs.is_empty()
+                                    && source.add_to_playlist(&playlist_id, &refs).await.is_ok()
+                                {
+                                    gens.bump(Table::Playlists);
+                                }
+                            });
+                        }
+                        show_playlist_modal.set(false);
+                        active_menu_track.set(None);
+                    },
+                    on_create_playlist: move |name: String| {
+                        if let Some(path) = selected_track_for_playlist.read().clone() {
+                            let source = active_source.peek().clone();
+                            spawn(async move {
+                                let refs: Vec<String> = std::iter::once(path.key().into_owned())
+                                    .filter(|r| !r.is_empty())
+                                    .collect();
+                                if !refs.is_empty()
+                                    && source.create_playlist(&name, &refs).await.is_ok()
+                                {
+                                    gens.bump(Table::Playlists);
+                                }
+                            });
+                        }
+                        show_playlist_modal.set(false);
+                        active_menu_track.set(None);
+                    },
+                }
             }
-        } else {
-            LocalSearch {
-                library,
-                config,
-                playlist_store,
-                search_query,
-                player,
-                is_playing,
-                current_playing,
-                current_song_cover_url,
-                current_song_title,
-                current_song_artist,
-                current_song_duration,
-                current_song_progress,
-                queue,
-                current_queue_index,
-                on_select_album,
+
+            if let Some(genre) = selected_genre.read().as_ref() {
+                SearchGenreDetail {
+                    genre: genre.clone(),
+                    genre_tracks: genre_tracks.read().clone(),
+                    genres: (data.genres)().clone(),
+                    on_back: move |_| selected_genre.set(None),
+                    player,
+                    is_playing,
+                    current_song_cover_url,
+                    current_song_title,
+                    current_song_artist,
+                    current_song_duration,
+                    current_song_progress,
+                    queue,
+                    current_queue_index,
+                    active_menu_track,
+                    show_playlist_modal,
+                    selected_track_for_playlist,
+                }
+            } else {
+                SearchBar { search_query: data.search_query }
+
+                if let Some(Some((tracks, albums))) = data.search_results.cloned() {
+                    SearchResults {
+                        search_query: data.search_query.read().clone(),
+                        tracks: tracks.clone(),
+                        albums: albums.clone(),
+                        player,
+                        is_playing,
+                        current_song_cover_url,
+                        current_song_title,
+                        current_song_artist,
+                        current_song_duration,
+                        current_song_progress,
+                        queue,
+                        current_queue_index,
+                        active_menu_track,
+                        show_playlist_modal,
+                        selected_track_for_playlist,
+                        on_select_album,
+                    }
+                } else {
+                    SearchGenres {
+                        genres: (data.genres)().clone(),
+                        on_select_genre: move |genre| selected_genre.set(Some(genre)),
+                    }
+                }
             }
         }
     }

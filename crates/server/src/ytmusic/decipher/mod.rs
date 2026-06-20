@@ -40,9 +40,6 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
-
 const LIB: &str = include_str!("solver/lib.min.js");
 const CORE: &str = include_str!("solver/core.min.js");
 const WEB_UA: &str =
@@ -335,14 +332,16 @@ fn detect_runtime() -> Option<Runtime> {
         ];
         CANDIDATES.iter().copied().find(|c| {
             let mut cmd = std::process::Command::new(c.bin);
-            #[cfg(target_os = "windows")]
-            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
             cmd.arg("--version")
                 .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false)
+                .stderr(std::process::Stdio::null());
+            // Don't flash a console window on Windows for the version probe.
+            #[cfg(target_os = "windows")]
+            {
+                use std::os::windows::process::CommandExt;
+                cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+            }
+            cmd.status().map(|s| s.success()).unwrap_or(false)
         })
     })
 }
@@ -379,18 +378,16 @@ impl JsEngine for SubprocessEngine {
                     .await
                     .map_err(|e| format!("write solver temp: {e}"))?;
             }
-            let spawned = {
-                let mut cmd = tokio::process::Command::new(rt.bin);
-                #[cfg(target_os = "windows")]
-                cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-                cmd.args(rt.args)
-                    .arg(&path)
-                    .stdout(std::process::Stdio::piped())
-                    .stderr(std::process::Stdio::piped())
-                    .kill_on_drop(true)
-                    .spawn()
-            };
-            let child = match spawned {
+            let mut cmd = tokio::process::Command::new(rt.bin);
+            cmd.args(rt.args)
+                .arg(&path)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .kill_on_drop(true);
+            // Don't flash a console window on Windows for the solver subprocess.
+            #[cfg(target_os = "windows")]
+            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+            let child = match cmd.spawn() {
                 Ok(c) => c,
                 Err(e) => {
                     let _ = tokio::fs::remove_file(&path).await;

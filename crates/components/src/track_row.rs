@@ -5,7 +5,6 @@ use crate::queue_drag::{
     clear_dragged_queue_track, handle_select_click, is_queue_drag_enabled, set_dragged_queue_track,
     set_dragged_queue_tracks,
 };
-use config::MusicSource;
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::PlayerController;
@@ -34,12 +33,6 @@ pub(crate) fn share_to_musicbrainz(release_id: Option<String>, artist: String, t
         }
         .instrument(tracing::info_span!("musicbrainz.fetch")),
     );
-}
-
-pub(crate) fn share_youtube_url(video_id: &str) {
-    let url = format!("https://music.youtube.com/watch?v={video_id}");
-    copy_to_clipboard(&url);
-    toast("Copied YouTube Music link");
 }
 
 fn toast(msg: &str) {
@@ -82,6 +75,7 @@ pub fn TrackRow(
     on_select: Option<EventHandler<bool>>,
     on_long_press: Option<EventHandler<()>>,
     on_download: Option<EventHandler<()>>,
+    on_start_radio: Option<EventHandler<()>>,
     #[props(default = false)] is_downloaded: bool,
     #[props(default = false)] is_downloading: bool,
     #[props(default = false)] is_currently_playing: bool,
@@ -89,6 +83,7 @@ pub fn TrackRow(
     #[props(default = None)] row_num: Option<usize>,
 ) -> Element {
     let config = use_context::<Signal<AppConfig>>();
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let mut ctrl = use_context::<PlayerController>();
     let nav_ctrl = use_context::<NavigationController>();
     let is_modern = config.read().ui_style == UiStyle::Modern;
@@ -117,14 +112,10 @@ pub fn TrackRow(
     let share_text = i18n::t("share_musicbrainz").to_string();
     let view_metadata_text = i18n::t("view_metadata").to_string();
 
-    // Identifiers used to resolve the track's MusicBrainz page when sharing.
-    // Cloned once per layout closure (modern / normal) since each moves them in.
-    let share_modern = (
-        track.musicbrainz_release_id.clone(),
-        track.artist.clone(),
-        track.title.clone(),
-    );
-    let share_normal = share_modern.clone();
+    // The track to share, cloned once per layout closure (modern / normal) since
+    // each moves it in; `share_track` picks the link form from the source.
+    let share_track_modern = track.clone();
+    let share_track_normal = track.clone();
 
     let mut actions = Vec::new();
 
@@ -153,9 +144,9 @@ pub fn TrackRow(
         ));
     }
 
+    // `on_download` is only wired by sources that support downloads (servers),
+    // so its presence is the gate — no separate source check needed.
     let has_download = on_download.is_some();
-    let is_server = config.read().active_source == MusicSource::Server;
-    let has_download = has_download && is_server;
 
     if has_download {
         let (dl_label, dl_icon) = if is_downloading {
@@ -186,8 +177,7 @@ pub fn TrackRow(
         "fa-solid fa-share-nodes",
     ));
 
-    let is_ytmusic_track = track.path.to_string_lossy().starts_with("ytmusic:");
-    let mix_idx = if is_ytmusic_track {
+    let mix_idx = if on_start_radio.is_some() {
         let idx = actions.len();
         actions.push(MenuAction::new(
             "Start radio",
@@ -251,20 +241,6 @@ pub fn TrackRow(
 
     let fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
     let duration_str = fmt_dur(track.duration);
-
-    // File-type tag (MP3, FLAC, …) for local tracks. Server/YT tracks use
-    // "service:id" pseudo-paths with no extension, so they get no badge.
-    let file_type = track
-        .path
-        .extension()
-        .and_then(|e| e.to_str())
-        .filter(|e| {
-            matches!(
-                e.to_ascii_lowercase().as_str(),
-                "mp3" | "flac" | "m4a" | "wav" | "ogg" | "opus" | "mp4" | "mka"
-            )
-        })
-        .map(|e| e.to_uppercase());
 
     let columns_modern = if is_album {
         COLUMNS_MODERN_ALBUM
@@ -432,13 +408,6 @@ pub fn TrackRow(
                             style: "color: var(--color-indigo-500); opacity: 0.7;"
                         }
                     }
-                    if let Some(ref ft) = file_type {
-                        span {
-                            class: "shrink-0 text-[9px] font-semibold uppercase px-1 py-0.5 rounded leading-none tracking-wide",
-                            style: "background: rgba(255,255,255,0.08); color: var(--color-white); opacity: 0.5;",
-                            "{ft}"
-                        }
-                    }
                 }
 
                 div { class: "flex items-center min-w-0 pr-3",
@@ -523,17 +492,13 @@ pub fn TrackRow(
                                 } else if has_download && idx == download_action_idx {
                                     if let Some(handler) = on_download { handler.call(()); }
                                 } else if idx == share_idx {
-                                    if is_ytmusic_track {
-                                        if let Some(vid) = track.path.to_string_lossy().split(':').nth(1) {
-                                            share_youtube_url(vid);
-                                        }
-                                    } else {
-                                        let (rid, artist, title) = share_modern.clone();
-                                        share_to_musicbrainz(rid, artist, title);
-                                    }
+                                    let src = active_source.peek().clone();
+                                    share_track(share_track_modern.clone(), src);
                                     on_close_menu.call(());
                                 } else if mix_idx == Some(idx) {
-                                    start_radio_from(track.path.clone(), config, ctrl);
+                                    if let Some(handler) = on_start_radio {
+                                        handler.call(());
+                                    }
                                     on_close_menu.call(());
                                 } else if view_metadata_idx == Some(idx) {
                                     if let Some(handler) = on_view_metadata { handler.call(()); }
@@ -714,13 +679,6 @@ pub fn TrackRow(
                     ondoubleclick: move |evt| evt.stop_propagation(),
                     "{track.title}"
                 }
-                if let Some(ref ft) = file_type {
-                    span {
-                        class: "shrink-0 ml-2 text-[9px] font-semibold uppercase px-1 py-0.5 rounded leading-none tracking-wide",
-                        style: "background: rgba(255,255,255,0.08); color: var(--color-white); opacity: 0.5;",
-                        "{ft}"
-                    }
-                }
             }
 
             div { class: "min-w-0",
@@ -802,17 +760,13 @@ pub fn TrackRow(
                                     handler.call(());
                                 }
                             } else if idx == share_idx {
-                                if is_ytmusic_track {
-                                    if let Some(vid) = track.path.to_string_lossy().split(':').nth(1) {
-                                        share_youtube_url(vid);
-                                    }
-                                } else {
-                                    let (rid, artist, title) = share_normal.clone();
-                                    share_to_musicbrainz(rid, artist, title);
-                                }
+                                let src = active_source.peek().clone();
+                                share_track(share_track_normal.clone(), src);
                                 on_close_menu.call(());
                             } else if mix_idx == Some(idx) {
-                                start_radio_from(track.path.clone(), config, ctrl);
+                                if let Some(handler) = on_start_radio {
+                                    handler.call(());
+                                }
                                 on_close_menu.call(());
                             } else if view_metadata_idx == Some(idx) {
                                 if let Some(handler) = on_view_metadata {
@@ -830,40 +784,57 @@ pub fn TrackRow(
     };
 }
 
-fn start_radio_from(
-    track_path: std::path::PathBuf,
-    config: Signal<AppConfig>,
+/// The `on_start_radio` handler for a track row: `Some` iff the active source
+/// supports radio ([`Capabilities::radio`]), else `None` (so the row hides the
+/// "Start radio" action). Lets every call site wire radio in one line without
+/// repeating the capability gate or context plumbing.
+///
+/// Reads context via `consume_context`, never a `use_*` hook: call sites invoke
+/// this once per visible row, so a hook here would register a per-row-count
+/// number of hooks and panic the parent on rules-of-hooks when the row count
+/// changes (e.g. an empty server library filling in after a sync).
+pub fn radio_handler(track: Track) -> Option<EventHandler<()>> {
+    let ctrl = consume_context::<PlayerController>();
+    let active_source = consume_context::<Signal<::server::source::ActiveSource>>();
+    let can_radio = active_source.read().capabilities().radio;
+    can_radio.then(|| {
+        EventHandler::new(move |_| {
+            let src = active_source.peek().clone();
+            play_radio(track.clone(), src, ctrl)
+        })
+    })
+}
+
+/// Start radio seeded from a track and play the generated queue. The radio
+/// operation lives in the source layer ([`MediaSource::start_radio`]); this just
+/// resolves the track's source, awaits it, and hands the result to the player.
+/// Call sites wire this into `on_start_radio` only when `capabilities().radio`.
+pub fn play_radio(
+    track: Track,
+    source: ::server::source::ActiveSource,
     mut ctrl: PlayerController,
 ) {
-    let video_id = match track_path
-        .to_string_lossy()
-        .split(':')
-        .nth(1)
-        .map(|s| s.to_string())
-    {
-        Some(id) if !id.is_empty() => id,
-        _ => return,
-    };
-    // Mix radio works anonymously — start_mix hits /next with no auth
-    // when cookies are empty. Pass whatever token we have (empty for
-    // anonymous mode) instead of bailing on missing cookies.
-    let cookies = config
-        .peek()
-        .server
-        .as_ref()
-        .and_then(|s| s.access_token.clone())
-        .unwrap_or_default();
+    let seed = track.id.key().into_owned();
     spawn(
         async move {
-            let yt = server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
-            match yt.start_mix(&video_id).await {
-                Ok(tracks) if !tracks.is_empty() => {
-                    ctrl.play_queue_linear(tracks);
-                }
-                Ok(_) => tracing::debug!(seed = %video_id, "YT mix returned empty queue"),
-                Err(e) => tracing::warn!(seed = %video_id, error = %e, "YT mix failed"),
+            match source.start_radio(&seed).await {
+                Ok(tracks) if !tracks.is_empty() => ctrl.play_queue_linear(tracks),
+                Ok(_) => tracing::debug!(seed = %seed, "radio returned empty queue"),
+                Err(e) => tracing::warn!(seed = %seed, error = %e, "radio failed"),
             }
         }
-        .instrument(tracing::info_span!("mix.start")),
+        .instrument(tracing::info_span!("radio.start")),
     );
+}
+
+/// Copy a shareable link for a track: its source's public web URL when it has
+/// one (YT), else fall back to a MusicBrainz lookup by metadata. The provider
+/// URL knowledge lives in the source impl ([`MediaSource::web_url`]), not here.
+pub fn share_track(track: Track, source: ::server::source::ActiveSource) {
+    if let Some(url) = source.web_url(&track) {
+        copy_to_clipboard(&url);
+        toast("Copied link");
+    } else {
+        share_to_musicbrainz(track.musicbrainz_release_id, track.artist, track.title);
+    }
 }

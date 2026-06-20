@@ -1,4 +1,5 @@
 use config::{AppConfig, MusicService};
+use dioxus::core::spawn_forever;
 use dioxus::prelude::*;
 use std::cell::Cell;
 use std::sync::Arc;
@@ -94,15 +95,43 @@ pub fn queue_downloads(
 
     reset_progress_session();
 
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let session_start = Instant::now();
     let session_span = tracing::info_span!("downloads.session");
-    spawn(
+    // spawn_forever: queue_downloads is called from page event handlers, and a
+    // scope-tied spawn dies with the page — navigating away from the downloads
+    // view cancelled the whole session mid-download (#327).
+    spawn_forever(
         async move {
             tokio::join!(
-                download_worker(queue, config, session_start, cancel_flag.clone()),
-                download_worker(queue, config, session_start, cancel_flag.clone()),
-                download_worker(queue, config, session_start, cancel_flag.clone()),
-                download_worker(queue, config, session_start, cancel_flag.clone()),
+                download_worker(
+                    queue,
+                    config,
+                    active_source,
+                    session_start,
+                    cancel_flag.clone()
+                ),
+                download_worker(
+                    queue,
+                    config,
+                    active_source,
+                    session_start,
+                    cancel_flag.clone()
+                ),
+                download_worker(
+                    queue,
+                    config,
+                    active_source,
+                    session_start,
+                    cancel_flag.clone()
+                ),
+                download_worker(
+                    queue,
+                    config,
+                    active_source,
+                    session_start,
+                    cancel_flag.clone()
+                ),
             );
 
             let mut q = queue.write();
@@ -117,6 +146,7 @@ pub fn queue_downloads(
 async fn download_worker(
     mut queue: Signal<DownloadQueue>,
     mut config: Signal<AppConfig>,
+    active_source: Signal<::server::source::ActiveSource>,
     session_start: Instant,
     cancel_flag: Arc<AtomicBool>,
 ) {
@@ -152,41 +182,20 @@ async fn download_worker(
             continue;
         }
 
-        let (service, yt_cookies) = {
-            let conf = config.read();
-            let s = conf.server.as_ref();
-            (s.map(|x| x.service), s.and_then(|x| x.access_token.clone()))
-        };
+        let service = config.read().server.as_ref().map(|x| x.service);
 
         let resolved: Option<(String, &'static str, Option<String>, Option<u64>)> =
             if matches!(service, Some(MusicService::YtMusic)) {
-                let cookies = yt_cookies.unwrap_or_default();
-                let yt = ::server::ytmusic::YouTubeMusicClient::with_cookies(cookies);
-                match yt.get_stream(&id).await {
+                let source = active_source.peek().clone();
+                match source.resolve_stream(&id).await {
                     Ok(info) => Some((
                         info.url,
-                        info.format.extension(),
-                        Some(info.user_agent),
+                        info.format.map(|(f, _)| f.extension()).unwrap_or_default(),
+                        info.user_agent,
                         info.content_length,
                     )),
                     Err(e) => {
                         tracing::warn!(%id, error = %e, "YT download URL resolve failed");
-                        None
-                    }
-                }
-            } else if matches!(service, Some(MusicService::SoundCloud)) {
-                // Resolve anonymously (token = None) so we always get the
-                // keyless progressive MP3 rather than a Go+ HLS playlist, which
-                // can't be saved as a single offline file.
-                match ::server::soundcloud::resolve_stream(&id, None).await {
-                    Ok(::server::soundcloud::ResolvedStream::Progressive(url)) => {
-                        Some((url, "mp3", None, None))
-                    }
-                    Ok(::server::soundcloud::ResolvedStream::HlsAac(url)) => {
-                        Some((url, "m4a", None, None))
-                    }
-                    Err(e) => {
-                        tracing::warn!(%id, error = %e, "SoundCloud download URL resolve failed");
                         None
                     }
                 }
@@ -218,10 +227,13 @@ async fn download_worker(
         .await
         {
             Ok(path) => {
-                config
-                    .write()
-                    .offline_tracks
-                    .insert(id.clone(), path.to_string_lossy().into_owned());
+                let path_str = path.to_string_lossy().into_owned();
+                // Durable FIRST as a single json_set (the whole-config save per
+                // completed song was the audio-stutter bug), then the in-memory
+                // mirror for live reads.
+                let source = active_source.peek().clone();
+                let _ = source.set_offline_track(&id, Some(&path_str)).await;
+                config.write().offline_tracks.insert(id.clone(), path_str);
                 if let Some(item) = queue.write().items.iter_mut().find(|i| i.id == id) {
                     item.status = DownloadStatus::Done;
                 }
@@ -244,6 +256,7 @@ pub fn delete_downloads(
     mut config: Signal<AppConfig>,
     mut queue: Signal<DownloadQueue>,
 ) {
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let mut conf = config.write();
     let mut q = queue.write();
 
@@ -254,6 +267,13 @@ pub fn delete_downloads(
                 let _ = std::fs::remove_file(path);
             }
         }
+        let source = active_source.peek().clone();
+        let spawn_id = id.clone();
+        // The file is already deleted above — the DB row removal must
+        // outlive the calling page or the registry points at nothing.
+        spawn_forever(async move {
+            let _ = source.set_offline_track(&spawn_id, None).await;
+        });
         q.items.retain(|i| i.id != id);
     }
 }
@@ -264,7 +284,6 @@ pub fn delete_downloads(
     skip(url, user_agent, queue, session_start, cancel_flag),
     fields(item_id = %item_id, content_length)
 )]
-#[allow(clippy::too_many_arguments)]
 async fn download_with_progress(
     item_id: &str,
     url: &str,

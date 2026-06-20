@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO favorites (server_id, ref, dirty, rank, epoch) VALUES (?1, ?2, 0, ?3, ?4) ON CONFLICT(server_id, ref) DO UPDATE SET rank = excluded.rank, epoch = excluded.epoch",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "a84c2fbbacddf38de8dbf749d9ee78c67c7754b78ea27c86768697adad843d8b"
+}

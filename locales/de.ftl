@@ -53,6 +53,10 @@ titlebar_system = Systemdekorationen
 titlebar_off = Keine Titelleiste
 volume = Lautstärke
 local = Lokal
+source = Source
+sources = Sources
+manage_sources = Manage sources
+source_on_this_device = On this device
 server = Server
 ytdlp = Downloads
 

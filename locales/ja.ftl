@@ -53,6 +53,10 @@ titlebar_system = システム装飾
 titlebar_off = タイトルバーなし
 volume = 音量
 local = ローカル
+source = Source
+sources = Sources
+manage_sources = Manage sources
+source_on_this_device = On this device
 server = サーバー
 ytdlp = ダウンロード
 

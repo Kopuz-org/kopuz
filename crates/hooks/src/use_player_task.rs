@@ -1,8 +1,8 @@
 use crate::use_player_controller::PlayerController;
 use config::AppConfig;
 use config::MusicService;
+use dioxus::logger::tracing::Instrument;
 use dioxus::prelude::*;
-use server::jellyfin::JellyfinClient;
 use std::sync::Arc;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -26,19 +26,25 @@ enum BgCmd {
     Prev,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-struct JellyfinCacheKey {
-    url: String,
-    access_token: Option<String>,
-    device_id: String,
-    user_id: Option<String>,
-}
-
 static BG_CMD_TX: std::sync::OnceLock<std::sync::Mutex<std::sync::mpsc::Sender<BgCmd>>> =
     std::sync::OnceLock::new();
 static BG_CMD_RX: std::sync::OnceLock<std::sync::Mutex<std::sync::mpsc::Receiver<BgCmd>>> =
     std::sync::OnceLock::new();
 static BG_NOTIFY: std::sync::OnceLock<tokio::sync::Notify> = std::sync::OnceLock::new();
+
+/// Persist a play-count increment as a single-row upsert. The in-memory
+/// `config.listen_counts` is bumped by the caller for live views; this is the
+/// durable side (no whole-config rewrite on the play hot path).
+fn bump_listen_count_db(track_uid: String, db: db::Db) {
+    spawn(async move {
+        if let Err(e) = ::server::source::local(db)
+            .bump_listen_count(&track_uid)
+            .await
+        {
+            tracing::warn!(error = %e, "listen count persist failed");
+        }
+    });
+}
 
 fn init_bg_channel() {
     BG_CMD_TX.get_or_init(|| {
@@ -222,6 +228,7 @@ pub fn use_player_task(ctrl: PlayerController) {
         });
     });
 
+    let gens = crate::db_reactivity::use_generations();
     use_future(move || {
         let mut ctrl = ctrl;
         #[cfg(not(target_arch = "wasm32"))]
@@ -245,7 +252,6 @@ pub fn use_player_task(ctrl: PlayerController) {
             let mut last_recent_path: Option<String> = None;
             #[cfg(not(target_arch = "wasm32"))]
             let bg_notify = BG_NOTIFY.get_or_init(tokio::sync::Notify::new);
-            let mut jellyfin_client_cache: Option<(JellyfinCacheKey, Arc<JellyfinClient>)> = None;
             loop {
                 #[cfg(not(target_arch = "wasm32"))]
                 tokio::select! {
@@ -270,26 +276,26 @@ pub fn use_player_task(ctrl: PlayerController) {
                 let is_playing = *ctrl.is_playing.read();
 
                 {
-                    let current_path: Option<String> = {
+                    let current_track = {
                         let idx = *ctrl.current_queue_index.read();
                         ctrl.get_track_at(idx)
-                            .map(|t| t.path.to_string_lossy().to_string())
                     };
-                    if let Some(path) = current_path
+                    if let Some(track) = current_track
                         && is_playing
-                        && last_recent_path.as_ref() != Some(&path)
                     {
-                        last_recent_path = Some(path.clone());
-                        let is_server = path.starts_with("jellyfin:")
-                            || path.starts_with("subsonic:")
-                            || path.starts_with("ytmusic:")
-                            || path.starts_with("soundcloud:");
-                        let id = if is_server {
-                            path.split(':').nth(1).unwrap_or(&path).to_string()
-                        } else {
-                            path.clone()
-                        };
-                        config.write().push_recent(id, is_server);
+                        let uid = track.id.uid().to_string();
+                        if last_recent_path.as_ref() != Some(&uid) {
+                            last_recent_path = Some(uid);
+                            // Records under the active source's partition — same
+                            // source the rest of now-playing resolves through.
+                            let key = track.id.key().into_owned();
+                            let source = ctrl.active_source.peek().clone();
+                            spawn(async move {
+                                if source.record_recent(&key).await.is_ok() {
+                                    gens.bump(crate::db_reactivity::Table::Recents);
+                                }
+                            });
+                        }
                     }
                 }
 
@@ -299,7 +305,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                 };
 
                 if let Some(next_track) = lyrics_prefetch {
-                    let next_track_key = next_track.path.to_string_lossy().to_string();
+                    let next_track_key = next_track.id.uid().to_string();
                     if last_lyrics_prefetch_track.as_ref() != Some(&next_track_key) {
                         last_lyrics_prefetch_track = Some(next_track_key);
                         let (
@@ -326,7 +332,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                         };
 
                         spawn(async move {
-                            let next_track_path = next_track.path.to_string_lossy().into_owned();
+                            let next_track_path = next_track.id.uid();
                             let _ = utils::lyrics::fetch_lyrics(
                                 &next_track.artist,
                                 &next_track.title,
@@ -377,37 +383,21 @@ pub fn use_player_task(ctrl: PlayerController) {
                     conf.server.clone().map(|s| (s, conf.device_id.clone()))
                 };
 
-                if let Some((server, device_id)) = jellyfin_info
+                if let Some((server, _device_id)) = jellyfin_info
                     && server.service == MusicService::Jellyfin
                 {
-                    let key = JellyfinCacheKey {
-                        url: server.url.clone(),
-                        access_token: server.access_token,
-                        device_id: device_id.clone(),
-                        user_id: server.user_id,
-                    };
-
-                    let remote = match &jellyfin_client_cache {
-                        Some((cached_key, cached_client)) if cached_key == &key => {
-                            cached_client.clone()
-                        }
-                        _ => {
-                            let client = Arc::new(JellyfinClient::new(
-                                &key.url,
-                                key.access_token.as_deref(),
-                                &key.device_id,
-                                key.user_id.as_deref(),
-                            ));
-                            jellyfin_client_cache = Some((key, client.clone()));
-                            client
-                        }
-                    };
-
+                    // Session reporting goes through the active source (Jellyfin
+                    // overrides keepalive/report_*; others no-op). Reports are
+                    // gated to ≥5s/track-change, so resolving a fresh source per
+                    // report is cheap — no client cache needed.
                     if last_ping.elapsed().as_secs() >= 30 {
-                        let remote = remote.clone();
-                        spawn(async move {
-                            let _ = remote.ping().await;
-                        });
+                        let source = ctrl.active_source.peek().clone();
+                        spawn(
+                            async move {
+                                let _ = source.keepalive().await;
+                            }
+                            .instrument(tracing::info_span!("jellyfin.keepalive")),
+                        );
                         last_ping = web_time::Instant::now();
                     }
 
@@ -417,66 +407,76 @@ pub fn use_player_task(ctrl: PlayerController) {
                     };
 
                     if let Some(track) = track {
-                        let path_str = track.path.to_string_lossy();
-                        if path_str.starts_with("jellyfin:") {
-                            let parts: Vec<&str> = path_str.split(':').collect();
-                            if let Some(id) = parts.get(1) {
-                                let current_id = id.to_string();
-
-                                if last_jellyfin_id.as_ref() != Some(&current_id) {
-                                    if let Some(old_id) = last_jellyfin_id {
-                                        let remote = remote.clone();
-                                        spawn(async move {
-                                            let _ = remote
-                                                .report_playback_stopped(
-                                                    &old_id,
-                                                    pos.as_micros() as u64 * 10,
-                                                )
-                                                .await;
-                                        });
-                                    }
-                                    let remote = remote.clone();
-                                    let current_id_clone = current_id.clone();
-                                    spawn(async move {
-                                        let _ =
-                                            remote.report_playback_start(&current_id_clone).await;
-                                    });
-                                    last_jellyfin_id = Some(current_id.clone());
-                                }
-
-                                if last_progress_report.elapsed().as_secs() >= 5
-                                    || is_playing != prev_playing
-                                {
+                        if let Some(current_id) = track
+                            .id
+                            .service()
+                            .filter(|s| *s == MusicService::Jellyfin)
+                            .map(|_| track.id.key().into_owned())
+                        {
+                            if last_jellyfin_id.as_ref() != Some(&current_id) {
+                                if let Some(old_id) = last_jellyfin_id {
+                                    let source = ctrl.active_source.peek().clone();
                                     let ticks = pos.as_micros() as u64 * 10;
-                                    let remote = remote.clone();
-                                    let current_id_clone = current_id.clone();
-                                    spawn(async move {
-                                        let _ = remote
+                                    spawn(
+                                        async move {
+                                            let _ = source
+                                                .report_playback_stopped(&old_id, ticks)
+                                                .await;
+                                        }
+                                        .instrument(tracing::info_span!("playback.report")),
+                                    );
+                                }
+                                let source = ctrl.active_source.peek().clone();
+                                let current_id_clone = current_id.clone();
+                                spawn(
+                                    async move {
+                                        let _ =
+                                            source.report_playback_start(&current_id_clone).await;
+                                    }
+                                    .instrument(tracing::info_span!("playback.report")),
+                                );
+                                last_jellyfin_id = Some(current_id.clone());
+                            }
+
+                            if last_progress_report.elapsed().as_secs() >= 5
+                                || is_playing != prev_playing
+                            {
+                                let ticks = pos.as_micros() as u64 * 10;
+                                let source = ctrl.active_source.peek().clone();
+                                let current_id_clone = current_id.clone();
+                                spawn(
+                                    async move {
+                                        let _ = source
                                             .report_playback_progress(
                                                 &current_id_clone,
                                                 ticks,
                                                 !is_playing,
                                             )
                                             .await;
-                                    });
-                                    last_progress_report = web_time::Instant::now();
-                                }
+                                    }
+                                    .instrument(tracing::info_span!("playback.report")),
+                                );
+                                last_progress_report = web_time::Instant::now();
                             }
                         } else if let Some(old_id) = last_jellyfin_id.take() {
-                            let remote = remote.clone();
-                            spawn(async move {
-                                let _ = remote
-                                    .report_playback_stopped(&old_id, pos.as_micros() as u64 * 10)
-                                    .await;
-                            });
+                            let source = ctrl.active_source.peek().clone();
+                            let ticks = pos.as_micros() as u64 * 10;
+                            spawn(
+                                async move {
+                                    let _ = source.report_playback_stopped(&old_id, ticks).await;
+                                }
+                                .instrument(tracing::info_span!("playback.report")),
+                            );
                         }
                     } else if let Some(old_id) = last_jellyfin_id.take() {
-                        let remote = remote.clone();
-                        spawn(async move {
-                            let _ = remote
-                                .report_playback_stopped(&old_id, pos.as_micros() as u64 * 10)
-                                .await;
-                        });
+                        let source = ctrl.active_source.peek().clone();
+                        let ticks = pos.as_micros() as u64 * 10;
+                        spawn(
+                            async move {
+                                let _ = source.report_playback_stopped(&old_id, ticks).await;
+                            }
+                            .instrument(tracing::info_span!("playback.report")),
+                        );
                     }
                 }
 
@@ -522,17 +522,20 @@ pub fn use_player_task(ctrl: PlayerController) {
                             let artist_c = artist.clone();
                             let album_c = album.clone();
                             let song_key_for_spawn = song_key.clone();
-                            spawn(async move {
-                                let resolved = cover_art::resolve_cover_art_url(
-                                    mbid.as_deref(),
-                                    &artist_c,
-                                    &album_c,
-                                )
-                                .await;
-                                if *discord_cover_resolving_for.peek() == song_key_for_spawn {
-                                    discord_cover_url.set(resolved);
+                            spawn(
+                                async move {
+                                    let resolved = cover_art::resolve_cover_art_url_cached(
+                                        mbid.as_deref(),
+                                        &artist_c,
+                                        &album_c,
+                                    )
+                                    .await;
+                                    if *discord_cover_resolving_for.peek() == song_key_for_spawn {
+                                        discord_cover_url.set(resolved);
+                                    }
                                 }
-                            });
+                                .instrument(tracing::info_span!("presence.cover_resolve")),
+                            );
                         }
 
                         if discord_enabled {
@@ -579,8 +582,13 @@ pub fn use_player_task(ctrl: PlayerController) {
                             let mut config_write = config.write();
                             let idx = *ctrl.current_queue_index.peek();
                             if let Some(track) = ctrl.get_track_at(idx) {
-                                let track_id = track.path.to_string_lossy().to_string();
-                                *config_write.listen_counts.entry(track_id).or_insert(0) += 1;
+                                let track_id = track.id.uid().to_string();
+                                *config_write
+                                    .listen_counts
+                                    .entry(track_id.clone())
+                                    .or_insert(0) += 1;
+                                drop(config_write);
+                                bump_listen_count_db(track_id, ctrl.db.peek().clone());
                             }
                         }
                         ctrl.play_next_with_crossfade();
@@ -613,8 +621,13 @@ pub fn use_player_task(ctrl: PlayerController) {
                             let _q = ctrl.queue.peek();
                             let idx = *ctrl.current_queue_index.peek();
                             if let Some(track) = ctrl.get_track_at(idx) {
-                                let track_id = track.path.to_string_lossy().to_string();
-                                *config_write.listen_counts.entry(track_id).or_insert(0) += 1;
+                                let track_id = track.id.uid().to_string();
+                                *config_write
+                                    .listen_counts
+                                    .entry(track_id.clone())
+                                    .or_insert(0) += 1;
+                                drop(config_write);
+                                bump_listen_count_db(track_id, ctrl.db.peek().clone());
                             }
                         }
                         ctrl.play_next();

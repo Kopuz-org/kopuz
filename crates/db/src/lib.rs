@@ -1,0 +1,587 @@
+//! Kopuz persistence layer (issue #347).
+//!
+//! Owns the SQLite schema and all persistence behind a single async [`Storage`]
+//! trait. Native targets implement it with sqlx; wasm (not a shipped target)
+//! gets a thin in-memory stub so the build stays green. Everything above this
+//! crate (reactive hooks, UI) is driver-agnostic.
+//!
+//! Dependency direction: `db` sits ABOVE `config`/`reader` (it persists their
+//! types), so those crates stay pure model definitions and all save/load lives
+//! here.
+
+use std::sync::Arc;
+
+mod backend;
+
+/// What a one-shot legacy-JSON import did. `ran == false` means it was skipped
+/// (already migrated, or no legacy JSON present); the counts are then all zero.
+#[derive(Debug, Default, Clone)]
+pub struct ImportReport {
+    pub ran: bool,
+    pub tracks: usize,
+    pub albums: usize,
+    pub playlists: usize,
+    pub favorites: usize,
+    pub servers: usize,
+}
+
+// `Source` is defined in `config` (the active source lives there) and is the
+// single type-safe representation of "which source"; re-exported here since the
+// DB layer is its main consumer (`WHERE source = ?`).
+pub use config::Source;
+
+/// A window into a list query (for virtual-scrolled big lists).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Page {
+    pub offset: u32,
+    pub limit: u32,
+}
+
+/// The queue/progress snapshot, reconstructed from the `queue_state` row. The
+/// in-memory `PersistedQueueState` (in the app crate) maps directly from this.
+#[derive(Clone, Debug, Default)]
+pub struct QueueSnapshot {
+    pub version: u8,
+    pub queue: Vec<reader::Track>,
+    pub current_queue_index: usize,
+    pub progress_secs: u64,
+    pub shuffle_order: Vec<usize>,
+    pub shuffle_enabled: bool,
+}
+
+/// Sort order for a track listing — maps to an indexed `ORDER BY`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TrackSort {
+    /// Artist → album → disc → track (the natural library order).
+    #[default]
+    ArtistAlbum,
+    Title,
+    Artist,
+    Album,
+    /// Most-recently-added first (insertion order).
+    DateAdded,
+    /// Most-played first (`listen_counts` join), ties by title.
+    PlayCount,
+}
+
+/// What a windowed track listing selects: which source, how it's sorted, and
+/// an optional case-insensitive search across title/artist/album. Drives
+/// `WHERE`/`ORDER BY` so only the needed rows are materialized. Narrower
+/// listings (one album, one artist, one genre, a folder) have dedicated
+/// `Storage` methods instead of filter fields — there is deliberately no way
+/// to pull a whole source and filter it in memory.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TrackFilter {
+    pub source: Source,
+    pub sort: TrackSort,
+    pub search: String,
+}
+
+impl TrackFilter {
+    pub fn new(source: Source) -> Self {
+        Self {
+            source,
+            ..Default::default()
+        }
+    }
+}
+
+/// Errors surfaced by the storage layer. String-wrapped so the type is identical
+/// on native and wasm (sqlx isn't compiled for wasm).
+#[derive(Debug, Clone)]
+pub enum DbError {
+    Backend(String),
+    Serde(String),
+    Io(String),
+}
+
+impl std::fmt::Display for DbError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DbError::Backend(e) => write!(f, "db backend: {e}"),
+            DbError::Serde(e) => write!(f, "db serde: {e}"),
+            DbError::Io(e) => write!(f, "db io: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for DbError {}
+
+impl From<serde_json::Error> for DbError {
+    fn from(e: serde_json::Error) -> Self {
+        DbError::Serde(e.to_string())
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl From<sqlx::Error> for DbError {
+    fn from(e: sqlx::Error) -> Self {
+        DbError::Backend(e.to_string())
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl From<sqlx::migrate::MigrateError> for DbError {
+    fn from(e: sqlx::migrate::MigrateError) -> Self {
+        DbError::Backend(e.to_string())
+    }
+}
+
+/// Per-artist images, source-agnostic: `(overrides, photos)`. `overrides` are
+/// user-set custom photos (always a local path, highest priority); `photos` are
+/// the synced photo per artist as a uniform [`reader::ArtistImageRef`] (a server
+/// URL or a local path — server wins when both exist), resolved by the cover
+/// seam so callers never branch on origin. Both keyed by normalized artist name.
+pub type ArtistImages = (
+    std::collections::HashMap<String, std::path::PathBuf>,
+    std::collections::HashMap<String, reader::ArtistImageRef>,
+);
+
+/// The read side of the persistence API — every query, no mutation. Carried as
+/// a supertrait of [`Storage`], so any `dyn Storage` is also a `dyn ReadStore`.
+#[async_trait::async_trait]
+pub trait ReadStore: Send + Sync {
+    /// Load the persisted `AppConfig` (the single-row JSON blob), or `None` if
+    /// the app has never been configured.
+    async fn load_config(&self) -> Result<Option<config::AppConfig>, DbError>;
+
+    /// One window of a track listing (sorted + filtered in SQL — only this slice
+    /// is materialized).
+    async fn tracks_page(
+        &self,
+        filter: &TrackFilter,
+        page: Page,
+    ) -> Result<Vec<reader::Track>, DbError>;
+
+    /// Total rows a `tracks_page` filter matches (for the scroll spacer).
+    async fn tracks_count(&self, filter: &TrackFilter) -> Result<u32, DbError>;
+
+    /// One album's tracks, disc/track-ordered.
+    async fn album_tracks(
+        &self,
+        source: &Source,
+        album_id: &str,
+    ) -> Result<Vec<reader::Track>, DbError>;
+
+    /// One artist's tracks, album/disc/track-ordered.
+    async fn artist_tracks(
+        &self,
+        source: &Source,
+        artist: &str,
+    ) -> Result<Vec<reader::Track>, DbError>;
+
+    /// Tracks whose album has this genre, artist/album-ordered.
+    async fn genre_tracks(
+        &self,
+        source: &Source,
+        genre: &str,
+    ) -> Result<Vec<reader::Track>, DbError>;
+
+    /// Local tracks under a directory (path-prefix match), path-ordered.
+    async fn folder_tracks(&self, prefix: &str) -> Result<Vec<reader::Track>, DbError>;
+
+    /// This source's recently-played track keys, newest first (capped).
+    async fn recently_played(&self, source: &Source, limit: u32) -> Result<Vec<String>, DbError>;
+
+    /// One representative (first-inserted) track per artist, artist A→Z — for
+    /// artist tiles that need a cover without pulling the whole source.
+    async fn artist_sample_tracks(
+        &self,
+        source: &Source,
+        limit: u32,
+    ) -> Result<Vec<reader::Track>, DbError>;
+
+    /// The genre with the highest summed play count for a source, if any.
+    async fn top_genre(&self, source: &Source) -> Result<Option<String>, DbError>;
+
+    /// Every track of a source — ONLY for full-text search, which needs the
+    /// corpus because its Unicode-aware matching can't be expressed as SQLite
+    /// `LIKE` (ASCII-only case folding). Runs on demand when a query is typed,
+    /// never on page mount. Nothing else may pull a whole source.
+    async fn search_corpus(&self, source: &Source) -> Result<Vec<reader::Track>, DbError>;
+
+    /// Resolve tracks by `track_key`, preserving the input order (recents,
+    /// playlist membership). Missing keys are skipped.
+    async fn tracks_by_keys(
+        &self,
+        source: &Source,
+        keys: &[String],
+    ) -> Result<Vec<reader::Track>, DbError>;
+
+    /// Distinct artists for a source with their track counts, A→Z.
+    async fn artists(&self, source: &Source) -> Result<Vec<(String, u32)>, DbError>;
+
+    /// Distinct non-empty album genres for a source, A→Z.
+    async fn genres(&self, source: &Source) -> Result<Vec<String>, DbError>;
+
+    /// One album by id.
+    async fn album(
+        &self,
+        source: &Source,
+        album_id: &str,
+    ) -> Result<Option<reader::Album>, DbError>;
+
+    /// Per-artist images: `(overrides, photos)` — see [`ArtistImages`].
+    async fn artist_images(&self) -> Result<ArtistImages, DbError>;
+
+    /// All albums for a source, ordered by artist then title.
+    async fn albums(&self, source: &Source) -> Result<Vec<reader::Album>, DbError>;
+
+    /// Reconstruct the queue/progress snapshot from the `queue_state` row.
+    async fn load_queue(&self) -> Result<QueueSnapshot, DbError>;
+
+    /// The `PlaylistStore` (the active source's playlists + folders) — the read
+    /// side of the playlists UI (`use_playlists`). Writes go through the
+    /// playlist-scoped ops, never a whole-store save. Scoped to `source`, the
+    /// caller's in-memory active source.
+    async fn load_playlists(&self, source: &Source) -> Result<reader::PlaylistStore, DbError>;
+
+    /// Hydrate one server row (creds included) into the in-memory shape — used
+    /// by server switching so stored creds are reused instead of re-prompting.
+    async fn load_server(&self, id: &str) -> Result<Option<config::MusicServer>, DbError>;
+
+    /// Generic metadata-cache read (`metadata_cache` table): the `payload` for
+    /// `(cache_key, kind)`, if cached.
+    async fn meta_get(&self, cache_key: &str, kind: &str) -> Result<Option<String>, DbError>;
+
+    /// The favorite refs (`track_key`s) for a server (`"local"` for filesystem).
+    async fn favorites(&self, server_id: &str) -> Result<Vec<String>, DbError>;
+
+    /// Whether `ref_` is favorited under `server_id`.
+    async fn is_favorite(&self, server_id: &str, ref_: &str) -> Result<bool, DbError>;
+
+    /// Pending-like refs (`dirty=1`) not yet pushed to the server.
+    async fn dirty_favorites(&self, server_id: &str) -> Result<Vec<String>, DbError>;
+
+    /// Pending-unlike tombstones (`dirty=2`) not yet pushed to the server.
+    async fn dirty_unlikes(&self, server_id: &str) -> Result<Vec<String>, DbError>;
+}
+
+/// The persistence API: every mutation plus admin/dev ops, layered on top of the
+/// read-only [`ReadStore`]. One impl per target (sqlx native / in-mem stub).
+#[async_trait::async_trait]
+pub trait Storage: ReadStore {
+    /// Persist the whole `AppConfig` as the single-row JSON blob.
+    async fn save_config(&self, cfg: &config::AppConfig) -> Result<(), DbError>;
+
+    /// One-shot import of the legacy `*.json` store at `config_dir` into the DB,
+    /// then rename each imported file to `*.json.bak` and drop a sentinel. No-op
+    /// if the DB already holds data or the sentinel exists. Idempotent; safe to
+    /// call on every launch. (Native only; the wasm stub no-ops.)
+    async fn import_legacy_json(
+        &self,
+        config_dir: &std::path::Path,
+    ) -> Result<ImportReport, DbError>;
+
+    /// Point of no return: rename each imported `X.json` → `X.json.bak` (kept for
+    /// downgrade). Call only once every domain reads from the DB. Idempotent;
+    /// no-op until a real import has happened. Returns how many files moved.
+    async fn finalize_migration(&self, config_dir: &std::path::Path) -> Result<usize, DbError>;
+
+    /// Delete tracks by key for a source. Returns rows removed.
+    async fn delete_tracks(&self, source: &Source, keys: &[String]) -> Result<u64, DbError>;
+
+    /// Delete an album AND its tracks (matches the legacy `Library::remove_album`).
+    async fn delete_album(&self, source: &Source, album_id: &str) -> Result<(), DbError>;
+
+    /// After a full sync: drop this source's tracks/albums that were NOT in the
+    /// sync (`keep_*` = the synced identities). The sync-side replacement for
+    /// the old clear-and-repopulate.
+    async fn prune_source(
+        &self,
+        source: &Source,
+        keep_track_keys: &[String],
+        keep_album_ids: &[String],
+    ) -> Result<(), DbError>;
+
+    /// Set (`Some`) or remove (`None`) one artist image. `kind` is
+    /// `"server" | "local" | "custom"`.
+    async fn set_artist_image(
+        &self,
+        artist_norm: &str,
+        kind: &str,
+        image_ref: Option<&str>,
+    ) -> Result<(), DbError>;
+
+    /// Set/clear an album's cover (manual covers survive non-manual updates).
+    async fn update_album_cover(
+        &self,
+        source: &Source,
+        album_id: &str,
+        cover_path: Option<&str>,
+        manual: bool,
+    ) -> Result<(), DbError>;
+
+    /// Upsert one playlist's metadata (name/cover/image_tag), keeping membership.
+    async fn upsert_playlist_meta(
+        &self,
+        source: &Source,
+        pl_id: &str,
+        name: &str,
+        cover_path: Option<&str>,
+        image_tag: Option<&str>,
+    ) -> Result<(), DbError>;
+
+    /// Delete one playlist (membership cascades).
+    async fn delete_playlist(&self, source: &Source, pl_id: &str) -> Result<(), DbError>;
+
+    /// Replace ONE playlist's membership (creates the playlist row if absent).
+    /// For reorders and full rebuilds; prefer the incremental variants below for
+    /// single add/remove so a big playlist isn't rewritten wholesale.
+    async fn set_playlist_tracks(
+        &self,
+        source: &Source,
+        pl_id: &str,
+        refs: &[String],
+    ) -> Result<(), DbError>;
+
+    /// Append refs to one playlist (creating it if absent), skipping any already
+    /// present so a track is never duplicated.
+    async fn add_playlist_tracks(
+        &self,
+        source: &Source,
+        pl_id: &str,
+        refs: &[String],
+    ) -> Result<(), DbError>;
+
+    /// Remove every occurrence of each ref from one playlist. No-op for absent
+    /// playlists/refs.
+    async fn remove_playlist_tracks(
+        &self,
+        source: &Source,
+        pl_id: &str,
+        refs: &[String],
+    ) -> Result<(), DbError>;
+
+    /// Streaming upsert of one page of a playlist's entries (creating the playlist
+    /// row if absent): each ref is written at `start_position + i` and stamped with
+    /// the current walk's `epoch`. On position conflict the ref and epoch are
+    /// overwritten — so re-walking in order applies adds, reorders, and (with the
+    /// trailing sweep) removals, all without rewriting the whole list up front.
+    async fn upsert_playlist_tracks_page(
+        &self,
+        source: &Source,
+        pl_id: &str,
+        refs: &[String],
+        start_position: i64,
+        epoch: i64,
+    ) -> Result<(), DbError>;
+
+    /// End-of-walk sweep: drop one playlist's rows NOT re-stamped with `epoch` —
+    /// entries removed remotely, plus the stale tail when the playlist shrank.
+    async fn sweep_playlist_tracks(
+        &self,
+        source: &Source,
+        pl_id: &str,
+        epoch: i64,
+    ) -> Result<(), DbError>;
+
+    /// Create one (local) playlist folder.
+    async fn create_folder(&self, id: &str, name: &str) -> Result<(), DbError>;
+
+    /// Rename one folder.
+    async fn rename_folder(&self, id: &str, name: &str) -> Result<(), DbError>;
+
+    /// Delete one folder; its playlist memberships cascade away.
+    async fn delete_folder(&self, id: &str) -> Result<(), DbError>;
+
+    /// Move one playlist into `folder_id`, or out of every folder when `None`.
+    /// Folder membership is single-folder per playlist.
+    async fn set_playlist_folder(
+        &self,
+        playlist_ref: &str,
+        folder_id: Option<&str>,
+    ) -> Result<(), DbError>;
+
+    /// Increment one track's play count (single-row upsert; key = `TrackId::uid()`).
+    async fn bump_listen_count(&self, track_uid: &str) -> Result<(), DbError>;
+
+    /// Record a play for this source's recently-played history (caps + trims).
+    async fn push_recent(&self, source: &Source, track_key: &str) -> Result<(), DbError>;
+
+    /// Register/unregister one offline download in the config blob (single
+    /// `json_set`/`json_remove` — the downloads hot path must not rewrite the
+    /// whole config per finished song).
+    async fn set_offline_track(&self, id: &str, path: Option<&str>) -> Result<(), DbError>;
+
+    /// Persist the queue/progress snapshot to the single `queue_state` row.
+    async fn save_queue(&self, snap: &QueueSnapshot) -> Result<(), DbError>;
+
+    /// Generic metadata-cache write (upsert of `payload` for `(cache_key, kind)`).
+    async fn meta_put(&self, cache_key: &str, kind: &str, payload: &str) -> Result<(), DbError>;
+
+    // --- Debug-panel operations (dev tooling; no-ops on the wasm stub) -----
+
+    /// Delete the database files at `db_path`, re-init an empty schema there,
+    /// and hot-swap the live pool onto it.
+    async fn debug_reset(&self, db_path: &std::path::Path) -> Result<(), DbError>;
+
+    /// Copy the release database over `db_path` (running any pending
+    /// migrations on the copy) and hot-swap the live pool onto it.
+    async fn debug_load_release(
+        &self,
+        release_path: &std::path::Path,
+        db_path: &std::path::Path,
+    ) -> Result<(), DbError>;
+
+    /// Insert `n` synthetic local tracks (perf testing the windowed queries).
+    async fn debug_seed_synthetic(&self, n: u32) -> Result<(), DbError>;
+
+    /// Human-readable DB info: applied migrations + row counts.
+    async fn debug_info(&self) -> Result<String, DbError>;
+
+    /// VACUUM.
+    async fn debug_vacuum(&self) -> Result<(), DbError>;
+
+    /// Toggle a favorite locally, optimistically. `on` upserts the row as a
+    /// pending-like (`dirty=1`). `!on` deletes a never-pushed like outright and
+    /// turns a synced row into a pending-unlike tombstone (`dirty=2`) so the
+    /// removal can be pushed later. Works while unauthenticated — the reconciler
+    /// flushes pending rows once a server is active.
+    async fn set_favorite(&self, server_id: &str, ref_: &str, on: bool) -> Result<(), DbError>;
+
+    /// Resolve a ref after a successful remote push: a pending-like becomes
+    /// clean, a pending-unlike tombstone is deleted.
+    async fn clear_favorite_dirty(&self, server_id: &str, ref_: &str) -> Result<(), DbError>;
+
+    /// Replace a server's favorites with the remote set (a sync pull): rows not in
+    /// `refs` and not `dirty` are dropped, rows in `refs` are added clean. Dirty
+    /// local rows are preserved (push-before-pull hasn't flushed them yet).
+    async fn replace_favorites_clean(
+        &self,
+        server_id: &str,
+        refs: &[String],
+    ) -> Result<(), DbError>;
+
+    /// Upsert one page of a streaming favorites sync: refs become clean rows at
+    /// `start_rank + offset` (remote order), stamped with `epoch`. Existing rows
+    /// update in place; dirty rows keep their flag. Pair with
+    /// [`sweep_favorites`](Self::sweep_favorites) at stream end. Lets the list
+    /// grow live during the walk.
+    async fn upsert_favorites_page(
+        &self,
+        server_id: &str,
+        refs: &[String],
+        start_rank: i64,
+        epoch: i64,
+    ) -> Result<(), DbError>;
+
+    /// End-of-stream sweep for [`upsert_favorites_page`](Self::upsert_favorites_page):
+    /// drop clean rows not stamped with the current `epoch` (unliked remotely).
+    /// Dirty rows survive.
+    async fn sweep_favorites(&self, server_id: &str, epoch: i64) -> Result<(), DbError>;
+
+    /// Batch upsert tracks for a source (one transaction). Identity is
+    /// `(source, track_key)`; an existing row is updated in place. Used by the
+    /// streaming scan/sync so a batch lands atomically.
+    async fn upsert_tracks(&self, source: &Source, tracks: &[reader::Track])
+    -> Result<(), DbError>;
+
+    /// Batch upsert albums for a source (one transaction).
+    async fn upsert_albums(&self, source: &Source, albums: &[reader::Album])
+    -> Result<(), DbError>;
+}
+
+/// Cheap-`Clone` handle to the active storage backend, shared via Dioxus context.
+#[derive(Clone)]
+pub struct Db(Arc<dyn Storage>);
+
+impl std::ops::Deref for Db {
+    type Target = dyn Storage;
+    fn deref(&self) -> &Self::Target {
+        &*self.0
+    }
+}
+
+/// Read-only view of the storage backend — the surface the UI gets, so it
+/// cannot reach a write method (those live on `Storage`, not `ReadStore`).
+#[derive(Clone)]
+pub struct ReadDb(std::sync::Arc<dyn ReadStore>);
+
+impl std::ops::Deref for ReadDb {
+    type Target = dyn ReadStore;
+    fn deref(&self) -> &Self::Target {
+        &*self.0
+    }
+}
+
+impl Db {
+    /// A read-only view of the same backend (cheap Arc upcast).
+    pub fn reads(&self) -> ReadDb {
+        ReadDb(self.0.clone())
+    }
+}
+
+/// Open the database and apply migrations (native), or build the in-memory stub
+/// (wasm). Native callers should `block_on` this in `main()` before mounting.
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn init(db_path: &std::path::Path) -> Result<Db, DbError> {
+    let native = backend::native::Native::open(db_path).await?;
+    Ok(Db(Arc::new(native)))
+}
+
+/// wasm: an in-memory stub so `dx build --platform web` compiles. Not persistent.
+#[cfg(target_arch = "wasm32")]
+pub fn init_stub() -> Db {
+    Db(Arc::new(backend::stub::Stub::new()))
+}
+
+/// The on-disk database path: `KOPUZ_DB_PATH` override, else `<config_dir>/kopuz.db`
+/// (release) or `kopuz-debug.db` (debug builds, so `dx run` never touches real data).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn default_db_path() -> std::path::PathBuf {
+    if let Ok(p) = std::env::var("KOPUZ_DB_PATH") {
+        return std::path::PathBuf::from(p);
+    }
+    let name = if cfg!(debug_assertions) {
+        "kopuz-debug.db"
+    } else {
+        "kopuz.db"
+    };
+    config_dir().join(name)
+}
+
+/// Blocking pre-boot read of the config blob — for the few values needed before
+/// the app (and its async runtime/log subscriber) exists: the tracing toggle and
+/// the titlebar mode. Opens the DB read-only without running migrations; `None`
+/// if the DB or blob doesn't exist yet (first launch). Server/creds fields are
+/// NOT hydrated — blob fields only.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn peek_config(db_path: &std::path::Path) -> Option<config::AppConfig> {
+    if !db_path.exists() {
+        return None;
+    }
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .ok()?;
+    rt.block_on(async {
+        let opts = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(db_path)
+            .create_if_missing(false)
+            .read_only(true);
+        use sqlx::ConnectOptions;
+        let mut conn = opts.connect().await.ok()?;
+        let json: Option<String> = sqlx::query_scalar!("SELECT json FROM app_config WHERE id = 1")
+            .fetch_optional(&mut conn)
+            .await
+            .ok()
+            .flatten();
+        json.and_then(|j| serde_json::from_str(&j).ok())
+    })
+}
+
+/// The RELEASE database path (`kopuz.db`), independent of build profile — the
+/// debug panel's "load release DB" source.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn release_db_path() -> std::path::PathBuf {
+    config_dir().join("kopuz.db")
+}
+
+/// `<config_dir>` for kopuz (matches the legacy JSON store location).
+#[cfg(not(target_arch = "wasm32"))]
+pub fn config_dir() -> std::path::PathBuf {
+    directories::ProjectDirs::from("com", "temidaradev", "kopuz")
+        .map(|d| d.config_dir().to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("./config"))
+}

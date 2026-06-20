@@ -53,6 +53,10 @@ titlebar_system = Системные украшения
 titlebar_off = Без строки заголовка
 volume = Громкость
 local = Локально
+source = Source
+sources = Sources
+manage_sources = Manage sources
+source_on_this_device = On this device
 server = Сервер
 ytdlp = Загрузки
 

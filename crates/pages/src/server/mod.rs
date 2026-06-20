@@ -1,15 +1,6 @@
-pub mod activity;
-pub mod album;
-pub mod artist;
 pub mod discover;
 pub mod download_manager;
-pub mod favorites;
-pub mod home;
-pub mod library;
-pub mod playlists;
-pub mod search;
 pub mod subsonic_sync;
-pub mod unsupported;
 
 use config::{AppConfig, MusicService};
 use dioxus::prelude::{ReadableExt, WritableExt};
@@ -52,10 +43,15 @@ pub fn build_download_url(item_id: &str, config: &AppConfig) -> Option<(String, 
             let username = server.user_id.as_deref()?;
             let password_or_token = server.access_token.as_deref()?;
             let resolved_password = ::server::provider::resolve_subsonic_secret(password_or_token)?;
-            let client =
-                ::server::subsonic::SubsonicClient::new(&server.url, username, &resolved_password);
             let kbps = quality.subsonic_max_bitrate_kbps();
-            client.stream_url_with_bitrate(item_id, Some(kbps)).ok()?
+            ::server::subsonic::stream_url_with_bitrate(
+                &server.url,
+                username,
+                &resolved_password,
+                item_id,
+                Some(kbps),
+            )
+            .ok()?
         }
         MusicService::YtMusic | MusicService::SoundCloud => return None,
     };
