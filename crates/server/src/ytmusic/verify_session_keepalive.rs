@@ -15,11 +15,13 @@ use super::innertube;
 /// jar. Returns the updated jar if anything changed, `None` if not. A
 /// transport or auth failure surfaces as `Err`; cookie-by-cookie
 /// invalidation (tombstones) is reflected by a shrunk jar.
+#[tracing::instrument(name = "yt.keepalive", skip(cookies))]
 pub async fn tick(cookies: &str) -> Result<Option<String>, String> {
     let auth = innertube::sapisid_hash(cookies, ORIGIN_YOUTUBE_MUSIC)
         .ok_or_else(|| "SAPISID missing — cannot build SAPISIDHASH".to_string())?;
 
-    let resp = super::innertube::http_client().clone()
+    let resp = super::innertube::http_client()
+        .clone()
         .get(format!("{ORIGIN_YOUTUBE_MUSIC}/verify_session"))
         .header("User-Agent", super::clients::WEB_REMIX.user_agent)
         .header("Accept", "*/*")

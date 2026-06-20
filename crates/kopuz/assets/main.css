@@ -49,6 +49,8 @@
 html,
 body {
     height: 100%;
+    /* Prevent macOS WKWebView rubber-band overscroll on the root scroller */
+    overscroll-behavior: none;
 }
 
 button:focus {
@@ -60,7 +62,18 @@ button:focus {
 }
 
 #main-scroll-area {
-    contain: layout paint;
+    /* `position: relative` (not `contain`/`transform`) so this is the containing
+       block for the page's `absolute inset-0` container, WITHOUT also becoming
+       one for position:fixed descendants — otherwise a modal's full-screen
+       `.overlay` gets clipped to the scroll area (only the top darkens). */
+    position: relative;
+    /* Don't chain scroll to the document when hitting top/bottom */
+    overscroll-behavior: none;
+}
+
+/* While a modal overlay is open, lock background scrolling. */
+#main-scroll-area:has(.overlay) {
+    overflow: hidden;
 }
 
 /* CSS-native virtualization: browser skips paint/layout for off-screen sections */

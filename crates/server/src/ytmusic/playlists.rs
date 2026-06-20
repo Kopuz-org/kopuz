@@ -24,6 +24,7 @@ pub struct YtPlaylistSummary {
 /// List the signed-in user's playlists (everything under
 /// "Library → Playlists"). Returns just metadata — call
 /// [`get_playlist_entries`] to fetch each one's tracks lazily.
+#[tracing::instrument(name = "yt.list_playlists", skip(cookies))]
 pub async fn list_playlists(cookies: &str) -> Result<Vec<YtPlaylistSummary>, String> {
     let resp: Value = innertube::browse("FEmusic_liked_playlists", cookies).await?;
     if has_sign_in_endpoint(&resp) {
@@ -96,10 +97,7 @@ pub async fn list_playlists(cookies: &str) -> Result<Vec<YtPlaylistSummary>, Str
 /// playlist ID (without the `VL` prefix); we add it here. Follows
 /// `nextContinuationData` until exhausted so playlists longer than the
 /// first ~100-track page come through complete.
-pub async fn get_playlist_entries(
-    playlist_id: &str,
-    cookies: &str,
-) -> Result<Vec<Track>, String> {
+pub async fn get_playlist_entries(playlist_id: &str, cookies: &str) -> Result<Vec<Track>, String> {
     let mut out = Vec::new();
     stream_playlist_entries(playlist_id, cookies, |batch| out.extend(batch)).await?;
     Ok(out)
@@ -110,6 +108,7 @@ pub async fn get_playlist_entries(
 /// of buffering the entire playlist. Used by the discover play-on-hover
 /// flow so audio can start streaming on the first ~100 rows without
 /// waiting for the rest of a 1000-row playlist to paginate in.
+#[tracing::instrument(name = "yt.playlist_entries", skip(cookies, on_batch), fields(playlist_id = %playlist_id))]
 pub async fn stream_playlist_entries<F>(
     playlist_id: &str,
     cookies: &str,
@@ -126,7 +125,11 @@ where
     // Public playlists (the ones Discover surfaces) load anonymously.
     // Empty cookies (anon mode) → None so browse skips SAPISID auth
     // instead of erroring "SAPISID missing".
-    let auth = if cookies.is_empty() { None } else { Some(cookies) };
+    let auth = if cookies.is_empty() {
+        None
+    } else {
+        Some(cookies)
+    };
     let resp: Value = innertube::browse_maybe_auth(&browse_id, auth).await?;
     let (raw_first, mut next) = walk_playlist_shelf(&resp);
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -137,9 +140,10 @@ where
     if !first.is_empty() {
         on_batch(first);
     }
+    let mut page = 1u32;
     while let Some(token) = next.take() {
-        let page = innertube::browse_continuation_maybe_auth(&token, auth).await?;
-        let (more, next_token) = super::search::walk_playlist_continuation(&page);
+        let resp = innertube::browse_continuation_maybe_auth(&token, auth).await?;
+        let (more, next_token) = super::search::walk_playlist_continuation(&resp);
         let unique: Vec<Track> = more
             .into_iter()
             .filter(|t| keep_unique(t, &mut seen))
@@ -150,10 +154,55 @@ where
         if unique.is_empty() {
             break;
         }
+        page += 1;
+        tracing::debug!(
+            page,
+            new_tracks = unique.len(),
+            total = seen.len(),
+            "playlist continuation page"
+        );
         on_batch(unique);
         next = next_token;
     }
+    tracing::debug!(
+        pages = page,
+        total = seen.len(),
+        "playlist pagination complete"
+    );
     Ok(())
+}
+
+/// One page of a playlist walk: pass `continuation = None` for the first page
+/// (an initial browse of `VL{playlist_id}`) and the returned token for each
+/// subsequent page (`None` once exhausted). Stateless — cross-page dedup is the
+/// caller's job — so it can back a `Send`-safe source method that a UI loop pulls
+/// at its own pace (vs. `stream_playlist_entries`' non-`Send` callback).
+pub async fn playlist_page(
+    playlist_id: &str,
+    cookies: &str,
+    continuation: Option<&str>,
+) -> Result<(Vec<Track>, Option<String>), String> {
+    let auth = if cookies.is_empty() {
+        None
+    } else {
+        Some(cookies)
+    };
+    let page = match continuation {
+        None => {
+            let browse_id = if playlist_id.starts_with("VL") {
+                playlist_id.to_string()
+            } else {
+                format!("VL{playlist_id}")
+            };
+            let resp: Value = innertube::browse_maybe_auth(&browse_id, auth).await?;
+            walk_playlist_shelf(&resp)
+        }
+        Some(token) => {
+            let resp = innertube::browse_continuation_maybe_auth(token, auth).await?;
+            super::search::walk_playlist_continuation(&resp)
+        }
+    };
+    Ok(page)
 }
 
 /// Recursively look for a `signInEndpoint` object key in the response.
@@ -162,8 +211,7 @@ where
 fn has_sign_in_endpoint(v: &Value) -> bool {
     match v {
         Value::Object(map) => {
-            map.contains_key("signInEndpoint")
-                || map.values().any(has_sign_in_endpoint)
+            map.contains_key("signInEndpoint") || map.values().any(has_sign_in_endpoint)
         }
         Value::Array(items) => items.iter().any(has_sign_in_endpoint),
         _ => false,
@@ -171,12 +219,6 @@ fn has_sign_in_endpoint(v: &Value) -> bool {
 }
 
 fn keep_unique(t: &Track, seen: &mut std::collections::HashSet<String>) -> bool {
-    let id = t
-        .path
-        .to_string_lossy()
-        .split(':')
-        .nth(1)
-        .unwrap_or("")
-        .to_string();
+    let id = t.id.key().to_string();
     !id.is_empty() && seen.insert(id)
 }

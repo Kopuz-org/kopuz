@@ -1,9 +1,8 @@
 use config::AppConfig;
 use dioxus::prelude::*;
-use reader::{Library, Track};
+use reader::Track;
 use std::cmp::Ordering;
 use std::collections::HashSet;
-use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SortField {
@@ -77,7 +76,22 @@ pub fn sorted_track_indices(tracks: &[Track], sort_state: SortState) -> Vec<usiz
                 SortDirection::Asc => primary,
                 SortDirection::Desc => primary.reverse(),
             };
-            directional.then_with(|| left_idx.cmp(&right_idx))
+            match field {
+                SortField::Album => directional
+                    .then_with(|| {
+                        left.disc_number
+                            .unwrap_or(0)
+                            .cmp(&right.disc_number.unwrap_or(0))
+                    })
+                    .then_with(|| {
+                        left.track_number
+                            .unwrap_or(0)
+                            .cmp(&right.track_number.unwrap_or(0))
+                    })
+                    .then_with(|| compare_text(&left.title, &right.title))
+                    .then_with(|| left_idx.cmp(&right_idx)),
+                _ => directional.then_with(|| left_idx.cmp(&right_idx)),
+            }
         });
     }
 
@@ -92,9 +106,10 @@ fn compare_text(left: &str, right: &str) -> Ordering {
 pub struct ShowcaseProps {
     pub name: String,
     pub description: String,
+    #[props(default)]
+    pub on_description_click: Option<EventHandler<()>>,
     pub cover_url: Option<utils::CoverUrl>,
     pub tracks: Vec<Track>,
-    pub library: Signal<Library>,
     pub on_play_all: EventHandler<()>,
     pub on_play: EventHandler<usize>,
     pub on_queue: Option<EventHandler<usize>>,
@@ -103,7 +118,7 @@ pub struct ShowcaseProps {
     pub on_remove_from_playlist: Option<EventHandler<usize>>,
     pub on_view_metadata: Option<EventHandler<usize>>,
     pub on_download_track: Option<EventHandler<usize>>,
-    pub active_track: Option<std::path::PathBuf>,
+    pub active_track: Option<reader::TrackId>,
     pub on_click_menu: Option<EventHandler<usize>>,
     pub on_close_menu: Option<EventHandler<()>>,
     pub actions: Option<Element>,
@@ -116,7 +131,7 @@ pub struct ShowcaseProps {
     #[props(default = false)]
     pub is_selection_mode: bool,
     #[props(default = HashSet::new())]
-    pub selected_tracks: HashSet<PathBuf>,
+    pub selected_tracks: HashSet<reader::TrackId>,
     pub on_select: Option<EventHandler<(usize, bool)>>,
     pub on_select_all: Option<EventHandler<bool>>,
     #[props(default = false)]

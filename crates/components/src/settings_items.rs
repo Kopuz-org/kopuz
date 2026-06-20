@@ -7,6 +7,8 @@ use dioxus::prelude::*;
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 use rfd::AsyncFileDialog;
 use scrobble::lastfm;
+use scrobble::librefm;
+use tracing::Instrument;
 
 #[component]
 pub fn SettingItem(title: String, control: Element) -> Element {
@@ -195,6 +197,11 @@ fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -
 #[component]
 pub fn ServerSettings(
     active: Option<MusicServer>,
+    /// The active source's server id (`None` ⇒ Local) — the authoritative "which
+    /// server is active", reactive to the sidebar source switcher too. The
+    /// `active` snapshot (`config.server`) is only updated by the Settings switch
+    /// path, so keying the badge off it alone misses a switch made from the sidebar.
+    active_source_id: Option<String>,
     servers: Vec<SavedServer>,
     on_add: EventHandler<()>,
     on_delete: EventHandler<String>,
@@ -205,7 +212,6 @@ pub fn ServerSettings(
     let delete_text = i18n::t("delete");
     let switch_text = i18n::t("switch_to_server");
     let active_text = i18n::t("active_server");
-    let active_id = active.as_ref().and_then(|s| s.id.clone());
 
     rsx! {
         div { class: "flex flex-col gap-2 w-full",
@@ -215,10 +221,14 @@ pub fn ServerSettings(
             for srv in servers.iter().cloned() {
                 {
                     let id = srv.id.clone();
-                    let is_active = active_id.as_deref() == Some(srv.id.as_str());
+                    let is_active = active_source_id.as_deref() == Some(srv.id.as_str());
+                    // "Connected" only when the active server snapshot is actually
+                    // this server (and carries a token) — after a sidebar switch the
+                    // snapshot can lag, so don't claim a stale connection.
                     let connected = is_active
                         && active
                             .as_ref()
+                            .filter(|s| s.id.as_deref() == Some(srv.id.as_str()))
                             .and_then(|s| s.access_token.clone())
                             .is_some();
                     let id_switch = id.clone();
@@ -510,13 +520,73 @@ pub fn LastFmSettings(
                                 tracing::warn!("Failed to get auth token: {}", e);
                             }
                         }
-                    });
+                    }.instrument(tracing::info_span!("lastfm.auth")));
                 },
 
                 if session_key.is_empty() || api_key_input.is_empty() || api_secret_input.is_empty() {
                     "{i18n::t(\"connect_to_lastfm\")}"
                 } else {
                     "{i18n::t(\"lastfm_connected\")}"
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub fn LibreFmSettings(session_key: String, on_session_key_save: EventHandler<String>) -> Element {
+    rsx! {
+        div {
+            class: "flex flex-col gap-3 w-full max-w-xl",
+            button {
+                class: "bg-white/10 hover:bg-white/20 px-5 py-2 rounded text-sm text-white transition-colors self-start mx-auto w-fit",
+                onclick: move |_| {
+                    let on_session_key_save = on_session_key_save;
+
+                    spawn(async move {
+                        match librefm::get_auth_token(librefm::API_KEY).await {
+                            Ok(token) => {
+                                let url = librefm::auth_url(librefm::API_KEY, &token);
+
+                                if let Err(e) = webbrowser::open(&url) {
+                                    tracing::warn!("Failed to open browser: {}", e);
+                                    return;
+                                }
+                                let mut connected = false;
+                                for _ in 0..30 {
+                                    match librefm::get_session_key(
+                                        librefm::API_KEY,
+                                        librefm::API_SECRET,
+                                        &token,
+                                    )
+                                    .await
+                                    {
+                                        Ok(session_key) => {
+                                            on_session_key_save.call(session_key);
+                                            tracing::info!("Libre.fm connected successfully");
+                                            connected = true;
+                                            break;
+                                        }
+                                        Err(_) => {
+                                            utils::sleep(std::time::Duration::from_secs(2)).await;
+                                        }
+                                    }
+                                }
+                                if !connected {
+                                    tracing::warn!("Timed out waiting for Libre.fm authorization");
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!("Failed to get auth token: {}", e);
+                            }
+                        }
+                    });
+                },
+
+                if session_key.is_empty() {
+                    "{i18n::t(\"connect_to_librefm\")}"
+                } else {
+                    "{i18n::t(\"librefm_connected\")}"
                 }
             }
         }

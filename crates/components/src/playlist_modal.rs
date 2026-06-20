@@ -1,57 +1,50 @@
 use dioxus::prelude::*;
-use reader::PlaylistStore;
+use hooks::use_db_queries::use_playlists;
 
-#[derive(PartialEq, Clone, Copy, Props)]
+const DEFAULT_OVERLAY_CLASS: &str =
+    "fixed inset-0 bg-black/80 flex items-center justify-center z-50";
+
+#[derive(PartialEq, Clone, Props)]
 pub struct PlaylistModalProps {
-    pub playlist_store: Signal<PlaylistStore>,
-    pub is_jellyfin: bool,
     pub on_close: EventHandler,
     pub on_add_to_playlist: EventHandler<String>,
     pub on_create_playlist: EventHandler<String>,
+    #[props(default)]
+    pub overlay_class: Option<String>,
 }
 
 #[component]
 pub fn PlaylistModal(props: PlaylistModalProps) -> Element {
     let mut new_playlist_name = use_signal(String::new);
-    let store = props.playlist_store.read();
+    let playlists_res = use_playlists();
+    let store = playlists_res.read().clone().unwrap_or_default();
     let add_to_playlist_text = i18n::t("add_to_playlist").to_string();
     let no_playlists_found_text = i18n::t("no_playlists_found").to_string();
     let create_new_playlist_text = i18n::t("create_new_playlist").to_string();
     let create_text = i18n::t("create").to_string();
     let cancel_text = i18n::t("cancel").to_string();
     let playlist_name_input = i18n::t("playlist_name_input").to_string();
+    let overlay_class = props
+        .overlay_class
+        .as_deref()
+        .unwrap_or(DEFAULT_OVERLAY_CLASS);
 
-    let playlists: Vec<(String, String, String)> = if props.is_jellyfin {
-        store
-            .jellyfin_playlists
-            .iter()
-            .map(|p| {
-                let track_text = if p.tracks.len() == 1 {
-                    i18n::t("track_count_singular").to_string()
-                } else {
-                    i18n::t_with("track_count", &[("count", p.tracks.len().to_string())])
-                };
-                (p.id.clone(), p.name.clone(), track_text)
-            })
-            .collect()
-    } else {
-        store
-            .playlists
-            .iter()
-            .map(|p| {
-                let track_text = if p.tracks.len() == 1 {
-                    i18n::t("track_count_singular").to_string()
-                } else {
-                    i18n::t_with("track_count", &[("count", p.tracks.len().to_string())])
-                };
-                (p.id.clone(), p.name.clone(), track_text)
-            })
-            .collect()
-    };
+    let playlists: Vec<(String, String, String)> = store
+        .playlists
+        .iter()
+        .map(|p| {
+            let track_text = if p.tracks.len() == 1 {
+                i18n::t("track_count_singular").to_string()
+            } else {
+                i18n::t_with("track_count", &[("count", p.tracks.len().to_string())])
+            };
+            (p.id.clone(), p.name.clone(), track_text)
+        })
+        .collect();
 
     rsx! {
         div {
-            class: "fixed inset-0 bg-black/80 flex items-center justify-center z-50",
+            class: overlay_class,
             onclick: move |_| props.on_close.call(()),
             div {
                 class: "bg-neutral-900 rounded-xl border border-white/10 w-full max-w-md p-6",

@@ -130,16 +130,22 @@ struct CrossfadeState {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+type SharedConsumer = Arc<Mutex<rb::Consumer<f32>>>;
+
+#[cfg(not(target_arch = "wasm32"))]
+type ActiveConsumerSlot = Arc<Mutex<Option<SharedConsumer>>>;
+
+#[cfg(not(target_arch = "wasm32"))]
 pub struct Player {
     state: Arc<Mutex<PlaybackState>>,
     active_state_handle: Arc<Mutex<Arc<Mutex<PlaybackState>>>>,
     _device: cpal::Device,
     stream_config: cpal::StreamConfig,
     _stream: Option<cpal::Stream>,
-    active_consumer: Arc<Mutex<Option<Arc<Mutex<rb::Consumer<f32>>>>>>,
-    fading_consumer: Arc<Mutex<Option<Arc<Mutex<rb::Consumer<f32>>>>>>,
+    active_consumer: ActiveConsumerSlot,
+    fading_consumer: ActiveConsumerSlot,
     crossfade_state: Arc<Mutex<Option<CrossfadeState>>>,
-    ring_buf_consumer: Option<Arc<Mutex<rb::Consumer<f32>>>>,
+    ring_buf_consumer: Option<SharedConsumer>,
     ring_buf: Option<SpscRb<f32>>,
     decoder_handle: Option<std::thread::JoinHandle<()>>,
     fading_session_state: Arc<Mutex<Option<Arc<Mutex<PlaybackState>>>>>,
@@ -385,7 +391,7 @@ impl Player {
                     }
                 },
                 move |err| {
-                    eprintln!("cpal stream error: {}", err);
+                    tracing::error!(error = %err, "cpal stream error");
                 },
                 None,
             )
@@ -437,6 +443,7 @@ impl Player {
     #[cfg(not(target_os = "android"))]
     const RING_BUF_SECONDS: usize = 2;
 
+    #[tracing::instrument(name = "player.play", skip_all, fields(title = %meta.title))]
     pub fn play(
         &mut self,
         source: Box<dyn symphonia::core::io::MediaSource>,
@@ -504,6 +511,7 @@ impl Player {
         Ok(())
     }
 
+    #[tracing::instrument(name = "player.crossfade", skip_all, fields(title = %meta.title))]
     pub fn crossfade_to(
         &mut self,
         source: Box<dyn symphonia::core::io::MediaSource>,
@@ -729,7 +737,7 @@ impl Player {
         ) {
             Ok(f) => f,
             Err(e) => {
-                eprintln!("symphonia probe error: {}", e);
+                tracing::error!(error = %e, "symphonia probe error");
                 finish_natural(&state);
                 return;
             }
@@ -742,7 +750,7 @@ impl Player {
         {
             Some(t) => t,
             None => {
-                eprintln!("no supported audio tracks found");
+                tracing::error!("no supported audio tracks found");
                 finish_natural(&state);
                 return;
             }
@@ -766,8 +774,7 @@ impl Player {
                 .as_deref()
                 .and_then(parse_opushead_channels)
                 .unwrap_or(2);
-            audio_params.channels =
-                Some(symphonia::core::audio::Channels::Discrete(ch as u16));
+            audio_params.channels = Some(symphonia::core::audio::Channels::Discrete(ch as u16));
             if audio_params.sample_rate.is_none() {
                 audio_params.sample_rate = Some(48_000);
             }
@@ -784,7 +791,7 @@ impl Player {
             ) {
                 Ok(d) => d,
                 Err(e) => {
-                    eprintln!("symphonia codec error: {}", e);
+                    tracing::error!(error = %e, "symphonia codec error");
                     finish_natural(&state);
                     return;
                 }
@@ -800,8 +807,7 @@ impl Player {
                 }
 
                 if let Some(seek_time) = st.seek_to.take() {
-                    let time =
-                        Time::try_from_secs_f64(seek_time.as_secs_f64()).unwrap_or_default();
+                    let time = Time::try_from_secs_f64(seek_time.as_secs_f64()).unwrap_or_default();
                     let seek_to = SeekTo::Time {
                         time,
                         track_id: Some(track_id),
@@ -813,9 +819,9 @@ impl Player {
                         }));
                     match seek_result {
                         Ok(Ok(_)) => decoder.reset(),
-                        Ok(Err(e)) => eprintln!("seek error: {}", e),
+                        Ok(Err(e)) => tracing::warn!(error = %e, "seek error"),
                         Err(_) => {
-                            eprintln!(
+                            tracing::warn!(
                                 "seek panicked inside symphonia demuxer; continuing playback"
                             );
                             decoder.reset();
@@ -853,7 +859,7 @@ impl Player {
                     continue;
                 }
                 Err(e) => {
-                    eprintln!("format error: {}", e);
+                    tracing::warn!(error = %e, "format error — ending track");
                     finish_natural(&state);
                     return;
                 }
@@ -866,11 +872,11 @@ impl Player {
             let decoded = match decoder.decode(&packet) {
                 Ok(d) => d,
                 Err(symphonia::core::errors::Error::DecodeError(e)) => {
-                    eprintln!("decode error: {}", e);
+                    tracing::debug!(error = %e, "recoverable decode error — skipping packet");
                     continue;
                 }
                 Err(e) => {
-                    eprintln!("fatal decode error: {}", e);
+                    tracing::error!(error = %e, "fatal decode error");
                     finish_natural(&state);
                     return;
                 }

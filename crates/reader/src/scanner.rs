@@ -15,6 +15,7 @@ fn normalize_artist_key(value: &str) -> Option<String> {
     }
 }
 
+#[tracing::instrument(name = "library.scan", skip(cover_cache, library, on_progress), fields(dir = %dir.display()))]
 pub async fn scan_directory(
     dir: PathBuf,
     cover_cache: PathBuf,
@@ -25,10 +26,20 @@ pub async fn scan_directory(
         .local_artist_images
         .retain(|_, image_path| !image_path.starts_with(&dir));
 
-    let existing_paths: Arc<HashSet<PathBuf>> =
-        Arc::new(library.tracks.iter().map(|t| t.path.clone()).collect());
+    let existing_paths: Arc<HashSet<PathBuf>> = Arc::new(
+        library
+            .tracks
+            .iter()
+            .filter_map(|t| t.id.local_path().map(Path::to_path_buf))
+            .collect(),
+    );
 
     let (all_audio, artist_image_dirs) = collect_audio_files(&dir, &existing_paths).await;
+    tracing::info!(
+        new_files = all_audio.len(),
+        existing = existing_paths.len(),
+        "scanning library directory"
+    );
 
     let lib_arc = Arc::new(Mutex::new(std::mem::take(library)));
 
@@ -66,7 +77,7 @@ pub async fn scan_directory(
         let artists: HashSet<String> = library
             .tracks
             .iter()
-            .filter(|t| t.path.starts_with(&img_dir))
+            .filter(|t| t.id.local_path().is_some_and(|p| p.starts_with(&img_dir)))
             .filter_map(|t| {
                 let mut set = HashSet::new();
                 if let Some(a) = normalize_artist_key(&t.artist) {
@@ -92,6 +103,7 @@ pub async fn scan_directory(
         }
     }
 
+    tracing::info!(total_tracks = library.tracks.len(), "library scan complete");
     Ok(())
 }
 

@@ -14,6 +14,11 @@
   <img src="https://github.com/Kopuz-org/kopuz/actions/workflows/build.yml/badge.svg" alt="Build">
   <img src="https://github.com/user-attachments/assets/2b12ec40-2fcb-45e9-969e-ef99b4654957" alt="Kopuz">
 
+<br/>
+  <br/>
+  <p>
+    <b>English</b> | <a href="docs/README-TR.md">Türkçe</a>
+  </p>
 </div>
 
 ## About the Name
@@ -196,7 +201,9 @@ discover
 
 > [!IMPORTANT]
 > The AppImage requires `webkit2gtk-4.1` and `gtk3` installed on your system.
-> Those dependencies are **not** bundled.
+> Those dependencies are **not** bundled. The system tray icon additionally
+> needs the **appindicator** library (e.g. `libayatana-appindicator`); without
+> it Kopuz runs fine but shows no tray icon.
 >
 > On most distros with a modern desktop environment, these are already present.
 > You will need to install them manually if they are not yet installed.
@@ -243,16 +250,23 @@ direnv allow
 Direnv is recommended if you want to keep using your usershell within the
 development environment.
 
+> [!NOTE]
+> The system tray icon (used by **minimize to tray**) requires the
+> **appindicator** library at runtime. It is included in the package
+> dependencies below. Without it the tray icon simply won't appear and closing
+> the window quits the app instead of hiding it — Kopuz still runs normally. The
+> Nix dev shell already provides it.
+
 **Arch Linux Based Systems**
 
 ```bash
-sudo pacman -S rust cargo dioxus-cli base-devel cmake pkgconf opus alsa-lib xdotool webkit2gtk-4.1 gtk3 libsoup3 openssl
+sudo pacman -S rust cargo dioxus-cli base-devel cmake pkgconf opus alsa-lib xdotool webkit2gtk-4.1 gtk3 libsoup3 openssl libayatana-appindicator
 ```
 
 **Debian Based Systems**
 
 ```bash
-sudo apt install rustc cargo build-essential cmake pkg-config libopus-dev libasound2-dev libxdo-dev libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libssl-dev
+sudo apt install rustc cargo build-essential cmake pkg-config libopus-dev libasound2-dev libxdo-dev libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libssl-dev libayatana-appindicator3-1
 cargo install dioxus-cli
 ```
 
@@ -260,14 +274,14 @@ cargo install dioxus-cli
 
 ```bash
 sudo dnf groupinstall "Development Tools" "Development Libraries"
-sudo dnf install rust cargo cmake pkgconf-pkg-config opus-devel alsa-lib-devel libxdo-devel webkit2gtk4.1-devel gtk3-devel libsoup3-devel openssl-devel
+sudo dnf install rust cargo cmake pkgconf-pkg-config opus-devel alsa-lib-devel libxdo-devel webkit2gtk4.1-devel gtk3-devel libsoup3-devel openssl-devel libayatana-appindicator-gtk3
 cargo install --locked dioxus-cli
 ```
 
 **openSUSE Based Systems**
 
 ```bash
-sudo zypper install rust cargo cmake pkg-config libopus-devel alsa-devel xdotool webkit2gtk3-soup2-devel gtk3-devel libsoup3-devel libopenssl-devel
+sudo zypper install rust cargo cmake pkg-config libopus-devel alsa-devel xdotool webkit2gtk3-soup2-devel gtk3-devel libsoup3-devel libopenssl-devel libayatana-appindicator3-1
 cargo install --locked dioxus-cli
 ```
 
@@ -374,6 +388,80 @@ Music Premium-locked tracks fall back to a local
 returns `UNPLAYABLE`, so having `yt-dlp` installed helps for those. Anonymous
 mode can't play Premium-only content at all.
 
+## Logs & Debugging
+
+Kopuz logs through [`tracing`](https://docs.rs/tracing). Most of this is
+reachable from the app itself — **Settings → Logs** has **Open logs folder**,
+**Export logs**, and an **Enable Performance Tracing** toggle — so users never
+need a terminal to send a useful report.
+
+### Where the files live
+
+All files sit in the logs directory (the **Open logs folder** button jumps
+straight here):
+
+- Linux: `~/.cache/kopuz/logs/`
+- macOS: `~/Library/Caches/com.temidaradev.kopuz/logs/`
+- Windows: `%LOCALAPPDATA%\temidaradev\kopuz\cache\logs\`
+
+| File                    | What it is                                                                                       |
+| ----------------------- | ------------------------------------------------------------------------------------------------ |
+| `latest.log`            | The current session. Span timing + events; the live log.                                         |
+| `kopuz-<timestamp>.log` | Previous sessions, archived on startup (last 10 kept). A restart never erases the run before it. |
+| `crash-<timestamp>.txt` | Written **only on a crash** (Rust panic): message, backtrace, recent log tail, app/OS version.   |
+| `kopuz-trace.json`      | Performance trace — only when tracing is enabled (see below). Overwritten each run.              |
+
+Timestamps are UTC `YYYY-MM-DD_HH-MM-SS`, so the files sort chronologically.
+
+### Triage cheat-sheet
+
+**App crashed →** a `crash-<timestamp>.txt` is generated automatically. Ask the
+user for **Settings → Logs → Export logs** (bundles `latest.log` + the newest
+crash report into one file), or **Open logs folder** and grab the newest
+`crash-*.txt`.
+
+**Performance issue (freeze / slow load / stutter) →** ask the user to:
+
+1. **Settings → Logs → enable "Performance Tracing"**, then **restart** the app
+   (the toggle warns about this — the trace recorder is set up once at startup).
+2. Reproduce the slow action.
+3. **Quit the app** (this flushes the trace cleanly).
+4. **Settings → Logs → Open logs folder** and send `kopuz-trace.json` (or
+   **Export logs**).
+
+Open the trace at [speedscope.app](https://speedscope.app) or
+[ui.perfetto.dev](https://ui.perfetto.dev). Critical paths (YouTube stream
+resolve, browse/search/pagination, mix radio, library scan, downloads, playback
+transitions, per-component renders) are instrumented as named spans, and
+worker-thread work nests under the action that launched it, so the trace shows
+exactly where time goes. Turn it back off afterward — it adds overhead and grows
+the trace file during long sessions.
+
+### Power-user env vars
+
+Log **verbosity** is controlled by env vars for terminal runs:
+
+```bash
+# Verbose (debug-level) logs for a session
+KOPUZ_DEBUG=1 kopuz
+
+# Fine-grained, per-module (overrides KOPUZ_DEBUG); standard tracing directive syntax
+KOPUZ_LOG="server::ytmusic=trace,kopuz=debug" kopuz
+
+# Deep render-tree profiling: Dioxus's own per-component render/diff spans
+# (enable the trace toggle in Settings first; this just controls what's recorded)
+KOPUZ_LOG="info,dioxus_core=trace" kopuz
+```
+
+`RUST_LOG` works too; `KOPUZ_LOG` takes precedence.
+
+The **performance trace** is enabled only via **Settings → Logs → Enable
+Performance Tracing** (then restart) — there's no env var for it; the UI is the
+single source of truth. Off by default → zero overhead.
+
+> Debug builds add a **Trigger crash** button in Settings → Logs to exercise the
+> crash-report path. It's compiled out of release builds.
+
 ## Optimization
 
 Kopuz is built to feel snappy even with large libraries. Here's what we do under
@@ -426,7 +514,7 @@ longer than needed.
 
 ## Crypto Donation
 
-- **Solana**: "BK84dVEMnGBP5Tya2mEaB1BQgcSBjngf1NBmRCqefxGg"
+- **Solana**: "2fapJYRztnTRLpJbmyEUnsuZ36AzLK2JrMmmLEfDqKpN"
 - **Bitcoin**: "bc1qz94yz9xvufa6hxlvjzaajgd2zyfu86arn68hu4"
 - **Monero**:
   "86mz3HxTrKyYpuvx78m6pufbXdwAnoyoZBztz6HyYrnM1XP5YVrMy9jTVRY5vzgGtkizACLpFwHEdafKTMoj6y8mAVgvWMz"

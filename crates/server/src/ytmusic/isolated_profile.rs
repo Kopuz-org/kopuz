@@ -15,8 +15,7 @@ use std::time::{Duration, Instant};
 use config::Browser;
 use tokio::process::Command;
 
-const SIGNIN_URL: &str =
-    "https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fmusic.youtube.com%2F";
+const SIGNIN_URL: &str = "https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fmusic.youtube.com%2F";
 
 pub fn profile_dir(server_id: &str) -> PathBuf {
     let safe: String = server_id
@@ -42,7 +41,7 @@ pub fn profile_dir(server_id: &str) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(format!("./{leaf}")))
 }
 
-fn browser_candidates(browser: Browser) -> &'static [&'static str] {
+pub(crate) fn browser_candidates(browser: Browser) -> &'static [&'static str] {
     match browser {
         Browser::Brave => &["brave", "brave-browser"],
         Browser::Chrome => &["google-chrome", "google-chrome-stable", "chrome"],
@@ -60,21 +59,11 @@ fn browser_candidates(browser: Browser) -> &'static [&'static str] {
 #[cfg(target_os = "macos")]
 fn macos_app_paths(browser: Browser) -> &'static [&'static str] {
     match browser {
-        Browser::Brave => &[
-            "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
-        ],
-        Browser::Chrome => &[
-            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-        ],
-        Browser::Chromium => &[
-            "/Applications/Chromium.app/Contents/MacOS/Chromium",
-        ],
-        Browser::Edge => &[
-            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
-        ],
-        Browser::Vivaldi => &[
-            "/Applications/Vivaldi.app/Contents/MacOS/Vivaldi",
-        ],
+        Browser::Brave => &["/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"],
+        Browser::Chrome => &["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"],
+        Browser::Chromium => &["/Applications/Chromium.app/Contents/MacOS/Chromium"],
+        Browser::Edge => &["/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"],
+        Browser::Vivaldi => &["/Applications/Vivaldi.app/Contents/MacOS/Vivaldi"],
     }
 }
 
@@ -120,8 +109,11 @@ fn windows_install_paths(browser: Browser) -> Vec<PathBuf> {
     out
 }
 
-fn find_browser_bin(browser: Browser) -> Option<String> {
-    let env_key = format!("KOPUZ_{}_BIN", browser.id().to_uppercase().replace('-', "_"));
+pub(crate) fn find_browser_bin(browser: Browser) -> Option<String> {
+    let env_key = format!(
+        "KOPUZ_{}_BIN",
+        browser.id().to_uppercase().replace('-', "_")
+    );
     if let Some(v) = std::env::var_os(&env_key)
         && !v.is_empty()
     {
@@ -155,17 +147,20 @@ fn find_browser_bin(browser: Browser) -> Option<String> {
 /// True when running inside a flatpak sandbox. The host browser binary isn't
 /// reachable from the sandbox `/usr`, so launches are proxied to the host via
 /// `flatpak-spawn --host` (which the runtime provides at `/usr/bin`).
-fn in_flatpak() -> bool {
+pub(crate) fn in_flatpak() -> bool {
     std::path::Path::new("/.flatpak-info").exists()
 }
 
 /// Resolve the browser command on the *host* PATH (the sandbox can't stat host
 /// binaries). Probes each candidate with `flatpak-spawn --host command -v`.
-async fn find_host_browser_bin(browser: Browser) -> Option<String> {
+pub(crate) async fn find_host_browser_bin(browser: Browser) -> Option<String> {
     // Honour an explicit override (e.g. a non-standard host install path) — same
     // escape hatch as the native `find_browser_bin`. `flatpak-spawn --host` runs
     // it in the host environment, so an absolute host path works.
-    let env_key = format!("KOPUZ_{}_BIN", browser.id().to_uppercase().replace('-', "_"));
+    let env_key = format!(
+        "KOPUZ_{}_BIN",
+        browser.id().to_uppercase().replace('-', "_")
+    );
     if let Some(v) = std::env::var_os(&env_key)
         && !v.is_empty()
     {
@@ -192,7 +187,7 @@ async fn find_host_browser_bin(browser: Browser) -> Option<String> {
 /// `flatpak-spawn --host` when packaged, a plain `Command` natively.
 /// `--watch-bus` ties the host browser's lifetime to ours, so `child.kill()`
 /// (and `kill_on_drop`) still tears it down.
-fn browser_command(bin: &str) -> Command {
+pub(crate) fn browser_command(bin: &str) -> Command {
     if in_flatpak() {
         let mut c = Command::new("flatpak-spawn");
         c.args(["--host", "--watch-bus", bin]);
@@ -217,6 +212,7 @@ fn browser_command(bin: &str) -> Command {
 // Windows tester to iterate (tried --disable-blink-features=
 // AutomationControlled + UA spoof, reverted — see commits
 // 6bec69d/8a03c89). Until then, Windows users get anonymous YT.
+#[tracing::instrument(name = "yt.signin", skip(server_id, signin_timeout), fields(browser = %browser))]
 pub async fn launch_signin_and_extract(
     browser: Browser,
     server_id: &str,
@@ -258,10 +254,7 @@ pub async fn launch_signin_and_extract(
             )
         })?
     };
-    eprintln!(
-        "[yt-signin] launching {bin} against {} (sign-in URL: {SIGNIN_URL})",
-        profile.display()
-    );
+    tracing::info!(%bin, profile = %profile.display(), "launching sign-in browser");
     let mut cmd = browser_command(&bin);
     cmd.arg("--no-first-run")
         .arg("--no-default-browser-check")
@@ -282,7 +275,7 @@ pub async fn launch_signin_and_extract(
         .kill_on_drop(true)
         .spawn()
         .map_err(|e| format!("spawn {bin}: {e}"))?;
-    eprintln!("[yt-signin] {bin} pid={:?} — waiting for sign-in", child.id());
+    tracing::debug!(%bin, pid = ?child.id(), "browser spawned — waiting for sign-in");
 
     let deadline = Instant::now() + signin_timeout;
     let mut last_extract_err: Option<String> = None;
@@ -311,21 +304,21 @@ pub async fn launch_signin_and_extract(
         if child_exited_at.is_none()
             && let Ok(Some(status)) = child.try_wait()
         {
-            eprintln!("[yt-signin] {bin} exited (status {status}) — continuing to poll cookies in case the browser is still running as a detached process");
+            tracing::debug!(%bin, %status, "browser process exited — still polling cookies (may be a detached UI)");
             child_exited_at = Some(Instant::now());
         }
         let cookies = match super::cookies::extract_from(browser, &profile).await {
             Ok(c) => c,
             Err(e) => {
                 if last_extract_err.as_deref() != Some(e.as_str()) {
-                    eprintln!("[yt-signin] cookie extract: {e}");
+                    tracing::trace!(error = %e, "cookie extract not ready yet");
                     last_extract_err = Some(e);
                 }
                 continue;
             }
         };
         if has_cookie(&cookies, "SAPISID") && has_cookie(&cookies, "SID") {
-            eprintln!("[yt-signin] cookies detected — closing {bin}");
+            tracing::info!(%bin, "sign-in cookies detected — closing browser");
             break Ok(cookies);
         }
     };

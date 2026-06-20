@@ -63,7 +63,7 @@ pub fn init() {
                 cache_classloader();
                 init_media_session();
             }
-            Err(e) => eprintln!("[android] Failed to capture JVM: {}", e),
+            Err(e) => tracing::warn!(error = %e, "failed to capture JVM"),
         }
     });
 }
@@ -81,7 +81,7 @@ fn cache_classloader() {
     let ctx = ndk_context::android_context();
     let raw = ctx.context();
     if raw.is_null() {
-        eprintln!("[android] null activity context; skipping classloader cache");
+        tracing::warn!("null activity context; skipping classloader cache");
         return;
     }
     // Transient local only — we immediately turn the resolved classloader into a
@@ -101,7 +101,7 @@ fn cache_classloader() {
         Ok(())
     })();
     if let Err(e) = result {
-        eprintln!("[android] Failed to cache classloader: {}", e);
+        tracing::warn!(error = %e, "failed to cache classloader");
     }
 }
 
@@ -131,7 +131,7 @@ fn init_media_session() {
     let mut env = match vm.attach_current_thread() {
         Ok(e) => e,
         Err(e) => {
-            eprintln!("[android] attach_current_thread failed: {}", e);
+            tracing::warn!(error = %e, "attach_current_thread failed");
             return;
         }
     };
@@ -149,7 +149,7 @@ fn init_media_session() {
         Ok(())
     })();
     if let Err(e) = result {
-        eprintln!("[android] MediaSessionHelper.init failed: {}", e);
+        tracing::warn!(error = %e, "MediaSessionHelper.init failed");
         clear_jni_exception(&mut env);
     }
 }
@@ -211,7 +211,7 @@ pub fn get_android_music_dir() -> Option<String> {
         Ok(env.get_string(&JString::from(path))?.into())
     })(&mut env);
     if let Err(e) = result {
-        eprintln!("[android] get_android_music_dir failed: {}", e);
+        tracing::warn!(error = %e, "get_android_music_dir failed");
         clear_jni_exception(&mut env);
         None
     } else {
@@ -272,10 +272,10 @@ fn resolve_artwork(url: &str) -> Option<String> {
     } else {
         normalize_artwork(url)
     };
-    eprintln!(
-        "[android] resolve_artwork in={} -> {:?}",
-        &url[..url.len().min(48)],
-        resolved
+    tracing::trace!(
+        input = &url[..url.len().min(48)],
+        ?resolved,
+        "resolve_artwork"
     );
     resolved
 }
@@ -417,10 +417,7 @@ pub fn update_now_playing(
         Ok(())
     })();
     if let Err(e) = result {
-        eprintln!(
-            "[android] MediaSessionHelper.updateNowPlaying failed: {}",
-            e
-        );
+        tracing::warn!(error = %e, "MediaSessionHelper.updateNowPlaying failed");
         clear_jni_exception(&mut env);
     }
 }
@@ -468,7 +465,7 @@ pub fn stop_session() {
         Ok(())
     })();
     if let Err(e) = result {
-        eprintln!("[android] MediaSessionHelper.stopSession failed: {}", e);
+        tracing::warn!(error = %e, "MediaSessionHelper.stopSession failed");
         clear_jni_exception(&mut env);
     }
 }
@@ -497,10 +494,7 @@ pub fn request_permissions() {
         Ok(())
     })(&mut env);
     if let Err(e) = result {
-        eprintln!(
-            "[android] MediaSessionHelper.requestPermissions failed: {}",
-            e
-        );
+        tracing::warn!(error = %e, "MediaSessionHelper.requestPermissions failed");
         clear_jni_exception(&mut env);
     }
 }
@@ -557,7 +551,7 @@ pub fn move_task_to_back() {
         Ok(())
     })();
     if let Err(e) = result {
-        eprintln!("[android] MainActivity.moveToBack failed: {}", e);
+        tracing::warn!(error = %e, "MainActivity.moveToBack failed");
         clear_jni_exception(&mut env);
     }
 }

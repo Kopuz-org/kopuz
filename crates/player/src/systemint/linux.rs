@@ -251,19 +251,21 @@ pub fn update_now_playing(
             // thumbs, YT Music covers) through unchanged so clients can
             // fetch them directly; only wrap actual local file paths
             // with file://.
-            b = b.art_url(if art.starts_with("http://")
-                || art.starts_with("https://")
-                || art.starts_with("file://")
-            {
-                art.to_string()
-            } else if art.starts_with('/') {
-                format!("file://{art}")
-            } else {
-                format!(
-                    "file://{}/{art}",
-                    std::env::current_dir().unwrap_or_default().display()
-                )
-            });
+            b = b.art_url(
+                if art.starts_with("http://")
+                    || art.starts_with("https://")
+                    || art.starts_with("file://")
+                {
+                    art.to_string()
+                } else if art.starts_with('/') {
+                    format!("file://{art}")
+                } else {
+                    format!(
+                        "file://{}/{art}",
+                        std::env::current_dir().unwrap_or_default().display()
+                    )
+                },
+            );
         }
         *s = (
             b.build(),

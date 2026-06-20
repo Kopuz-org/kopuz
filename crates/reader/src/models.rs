@@ -1,5 +1,4 @@
 use serde::{Deserialize, Deserializer, Serialize};
-use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -14,9 +13,107 @@ pub struct Album {
     pub manual_cover: bool,
 }
 
+/// A source-agnostic artist photo reference: a local file path or a remote URL.
+/// Resolved to a `CoverUrl` by the cover seam (`server::cover::artist`), so the
+/// UI never branches on where the image lives. A custom user override is handled
+/// separately (it's a priority concern, not a source one).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ArtistImageRef {
+    /// A local filesystem path (from the local scan).
+    Local(PathBuf),
+    /// A remote URL (from a server sync).
+    Remote(String),
+}
+
+/// Typed track identity — replaces the old `Track.path` synthetic-string hack.
+/// Local tracks are a filesystem path; server tracks are a service + item id.
+/// The cover reference is a separate `Track.cover` field, NOT part of identity.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum TrackId {
+    Local(PathBuf),
+    Server {
+        service: config::MusicService,
+        item_id: String,
+    },
+}
+
+impl TrackId {
+    /// The bare key within its source — the file-path string (local) or the
+    /// item/video id (server). This is the DB `track_key`.
+    pub fn key(&self) -> std::borrow::Cow<'_, str> {
+        match self {
+            TrackId::Local(p) => p.to_string_lossy(),
+            TrackId::Server { item_id, .. } => std::borrow::Cow::Borrowed(item_id),
+        }
+    }
+
+    /// The filesystem path, if this is a local track.
+    pub fn local_path(&self) -> Option<&Path> {
+        match self {
+            TrackId::Local(p) => Some(p),
+            TrackId::Server { .. } => None,
+        }
+    }
+
+    /// The media service, if this is a server track.
+    pub fn service(&self) -> Option<config::MusicService> {
+        match self {
+            TrackId::Server { service, .. } => Some(*service),
+            TrackId::Local(_) => None,
+        }
+    }
+
+    /// A stable, source-qualified identity string (no cover): the file path for
+    /// local, or `"<service-prefix>:<item_id>"` for server. For logging /
+    /// cross-source string keys.
+    pub fn uid(&self) -> String {
+        match self {
+            TrackId::Local(p) => p.to_string_lossy().into_owned(),
+            TrackId::Server { service, item_id } => {
+                format!("{}:{}", service_prefix(*service), item_id)
+            }
+        }
+    }
+
+    /// Parse a legacy `Track.path` string (`"service:id[:cover]"` or a real
+    /// path). Used ONLY by the migration importer; the 3rd cover segment is
+    /// dropped here (the importer sets `Track.cover` separately).
+    pub fn from_legacy_path(s: &str) -> Self {
+        for (prefix, svc) in [
+            ("ytmusic", config::MusicService::YtMusic),
+            ("jellyfin", config::MusicService::Jellyfin),
+            ("subsonic", config::MusicService::Subsonic),
+            ("custom", config::MusicService::Custom),
+            ("soundcloud", config::MusicService::SoundCloud),
+        ] {
+            if let Some(rest) = s.strip_prefix(prefix).and_then(|r| r.strip_prefix(':')) {
+                let item_id = rest.split(':').next().unwrap_or("").to_string();
+                return TrackId::Server {
+                    service: svc,
+                    item_id,
+                };
+            }
+        }
+        TrackId::Local(PathBuf::from(s))
+    }
+}
+
+fn service_prefix(s: config::MusicService) -> &'static str {
+    match s {
+        config::MusicService::YtMusic => "ytmusic",
+        config::MusicService::Jellyfin => "jellyfin",
+        config::MusicService::Subsonic => "subsonic",
+        config::MusicService::Custom => "custom",
+        config::MusicService::SoundCloud => "soundcloud",
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Track {
-    pub path: PathBuf,
+    pub id: TrackId,
+    /// Cover art reference (URL for server, path for local) — out of identity.
+    #[serde(default)]
+    pub cover: Option<String>,
     pub album_id: String,
     pub title: String,
     pub artist: String,
@@ -125,27 +222,8 @@ impl Library {
         }
     }
 
-    pub fn load(path: &Path) -> std::io::Result<Self> {
-        if !path.exists() {
-            return Ok(Self::default());
-        }
-        let data = fs::read_to_string(path)?;
-        let library = serde_json::from_str(&data)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-        Ok(library)
-    }
-
-    pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let data = serde_json::to_string(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-        fs::write(path, data)
-    }
-
     pub fn add_track(&mut self, track: Track) {
-        if let Some(index) = self.tracks.iter().position(|t| t.path == track.path) {
+        if let Some(index) = self.tracks.iter().position(|t| t.id == track.id) {
             self.tracks[index] = track;
         } else {
             self.tracks.push(track);
@@ -168,8 +246,8 @@ impl Library {
         }
     }
 
-    pub fn remove_track(&mut self, path: &Path) {
-        self.tracks.retain(|t| t.path != path);
+    pub fn remove_track(&mut self, id: &TrackId) {
+        self.tracks.retain(|t| &t.id != id);
     }
 
     pub fn remove_album(&mut self, album_id: &str) {
@@ -197,23 +275,18 @@ mod tests {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+/// One playlist. `tracks` are opaque refs — a filesystem path string for local
+/// playlists, an item/video id for a server. Which source these belong to is
+/// context (the active source the store was loaded for), not per-row state, so
+/// there's no source field and no local/server type split. The path↔file
+/// conversion happens only at the player's resolve boundary, not here.
+#[derive(Debug, Clone, PartialEq)]
 pub struct Playlist {
     pub id: String,
     pub name: String,
-    pub tracks: Vec<PathBuf>,
-    #[serde(default)]
-    pub cover_path: Option<PathBuf>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct JellyfinPlaylist {
-    pub id: String,
-    pub name: String,
     pub tracks: Vec<String>,
-    #[serde(default)]
+    /// Server cover-version tag (server playlists only; `None` for local).
     pub image_tag: Option<String>,
-    #[serde(default)]
     pub cover_path: Option<PathBuf>,
 }
 
@@ -224,34 +297,13 @@ pub struct PlaylistFolder {
     pub playlist_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+/// The in-memory playlist read model for the active source (built by the DB
+/// layer, never serialized). One uniform list — local vs server is the active
+/// source context, not a per-row split.
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct PlaylistStore {
     pub playlists: Vec<Playlist>,
-    #[serde(default)]
-    pub jellyfin_playlists: Vec<JellyfinPlaylist>,
-    #[serde(default)]
     pub folders: Vec<PlaylistFolder>,
-}
-
-impl PlaylistStore {
-    pub fn load(path: &Path) -> std::io::Result<Self> {
-        if !path.exists() {
-            return Ok(Self::default());
-        }
-        let data = fs::read_to_string(path)?;
-        let store = serde_json::from_str(&data)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-        Ok(store)
-    }
-
-    pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let data = serde_json::to_string(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-        fs::write(path, data)
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
@@ -263,25 +315,6 @@ pub struct FavoritesStore {
 }
 
 impl FavoritesStore {
-    pub fn load(path: &Path) -> std::io::Result<Self> {
-        if !path.exists() {
-            return Ok(Self::default());
-        }
-        let data = fs::read_to_string(path)?;
-        let store = serde_json::from_str(&data)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-        Ok(store)
-    }
-
-    pub fn save(&self, path: &Path) -> std::io::Result<()> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let data = serde_json::to_string_pretty(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
-        fs::write(path, data)
-    }
-
     pub fn is_local_favorite(&self, path: &Path) -> bool {
         self.local_favorites.iter().any(|p| p == path)
     }

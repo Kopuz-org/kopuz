@@ -20,6 +20,7 @@
   xdotool,
   wayland,
   dbus,
+  libayatana-appindicator,
   # Darwin deps
   libopus,
 }:
@@ -49,6 +50,7 @@ let
     xdotool
     wayland
     dbus
+    libayatana-appindicator
     libopus
   ];
 
@@ -148,6 +150,7 @@ craneLib.mkCargoDerivation (
       gappsWrapperArgs+=(
         --chdir $out/bin
         --prefix PATH : ${lib.makeBinPath [ yt-dlp ]}
+        --prefix LD_LIBRARY_PATH : ${libayatana-appindicator}/lib
       )
     '';
 

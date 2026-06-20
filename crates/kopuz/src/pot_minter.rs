@@ -87,21 +87,29 @@ window.__KOPUZ_BGX = (window.module && window.module.exports) || null;
 window.__kopuzMinter = null;
 window.__kopuzMinterExp = 0;
 window.__kopuzMinting = null;
+// Diagnostic side-channel (no reqId): forwards minter progress/errors to the
+// Rust side so a broken minter is debuggable from logs (issue: BotGuard VM
+// throwing "Function@[native code]" on some webview setups).
+window.__kopuzDiag = function(m) {{ try {{ window.ipc.postMessage(JSON.stringify({{diag: '' + m}})); }} catch(e) {{}} }};
 
-window.__kopuzEnsureMinter = function() {{
+window.__kopuzEnsureMinter = function(quiet) {{
   var now = Date.now();
   if (window.__kopuzMinter && now < window.__kopuzMinterExp) return Promise.resolve(window.__kopuzMinter);
   if (window.__kopuzMinting) return window.__kopuzMinting;
   window.__kopuzMinting = (async function() {{
+    var step = 'capture_bg';
+    try {{
     var X = window.__KOPUZ_BGX;
-    if (!X || !X.BG) throw new Error('no BG');
+    if (!X || !X.BG) throw new Error('BgUtils BG not captured (page structure changed?)');
     var BG = X.BG;
     var bgConfig = {{
       fetch: function(u, o) {{ return fetch(u, o); }},
       globalObj: window, identifier: '', requestKey: "O43z0dpjhgX20SCx4KAo"
     }};
+    step = 'challenge_create';
     var ch = await BG.Challenge.create(bgConfig);
     if (!ch) throw new Error('null challenge');
+    step = 'run_interpreter';
     var js = ch.interpreterJavascript && ch.interpreterJavascript.privateDoNotAccessOrElseSafeScriptWrappedValue;
     if (js) {{
       var src = js;
@@ -111,21 +119,31 @@ window.__kopuzEnsureMinter = function() {{
       }}
       new Function(src)();
     }}
+    step = 'botguard_create';
     var botguard = await BG.BotGuardClient.create({{ program: ch.program, globalName: ch.globalName, globalObj: window }});
+    step = 'snapshot';
     var sig = [];
     var botguardResponse = await botguard.snapshot({{ webPoSignalOutput: sig }});
+    step = 'generate_it';
     var itUrl = X.buildURL('GenerateIT', bgConfig.useYouTubeAPI);
     var itResp = await bgConfig.fetch(itUrl, {{
       method: 'POST', headers: X.getHeaders(),
       body: JSON.stringify([bgConfig.requestKey, botguardResponse])
     }});
     var it = await itResp.json();
+    step = 'webpominter_create';
     var itData = {{ integrityToken: it[0], estimatedTtlSecs: it[1], mintRefreshThreshold: it[2], websafeFallbackToken: it[3] }};
     var minter = await BG.WebPoMinter.create(itData, sig);
     var ttl = (itData.estimatedTtlSecs > 0) ? itData.estimatedTtlSecs : 21600;
     window.__kopuzMinter = minter;
     window.__kopuzMinterExp = Date.now() + Math.floor(ttl * 0.8) * 1000;
+    window.__kopuzDiag('integrity token negotiated (ttl=' + ttl + 's)');
     return minter;
+    }} catch (e) {{
+      var label = quiet ? 'ensureMinter warmup failed (will retry)' : 'ensureMinter FAILED';
+      window.__kopuzDiag(label + ' at step=' + step + ' :: ' + ((e && e.stack) ? e.stack : ('' + e)));
+      throw e;
+    }}
   }})();
   window.__kopuzMinting.then(function() {{ window.__kopuzMinting = null; }},
     function() {{ window.__kopuzMinting = null; window.__kopuzMinter = null; window.__kopuzMinterExp = 0; }});
@@ -134,21 +152,36 @@ window.__kopuzEnsureMinter = function() {{
 
 window.__kopuzMint = async function(videoId, reqId) {{
   function send(o) {{ o.id = reqId; try {{ window.ipc.postMessage(JSON.stringify(o)); }} catch(e) {{}} }}
+  var phase = 'ensure_minter';
   try {{
     var minter = await window.__kopuzEnsureMinter();
+    phase = 'mint';
     var pot = await minter.mintAsWebsafeString(videoId);
     send({{pot: (pot || '') + ''}});
   }} catch (e) {{
     window.__kopuzMinter = null; window.__kopuzMinterExp = 0;
-    send({{err: (e && e.stack) ? e.stack : ('' + e)}});
+    var stk = (e && e.stack) ? e.stack : ('' + e);
+    window.__kopuzDiag('mint FAILED in phase=' + phase + ' :: ' + stk);
+    send({{err: 'phase=' + phase + ': ' + stk}});
   }}
 }};
+
+// One-shot environment snapshot: whether BgUtils captured BG, Trusted-Types
+// presence, the automation flag, and the UA — the usual culprits when the
+// BotGuard VM behaves differently across webview builds.
+setTimeout(function() {{
+  var x = window.__KOPUZ_BGX;
+  window.__kopuzDiag('env: bgx=' + !!x + ' BG=' + !!(x && x.BG) + ' trustedTypes=' + !!(window.trustedTypes) + ' webdriver=' + navigator.webdriver + ' ua=' + navigator.userAgent);
+}}, 2000);
 
 // Pre-warm the integrity token as soon as the origin is live, so even the
 // first track doesn't pay the negotiation. Best-effort, backs off, then stops.
 (function warm(n) {{
   if (!window.__KOPUZ_BGX || !window.__KOPUZ_BGX.BG) {{ if (n > 0) setTimeout(function() {{ warm(n - 1); }}, 500); return; }}
-  window.__kopuzEnsureMinter().catch(function() {{ if (n > 0) setTimeout(function() {{ warm(n - 1); }}, 2000); }});
+  // quiet while retries remain: the first snapshot right after page load is
+  // flaky, and a self-healing attempt shouldn't read as a failure. The LAST
+  // attempt (and every on-demand mint) reports loudly.
+  window.__kopuzEnsureMinter(n > 0).catch(function() {{ if (n > 0) setTimeout(function() {{ warm(n - 1); }}, 2000); }});
 }})(20);
 "#
     )
@@ -180,7 +213,7 @@ pub fn install_if_wanted<T: 'static>(target: &EventLoopWindowTarget<T>) {
     {
         Ok(w) => w,
         Err(e) => {
-            eprintln!("[pot-minter] window build failed: {e}");
+            tracing::error!(error = %e, "pot-minter window build failed");
             return;
         }
     };
@@ -190,20 +223,44 @@ pub fn install_if_wanted<T: 'static>(target: &EventLoopWindowTarget<T>) {
     let builder = WebViewBuilder::new()
         .with_url("https://music.youtube.com/")
         .with_user_agent(UA)
-        .with_initialization_script(&init_script())
+        .with_initialization_script(init_script())
         .with_ipc_handler(move |req| {
             let body = req.into_body();
             let v: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
+            // Diagnostic side-channel (no reqId): which BotGuard step failed +
+            // the full JS stack, so a broken minter shows up in logs as more
+            // than "Function@[native code]".
+            if let Some(diag) = v.get("diag").and_then(|d| d.as_str()) {
+                // Real failures at WARN; the negotiation success at INFO so a
+                // boot whose first warmup attempt failed (the BotGuard
+                // snapshot is flaky right after page load) visibly resolves
+                // instead of ending on a scary warning; self-healing warmup
+                // retries and env dumps are routine — DEBUG.
+                if diag.contains("FAILED") || diag.contains("error") {
+                    tracing::warn!(%diag, "pot-minter diagnostic");
+                } else if diag.contains("will retry") {
+                    tracing::debug!(%diag, "pot-minter diagnostic");
+                } else if diag.contains("integrity token negotiated") {
+                    tracing::info!(%diag, "pot-minter diagnostic");
+                } else {
+                    tracing::debug!(%diag, "pot-minter diagnostic");
+                }
+                return;
+            }
             let Some(id) = v.get("id").and_then(|i| i.as_u64()) else {
                 return;
             };
             let result = match v.get("pot").and_then(|p| p.as_str()) {
                 Some(pot) => Ok(pot.to_string()),
-                None => Err(v
-                    .get("err")
-                    .and_then(|e| e.as_str())
-                    .unwrap_or("mint failed")
-                    .to_string()),
+                None => {
+                    let err = v
+                        .get("err")
+                        .and_then(|e| e.as_str())
+                        .unwrap_or("mint failed")
+                        .to_string();
+                    tracing::error!(error = %err, "pot-minter mint error");
+                    Err(err)
+                }
             };
             if let Some(reply) = pending_ipc.borrow_mut().remove(&id) {
                 let _ = reply.send(result);
@@ -216,7 +273,7 @@ pub fn install_if_wanted<T: 'static>(target: &EventLoopWindowTarget<T>) {
     let built = match window.default_vbox() {
         Some(vbox) => builder.build_gtk(vbox),
         None => {
-            eprintln!("[pot-minter] no GTK vbox on window");
+            tracing::error!("pot-minter: no GTK vbox on window");
             return;
         }
     };
@@ -226,14 +283,14 @@ pub fn install_if_wanted<T: 'static>(target: &EventLoopWindowTarget<T>) {
     let webview = match built {
         Ok(w) => w,
         Err(e) => {
-            eprintln!("[pot-minter] webview build failed: {e}");
+            tracing::error!(error = %e, "pot-minter webview build failed");
             return;
         }
     };
 
     let (tx, rx) = mpsc::unbounded_channel::<MintRequest>();
     if botguard::set_minter(tx).is_err() {
-        eprintln!("[pot-minter] minter already registered");
+        tracing::warn!("pot-minter already registered");
     }
 
     STATE.with(|s| {
@@ -245,7 +302,7 @@ pub fn install_if_wanted<T: 'static>(target: &EventLoopWindowTarget<T>) {
         });
     });
     INSTALLED.with(|c| c.set(true));
-    eprintln!("[pot-minter] installed (anon PoToken minting via webview)");
+    tracing::info!("pot-minter installed (anon PoToken minting via webview)");
 }
 
 /// Drain queued mint requests and dispatch each to the webview. Called every

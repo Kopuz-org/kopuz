@@ -1,15 +1,6 @@
-pub mod activity;
-pub mod album;
-pub mod artist;
 pub mod discover;
 pub mod download_manager;
-pub mod favorites;
-pub mod home;
-pub mod library;
-pub mod playlists;
-pub mod search;
 pub mod subsonic_sync;
-pub mod unsupported;
 
 use config::{AppConfig, MusicService};
 use dioxus::prelude::{ReadableExt, WritableExt};
@@ -52,12 +43,17 @@ pub fn build_download_url(item_id: &str, config: &AppConfig) -> Option<(String, 
             let username = server.user_id.as_deref()?;
             let password_or_token = server.access_token.as_deref()?;
             let resolved_password = ::server::provider::resolve_subsonic_secret(password_or_token)?;
-            let client =
-                ::server::subsonic::SubsonicClient::new(&server.url, username, &resolved_password);
             let kbps = quality.subsonic_max_bitrate_kbps();
-            client.stream_url_with_bitrate(item_id, Some(kbps)).ok()?
+            ::server::subsonic::stream_url_with_bitrate(
+                &server.url,
+                username,
+                &resolved_password,
+                item_id,
+                Some(kbps),
+            )
+            .ok()?
         }
-        MusicService::YtMusic => return None,
+        MusicService::YtMusic | MusicService::SoundCloud => return None,
     };
     Some((url, ext))
 }
@@ -79,6 +75,7 @@ pub(super) fn content_type_to_ext(content_type: &str) -> Option<&'static str> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[tracing::instrument(name = "download.to_cache", skip(url), fields(item_id = %item_id))]
 pub async fn download_track_to_cache(
     item_id: &str,
     url: &str,
@@ -135,7 +132,7 @@ pub async fn download_tracks_batch(
                         .offline_tracks
                         .insert(id.clone(), path.to_string_lossy().into_owned());
                 }
-                Err(e) => eprintln!("Batch download failed for {id}: {e}"),
+                Err(e) => tracing::warn!(%id, error = %e, "batch download failed"),
             }
         }
     }

@@ -45,7 +45,7 @@ pub struct PlaylistCreationResult {
     pub id: String,
 }
 
-pub struct JellyfinClient {
+pub(crate) struct JellyfinClient {
     client: JellyfinSDK,
     http_client: reqwest::Client,
     base_url: String,
@@ -198,6 +198,16 @@ impl JellyfinClient {
             .ok_or_else(|| "No access token available".to_string())
     }
 
+    /// The server base URL — for building image URLs outside the client.
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    /// The access token, if signed in — for building authed image URLs.
+    pub fn token(&self) -> Option<&str> {
+        self.access_token.as_deref()
+    }
+
     fn build_url(&self, path: &str) -> String {
         if path.starts_with('/') {
             format!("{}{}", self.base_url, path)
@@ -244,6 +254,7 @@ impl JellyfinClient {
         }
     }
 
+    #[tracing::instrument(name = "jellyfin.request", skip_all, fields(path = %path))]
     async fn request<T>(&self, path: &str) -> Result<T, String>
     where
         T: DeserializeOwned,
@@ -260,6 +271,7 @@ impl JellyfinClient {
         resp.json::<T>().await.map_err(|e| e.to_string())
     }
 
+    #[tracing::instrument(name = "jellyfin.request", skip_all, fields(path = %path))]
     async fn request_with_query<T, Q>(&self, path: &str, query: &Q) -> Result<T, String>
     where
         T: DeserializeOwned,
@@ -316,11 +328,6 @@ impl JellyfinClient {
             .create_api(&self.base_url, Some(&login_resp.access_token));
 
         Ok((login_resp.access_token, login_resp.user.id))
-    }
-
-    pub async fn get_metadata(&self, user_id: &str, item_id: &str) -> Result<Item, String> {
-        let path = format!("/Users/{}/Items/{}/Metadata", user_id, item_id);
-        self.request(&path).await
     }
 
     pub async fn get_views(&self) -> Result<Vec<ViewItem>, String> {
@@ -383,6 +390,16 @@ impl JellyfinClient {
         Ok(items_resp.items)
     }
 
+    /// The progressive audio stream URL for one item, with the api_key inlined.
+    pub fn stream_url(&self, item_id: &str) -> String {
+        let mut url = format!("{}/Audio/{}/stream?static=true", self.base_url, item_id);
+        if let Some(token) = &self.access_token {
+            url.push_str(&format!("&api_key={token}"));
+        }
+        url
+    }
+
+    #[tracing::instrument(name = "jellyfin.playlist_create", skip_all, fields(count = item_ids.len()))]
     pub async fn create_playlist(&self, name: &str, item_ids: &[&str]) -> Result<String, String> {
         let user_id = self.user_id.as_ref().ok_or("No user ID available")?;
         let token = self
@@ -424,6 +441,7 @@ impl JellyfinClient {
         Ok(result.id)
     }
 
+    #[tracing::instrument(name = "jellyfin.playlist_add", skip(self), fields(playlist_id = %playlist_id, item_id = %item_id))]
     pub async fn add_to_playlist(&self, playlist_id: &str, item_id: &str) -> Result<(), String> {
         let user_id = self.user_id.as_ref().ok_or("No user ID available")?;
         let token = self
@@ -464,6 +482,7 @@ impl JellyfinClient {
         Ok(items_resp.items)
     }
 
+    #[tracing::instrument(name = "jellyfin.playlist_remove", skip(self), fields(playlist_id = %playlist_id, entry_id = %entry_id))]
     pub async fn remove_from_playlist(
         &self,
         playlist_id: &str,
@@ -500,6 +519,7 @@ impl JellyfinClient {
         Ok(())
     }
 
+    #[tracing::instrument(name = "jellyfin.playlist_move", skip(self), fields(playlist_id = %playlist_id, item_id = %item_id, new_index))]
     pub async fn move_playlist_item(
         &self,
         playlist_id: &str,
@@ -537,6 +557,7 @@ impl JellyfinClient {
         Ok(())
     }
 
+    #[tracing::instrument(name = "jellyfin.set_playlist_image", skip_all, fields(playlist_id = %playlist_id))]
     pub async fn set_playlist_image(
         &self,
         playlist_id: &str,
@@ -556,18 +577,6 @@ impl JellyfinClient {
 
         Self::ensure_success(resp, "Failed to upload playlist image").await?;
         Ok(())
-    }
-
-    pub async fn get_genres(&self) -> Result<Vec<Genre>, String> {
-        let user_id = self.user_id()?;
-        let query = [
-            ("UserId", user_id),
-            ("Recursive", "true"),
-            ("IncludeItemTypes", "Audio"),
-        ];
-
-        let genres_resp: GenresResponse = self.request_with_query("/Genres", &query).await?;
-        Ok(genres_resp.items)
     }
 
     pub async fn get_albums_paginated(
@@ -599,6 +608,7 @@ impl JellyfinClient {
         Ok((albums_resp.items, albums_resp.total_record_count))
     }
 
+    #[tracing::instrument(name = "jellyfin.playback_report", skip(self), fields(item_id = %item_id))]
     pub async fn report_playback_start(&self, item_id: &str) -> Result<(), String> {
         let token = self
             .access_token
@@ -637,6 +647,7 @@ impl JellyfinClient {
         Ok(())
     }
 
+    #[tracing::instrument(name = "jellyfin.playback_report", skip(self), fields(item_id = %item_id))]
     pub async fn report_playback_progress(
         &self,
         item_id: &str,
@@ -680,6 +691,7 @@ impl JellyfinClient {
         Ok(())
     }
 
+    #[tracing::instrument(name = "jellyfin.playback_report", skip(self), fields(item_id = %item_id))]
     pub async fn report_playback_stopped(
         &self,
         item_id: &str,
@@ -720,30 +732,18 @@ impl JellyfinClient {
         Ok(())
     }
 
+    /// Validate the connection + token. Hits `GET /Users/Me` (token-gated, present
+    /// on every Jellyfin) rather than `POST /Sessions/Ping`, which 404s on 10.11+.
+    /// A 401/403 surfaces in the error string so callers can tell auth-expired
+    /// (`Expired`) from unreachable.
+    #[tracing::instrument(name = "jellyfin.ping", skip_all)]
     pub async fn ping(&self) -> Result<(), String> {
-        let token = self
-            .access_token
-            .as_ref()
-            .ok_or("No access token available")?;
-        let url = format!("{}/Sessions/Ping", self.base_url);
-
-        let auth_header = format!(
-            "MediaBrowser Client=\"Kopuz\", Device=\"Kopuz\", DeviceId=\"{}\", Version=\"{}\", Token=\"{}\"",
-            self.device_id, APP_VERSION, token
-        );
-
         let resp = self
-            .http_client
-            .post(&url)
-            .header("X-Emby-Authorization", auth_header)
+            .authorized_request(reqwest::Method::GET, "/Users/Me")?
             .send()
             .await
             .map_err(|e| e.to_string())?;
-
-        if !resp.status().is_success() {
-            return Err(format!("Ping failed: {}", resp.status()));
-        }
-
+        Self::ensure_success(resp, "Ping failed").await?;
         Ok(())
     }
 

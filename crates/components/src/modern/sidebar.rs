@@ -1,6 +1,5 @@
-use config::MusicSource;
 #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
-use dioxus::desktop::use_window;
+use dioxus::desktop::window;
 use dioxus::prelude::*;
 use kopuz_route::Route;
 
@@ -99,7 +98,7 @@ const TOOL_ITEMS: &[NavItem] = &[NavItem {
 
 #[component]
 pub fn SidebarModern(props: SidebarProps) -> Element {
-    let mut config = use_context::<Signal<config::AppConfig>>();
+    let config = use_context::<Signal<config::AppConfig>>();
     let mut width = use_signal(|| 200i32);
     let mut is_collapsed = use_signal(|| false);
     let mut is_resizing = use_signal(|| false);
@@ -133,7 +132,9 @@ pub fn SidebarModern(props: SidebarProps) -> Element {
     };
     let onmouseup = move |_| is_resizing.set(false);
 
-    let is_server = config.read().active_source == MusicSource::Server;
+    // Discover is a capability of the active source (YT), not a config flag.
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let has_discover = use_memo(move || active_source.read().capabilities().discover);
     let collapsed = if is_android {
         false
     } else {
@@ -153,7 +154,10 @@ pub fn SidebarModern(props: SidebarProps) -> Element {
             "position: fixed; left: 0; top: 0; z-index: 100; height: 100%; width: 280px; background: rgba(10,10,10,0.97);".to_string()
         }
     } else {
-        format!("width: {current_width}px; background: rgba(0,0,0,0.5);")
+        // Theme-following surface (not a fixed black overlay) so the Vaxry chrome
+        // harmonises with the active palette and the switcher text stays readable
+        // on light themes.
+        format!("width: {current_width}px; background: var(--color-neutral-900);")
     };
 
     rsx! {
@@ -197,44 +201,16 @@ pub fn SidebarModern(props: SidebarProps) -> Element {
                     class: "h-10 flex-shrink-0",
                     onmousedown: move |_| {
                         #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
-                        use_window().drag();
+                        window().drag();
                     }
                 }
             }
 
             if !cfg!(target_arch = "wasm32") && config.read().show_source_toggle {
-                if collapsed {
-                    div { class: "flex flex-col items-center gap-1 py-3 border-b border-white/5",
-                        button {
-                            class: if !is_server { "text-[10px] font-bold py-1" } else { "text-[10px] font-bold py-1 opacity-30" },
-                            style: if !is_server { "color: var(--color-indigo-500);" } else { "" },
-                            onclick: move |_| { config.write().active_source = MusicSource::Local; config.write().source_explicitly_set = true; },
-                            i { class: "fa-solid fa-hard-drive text-xs" }
-                        }
-                        button {
-                            class: if is_server { "text-[10px] font-bold py-1" } else { "text-[10px] font-bold py-1 opacity-30" },
-                            style: if is_server { "color: var(--color-indigo-500);" } else { "" },
-                            onclick: move |_| { config.write().active_source = MusicSource::Server; config.write().source_explicitly_set = true; },
-                            i { class: "fa-solid fa-server text-xs" }
-                        }
-                    }
-                } else {
-                    div { class: "px-3 pt-3 pb-2 border-b border-white/5",
-                        div { class: "flex rounded-lg overflow-hidden border border-white/10 text-[11px] font-bold",
-                            button {
-                                class: "flex-1 py-1.5 transition-colors",
-                                style: if !is_server { "background: color-mix(in oklab, var(--color-indigo-500) 20%, transparent); color: var(--color-indigo-500);" } else { "color: rgba(255,255,255,0.3);" },
-                                onclick: move |_| { config.write().active_source = MusicSource::Local; config.write().source_explicitly_set = true; },
-                                "{i18n::t(\"local\").to_uppercase()}"
-                            }
-                            button {
-                                class: "flex-1 py-1.5 transition-colors",
-                                style: if is_server { "background: color-mix(in oklab, var(--color-indigo-500) 20%, transparent); color: var(--color-indigo-500);" } else { "color: rgba(255,255,255,0.3);" },
-                                onclick: move |_| { config.write().active_source = MusicSource::Server; config.write().source_explicitly_set = true; },
-                                "{i18n::t(\"server\").to_uppercase()}"
-                            }
-                        }
-                    }
+                crate::source_switcher::SourceSwitcher {
+                    config,
+                    collapsed,
+                    on_manage: move |_| props.on_navigate.call(Route::Settings),
                 }
             }
 
@@ -251,15 +227,17 @@ pub fn SidebarModern(props: SidebarProps) -> Element {
                             }
                         }
                         for item in *items {
-                            ModernNavItem {
-                                key: "{item.key}",
-                                item: item.clone(),
-                                active: current_route == item.route,
-                                collapsed,
-                                onclick: move |_| {
-                                    props.on_navigate.call(item.route);
-                                    if is_android { mobile_collapsed.set(true); }
-                                },
+                            if item.route != Route::Discover || has_discover() {
+                                ModernNavItem {
+                                    key: "{item.key}",
+                                    item: item.clone(),
+                                    active: current_route == item.route,
+                                    collapsed,
+                                    onclick: move |_| {
+                                        props.on_navigate.call(item.route);
+                                        if is_android { mobile_collapsed.set(true); }
+                                    },
+                                }
                             }
                         }
                     }

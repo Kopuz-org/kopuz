@@ -17,6 +17,7 @@ depends=(
     'dbus'
     'cmake'
     'opus'
+    'libayatana-appindicator'
 )
 
 optdepends=(

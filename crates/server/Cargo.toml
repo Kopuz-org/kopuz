@@ -3,7 +3,11 @@ name = "server"
 version.workspace = true
 edition = "2024"
 
+[lints]
+workspace = true
+
 [dependencies]
+tracing = { workspace = true }
 directories = { workspace = true }
 jellyfin-sdk-rust = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
@@ -20,6 +24,9 @@ rookie = "0.5"
 web-time = { workspace = true }
 tokio = { workspace = true, features = ["fs", "process", "rt", "sync"] }
 reader = { workspace = true }
+db = { workspace = true }
+utils = { workspace = true }
+async-trait = "0.1"
 
 [[example]]
 name = "duration_probe"

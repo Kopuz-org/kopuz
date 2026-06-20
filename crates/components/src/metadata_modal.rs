@@ -37,21 +37,31 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
     });
     let mut album = use_signal(|| props.track.album.clone());
     let mut track_no = use_signal(|| {
-        props.track.track_number.map(|n| n.to_string()).unwrap_or_default()
+        props
+            .track
+            .track_number
+            .map(|n| n.to_string())
+            .unwrap_or_default()
     });
     let mut disc_no = use_signal(|| {
-        props.track.disc_number.map(|n| n.to_string()).unwrap_or_default()
+        props
+            .track
+            .disc_number
+            .map(|n| n.to_string())
+            .unwrap_or_default()
     });
 
     let mut cover_preview = use_signal(|| None::<String>);
     let mut cover_change = use_signal(|| CoverChange::Keep);
 
     {
-        let path = props.track.path.clone();
+        let path = props.track.id.local_path().map(|p| p.to_path_buf());
         use_hook(move || {
             #[cfg(not(target_arch = "wasm32"))]
             spawn(async move {
-                if let Some((bytes, mime)) = reader::read_cover(&path) {
+                if let Some(p) = &path
+                    && let Some((bytes, mime)) = reader::read_cover(p)
+                {
                     cover_preview.set(Some(data_url(&bytes, &mime)));
                 }
             });
@@ -92,15 +102,27 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
         push(&duration_text, fmt_dur(t.duration));
     }
     if t.khz > 0 {
-        push(&sample_rate_text, format!("{:.1} kHz", t.khz as f64 / 1000.0));
+        push(
+            &sample_rate_text,
+            format!("{:.1} kHz", t.khz as f64 / 1000.0),
+        );
     }
     if t.bitrate > 0 {
         push(&bitrate_text, format!("{} kbps", t.bitrate));
     }
-    push(&musicbrainz_release_text, t.musicbrainz_release_id.clone().unwrap_or_default());
-    push(&musicbrainz_recording_text, t.musicbrainz_recording_id.clone().unwrap_or_default());
-    push(&musicbrainz_track_text, t.musicbrainz_track_id.clone().unwrap_or_default());
-    push(&path_text, t.path.display().to_string());
+    push(
+        &musicbrainz_release_text,
+        t.musicbrainz_release_id.clone().unwrap_or_default(),
+    );
+    push(
+        &musicbrainz_recording_text,
+        t.musicbrainz_recording_id.clone().unwrap_or_default(),
+    );
+    push(
+        &musicbrainz_track_text,
+        t.musicbrainz_track_id.clone().unwrap_or_default(),
+    );
+    push(&path_text, t.id.uid());
 
     let input_class = "w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-white/20";
 

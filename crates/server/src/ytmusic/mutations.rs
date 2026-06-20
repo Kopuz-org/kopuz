@@ -10,7 +10,8 @@ async fn post(endpoint: &str, body: Value, cookies: &str) -> Result<Value, Strin
     let client = WEB_REMIX;
     let auth =
         sapisid_hash(cookies, ORIGIN_YOUTUBE_MUSIC).ok_or_else(|| "SAPISID missing".to_string())?;
-    let resp = super::innertube::http_client().clone()
+    let resp = super::innertube::http_client()
+        .clone()
         .post(format!(
             "{ORIGIN_YOUTUBE_MUSIC}/youtubei/v1/{endpoint}?prettyPrint=false"
         ))
@@ -47,6 +48,7 @@ fn ytmusic_context() -> Value {
 }
 
 /// Add a video to the user's Liked Music auto-playlist.
+#[tracing::instrument(name = "yt.like", skip(cookies), fields(video_id = %video_id))]
 pub async fn like_video(video_id: &str, cookies: &str) -> Result<(), String> {
     let body = json!({
         "context": { "client": ytmusic_context()["client"], "user": { "lockedSafetyMode": false } },
@@ -56,6 +58,7 @@ pub async fn like_video(video_id: &str, cookies: &str) -> Result<(), String> {
 }
 
 /// Remove a video from the user's Liked Music auto-playlist (unlike).
+#[tracing::instrument(name = "yt.unlike", skip(cookies), fields(video_id = %video_id))]
 pub async fn unlike_video(video_id: &str, cookies: &str) -> Result<(), String> {
     let body = json!({
         "context": { "client": ytmusic_context()["client"], "user": { "lockedSafetyMode": false } },
@@ -66,6 +69,7 @@ pub async fn unlike_video(video_id: &str, cookies: &str) -> Result<(), String> {
 
 /// Add a video to a user playlist. `playlist_id` is the bare ID (no `VL`
 /// prefix); `video_id` is the YT video ID.
+#[tracing::instrument(name = "yt.playlist_add", skip(cookies), fields(playlist_id = %playlist_id, video_id = %video_id))]
 pub async fn add_to_playlist(
     playlist_id: &str,
     video_id: &str,
@@ -79,12 +83,15 @@ pub async fn add_to_playlist(
             "addedVideoId": video_id,
         }],
     });
-    post("browse/edit_playlist", body, cookies).await.map(|_| ())
+    post("browse/edit_playlist", body, cookies)
+        .await
+        .map(|_| ())
 }
 
 /// Remove a video from a user playlist by video ID. (YT's API also
 /// supports remove-by-setVideoId for repeats; we use the simpler
 /// by-video-ID form which removes the first occurrence.)
+#[tracing::instrument(name = "yt.playlist_remove", skip(cookies), fields(playlist_id = %playlist_id, video_id = %video_id))]
 pub async fn remove_from_playlist(
     playlist_id: &str,
     video_id: &str,
@@ -98,20 +105,22 @@ pub async fn remove_from_playlist(
             "removedVideoId": video_id,
         }],
     });
-    post("browse/edit_playlist", body, cookies).await.map(|_| ())
+    post("browse/edit_playlist", body, cookies)
+        .await
+        .map(|_| ())
 }
 
 /// Create a new playlist with an optional initial set of video IDs.
+#[tracing::instrument(name = "yt.playlist_create", skip(cookies, video_ids), fields(title = %title, count = video_ids.len()))]
 pub async fn create_playlist(
     title: &str,
-    description: &str,
     video_ids: &[&str],
     cookies: &str,
 ) -> Result<String, String> {
     let body = json!({
         "context": { "client": ytmusic_context()["client"], "user": { "lockedSafetyMode": false } },
         "title": title,
-        "description": description,
+        "description": "",
         "privacyStatus": "PRIVATE",
         "videoIds": video_ids,
     });

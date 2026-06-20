@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT version, queue_json, current_queue_index, progress_secs, shuffle_order_json, shuffle_enabled FROM queue_state WHERE id = 1",
+  "describe": {
+    "columns": [
+      {
+        "name": "version",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "queue_json",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "current_queue_index",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "progress_secs",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "shuffle_order_json",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "shuffle_enabled",
+        "ordinal": 5,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4a005a676d8a0b9b9be039f29501f1b88f14b51a6c4fc2d6490dc9a82e5a8302"
+}

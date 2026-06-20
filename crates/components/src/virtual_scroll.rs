@@ -75,6 +75,25 @@ pub fn VirtualScrollView(
     #[props(default)] on_mouse_move: Option<EventHandler<MouseEvent>>,
     #[props(default)] bottom_content: Option<Element>,
 ) -> Element {
+    // The mount-time restore below can race the async row count: at mount the
+    // list height is ~0, so the browser clamps scrollTop to 0, and once the
+    // spacer grows the viewport sits on a blank pad. Re-apply the restore once
+    // when the spacer-driving pads first become non-zero.
+    let mut mounted = use_signal(|| false);
+    let mut restored = use_signal(|| false);
+    let pad_total = use_memo(use_reactive!(|(top_pad, bottom_pad)| top_pad + bottom_pad));
+    let id_for_restore = id.clone();
+    use_effect(move || {
+        let pads = pad_total();
+        if saved_scroll > 0.0 && pads > 0.0 && *mounted.read() && !*restored.peek() {
+            restored.set(true);
+            let safe_id = id_for_restore.replace('\\', "\\\\").replace('\'', "\\'");
+            let _ = dioxus::document::eval(&format!(
+                "let el = document.getElementById('{}'); if (el) el.scrollTop = {};",
+                safe_id, saved_scroll
+            ));
+        }
+    });
     rsx! {
         div {
             id: "{id}",
@@ -92,6 +111,7 @@ pub fn VirtualScrollView(
                         safe_id, saved_scroll
                     ));
                 }
+                mounted.set(true);
             },
             onscroll: move |event| {
                 let new_scroll = event.scroll_top();

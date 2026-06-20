@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "radyo7",
+  "name": "Radyo 7",
+  "description": "Radyo 7 Canlı Yayın",
+  "icon": "fa-solid fa-radio",
+  "streams": [
+    { "id": "main", "name": "Canlı Yayın", "url": "http://46.20.3.250/;stream", "icon": "fa-solid fa-play" }
+  ],
+  "metadata": { "type": "static", "title": "Radyo 7", "artist": "Canlı Yayın" }
+}

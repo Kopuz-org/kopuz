@@ -1,6 +1,5 @@
-use config::MusicSource;
 #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
-use dioxus::desktop::use_window;
+use dioxus::desktop::window;
 use dioxus::prelude::*;
 use kopuz_route::Route;
 
@@ -232,24 +231,10 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
     let is_rtl = i18n::is_rtl();
     let border_side = if is_rtl { "border-l" } else { "border-r" };
 
-    let is_server = config.read().active_source == MusicSource::Server;
-    let local_class = if !is_server {
-        "text-white"
-    } else {
-        "text-slate-500 hover:text-slate-300"
-    };
-    let server_class = if is_server {
-        "text-white"
-    } else {
-        "text-slate-500 hover:text-slate-300"
-    };
-    let slider_style = match (is_rtl, is_server) {
-        (false, false) => "left: 4px; width: calc(50% - 4px);",
-        (false, true) => "left: calc(50% + 2px); width: calc(50% - 4px);",
-        (true, false) => "right: 4px; width: calc(50% - 4px);",
-        (true, true) => "right: calc(50% + 2px); width: calc(50% - 4px);",
-    };
-
+    // Discover is a capability of the active source (YT), not a config flag —
+    // hide the tab when the active source has no discover surface.
+    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+    let has_discover = use_memo(move || active_source.read().capabilities().discover);
     let ordered_items: Vec<SidebarItem> = {
         let order = config.read().sidebar_order.clone();
         let mut items: Vec<SidebarItem> = order
@@ -261,6 +246,7 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
                 items.push(item.clone());
             }
         }
+        items.retain(|item| item.route != Route::Discover || has_discover());
         items
     };
 
@@ -327,7 +313,7 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
                     class: "absolute top-0 left-0 w-full h-10 z-50",
                     onmousedown: move |_| {
                         #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
-                        use_window().drag();
+                        window().drag();
                     }
                 }
             }
@@ -336,33 +322,9 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
                 class: "flex-1 flex flex-col overflow-y-auto overflow-x-hidden pt-2",
 
                 if !*is_collapsed.read() && !cfg!(target_arch = "wasm32") && config.read().show_source_toggle {
-                    div {
-                        class: "px-4 mb-6",
-                        div {
-                            class: "bg-white/5 p-1 rounded-xl flex relative h-10 items-center border border-white/5",
-                            div {
-                                class: "absolute h-8 bg-white/10 rounded-lg transition-all duration-300 ease-out",
-                                style: "{slider_style}"
-                            }
-                            button {
-                                class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 {local_class}",
-                                onclick: move |_| {
-                                    let mut cfg = config.write();
-                                    cfg.active_source = MusicSource::Local;
-                                    cfg.source_explicitly_set = true;
-                                },
-                                "{i18n::t(\"local\").to_uppercase()}"
-                            }
-                            button {
-                                class: "flex-1 text-[11px] font-bold z-10 transition-colors duration-300 {server_class}",
-                                onclick: move |_| {
-                                    let mut cfg = config.write();
-                                    cfg.active_source = MusicSource::Server;
-                                    cfg.source_explicitly_set = true;
-                                },
-                                "{i18n::t(\"server\").to_uppercase()}"
-                            }
-                        }
+                    crate::source_switcher::SourceSwitcher {
+                        config,
+                        on_manage: move |_| props.on_navigate.call(Route::Settings),
                     }
                 }
 

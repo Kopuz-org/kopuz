@@ -21,6 +21,7 @@ pub fn AddServerPopup(
         MusicService::Subsonic => "subsonic",
         MusicService::Custom => "custom",
         MusicService::YtMusic => "ytmusic",
+        MusicService::SoundCloud => "soundcloud",
     };
 
     let server_name_optional = i18n::t("server_name_optional").to_string();
@@ -65,6 +66,7 @@ pub fn AddServerPopup(
                             "subsonic" => MusicService::Subsonic,
                             "custom" => MusicService::Custom,
                             "ytmusic" => MusicService::YtMusic,
+                            "soundcloud" => MusicService::SoundCloud,
                             _ => MusicService::Jellyfin,
                         };
                         server_service.set(service);
@@ -89,6 +91,11 @@ pub fn AddServerPopup(
                         value: "ytmusic",
                         selected: server_service() == MusicService::YtMusic,
                         "YouTube Music"
+                    }
+                    option {
+                        value: "soundcloud",
+                        selected: server_service() == MusicService::SoundCloud,
+                        "SoundCloud"
                     }
                 }
 
@@ -299,7 +306,28 @@ fn ServerServiceFields(
                         }
                     }
                 }
-
+            }
+        }
+        MusicService::SoundCloud => rsx! {
+            // SoundCloud is browser sign-in only (no URL); pick the browser for
+            // the isolated sign-in window.
+            p { class: "text-xs text-white/60",
+                "Pick which browser kopuz should use for the SoundCloud sign-in window. It opens in an isolated profile (a fresh, separate session) — your normal browsing is untouched. Make sure the browser is installed."
+            }
+            select {
+                onchange: move |e| {
+                    if let Some(b) = Browser::from_id(&e.value()) {
+                        yt_browser.set(b);
+                    }
+                },
+                onkeydown: move |e| e.stop_propagation(),
+                for browser in Browser::ALL.iter().copied() {
+                    option {
+                        value: "{browser.id()}",
+                        selected: yt_browser() == browser,
+                        "{browser.label()}"
+                    }
+                }
             }
         },
         _ => rsx! {

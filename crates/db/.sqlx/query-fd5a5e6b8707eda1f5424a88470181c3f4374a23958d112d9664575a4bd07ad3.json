@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM favorites WHERE server_id = ?1 AND dirty = 0 AND epoch != ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "fd5a5e6b8707eda1f5424a88470181c3f4374a23958d112d9664575a4bd07ad3"
+}

@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use reader::models::Track;
 use serde_json::{Value, json};
 
@@ -53,10 +51,8 @@ struct ParsedRow {
     thumbnail_url: Option<String>,
 }
 
-pub async fn music_search_tracks(
-    query: &str,
-    cookies: Option<&str>,
-) -> Result<Vec<Track>, String> {
+#[tracing::instrument(name = "yt.search", skip(cookies), fields(query = %query))]
+pub async fn music_search_tracks(query: &str, cookies: Option<&str>) -> Result<Vec<Track>, String> {
     let http = super::innertube::http_client();
     let (top, songs, videos) = tokio::join!(
         do_search(http, query, None, cookies),
@@ -100,6 +96,7 @@ pub async fn music_search_tracks(
 /// Powers the artist page when navigation only had a name (track row
 /// click, sidebar tag, etc.) and the YT backend is active. Returns
 /// None if the search returned no artist row at all.
+#[tracing::instrument(name = "yt.resolve_artist", skip(cookies), fields(query = %query))]
 pub async fn resolve_artist_channel_id(
     query: &str,
     cookies: Option<&str>,
@@ -155,10 +152,14 @@ async fn do_search_raw(
         "query": query,
     });
     if let Some(p) = params {
-        body.as_object_mut().unwrap().insert("params".into(), json!(p));
+        body.as_object_mut()
+            .unwrap()
+            .insert("params".into(), json!(p));
     }
     let mut req = http
-        .post(format!("{ORIGIN_YT_MUSIC}/youtubei/v1/search?prettyPrint=false"))
+        .post(format!(
+            "{ORIGIN_YT_MUSIC}/youtubei/v1/search?prettyPrint=false"
+        ))
         .header("Content-Type", "application/json")
         .header("X-YouTube-Client-Name", client.client_id)
         .header("X-YouTube-Client-Version", client.client_version)
@@ -236,17 +237,15 @@ fn walk_tracks(resp: &Value) -> Vec<Track> {
 }
 
 fn track_id(t: &Track) -> String {
-    t.path
-        .to_string_lossy()
-        .split(':')
-        .nth(1)
-        .unwrap_or("")
-        .to_string()
+    t.id.key().into_owned()
 }
 
 fn parse_card_shelf(card: &Value) -> Option<ParsedRow> {
     let endpoint = card.pointer("/onTap/watchEndpoint")?;
-    let video_id = endpoint.get("videoId").and_then(|v| v.as_str())?.to_string();
+    let video_id = endpoint
+        .get("videoId")
+        .and_then(|v| v.as_str())?
+        .to_string();
     let mvt = endpoint
         .pointer("/watchEndpointMusicSupportedConfigs/watchEndpointMusicConfig/musicVideoType")
         .and_then(|v| v.as_str())
@@ -286,7 +285,10 @@ fn parse_card_shelf(card: &Value) -> Option<ParsedRow> {
     let thumbnail_url = card
         .pointer("/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails")
         .and_then(|v| v.as_array())
-        .and_then(|arr| arr.iter().max_by_key(|t| t.get("width").and_then(|v| v.as_u64()).unwrap_or(0)))
+        .and_then(|arr| {
+            arr.iter()
+                .max_by_key(|t| t.get("width").and_then(|v| v.as_u64()).unwrap_or(0))
+        })
         .and_then(|t| t.get("url"))
         .and_then(|u| u.as_str())
         .map(normalize_yt_thumbnail);
@@ -321,7 +323,13 @@ fn parse_row(item: &Value) -> Option<ParsedRow> {
     // " • " runs. The shapes are visually distinct in the JSON so we
     // dispatch on presence, not on guesswork.
     if row.get("fixedColumns").is_some() {
-        Some(parse_playlist_track(row, video_id, title, mvt, thumbnail_url))
+        Some(parse_playlist_track(
+            row,
+            video_id,
+            title,
+            mvt,
+            thumbnail_url,
+        ))
     } else {
         Some(parse_search_row(row, video_id, title, mvt, thumbnail_url))
     }
@@ -385,11 +393,7 @@ fn parse_search_row(
     // duration is always last; the slot before it is album OR view-count
     // depending on mvt. We dispatch on mvt — no view-count text sniffing.
     let mut tokens = pick_all_runs(row, 1);
-    let duration = tokens
-        .pop()
-        .as_deref()
-        .and_then(parse_mm_ss)
-        .unwrap_or(0);
+    let duration = tokens.pop().as_deref().and_then(parse_mm_ss).unwrap_or(0);
     let second_last = tokens.pop();
     let (album, artists) = if mvt.has_album() {
         let album = second_last.filter(|s| !s.is_empty());
@@ -418,17 +422,11 @@ fn parsed_to_track(p: ParsedRow) -> Track {
         Some(id) => format!("{SOURCE_PREFIX}:album:{id}"),
         None => synthesize_album_id(&album, &primary_artist),
     };
-    let path = match p.thumbnail_url {
-        Some(ref url) if !url.is_empty() => PathBuf::from(format!(
-            "{SOURCE_PREFIX}:{}:{}",
-            p.video_id,
-            encode_url_tag(url)
-        )),
-        _ => PathBuf::from(format!("{SOURCE_PREFIX}:{}", p.video_id)),
-    };
+    let cover = p.thumbnail_url.filter(|u| !u.is_empty());
 
     Track {
-        path,
+        id: super::yt_id(p.video_id),
+        cover,
         album_id,
         title: p.title,
         artist: primary_artist,
@@ -450,7 +448,11 @@ fn pick_run(row: &Value, col: usize, run: usize) -> String {
     row.get("flexColumns")
         .and_then(|c| c.as_array())
         .and_then(|cs| cs.get(col))
-        .and_then(|c| c.pointer(&format!("/musicResponsiveListItemFlexColumnRenderer/text/runs/{run}/text")))
+        .and_then(|c| {
+            c.pointer(&format!(
+                "/musicResponsiveListItemFlexColumnRenderer/text/runs/{run}/text"
+            ))
+        })
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string()
@@ -625,10 +627,6 @@ fn normalize_yt_thumbnail(url: &str) -> String {
         return format!("{}=w544-h544-l90-rj", &url[..idx]);
     }
     url.to_string()
-}
-
-pub(crate) fn encode_url_tag(url: &str) -> String {
-    format!("urlhex_{}", hex::encode(url.as_bytes()))
 }
 
 pub(crate) fn synthesize_album_id(album: &str, artist: &str) -> String {

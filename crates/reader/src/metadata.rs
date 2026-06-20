@@ -1,4 +1,4 @@
-use super::models::{Album, CoverChange, Library, Track, TrackEdits};
+use super::models::{Album, CoverChange, Library, Track, TrackEdits, TrackId};
 use super::utils::{find_folder_cover, save_cover};
 use lofty::file::TaggedFileExt;
 use lofty::picture::{Picture, PictureType};
@@ -133,7 +133,8 @@ pub fn extract_metadata(
     let bitrate_kbps = ((file_size * 8) / duration_secs / 1000).min(u16::MAX as u64) as u16;
 
     Track {
-        path: track_path.to_path_buf(),
+        id: TrackId::Local(track_path.to_path_buf()),
+        cover: None,
         album_id: make_album_id(album_title.as_deref().unwrap_or(""), grouping_key),
         title,
         artist,
@@ -303,8 +304,7 @@ pub fn write_tags(track_path: &Path, edits: &TrackEdits) -> Result<(), String> {
             }
         }
         CoverChange::Set(bytes) => {
-            let mut picture =
-                Picture::from_reader(&mut &bytes[..]).map_err(|e| e.to_string())?;
+            let mut picture = Picture::from_reader(&mut &bytes[..]).map_err(|e| e.to_string())?;
             picture.set_pic_type(PictureType::CoverFront);
             while !tag.pictures().is_empty() {
                 tag.remove_picture(0);
@@ -408,7 +408,13 @@ fn read_with_symphonia(
         if let Some(track_info) = format
             .tracks()
             .iter()
-            .find(|track| track.codec_params.as_ref().and_then(|p| p.audio()).is_some())
+            .find(|track| {
+                track
+                    .codec_params
+                    .as_ref()
+                    .and_then(|p| p.audio())
+                    .is_some()
+            })
             .or_else(|| format.tracks().first())
         {
             if let Some(audio) = track_info.codec_params.as_ref().and_then(|p| p.audio()) {
@@ -447,14 +453,18 @@ fn read_with_symphonia(
         .or(parent_path.as_deref())
         .unwrap_or(&artist);
 
-    let title = find_symphonia_tag(&tags, |t| matches!(t, StandardTag::TrackTitle(_)), &["TITLE"])
-        .and_then(symphonia_tag_to_string)
-        .or_else(|| {
-            track_path
-                .file_stem()
-                .map(|stem| stem.to_string_lossy().into_owned())
-        })
-        .unwrap_or_else(|| "Unknown Title".to_string());
+    let title = find_symphonia_tag(
+        &tags,
+        |t| matches!(t, StandardTag::TrackTitle(_)),
+        &["TITLE"],
+    )
+    .and_then(symphonia_tag_to_string)
+    .or_else(|| {
+        track_path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+    })
+    .unwrap_or_else(|| "Unknown Title".to_string());
 
     let bitrate_kbps = (file_size * 8)
         .checked_div(duration)
@@ -462,7 +472,8 @@ fn read_with_symphonia(
         .unwrap_or(0);
 
     let track = Track {
-        path: track_path.to_path_buf(),
+        id: TrackId::Local(track_path.to_path_buf()),
+        cover: None,
         album_id: make_album_id(album_title.as_deref().unwrap_or(""), grouping_key),
         title,
         artist: artist.clone(),
@@ -538,8 +549,8 @@ fn read_with_symphonia(
             &["DATE", "YEAR"],
         )
         .and_then(symphonia_tag_to_string)
-            .and_then(|value| value.get(..4).and_then(|prefix| prefix.parse::<u16>().ok()))
-            .unwrap_or(0);
+        .and_then(|value| value.get(..4).and_then(|prefix| prefix.parse::<u16>().ok()))
+        .unwrap_or(0);
 
         library.add_album(Album {
             id: album_id.clone(),

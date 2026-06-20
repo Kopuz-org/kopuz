@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT MAX(position) AS \"m?: i64\" FROM playlist_tracks WHERE playlist_pk = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "m?: i64",
+        "ordinal": 0,
+        "type_info": "Null"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "a987059cf5b971e2b7abd81bab7dde2bb624684749290c371b615eb409ba7af3"
+}

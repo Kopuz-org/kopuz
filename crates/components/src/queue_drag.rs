@@ -157,10 +157,8 @@ pub fn handle_select_click(
     is_selection_mode: bool,
     on_select: Option<EventHandler<bool>>,
 ) {
-    if is_selection_mode {
-        if let Some(handler) = on_select {
-            handler.call(!is_selected);
-        }
+    if is_selection_mode && let Some(handler) = on_select {
+        handler.call(!is_selected);
     }
 }
 

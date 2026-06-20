@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "id": "radyo7_nostalji",
+  "name": "Radyo 7 Nostalji",
+  "description": "Radyo 7 Nostalji - Eski Türk Müziği",
+  "icon": "fa-solid fa-radio",
+  "streams": [
+    { "id": "main", "name": "Canlı Yayın", "url": "http://37.247.98.8/stream/24/", "icon": "fa-solid fa-play" }
+  ],
+  "metadata": { "type": "static", "title": "Radyo 7 Nostalji", "artist": "Canlı Yayın" }
+}

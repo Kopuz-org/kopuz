@@ -17,6 +17,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::Value;
 use tokio::sync::OnceCell;
+use tracing::Instrument;
 
 use super::botguard;
 use super::clients::{ANDROID_VR_1_61_48, STREAM_FALLBACK_CLIENTS, WEB_REMIX, YouTubeClient};
@@ -60,6 +61,12 @@ pub struct YtStreamInfo {
     pub bitrate: Option<u32>,
     /// YouTube format id of the chosen stream.
     pub itag: Option<u32>,
+    /// Whether arbitrary HTTP range requests are safe on this URL. False for
+    /// the no-pot decipher fallback: googlevideo 403s deep ranges without a
+    /// content pot, and symphonia's probe reads the webm tail (Cues) before
+    /// playing — a range-backed source would fail outright instead of playing
+    /// sequentially (issue #386).
+    pub range_safe: bool,
 }
 
 /// Process-wide anonymous visitor_data cache (the ANDROID_VR + pot path).
@@ -76,6 +83,7 @@ async fn visitor_data(cookies: Option<&str>) -> Result<&'static str, String> {
 /// Resolve a YT video to a playable stream. Premium (cookies) → decipher;
 /// anonymous → ANDROID_VR + a webview-minted content pot; last resort →
 /// ANDROID_VR bare.
+#[tracing::instrument(name = "yt.resolve", skip(cookies), fields(video_id = %video_id, anon = cookies.is_none()))]
 pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamInfo, String> {
     // A Premium *subscription* — not merely being signed in — is what exempts a
     // stream from a PO token. The signal is the itag: subscribers get 774-class
@@ -89,6 +97,9 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
     let mut decipher_fallback: Option<YtStreamInfo> = None;
     if let Some(c) = cookies {
         let uid = super::derive_user_id(c);
+        if let Some(u) = &uid {
+            seed_tier_from_db(u).await;
+        }
         // Skip the Premium decipher attempt for accounts already known to be
         // non-Premium — but only when a pot can actually be minted (the decipher
         // stream is our fallback when it can't). Saves a /player round-trip per
@@ -106,21 +117,17 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
                     if let Some(u) = &uid {
                         remember_tier(u, false);
                     }
-                    eprintln!(
-                        "[yt-player] {video_id} signed-in but non-Premium (itag={:?}) — needs a content pot, trying ANDROID_VR",
-                        info.itag
-                    );
+                    tracing::debug!(itag = ?info.itag, "signed-in but non-Premium — needs a content pot, trying ANDROID_VR");
                     decipher_fallback = Some(info);
                 }
-                Err(e) => eprintln!("[yt-player] decipher failed ({e}) — falling back"),
+                Err(e) => tracing::debug!(error = %e, "premium decipher failed — falling back"),
             }
         }
     }
 
     // Anonymous: ANDROID_VR + content_pot. Mint + visitor_data in parallel.
     let mut last_err = {
-        let (pot, visitor) =
-            tokio::join!(botguard::mint_content_pot(video_id), visitor_data(None));
+        let (pot, visitor) = tokio::join!(botguard::mint_content_pot(video_id), visitor_data(None));
         match (pot, visitor) {
             (Ok(pot), Ok(visitor)) => {
                 let extras = PlayerExtras {
@@ -151,10 +158,14 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
             (_, Err(e)) => format!("visitor_data: {e}"),
         }
     };
-    eprintln!("[yt-player] ANDROID_VR+pot failed ({last_err}) — trying bare clients");
+    tracing::debug!(%last_err, "ANDROID_VR+pot failed — trying bare clients");
 
     for client in STREAM_FALLBACK_CLIENTS {
-        let cookies_for = if client.login_supported { cookies } else { None };
+        let cookies_for = if client.login_supported {
+            cookies
+        } else {
+            None
+        };
         match innertube::player(*client, video_id, cookies_for, PlayerExtras::default()).await {
             Ok(json) => {
                 let status = PlayabilityStatus::from_response(&json);
@@ -175,10 +186,12 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
             Err(e) => last_err = format!("{}: {e}", client.client_name),
         }
     }
-    if let Some(info) = decipher_fallback {
-        eprintln!(
-            "[yt-player] {video_id} no content pot available (minter not running?) — using the non-Premium decipher stream; deep seeks may 403"
+    if let Some(mut info) = decipher_fallback {
+        tracing::warn!(
+            "no content pot available (minter not running?) — using the non-Premium decipher \
+             stream sequentially (range requests 403 without a pot, so seeking is disabled)"
         );
+        info.range_safe = false;
         return Ok(info);
     }
     Err(format!("all stream paths failed; last error: {last_err}"))
@@ -188,16 +201,41 @@ pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamIn
 /// lesser itag (251, etc.) — even from a signed-in account — needs a content
 /// pot for deep ranges, exactly like anonymous.
 fn is_premium_itag(itag: Option<u32>) -> bool {
-    matches!(itag, Some(774))
+    // Formats only a paid subscription unlocks: 774 (Opus ~256k), 141 (AAC
+    // 256k), 256/258 (AAC 192/384k). A free/anon account never sees these — it
+    // caps at 251/140 (~128k) — so any of them proves the account is Premium
+    // and the deciphered stream is served directly, no content pot. Only the
+    // free-tier itags fall through to the ANDROID_VR + pot path. (Crucially:
+    // without 141 here, a Premium user playing a video that has no Opus format
+    // gets mis-tagged as free, poisoning the per-account tier cache — and with
+    // a flaky minter that breaks playback for the whole 5-min TTL window.)
+    matches!(itag, Some(774 | 141 | 256 | 258))
 }
 
-/// Premium-tier memo, keyed by Google user id (so switching accounts re-learns).
+/// Premium-tier memo, keyed by Google user id (so switching accounts re-learns)
+/// and PERSISTED through the metadata cache so a restart doesn't re-probe.
 /// Lets us skip the redundant Premium decipher attempt for accounts already
-/// known to be non-Premium. The "free" verdict carries a timestamp and expires
-/// so that an account upgraded free→Premium (same id, no re-sign-in) is
-/// re-checked rather than pinned to ANDROID_VR for the session.
+/// known to be non-Premium.
+///
+/// Trust is asymmetric, because the free signal is weak: ONE non-premium itag
+/// can mean a free account — but also a track with no premium encodes, or a
+/// /player response served unauthenticated by a transient cookie hiccup. So a
+/// premium verdict survives contradictions (a real downgrade just costs one
+/// extra /player attempt per track until tiers re-learn at sign-in), and the
+/// free pin is short — a mis-pinned Premium account recovers in minutes,
+/// while a truly free account merely re-pays one probe per window.
 static ACCOUNT_PREMIUM: OnceLock<Mutex<HashMap<String, (Instant, bool)>>> = OnceLock::new();
-const TIER_TTL: Duration = Duration::from_secs(5 * 60);
+static TIER_DB: OnceLock<db::Db> = OnceLock::new();
+const FREE_TIER_TTL: Duration = Duration::from_secs(30 * 60);
+// v2: "yt_tier" rows were poisoned by the 774-only is_premium_itag (a Premium
+// account deciphering an AAC-only track got a persisted "free" verdict, pinning
+// it to anonymous 251 for a day). New kind orphans those rows.
+const TIER_META_KIND: &str = "yt_tier_v2";
+
+/// Register the database used to persist account tiers. Called once at startup.
+pub fn init_tier_store(handle: db::Db) {
+    let _ = TIER_DB.set(handle);
+}
 
 fn account_premium() -> &'static Mutex<HashMap<String, (Instant, bool)>> {
     ACCOUNT_PREMIUM.get_or_init(|| Mutex::new(HashMap::new()))
@@ -206,13 +244,79 @@ fn account_premium() -> &'static Mutex<HashMap<String, (Instant, bool)>> {
 fn known_non_premium(user_id: &str) -> bool {
     matches!(
         account_premium().lock().ok().and_then(|m| m.get(user_id).copied()),
-        Some((at, false)) if at.elapsed() < TIER_TTL
+        Some((at, false)) if at.elapsed() < FREE_TIER_TTL
     )
 }
 
+/// Warm the in-memory memo from the persisted tier, if this account hasn't been
+/// seen this session. `"premium:<ts>"` seeds fresh; `"free:<ts>"` seeds with its
+/// real age so the daily re-check still happens on schedule.
+async fn seed_tier_from_db(user_id: &str) {
+    {
+        let Ok(m) = account_premium().lock() else {
+            return;
+        };
+        if m.contains_key(user_id) {
+            return;
+        }
+    }
+    let Some(handle) = TIER_DB.get() else { return };
+    let Ok(Some(payload)) = handle.meta_get(user_id, TIER_META_KIND).await else {
+        return;
+    };
+    let (verdict, ts) = match payload.split_once(':') {
+        Some((v, t)) => (v.to_string(), t.parse::<u64>().unwrap_or(0)),
+        None => (payload, 0),
+    };
+    let premium = verdict == "premium";
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let age = Duration::from_secs(now.saturating_sub(ts));
+    if !premium && age >= FREE_TIER_TTL {
+        return; // stale free verdict — let the probe re-learn
+    }
+    let seeded_at = Instant::now().checked_sub(age).unwrap_or_else(Instant::now);
+    if let Ok(mut m) = account_premium().lock() {
+        m.entry(user_id.to_string()).or_insert((seeded_at, premium));
+    }
+}
+
 fn remember_tier(user_id: &str, premium: bool) {
+    if !premium {
+        // Asymmetric trust (see ACCOUNT_PREMIUM): a known-premium account is
+        // never downgraded by a single non-premium itag — the track may just
+        // lack premium encodes. The pot path still serves THIS stream fine.
+        let was_premium = account_premium()
+            .lock()
+            .ok()
+            .and_then(|m| m.get(user_id).map(|(_, p)| *p))
+            .unwrap_or(false);
+        if was_premium {
+            tracing::info!(
+                "yt: non-premium itag from a known-Premium account — keeping the premium verdict (track without premium encodes, or a transient auth hiccup)"
+            );
+            return;
+        }
+    }
     if let Ok(mut m) = account_premium().lock() {
         m.insert(user_id.to_string(), (Instant::now(), premium));
+    }
+    if let Some(handle) = TIER_DB.get() {
+        let handle = handle.clone();
+        let uid = user_id.to_string();
+        tokio::spawn(
+            async move {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let payload = format!("{}:{now}", if premium { "premium" } else { "free" });
+                let _ = handle.meta_put(&uid, TIER_META_KIND, &payload).await;
+            }
+            .instrument(tracing::info_span!("yt.tier_persist")),
+        );
     }
 }
 
@@ -311,12 +415,7 @@ fn pick_plain_format(json: &Value, client: YouTubeClient) -> Option<YtStreamInfo
         .pointer("/videoDetails/videoId")
         .and_then(|v| v.as_str())
         .unwrap_or("?");
-    eprintln!(
-        "[yt-player] resolved {vid} itag={} {} kbps {mime} via {} (plain)",
-        itag.unwrap_or(0),
-        bitrate / 1000,
-        client.client_name
-    );
+    tracing::info!(video_id = %vid, itag = itag.unwrap_or(0), kbps = bitrate / 1000, mime, client = client.client_name, "stream resolved (plain)");
     // `contentLength` ships as a numeric string in adaptiveFormats.
     let content_length = fmt
         .get("contentLength")
@@ -341,6 +440,7 @@ fn pick_plain_format(json: &Value, client: YouTubeClient) -> Option<YtStreamInfo
         duration_secs,
         bitrate: Some(bitrate as u32),
         itag,
+        range_safe: true,
     })
 }
 
@@ -383,18 +483,16 @@ fn stream_info_from(
                 .and_then(|s| s.parse::<u64>().ok())
                 .map(|ms| (ms + 500) / 1000)
         });
-    let bitrate = fmt.get("bitrate").and_then(|v| v.as_u64()).map(|v| v as u32);
+    let bitrate = fmt
+        .get("bitrate")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as u32);
     let itag = fmt.get("itag").and_then(|v| v.as_u64()).map(|v| v as u32);
     let vid = json
         .pointer("/videoDetails/videoId")
         .and_then(|v| v.as_str())
         .unwrap_or("?");
-    eprintln!(
-        "[yt-player] resolved {vid} itag={} {} kbps {mime} via {} (decipher)",
-        itag.unwrap_or(0),
-        bitrate.unwrap_or(0) / 1000,
-        client.client_name
-    );
+    tracing::info!(video_id = %vid, itag = itag.unwrap_or(0), kbps = bitrate.unwrap_or(0) / 1000, mime, client = client.client_name, "stream resolved (decipher)");
     Some(YtStreamInfo {
         url,
         format,
@@ -403,6 +501,7 @@ fn stream_info_from(
         duration_secs,
         bitrate,
         itag,
+        range_safe: true,
     })
 }
 
@@ -472,8 +571,11 @@ mod tests {
     /// `YtStreamInfo` the player controller stamps onto the bottom bar.
     #[tokio::test]
     #[ignore = "hits live YouTube + needs a system JS runtime"]
+    #[expect(clippy::print_stderr, reason = "test diagnostic output")]
     async fn resolve_populates_bitrate_itag_duration() {
-        let info = resolve("dQw4w9WgXcQ", None).await.expect("resolve should succeed");
+        let info = resolve("dQw4w9WgXcQ", None)
+            .await
+            .expect("resolve should succeed");
         eprintln!(
             "[test] resolved itag={:?} bitrate={:?} kbps duration={:?}s",
             info.itag,
