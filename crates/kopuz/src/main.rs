@@ -2334,7 +2334,7 @@ fn App() -> Element {
         document::Style { {TAILWIND_CSS} }
         document::Style { {REDUCED_ANIMATIONS_CSS} }
         WindowsToolbarIconAssets {}
-        // Fonts are vendored offline (packaging/scripts/vendor-fonts.py) and the
+        // Fonts are vendored offline (scripts/vendor-fonts.nu) and the
         // woff2 are inlined as data: URIs by build.rs, so they load with a bare
         // `cargo run` on any OS with no CDN dependency at runtime. Inlined as
         // Style rather than a Script so they're re-render-safe (a Script warns

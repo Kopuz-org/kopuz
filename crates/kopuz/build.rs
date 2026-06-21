@@ -68,7 +68,7 @@ fn warn(msg: &str) {
 /// straight into the binary — styling works under a bare `cargo run` on any OS
 /// (no CDN, no asset collection, no path resolution). The committed CSS keeps
 /// readable `url(fonts/NAME.woff2)` refs; the woff2 live in `assets/fonts/`.
-/// Regenerate the inputs with `packaging/scripts/vendor-fonts.py`.
+/// Regenerate the inputs with `nu scripts/vendor-fonts.nu`.
 fn embed_fonts(crate_dir: &Path) {
     let assets = crate_dir.join("assets");
     let fonts = assets.join("fonts");
