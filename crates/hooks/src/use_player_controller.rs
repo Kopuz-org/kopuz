@@ -1505,7 +1505,8 @@ impl PlayerController {
                                     if let Some(ref mbid) = scrobble_track.musicbrainz_release_id {
                                         map.insert("release_mbid", mbid.as_str());
                                     }
-                                    if let Some(ref mbid) = scrobble_track.musicbrainz_recording_id {
+                                    if let Some(ref mbid) = scrobble_track.musicbrainz_recording_id
+                                    {
                                         map.insert("recording_mbid", mbid.as_str());
                                     }
                                     if let Some(ref mbid) = scrobble_track.musicbrainz_track_id {
@@ -1722,7 +1723,10 @@ impl PlayerController {
                                                 )
                                             }
                                             Err(e) => {
-                                                tracing::warn!("MusicBrainz scrobble failed: {}", e);
+                                                tracing::warn!(
+                                                    "MusicBrainz scrobble failed: {}",
+                                                    e
+                                                );
                                                 if scrobble::queue::is_transient(&e)
                                                     && let Some(qp) = &queue_path
                                                 {
@@ -2265,14 +2269,15 @@ pub fn use_player_controller(
         let creds = {
             let cfg = config.peek();
             scrobble::queue::Credentials {
-                lastfm: (!cfg.lastfm_api_key.is_empty() && !cfg.lastfm_api_secret.is_empty())
-                    .then(|| {
+                lastfm: (!cfg.lastfm_api_key.is_empty() && !cfg.lastfm_api_secret.is_empty()).then(
+                    || {
                         (
                             cfg.lastfm_api_key.clone(),
                             cfg.lastfm_api_secret.clone(),
                             cfg.lastfm_session_key.clone(),
                         )
-                    }),
+                    },
+                ),
                 librefm_session_key: (!cfg.librefm_session_key.is_empty())
                     .then(|| cfg.librefm_session_key.clone()),
                 listenbrainz_token: (!cfg.musicbrainz_token.is_empty())
