@@ -1222,8 +1222,8 @@ mod tests {
         use lofty::probe::Probe;
         use lofty::tag::Accessor;
 
-        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../reader/tests/fixtures/comma.opus");
+        let fixture =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../reader/tests/fixtures/comma.opus");
         let dir = std::env::temp_dir().join(format!("kopuz-ytdlp-test-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let media = dir.join("comma.opus");
@@ -1244,7 +1244,9 @@ mod tests {
         apply_artist_manifest(&manifest);
 
         let tagged = Probe::open(&media).unwrap().read().unwrap();
-        let artist = tagged.primary_tag().and_then(|t| t.artist().map(|a| a.to_string()));
+        let artist = tagged
+            .primary_tag()
+            .and_then(|t| t.artist().map(|a| a.to_string()));
         // Multi-artist line rewrites with ';'; the single-artist (comma-in-name)
         // line must NOT rewrite, so the ';'-joined value survives it.
         assert_eq!(
