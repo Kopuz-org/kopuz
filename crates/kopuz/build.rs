@@ -133,8 +133,8 @@ fn bake_font_css(css: &str, fonts: &Path) -> String {
         let file = &after[..end];
         let path = fonts.join(file);
         println!("cargo:rerun-if-changed={}", path.display());
-        let bytes = fs::read(&path)
-            .unwrap_or_else(|e| panic!("cannot read font {}: {e}", path.display()));
+        let bytes =
+            fs::read(&path).unwrap_or_else(|e| panic!("cannot read font {}: {e}", path.display()));
         let mime = match Path::new(file).extension().and_then(|e| e.to_str()) {
             Some("woff2") => "font/woff2",
             Some("woff") => "font/woff",
