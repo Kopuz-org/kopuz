@@ -69,11 +69,18 @@ fn migrate_legacy_locations() {
     let _ = std::fs::write(&sentinel, "");
 }
 
-const FAVICON: Asset = asset!("../assets/favicon.ico");
-const MAIN_CSS: Asset = asset!("../assets/main.css");
-const THEME_CSS: Asset = asset!("../assets/themes.css");
-const TAILWIND_CSS: Asset = asset!("../assets/tailwind.css");
-const REDUCED_ANIMATIONS_CSS: Asset = asset!("../assets/reduced-animations.css");
+const FAVICON: &str = include_str!(concat!(env!("OUT_DIR"), "/favicon.uri"));
+// CSS is compiled into the binary (not collected as assets) so styling applies
+// under a bare `cargo run` on any OS — not just `dx` builds. The fonts referenced
+// by FONT_AWESOME_CSS / JETBRAINS_MONO_CSS are inlined as data: URIs by build.rs.
+// main.css declares the nasin-nanpa @font-face, so it's routed through build.rs
+// to inline that font too; the others have no font refs and pass through unchanged.
+const MAIN_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/main.css"));
+const THEME_CSS: &str = include_str!("../assets/themes.css");
+const TAILWIND_CSS: &str = include_str!("../assets/tailwind.css");
+const REDUCED_ANIMATIONS_CSS: &str = include_str!("../assets/reduced-animations.css");
+const FONT_AWESOME_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/fontawesome.css"));
+const JETBRAINS_MONO_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/jetbrains-mono.css"));
 #[cfg(target_os = "windows")]
 const TOOLBAR_ICONS: Asset = asset!("../assets/toolbar_icons", AssetOptions::folder());
 const QUEUE_STATE_SAVE_DEBOUNCE_MS: u64 = 1200;
@@ -2322,24 +2329,18 @@ fn App() -> Element {
 
     rsx! {
         document::Link { rel: "icon", href: FAVICON }
-        document::Link { rel: "stylesheet", href: MAIN_CSS }
-        document::Link { rel: "stylesheet", href: THEME_CSS }
-        document::Link { rel: "stylesheet", href: TAILWIND_CSS }
-        document::Link { rel: "stylesheet", href: REDUCED_ANIMATIONS_CSS }
+        document::Style { {MAIN_CSS} }
+        document::Style { {THEME_CSS} }
+        document::Style { {TAILWIND_CSS} }
+        document::Style { {REDUCED_ANIMATIONS_CSS} }
         WindowsToolbarIconAssets {}
-        // Font stylesheets injected declaratively rather than via a
-        // document::Script: a Script is processed once but App re-renders
-        // on every signal change, and dioxus_document warns "Changing the
-        // props of Script {} is not supported" each time. Links are
-        // re-render-safe and do the same job (and load a touch earlier).
-        document::Link {
-            rel: "stylesheet",
-            href: "https://fonts.bunny.net/css?family=jetbrains-mono:400,500,700,800&display=swap",
-        }
-        document::Link {
-            rel: "stylesheet",
-            href: "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css",
-        }
+        // Fonts are vendored offline (packaging/scripts/vendor-fonts.py) and the
+        // woff2 are inlined as data: URIs by build.rs, so they load with a bare
+        // `cargo run` on any OS with no CDN dependency at runtime. Inlined as
+        // Style rather than a Script so they're re-render-safe (a Script warns
+        // "Changing the props of Script {} is not supported" on every re-render).
+        document::Style { {JETBRAINS_MONO_CSS} }
+        document::Style { {FONT_AWESOME_CSS} }
 
         div {
             class: "flex flex-col h-screen text-white select-none overflow-x-hidden {theme_class}",
