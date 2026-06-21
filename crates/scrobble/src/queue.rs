@@ -164,9 +164,16 @@ pub async fn enqueue(
 /// failure drops the service from that entry. Progress is checkpointed to
 /// disk after every entry, so an interrupted drain re-sends at most the one
 /// in-flight item instead of replaying everything already delivered.
+///
+/// The mutex is held only around file I/O; network submissions run outside
+/// the lock so concurrent `enqueue()` calls are never blocked by the wire.
+/// Each checkpoint re-loads the on-disk queue and merges progress into it,
+/// preserving any entries added by `enqueue()` while drain was in flight.
 pub async fn drain(path: &Path, creds: &Credentials) {
-    let _guard = QUEUE_LOCK.lock().await;
-    let mut queue = ScrobbleQueue::load(path);
+    let queue = {
+        let _guard = QUEUE_LOCK.lock().await;
+        ScrobbleQueue::load(path)
+    };
     if queue.is_empty() {
         return;
     }
@@ -174,14 +181,13 @@ pub async fn drain(path: &Path, creds: &Credentials) {
 
     let mut give_up: Vec<Service> = Vec::new();
 
-    for idx in 0..queue.items.len() {
-        let item = queue.items[idx].clone();
+    for item in &queue.items {
         let mut done: Vec<Service> = Vec::new();
         for &service in &item.pending {
             if give_up.contains(&service) {
                 continue;
             }
-            match submit_one(service, &item, creds).await {
+            match submit_one(service, item, creds).await {
                 Outcome::Sent => {
                     tracing::info!(
                         service = service.label(),
@@ -211,16 +217,21 @@ pub async fn drain(path: &Path, creds: &Credentials) {
             }
         }
         if !done.is_empty() {
-            queue.items[idx].pending.retain(|s| !done.contains(s));
-            if let Err(e) = queue.save(path) {
+            // Re-acquire the lock only for the checkpoint write. Reload the
+            // on-disk queue to merge any enqueue() calls that arrived while
+            // we were on the wire, then remove the services we just delivered.
+            let _guard = QUEUE_LOCK.lock().await;
+            let mut on_disk = ScrobbleQueue::load(path);
+            if let Some(disk_item) = on_disk.items.iter_mut().find(|i| {
+                i.timestamp == item.timestamp && i.artist == item.artist && i.title == item.title
+            }) {
+                disk_item.pending.retain(|s| !done.contains(s));
+            }
+            on_disk.items.retain(|i| !i.pending.is_empty());
+            if let Err(e) = on_disk.save(path) {
                 tracing::warn!(error = %e, "failed to checkpoint scrobble queue");
             }
         }
-    }
-
-    queue.items.retain(|i| !i.pending.is_empty());
-    if let Err(e) = queue.save(path) {
-        tracing::warn!(error = %e, "failed to persist scrobble queue");
     }
 }
 
