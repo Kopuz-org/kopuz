@@ -20,6 +20,71 @@ mod writes;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
+/// Run migrations, tolerating a checksum mismatch that is purely a line-ending
+/// difference of the *same* migration SQL.
+///
+/// sqlx checksums each migration's raw bytes at compile time, so a CRLF checkout
+/// (Windows) and an LF checkout (Linux/macOS) of the identical migration produce
+/// different checksums. A DB created by one build would then be rejected by the
+/// other — e.g. a v0.7.0 Windows user's DB (CRLF) opened by a cross-compiled
+/// build (LF). When a stored checksum matches this binary's migration content in
+/// the other line ending, the schema is provably identical, so we re-stamp the
+/// stored checksum to the canonical one and continue. A checksum matching
+/// neither line ending is a genuine modification and is left to fail.
+async fn run_migrations(pool: &SqlitePool) -> Result<(), DbError> {
+    match MIGRATOR.run(pool).await {
+        Ok(()) => Ok(()),
+        Err(sqlx::migrate::MigrateError::VersionMismatch(_)) => {
+            reconcile_eol_checksums(pool).await?;
+            MIGRATOR.run(pool).await.map_err(Into::into)
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Re-stamp `_sqlx_migrations` rows whose checksum differs from this binary's
+/// only by line endings. `VersionMismatch` reports just the first offender, so
+/// reconcile every applied migration in one pass before retrying.
+async fn reconcile_eol_checksums(pool: &SqlitePool) -> Result<(), DbError> {
+    use sha2::{Digest, Sha384};
+
+    let stored: std::collections::HashMap<i64, Vec<u8>> =
+        sqlx::query_as::<_, (i64, Vec<u8>)>("SELECT version, checksum FROM _sqlx_migrations")
+            .fetch_all(pool)
+            .await?
+            .into_iter()
+            .collect();
+
+    for m in MIGRATOR.iter() {
+        let Some(stored_ck) = stored.get(&m.version) else {
+            continue;
+        };
+        if stored_ck.as_slice() == m.checksum.as_ref() {
+            continue; // already canonical
+        }
+        // Hash this migration's SQL in both line endings; if either matches the
+        // stored checksum, the SQL (hence schema) is identical — only EOL differs.
+        let lf = m.sql.replace("\r\n", "\n");
+        let crlf = lf.replace('\n', "\r\n");
+        let matches_eol_variant = [lf.as_bytes(), crlf.as_bytes()]
+            .into_iter()
+            .any(|bytes| Sha384::digest(bytes).as_slice() == stored_ck.as_slice());
+        if matches_eol_variant {
+            sqlx::query("UPDATE _sqlx_migrations SET checksum = ?1 WHERE version = ?2")
+                .bind(m.checksum.as_ref())
+                .bind(m.version)
+                .execute(pool)
+                .await?;
+            tracing::warn!(
+                version = m.version,
+                "reconciled migration checksum (line-ending-only difference)"
+            );
+        }
+        // else: a real modification — leave it; the retry surfaces the error.
+    }
+    Ok(())
+}
+
 pub struct Native {
     pool: ArcSwap<SqlitePool>,
 }
@@ -33,7 +98,7 @@ impl Native {
         }
         snapshot_if_pending(path).await;
         let pool = open_pool(path).await?;
-        MIGRATOR.run(&pool).await?;
+        run_migrations(&pool).await?;
         Ok(Self {
             pool: ArcSwap::from_pointee(pool),
         })
@@ -444,7 +509,7 @@ impl Storage for Native {
             let _ = std::fs::remove_file(with_ext(db_path, ext));
         }
         let pool = open_pool(db_path).await?;
-        MIGRATOR.run(&pool).await?;
+        run_migrations(&pool).await?;
         self.swap_pool(pool);
         Ok(())
     }
@@ -466,7 +531,7 @@ impl Storage for Native {
             }
         }
         let pool = open_pool(db_path).await?;
-        MIGRATOR.run(&pool).await?;
+        run_migrations(&pool).await?;
         self.swap_pool(pool);
         Ok(())
     }
@@ -549,5 +614,73 @@ impl Storage for Native {
 
     async fn sweep_favorites(&self, server_id: &str, epoch: i64) -> Result<(), DbError> {
         writes::sweep_favorites(&self.pool(), server_id, epoch).await
+    }
+}
+
+#[cfg(test)]
+mod eol_reconcile_tests {
+    use super::*;
+    use sha2::{Digest, Sha384};
+
+    /// A DB created by a CRLF build (Windows) must open under this (LF) build,
+    /// and the stored checksums get re-stamped to canonical — while a genuine
+    /// migration edit is still rejected.
+    #[tokio::test]
+    async fn crlf_db_reconciles_but_real_edit_still_fails() {
+        let dir = std::env::temp_dir().join(format!("kopuz-eol-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let db = dir.join("t.db");
+        for ext in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(with_ext(&db, ext));
+        }
+
+        let pool = open_pool(&db).await.unwrap();
+        run_migrations(&pool).await.unwrap();
+
+        // Simulate a DB written by a CRLF build: every stored checksum becomes
+        // the CRLF-variant hash of the same migration SQL.
+        for m in MIGRATOR.iter() {
+            let crlf = m.sql.replace("\r\n", "\n").replace('\n', "\r\n");
+            sqlx::query("UPDATE _sqlx_migrations SET checksum = ?1 WHERE version = ?2")
+                .bind(Sha384::digest(crlf.as_bytes()).to_vec())
+                .bind(m.version)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        // Reopen: the EOL-only mismatch must reconcile, not error.
+        run_migrations(&pool)
+            .await
+            .expect("CRLF-only checksum mismatch should reconcile");
+
+        // Checksums are now canonical (this binary's).
+        let stored: Vec<(i64, Vec<u8>)> =
+            sqlx::query_as("SELECT version, checksum FROM _sqlx_migrations")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        for m in MIGRATOR.iter() {
+            let ck = stored.iter().find(|(v, _)| *v == m.version).map(|(_, c)| c);
+            assert_eq!(ck.unwrap().as_slice(), m.checksum.as_ref());
+        }
+
+        // A genuine modification (checksum matching neither line ending) must
+        // still be refused.
+        sqlx::query(
+            "UPDATE _sqlx_migrations SET checksum = ?1 \
+             WHERE version = (SELECT MIN(version) FROM _sqlx_migrations)",
+        )
+        .bind(vec![0u8; 48])
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(
+            run_migrations(&pool).await.is_err(),
+            "a real migration edit must still be rejected"
+        );
+
+        drop(pool);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

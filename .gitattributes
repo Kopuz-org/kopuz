@@ -1,0 +1,5 @@
+# sqlx checksums each migration file's bytes at compile time, so their line
+# endings must be identical on every platform — a Windows checkout would
+# otherwise use CRLF and change the checksum, making a DB created by one build
+# unreadable by another (e.g. cross-compiled). Pin migrations to LF.
+crates/db/migrations/*.sql text eol=lf

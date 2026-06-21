@@ -19,6 +19,8 @@ sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio",
 tokio = { workspace = true, features = ["rt", "sync"] }
 arc-swap = "1.7"
 directories = { workspace = true }
+# Recompute sqlx's migration checksum (Sha384) to detect line-ending-only diffs.
+sha2 = "0.10"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }
