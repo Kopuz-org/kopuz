@@ -1,0 +1,184 @@
+name: ci
+
+# Unified pipeline: lint gates the build, then a single Linux runner
+# cross-compiles all three desktop targets (no per-OS runners).
+#
+# This relies on assets being compiled into the binary (PR #434) and on
+# `rookie`/`libesedb` being gated off Windows (PR #435) — without #435 the
+# Windows cross-build cannot compile. PR #436 keeps existing DBs openable across
+# the resulting line-ending change. Merge this AFTER #434/#435/#436.
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  # ---- Lint gate -----------------------------------------------------------
+  rust-lint:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake pkg-config \
+            libopus-dev libasound2-dev libxdo-dev \
+            libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libsoup-3.0-dev libssl-dev \
+            libglib2.0-dev libpango1.0-dev \
+            libcairo2-dev libgdk-pixbuf-2.0-dev
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+      - name: rustfmt
+        run: cargo fmt --all --check
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  deno-fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: denoland/setup-deno@667a34cdef165d8d2b2e98dde39547c9daac7282
+        with:
+          deno-version: v2.x
+      - name: Check README.md formatting
+        run: deno fmt --check README.md
+
+  locale-parity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: Check locale parity against en.ftl
+        run: nix shell nixpkgs#nushell --command nu scripts/check_locales.nu
+      - name: Check Rust i18n usage against en.ftl
+        run: nix shell nixpkgs#nushell --command nu scripts/check_i18n_usage.nu
+
+  # ---- Unified cross-compile build (gated on lint) -------------------------
+  build:
+    needs: [rust-lint, deno-fmt, locale-parity]
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            name: linux-x86_64
+            bin: kopuz
+          - target: x86_64-pc-windows-msvc
+            name: windows-x86_64
+            bin: kopuz.exe
+          - target: aarch64-apple-darwin
+            name: macos-aarch64
+            bin: kopuz
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32
+        with:
+          key: ${{ matrix.target }}
+      - uses: cargo-bins/cargo-binstall@30b5ca8b54e1dcffd9548bc87ede1531310fdc67 # v1.20.0
+
+      # --- Linux native: needs the desktop runtime -dev libraries ---
+      - name: Linux build deps
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake pkg-config \
+            libopus-dev libasound2-dev libxdo-dev \
+            libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libsoup-3.0-dev libssl-dev \
+            libglib2.0-dev libpango1.0-dev \
+            libcairo2-dev libgdk-pixbuf-2.0-dev
+
+      # --- Windows cross (cargo-xwin): clang/lld + nasm (for aws-lc-sys) ---
+      - name: Windows cross deps
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm lld nasm
+          cargo binstall -y cargo-xwin
+      - name: Cache xwin MSVC SDK
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/cargo-xwin
+          key: xwin-${{ matrix.target }}
+
+      # --- macOS cross (cargo-zigbuild + zig + a MacOSX SDK) ---
+      # The SDK is Apple-licensed; using it off Apple hardware is a gray area —
+      # maintainer's call. Pulled from joseluisq/macosx-sdks.
+      - name: macOS cross deps
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: |
+          cargo binstall -y cargo-zigbuild apple-codesign
+          # cargo-zigbuild invokes zig via the `ziglang` Python module.
+          pip3 install ziglang
+      - name: Cache macOS SDK
+        if: matrix.target == 'aarch64-apple-darwin'
+        id: macsdk
+        uses: actions/cache@v4
+        with:
+          path: ~/macsdk
+          key: macsdk-14.0
+      - name: Fetch macOS SDK
+        if: matrix.target == 'aarch64-apple-darwin' && steps.macsdk.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "$HOME/macsdk"
+          curl -fL --retry 3 -o /tmp/sdk.tar.xz \
+            https://github.com/joseluisq/macosx-sdks/releases/download/14.0/MacOSX14.0.sdk.tar.xz
+          tar -xf /tmp/sdk.tar.xz -C "$HOME/macsdk"
+      - name: Configure macOS SDK env
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: |
+          echo "SDKROOT=$HOME/macsdk/MacOSX14.0.sdk" >> "$GITHUB_ENV"
+          echo "MACOSX_DEPLOYMENT_TARGET=11.0" >> "$GITHUB_ENV"
+
+      # --- Build (one cargo invocation per target, all from this Linux box) ---
+      - name: Build ${{ matrix.target }}
+        run: |
+          case "${{ matrix.target }}" in
+            x86_64-unknown-linux-gnu)
+              cargo build --release -p kopuz --target "${{ matrix.target }}" ;;
+            x86_64-pc-windows-msvc)
+              cargo xwin build --release -p kopuz --target "${{ matrix.target }}" ;;
+            aarch64-apple-darwin)
+              cargo zigbuild --release -p kopuz --target "${{ matrix.target }}" ;;
+          esac
+
+      # Apple Silicon refuses to run unsigned arm64 binaries — ad-hoc sign so
+      # the artifact is launchable (still un-notarized: testers clear quarantine).
+      - name: Ad-hoc sign macOS binary
+        if: matrix.target == 'aarch64-apple-darwin'
+        run: rcodesign sign "target/${{ matrix.target }}/release/${{ matrix.bin }}"
+
+      - name: Stage artifact
+        run: |
+          mkdir -p dist
+          ext=""; [ "${{ matrix.bin }}" = "kopuz.exe" ] && ext=".exe"
+          cp "target/${{ matrix.target }}/release/${{ matrix.bin }}" "dist/kopuz-${{ matrix.name }}${ext}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: kopuz-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
