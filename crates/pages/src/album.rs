@@ -405,9 +405,9 @@ fn AlbumDetail(
     // local DB until saved. When the DB has no row for the id, fetch the album
     // straight from the catalog remote by that browse id so every searched /
     // discovered album renders (header + full track list) instead of "not found".
-    let direct_remote_res: Resource<Option<::server::ytmusic::discover::YtAlbum>> = {
+    let direct_remote_res: Resource<Option<::server::source::RemoteAlbum>> = {
         use_resource(move || {
-            let want = caps().discover && !*is_offline.read();
+            let want = caps().albums == ::server::source::AlbumType::YtMusic && !*is_offline.read();
             let db_has = album_res.read().clone().flatten().is_some();
             let id = album_id_memo();
             let src = active_source.peek().clone();
@@ -495,9 +495,9 @@ fn AlbumDetail(
     // demand and fetch the full album (header + every track), the way YT Music
     // shows it. `None` for local/other sources (gated on `discover`) and while
     // offline; drives both the full track list and the YT-styled header.
-    let remote_album_res: Resource<Option<::server::ytmusic::discover::YtAlbum>> = {
+    let remote_album_res: Resource<Option<::server::source::RemoteAlbum>> = {
         use_resource(move || {
-            let want = caps().discover && !*is_offline.read();
+            let want = caps().albums == ::server::source::AlbumType::YtMusic && !*is_offline.read();
             let album = album_res.read().clone().flatten();
             let src = active_source.peek().clone();
             async move {
@@ -637,7 +637,7 @@ fn AlbumDetail(
 
     rsx! {
         div { class: "absolute inset-0 flex flex-col overflow-hidden p-8",
-            if cap.discover {
+            if cap.albums == ::server::source::AlbumType::YtMusic {
                 YtAlbumDetail {
                     config,
                     title: yt_title,
