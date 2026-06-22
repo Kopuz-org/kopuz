@@ -60,19 +60,19 @@ kendi favorilerini taşır.
 - **Native Integration**: Linux (MPRIS), macOS (Now Playing / Remote Command
   Center) ve Windows (System Media Transport Controls) üzerindeki sistem medya
   kontrolleri ile entegre olur.
-- **Mini-Player**: Daha küçük bir now-playing görünümü için bottom bar'dan
-  açıp kapatabileceğiniz kompakt bir oynatıcı katmanı.
+- **Mini-Player**: Daha küçük bir now-playing görünümü için bottom bar'dan açıp
+  kapatabileceğiniz kompakt bir oynatıcı katmanı.
 - **Minimize to Tray**: Çıkmak yerine isteğe bağlı olarak sistem tepsisi
   simgesine kapatın, böylece oynatma arka planda çalışmaya devam eder.
   **Settings** içinden açıp kapatın. Linux'ta appindicator kütüphanesi gerekir
   (bkz. Installation notları).
 - **Discord RPC**: Gömülü RPC dahildir!!!
 - **Multiple Backends**: Jellyfin veya Subsonic uyumlu sunucunuzdan (Navidrome
-  works great) stream edin, YouTube Music ya da SoundCloud'u bağlayın veya sadece
-  yerel bir klasörü gösterin. İstediğiniz gibi karıştırıp eşleştirin. Her kaynak
-  tek bir `MediaSource` katmanı üzerinden sunulur ve arayüz, her servise özel
-  davranışı sabit kodlamak yerine kaynağın yeteneklerine (arama, indirme, radyo,
-  discover, favori senkronizasyonu vb.) göre uyum sağlar.
+  works great) stream edin, YouTube Music ya da SoundCloud'u bağlayın veya
+  sadece yerel bir klasörü gösterin. İstediğiniz gibi karıştırıp eşleştirin. Her
+  kaynak tek bir `MediaSource` katmanı üzerinden sunulur ve arayüz, her servise
+  özel davranışı sabit kodlamak yerine kaynağın yeteneklerine (arama, indirme,
+  radyo, discover, favori senkronizasyonu vb.) göre uyum sağlar.
 - **YouTube Music**: Spotify tarzı bir **Discover** sayfası (önerilen şarkılar,
   playlist'ler, albümler, sanatçılar ve ruh halleri), zengin **artist profiles**
   (banner, en popüler şarkılar, albümler, single'lar, benzer sanatçılar),
@@ -333,8 +333,8 @@ xattr -d com.apple.quarantine /Applications/Kopuz.app
 ### Where does Kopuz keep its files?
 
 Ayarlarınız, taranan kütüphane, playlist'ler ve favoriler tek bir **SQLite**
-veritabanında, `kopuz.db`, config dizininde tutulur. Albüm kapakları ve indirilen
-parçalar cache dizininde diskte kalır. (Debug build'leri ayrı bir
+veritabanında, `kopuz.db`, config dizininde tutulur. Albüm kapakları ve
+indirilen parçalar cache dizininde diskte kalır. (Debug build'leri ayrı bir
 `kopuz-debug.db` kullanır, böylece `dx serve` gerçek verinize asla dokunmaz. DB
 konumunu `KOPUZ_DB_PATH` env değişkeniyle değiştirebilirsiniz.)
 

@@ -98,7 +98,7 @@ media source carries its own credentials and its own favorites.
   [jellyfin-plugin-listenbrainz] is recommended if you use multiple clients.
 - **Language Support**: UI available in English, Russian, German, French,
   Spanish, Turkish, Ukrainian, Polish, Arabic, Greek, Hebrew, Hungarian,
-  Indonesian, Japanese, Korean, Romanian, Brazilian Portuguese, Toki Pona, 
+  Indonesian, Japanese, Korean, Romanian, Brazilian Portuguese, Toki Pona,
   Simplified Chinese, and Filipino with a streamlined experience for adding new
   languages.
 - **High Performance**: Heavy background processing and an optimized library
