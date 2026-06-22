@@ -584,6 +584,25 @@ fn init_db_blocking() -> db::Db {
 
 #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
 fn serve_artwork(uri: http::Uri, responder: RequestAsyncResponder) {
+    fn resp(
+        status: u16,
+        headers: &[(&str, &str)],
+        body: Vec<u8>,
+    ) -> http::Response<std::borrow::Cow<'static, [u8]>> {
+        let mut b = http::Response::builder().status(status);
+        b = b.header("Access-Control-Allow-Origin", "*");
+        for (k, v) in headers {
+            b = b.header(*k, *v);
+        }
+        b.body(std::borrow::Cow::from(body)).unwrap_or_else(|_| {
+            http::Response::builder()
+                .status(500)
+                .header("Access-Control-Allow-Origin", "*")
+                .body(std::borrow::Cow::from(Vec::new()))
+                .expect("static fallback response")
+        })
+    }
+
     tokio::spawn(
         async move {
             let query = uri.query().unwrap_or_default();
@@ -599,12 +618,7 @@ fn serve_artwork(uri: http::Uri, responder: RequestAsyncResponder) {
             let high_quality = query.split('&').any(|kv| kv == "hq=1");
 
             if file_path.is_empty() {
-                responder.respond(
-                    http::Response::builder()
-                        .status(400)
-                        .body(std::borrow::Cow::from(Vec::new()))
-                        .unwrap(),
-                );
+                responder.respond(resp(400, &[], Vec::new()));
                 return;
             }
 
@@ -627,14 +641,14 @@ fn serve_artwork(uri: http::Uri, responder: RequestAsyncResponder) {
                 if hq_path.exists()
                     && let Ok(b) = tokio::fs::read(&hq_path).await
                 {
-                    responder.respond(
-                        http::Response::builder()
-                            .header("Content-Type", "image/jpeg")
-                            .header("Access-Control-Allow-Origin", "*")
-                            .header("Cache-Control", "public, max-age=31536000")
-                            .body(std::borrow::Cow::from(b))
-                            .unwrap(),
-                    );
+                    responder.respond(resp(
+                        200,
+                        &[
+                            ("Content-Type", "image/jpeg"),
+                            ("Cache-Control", "public, max-age=31536000"),
+                        ],
+                        b,
+                    ));
                     return;
                 }
                 match tokio::fs::read(&file_path).await {
@@ -654,28 +668,18 @@ fn serve_artwork(uri: http::Uri, responder: RequestAsyncResponder) {
                         })
                         .await;
                         match result {
-                            Ok((bytes, mime)) => responder.respond(
-                                http::Response::builder()
-                                    .header("Content-Type", mime)
-                                    .header("Access-Control-Allow-Origin", "*")
-                                    .header("Cache-Control", "public, max-age=31536000")
-                                    .body(std::borrow::Cow::from(bytes))
-                                    .unwrap(),
-                            ),
-                            Err(_) => responder.respond(
-                                http::Response::builder()
-                                    .status(500)
-                                    .body(std::borrow::Cow::from(Vec::new()))
-                                    .unwrap(),
-                            ),
+                            Ok((bytes, mime)) => responder.respond(resp(
+                                200,
+                                &[
+                                    ("Content-Type", mime),
+                                    ("Cache-Control", "public, max-age=31536000"),
+                                ],
+                                bytes,
+                            )),
+                            Err(_) => responder.respond(resp(500, &[], Vec::new())),
                         }
                     }
-                    Err(_) => responder.respond(
-                        http::Response::builder()
-                            .status(404)
-                            .body(std::borrow::Cow::from(Vec::new()))
-                            .unwrap(),
-                    ),
+                    Err(_) => responder.respond(resp(404, &[], Vec::new())),
                 }
                 return;
             }
@@ -697,12 +701,7 @@ fn serve_artwork(uri: http::Uri, responder: RequestAsyncResponder) {
                                 },
                             ),
                             Err(_) => {
-                                responder.respond(
-                                    http::Response::builder()
-                                        .status(404)
-                                        .body(std::borrow::Cow::from(Vec::new()))
-                                        .unwrap(),
-                                );
+                                responder.respond(resp(404, &[], Vec::new()));
                                 return;
                             }
                         }
@@ -730,37 +729,27 @@ fn serve_artwork(uri: http::Uri, responder: RequestAsyncResponder) {
                                 },
                             ),
                             Err(_) => {
-                                responder.respond(
-                                    http::Response::builder()
-                                        .status(500)
-                                        .body(std::borrow::Cow::from(Vec::new()))
-                                        .unwrap(),
-                                );
+                                responder.respond(resp(500, &[], Vec::new()));
                                 return;
                             }
                         }
                     }
                     Err(e) => {
                         tracing::warn!("[artwork] not found {}: {}", file_path, e);
-                        responder.respond(
-                            http::Response::builder()
-                                .status(404)
-                                .body(std::borrow::Cow::from(Vec::new()))
-                                .unwrap(),
-                        );
+                        responder.respond(resp(404, &[], Vec::new()));
                         return;
                     }
                 }
             };
 
-            responder.respond(
-                http::Response::builder()
-                    .header("Content-Type", mime)
-                    .header("Access-Control-Allow-Origin", "*")
-                    .header("Cache-Control", "public, max-age=31536000")
-                    .body(std::borrow::Cow::from(bytes))
-                    .unwrap(),
-            );
+            responder.respond(resp(
+                200,
+                &[
+                    ("Content-Type", mime),
+                    ("Cache-Control", "public, max-age=31536000"),
+                ],
+                bytes,
+            ));
         }
         .instrument(tracing::info_span!("artwork.serve")),
     );
@@ -954,23 +943,33 @@ fn main() {
                         }
                     });
 
+                fn err_resp(status: u16) -> http::Response<std::borrow::Cow<'static, [u8]>> {
+                    http::Response::builder()
+                        .status(status)
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(std::borrow::Cow::from(Vec::new()))
+                        .unwrap_or_else(|_| {
+                            http::Response::builder()
+                                .status(500)
+                                .header("Access-Control-Allow-Origin", "*")
+                                .body(std::borrow::Cow::from(Vec::new()))
+                                .expect("static fallback response")
+                        })
+                }
+
                 match read_result {
                     Ok(bytes) => http::Response::builder()
                         .header("Content-Type", mime)
                         .header("Access-Control-Allow-Origin", "*")
                         .body(std::borrow::Cow::from(bytes))
-                        .unwrap(),
+                        .unwrap_or_else(|_| err_resp(500)),
                     Err(e) => {
                         let status = if e.kind() == std::io::ErrorKind::NotFound {
                             404
                         } else {
                             500
                         };
-                        http::Response::builder()
-                            .status(status)
-                            .header("Access-Control-Allow-Origin", "*")
-                            .body(std::borrow::Cow::from(Vec::new()))
-                            .unwrap()
+                        err_resp(status)
                     }
                 }
             });

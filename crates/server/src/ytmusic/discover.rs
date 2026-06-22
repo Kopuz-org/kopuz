@@ -95,6 +95,7 @@ pub async fn fetch_home(cookies: &str) -> Result<DiscoverHome, String> {
 ///
 /// Track rows carry no thumbnail of their own, so we stamp the header
 /// cover onto every track for jellyfin_image to pick up.
+#[derive(Debug, Clone, PartialEq)]
 pub struct YtAlbum {
     pub browse_id: String,
     pub title: String,

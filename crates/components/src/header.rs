@@ -7,10 +7,10 @@ fn icon_class(
     sort_state: &Option<Signal<Option<(SortField, showcase::SortDirection)>>>,
     field: SortField,
 ) -> String {
-    if sort_state.is_some() {
-        showcase::sort_icon(*sort_state.unwrap().read(), field).to_string()
+    if let Some(s) = sort_state {
+        showcase::sort_icon(*s.read(), field).to_string()
     } else {
-        "".to_string()
+        String::new()
     }
 }
 

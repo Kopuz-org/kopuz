@@ -1,3 +1,6 @@
+//! Shared utility crate for Kopuz: color helpers, image processing (artwork,
+//! thumbnails, subsonic images), lyrics fetching, and terminal logging.
+
 pub mod color;
 pub mod db_cache;
 #[cfg(not(target_arch = "wasm32"))]

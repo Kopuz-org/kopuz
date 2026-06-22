@@ -414,7 +414,7 @@ fn DiscoverTile(
             subtitle,
             thumbnail,
         } => {
-            let title_for_click = title.clone();
+            let bid_for_click = browse_id.clone();
             let bid_for_play = browse_id.clone();
             let bid_for_source = browse_id.clone();
             rsx! {
@@ -424,7 +424,7 @@ fn DiscoverTile(
                     thumbnail: thumbnail,
                     rounded_full: false,
                     onclick: move |_| {
-                        on_select_playlist.call((browse_id.clone(), title_for_click.clone()))
+                        on_select_album.call(bid_for_click.clone())
                     },
                     on_play: EventHandler::new(move |_| {
                         play_playlist_async(bid_for_play.clone(), ctrl, now_playing, cache);
@@ -678,7 +678,7 @@ fn Card(
                 }
                 if let Some(play) = on_play {
                     button {
-                        class: "absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-black/40 transition-opacity duration-200 cursor-pointer",
+                        class: "absolute right-3 bottom-3 w-10 h-10 bg-white text-black rounded-full flex items-center justify-center shadow-lg translate-y-4 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-300 cursor-pointer",
                         onclick: move |e: MouseEvent| {
                             e.stop_propagation();
                             if show_loading {
@@ -692,11 +692,11 @@ fn Card(
                         },
                         i {
                             class: if show_loading {
-                                "fa-solid fa-arrows-rotate fa-spin text-white text-2xl"
+                                "fa-solid fa-arrows-rotate fa-spin text-sm"
                             } else if show_pause {
-                                "fa-solid fa-pause text-white text-2xl"
+                                "fa-solid fa-pause text-sm"
                             } else {
-                                "fa-solid fa-play text-white text-2xl"
+                                "fa-solid fa-play ml-0.5 text-sm"
                             }
                         }
                     }
@@ -929,11 +929,10 @@ pub fn DiscoverPlaylistDetail(
 ) -> Element {
     let config = use_context::<Signal<AppConfig>>();
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
-    let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
-    let mut now_playing = use_context::<DiscoverNowPlaying>().0;
     let mut tracks = use_signal(Vec::<Track>::new);
     let mut loading = use_signal(|| true);
     let mut error = use_signal(|| None::<String>);
+    let cover_for = hooks::use_db_queries::use_cover_resolver(512);
 
     let playlist_id = selected_playlist_id.read().clone();
     let header_title = selected_playlist_title
@@ -1011,110 +1010,56 @@ pub fn DiscoverPlaylistDetail(
         };
     }
 
-    rsx! {
-        div { class: "p-6 md:p-10 max-w-[1600px] mx-auto",
-            button {
-                class: "inline-flex items-center gap-2 text-white/70 hover:text-white text-sm cursor-pointer mb-6 group",
-                onclick: move |_| on_back.call(()),
-                i { class: "fa-solid fa-chevron-left text-xs transition-transform group-hover:-translate-x-0.5" }
-                span { "{i18n::t(\"back\")}" }
-            }
-            div { class: "flex items-end gap-6 mb-8",
-                div { class: "min-w-0",
-                    p { class: "text-[10px] font-bold tracking-widest uppercase text-white/40 mb-2", "{i18n::t(\"playlist\")}" }
-                    h1 { class: "text-3xl md:text-5xl font-black text-white break-words", "{header_title}" }
-                    if !*loading.read() {
-                        p { class: "text-sm text-white/50 mt-3",
-                            "{i18n::t_with(\"playlist_track_count\", &[(\"count\", tracks.read().len().to_string())])}"
-                        }
-                    }
-                }
-                button {
-                    class: "shrink-0 inline-flex items-center gap-3 bg-white text-black px-8 py-3 rounded-full font-bold hover:bg-white/90 hover:scale-105 active:scale-95 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-default",
-                    disabled: *loading.read() || tracks.read().is_empty(),
-                    onclick: move |_| {
-                        let all = tracks.read().clone();
-                        if !all.is_empty() {
-                            if let Some(pid) = selected_playlist_id.read().clone() {
-                                now_playing.set(Some(pid));
-                            }
-                            ctrl.play_queue_linear(all);
-                        }
-                    },
-                    i { class: "fa-solid fa-play text-[10px]" }
-                    span { class: "text-sm", "{i18n::t(\"start_listening\")}" }
-                }
-            }
-
-            if *loading.read() {
+    // Loading / error keep a lightweight header + back button; the loaded state
+    // hands off to the shared modern TrackListView (same look as the local
+    // playlist / album pages) so Discover playlists match everywhere else.
+    if *loading.read() {
+        return rsx! {
+            div { class: "p-6 md:p-10 max-w-[1600px] mx-auto",
+                BackButton { on_back }
                 div { class: "flex justify-center py-24",
                     i { class: "fa-solid fa-arrows-rotate fa-spin text-2xl text-white/60" }
                 }
-            } else if let Some(err) = error.read().clone() {
+            }
+        };
+    }
+    if let Some(err) = error.read().clone() {
+        return rsx! {
+            div { class: "p-6 md:p-10 max-w-[1600px] mx-auto",
+                BackButton { on_back }
                 div { class: "py-12 text-rose-400 text-sm",
                     "{i18n::t_with(\"discover_failed\", &[(\"error\", err.clone())])}"
                 }
-            } else {
-                div { class: "flex flex-col",
-                    for (idx, track) in tracks.read().iter().enumerate() {
-                        DiscoverPlaylistRow {
-                            key: "{idx}",
-                            track: track.clone(),
-                            index: idx + 1,
-                            on_play: move |t: Track| {
-                                let mut queue = tracks.read().clone();
-                                let start_idx = queue
-                                    .iter()
-                                    .position(|x| x.id == t.id)
-                                    .unwrap_or(0);
-                                queue.rotate_left(start_idx);
-                                if let Some(pid) = selected_playlist_id.read().clone() {
-                                    now_playing.set(Some(pid));
-                                }
-                                ctrl.play_queue_linear(queue);
-                            },
-                        }
-                    }
-                }
+            }
+        };
+    }
+
+    let track_list = tracks.read().clone();
+    let cover_url = track_list.first().and_then(&cover_for);
+
+    rsx! {
+        div { class: "absolute inset-0 flex flex-col overflow-hidden p-8",
+            components::track_list_view::TrackListView {
+                name: header_title.clone(),
+                description: String::new(),
+                cover_url,
+                back_label: i18n::t("back").to_string(),
+                tracks: track_list,
+                is_album: false,
+                on_close: move |_| on_back.call(()),
             }
         }
     }
 }
 
 #[component]
-fn DiscoverPlaylistRow(track: Track, index: usize, on_play: EventHandler<Track>) -> Element {
-    let thumbnail = utils::jellyfin_image::resolve_track_cover(
-        track.cover.as_deref(),
-        &track.id.key(),
-        &track.album_id,
-        "",
-        None,
-        96,
-        80,
-    );
-    let title = track.title.clone();
-    let artist = track.artist.clone();
-    let track_for_click = track.clone();
+fn BackButton(on_back: EventHandler<()>) -> Element {
     rsx! {
         button {
-            class: "group flex items-center gap-4 px-3 py-2 rounded-lg hover:bg-white/5 transition-colors text-left cursor-pointer w-full",
-            onclick: move |_| on_play.call(track_for_click.clone()),
-            span { class: "w-8 text-right text-white/40 text-xs tabular-nums group-hover:hidden", "{index}" }
-            i { class: "w-8 text-center fa-solid fa-play text-white text-xs hidden group-hover:inline-block" }
-            if let Some(url) = thumbnail {
-                img {
-                    src: "{url}",
-                    class: "w-11 h-11 object-cover rounded bg-white/5",
-                    loading: "lazy",
-                    decoding: "async",
-                }
-            } else {
-                div { class: "w-11 h-11 rounded bg-white/5" }
-            }
-            div { class: "min-w-0 flex-1",
-                p { class: "text-sm text-white font-medium truncate", "{title}" }
-                p { class: "text-xs text-white/50 truncate", "{artist}" }
-            }
+            class: "inline-flex items-center gap-2 text-white/70 hover:text-white text-sm cursor-pointer mb-6 group",
+            onclick: move |_| on_back.call(()),
+            i { class: "fa-solid fa-chevron-left text-xs transition-transform group-hover:-translate-x-0.5" }
+            span { "{i18n::t(\"back\")}" }
         }
     }
 }
