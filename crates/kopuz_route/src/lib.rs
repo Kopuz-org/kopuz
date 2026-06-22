@@ -1,3 +1,6 @@
+//! Route definitions for the Kopuz Dioxus application: enum of all navigable
+//! screens (Home, Discover, Album, Artist, Playlist, Settings, etc.).
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Route {
     Home,

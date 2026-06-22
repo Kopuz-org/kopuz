@@ -4,6 +4,8 @@ fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let locales_dir = PathBuf::from(&manifest_dir).join("../../locales");
 
+    println!("cargo:rerun-if-changed={}", locales_dir.display());
+
     let mut languages: Vec<(String, String)> = vec![];
 
     for entry in fs::read_dir(&locales_dir).expect("locales directory not found") {

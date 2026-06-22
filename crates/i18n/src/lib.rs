@@ -1,3 +1,6 @@
+//! Internationalization engine for Kopuz: loads Fluent (.ftl) locale files,
+//! provides a global `t()` macro for translatable UI strings.
+
 use fluent_bundle::concurrent::FluentBundle;
 use fluent_bundle::{FluentArgs, FluentResource, FluentValue};
 use std::borrow::Cow;
@@ -79,11 +82,15 @@ pub fn init(lang: &str) {
 }
 
 pub fn set_locale(lang: &str) {
-    *state().write().unwrap() = I18nState::new(lang);
+    let mut w = state().write().unwrap_or_else(|e| e.into_inner());
+    *w = I18nState::new(lang);
 }
 
 pub fn t(key: &str) -> String {
-    state().read().unwrap().translate(key, None)
+    state()
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .translate(key, None)
 }
 
 pub fn t_with(key: &str, args: &[(&str, String)]) -> String {
@@ -94,7 +101,10 @@ pub fn t_with(key: &str, args: &[(&str, String)]) -> String {
             FluentValue::String(Cow::Owned(v.clone())),
         );
     }
-    state().read().unwrap().translate(key, Some(&fluent_args))
+    state()
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .translate(key, Some(&fluent_args))
 }
 
 pub fn available_languages() -> &'static [(&'static str, &'static str)] {

@@ -1,3 +1,6 @@
+//! Dioxus hooks for Kopuz: player controller, library item management,
+//! search data, and async player task orchestration.
+
 pub mod db_reactivity;
 pub mod debug_db;
 pub mod source_switch;

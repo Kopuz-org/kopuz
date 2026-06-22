@@ -14,7 +14,7 @@ pub fn ReorderButtons(
             button {
                 disabled: !can_move_up,
                 class: if can_move_up {
-                    "p-0.5 text-slate-500 hover:text-white transition-colors"
+                    "p-0.5 text-slate-500 hover:text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
                 } else {
                     "p-0.5 text-slate-700 cursor-default"
                 },
@@ -30,7 +30,7 @@ pub fn ReorderButtons(
             button {
                 disabled: !can_move_down,
                 class: if can_move_down {
-                    "p-0.5 text-slate-500 hover:text-white transition-colors"
+                    "p-0.5 text-slate-500 hover:text-white transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2"
                 } else {
                     "p-0.5 text-slate-700 cursor-default"
                 },
