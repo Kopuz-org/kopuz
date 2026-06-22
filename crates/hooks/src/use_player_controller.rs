@@ -769,6 +769,19 @@ impl PlayerController {
                         })
                         .await;
 
+                        if let Err(_) | Ok(Err(_)) = &source_res {
+                            if *play_generation.read() == current_gen {
+                                let msg = match &source_res {
+                                    Ok(Err(e)) => format!("Couldn't load this track:\n{e}"),
+                                    _ => "Playback failed unexpectedly".to_string(),
+                                };
+                                playback_error.set(Some(msg));
+                                is_loading.set(false);
+                                skip_in_progress.set(false);
+                            }
+                            return;
+                        }
+
                         if let Ok(Ok((source, hint))) = source_res {
                             if *play_generation.read() == current_gen {
                                 let meta = NowPlayingMeta {
@@ -1632,6 +1645,10 @@ impl PlayerController {
         }
     }
 
+    /// Rebuilds `shuffle_order` as a full permutation of the queue: the
+    /// currently playing track at position 0, every other track after it
+    /// shuffled as a single pool. Resets `current_queue_index` to 0, which
+    /// acts as a pointer into `shuffle_order` while shuffle is on.
     fn rebuild_shuffle_order(&mut self) {
         use rand::seq::SliceRandom;
         let queue_len = self.queue.peek().len();
@@ -1643,25 +1660,19 @@ impl PlayerController {
             return;
         }
 
-        // Tracks that come after the current position (play these first).
-        let mut ahead: Vec<usize> = (current_idx..queue_len).collect();
-        ahead.shuffle(&mut rand::rng());
-        // move current played track to the front
-        let pos = ahead
-            .iter()
-            .position(|&i| i == current_idx)
-            .expect("cannot find current index in shuffle order");
-        ahead.swap(pos, 0);
+        // The current track keeps playing at position 0; every other track is
+        // shuffled as a single pool so the ones before and after it mix freely
+        // instead of playing as two separate groups (issue #362).
+        let mut order: Vec<usize> = Vec::with_capacity(queue_len);
+        order.push(current_idx);
+        let mut rest: Vec<usize> = (0..queue_len).filter(|&i| i != current_idx).collect();
+        rest.shuffle(&mut rand::rng());
+        order.extend(rest);
 
-        // Tracks that wrap around from the beginning (play after the ahead group).
-        let mut wrapped: Vec<usize> = (0..current_idx).collect();
-        wrapped.shuffle(&mut rand::rng());
-
-        ahead.extend(wrapped);
         // reset current queue index to match the currently played track (now moved at pos 0)
         // will be used as a pointer to the retrieve the current track in the shuffled order
         self.current_queue_index.set(0);
-        self.shuffle_order.set(ahead);
+        self.shuffle_order.set(order);
     }
 
     pub fn play_queue_shuffled(&mut self, tracks: Vec<Track>) {

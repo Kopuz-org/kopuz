@@ -224,7 +224,7 @@ pub fn make_scrobble<'a>(
 ) -> Scrobble<'a> {
     let now_unix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap()
+        .unwrap_or_default()
         .as_secs() as i64;
 
     Scrobble {

@@ -242,6 +242,21 @@ pub fn TrackRow(
     let fmt_dur = |s: u64| format!("{}:{:02}", s / 60, s % 60);
     let duration_str = fmt_dur(track.duration);
 
+    // File-type tag (MP3, FLAC, …) for local tracks. Server tracks have a
+    // `TrackId::Server` id with no filesystem path, so they get no badge.
+    let file_type = track
+        .id
+        .local_path()
+        .and_then(|p| p.extension())
+        .and_then(|e| e.to_str())
+        .filter(|e| {
+            matches!(
+                e.to_ascii_lowercase().as_str(),
+                "mp3" | "flac" | "m4a" | "wav" | "ogg" | "opus" | "mp4" | "mka"
+            )
+        })
+        .map(|e| e.to_uppercase());
+
     let columns_modern = if is_album {
         COLUMNS_MODERN_ALBUM
     } else {
@@ -406,6 +421,13 @@ pub fn TrackRow(
                         i {
                             class: "fa-solid fa-arrow-down-to-line text-[9px] shrink-0",
                             style: "color: var(--color-indigo-500); opacity: 0.7;"
+                        }
+                    }
+                    if let Some(ref ft) = file_type {
+                        span {
+                            class: "shrink-0 text-[9px] font-semibold uppercase px-1 py-0.5 rounded leading-none tracking-wide",
+                            style: "background: rgba(255,255,255,0.08); color: var(--color-white); opacity: 0.5;",
+                            "{ft}"
                         }
                     }
                 }
@@ -678,6 +700,13 @@ pub fn TrackRow(
                     },
                     ondoubleclick: move |evt| evt.stop_propagation(),
                     "{track.title}"
+                }
+                if let Some(ref ft) = file_type {
+                    span {
+                        class: "shrink-0 ml-2 text-[9px] font-semibold uppercase px-1 py-0.5 rounded leading-none tracking-wide",
+                        style: "background: rgba(255,255,255,0.08); color: var(--color-white); opacity: 0.5;",
+                        "{ft}"
+                    }
                 }
             }
 

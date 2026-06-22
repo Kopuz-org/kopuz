@@ -80,6 +80,24 @@ impl YouTubeMusicClient {
         search::resolve_artist_channel_id(query, self.cookies.as_deref()).await
     }
 
+    /// Top YT Music artist-search avatar for `name` — the Artists grid uses this
+    /// so its photos are real YT artist images.
+    pub async fn resolve_artist_image(&self, name: &str) -> Result<Option<String>, String> {
+        search::resolve_artist_image(name, self.cookies.as_deref()).await
+    }
+
+    /// Resolve a saved album (title + artist) back to its YT album browse id
+    /// (`MPRE…`). Library YT albums carry no browse id, so the album page calls
+    /// this on demand before [`fetch_album_tracks`](Self::fetch_album_tracks)
+    /// to show the album's complete track list.
+    pub async fn resolve_album_browse_id(
+        &self,
+        album: &str,
+        artist: &str,
+    ) -> Result<Option<String>, String> {
+        search::resolve_album_browse_id(album, artist, self.cookies.as_deref()).await
+    }
+
     /// List the user's saved playlists (everything under Library →
     /// Playlists, minus the Liked Music auto-playlist). Returns summary
     /// rows; call [`get_playlist_entries`] for the tracks of any given
@@ -259,6 +277,14 @@ impl YouTubeMusicClient {
         discover::fetch_album_tracks(browse_id, self.cookies.as_deref().unwrap_or("")).await
     }
 
+    /// The full album (header metadata — title, artist, year, cover — plus every
+    /// track). The album page uses this for its YT-Music-style header; the
+    /// thinner [`fetch_album_tracks`](Self::fetch_album_tracks) is for callers
+    /// that only queue the tracks.
+    pub async fn fetch_album(&self, browse_id: &str) -> Result<discover::YtAlbum, String> {
+        discover::fetch_album(browse_id, self.cookies.as_deref().unwrap_or("")).await
+    }
+
     pub async fn fetch_artist(&self, channel_id: &str) -> Result<discover::YtArtist, String> {
         discover::fetch_artist(channel_id, self.cookies.as_deref().unwrap_or("")).await
     }
@@ -284,17 +310,18 @@ impl YouTubeMusicClient {
 }
 
 fn has_playlist_shelf(json: &Value) -> bool {
-    json.pointer(
-        "/contents/twoColumnBrowseResultsRenderer/secondaryContents/sectionListRenderer/contents",
-    )
-    .or_else(|| {
-        json.pointer(
-            "/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents",
-        )
-    })
-    .and_then(|v| v.as_array())
-    .map(|arr| arr.iter().any(|shelf| shelf.get("musicPlaylistShelfRenderer").is_some()))
-    .unwrap_or(false)
+    json.pointer("/contents/twoColumnBrowseResultsRenderer/secondaryContents/sectionListRenderer/contents")
+        .or_else(|| {
+            json.pointer(
+                "/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents",
+            )
+        })
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .any(|shelf| shelf.get("musicPlaylistShelfRenderer").is_some())
+        })
+        .unwrap_or(false)
 }
 
 impl Default for YouTubeMusicClient {

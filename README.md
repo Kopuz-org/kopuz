@@ -17,7 +17,7 @@
 <br/>
   <br/>
   <p>
-    <b>English</b> | <a href="docs/README-TR.md">Türkçe</a>
+    <b>English</b> | <a href="docs/README-TR.md">Türkçe</a> | <a href="docs/README-PT-PT.md">Português de Portugal</a>
   </p>
 </div>
 
@@ -96,10 +96,12 @@ media source carries its own credentials and its own favorites.
   actually listen to most.
 - **Scrobbling**: Scrobble to ListenBrainz. For Jellyfin users,
   [jellyfin-plugin-listenbrainz] is recommended if you use multiple clients.
-- **Language Support**: UI available in English, Russian, German, French,
-  Spanish, Turkish, Ukrainian, Polish, Arabic, Greek, Hebrew, Hungarian,
-  Indonesian, Japanese, Korean, Romanian, Brazilian Portuguese, Toki Pona, and
-  Simplified Chinese with a streamlined experience for adding new languages.
+- **Language Support**: UI available in Arabic, Brazilian Portuguese, Dutch,
+  English, European Portuguese, Filipino, French, German, Greek, Hebrew,
+  Hungarian, Indonesian, Italian, Japanese, Korean, Malayalam, Polish, Romanian,
+  Russian, Simplified Chinese, Spanish, Tamil, Toki Pona, Turkish, Ukrainian,
+  Vietnamese, and Sitelen Pona with a streamlined experience for adding new
+  languages.
 - **High Performance**: Heavy background processing and an optimized library
   scanner ensure the app opens instantly, runs smoothly, and skips previously
   indexed files quickly.

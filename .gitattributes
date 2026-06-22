@@ -3,3 +3,4 @@
 # otherwise use CRLF and change the checksum, making a DB created by one build
 # unreadable by another (e.g. cross-compiled). Pin migrations to LF.
 crates/db/migrations/*.sql text eol=lf
+locales/**/*.ftl linguist-generated=true

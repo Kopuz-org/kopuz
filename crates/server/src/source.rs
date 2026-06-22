@@ -126,6 +126,19 @@ pub enum FavoritesSync {
     Paginated,
 }
 
+/// How the album page renders, routed on this instead of hardcoding a service.
+/// `Standard` is the library-driven [`TrackListView`]; `YtMusic` is the rich
+/// catalog-remote page (header + on-demand full track list resolved from the
+/// remote). Catalog remotes that store albums by a title+artist hash with no
+/// full local track list select `YtMusic`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AlbumType {
+    /// Standard album page from the local/library tracks.
+    Standard,
+    /// YT-Music-style page: instant header, full track list pulled on demand.
+    YtMusic,
+}
+
 /// One page of paginated favorites: the tracks plus the cursor for the next page
 /// (`None` once exhausted). Cross-page dedup is the caller's job.
 pub struct FavoritesPage {
@@ -177,6 +190,8 @@ pub struct Capabilities {
     pub playlists: PlaylistOps,
     /// How the artists tab renders a selected artist.
     pub artist_view: ArtistView,
+    /// How the album page renders.
+    pub albums: AlbumType,
     /// How favorites sync — one shot vs paginated (streamed with progress).
     pub favorites_sync: FavoritesSync,
 }
@@ -211,6 +226,36 @@ pub struct PlaylistMeta {
     pub id: String,
     pub name: String,
     pub image_tag: Option<String>,
+}
+
+/// A full remote album — header metadata + every track — for the YT-Music-style
+/// album page, transformed into the generic model types. Source-agnostic: the
+/// album page renders this without reaching into any per-service catalog struct.
+/// `browse_id`/`audio_playlist_id` are opaque remote ids (the catalog uses them
+/// to re-fetch / start the album radio); `None` where the source has none.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RemoteAlbum {
+    pub browse_id: String,
+    pub title: String,
+    pub artist: Option<String>,
+    pub year: Option<String>,
+    pub thumbnail: Option<String>,
+    pub audio_playlist_id: Option<String>,
+    pub tracks: Vec<reader::Track>,
+}
+
+impl From<crate::ytmusic::discover::YtAlbum> for RemoteAlbum {
+    fn from(a: crate::ytmusic::discover::YtAlbum) -> Self {
+        Self {
+            browse_id: a.browse_id,
+            title: a.title,
+            artist: a.artist,
+            year: a.year,
+            thumbnail: a.thumbnail,
+            audio_playlist_id: a.audio_playlist_id,
+            tracks: a.tracks,
+        }
+    }
 }
 
 /// The source-agnostic backend the app drives. Impls supply
@@ -347,6 +392,35 @@ pub trait MediaSource: Send + Sync {
         Err(SourceError::unsupported("album tracks"))
     }
 
+    /// The full remote album (header metadata + tracks) for the YT-Music-style
+    /// album page. Default unsupported; only catalog remotes (YT) override.
+    async fn fetch_album(&self, _browse_id: &str) -> Result<RemoteAlbum, SourceError> {
+        Err(SourceError::unsupported("album"))
+    }
+
+    /// Resolve an opened album reference — a raw browse id, a `ytmusic:album:MPRE…`
+    /// (search rows with an album link), or a synthesized `ytmusic:album:<hash>`
+    /// (search rows without one) — to its full remote album. `None` when it can't
+    /// be resolved or has no tracks. The id→browse-id→album dance lives here so the
+    /// UI never reaches into the per-service catalog. Default unsupported; only
+    /// catalog remotes (YT) override.
+    async fn fetch_album_by_ref(&self, _id: &str) -> Result<Option<RemoteAlbum>, SourceError> {
+        Err(SourceError::unsupported("album by ref"))
+    }
+
+    /// Resolve a saved album's title + artist to its full remote album (header +
+    /// every track) for the YT-Music-style album page — the local library stores
+    /// YT albums by hash with no browse id, so the page needs the remote listing.
+    /// `None` when it can't be resolved or has no tracks. Default unsupported; only
+    /// catalog remotes (YT) override.
+    async fn fetch_album_by_meta(
+        &self,
+        _title: &str,
+        _artist: &str,
+    ) -> Result<Option<RemoteAlbum>, SourceError> {
+        Err(SourceError::unsupported("album by meta"))
+    }
+
     /// One page of a remote playlist: `cursor = None` for the first page, then
     /// the returned cursor for each next (`None` once exhausted). Lets a UI loop
     /// stream a long playlist (play page 1 instantly, queue the rest) without a
@@ -364,6 +438,18 @@ pub trait MediaSource: Send + Sync {
     /// Default unsupported; only catalog remotes (YT) override.
     async fn resolve_artist_channel_id(&self, _query: &str) -> Result<Option<String>, SourceError> {
         Err(SourceError::unsupported("artist channel"))
+    }
+
+    /// Resolve a saved album's title + artist to a remote album browse id, so
+    /// the album page can fetch the album's full track list (the local library
+    /// stores YT albums by hash, with no browse id). Default unsupported; only
+    /// catalog remotes (YT) override.
+    async fn resolve_album_browse_id(
+        &self,
+        _album: &str,
+        _artist: &str,
+    ) -> Result<Option<String>, SourceError> {
+        Err(SourceError::unsupported("album browse id"))
     }
 
     /// A remote artist profile (banner, top songs, albums, related) by channel
@@ -421,6 +507,12 @@ pub trait MediaSource: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// Resolve a single artist's photo URL by name. Default None; the catalog
+    /// remote (YT) implements it so the Artists grid can show real YT photos.
+    async fn fetch_artist_image(&self, _name: &str) -> Result<Option<String>, SourceError> {
+        Ok(None)
+    }
+
     /// One page of favorites — for [`FavoritesSync::Paginated`] sources (YT). The
     /// caller passes `None` then each returned cursor; default is a single empty
     /// page (instant sources use [`fetch_favorites`] instead).
@@ -434,7 +526,17 @@ pub trait MediaSource: Send + Sync {
         })
     }
 
-    // --- uniform ops (default): a plain source-scoped DB write --------------
+    // --- uniform ops (default): a plain source-scoped DB read/write ---------
+
+    /// One album's tracks (disc/track-ordered), read from this source's library
+    /// cache. Uniform across sources — the UI goes through the source rather than
+    /// touching the DB directly.
+    async fn album_tracks(&self, album_id: &str) -> Result<Vec<reader::Track>, SourceError> {
+        self.db()
+            .album_tracks(self.source(), album_id)
+            .await
+            .map_err(SourceError::from)
+    }
 
     /// This source's favorite refs — its partition of the favorites table. The
     /// partition key is the source's own identity, so callers never compute it.
@@ -885,6 +987,7 @@ impl MediaSource for LocalSource {
             radio: false,
             playlists: PlaylistOps::Reorder,
             artist_view: ArtistView::Library,
+            albums: AlbumType::Standard,
             favorites_sync: FavoritesSync::Instant,
         }
     }
@@ -992,6 +1095,7 @@ impl MediaSource for OfflineServerSource {
             radio: false,
             playlists: PlaylistOps::None,
             artist_view: ArtistView::Library,
+            albums: AlbumType::Standard,
             favorites_sync: FavoritesSync::Instant,
         }
     }
@@ -1244,6 +1348,7 @@ impl MediaSource for JellyfinSource {
             radio: false,
             playlists: PlaylistOps::Reorder,
             artist_view: ArtistView::Library,
+            albums: AlbumType::Standard,
             favorites_sync: FavoritesSync::Instant,
         }
     }
@@ -1588,6 +1693,7 @@ impl MediaSource for SubsonicSource {
             radio: false,
             playlists: PlaylistOps::Reorder,
             artist_view: ArtistView::Library,
+            albums: AlbumType::Standard,
             favorites_sync: FavoritesSync::Instant,
         }
     }
@@ -1800,6 +1906,7 @@ impl MediaSource for YtSource {
             radio: true,
             playlists: PlaylistOps::AddRemove,
             artist_view: ArtistView::Remote,
+            albums: AlbumType::YtMusic,
             favorites_sync: FavoritesSync::Paginated,
         }
     }
@@ -1852,6 +1959,49 @@ impl MediaSource for YtSource {
             .map_err(SourceError::from)
     }
 
+    async fn fetch_album(&self, browse_id: &str) -> Result<RemoteAlbum, SourceError> {
+        self.client
+            .fetch_album(browse_id)
+            .await
+            .map(RemoteAlbum::from)
+            .map_err(SourceError::from)
+    }
+
+    async fn fetch_album_by_ref(&self, id: &str) -> Result<Option<RemoteAlbum>, SourceError> {
+        // Resolve the id (raw browse id, `ytmusic:album:MPRE…`, or a synthesized
+        // `ytmusic:album:<hash>`) to a real browse id before fetching.
+        let browse_id = if let Some(bid) = crate::ytmusic::search::album_browse_id(id) {
+            Some(bid)
+        } else if let Some((album, artist)) = crate::ytmusic::search::synth_album_parts(id) {
+            self.resolve_album_browse_id(&album, &artist).await?
+        } else {
+            None
+        };
+        let Some(browse_id) = browse_id else {
+            return Ok(None);
+        };
+        Ok(self
+            .fetch_album(&browse_id)
+            .await
+            .ok()
+            .filter(|a| !a.tracks.is_empty()))
+    }
+
+    async fn fetch_album_by_meta(
+        &self,
+        title: &str,
+        artist: &str,
+    ) -> Result<Option<RemoteAlbum>, SourceError> {
+        let Some(browse_id) = self.resolve_album_browse_id(title, artist).await? else {
+            return Ok(None);
+        };
+        Ok(self
+            .fetch_album(&browse_id)
+            .await
+            .ok()
+            .filter(|a| !a.tracks.is_empty()))
+    }
+
     async fn fetch_playlist_page(
         &self,
         playlist_id: &str,
@@ -1870,12 +2020,30 @@ impl MediaSource for YtSource {
             .map_err(SourceError::from)
     }
 
+    async fn resolve_album_browse_id(
+        &self,
+        album: &str,
+        artist: &str,
+    ) -> Result<Option<String>, SourceError> {
+        self.client
+            .resolve_album_browse_id(album, artist)
+            .await
+            .map_err(SourceError::from)
+    }
+
     async fn fetch_artist(
         &self,
         channel_id: &str,
     ) -> Result<crate::ytmusic::discover::YtArtist, SourceError> {
         self.client
             .fetch_artist(channel_id)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    async fn fetch_artist_image(&self, name: &str) -> Result<Option<String>, SourceError> {
+        self.client
+            .resolve_artist_image(name)
             .await
             .map_err(SourceError::from)
     }
@@ -2165,6 +2333,7 @@ impl MediaSource for SoundcloudSource {
             // No write side wired (api-v2 playlist mutation is DataDome-gated).
             playlists: PlaylistOps::None,
             artist_view: ArtistView::Library,
+            albums: AlbumType::Standard,
             favorites_sync: FavoritesSync::Paginated,
         }
     }

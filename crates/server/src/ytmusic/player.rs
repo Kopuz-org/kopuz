@@ -571,12 +571,11 @@ mod tests {
     /// `YtStreamInfo` the player controller stamps onto the bottom bar.
     #[tokio::test]
     #[ignore = "hits live YouTube + needs a system JS runtime"]
-    #[expect(clippy::print_stderr, reason = "test diagnostic output")]
     async fn resolve_populates_bitrate_itag_duration() {
         let info = resolve("dQw4w9WgXcQ", None)
             .await
             .expect("resolve should succeed");
-        eprintln!(
+        tracing::debug!(
             "[test] resolved itag={:?} bitrate={:?} kbps duration={:?}s",
             info.itag,
             info.bitrate.map(|b| b / 1000),
