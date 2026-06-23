@@ -761,6 +761,33 @@ impl PlayerController {
                                 let (source, mut hint) = decoder::from_stream_with_len(cursor, len);
                                 hint.with_extension("m4a");
                                 Ok::<_, std::io::Error>((source, hint))
+                            } else if let Some(rest) =
+                                stream_url_for_blocking.strip_prefix("__AM_FMP4:")
+                            {
+                                // Apple Music: CDM key exchange + encrypted fMP4 download + decrypt.
+                                // Format: adam_id:base64_token
+                                let (adam_id, token_b64) = rest.split_once(':').unwrap_or((rest, ""));
+                                let token = String::from_utf8(
+                                    base64::Engine::decode(
+                                        &base64::engine::general_purpose::STANDARD,
+                                        token_b64,
+                                    )
+                                    .unwrap_or_default(),
+                                )
+                                .unwrap_or_default();
+                                let adam_id = adam_id.to_string();
+                                let rt = tokio::runtime::Handle::current();
+                                let bytes = rt.block_on(async move {
+                                    server::applemusic::stream::resolve_and_decrypt(&adam_id, &token).await
+                                });
+                                let bytes = bytes.map_err(|e| {
+                                    std::io::Error::new(std::io::ErrorKind::Other, e)
+                                })?;
+                                let len = Some(bytes.len() as u64);
+                                let cursor = std::io::Cursor::new(bytes);
+                                let (source, mut hint) = decoder::from_stream_with_len(cursor, len);
+                                hint.with_extension("m4a");
+                                Ok::<_, std::io::Error>((source, hint))
                             } else {
                                 let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
                                     stream_url_for_blocking,

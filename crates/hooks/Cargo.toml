@@ -20,6 +20,7 @@ server = { workspace = true }
 scrobble = { workspace = true }
 web-time = { workspace = true }
 radio = { workspace = true }
+base64 = "0.22"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 tokio = { workspace = true }

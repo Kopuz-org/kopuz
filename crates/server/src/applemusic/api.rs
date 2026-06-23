@@ -41,6 +41,10 @@ impl AppleMusicApi {
         &self.language
     }
 
+    pub fn media_user_token(&self) -> Option<&str> {
+        self.media_user_token.as_deref()
+    }
+
     async fn get(&self, path: &str) -> Result<reqwest::Response, String> {
         let bearer = auth::get_bearer_token().await?;
         let url = format!("{BASE}{path}");

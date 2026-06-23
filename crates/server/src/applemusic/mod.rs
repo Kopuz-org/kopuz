@@ -1,6 +1,8 @@
 pub mod api;
 pub mod auth;
+pub mod cdm;
 pub mod signin;
+pub mod stream;
 pub mod types;
 
 pub use api::AppleMusicApi;
@@ -91,6 +93,8 @@ pub fn track_from_song_data(song: &types::TrackData) -> Track {
 }
 
 /// Convert a library song resource to a reader::Track.
+/// Uses playParams.catalogId (the Adam ID) when available, falling back to the
+/// library ID. The web playback API requires Adam IDs, not library IDs.
 pub fn track_from_library_song(song: &types::LibrarySongResource) -> Track {
     let cover = song
         .attributes
@@ -99,8 +103,21 @@ pub fn track_from_library_song(song: &types::LibrarySongResource) -> Track {
         .filter(|a| !a.url.is_empty())
         .map(|a| artwork_url(&a.url, 600));
 
+    // Use catalogId (Adam ID) for playback — web playback API requires it.
+    let playback_id = song.attributes.playParams.as_ref()
+        .and_then(|p| p.catalog_id.as_deref())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&song.id);
+
+    tracing::debug!(
+        "am.track_from_library_song: library_id={}, catalog_id={:?}, playback_id={}",
+        song.id,
+        song.attributes.playParams.as_ref().and_then(|p| p.catalog_id.as_deref()),
+        playback_id
+    );
+
     Track {
-        id: apple_music_id(&song.id),
+        id: apple_music_id(playback_id),
         cover,
         album_id: String::new(),
         title: song.attributes.name.clone(),

@@ -2513,7 +2513,21 @@ impl MediaSource for AppleMusicSource {
     }
 
     async fn resolve_stream(&self, _item_id: &str) -> Result<StreamInfo, SourceError> {
-        Err(SourceError::unsupported("audio"))
+        // For Apple Music, we encode the token in the sentinel so the blocking
+        // player controller can use it for the CDM pipeline.
+        let token = self.client.media_user_token().unwrap_or("");
+        let encoded_token = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            token.as_bytes(),
+        );
+        Ok(StreamInfo {
+            url: format!("__AM_FMP4:{_item_id}:{encoded_token}"),
+            format: None,
+            user_agent: None,
+            duration_secs: None,
+            bitrate: Some(256_000),
+            content_length: None,
+        })
     }
 
     async fn validate(&self) -> AuthOutcome {
