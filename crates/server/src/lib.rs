@@ -8,6 +8,7 @@ pub mod provider;
 pub mod server_ops;
 pub mod soundcloud;
 pub mod source;
+pub mod spotify;
 pub mod subsonic;
 pub mod sync;
 pub mod ytmusic;

@@ -22,11 +22,18 @@ httpdate = "1"
 hex = "0.4"
 rookie = "0.5"
 web-time = { workspace = true }
-tokio = { workspace = true, features = ["fs", "process", "rt", "sync"] }
+tokio = { workspace = true, features = ["fs", "process", "rt", "rt-multi-thread", "sync"] }
 reader = { workspace = true }
 db = { workspace = true }
 utils = { workspace = true }
 async-trait = "0.1"
+librespot-core = { workspace = true }
+librespot-oauth = { workspace = true }
+librespot-metadata = { workspace = true }
+librespot-audio = { workspace = true }
+librespot-protocol = { workspace = true }
+protobuf = { workspace = true }
+futures-util = { workspace = true }
 
 [[example]]
 name = "duration_probe"

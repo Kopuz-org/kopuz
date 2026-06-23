@@ -22,6 +22,7 @@ pub fn AddServerPopup(
         MusicService::Custom => "custom",
         MusicService::YtMusic => "ytmusic",
         MusicService::SoundCloud => "soundcloud",
+        MusicService::Spotify => "spotify",
     };
 
     let server_name_optional = i18n::t("server_name_optional").to_string();
@@ -67,6 +68,7 @@ pub fn AddServerPopup(
                             "custom" => MusicService::Custom,
                             "ytmusic" => MusicService::YtMusic,
                             "soundcloud" => MusicService::SoundCloud,
+                            "spotify" => MusicService::Spotify,
                             _ => MusicService::Jellyfin,
                         };
                         server_service.set(service);
@@ -96,6 +98,11 @@ pub fn AddServerPopup(
                         value: "soundcloud",
                         selected: server_service() == MusicService::SoundCloud,
                         "SoundCloud"
+                    }
+                    option {
+                        value: "spotify",
+                        selected: server_service() == MusicService::Spotify,
+                        "Spotify"
                     }
                 }
 
@@ -328,6 +335,11 @@ fn ServerServiceFields(
                         "{browser.label()}"
                     }
                 }
+            }
+        },
+        MusicService::Spotify => rsx! {
+            p { class: "text-xs text-white/60",
+                "Saving opens Spotify's sign-in page in your default browser. Approve access and you're done — kopuz never sees your password. Playing tracks requires a Spotify Premium account; library and playlists load on any account."
             }
         },
         _ => rsx! {

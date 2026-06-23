@@ -351,10 +351,37 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         });
     };
 
+    let spotify_auto_login = move || {
+        let mut report = move |msg: String| {
+            error.set(Some(msg.clone()));
+            ctrl.playback_error.set(Some(msg));
+        };
+        spawn(async move {
+            let auth = match ::server::spotify::auth::launch_signin_and_extract().await {
+                Ok(a) => a,
+                Err(e) => {
+                    report(format!("Spotify sign-in failed: {e}"));
+                    return;
+                }
+            };
+            let packed =
+                ::server::spotify::auth::pack_token(&auth.access_token, &auth.refresh_token);
+            {
+                let mut cfg = config.write();
+                if let Some(srv) = cfg.server.as_mut() {
+                    srv.access_token = Some(packed);
+                    srv.user_id = Some(auth.user_id);
+                }
+            }
+            error.set(None);
+        });
+    };
+
     let handle_add_server = move |_| {
         let selected_service = server_service();
         let is_ytmusic = selected_service == MusicService::YtMusic;
         let is_soundcloud = selected_service == MusicService::SoundCloud;
+        let is_spotify = selected_service == MusicService::Spotify;
         let is_browser_signin = selected_service.uses_browser_signin();
 
         // Browser-sign-in backends (YT, SoundCloud) have no user-entered URL.
@@ -381,6 +408,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     "https://music.youtube.com".to_string()
                 } else if is_soundcloud {
                     "https://soundcloud.com".to_string()
+                } else if is_spotify {
+                    "https://open.spotify.com".to_string()
                 } else {
                     url_input
                 };
@@ -432,6 +461,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     ytmusic_auto_login();
                 } else if is_soundcloud {
                     soundcloud_auto_login();
+                } else if is_spotify {
+                    spotify_auto_login();
                 } else if !is_browser_signin {
                     show_login.set(true);
                 }
@@ -446,11 +477,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     let handle_switch_server = move |id: String| {
         let db = db_for_switch.clone();
         spawn(async move {
-            let Some(is_ytmusic) = config
-                .peek()
-                .find_saved_server(&id)
-                .map(|s| s.service == MusicService::YtMusic)
-            else {
+            let Some(service) = config.peek().find_saved_server(&id).map(|s| s.service) else {
                 return;
             };
             // Shared switch (sidebar + Settings): loads creds and sets the active
@@ -460,10 +487,11 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                 hooks::source_switch::apply_source_switch(config, db, config::Source::Server(id))
                     .await;
             if !usable {
-                if is_ytmusic {
-                    ytmusic_auto_login();
-                } else {
-                    show_login.set(true);
+                match service {
+                    MusicService::YtMusic => ytmusic_auto_login(),
+                    MusicService::SoundCloud => soundcloud_auto_login(),
+                    MusicService::Spotify => spotify_auto_login(),
+                    _ => show_login.set(true),
                 }
             }
         });

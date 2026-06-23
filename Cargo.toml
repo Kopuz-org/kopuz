@@ -48,6 +48,13 @@ uuid = { version = "1.20.0", features = ["v4", "fast-rng", "macro-diagnostics", 
 cpal = "0.17"
 symphonia = { version = "0.6", features = ["all"] }
 rb = "0.4"
+librespot-core = { version = "0.8", default-features = false, features = ["rustls-tls-native-roots"] }
+librespot-oauth = { version = "0.8", default-features = false, features = ["rustls-tls-native-roots"] }
+librespot-metadata = { version = "0.8", default-features = false, features = ["rustls-tls-native-roots"] }
+librespot-audio = { version = "0.8", default-features = false, features = ["rustls-tls-native-roots"] }
+librespot-protocol = "0.8"
+protobuf = "3"
+futures-util = "0.3"
 jellyfin-sdk-rust = "0.1.2"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "charset", "query", "form"] }
 rand = "0.10"

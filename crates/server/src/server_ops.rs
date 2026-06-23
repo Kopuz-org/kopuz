@@ -29,7 +29,9 @@ impl ServerConn {
         let server = config.server.as_ref()?;
         let token = server.access_token.clone()?;
         let user_id = match server.service {
-            MusicService::YtMusic => server.user_id.clone().unwrap_or_default(),
+            MusicService::YtMusic | MusicService::Spotify => {
+                server.user_id.clone().unwrap_or_default()
+            }
             _ => server.user_id.clone()?,
         };
         Some(Self {

@@ -18,6 +18,10 @@ info_plist_path = "Info.plist"
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 directories = { workspace = true }
 discord-presence = { workspace = true }
+# Install a process-wide rustls CryptoProvider at startup: the dep graph has both
+# aws-lc-rs and ring, so rustls 0.23 can't auto-pick one and librespot's
+# token-exchange/connect TLS would panic.
+rustls = "0.23"
 
 # Desktop only. Android uses the mobile renderer, logs to logcat, and has no Discord IPC.
 [target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))'.dependencies]
