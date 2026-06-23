@@ -770,14 +770,14 @@ impl PlayerController {
                                 stream_url_for_blocking.strip_prefix("__SP:")
                             {
                                 let token = spotify_token_for_blocking.unwrap_or_default();
-                                let bytes =
-                                    ::server::spotify::stream::fetch_decrypted_ogg(track_id, &token)
+                                let (bytes, ext) =
+                                    ::server::spotify::stream::fetch_track_audio(track_id, &token)
                                         .map_err(std::io::Error::other)?;
                                 let len = Some(bytes.len() as u64);
                                 let cursor = std::io::Cursor::new(bytes);
                                 let (source, mut hint) =
                                     decoder::from_stream_with_len(cursor, len);
-                                hint.with_extension("ogg");
+                                hint.with_extension(ext);
                                 Ok::<_, std::io::Error>((source, hint))
                             } else {
                                 let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
