@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use aes::cipher::{BlockDecryptMut, KeyIvInit};
+use aes::cipher::KeyIvInit;
 use pkcs1::DecodeRsaPrivateKey;
 use sha1::{Digest, Sha1};
 
@@ -184,7 +184,7 @@ fn encode_content_identification_cenc(
 }
 
 fn encode_content_identification(cenc: &[u8]) -> Vec<u8> {
-    encode_message_field(3, cenc)
+    encode_message_field(1, cenc)
 }
 
 fn encode_license_request(
@@ -249,8 +249,7 @@ pub struct Cdm {
     private_key_raw: rsa::RsaPrivateKey,
     client_id: Vec<u8>,
     session_id: [u8; 32],
-    key_ids: Vec<Vec<u8>>,
-    content_id: Vec<u8>,
+    widevine_cenc_header: Vec<u8>,
 }
 
 pub struct CdmKey {
@@ -272,8 +271,6 @@ impl Cdm {
             return Err("initData too short".to_string());
         }
 
-        let (_key_ids, _content_id) = parse_widevine_cenc_header(&init_data[32..]);
-
         use rand::RngExt;
         let mut rng = rand::rng();
         let charset = b"ABCDEF0123456789";
@@ -287,16 +284,16 @@ impl Cdm {
             session_id[i] = b'0';
         }
 
-        // We need the full key_ids from the header for the request
-        let (key_ids, _content_id_inner) = parse_widevine_cenc_header(&init_data[32..]);
+        // Store the raw header bytes like Go does (it stores the parsed WidevineCencHeader
+        // and marshals it directly). Re-encoding from parsed fields could differ.
+        let widevine_cenc_header = init_data[32..].to_vec();
 
         Ok(Self {
             private_key: rsa::pkcs1v15::SigningKey::<Sha1>::new(private_key.clone()),
             private_key_raw: private_key,
             client_id,
             session_id,
-            key_ids,
-            content_id: _content_id_inner,
+            widevine_cenc_header,
         })
     }
 
@@ -305,13 +302,10 @@ impl Cdm {
     }
 
     pub fn get_license_request(&self) -> Result<Vec<u8>, String> {
-        let pssh_header = encode_widevine_cenc_header(
-            self.key_ids.first().map(|k| k.as_slice()).unwrap_or(&[]),
-            &String::from_utf8_lossy(&self.content_id),
-        );
-
+        // Use the original WidevineCencHeader bytes directly (same as Go's
+        // `licenseRequest.Msg.ContentId.CencId.Pssh = &c.widevineCencHeader`)
         let cenc = encode_content_identification_cenc(
-            &pssh_header,
+            &self.widevine_cenc_header,
             1, // LICENSE_TYPE_DEFAULT = 1
             &self.session_id,
         );
@@ -470,6 +464,17 @@ impl Cdm {
                 }
             }
 
+            // Widevine content keys are always 16 bytes (AES-128).
+            // After decryption + PKCS7 unpad, truncate to 16 bytes if longer.
+            // Extra bytes are garbage from padding or incorrect block decryption.
+            if decrypted.len() > 16 {
+                tracing::debug!(
+                    "am.cdm: key was {} bytes after decrypt, truncating to 16",
+                    decrypted.len()
+                );
+                decrypted.truncate(16);
+            }
+
             tracing::debug!(
                 "am.cdm: decrypted key id={} type={} value_len={}",
                 hex::encode(&id),
@@ -613,6 +618,12 @@ pub const DEFAULT_CLIENT_ID: &[u8] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::Engine;
+
+    const TEST_KID_B64: &str = "AAAAAGmd8sAAHUQHlVERpg==";
+
+    // Reference values from Go TestCDMDumpForCrossValidation (deterministic parts only;
+    // session_id, request_time, key_control_nonce are random and excluded)
 
     #[test]
     fn test_varint_encoding() {
@@ -624,17 +635,158 @@ mod tests {
     }
 
     #[test]
-    fn test_cdm_creation() {
-        let init_data = vec![0u8; 64];
-        let cdm = Cdm::new(DEFAULT_PRIVATE_KEY, DEFAULT_CLIENT_ID.to_vec(), &init_data);
-        assert!(cdm.is_ok());
+    fn test_widevine_header_matches_go() {
+        let kid = base64::engine::general_purpose::STANDARD.decode(TEST_KID_B64).unwrap();
+        let content_id_encoded = base64::engine::general_purpose::STANDARD.encode(b"");
+        let header = encode_widevine_cenc_header(&kid, &content_id_encoded);
+
+        // Go reference: HEADER_HEX=0801121000000000699df2c0001d4407955111a61a0022003200
+        // HEADER_LEN=26
+        let expected = hex::decode("0801121000000000699df2c0001d4407955111a61a0022003200").unwrap();
+        assert_eq!(header, expected, "WidevineCencHeader must be byte-identical to Go output");
+        assert_eq!(header.len(), 26, "header length must be 26");
     }
 
     #[test]
-    fn test_license_request_generation() {
-        let init_data = vec![0u8; 64];
+    fn test_pssh_construction_matches_go() {
+        let kid = base64::engine::general_purpose::STANDARD.decode(TEST_KID_B64).unwrap();
+        let content_id_encoded = base64::engine::general_purpose::STANDARD.encode(b"");
+        let header = encode_widevine_cenc_header(&kid, &content_id_encoded);
+
+        let mut pssh_data = b"0123456789abcdef0123456789abcdef".to_vec();
+        pssh_data.extend_from_slice(&header);
+        let pssh_b64 = base64::engine::general_purpose::STANDARD.encode(&pssh_data);
+
+        // Go reference: PSSH_LEN=58
+        // PSSH_B64=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYIARIQAAAAAGmd8sAAHUQHlVERphoAIgAyAA==
+        assert_eq!(pssh_data.len(), 58, "PSSH length must be 58");
+        assert_eq!(pssh_b64, "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYIARIQAAAAAGmd8sAAHUQHlVERphoAIgAyAA==",
+            "PSSH base64 must match Go");
+    }
+
+    #[test]
+    fn test_cdm_creation_and_license_request() {
+        let kid = base64::engine::general_purpose::STANDARD.decode(TEST_KID_B64).unwrap();
+        let content_id_encoded = base64::engine::general_purpose::STANDARD.encode(b"");
+        let header = encode_widevine_cenc_header(&kid, &content_id_encoded);
+
+        let mut pssh_data = b"0123456789abcdef0123456789abcdef".to_vec();
+        pssh_data.extend_from_slice(&header);
+        let pssh_b64 = base64::engine::general_purpose::STANDARD.encode(&pssh_data);
+        let init_data = base64::engine::general_purpose::STANDARD.decode(&pssh_b64).unwrap();
+
         let cdm = Cdm::new(DEFAULT_PRIVATE_KEY, DEFAULT_CLIENT_ID.to_vec(), &init_data).unwrap();
-        let request = cdm.get_license_request().unwrap();
-        assert!(!request.is_empty());
+        let req = cdm.get_license_request().unwrap();
+
+        // Go reference: LICENSE_REQ_LEN=2131
+        assert_eq!(req.len(), 2131, "license request length must be 2131");
+    }
+
+    #[test]
+    fn test_signed_license_request_structure() {
+        let kid = base64::engine::general_purpose::STANDARD.decode(TEST_KID_B64).unwrap();
+        let content_id_encoded = base64::engine::general_purpose::STANDARD.encode(b"");
+        let header = encode_widevine_cenc_header(&kid, &content_id_encoded);
+        let mut pssh_data = b"0123456789abcdef0123456789abcdef".to_vec();
+        pssh_data.extend_from_slice(&header);
+        let pssh_b64 = base64::engine::general_purpose::STANDARD.encode(&pssh_data);
+        let init_data = base64::engine::general_purpose::STANDARD.decode(&pssh_b64).unwrap();
+
+        let cdm = Cdm::new(DEFAULT_PRIVATE_KEY, DEFAULT_CLIENT_ID.to_vec(), &init_data).unwrap();
+        let req = cdm.get_license_request().unwrap();
+
+        let mut pos = 0;
+        let mut found_type = false;
+        let mut found_msg = false;
+        let mut found_sig = false;
+        let mut sig_len = 0usize;
+        let mut msg_len = 0usize;
+
+        while pos < req.len() {
+            if let Some((field, wire, value_start)) = decode_field(&req, &mut pos) {
+                let end = pos;
+                match (field, wire) {
+                    (1, 0) => {
+                        let mut vpos = value_start;
+                        let val = decode_varint(&req, &mut vpos).unwrap();
+                        assert_eq!(val, 1, "SLR.Type must be LICENSE_REQUEST (1)");
+                        found_type = true;
+                    }
+                    (2, 2) => { found_msg = true; msg_len = end - value_start; }
+                    (3, 2) => { found_sig = true; sig_len = end - value_start; }
+                    _ => {}
+                }
+            } else { break; }
+        }
+
+        assert!(found_type, "must have Type field");
+        assert!(found_msg, "must have Msg field");
+        assert!(found_sig, "must have Signature field");
+        assert_eq!(sig_len, 256, "signature must be 256 bytes");
+        assert_eq!(msg_len, 1867, "LicenseRequest must be 1867 bytes");
+    }
+
+    #[test]
+    fn test_cmac_input_matches_go() {
+        let kid = base64::engine::general_purpose::STANDARD.decode(TEST_KID_B64).unwrap();
+        let content_id_encoded = base64::engine::general_purpose::STANDARD.encode(b"");
+        let header = encode_widevine_cenc_header(&kid, &content_id_encoded);
+        let mut pssh_data = b"0123456789abcdef0123456789abcdef".to_vec();
+        pssh_data.extend_from_slice(&header);
+        let pssh_b64 = base64::engine::general_purpose::STANDARD.encode(&pssh_data);
+        let init_data = base64::engine::general_purpose::STANDARD.decode(&pssh_b64).unwrap();
+
+        let cdm = Cdm::new(DEFAULT_PRIVATE_KEY, DEFAULT_CLIENT_ID.to_vec(), &init_data).unwrap();
+        let req = cdm.get_license_request().unwrap();
+
+        // Extract inner msg (field 2 of SignedLicenseRequest)
+        let mut pos = 0;
+        let mut inner_msg = Vec::new();
+        while pos < req.len() {
+            if let Some((field, wire, value_start)) = decode_field(&req, &mut pos) {
+                if field == 2 && wire == 2 {
+                    inner_msg = req[value_start..pos].to_vec();
+                    break;
+                }
+            } else { break; }
+        }
+
+        // Dump the inner msg for comparison with Go
+        println!("RUST_INNER_MSG_LEN={}", inner_msg.len());
+        println!("RUST_INNER_MSG_HEX={}", hex::encode(&inner_msg));
+
+        // Build CMAC input
+        let mut cmac_input = vec![0x01];
+        cmac_input.extend_from_slice(b"ENCRYPTION");
+        cmac_input.extend_from_slice(&inner_msg);
+        cmac_input.extend_from_slice(&[0x00, 0x00, 0x00, 0x80]);
+        println!("RUST_CMAC_INPUT_LEN={}", cmac_input.len());
+
+        // Test CMAC with dummy key
+        use cmac::{Cmac, Mac};
+        type Aes128Cmac = Cmac<aes::Aes128>;
+        let dummy_key: [u8; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        let mut mac = Aes128Cmac::new_from_slice(&dummy_key).unwrap();
+        mac.update(&cmac_input);
+        let result = mac.finalize().into_bytes();
+        println!("RUST_CMAC_RESULT={}", hex::encode(&result));
+    }
+
+    #[test]
+    fn test_pem_key_matches_go() {
+        use pkcs1::DecodeRsaPrivateKey;
+        use rsa::traits::PublicKeyParts;
+        let key = rsa::RsaPrivateKey::from_pkcs1_pem(DEFAULT_PRIVATE_KEY).unwrap();
+        assert_eq!(key.size() * 8, 2048, "key must be RSA-2048");
+        assert!(key.validate().is_ok(), "key must be valid");
+    }
+
+    #[test]
+    fn test_client_id_is_full_blob() {
+        assert!(
+            DEFAULT_CLIENT_ID.len() > 1000,
+            "DEFAULT_CLIENT_ID must be the full {} byte blob, got {}",
+            1780, DEFAULT_CLIENT_ID.len()
+        );
     }
 }

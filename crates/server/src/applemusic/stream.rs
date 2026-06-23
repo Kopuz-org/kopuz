@@ -57,8 +57,17 @@ pub async fn get_web_playback(
 
     let song = &song_list[0];
 
-    // Find the "28:ctrp256" audio asset
+    // Log all available assets
     let assets = song["assets"].as_array().ok_or("no assets")?;
+    for asset in assets {
+        tracing::info!("am.webplayback: asset flavor={} url={}",
+            asset["flavor"].as_str().unwrap_or("?"),
+            asset["URL"].as_str().unwrap_or("?"),
+        );
+    }
+
+    // Find the audio asset — only 28:ctrp256 (CTR-encrypted) works with our Widevine CDM.
+    // cbcp flavors use Apple's proprietary skd:// key delivery which our CDM can't handle.
     let asset_url = assets
         .iter()
         .find(|a| a["flavor"].as_str() == Some("28:ctrp256"))
@@ -236,99 +245,9 @@ async fn get_content_key(
     Err("no content key found in license response".to_string())
 }
 
-/// Decrypt a CENC-encrypted fMP4 using AES-CTR with the content key.
-/// For Apple Music, the file body after the mdat box header is AES-CTR encrypted.
-pub fn decrypt_fmp4(encrypted: &[u8], key: &[u8]) -> Result<Vec<u8>, String> {
-    // Find mdat box offset
-    let mut mdat_offset = 0;
-    let mut pos = 0;
-    while pos + 8 <= encrypted.len() {
-        let box_size = u32::from_be_bytes([
-            encrypted[pos],
-            encrypted[pos + 1],
-            encrypted[pos + 2],
-            encrypted[pos + 3],
-        ]) as usize;
-        let box_type = &encrypted[pos + 4..pos + 8];
-
-        if box_type == b"mdat" {
-            mdat_offset = pos + 8;
-            break;
-        }
-
-        if box_size < 8 {
-            pos += 8;
-            continue;
-        }
-        pos += box_size;
-    }
-
-    if mdat_offset == 0 {
-        tracing::warn!("am.decrypt_fmp4: no mdat box found, returning as-is");
-        return Ok(encrypted.to_vec());
-    }
-
-    // Apple Music uses AES-128-CTR with IV = 16 zero bytes
-    let iv = [0u8; 16];
-    let mut decrypted = encrypted.to_vec();
-
-    // Decrypt from mdat_offset onwards using AES-CTR
-    let encrypted_part = &mut decrypted[mdat_offset..];
-
-    // Manual AES-CTR implementation (keystream XOR)
-    use aes::Aes128;
-    use aes::cipher::generic_array::GenericArray;
-    use aes::cipher::{BlockEncrypt, KeyInit};
-
-    struct AesCtr {
-        cipher: Aes128,
-        counter: [u8; 16],
-    }
-
-    impl AesCtr {
-        fn new(key: &[u8; 16], iv: &[u8; 16]) -> Self {
-            let cipher = Aes128::new(GenericArray::from_slice(key));
-            Self {
-                cipher,
-                counter: *iv,
-            }
-        }
-
-        fn apply_keystream(&mut self, data: &mut [u8]) {
-            let mut remaining = data;
-            while !remaining.is_empty() {
-                let mut keystream_block = aes::Block::clone_from_slice(&self.counter);
-                self.cipher.encrypt_block(&mut keystream_block);
-
-                let len = remaining.len().min(16);
-                for i in 0..len {
-                    remaining[i] ^= keystream_block[i];
-                }
-                remaining = &mut remaining[len..];
-
-                for i in (0..16).rev() {
-                    self.counter[i] = self.counter[i].wrapping_add(1);
-                    if self.counter[i] != 0 {
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    let mut ctr = AesCtr::new(
-        key.try_into().map_err(|_| "key must be 16 bytes")?,
-        &iv,
-    );
-    ctr.apply_keystream(encrypted_part);
-
-    Ok(decrypted)
-}
-
 /// If the id looks like a library id (contains "."), resolve it to a catalog Adam id.
 /// Library ids like "i.xxx" are not valid for web playback — only numeric Adam ids work.
 async fn resolve_adam_id(item_id: &str, bearer_token: &str, media_user_token: &str) -> Result<String, String> {
-    // If it's already numeric, it's likely an Adam ID
     if item_id.chars().all(|c| c.is_ascii_digit()) {
         return Ok(item_id.to_string());
     }
@@ -346,6 +265,7 @@ async fn resolve_adam_id(item_id: &str, bearer_token: &str, media_user_token: &s
         .header("User-Agent", USER_AGENT)
         .header("Origin", "https://music.apple.com")
         .header("Referer", "https://music.apple.com/")
+        .header("x-apple-music-user-token", media_user_token)
         .header("Cookie", format!("media-user-token={media_user_token}"))
         .send()
         .await
@@ -353,9 +273,8 @@ async fn resolve_adam_id(item_id: &str, bearer_token: &str, media_user_token: &s
 
     let status = resp.status();
     if !status.is_success() {
-        // Fallback: try using the id directly with web playback
-        tracing::warn!("am.stream: catalog resolve failed ({status}), trying id directly");
-        return Ok(item_id.to_string());
+        tracing::warn!("am.stream: catalog resolve failed ({status}), library song may not have a catalog equivalent");
+        return Err(format!("library song {} has no catalog equivalent (HTTP {status})", item_id));
     }
 
     let body: serde_json::Value = resp.json().await.map_err(|e| format!("parse catalog response: {e}"))?;
@@ -369,8 +288,7 @@ async fn resolve_adam_id(item_id: &str, bearer_token: &str, media_user_token: &s
         }
     }
 
-    // Fallback: use the id directly
-    tracing::warn!("am.stream: could not extract catalog id from response, using raw id");
+    tracing::warn!("am.stream: no catalog id found in response");
     Ok(item_id.to_string())
 }
 
@@ -443,12 +361,99 @@ pub async fn resolve_and_decrypt(adam_id: &str, media_user_token: &str) -> Resul
     tracing::info!(
         "am.stream: downloaded {} bytes, decrypting with key {}",
         encrypted_bytes.len(),
-        &key_hex[..16.min(key_hex.len())]
+        &key_hex[..32.min(key_hex.len())]
     );
 
-    let decrypted = decrypt_fmp4(&encrypted_bytes, &key_bytes)?;
+    // Two-step: mp4decrypt decrypts the fMP4, then MP4Box extracts raw AAC.
+    // mp4decrypt handles Apple Music's CENC/fPIFF encryption.
+    // MP4Box -raw extracts plain ADTS AAC that Symphonia can decode.
+    let decrypted = decrypt_and_extract_aac(&encrypted_bytes, &key_hex).await?;
 
     tracing::info!("am.stream: decrypted {} bytes", decrypted.len());
 
     Ok(decrypted)
+}
+
+/// Two-step decryption + AAC extraction pipeline:
+/// 1. mp4decrypt: decrypt Apple Music's fragmented CENC MP4 → standard m4a
+/// 2. MP4Box -raw: extract plain AAC from the m4a
+/// Falls back to the m4a if MP4Box fails.
+async fn decrypt_and_extract_aac(encrypted: &[u8], key_hex: &str) -> Result<Vec<u8>, String> {
+    use tokio::fs;
+    use std::process::Stdio;
+
+    let tmp_dir = std::env::temp_dir().join("kopuz_am_decrypt");
+    fs::create_dir_all(&tmp_dir).await.map_err(|e| format!("create tmp dir: {e}"))?;
+
+    let id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+
+    let encrypted_path = tmp_dir.join(format!("enc_{id}.m4s"));
+    let decrypted_path = tmp_dir.join(format!("dec_{id}.m4a"));
+    let aac_path = tmp_dir.join(format!("aac_{id}.aac"));
+
+    fs::write(&encrypted_path, encrypted).await.map_err(|e| format!("write encrypted: {e}"))?;
+
+    // Step 1: mp4decrypt
+    tracing::info!("am.decrypt: step 1 — mp4decrypt --key 1:{key_hex}");
+    let status = tokio::process::Command::new("mp4decrypt")
+        .arg("--key")
+        .arg(format!("1:{key_hex}"))
+        .arg(&encrypted_path)
+        .arg(&decrypted_path)
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .status()
+        .await
+        .map_err(|e| format!("mp4decrypt spawn: {e}"))?;
+
+    if !status.success() {
+        let _ = fs::remove_file(&encrypted_path).await;
+        return Err(format!("mp4decrypt failed with status {status}"));
+    }
+
+    let dec_size = fs::metadata(&decrypted_path).await.map(|m| m.len()).unwrap_or(0);
+    tracing::info!("am.decrypt: mp4decrypt produced {dec_size} bytes → {}", decrypted_path.display());
+
+    // Step 2: MP4Box -raw to extract plain AAC
+    tracing::info!("am.decrypt: step 2 — MP4Box -raw 1 → AAC");
+    let output = tokio::process::Command::new("MP4Box")
+        .arg("-raw")
+        .arg("1")
+        .arg(&decrypted_path)
+        .arg("-out")
+        .arg(&aac_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| format!("MP4Box spawn: {e}"))?;
+
+    let mp4box_stdout = String::from_utf8_lossy(&output.stdout);
+    let mp4box_stderr = String::from_utf8_lossy(&output.stderr);
+    if !mp4box_stdout.is_empty() {
+        tracing::info!("am.decrypt: MP4Box stdout: {}", mp4box_stdout.trim());
+    }
+    if !mp4box_stderr.is_empty() {
+        tracing::warn!("am.decrypt: MP4Box stderr: {}", mp4box_stderr.trim());
+    }
+
+    if !output.status.success() {
+        tracing::warn!("am.decrypt: MP4Box failed (status={}), falling back to m4a at {}",
+            output.status, decrypted_path.display());
+        let aac_bytes = fs::read(&decrypted_path).await.map_err(|e| format!("read m4a: {e}"))?;
+        let _ = fs::remove_file(&encrypted_path).await;
+        let _ = fs::remove_file(&aac_path).await;
+        return Ok(aac_bytes);
+    }
+
+    let aac_bytes = fs::read(&aac_path).await.map_err(|e| format!("read AAC: {e}"))?;
+    let _ = fs::remove_file(&encrypted_path).await;
+    // Keep decrypted m4a and extracted aac for debugging
+    tracing::info!("am.decrypt: files kept at {} and {}", decrypted_path.display(), aac_path.display());
+
+    tracing::info!("am.decrypt: extracted {} bytes of raw AAC", aac_bytes.len());
+    Ok(aac_bytes)
 }

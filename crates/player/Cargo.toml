@@ -14,6 +14,7 @@ config = { workspace = true }
 cpal = { workspace = true }
 symphonia = { workspace = true }
 symphonia-adapter-libopus = "0.3"
+symphonia-adapter-fdk-aac = "0.2"
 rb = { workspace = true }
 tokio = { workspace = true }
 

@@ -790,11 +790,17 @@ impl Player {
                 &AudioDecoderOptions::default(),
             ) {
                 Ok(d) => d,
-                Err(e) => {
-                    tracing::error!(error = %e, "symphonia codec error");
-                    finish_natural(&state);
-                    return;
-                }
+                Err(_) => match symphonia_adapter_fdk_aac::AacDecoder::try_registry_new(
+                    &audio_params,
+                    &AudioDecoderOptions::default(),
+                ) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        tracing::error!(error = %e, "symphonia codec error");
+                        finish_natural(&state);
+                        return;
+                    }
+                },
             },
         };
 

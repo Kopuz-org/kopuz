@@ -2485,6 +2485,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "fdk-aac"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7bb67e142688083cb9afb63f2424203fc98c4e7afb494bf912b60b55513b177e"
+dependencies = [
+ "fdk-aac-sys",
+]
+
+[[package]]
+name = "fdk-aac-sys"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "24516d2611506d5cb1833555adc75f6baf9fe2706b9c13e6fc33a6b22c51ca83"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "field-offset"
 version = "0.3.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5708,6 +5726,7 @@ dependencies = [
  "rb",
  "reqwest 0.13.4",
  "symphonia",
+ "symphonia-adapter-fdk-aac",
  "symphonia-adapter-libopus",
  "tokio",
  "tracing",
@@ -7651,6 +7670,17 @@ dependencies = [
  "symphonia-format-ogg",
  "symphonia-format-riff",
  "symphonia-metadata",
+]
+
+[[package]]
+name = "symphonia-adapter-fdk-aac"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b9cc5d16c27e9cd23e028655c3740ec78e31eb6cb513f1837d36afed82b2dd44"
+dependencies = [
+ "fdk-aac",
+ "log",
+ "symphonia-core",
 ]
 
 [[package]]
