@@ -102,6 +102,21 @@ async fn fetch_tracks(
     out
 }
 
+/// Fetch one track's tags (title/artist/album/duration) by base62 id. Used by
+/// the YouTube match resolver to build a search query for a Spotify track.
+pub async fn track_meta(token: String, track_id: String) -> Result<reader::Track, String> {
+    session::on_rt(async move {
+        let session = ensure_session(&token).await?;
+        let id = librespot_core::SpotifyId::from_base62(&track_id)
+            .map_err(|e| format!("spotify id: {e}"))?;
+        let track = SpTrack::get(&session, &SpotifyUri::Track { id })
+            .await
+            .map_err(|e| format!("spotify track metadata: {e}"))?;
+        Ok::<reader::Track, String>(map_track(&track))
+    })
+    .await?
+}
+
 /// List the signed-in user's playlists (root list), each decorated with its name.
 pub async fn list_playlists(token: String) -> Result<Vec<SpPlaylist>, String> {
     session::on_rt(async move {

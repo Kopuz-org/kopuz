@@ -1169,15 +1169,19 @@ fn App() -> Element {
     // anon and also needs a content pot for deep ranges; only true Premium
     // subscribers (itag 774) are pot-exempt, and we can't know that until a
     // track resolves. So run the minter for any YtMusic session; Premium just
-    // leaves it idle. Reactive: fires when config loads or the server changes.
+    // leaves it idle. Spotify needs it too: it streams full tracks by matching
+    // to an *anonymous* YouTube video (see `spotify::match_yt`), which 403s on
+    // deep ranges without a content pot. Reactive: fires when config loads or
+    // the server changes.
     #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
     use_effect(move || {
-        let yt_active = config
-            .read()
-            .server
-            .as_ref()
-            .is_some_and(|s| s.service == config::MusicService::YtMusic);
-        if yt_active {
+        let needs_pot = config.read().server.as_ref().is_some_and(|s| {
+            matches!(
+                s.service,
+                config::MusicService::YtMusic | config::MusicService::Spotify
+            )
+        });
+        if needs_pot {
             crate::pot_minter::request();
         }
     });

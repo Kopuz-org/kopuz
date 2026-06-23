@@ -2515,14 +2515,24 @@ impl MediaSource for SpotifySource {
     }
 
     async fn resolve_stream(&self, item_id: &str) -> Result<StreamInfo, SourceError> {
-        tracing::info!(item_id, "spotify: resolve_stream -> __SP sentinel");
+        // Spotify is the catalog; the audio comes from an anonymous YouTube
+        // match (full track, no Premium audio key needed). Reuses the YouTube
+        // decode path via the resolved googlevideo stream.
+        let token = self
+            .access_token
+            .as_deref()
+            .ok_or_else(|| SourceError::Backend("spotify: no access token".into()))?;
+        tracing::info!(item_id, "spotify: resolve_stream -> youtube match");
+        let info = crate::spotify::match_yt::resolve(token, item_id)
+            .await
+            .map_err(SourceError::Backend)?;
         Ok(StreamInfo {
-            url: format!("__SP:{item_id}"),
-            format: None,
-            user_agent: None,
-            duration_secs: None,
-            bitrate: None,
-            content_length: None,
+            url: info.url,
+            format: Some((info.format, info.range_safe)),
+            user_agent: Some(info.user_agent),
+            duration_secs: info.duration_secs,
+            bitrate: info.bitrate,
+            content_length: info.content_length,
         })
     }
 
