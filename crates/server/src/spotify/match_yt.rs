@@ -30,14 +30,23 @@ fn cache() -> &'static Mutex<HashMap<String, String>> {
 /// Fetches the Spotify tags, searches YouTube Music for the best match, then
 /// resolves that video to a playable stream. The match is cached so a re-play
 /// skips straight to stream resolution.
-pub async fn resolve(token: &str, track_id: &str) -> Result<YtStreamInfo, String> {
+pub async fn resolve(
+    token: &str,
+    track_id: &str,
+    known: Option<reader::Track>,
+) -> Result<YtStreamInfo, String> {
     let cached = cache().lock().unwrap().get(track_id).cloned();
     if let Some(vid) = cached {
         tracing::info!(track = %track_id, video = %vid, "spotify→yt: cached match");
         return player::resolve(&vid, None).await;
     }
 
-    let meta = super::metadata::track_meta(token.to_string(), track_id.to_string()).await?;
+    // Prefer the metadata the caller already has (the track row from the DB) so
+    // a cold play skips a Spotify round-trip; only hit the AP when it's absent.
+    let meta = match known {
+        Some(t) if !t.title.is_empty() => t,
+        _ => super::metadata::track_meta(token.to_string(), track_id.to_string()).await?,
+    };
     let query = format!("{} {}", meta.artist, meta.title);
     tracing::info!(track = %track_id, %query, "spotify→yt: searching YouTube for a full-track match");
 

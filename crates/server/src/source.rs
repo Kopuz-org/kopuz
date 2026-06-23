@@ -2523,7 +2523,15 @@ impl MediaSource for SpotifySource {
             .as_deref()
             .ok_or_else(|| SourceError::Backend("spotify: no access token".into()))?;
         tracing::info!(item_id, "spotify: resolve_stream -> youtube match");
-        let info = crate::spotify::match_yt::resolve(token, item_id)
+        // Reuse the track's already-synced DB row for the search query so we skip
+        // a redundant Spotify metadata fetch on a cold play.
+        let known = self
+            .db
+            .tracks_by_keys(&self.source, &[item_id.to_string()])
+            .await
+            .ok()
+            .and_then(|mut v| v.pop());
+        let info = crate::spotify::match_yt::resolve(token, item_id, known)
             .await
             .map_err(SourceError::Backend)?;
         Ok(StreamInfo {
