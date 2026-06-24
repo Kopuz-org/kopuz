@@ -144,22 +144,38 @@ fn get_tenc_iv_size(data: &[u8], enca_body_start: usize, enca_body_end: usize) -
 
 // SENC parsing
 
-fn parse_senc(iv_size: u8, sample_count: u32, raw_data: &[u8]) -> (Vec<[u8; 16]>, Vec<Vec<(u16, u32)>>) {
+fn parse_senc(iv_size: u8, sample_count: u32, raw_data: &[u8], use_subsample: bool) -> (Vec<[u8; 16]>, Vec<Vec<(u16, u32)>>) {
     if iv_size == 0 && sample_count == 0 {
         return (vec![], vec![]);
     }
 
-    if iv_size != 0 {
-        if let Some(result) = try_parse_senc(iv_size, sample_count, raw_data) {
-            return result;
+    if use_subsample {
+        // Subsample mode: each sample has [IV] + subsample_count(2) + patterns(n*6)
+        if iv_size != 0 {
+            if let Some(result) = try_parse_senc(iv_size, sample_count, raw_data, true) {
+                return result;
+            }
         }
-    }
-
-    for try_size in [0u8, 8, 16] {
-        if try_size == iv_size { continue; }
-        if let Some(result) = try_parse_senc(try_size, sample_count, raw_data) {
-            tracing::info!("am.decrypt: senc parsed with inferred iv_size={try_size}");
-            return result;
+        for try_size in [0u8, 8, 16] {
+            if try_size == iv_size { continue; }
+            if let Some(result) = try_parse_senc(try_size, sample_count, raw_data, true) {
+                tracing::info!("am.decrypt: senc parsed with inferred iv_size={try_size}");
+                return result;
+            }
+        }
+    } else {
+        // Full-sample mode: each sample has just [IV], no subsample patterns
+        if iv_size != 0 {
+            if let Some(result) = try_parse_senc(iv_size, sample_count, raw_data, false) {
+                return result;
+            }
+        }
+        for try_size in [0u8, 8, 16] {
+            if try_size == iv_size { continue; }
+            if let Some(result) = try_parse_senc(try_size, sample_count, raw_data, false) {
+                tracing::info!("am.decrypt: senc parsed with inferred iv_size={try_size}");
+                return result;
+            }
         }
     }
 
@@ -167,7 +183,7 @@ fn parse_senc(iv_size: u8, sample_count: u32, raw_data: &[u8]) -> (Vec<[u8; 16]>
     (vec![], vec![])
 }
 
-fn try_parse_senc(iv_size: u8, sample_count: u32, raw_data: &[u8]) -> Option<(Vec<[u8; 16]>, Vec<Vec<(u16, u32)>>)> {
+fn try_parse_senc(iv_size: u8, sample_count: u32, raw_data: &[u8], use_subsample: bool) -> Option<(Vec<[u8; 16]>, Vec<Vec<(u16, u32)>>)> {
     let count = sample_count as usize;
     let mut pos = 0usize;
     let mut ivs = Vec::with_capacity(count);
@@ -181,18 +197,22 @@ fn try_parse_senc(iv_size: u8, sample_count: u32, raw_data: &[u8]) -> Option<(Ve
             ivs.push(iv);
             pos += iv_size as usize;
         }
-        if raw_data.len().saturating_sub(pos) < 2 { return None; }
-        let n = u16::from_be_bytes([raw_data[pos], raw_data[pos + 1]]) as usize;
-        pos += 2;
-        if raw_data.len().saturating_sub(pos) < n * 6 { return None; }
-        let mut patterns = Vec::with_capacity(n);
-        for _ in 0..n {
-            let clear = u16::from_be_bytes([raw_data[pos], raw_data[pos + 1]]);
-            let protected = u32::from_be_bytes([raw_data[pos + 2], raw_data[pos + 3], raw_data[pos + 4], raw_data[pos + 5]]);
-            patterns.push((clear, protected));
-            pos += 6;
+        if use_subsample {
+            if raw_data.len().saturating_sub(pos) < 2 { return None; }
+            let n = u16::from_be_bytes([raw_data[pos], raw_data[pos + 1]]) as usize;
+            pos += 2;
+            if raw_data.len().saturating_sub(pos) < n * 6 { return None; }
+            let mut patterns = Vec::with_capacity(n);
+            for _ in 0..n {
+                let clear = u16::from_be_bytes([raw_data[pos], raw_data[pos + 1]]);
+                let protected = u32::from_be_bytes([raw_data[pos + 2], raw_data[pos + 3], raw_data[pos + 4], raw_data[pos + 5]]);
+                patterns.push((clear, protected));
+                pos += 6;
+            }
+            subs.push(patterns);
+        } else {
+            subs.push(vec![]);
         }
-        subs.push(patterns);
     }
 
     if pos != raw_data.len() { return None; }
@@ -293,10 +313,11 @@ pub fn decrypt_fmp4(data: &[u8], key: &[u8]) -> Result<Vec<u8>, String> {
             let mut traf_subs: Vec<Vec<(u16, u32)>> = Vec::new();
 
             if let Some((senc_bs, senc_be, _)) = find_child(data, traf_bs, traf_be, SENC) {
-                let _flags = u32be(data, senc_bs);
+                let flags = u32be(data, senc_bs);
                 let sample_count = u32be(data, senc_bs + 4);
                 let raw = &data[senc_bs + 8..senc_be];
-                let (ivs, subs) = parse_senc(per_sample_iv_size, sample_count, raw);
+                let use_subsample = (flags & 0x02) != 0;
+                let (ivs, subs) = parse_senc(per_sample_iv_size, sample_count, raw, use_subsample);
                 tracing::debug!("am.decrypt: senc: {} IVs, {} subs, iv_size={}", ivs.len(), subs.len(), per_sample_iv_size);
                 traf_ivs = ivs;
                 traf_subs = subs;
