@@ -1011,12 +1011,24 @@ impl PlayerController {
                                             }
                                         }
 
+                                        // Offline queue bookkeeping (issue #335): scrobbles
+                                        // that fail with a transient error are queued with
+                                        // this listen timestamp and resubmitted later; one
+                                        // success means we're online, so drain the backlog.
+                                        let listened_at = std::time::SystemTime::now()
+                                            .duration_since(std::time::UNIX_EPOCH)
+                                            .map(|d| d.as_secs() as i64)
+                                            .unwrap_or(0);
+                                        let queue_path = scrobble::queue::default_queue_path();
+                                        let mut scrobble_ok = false;
+
                                         // Last.fm scrobble
                                         if has_lastfm {
-                                            let scrobble = scrobble::lastfm::make_scrobble(
+                                            let scrobble = scrobble::lastfm::make_scrobble_at(
                                                 &scrobble_track.artist,
                                                 &scrobble_track.title,
                                                 Some(&scrobble_track.album),
+                                                listened_at,
                                             );
                                             match scrobble::lastfm::submit_scrobble(
                                                 &lastfm_api_key,
@@ -1026,23 +1038,40 @@ impl PlayerController {
                                             )
                                             .await
                                             {
-                                                Ok(_) => tracing::info!(
-                                                    "Last.fm scrobbled: {} - {}",
-                                                    scrobble_track.artist,
-                                                    scrobble_track.title
-                                                ),
+                                                Ok(_) => {
+                                                    scrobble_ok = true;
+                                                    tracing::info!(
+                                                        "Last.fm scrobbled: {} - {}",
+                                                        scrobble_track.artist,
+                                                        scrobble_track.title
+                                                    )
+                                                }
                                                 Err(e) => {
-                                                    tracing::warn!("Last.fm scrobble failed: {}", e)
+                                                    tracing::warn!("Last.fm scrobble failed: {}", e);
+                                                    if scrobble::queue::is_transient(&e)
+                                                        && let Some(qp) = &queue_path
+                                                    {
+                                                        scrobble::queue::enqueue(
+                                                            qp,
+                                                            scrobble::queue::Service::LastFm,
+                                                            &scrobble_track.artist,
+                                                            &scrobble_track.title,
+                                                            Some(&scrobble_track.album),
+                                                            listened_at,
+                                                        )
+                                                        .await;
+                                                    }
                                                 }
                                             }
                                         }
 
                                         // Libre.fm scrobble
                                         if has_librefm {
-                                            let scrobble = scrobble::librefm::make_scrobble(
+                                            let scrobble = scrobble::librefm::make_scrobble_at(
                                                 &scrobble_track.artist,
                                                 &scrobble_track.title,
                                                 Some(&scrobble_track.album),
+                                                listened_at,
                                             );
                                             match scrobble::librefm::submit_scrobble(
                                                 scrobble::librefm::API_KEY,
@@ -1052,16 +1081,32 @@ impl PlayerController {
                                             )
                                             .await
                                             {
-                                                Ok(_) => tracing::info!(
-                                                    "Libre.fm scrobbled: {} - {}",
-                                                    scrobble_track.artist,
-                                                    scrobble_track.title
-                                                ),
+                                                Ok(_) => {
+                                                    scrobble_ok = true;
+                                                    tracing::info!(
+                                                        "Libre.fm scrobbled: {} - {}",
+                                                        scrobble_track.artist,
+                                                        scrobble_track.title
+                                                    )
+                                                }
                                                 Err(e) => {
                                                     tracing::warn!(
                                                         "Libre.fm scrobble failed: {}",
                                                         e
-                                                    )
+                                                    );
+                                                    if scrobble::queue::is_transient(&e)
+                                                        && let Some(qp) = &queue_path
+                                                    {
+                                                        scrobble::queue::enqueue(
+                                                            qp,
+                                                            scrobble::queue::Service::LibreFm,
+                                                            &scrobble_track.artist,
+                                                            &scrobble_track.title,
+                                                            Some(&scrobble_track.album),
+                                                            listened_at,
+                                                        )
+                                                        .await;
+                                                    }
                                                 }
                                             }
                                         }
@@ -1071,15 +1116,16 @@ impl PlayerController {
                                             scrobble_cfg.read().musicbrainz_token.clone();
                                         if !token_raw.is_empty() {
                                             let auth = if token_raw.contains(' ') {
-                                                token_raw
+                                                token_raw.clone()
                                             } else {
                                                 format!("Token {}", token_raw)
                                             };
-                                            let listen = scrobble::musicbrainz::make_listen(
+                                            let listen = scrobble::musicbrainz::make_listen_at(
                                                 &scrobble_track.artist,
                                                 &scrobble_track.title,
                                                 Some(&scrobble_track.album),
                                                 None,
+                                                listened_at,
                                             );
                                             match scrobble::musicbrainz::submit_listens(
                                                 &auth,
@@ -1088,18 +1134,58 @@ impl PlayerController {
                                             )
                                             .await
                                             {
-                                                Ok(_) => tracing::info!(
-                                                    "MusicBrainz scrobbled: {} - {}",
-                                                    scrobble_track.artist,
-                                                    scrobble_track.title
-                                                ),
+                                                Ok(_) => {
+                                                    scrobble_ok = true;
+                                                    tracing::info!(
+                                                        "MusicBrainz scrobbled: {} - {}",
+                                                        scrobble_track.artist,
+                                                        scrobble_track.title
+                                                    )
+                                                }
                                                 Err(e) => {
                                                     tracing::warn!(
                                                         "MusicBrainz scrobble failed: {}",
                                                         e
-                                                    )
+                                                    );
+                                                    if scrobble::queue::is_transient(&e)
+                                                        && let Some(qp) = &queue_path
+                                                    {
+                                                        scrobble::queue::enqueue(
+                                                            qp,
+                                                            scrobble::queue::Service::ListenBrainz,
+                                                            &scrobble_track.artist,
+                                                            &scrobble_track.title,
+                                                            Some(&scrobble_track.album),
+                                                            listened_at,
+                                                        )
+                                                        .await;
+                                                    }
                                                 }
                                             }
+                                        }
+
+                                        // One success means we're online again: flush any
+                                        // scrobbles queued while offline.
+                                        if scrobble_ok && let Some(qp) = &queue_path {
+                                            let creds = scrobble::queue::Credentials {
+                                                lastfm: has_lastfm.then(|| {
+                                                    (
+                                                        lastfm_api_key.clone(),
+                                                        lastfm_api_secret.clone(),
+                                                        lastfm_session_key.clone(),
+                                                    )
+                                                }),
+                                                librefm_session_key: has_librefm
+                                                    .then(|| librefm_session_key.clone()),
+                                                listenbrainz_token: (!scrobble_cfg
+                                                    .read()
+                                                    .musicbrainz_token
+                                                    .is_empty())
+                                                .then(|| {
+                                                    scrobble_cfg.read().musicbrainz_token.clone()
+                                                }),
+                                            };
+                                            scrobble::queue::drain(qp, &creds).await;
                                         }
                                     }.instrument(scrobble_span));
 
@@ -1440,6 +1526,29 @@ impl PlayerController {
                                         map.insert("track_mbid", mbid.as_str());
                                     }
 
+                                    // Libre.fm now-playing
+                                    let librefm_session_key =
+                                        cfg_signal.read().librefm_session_key.clone();
+                                    let has_librefm = !librefm_session_key.is_empty();
+
+                                    if has_librefm {
+                                        let playing_now = scrobble::librefm::make_playing_now(
+                                            &scrobble_track.artist,
+                                            &scrobble_track.title,
+                                            Some(&scrobble_track.album),
+                                        );
+                                        if let Err(e) = scrobble::librefm::submit_now_playing(
+                                            scrobble::librefm::API_KEY,
+                                            scrobble::librefm::API_SECRET,
+                                            &librefm_session_key,
+                                            &playing_now,
+                                        )
+                                        .await
+                                        {
+                                            tracing::warn!("Libre.fm now playing failed: {}", e);
+                                        }
+                                    }
+
                                     // Last.fm now-playing
                                     let lastfm_api_key = cfg_signal.read().lastfm_api_key.clone();
                                     let lastfm_api_secret =
@@ -1501,11 +1610,23 @@ impl PlayerController {
                                         return;
                                     }
 
+                                    // Offline queue bookkeeping (issue #335): scrobbles that
+                                    // fail with a transient error are queued with this listen
+                                    // timestamp and resubmitted later; one success means we're
+                                    // online, so drain the backlog.
+                                    let listened_at = std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .map(|d| d.as_secs() as i64)
+                                        .unwrap_or(0);
+                                    let queue_path = scrobble::queue::default_queue_path();
+                                    let mut scrobble_ok = false;
+
                                     if has_lastfm {
-                                        let scrobble = scrobble::lastfm::make_scrobble(
+                                        let scrobble = scrobble::lastfm::make_scrobble_at(
                                             &scrobble_track.artist,
                                             &scrobble_track.title,
                                             Some(&scrobble_track.album),
+                                            listened_at,
                                         );
                                         match scrobble::lastfm::submit_scrobble(
                                             &lastfm_api_key,
@@ -1515,13 +1636,72 @@ impl PlayerController {
                                         )
                                         .await
                                         {
-                                            Ok(_) => tracing::info!(
-                                                "Last.fm scrobbled: {} - {}",
-                                                scrobble_track.artist,
-                                                scrobble_track.title
-                                            ),
+                                            Ok(_) => {
+                                                scrobble_ok = true;
+                                                tracing::info!(
+                                                    "Last.fm scrobbled: {} - {}",
+                                                    scrobble_track.artist,
+                                                    scrobble_track.title
+                                                )
+                                            }
                                             Err(e) => {
-                                                tracing::warn!("Last.fm scrobble failed: {}", e)
+                                                tracing::warn!("Last.fm scrobble failed: {}", e);
+                                                if scrobble::queue::is_transient(&e)
+                                                    && let Some(qp) = &queue_path
+                                                {
+                                                    scrobble::queue::enqueue(
+                                                        qp,
+                                                        scrobble::queue::Service::LastFm,
+                                                        &scrobble_track.artist,
+                                                        &scrobble_track.title,
+                                                        Some(&scrobble_track.album),
+                                                        listened_at,
+                                                    )
+                                                    .await;
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Libre.fm scrobble
+                                    if has_librefm {
+                                        let scrobble = scrobble::librefm::make_scrobble_at(
+                                            &scrobble_track.artist,
+                                            &scrobble_track.title,
+                                            Some(&scrobble_track.album),
+                                            listened_at,
+                                        );
+                                        match scrobble::librefm::submit_scrobble(
+                                            scrobble::librefm::API_KEY,
+                                            scrobble::librefm::API_SECRET,
+                                            &librefm_session_key,
+                                            &scrobble,
+                                        )
+                                        .await
+                                        {
+                                            Ok(_) => {
+                                                scrobble_ok = true;
+                                                tracing::info!(
+                                                    "Libre.fm scrobbled: {} - {}",
+                                                    scrobble_track.artist,
+                                                    scrobble_track.title
+                                                )
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!("Libre.fm scrobble failed: {}", e);
+                                                if scrobble::queue::is_transient(&e)
+                                                    && let Some(qp) = &queue_path
+                                                {
+                                                    scrobble::queue::enqueue(
+                                                        qp,
+                                                        scrobble::queue::Service::LibreFm,
+                                                        &scrobble_track.artist,
+                                                        &scrobble_track.title,
+                                                        Some(&scrobble_track.album),
+                                                        listened_at,
+                                                    )
+                                                    .await;
+                                                }
                                             }
                                         }
                                     }
@@ -1529,15 +1709,16 @@ impl PlayerController {
                                     let token_raw = cfg_signal.read().musicbrainz_token.clone();
                                     if !token_raw.is_empty() {
                                         let auth = if token_raw.contains(' ') {
-                                            token_raw
+                                            token_raw.clone()
                                         } else {
                                             format!("Token {}", token_raw)
                                         };
-                                        let listen = scrobble::musicbrainz::make_listen(
+                                        let listen = scrobble::musicbrainz::make_listen_at(
                                             &scrobble_track.artist,
                                             &scrobble_track.title,
                                             Some(&scrobble_track.album),
                                             Some(map.clone()),
+                                            listened_at,
                                         );
                                         match scrobble::musicbrainz::submit_listens(
                                             &auth,
@@ -1546,15 +1727,55 @@ impl PlayerController {
                                         )
                                         .await
                                         {
-                                            Ok(_) => tracing::info!(
-                                                "MusicBrainz scrobbled: {} - {}",
-                                                scrobble_track.artist,
-                                                scrobble_track.title
-                                            ),
+                                            Ok(_) => {
+                                                scrobble_ok = true;
+                                                tracing::info!(
+                                                    "MusicBrainz scrobbled: {} - {}",
+                                                    scrobble_track.artist,
+                                                    scrobble_track.title
+                                                )
+                                            }
                                             Err(e) => {
-                                                tracing::warn!("MusicBrainz scrobble failed: {}", e)
+                                                tracing::warn!(
+                                                    "MusicBrainz scrobble failed: {}",
+                                                    e
+                                                );
+                                                if scrobble::queue::is_transient(&e)
+                                                    && let Some(qp) = &queue_path
+                                                {
+                                                    scrobble::queue::enqueue(
+                                                        qp,
+                                                        scrobble::queue::Service::ListenBrainz,
+                                                        &scrobble_track.artist,
+                                                        &scrobble_track.title,
+                                                        Some(&scrobble_track.album),
+                                                        listened_at,
+                                                    )
+                                                    .await;
+                                                }
                                             }
                                         }
+                                    }
+
+                                    // One success means we're online again: flush queued scrobbles.
+                                    if scrobble_ok && let Some(qp) = &queue_path {
+                                        let creds = scrobble::queue::Credentials {
+                                            lastfm: has_lastfm.then(|| {
+                                                (
+                                                    lastfm_api_key.clone(),
+                                                    lastfm_api_secret.clone(),
+                                                    lastfm_session_key.clone(),
+                                                )
+                                            }),
+                                            librefm_session_key: has_librefm
+                                                .then(|| librefm_session_key.clone()),
+                                            listenbrainz_token: (!cfg_signal
+                                                .read()
+                                                .musicbrainz_token
+                                                .is_empty())
+                                            .then(|| cfg_signal.read().musicbrainz_token.clone()),
+                                        };
+                                        scrobble::queue::drain(qp, &creds).await;
                                     }
                                 }
                                 .instrument(tracing::info_span!("scrobble.submit")),
@@ -2048,6 +2269,34 @@ pub fn use_player_controller(
     let playback_error = use_signal(|| None::<String>);
     let db = use_signal(move || db_handle);
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
+
+    // Scrobbles queued while offline (issue #335): retry once on startup, in
+    // case connectivity came back between sessions.
+    #[cfg(not(target_arch = "wasm32"))]
+    use_future(move || async move {
+        let Some(queue_path) = scrobble::queue::default_queue_path() else {
+            return;
+        };
+        let creds = {
+            let cfg = config.peek();
+            scrobble::queue::Credentials {
+                lastfm: (!cfg.lastfm_api_key.is_empty() && !cfg.lastfm_api_secret.is_empty()).then(
+                    || {
+                        (
+                            cfg.lastfm_api_key.clone(),
+                            cfg.lastfm_api_secret.clone(),
+                            cfg.lastfm_session_key.clone(),
+                        )
+                    },
+                ),
+                librefm_session_key: (!cfg.librefm_session_key.is_empty())
+                    .then(|| cfg.librefm_session_key.clone()),
+                listenbrainz_token: (!cfg.musicbrainz_token.is_empty())
+                    .then(|| cfg.musicbrainz_token.clone()),
+            }
+        };
+        scrobble::queue::drain(&queue_path, &creds).await;
+    });
 
     PlayerController {
         player,

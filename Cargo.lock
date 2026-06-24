@@ -6825,6 +6825,7 @@ version = "0.7.0"
 dependencies = [
  "config",
  "dioxus",
+ "directories",
  "md5",
  "reqwest 0.13.4",
  "serde",
