@@ -495,8 +495,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     ytmusic_auto_login();
                 } else if is_soundcloud {
                     soundcloud_auto_login();
-                } else if selected_service == MusicService::AppleMusic
-                    && !apple_music_use_manual()
+                } else if selected_service == MusicService::AppleMusic && !apple_music_use_manual()
                 {
                     applemusic_auto_login();
                 } else if !is_browser_signin {
@@ -513,10 +512,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     let handle_switch_server = move |id: String| {
         let db = db_for_switch.clone();
         spawn(async move {
-            let saved = config
-                .peek()
-                .find_saved_server(&id)
-                .cloned();
+            let saved = config.peek().find_saved_server(&id).cloned();
             let Some(saved) = saved else {
                 return;
             };

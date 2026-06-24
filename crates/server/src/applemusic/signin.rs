@@ -124,13 +124,18 @@ pub async fn extract_cookie(
     profile_root: &Path,
     name: &str,
 ) -> Result<Option<String>, String> {
-    let db_path = pick_cookies_path(profile_root)
-        .ok_or_else(|| {
-            tracing::warn!("am.signin.extract_cookie: no Cookies database at {}", profile_root.display());
-            "no Cookies database yet".to_string()
-        })?;
+    let db_path = pick_cookies_path(profile_root).ok_or_else(|| {
+        tracing::warn!(
+            "am.signin.extract_cookie: no Cookies database at {}",
+            profile_root.display()
+        );
+        "no Cookies database yet".to_string()
+    })?;
     let browser_name = rookie_browser_name(browser);
-    tracing::debug!("am.signin.extract_cookie: name={name}, db={}", db_path.display());
+    tracing::debug!(
+        "am.signin.extract_cookie: name={name}, db={}",
+        db_path.display()
+    );
     let profile_owned = profile_root.to_path_buf();
 
     let cookies =
@@ -152,7 +157,11 @@ pub async fn extract_cookie(
         .await
         .map_err(|e| format!("cookie extract task: {e}"))??;
 
-    tracing::debug!("am.signin.extract_cookie: {} cookies from {}", cookies.len(), COOKIE_DOMAIN);
+    tracing::debug!(
+        "am.signin.extract_cookie: {} cookies from {}",
+        cookies.len(),
+        COOKIE_DOMAIN
+    );
     let found = cookies
         .into_iter()
         .find(|c| c.name == name && !c.value.is_empty())

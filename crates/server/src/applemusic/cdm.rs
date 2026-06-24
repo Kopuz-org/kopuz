@@ -1,5 +1,5 @@
-use aes::cipher::{KeyIvInit, BlockDecryptMut, block_padding::NoPadding};
 use aes::cipher::generic_array::GenericArray;
+use aes::cipher::{BlockDecryptMut, KeyIvInit, block_padding::NoPadding};
 use pkcs1::DecodeRsaPrivateKey;
 use prost::Message;
 use sha1::{Digest, Sha1};
@@ -24,7 +24,11 @@ pub struct CdmKey {
 }
 
 impl Cdm {
-    pub fn new(private_key_pem: &str, client_id: Vec<u8>, init_data: &[u8]) -> Result<Self, String> {
+    pub fn new(
+        private_key_pem: &str,
+        client_id: Vec<u8>,
+        init_data: &[u8],
+    ) -> Result<Self, String> {
         let private_key = rsa::RsaPrivateKey::from_pkcs1_pem(private_key_pem)
             .map_err(|e| format!("parse private key: {e}"))?;
 
@@ -87,11 +91,10 @@ impl Cdm {
         let msg_bytes = license_request.encode_to_vec();
 
         let hash = Sha1::digest(&msg_bytes);
-        let signature = self.private_key_raw.sign_with_rng(
-            &mut rsa::rand_core::OsRng,
-            rsa::Pss::new::<Sha1>(),
-            &hash,
-        ).map_err(|e| format!("RSA-PSS sign: {e}"))?;
+        let signature = self
+            .private_key_raw
+            .sign_with_rng(&mut rsa::rand_core::OsRng, rsa::Pss::new::<Sha1>(), &hash)
+            .map_err(|e| format!("RSA-PSS sign: {e}"))?;
 
         let signed = wv::SignedLicenseRequest {
             r#type: Some(1), // LICENSE_REQUEST
@@ -114,15 +117,21 @@ impl Cdm {
             .map_err(|e| format!("decode SignedLicenseRequest: {e}"))?;
 
         let license_request_msg = signed_req.msg.ok_or("no msg in SignedLicenseRequest")?;
-        tracing::info!("am.cdm: license_request_msg len={}", license_request_msg.len());
-        tracing::debug!("am.cdm: license_request_msg hex (first 100): {}", hex::encode(&license_request_msg[..license_request_msg.len().min(100)]));
+        tracing::info!(
+            "am.cdm: license_request_msg len={}",
+            license_request_msg.len()
+        );
+        tracing::debug!(
+            "am.cdm: license_request_msg hex (first 100): {}",
+            hex::encode(&license_request_msg[..license_request_msg.len().min(100)])
+        );
 
         let session_key = signed_license.session_key.ok_or("no session key")?;
 
-        let decrypted_session_key = self.private_key_raw.decrypt(
-            rsa::Oaep::new::<Sha1>(),
-            &session_key,
-        ).map_err(|e| format!("RSA-OAEP decrypt: {e}"))?;
+        let decrypted_session_key = self
+            .private_key_raw
+            .decrypt(rsa::Oaep::new::<Sha1>(), &session_key)
+            .map_err(|e| format!("RSA-OAEP decrypt: {e}"))?;
 
         // Derive encryption key via CMAC
         use cmac::{Cmac, Mac};
@@ -141,9 +150,8 @@ impl Cdm {
         let encryption_key = mac.finalize().into_bytes();
 
         // Parse License from SignedLicense.Msg
-        let license = wv::License::decode(
-            signed_license.msg.as_deref().unwrap_or(&[]),
-        ).map_err(|e| format!("decode License: {e}"))?;
+        let license = wv::License::decode(signed_license.msg.as_deref().unwrap_or(&[]))
+            .map_err(|e| format!("decode License: {e}"))?;
 
         let mut keys = Vec::new();
         for key_container in &license.key {
@@ -160,20 +168,33 @@ impl Cdm {
                 continue;
             }
             if encrypted_key.len() % 16 != 0 || encrypted_key.is_empty() {
-                tracing::warn!("am.cdm: key is {} bytes, not block-aligned, skipping", encrypted_key.len());
+                tracing::warn!(
+                    "am.cdm: key is {} bytes, not block-aligned, skipping",
+                    encrypted_key.len()
+                );
                 continue;
             }
 
             let mut decrypted = encrypted_key.to_vec();
-            tracing::debug!("am.cdm: AES-CBC decrypt: key_type={} iv_len={} enc_len={}", key_type, iv.len(), encrypted_key.len());
+            tracing::debug!(
+                "am.cdm: AES-CBC decrypt: key_type={} iv_len={} enc_len={}",
+                key_type,
+                iv.len(),
+                encrypted_key.len()
+            );
             tracing::debug!("am.cdm: enc_key for AES: {}", hex::encode(&encryption_key));
             let cipher = Aes128CbcDec::new(&encryption_key, GenericArray::from_slice(&iv[..16]));
-            cipher.decrypt_padded_mut::<NoPadding>(&mut decrypted).map_err(|e| {
-                tracing::warn!("am.cdm: AES-CBC decrypt failed: {e}");
-                format!("{e}")
-            })?;
+            cipher
+                .decrypt_padded_mut::<NoPadding>(&mut decrypted)
+                .map_err(|e| {
+                    tracing::warn!("am.cdm: AES-CBC decrypt failed: {e}");
+                    format!("{e}")
+                })?;
             tracing::debug!("am.cdm: post-decrypt len={}", decrypted.len());
-            tracing::debug!("am.cdm: post-decrypt first 32: {}", hex::encode(&decrypted[..decrypted.len().min(32)]));
+            tracing::debug!(
+                "am.cdm: post-decrypt first 32: {}",
+                hex::encode(&decrypted[..decrypted.len().min(32)])
+            );
 
             // PKCS7 unpad
             let last_byte = *decrypted.last().unwrap_or(&0);
@@ -186,7 +207,8 @@ impl Cdm {
                 }
             }
 
-            tracing::debug!("am.cdm: decrypted key id={} type={} value_len={}",
+            tracing::debug!(
+                "am.cdm: decrypted key id={} type={} value_len={}",
                 hex::encode(&key_container.id.as_deref().unwrap_or(&[])),
                 key_type,
                 decrypted.len(),

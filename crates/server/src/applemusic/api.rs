@@ -1,7 +1,7 @@
 use reqwest::Client;
 
-use super::types::*;
 use super::auth;
+use super::types::*;
 
 const BASE: &str = "https://amp-api.music.apple.com";
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
@@ -61,10 +61,7 @@ impl AppleMusicApi {
         }
 
         tracing::debug!("am.get: {url}");
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| format!("GET {path}: {e}"))?;
+        let resp = req.send().await.map_err(|e| format!("GET {path}: {e}"))?;
         let status = resp.status();
         tracing::debug!("am.get: {path} → {status}");
         if !status.is_success() {
@@ -73,7 +70,11 @@ impl AppleMusicApi {
         Ok(resp)
     }
 
-    async fn post(&self, path: &str, body: &serde_json::Value) -> Result<reqwest::Response, String> {
+    async fn post(
+        &self,
+        path: &str,
+        body: &serde_json::Value,
+    ) -> Result<reqwest::Response, String> {
         let bearer = auth::get_bearer_token().await?;
         let url = format!("{BASE}{path}");
         let mut req = self
@@ -91,10 +92,7 @@ impl AppleMusicApi {
         }
 
         tracing::debug!("am.post: {url}");
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| format!("POST {path}: {e}"))?;
+        let resp = req.send().await.map_err(|e| format!("POST {path}: {e}"))?;
         let status = resp.status();
         tracing::debug!("am.post: {path} → {status}");
         if !status.is_success() {
@@ -149,14 +147,11 @@ impl AppleMusicApi {
             tracing::warn!("am.get_song: parse failed: {e}");
             format!("parse song: {e}")
         })?;
-        song.data
-            .into_iter()
-            .next()
-            .ok_or_else(|| {
-                let msg = format!("song {id} not found in response");
-                tracing::warn!("am.get_song: {msg}");
-                msg
-            })
+        song.data.into_iter().next().ok_or_else(|| {
+            let msg = format!("song {id} not found in response");
+            tracing::warn!("am.get_song: {msg}");
+            msg
+        })
     }
 
     pub async fn get_album(&self, id: &str) -> Result<AlbumData, String> {
@@ -175,15 +170,11 @@ impl AppleMusicApi {
             tracing::warn!("am.get_album: parse failed: {e}");
             format!("parse album: {e}")
         })?;
-        album
-            .data
-            .into_iter()
-            .next()
-            .ok_or_else(|| {
-                let msg = format!("album {id} not found in response");
-                tracing::warn!("am.get_album: {msg}");
-                msg
-            })
+        album.data.into_iter().next().ok_or_else(|| {
+            let msg = format!("album {id} not found in response");
+            tracing::warn!("am.get_album: {msg}");
+            msg
+        })
     }
 
     pub async fn get_playlist(&self, id: &str) -> Result<PlaylistData, String> {
@@ -202,14 +193,11 @@ impl AppleMusicApi {
             tracing::warn!("am.get_playlist: parse failed: {e}");
             format!("parse playlist: {e}")
         })?;
-        pl.data
-            .into_iter()
-            .next()
-            .ok_or_else(|| {
-                let msg = format!("playlist {id} not found in response");
-                tracing::warn!("am.get_playlist: {msg}");
-                msg
-            })
+        pl.data.into_iter().next().ok_or_else(|| {
+            let msg = format!("playlist {id} not found in response");
+            tracing::warn!("am.get_playlist: {msg}");
+            msg
+        })
     }
 
     pub async fn search(
@@ -248,7 +236,10 @@ impl AppleMusicApi {
 
     /// Generic paginated library fetch — returns the full `data` array from
     /// each page, following `next` until exhausted.
-    async fn library_page<T: serde::de::DeserializeOwned>(&self, initial_path: &str) -> Result<Vec<T>, String> {
+    async fn library_page<T: serde::de::DeserializeOwned>(
+        &self,
+        initial_path: &str,
+    ) -> Result<Vec<T>, String> {
         let mut all = Vec::new();
         let mut next = Some(initial_path.to_string());
         let mut page_num = 0u32;
@@ -267,10 +258,14 @@ impl AppleMusicApi {
             })?;
             tracing::debug!("am.library_page: page {page_num} body_len={}", body.len());
             let parsed: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
-                tracing::warn!("am.library_page: parse failed page {page_num}: {e}\nbody (first 2000): {}", &body[..body.len().min(2000)]);
+                tracing::warn!(
+                    "am.library_page: parse failed page {page_num}: {e}\nbody (first 2000): {}",
+                    &body[..body.len().min(2000)]
+                );
                 format!("parse library page: {e}")
             })?;
-            let data = parsed.get("data")
+            let data = parsed
+                .get("data")
                 .and_then(|d| d.as_array())
                 .cloned()
                 .unwrap_or_default();
@@ -279,10 +274,13 @@ impl AppleMusicApi {
             for item in data {
                 match serde_json::from_value::<T>(item) {
                     Ok(v) => all.push(v),
-                    Err(e) => tracing::warn!("am.library_page: deserialize item on page {page_num}: {e}"),
+                    Err(e) => {
+                        tracing::warn!("am.library_page: deserialize item on page {page_num}: {e}")
+                    }
                 }
             }
-            next = parsed.get("next")
+            next = parsed
+                .get("next")
                 .and_then(|n| n.as_str())
                 .filter(|s| !s.is_empty())
                 .map(String::from);
@@ -299,7 +297,8 @@ impl AppleMusicApi {
         self.library_page(&format!(
             "/v1/me/library/songs?l={}&limit=100&sort=dateAdded&include=catalog",
             self.language
-        )).await
+        ))
+        .await
     }
 
     pub async fn get_library_albums(&self) -> Result<Vec<LibraryAlbumResource>, String> {
@@ -307,7 +306,8 @@ impl AppleMusicApi {
         self.library_page(&format!(
             "/v1/me/library/albums?l={}&limit=100&sort=name",
             self.language
-        )).await
+        ))
+        .await
     }
 
     pub async fn get_library_playlists(&self) -> Result<Vec<LibraryPlaylistResource>, String> {
@@ -315,7 +315,8 @@ impl AppleMusicApi {
         self.library_page(&format!(
             "/v1/me/library/playlists?l={}&limit=100",
             self.language
-        )).await
+        ))
+        .await
     }
 
     pub async fn get_library_artists(&self) -> Result<Vec<LibraryArtistResource>, String> {
@@ -323,7 +324,8 @@ impl AppleMusicApi {
         self.library_page(&format!(
             "/v1/me/library/artists?l={}&limit=100&sort=name",
             self.language
-        )).await
+        ))
+        .await
     }
 
     /// Fetch tracks of a library playlist using the standard format.
@@ -350,17 +352,24 @@ impl AppleMusicApi {
         })?;
         tracing::debug!("am.get_library_playlist_tracks: body_len={}", body.len());
         let parsed: serde_json::Value = serde_json::from_str(&body).map_err(|e| {
-            tracing::warn!("am.get_library_playlist_tracks: parse failed: {e}\nbody (first 2000): {}", &body[..body.len().min(2000)]);
+            tracing::warn!(
+                "am.get_library_playlist_tracks: parse failed: {e}\nbody (first 2000): {}",
+                &body[..body.len().min(2000)]
+            );
             format!("parse playlist: {e}")
         })?;
 
         // Extract tracks from relationships.tracks.data
         let mut all = Vec::new();
-        let tracks_data = parsed.pointer("/data/0/relationships/tracks/data")
+        let tracks_data = parsed
+            .pointer("/data/0/relationships/tracks/data")
             .and_then(|d| d.as_array())
             .cloned()
             .unwrap_or_default();
-        tracing::info!("am.get_library_playlist_tracks: {} tracks in first page", tracks_data.len());
+        tracing::info!(
+            "am.get_library_playlist_tracks: {} tracks in first page",
+            tracks_data.len()
+        );
         for item in tracks_data {
             match serde_json::from_value::<TrackData>(item) {
                 Ok(v) => all.push(v),
@@ -369,7 +378,8 @@ impl AppleMusicApi {
         }
 
         // Follow pagination via relationships.tracks.next
-        let mut next = parsed.pointer("/data/0/relationships/tracks/next")
+        let mut next = parsed
+            .pointer("/data/0/relationships/tracks/next")
             .and_then(|n| n.as_str())
             .filter(|s| !s.is_empty())
             .map(String::from);
@@ -384,31 +394,47 @@ impl AppleMusicApi {
             tracing::info!("am.get_library_playlist_tracks: page {page_num}, path={path}");
             let resp = self.get(&path).await?;
             if !resp.status().is_success() {
-                tracing::warn!("am.get_library_playlist_tracks: page {page_num} HTTP {}", resp.status());
+                tracing::warn!(
+                    "am.get_library_playlist_tracks: page {page_num} HTTP {}",
+                    resp.status()
+                );
                 break;
             }
-            let next_body = resp.text().await.map_err(|e| format!("read tracks next: {e}"))?;
+            let next_body = resp
+                .text()
+                .await
+                .map_err(|e| format!("read tracks next: {e}"))?;
             let next_parsed: serde_json::Value = serde_json::from_str(&next_body).map_err(|e| {
                 tracing::warn!("am.get_library_playlist_tracks: parse page {page_num}: {e}");
                 format!("parse tracks next: {e}")
             })?;
-            let data = next_parsed.get("data")
+            let data = next_parsed
+                .get("data")
                 .and_then(|d| d.as_array())
                 .cloned()
                 .unwrap_or_default();
-            tracing::info!("am.get_library_playlist_tracks: page {page_num} — {} tracks", data.len());
+            tracing::info!(
+                "am.get_library_playlist_tracks: page {page_num} — {} tracks",
+                data.len()
+            );
             for item in data {
                 match serde_json::from_value::<TrackData>(item) {
                     Ok(v) => all.push(v),
-                    Err(e) => tracing::warn!("am.get_library_playlist_tracks: deserialize track page {page_num}: {e}"),
+                    Err(e) => tracing::warn!(
+                        "am.get_library_playlist_tracks: deserialize track page {page_num}: {e}"
+                    ),
                 }
             }
-            next = next_parsed.get("next")
+            next = next_parsed
+                .get("next")
                 .and_then(|n| n.as_str())
                 .filter(|s| !s.is_empty())
                 .map(String::from);
         }
-        tracing::info!("am.get_library_playlist_tracks: done — {} tracks total", all.len());
+        tracing::info!(
+            "am.get_library_playlist_tracks: done — {} tracks total",
+            all.len()
+        );
         Ok(all)
     }
 
@@ -418,7 +444,10 @@ impl AppleMusicApi {
     pub async fn find_favorite_songs_playlist(&self) -> Result<Option<String>, String> {
         tracing::debug!("am.find_favorite_songs: scanning playlists");
         let playlists = self.get_library_playlists().await?;
-        tracing::debug!("am.find_favorite_songs: {} playlists to scan", playlists.len());
+        tracing::debug!(
+            "am.find_favorite_songs: {} playlists to scan",
+            playlists.len()
+        );
         for pl in &playlists {
             if pl.attributes.name == "Favorite Songs" {
                 tracing::debug!("am.find_favorite_songs: found by name — id={}", pl.id);
@@ -431,7 +460,10 @@ impl AppleMusicApi {
                 }
             }
         }
-        tracing::warn!("am.find_favorite_songs: no Favorite Songs playlist found among {} playlists", playlists.len());
+        tracing::warn!(
+            "am.find_favorite_songs: no Favorite Songs playlist found among {} playlists",
+            playlists.len()
+        );
         Ok(None)
     }
 
@@ -523,7 +555,10 @@ impl AppleMusicApi {
         playlist_id: &str,
         item_refs: &[String],
     ) -> Result<(), String> {
-        tracing::debug!("am.add_to_playlist: playlist={playlist_id}, items={}", item_refs.len());
+        tracing::debug!(
+            "am.add_to_playlist: playlist={playlist_id}, items={}",
+            item_refs.len()
+        );
         let mut tracks = Vec::new();
         for id in item_refs {
             tracks.push(serde_json::json!({ "id": id }));
@@ -549,12 +584,12 @@ impl AppleMusicApi {
         playlist_id: &str,
         track_ids: &[String],
     ) -> Result<(), String> {
-        tracing::debug!("am.remove_from_playlist: playlist={playlist_id}, tracks={}", track_ids.len());
+        tracing::debug!(
+            "am.remove_from_playlist: playlist={playlist_id}, tracks={}",
+            track_ids.len()
+        );
         let resp = self
-            .delete(&format!(
-                "/v1/me/library/playlists/{}/tracks",
-                playlist_id
-            ))
+            .delete(&format!("/v1/me/library/playlists/{}/tracks", playlist_id))
             .await?;
         if !resp.status().is_success() {
             let err = format!("remove_from_playlist: HTTP {}", resp.status());
@@ -577,7 +612,11 @@ impl AppleMusicApi {
                 return Err(e);
             }
         };
-        tracing::debug!("am.validate: token_len={}, bearer_len={}", token.len(), bearer.len());
+        tracing::debug!(
+            "am.validate: token_len={}, bearer_len={}",
+            token.len(),
+            bearer.len()
+        );
         let resp = self
             .http
             .get(format!(

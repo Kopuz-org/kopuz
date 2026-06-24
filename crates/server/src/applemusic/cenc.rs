@@ -3,8 +3,21 @@ use aes::cipher::{KeyIvInit, StreamCipher};
 
 type Aes128Ctr = ctr::Ctr128BE<Aes128>;
 
-fn u32be(d: &[u8], o: usize) -> u32 { u32::from_be_bytes([d[o],d[o+1],d[o+2],d[o+3]]) }
-fn u64be(d: &[u8], o: usize) -> u64 { u64::from_be_bytes([d[o],d[o+1],d[o+2],d[o+3],d[o+4],d[o+5],d[o+6],d[o+7]]) }
+fn u32be(d: &[u8], o: usize) -> u32 {
+    u32::from_be_bytes([d[o], d[o + 1], d[o + 2], d[o + 3]])
+}
+fn u64be(d: &[u8], o: usize) -> u64 {
+    u64::from_be_bytes([
+        d[o],
+        d[o + 1],
+        d[o + 2],
+        d[o + 3],
+        d[o + 4],
+        d[o + 5],
+        d[o + 6],
+        d[o + 7],
+    ])
+}
 
 const ENCA: u32 = u32::from_be_bytes(*b"enca");
 const ENCV: u32 = u32::from_be_bytes(*b"encv");
@@ -23,19 +36,27 @@ const TRUN: u32 = u32::from_be_bytes(*b"trun");
 const TFHD: u32 = u32::from_be_bytes(*b"tfhd");
 
 fn read_box(data: &[u8], pos: usize) -> Option<(usize, usize, usize)> {
-    if pos + 8 > data.len() { return None; }
+    if pos + 8 > data.len() {
+        return None;
+    }
     let size = u32be(data, pos) as usize;
     if size == 1 {
-        if pos + 16 > data.len() { return None; }
+        if pos + 16 > data.len() {
+            return None;
+        }
         let ext = u64be(data, pos + 8) as usize;
         let body_start = pos + 16;
         let body_end = pos + ext;
-        if body_end > data.len() { return None; }
+        if body_end > data.len() {
+            return None;
+        }
         Some((body_start, body_end, ext))
     } else if size >= 8 {
         let body_start = pos + 8;
         let body_end = pos + size;
-        if body_end > data.len() { return None; }
+        if body_end > data.len() {
+            return None;
+        }
         Some((body_start, body_end, size))
     } else {
         None
@@ -43,14 +64,24 @@ fn read_box(data: &[u8], pos: usize) -> Option<(usize, usize, usize)> {
 }
 
 fn box_type(data: &[u8], pos: usize) -> u32 {
-    u32::from_be_bytes([data[pos+4], data[pos+5], data[pos+6], data[pos+7]])
+    u32::from_be_bytes([data[pos + 4], data[pos + 5], data[pos + 6], data[pos + 7]])
 }
 
-fn find_child(data: &[u8], body_start: usize, body_end: usize, target: u32) -> Option<(usize, usize, usize)> {
+fn find_child(
+    data: &[u8],
+    body_start: usize,
+    body_end: usize,
+    target: u32,
+) -> Option<(usize, usize, usize)> {
     let mut pos = body_start;
     while pos < body_end {
-        let (bs, be, total) = match read_box(data, pos) { Some(v) => v, None => break };
-        if box_type(data, pos) == target { return Some((bs, be, total)); }
+        let (bs, be, total) = match read_box(data, pos) {
+            Some(v) => v,
+            None => break,
+        };
+        if box_type(data, pos) == target {
+            return Some((bs, be, total));
+        }
         pos += total;
     }
     None
@@ -59,19 +90,33 @@ fn find_child(data: &[u8], body_start: usize, body_end: usize, target: u32) -> O
 fn find_deep(data: &[u8], start: usize, end: usize, target: u32) -> Option<(usize, usize)> {
     let mut pos = start;
     while pos < end {
-        let (bs, be, total) = match read_box(data, pos) { Some(v) => v, None => break };
-        if box_type(data, pos) == target { return Some((bs, be)); }
-        if let Some(found) = find_deep(data, bs, be, target) { return Some(found); }
+        let (bs, be, total) = match read_box(data, pos) {
+            Some(v) => v,
+            None => break,
+        };
+        if box_type(data, pos) == target {
+            return Some((bs, be));
+        }
+        if let Some(found) = find_deep(data, bs, be, target) {
+            return Some(found);
+        }
         pos += total;
     }
     None
 }
 
-fn find_all_children(data: &[u8], body_start: usize, body_end: usize) -> Vec<(usize, usize, usize)> {
+fn find_all_children(
+    data: &[u8],
+    body_start: usize,
+    body_end: usize,
+) -> Vec<(usize, usize, usize)> {
     let mut result = Vec::new();
     let mut pos = body_start;
     while pos < body_end {
-        let (bs, _be, total) = match read_box(data, pos) { Some(v) => v, None => break };
+        let (bs, _be, total) = match read_box(data, pos) {
+            Some(v) => v,
+            None => break,
+        };
         result.push((pos, bs, total));
         pos += total;
     }
@@ -85,7 +130,10 @@ struct TrackInfo {
     default_iv_size: u8,
 }
 
-fn extract_track_info(data: &[u8], init_end: usize) -> Result<(Vec<TrackInfo>, Vec<usize>), String> {
+fn extract_track_info(
+    data: &[u8],
+    init_end: usize,
+) -> Result<(Vec<TrackInfo>, Vec<usize>), String> {
     let mut track_infos = Vec::new();
     let mut enca_positions = Vec::new();
 
@@ -94,9 +142,13 @@ fn extract_track_info(data: &[u8], init_end: usize) -> Result<(Vec<TrackInfo>, V
         None => return Ok((track_infos, enca_positions)),
     };
 
-    for (trak_box_start, trak_body_start, trak_total) in find_all_children(data, moov_body_start, moov_body_end) {
+    for (trak_box_start, trak_body_start, trak_total) in
+        find_all_children(data, moov_body_start, moov_body_end)
+    {
         let trak_body_end = trak_body_start + trak_total - 8;
-        if box_type(data, trak_box_start) != TRAK { continue; }
+        if box_type(data, trak_box_start) != TRAK {
+            continue;
+        }
 
         let track_id = find_child(data, trak_body_start, trak_body_end, TKHD)
             .map(|(s, _, _)| {
@@ -110,14 +162,20 @@ fn extract_track_info(data: &[u8], init_end: usize) -> Result<(Vec<TrackInfo>, V
             let entries_start = stsd_bs + 8;
             let mut epos = entries_start;
             while epos < stsd_be {
-                let (es, ee, etotal) = match read_box(data, epos) { Some(v) => v, None => break };
+                let (es, ee, etotal) = match read_box(data, epos) {
+                    Some(v) => v,
+                    None => break,
+                };
                 let etype = box_type(data, epos);
 
                 if etype == ENCA || etype == ENCV {
                     let children_start = es + 28;
                     let default_iv = get_tenc_iv_size(data, children_start, ee);
                     tracing::info!("am.decrypt: track {track_id}: tenc iv_size={default_iv}");
-                    track_infos.push(TrackInfo { track_id, default_iv_size: default_iv });
+                    track_infos.push(TrackInfo {
+                        track_id,
+                        default_iv_size: default_iv,
+                    });
                     enca_positions.push(epos);
                 }
                 epos += etotal;
@@ -144,7 +202,12 @@ fn get_tenc_iv_size(data: &[u8], enca_body_start: usize, enca_body_end: usize) -
 
 // SENC parsing
 
-fn parse_senc(iv_size: u8, sample_count: u32, raw_data: &[u8], use_subsample: bool) -> (Vec<[u8; 16]>, Vec<Vec<(u16, u32)>>) {
+fn parse_senc(
+    iv_size: u8,
+    sample_count: u32,
+    raw_data: &[u8],
+    use_subsample: bool,
+) -> (Vec<[u8; 16]>, Vec<Vec<(u16, u32)>>) {
     if iv_size == 0 && sample_count == 0 {
         return (vec![], vec![]);
     }
@@ -157,7 +220,9 @@ fn parse_senc(iv_size: u8, sample_count: u32, raw_data: &[u8], use_subsample: bo
             }
         }
         for try_size in [0u8, 8, 16] {
-            if try_size == iv_size { continue; }
+            if try_size == iv_size {
+                continue;
+            }
             if let Some(result) = try_parse_senc(try_size, sample_count, raw_data, true) {
                 tracing::info!("am.decrypt: senc parsed with inferred iv_size={try_size}");
                 return result;
@@ -171,7 +236,9 @@ fn parse_senc(iv_size: u8, sample_count: u32, raw_data: &[u8], use_subsample: bo
             }
         }
         for try_size in [0u8, 8, 16] {
-            if try_size == iv_size { continue; }
+            if try_size == iv_size {
+                continue;
+            }
             if let Some(result) = try_parse_senc(try_size, sample_count, raw_data, false) {
                 tracing::info!("am.decrypt: senc parsed with inferred iv_size={try_size}");
                 return result;
@@ -183,7 +250,12 @@ fn parse_senc(iv_size: u8, sample_count: u32, raw_data: &[u8], use_subsample: bo
     (vec![], vec![])
 }
 
-fn try_parse_senc(iv_size: u8, sample_count: u32, raw_data: &[u8], use_subsample: bool) -> Option<(Vec<[u8; 16]>, Vec<Vec<(u16, u32)>>)> {
+fn try_parse_senc(
+    iv_size: u8,
+    sample_count: u32,
+    raw_data: &[u8],
+    use_subsample: bool,
+) -> Option<(Vec<[u8; 16]>, Vec<Vec<(u16, u32)>>)> {
     let count = sample_count as usize;
     let mut pos = 0usize;
     let mut ivs = Vec::with_capacity(count);
@@ -191,21 +263,32 @@ fn try_parse_senc(iv_size: u8, sample_count: u32, raw_data: &[u8], use_subsample
 
     for _ in 0..count {
         if iv_size > 0 {
-            if raw_data.len().saturating_sub(pos) < iv_size as usize { return None; }
+            if raw_data.len().saturating_sub(pos) < iv_size as usize {
+                return None;
+            }
             let mut iv = [0u8; 16];
             iv[..iv_size as usize].copy_from_slice(&raw_data[pos..pos + iv_size as usize]);
             ivs.push(iv);
             pos += iv_size as usize;
         }
         if use_subsample {
-            if raw_data.len().saturating_sub(pos) < 2 { return None; }
+            if raw_data.len().saturating_sub(pos) < 2 {
+                return None;
+            }
             let n = u16::from_be_bytes([raw_data[pos], raw_data[pos + 1]]) as usize;
             pos += 2;
-            if raw_data.len().saturating_sub(pos) < n * 6 { return None; }
+            if raw_data.len().saturating_sub(pos) < n * 6 {
+                return None;
+            }
             let mut patterns = Vec::with_capacity(n);
             for _ in 0..n {
                 let clear = u16::from_be_bytes([raw_data[pos], raw_data[pos + 1]]);
-                let protected = u32::from_be_bytes([raw_data[pos + 2], raw_data[pos + 3], raw_data[pos + 4], raw_data[pos + 5]]);
+                let protected = u32::from_be_bytes([
+                    raw_data[pos + 2],
+                    raw_data[pos + 3],
+                    raw_data[pos + 4],
+                    raw_data[pos + 5],
+                ]);
                 patterns.push((clear, protected));
                 pos += 6;
             }
@@ -215,7 +298,9 @@ fn try_parse_senc(iv_size: u8, sample_count: u32, raw_data: &[u8], use_subsample
         }
     }
 
-    if pos != raw_data.len() { return None; }
+    if pos != raw_data.len() {
+        return None;
+    }
 
     Some((ivs, subs))
 }
@@ -239,17 +324,29 @@ fn crypt_sample_cenc(sample: &mut [u8], key: &[u8], iv: &[u8; 16], subs: &[(u16,
 }
 
 pub fn decrypt_fmp4(data: &[u8], key: &[u8]) -> Result<Vec<u8>, String> {
-    tracing::info!("am.decrypt: file={} bytes, key={} bytes", data.len(), key.len());
+    tracing::info!(
+        "am.decrypt: file={} bytes, key={} bytes",
+        data.len(),
+        key.len()
+    );
 
     // 1. Find init segment (ftyp + moov)
     let mut init_end = 0usize;
     let mut pos = 0;
     while pos + 8 <= data.len() {
-        let (_, be, total) = match read_box(data, pos) { Some(v) => v, None => break };
-        if box_type(data, pos) == MOOV { init_end = be; break; }
+        let (_, be, total) = match read_box(data, pos) {
+            Some(v) => v,
+            None => break,
+        };
+        if box_type(data, pos) == MOOV {
+            init_end = be;
+            break;
+        }
         pos += total;
     }
-    if init_end == 0 { return Err("no moov".to_string()); }
+    if init_end == 0 {
+        return Err("no moov".to_string());
+    }
     tracing::info!("am.decrypt: init segment = {init_end} bytes");
 
     // 2. DecryptInit: extract track info and patch enca→mp4a in init
@@ -268,7 +365,10 @@ pub fn decrypt_fmp4(data: &[u8], key: &[u8]) -> Result<Vec<u8>, String> {
     let mut total_samples = 0u32;
 
     while pos + 8 <= data.len() {
-        let (moof_bs, moof_be, moof_total) = match read_box(data, pos) { Some(v) => v, None => break };
+        let (moof_bs, moof_be, moof_total) = match read_box(data, pos) {
+            Some(v) => v,
+            None => break,
+        };
         let bt = box_type(data, pos);
         if bt != MOOF {
             pos += moof_total;
@@ -283,7 +383,10 @@ pub fn decrypt_fmp4(data: &[u8], key: &[u8]) -> Result<Vec<u8>, String> {
         let mut mdat_body_start = 0usize;
         let mut mdat_total_size = 0usize;
         while mdat_pos + 8 <= data.len() {
-            let (mdb, _, mtot) = match read_box(data, mdat_pos) { Some(v) => v, None => break };
+            let (mdb, _, mtot) = match read_box(data, mdat_pos) {
+                Some(v) => v,
+                None => break,
+            };
             if box_type(data, mdat_pos) == MDAT {
                 mdat_body_start = mdb;
                 mdat_total_size = mtot;
@@ -291,20 +394,30 @@ pub fn decrypt_fmp4(data: &[u8], key: &[u8]) -> Result<Vec<u8>, String> {
             }
             mdat_pos += mtot;
         }
-        if mdat_body_start == 0 { pos = moof_be; continue; }
+        if mdat_body_start == 0 {
+            pos = moof_be;
+            continue;
+        }
         let mdat_payload_offset = mdat_pos as u64 + 8;
 
         // Process each traf in moof
         for (traf_pos, traf_bs, traf_total) in find_all_children(data, moof_bs, moof_be) {
-            if box_type(data, traf_pos) != TRAF { continue; }
+            if box_type(data, traf_pos) != TRAF {
+                continue;
+            }
             let traf_be = traf_bs + traf_total - 8;
 
             let tfhd = find_child(data, traf_bs, traf_be, TFHD);
             // TFHD: version(1)+flags(3)=4 bytes, then track_ID(4 bytes) at body offset 4
-            let track_id = tfhd.as_ref().map(|(s, _, _)| u32be(data, s + 4)).unwrap_or(0);
+            let track_id = tfhd
+                .as_ref()
+                .map(|(s, _, _)| u32be(data, s + 4))
+                .unwrap_or(0);
 
             let ti = track_infos.iter().find(|t| t.track_id == track_id);
-            if ti.is_none() { continue; }
+            if ti.is_none() {
+                continue;
+            }
             let ti = ti.unwrap();
             let per_sample_iv_size = ti.default_iv_size;
 
@@ -318,7 +431,12 @@ pub fn decrypt_fmp4(data: &[u8], key: &[u8]) -> Result<Vec<u8>, String> {
                 let raw = &data[senc_bs + 8..senc_be];
                 let use_subsample = (flags & 0x02) != 0;
                 let (ivs, subs) = parse_senc(per_sample_iv_size, sample_count, raw, use_subsample);
-                tracing::debug!("am.decrypt: senc: {} IVs, {} subs, iv_size={}", ivs.len(), subs.len(), per_sample_iv_size);
+                tracing::debug!(
+                    "am.decrypt: senc: {} IVs, {} subs, iv_size={}",
+                    ivs.len(),
+                    subs.len(),
+                    per_sample_iv_size
+                );
                 traf_ivs = ivs;
                 traf_subs = subs;
             }
@@ -326,23 +444,38 @@ pub fn decrypt_fmp4(data: &[u8], key: &[u8]) -> Result<Vec<u8>, String> {
             // Get trun data
             let trun = find_child(data, traf_bs, traf_be, TRUN);
             let (trun_data_offset, samples) = match trun {
-                Some((trun_bs, trun_be, _)) => parse_trun(data, trun_bs, trun_be, tfhd, moof_start_pos, mdat_payload_offset, &mdat_body_start, mdat_total_size),
+                Some((trun_bs, trun_be, _)) => parse_trun(
+                    data,
+                    trun_bs,
+                    trun_be,
+                    tfhd,
+                    moof_start_pos,
+                    mdat_payload_offset,
+                    &mdat_body_start,
+                    mdat_total_size,
+                ),
                 None => (0, vec![]),
             };
 
-            if samples.is_empty() { continue; }
+            if samples.is_empty() {
+                continue;
+            }
 
             // Decrypt samples in-place
             let mdat_body_len = mdat_total_size.saturating_sub(8) as usize;
             let mut decrypted = vec![0u8; mdat_body_len];
             let mdat_data_end = mdat_body_start + mdat_body_len;
-            if mdat_data_end > data.len() { continue; }
+            if mdat_data_end > data.len() {
+                continue;
+            }
             decrypted.copy_from_slice(&data[mdat_body_start..mdat_data_end]);
 
             let mut iv = [0u8; 16];
             for (i, &sz) in samples.iter().enumerate() {
                 let sz = sz as usize;
-                if sz == 0 { continue; }
+                if sz == 0 {
+                    continue;
+                }
 
                 // copy senc IV into 16-byte buffer (zero-pad if < 16)
                 if i < traf_ivs.len() {
@@ -350,9 +483,12 @@ pub fn decrypt_fmp4(data: &[u8], key: &[u8]) -> Result<Vec<u8>, String> {
                 }
                 let subs = traf_subs.get(i).map(|s| s.as_slice()).unwrap_or(&[]);
 
-                let sample_start = trun_data_offset + samples.iter().take(i).map(|&s| s as usize).sum::<usize>();
+                let sample_start =
+                    trun_data_offset + samples.iter().take(i).map(|&s| s as usize).sum::<usize>();
                 let sample_end = sample_start + sz;
-                if sample_end > decrypted.len() { break; }
+                if sample_end > decrypted.len() {
+                    break;
+                }
 
                 crypt_sample_cenc(&mut decrypted[sample_start..sample_end], key, &iv, subs);
                 total_samples += 1;
@@ -369,14 +505,28 @@ pub fn decrypt_fmp4(data: &[u8], key: &[u8]) -> Result<Vec<u8>, String> {
         pos = moof_be;
     }
 
-    tracing::info!("am.decrypt: done — {total_samples} samples, {} bytes", output.len());
+    tracing::info!(
+        "am.decrypt: done — {total_samples} samples, {} bytes",
+        output.len()
+    );
     Ok(output)
 }
 
 // Parse trun
 
-fn parse_trun(data: &[u8], trun_bs: usize, trun_be: usize, tfhd: Option<(usize, usize, usize)>, moof_start_pos: u64, mdat_payload_offset: u64, _mdat_body_start: &usize, _mdat_total_size: usize) -> (usize, Vec<u32>) {
-    if trun_bs + 8 > trun_be { return (0, vec![]); }
+fn parse_trun(
+    data: &[u8],
+    trun_bs: usize,
+    trun_be: usize,
+    tfhd: Option<(usize, usize, usize)>,
+    moof_start_pos: u64,
+    mdat_payload_offset: u64,
+    _mdat_body_start: &usize,
+    _mdat_total_size: usize,
+) -> (usize, Vec<u32>) {
+    if trun_bs + 8 > trun_be {
+        return (0, vec![]);
+    }
 
     let trun_flags = u32be(data, trun_bs);
     let sample_count = u32be(data, trun_bs + 4) as usize;
@@ -387,7 +537,7 @@ fn parse_trun(data: &[u8], trun_bs: usize, trun_be: usize, tfhd: Option<(usize, 
     let mut has_first_sample_flags = false;
 
     if trun_flags & 0x000001 != 0 && tpos + 4 <= trun_be {
-        trun_data_offset_i32 = i32::from_be_bytes(data[tpos..tpos+4].try_into().unwrap());
+        trun_data_offset_i32 = i32::from_be_bytes(data[tpos..tpos + 4].try_into().unwrap());
         has_data_offset = true;
         tpos += 4;
     }
@@ -414,10 +564,13 @@ fn parse_trun(data: &[u8], trun_bs: usize, trun_be: usize, tfhd: Option<(usize, 
             flags.push(u32be(data, tpos));
             tpos += 4;
         } else if i == 0 && has_first_sample_flags {
-            flags.push(u32be(data, trun_bs + 8 + if has_data_offset { 4 } else { 0 }));
+            flags.push(u32be(
+                data,
+                trun_bs + 8 + if has_data_offset { 4 } else { 0 },
+            ));
         }
         if trun_flags & 0x000800 != 0 && tpos + 4 <= trun_be {
-            composition_offsets.push(i32::from_be_bytes(data[tpos..tpos+4].try_into().unwrap()));
+            composition_offsets.push(i32::from_be_bytes(data[tpos..tpos + 4].try_into().unwrap()));
             tpos += 4;
         }
     }
@@ -429,9 +582,15 @@ fn parse_trun(data: &[u8], trun_bs: usize, trun_be: usize, tfhd: Option<(usize, 
             let tfhd_version_flags = u32be(data, tfhd_bs);
             let tfhd_flags = tfhd_version_flags & 0x00FFFFFF;
             let mut off = tfhd_bs + 8; // skip version+flags + track_id
-            if tfhd_flags & 0x000001 != 0 { off += 8; } // base_data_offset (u64)
-            if tfhd_flags & 0x000002 != 0 { off += 4; } // sample_description_index (u32)
-            if tfhd_flags & 0x000008 != 0 { off += 4; } // default_sample_duration (u32)
+            if tfhd_flags & 0x000001 != 0 {
+                off += 8;
+            } // base_data_offset (u64)
+            if tfhd_flags & 0x000002 != 0 {
+                off += 4;
+            } // sample_description_index (u32)
+            if tfhd_flags & 0x000008 != 0 {
+                off += 4;
+            } // default_sample_duration (u32)
             if tfhd_flags & 0x000010 != 0 && off + 4 <= data.len() {
                 let def_size = u32be(data, off);
                 if def_size > 0 {
@@ -451,7 +610,12 @@ fn parse_trun(data: &[u8], trun_bs: usize, trun_be: usize, tfhd: Option<(usize, 
         }
     }
 
-    tracing::debug!("am.decrypt: trun samples={} sizes={} data_start={}", sample_count, sizes.len(), data_start);
+    tracing::debug!(
+        "am.decrypt: trun samples={} sizes={} data_start={}",
+        sample_count,
+        sizes.len(),
+        data_start
+    );
 
     (data_start, sizes)
 }

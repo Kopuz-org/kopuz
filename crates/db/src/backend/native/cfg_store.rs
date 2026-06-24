@@ -50,7 +50,10 @@ pub async fn load_config(pool: &SqlitePool) -> Result<Option<AppConfig>, DbError
             name: r.get("name"),
             url: r.get("url"),
             service: parse_service(r.get::<String, _>("service").as_str()),
-            yt_browser: r.get::<Option<String>, _>("yt_browser").as_deref().and_then(|s| parse_browser(Some(s))),
+            yt_browser: r
+                .get::<Option<String>, _>("yt_browser")
+                .as_deref()
+                .and_then(|s| parse_browser(Some(s))),
             yt_anonymous: r.get::<i64, _>("yt_anonymous") != 0,
             apple_music_storefront: r.get("apple_music_storefront"),
             apple_music_language: r.get("apple_music_language"),
@@ -58,18 +61,23 @@ pub async fn load_config(pool: &SqlitePool) -> Result<Option<AppConfig>, DbError
         .collect();
 
     cfg.server = cfg.active_source.server_id().and_then(|active| {
-        rows.iter().find(|r| r.get::<String, _>("id") == *active).map(|r| MusicServer {
-            name: r.get("name"),
-            url: r.get("url"),
-            service: parse_service(r.get::<String, _>("service").as_str()),
-            access_token: r.get("access_token"),
-            user_id: r.get("user_id"),
-            id: Some(r.get("id")),
-            yt_browser: r.get::<Option<String>, _>("yt_browser").as_deref().and_then(|s| parse_browser(Some(s))),
-            yt_anonymous: r.get::<i64, _>("yt_anonymous") != 0,
-            apple_music_storefront: r.get("apple_music_storefront"),
-            apple_music_language: r.get("apple_music_language"),
-        })
+        rows.iter()
+            .find(|r| r.get::<String, _>("id") == *active)
+            .map(|r| MusicServer {
+                name: r.get("name"),
+                url: r.get("url"),
+                service: parse_service(r.get::<String, _>("service").as_str()),
+                access_token: r.get("access_token"),
+                user_id: r.get("user_id"),
+                id: Some(r.get("id")),
+                yt_browser: r
+                    .get::<Option<String>, _>("yt_browser")
+                    .as_deref()
+                    .and_then(|s| parse_browser(Some(s))),
+                yt_anonymous: r.get::<i64, _>("yt_anonymous") != 0,
+                apple_music_storefront: r.get("apple_music_storefront"),
+                apple_music_language: r.get("apple_music_language"),
+            })
     });
 
     // Hydrate play counts.
@@ -217,19 +225,20 @@ pub async fn load_server(pool: &SqlitePool, id: &str) -> Result<Option<MusicServ
     .bind(id)
     .fetch_optional(pool)
     .await?;
-    Ok(row.map(|r| {
-        MusicServer {
-            name: r.get("name"),
-            url: r.get("url"),
-            service: parse_service(r.get::<String, _>("service").as_str()),
-            access_token: r.get("access_token"),
-            user_id: r.get("user_id"),
-            id: Some(r.get("id")),
-            yt_browser: r.get::<Option<String>, _>("yt_browser").as_deref().and_then(|s| parse_browser(Some(s))),
-            yt_anonymous: r.get::<i64, _>("yt_anonymous") != 0,
-            apple_music_storefront: r.get("apple_music_storefront"),
-            apple_music_language: r.get("apple_music_language"),
-        }
+    Ok(row.map(|r| MusicServer {
+        name: r.get("name"),
+        url: r.get("url"),
+        service: parse_service(r.get::<String, _>("service").as_str()),
+        access_token: r.get("access_token"),
+        user_id: r.get("user_id"),
+        id: Some(r.get("id")),
+        yt_browser: r
+            .get::<Option<String>, _>("yt_browser")
+            .as_deref()
+            .and_then(|s| parse_browser(Some(s))),
+        yt_anonymous: r.get::<i64, _>("yt_anonymous") != 0,
+        apple_music_storefront: r.get("apple_music_storefront"),
+        apple_music_language: r.get("apple_music_language"),
     }))
 }
 

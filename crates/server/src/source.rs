@@ -2516,10 +2516,8 @@ impl MediaSource for AppleMusicSource {
         // For Apple Music, we encode the token in the sentinel so the blocking
         // player controller can use it for the CDM pipeline.
         let token = self.client.media_user_token().unwrap_or("");
-        let encoded_token = base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            token.as_bytes(),
-        );
+        let encoded_token =
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, token.as_bytes());
         Ok(StreamInfo {
             url: format!("__AM_FMP4:{_item_id}:{encoded_token}"),
             format: None,
@@ -2637,11 +2635,7 @@ impl MediaSource for AppleMusicSource {
             .map_err(SourceError::Backend)?;
         Ok(ids
             .into_iter()
-            .map(|id| {
-                crate::applemusic::apple_music_id(&id)
-                    .key()
-                    .into_owned()
-            })
+            .map(|id| crate::applemusic::apple_music_id(&id).key().into_owned())
             .collect())
     }
 
@@ -2671,9 +2665,9 @@ impl MediaSource for AppleMusicSource {
                 id: p.id,
                 name: p.attributes.name,
                 image_tag: p.attributes.artwork.map(|a| {
-                    utils::jellyfin_image::encode_cover_url(
-                        &crate::applemusic::artwork_url(&a.url, 300)
-                    )
+                    utils::jellyfin_image::encode_cover_url(&crate::applemusic::artwork_url(
+                        &a.url, 300,
+                    ))
                 }),
             })
             .collect())
@@ -2725,9 +2719,7 @@ impl MediaSource for AppleMusicSource {
     ) -> Result<(), SourceError> {
         let vid = track.id.key();
         if vid.is_empty() {
-            return Err(SourceError::InvalidInput(
-                "track has no item id".into(),
-            ));
+            return Err(SourceError::InvalidInput("track has no item id".into()));
         }
         self.client
             .remove_from_playlist(playlist_id, &[vid.into_owned()])

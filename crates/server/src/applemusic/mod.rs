@@ -9,7 +9,7 @@ pub mod types;
 pub use api::AppleMusicApi;
 
 use config::MusicService;
-use reader::models::{TrackId, Track};
+use reader::models::{Track, TrackId};
 
 pub fn apple_music_id(adam_id: impl Into<String>) -> TrackId {
     TrackId::Server {
@@ -105,7 +105,10 @@ pub fn track_from_library_song(song: &types::LibrarySongResource) -> Track {
         .map(|a| artwork_url(&a.url, 600));
 
     // Use catalogId (Adam ID) for playback — web playback API requires it.
-    let playback_id = song.attributes.playParams.as_ref()
+    let playback_id = song
+        .attributes
+        .playParams
+        .as_ref()
         .and_then(|p| p.catalog_id.as_deref())
         .filter(|s| !s.is_empty())
         .unwrap_or(&song.id);
@@ -113,7 +116,10 @@ pub fn track_from_library_song(song: &types::LibrarySongResource) -> Track {
     tracing::debug!(
         "am.track_from_library_song: library_id={}, catalog_id={:?}, playback_id={}",
         song.id,
-        song.attributes.playParams.as_ref().and_then(|p| p.catalog_id.as_deref()),
+        song.attributes
+            .playParams
+            .as_ref()
+            .and_then(|p| p.catalog_id.as_deref()),
         playback_id
     );
 
@@ -156,11 +162,13 @@ pub fn album_from_library(album: &types::LibraryAlbumResource) -> reader::Album 
             .artwork
             .as_ref()
             .filter(|a| !a.url.is_empty())
-            .map(|a| std::path::PathBuf::from(format!(
-                "applemusic:{}:{}",
-                album.id,
-                artwork_url(&a.url, 600)
-            ))),
+            .map(|a| {
+                std::path::PathBuf::from(format!(
+                    "applemusic:{}:{}",
+                    album.id,
+                    artwork_url(&a.url, 600)
+                ))
+            }),
         manual_cover: false,
     }
 }

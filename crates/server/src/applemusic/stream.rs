@@ -1,10 +1,11 @@
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 
-use super::cdm::Cdm;
 use super::auth;
+use super::cdm::Cdm;
 
-const LICENSE_SERVER_URL: &str = "https://play.itunes.apple.com/WebObjects/MZPlay.woa/wa/acquireWebPlaybackLicense";
+const LICENSE_SERVER_URL: &str =
+    "https://play.itunes.apple.com/WebObjects/MZPlay.woa/wa/acquireWebPlaybackLicense";
 
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
@@ -45,7 +46,10 @@ pub async fn get_web_playback(
         return Err(format!("webPlayback HTTP {status}: {text}"));
     }
 
-    let json: serde_json::Value = resp.json().await.map_err(|e| format!("parse webPlayback: {e}"))?;
+    let json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("parse webPlayback: {e}"))?;
 
     let song_list = json["songList"]
         .as_array()
@@ -60,7 +64,8 @@ pub async fn get_web_playback(
     // Log all available assets
     let assets = song["assets"].as_array().ok_or("no assets")?;
     for asset in assets {
-        tracing::debug!("am.webplayback: asset flavor={} url={}",
+        tracing::debug!(
+            "am.webplayback: asset flavor={} url={}",
             asset["flavor"].as_str().unwrap_or("?"),
             asset["URL"].as_str().unwrap_or("?"),
         );
@@ -85,7 +90,10 @@ pub async fn get_web_playback(
         .await
         .map_err(|e| format!("fetch M3U8: {e}"))?;
 
-    let m3u8_body = m3u8_resp.text().await.map_err(|e| format!("read M3U8: {e}"))?;
+    let m3u8_body = m3u8_resp
+        .text()
+        .await
+        .map_err(|e| format!("read M3U8: {e}"))?;
 
     let (_, media_playlist) = m3u8_rs::parse_media_playlist(m3u8_body.as_bytes())
         .map_err(|e| format!("parse M3U8: {e}"))?;
@@ -178,8 +186,15 @@ async fn get_content_key(
         "user-initiated": true,
     });
 
-    tracing::debug!("am.license: sending envelope (challenge_b64_len={}, uri={})", envelope["challenge"].as_str().unwrap_or("").len(), envelope["uri"].as_str().unwrap_or(""));
-    tracing::debug!("am.license: full envelope: {}", serde_json::to_string(&envelope).unwrap_or_default());
+    tracing::debug!(
+        "am.license: sending envelope (challenge_b64_len={}, uri={})",
+        envelope["challenge"].as_str().unwrap_or("").len(),
+        envelope["uri"].as_str().unwrap_or("")
+    );
+    tracing::debug!(
+        "am.license: full envelope: {}",
+        serde_json::to_string(&envelope).unwrap_or_default()
+    );
 
     let client = reqwest::Client::new();
     let resp = client
@@ -204,8 +219,15 @@ async fn get_content_key(
         return Err(format!("license HTTP {status}: {text}"));
     }
 
-    let resp_body = resp.text().await.map_err(|e| format!("read license body: {e}"))?;
-    tracing::debug!("am.license: raw response len={} body: {}", resp_body.len(), &resp_body[..resp_body.len().min(500)]);
+    let resp_body = resp
+        .text()
+        .await
+        .map_err(|e| format!("read license body: {e}"))?;
+    tracing::debug!(
+        "am.license: raw response len={} body: {}",
+        resp_body.len(),
+        &resp_body[..resp_body.len().min(500)]
+    );
 
     let license_json: serde_json::Value = serde_json::from_str(&resp_body).map_err(|e| {
         tracing::warn!("am.license: parse license failed: {e}");
@@ -213,7 +235,10 @@ async fn get_content_key(
     })?;
 
     if let Some(obj) = license_json.as_object() {
-        tracing::debug!("am.license: response keys: {:?}", obj.keys().collect::<Vec<_>>());
+        tracing::debug!(
+            "am.license: response keys: {:?}",
+            obj.keys().collect::<Vec<_>>()
+        );
     }
 
     if let Some(err_code) = license_json["errorCode"].as_i64() {
@@ -232,9 +257,13 @@ async fn get_content_key(
         .decode(license_b64)
         .map_err(|e| format!("decode license: {e}"))?;
 
-    tracing::debug!("am.license: license binary len={}, calling cdm.get_license_keys", license_data.len());
+    tracing::debug!(
+        "am.license: license binary len={}, calling cdm.get_license_keys",
+        license_data.len()
+    );
 
-    let keys = cdm.get_license_keys(license_request, &license_data)
+    let keys = cdm
+        .get_license_keys(license_request, &license_data)
         .map_err(|e| {
             tracing::warn!("am.license: get_license_keys failed: {e}");
             e
@@ -256,7 +285,11 @@ async fn get_content_key(
 
 /// If the id looks like a library id (contains "."), resolve it to a catalog Adam id.
 /// Library ids like "i.xxx" are not valid for web playback — only numeric Adam ids work.
-async fn resolve_adam_id(item_id: &str, bearer_token: &str, media_user_token: &str) -> Result<String, String> {
+async fn resolve_adam_id(
+    item_id: &str,
+    bearer_token: &str,
+    media_user_token: &str,
+) -> Result<String, String> {
     if item_id.chars().all(|c| c.is_ascii_digit()) {
         return Ok(item_id.to_string());
     }
@@ -282,11 +315,19 @@ async fn resolve_adam_id(item_id: &str, bearer_token: &str, media_user_token: &s
 
     let status = resp.status();
     if !status.is_success() {
-        tracing::warn!("am.stream: catalog resolve failed ({status}), library song may not have a catalog equivalent");
-        return Err(format!("library song {} has no catalog equivalent (HTTP {status})", item_id));
+        tracing::warn!(
+            "am.stream: catalog resolve failed ({status}), library song may not have a catalog equivalent"
+        );
+        return Err(format!(
+            "library song {} has no catalog equivalent (HTTP {status})",
+            item_id
+        ));
     }
 
-    let body: serde_json::Value = resp.json().await.map_err(|e| format!("parse catalog response: {e}"))?;
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("parse catalog response: {e}"))?;
 
     if let Some(data) = body["data"].as_array() {
         if let Some(first) = data.first() {
@@ -320,13 +361,36 @@ pub async fn resolve_and_decrypt(adam_id: &str, media_user_token: &str) -> Resul
         .decode(&pssh)
         .map_err(|e| format!("decode PSSH: {e}"))?;
 
-    tracing::debug!("am.stream: creating CDM with {} byte init_data", init_data.len());
+    tracing::debug!(
+        "am.stream: creating CDM with {} byte init_data",
+        init_data.len()
+    );
     let cdm = Cdm::new_default(&init_data)?;
     let license_request = cdm.get_license_request()?;
-    tracing::debug!("am.stream: license request generated ({} bytes)", license_request.len());
-    tracing::debug!("am.stream: license request first 50 bytes: {}", license_request[..license_request.len().min(50)].iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" "));
-    tracing::debug!("am.stream: KID (b64) = {}, uri_prefix = {}", playback.kid_base64, playback.uri_prefix);
-    tracing::debug!("am.stream: kid decoded len = {}", STANDARD.decode(&playback.kid_base64).unwrap_or_default().len());
+    tracing::debug!(
+        "am.stream: license request generated ({} bytes)",
+        license_request.len()
+    );
+    tracing::debug!(
+        "am.stream: license request first 50 bytes: {}",
+        license_request[..license_request.len().min(50)]
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
+    tracing::debug!(
+        "am.stream: KID (b64) = {}, uri_prefix = {}",
+        playback.kid_base64,
+        playback.uri_prefix
+    );
+    tracing::debug!(
+        "am.stream: kid decoded len = {}",
+        STANDARD
+            .decode(&playback.kid_base64)
+            .unwrap_or_default()
+            .len()
+    );
     tracing::debug!("am.stream: pssh (b64) = {pssh}");
     tracing::debug!("am.stream: pssh decoded len = {}", init_data.len());
 
@@ -343,9 +407,16 @@ pub async fn resolve_and_decrypt(adam_id: &str, media_user_token: &str) -> Resul
     )
     .await?;
 
-    tracing::info!("am.stream: got content key (len={}, hex={})", key_bytes.len(), &key_hex[..32.min(key_hex.len())]);
+    tracing::info!(
+        "am.stream: got content key (len={}, hex={})",
+        key_bytes.len(),
+        &key_hex[..32.min(key_hex.len())]
+    );
 
-    tracing::info!("am.stream: downloading encrypted fMP4 from {}", playback.file_url);
+    tracing::info!(
+        "am.stream: downloading encrypted fMP4 from {}",
+        playback.file_url
+    );
 
     let client = reqwest::Client::new();
     let encrypted_resp = client
@@ -384,7 +455,11 @@ pub async fn resolve_and_decrypt(adam_id: &str, media_user_token: &str) -> Resul
         .as_nanos();
     let out_path = tmp_dir.join(format!("decrypted_{id}.m4a"));
     let _ = tokio::fs::write(&out_path, &decrypted).await;
-    tracing::info!("am.stream: decrypted {} bytes → {}", decrypted.len(), out_path.display());
+    tracing::info!(
+        "am.stream: decrypted {} bytes → {}",
+        decrypted.len(),
+        out_path.display()
+    );
 
     Ok(decrypted)
 }

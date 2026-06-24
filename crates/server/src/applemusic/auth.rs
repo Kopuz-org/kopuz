@@ -26,13 +26,10 @@ pub async fn get_bearer_token() -> Result<String, String> {
 
     tracing::debug!("am.auth: music.apple.com → {}", resp.status());
 
-    let body = resp
-        .text()
-        .await
-        .map_err(|e| {
-            tracing::warn!("am.auth: read body failed: {e}");
-            format!("read music.apple.com body: {e}")
-        })?;
+    let body = resp.text().await.map_err(|e| {
+        tracing::warn!("am.auth: read body failed: {e}");
+        format!("read music.apple.com body: {e}")
+    })?;
 
     tracing::debug!("am.auth: body length={}", body.len());
 
@@ -40,7 +37,10 @@ pub async fn get_bearer_token() -> Result<String, String> {
     let js_path = match js_re.find(&body) {
         Some(m) => m.as_str(),
         None => {
-            tracing::warn!("am.auth: no index~*.js found in HTML (body_len={})", body.len());
+            tracing::warn!(
+                "am.auth: no index~*.js found in HTML (body_len={})",
+                body.len()
+            );
             return Err("no index~*.js found on music.apple.com".to_string());
         }
     };
@@ -59,13 +59,10 @@ pub async fn get_bearer_token() -> Result<String, String> {
 
     tracing::debug!("am.auth: JS bundle → {}", js_resp.status());
 
-    let js_body = js_resp
-        .text()
-        .await
-        .map_err(|e| {
-            tracing::warn!("am.auth: read JS body failed: {e}");
-            format!("read JS bundle: {e}")
-        })?;
+    let js_body = js_resp.text().await.map_err(|e| {
+        tracing::warn!("am.auth: read JS body failed: {e}");
+        format!("read JS bundle: {e}")
+    })?;
 
     tracing::debug!("am.auth: JS bundle length={}", js_body.len());
 
@@ -73,7 +70,10 @@ pub async fn get_bearer_token() -> Result<String, String> {
     let token = match jwt_re.find(&js_body) {
         Some(m) => m.as_str().to_string(),
         None => {
-            tracing::warn!("am.auth: no Bearer JWT found in JS bundle (len={})", js_body.len());
+            tracing::warn!(
+                "am.auth: no Bearer JWT found in JS bundle (len={})",
+                js_body.len()
+            );
             return Err("no Bearer JWT found in JS bundle".to_string());
         }
     };
