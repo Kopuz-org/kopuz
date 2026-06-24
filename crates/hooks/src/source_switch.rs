@@ -17,13 +17,15 @@ pub enum ConnStatus {
     Connecting,
     /// Verified and reachable.
     Online,
-    /// Unreachable, or auth expired/invalid.
-    Offline,
+    /// Credentials are missing or rejected; the user needs to sign in again.
+    Expired,
+    /// The remote source could not be reached.
+    Unreachable,
 }
 
 /// Connection status of the active source: Local is always Online (no auth); a
 /// server runs `validate()` on each switch — `Connecting` until it resolves to
-/// `Online` (valid) or `Offline` (expired/unreachable).
+/// `Online` (valid), `Expired` (auth missing/rejected), or `Unreachable` (network/server).
 pub fn use_connection_status() -> Memo<ConnStatus> {
     let active_source = use_context::<Signal<ActiveSource>>();
     let config = use_context::<Signal<AppConfig>>();
@@ -38,13 +40,18 @@ pub fn use_connection_status() -> Memo<ConnStatus> {
         }
         status.set(ConnStatus::Connecting);
         spawn(async move {
-            status.set(match src.validate().await {
-                AuthOutcome::Valid => ConnStatus::Online,
-                AuthOutcome::Expired | AuthOutcome::Unreachable => ConnStatus::Offline,
-            });
+            status.set(status_for(src.validate().await));
         });
     });
     use_memo(move || *status.read())
+}
+
+fn status_for(outcome: AuthOutcome) -> ConnStatus {
+    match outcome {
+        AuthOutcome::Valid => ConnStatus::Online,
+        AuthOutcome::Expired => ConnStatus::Expired,
+        AuthOutcome::Unreachable => ConnStatus::Unreachable,
+    }
 }
 
 /// Apply a source switch. For a server it loads the stored creds from the DB (so
@@ -102,6 +109,21 @@ pub async fn apply_source_switch(
             tracing::info!(target: "kopuz::source", server = %id, "source switched");
             has_creds || is_anon
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_auth_outcomes_to_connection_statuses() {
+        assert_eq!(status_for(AuthOutcome::Valid), ConnStatus::Online);
+        assert_eq!(status_for(AuthOutcome::Expired), ConnStatus::Expired);
+        assert_eq!(
+            status_for(AuthOutcome::Unreachable),
+            ConnStatus::Unreachable
+        );
     }
 }
 

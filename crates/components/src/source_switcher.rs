@@ -41,6 +41,8 @@ const SWITCHER_CSS: &str = r#"
 .ss-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;transition:background .2s}
 .ss-on{background:#36d399;box-shadow:0 0 6px color-mix(in oklab,#36d399 70%,transparent)}
 .ss-off{background:#ff5f56;box-shadow:0 0 6px color-mix(in oklab,#ff5f56 55%,transparent)}
+.ss-connecting{background:#ff5f56;box-shadow:0 0 6px color-mix(in oklab,#ff5f56 55%,transparent)}
+.ss-expired{background:var(--ss-amber,#f5a623);box-shadow:0 0 6px color-mix(in oklab,var(--ss-amber,#f5a623) 55%,transparent)}
 .ss-bar{position:relative;width:42px;height:3px;border-radius:2px;overflow:hidden;background:color-mix(in oklab,var(--ss-fg) 14%,transparent)}
 .ss-bar::after{content:"";position:absolute;top:0;bottom:0;left:0;width:45%;border-radius:2px;background:#ff5f56;animation:ss-load 1.1s ease-in-out infinite}
 @keyframes ss-load{0%{transform:translateX(-110%)}100%{transform:translateX(235%)}}
@@ -115,6 +117,13 @@ pub fn SourceSwitcher(
     let switch = hooks::source_switch::use_switch_source();
     // Live auth/connection status of the active source, for the status indicator.
     let conn = hooks::source_switch::use_connection_status();
+    let connection_status = conn();
+    let (dot_class, dot_title) = match connection_status {
+        ConnStatus::Connecting => ("ss-dot ss-connecting", "Connecting"),
+        ConnStatus::Online => ("ss-dot ss-on", "Online"),
+        ConnStatus::Expired => ("ss-dot ss-expired", "Sign in again"),
+        ConnStatus::Unreachable => ("ss-dot ss-off", "Unreachable"),
+    };
     let sources = entries(&config.read());
     let count = sources.len();
     let active = config.read().active_source.clone();
@@ -151,11 +160,12 @@ pub fn SourceSwitcher(
                 span { class: "ss-tile", i { class: "{active_icon}" } }
                 if !collapsed {
                     span { class: "ss-stk",
-                        span { class: "ss-stat",
+                        span { class: "ss-stat", title: "{dot_title}",
                             span {
-                                class: if conn() == ConnStatus::Online { "ss-dot ss-on" } else { "ss-dot ss-off" },
+                                class: "{dot_class}",
+                                title: "{dot_title}",
                             }
-                            if conn() == ConnStatus::Connecting {
+                            if connection_status == ConnStatus::Connecting {
                                 span { class: "ss-bar" }
                             } else {
                                 span { class: "ss-kick", "{i18n::t(\"source\")}" }

@@ -47,7 +47,7 @@ pub enum SourceError {
     Unsupported(&'static str),
     /// No usable connection to the remote (offline / creds-less stand-in).
     Connectivity,
-    /// The remote rejected the credentials — re-auth needed.
+    /// Credentials are missing or rejected — re-auth needed.
     Auth,
     /// The caller passed something the operation can't act on (e.g. a track
     /// missing the id a remote needs).
@@ -197,7 +197,7 @@ pub struct Capabilities {
 }
 
 /// What credential validation concluded. `Unreachable` ≠ `Expired`: a network
-/// blip must not reprompt sign-in — only a real auth rejection does.
+/// blip must not reprompt sign-in — only missing or rejected credentials do.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthOutcome {
     Valid,
@@ -1118,7 +1118,7 @@ impl MediaSource for OfflineServerSource {
         Err(SourceError::Auth)
     }
     async fn validate(&self) -> AuthOutcome {
-        AuthOutcome::Unreachable
+        AuthOutcome::Expired
     }
     async fn fetch_favorites(&self) -> Result<Vec<String>, SourceError> {
         Err(SourceError::Connectivity)
