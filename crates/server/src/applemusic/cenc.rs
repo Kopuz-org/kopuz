@@ -5,7 +5,6 @@ type Aes128Ctr = ctr::Ctr128BE<Aes128>;
 
 fn u32be(d: &[u8], o: usize) -> u32 { u32::from_be_bytes([d[o],d[o+1],d[o+2],d[o+3]]) }
 fn u64be(d: &[u8], o: usize) -> u64 { u64::from_be_bytes([d[o],d[o+1],d[o+2],d[o+3],d[o+4],d[o+5],d[o+6],d[o+7]]) }
-fn u32be_mut(d: &mut [u8], o: usize, v: u32) { d[o..o+4].copy_from_slice(&v.to_be_bytes()); }
 
 const ENCA: u32 = u32::from_be_bytes(*b"enca");
 const ENCV: u32 = u32::from_be_bytes(*b"encv");
@@ -22,7 +21,6 @@ const TRAF: u32 = u32::from_be_bytes(*b"traf");
 const SENC: u32 = u32::from_be_bytes(*b"senc");
 const TRUN: u32 = u32::from_be_bytes(*b"trun");
 const TFHD: u32 = u32::from_be_bytes(*b"tfhd");
-const PSSH: u32 = u32::from_be_bytes(*b"pssh");
 
 fn read_box(data: &[u8], pos: usize) -> Option<(usize, usize, usize)> {
     if pos + 8 > data.len() { return None; }
@@ -58,16 +56,6 @@ fn find_child(data: &[u8], body_start: usize, body_end: usize, target: u32) -> O
     None
 }
 
-fn find_child_pos(data: &[u8], body_start: usize, body_end: usize, target: u32) -> Option<usize> {
-    let mut pos = body_start;
-    while pos < body_end {
-        let (_, _, total) = match read_box(data, pos) { Some(v) => v, None => break };
-        if box_type(data, pos) == target { return Some(pos); }
-        pos += total;
-    }
-    None
-}
-
 fn find_deep(data: &[u8], start: usize, end: usize, target: u32) -> Option<(usize, usize)> {
     let mut pos = start;
     while pos < end {
@@ -79,22 +67,11 @@ fn find_deep(data: &[u8], start: usize, end: usize, target: u32) -> Option<(usiz
     None
 }
 
-fn find_deep_pos(data: &[u8], start: usize, end: usize, target: u32) -> Option<usize> {
-    let mut pos = start;
-    while pos < end {
-        let (bs, be, total) = match read_box(data, pos) { Some(v) => v, None => break };
-        if box_type(data, pos) == target { return Some(pos); }
-        if let Some(found) = find_deep_pos(data, bs, be, target) { return Some(found); }
-        pos += total;
-    }
-    None
-}
-
 fn find_all_children(data: &[u8], body_start: usize, body_end: usize) -> Vec<(usize, usize, usize)> {
     let mut result = Vec::new();
     let mut pos = body_start;
     while pos < body_end {
-        let (bs, be, total) = match read_box(data, pos) { Some(v) => v, None => break };
+        let (bs, _be, total) = match read_box(data, pos) { Some(v) => v, None => break };
         result.push((pos, bs, total));
         pos += total;
     }
@@ -165,21 +142,6 @@ fn get_tenc_iv_size(data: &[u8], enca_body_start: usize, enca_body_end: usize) -
         }
     }
     16
-}
-
-fn remove_pssh(data: &mut Vec<u8>, body_start: usize, body_end: usize) {
-    let mut pos = body_start;
-    let mut offsets_to_remove: Vec<(usize, usize)> = Vec::new();
-    while pos < body_end {
-        let (_, _, total) = match read_box(data, pos) { Some(v) => v, None => break };
-        if box_type(data, pos) == PSSH {
-            offsets_to_remove.push((pos, pos + total));
-        }
-        pos += total;
-    }
-    for (start, end) in offsets_to_remove.into_iter().rev() {
-        data.drain(start..end);
-    }
 }
 
 // ── SENC parsing (matches mp4ff parseAndFillSamples exactly) ───────
@@ -298,7 +260,7 @@ pub fn decrypt_fmp4(data: &[u8], key: &[u8]) -> Result<Vec<u8>, String> {
             pos += moof_total;
             continue;
         }
-        tracing::info!("am.decrypt: found moof at {pos} total={moof_total}");
+        tracing::debug!("am.decrypt: found moof at {pos} total={moof_total}");
         let moof_pos = pos;
         let moof_start_pos = moof_pos as u64;
 
@@ -337,11 +299,11 @@ pub fn decrypt_fmp4(data: &[u8], key: &[u8]) -> Result<Vec<u8>, String> {
             let mut traf_subs: Vec<Vec<(u16, u32)>> = Vec::new();
 
             if let Some((senc_bs, senc_be, _)) = find_child(data, traf_bs, traf_be, SENC) {
-                let flags = u32be(data, senc_bs);
+                let _flags = u32be(data, senc_bs);
                 let sample_count = u32be(data, senc_bs + 4);
                 let raw = &data[senc_bs + 8..senc_be];
                 let (ivs, subs) = parse_senc(per_sample_iv_size, sample_count, raw);
-                tracing::info!("am.decrypt: senc: {} IVs, {} subs, iv_size={}", ivs.len(), subs.len(), per_sample_iv_size);
+                tracing::debug!("am.decrypt: senc: {} IVs, {} subs, iv_size={}", ivs.len(), subs.len(), per_sample_iv_size);
                 traf_ivs = ivs;
                 traf_subs = subs;
             }
@@ -398,7 +360,7 @@ pub fn decrypt_fmp4(data: &[u8], key: &[u8]) -> Result<Vec<u8>, String> {
 
 // ── Parse trun (matches mp4ff GetFullSamples) ──────────────────────
 
-fn parse_trun(data: &[u8], trun_bs: usize, trun_be: usize, tfhd: Option<(usize, usize, usize)>, moof_start_pos: u64, mdat_payload_offset: u64, mdat_body_start: &usize, mdat_total_size: usize) -> (usize, Vec<u32>) {
+fn parse_trun(data: &[u8], trun_bs: usize, trun_be: usize, tfhd: Option<(usize, usize, usize)>, moof_start_pos: u64, mdat_payload_offset: u64, _mdat_body_start: &usize, _mdat_total_size: usize) -> (usize, Vec<u32>) {
     if trun_bs + 8 > trun_be { return (0, vec![]); }
 
     let trun_flags = u32be(data, trun_bs);
@@ -475,7 +437,7 @@ fn parse_trun(data: &[u8], trun_bs: usize, trun_be: usize, tfhd: Option<(usize, 
         }
     }
 
-    tracing::info!("am.decrypt: trun samples={} sizes={} data_start={}", sample_count, sizes.len(), data_start);
+    tracing::debug!("am.decrypt: trun samples={} sizes={} data_start={}", sample_count, sizes.len(), data_start);
 
     (data_start, sizes)
 }

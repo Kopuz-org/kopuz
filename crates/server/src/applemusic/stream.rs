@@ -60,7 +60,7 @@ pub async fn get_web_playback(
     // Log all available assets
     let assets = song["assets"].as_array().ok_or("no assets")?;
     for asset in assets {
-        tracing::info!("am.webplayback: asset flavor={} url={}",
+        tracing::debug!("am.webplayback: asset flavor={} url={}",
             asset["flavor"].as_str().unwrap_or("?"),
             asset["URL"].as_str().unwrap_or("?"),
         );
@@ -75,7 +75,7 @@ pub async fn get_web_playback(
         .ok_or("no 28:ctrp256 asset found")?
         .to_string();
 
-    tracing::info!("am.webplayback: asset URL found, extracting KID");
+    tracing::debug!("am.webplayback: asset URL found, extracting KID");
 
     // Fetch the asset URL as M3U8 to extract the KID
     let m3u8_resp = client
@@ -98,15 +98,15 @@ pub async fn get_web_playback(
         .and_then(|k| k.uri.as_deref())
         .ok_or("no KEY in media playlist")?;
 
-    tracing::info!("am.webplayback: raw KEY URI = {key_uri}");
+    tracing::debug!("am.webplayback: raw KEY URI = {key_uri}");
 
     let (uri_prefix, kid_base64) = key_uri
         .split_once(',')
         .ok_or("KEY URI not in expected format 'prefix,kid'")?;
 
-    tracing::info!("am.webplayback: uri_prefix = {uri_prefix}, kid = {kid_base64}");
+    tracing::debug!("am.webplayback: uri_prefix = {uri_prefix}, kid = {kid_base64}");
 
-    tracing::info!("am.webplayback: KID extracted, uri_prefix present");
+    tracing::debug!("am.webplayback: KID extracted, uri_prefix present");
 
     // Build the file download URL from the MAP URI
     let base_url = asset_url
@@ -178,7 +178,7 @@ async fn get_content_key(
         "user-initiated": true,
     });
 
-    tracing::info!("am.license: sending envelope (challenge_b64_len={}, uri={})", envelope["challenge"].as_str().unwrap_or("").len(), envelope["uri"].as_str().unwrap_or(""));
+    tracing::debug!("am.license: sending envelope (challenge_b64_len={}, uri={})", envelope["challenge"].as_str().unwrap_or("").len(), envelope["uri"].as_str().unwrap_or(""));
     tracing::debug!("am.license: full envelope: {}", serde_json::to_string(&envelope).unwrap_or_default());
 
     let client = reqwest::Client::new();
@@ -205,7 +205,7 @@ async fn get_content_key(
     }
 
     let resp_body = resp.text().await.map_err(|e| format!("read license body: {e}"))?;
-    tracing::info!("am.license: raw response len={} body: {}", resp_body.len(), &resp_body[..resp_body.len().min(500)]);
+    tracing::debug!("am.license: raw response len={} body: {}", resp_body.len(), &resp_body[..resp_body.len().min(500)]);
 
     let license_json: serde_json::Value = serde_json::from_str(&resp_body).map_err(|e| {
         tracing::warn!("am.license: parse license failed: {e}");
@@ -213,7 +213,7 @@ async fn get_content_key(
     })?;
 
     if let Some(obj) = license_json.as_object() {
-        tracing::info!("am.license: response keys: {:?}", obj.keys().collect::<Vec<_>>());
+        tracing::debug!("am.license: response keys: {:?}", obj.keys().collect::<Vec<_>>());
     }
 
     if let Some(err_code) = license_json["errorCode"].as_i64() {
@@ -226,13 +226,13 @@ async fn get_content_key(
         .as_str()
         .ok_or("no license in response")?;
 
-    tracing::info!("am.license: license b64 len={}", license_b64.len());
+    tracing::debug!("am.license: license b64 len={}", license_b64.len());
 
     let license_data = STANDARD
         .decode(license_b64)
         .map_err(|e| format!("decode license: {e}"))?;
 
-    tracing::info!("am.license: license binary len={}, calling cdm.get_license_keys", license_data.len());
+    tracing::debug!("am.license: license binary len={}, calling cdm.get_license_keys", license_data.len());
 
     let keys = cdm.get_license_keys(license_request, &license_data)
         .map_err(|e| {
@@ -240,13 +240,13 @@ async fn get_content_key(
             e
         })?;
 
-    tracing::info!("am.license: got {} keys from CDM", keys.len());
+    tracing::debug!("am.license: got {} keys from CDM", keys.len());
 
     for key in &keys {
         if key.key_type == 2 {
             // CONTENT key
             let key_hex = hex::encode(&key.value);
-            tracing::info!("am.license: got content key ({} bytes)", key.value.len());
+            tracing::debug!("am.license: got content key ({} bytes)", key.value.len());
             return Ok((key_hex, key.value.clone()));
         }
     }
@@ -312,25 +312,25 @@ pub async fn resolve_and_decrypt(adam_id: &str, media_user_token: &str) -> Resul
 
     let playback = get_web_playback(&adam_id, &bearer_token, media_user_token).await?;
 
-    tracing::info!("am.stream: building PSSH and CDM license request");
+    tracing::debug!("am.stream: building PSSH and CDM license request");
 
     let pssh = build_pssh(&playback.kid_base64)?;
-    tracing::info!("am.stream: PSSH built ({} bytes)", pssh.len());
+    tracing::debug!("am.stream: PSSH built ({} bytes)", pssh.len());
     let init_data = STANDARD
         .decode(&pssh)
         .map_err(|e| format!("decode PSSH: {e}"))?;
 
-    tracing::info!("am.stream: creating CDM with {} byte init_data", init_data.len());
+    tracing::debug!("am.stream: creating CDM with {} byte init_data", init_data.len());
     let cdm = Cdm::new_default(&init_data)?;
     let license_request = cdm.get_license_request()?;
-    tracing::info!("am.stream: license request generated ({} bytes)", license_request.len());
+    tracing::debug!("am.stream: license request generated ({} bytes)", license_request.len());
     tracing::debug!("am.stream: license request first 50 bytes: {}", license_request[..license_request.len().min(50)].iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" "));
-    tracing::info!("am.stream: KID (b64) = {}, uri_prefix = {}", playback.kid_base64, playback.uri_prefix);
+    tracing::debug!("am.stream: KID (b64) = {}, uri_prefix = {}", playback.kid_base64, playback.uri_prefix);
     tracing::debug!("am.stream: kid decoded len = {}", STANDARD.decode(&playback.kid_base64).unwrap_or_default().len());
     tracing::debug!("am.stream: pssh (b64) = {pssh}");
     tracing::debug!("am.stream: pssh decoded len = {}", init_data.len());
 
-    tracing::info!("am.stream: exchanging license with Apple");
+    tracing::debug!("am.stream: exchanging license with Apple");
 
     let (key_hex, key_bytes) = get_content_key(
         &cdm,

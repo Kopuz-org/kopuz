@@ -11,7 +11,6 @@ pub mod wv {
 type Aes128CbcDec = cbc::Decryptor<aes::Aes128>;
 
 pub struct Cdm {
-    private_key: rsa::pkcs1v15::SigningKey<Sha1>,
     private_key_raw: rsa::RsaPrivateKey,
     client_id: Vec<u8>,
     session_id: Vec<u8>,
@@ -47,7 +46,6 @@ impl Cdm {
         session_id.extend_from_slice(&[b'0'; 14]);
 
         Ok(Self {
-            private_key: rsa::pkcs1v15::SigningKey::<Sha1>::new(private_key.clone()),
             private_key_raw: private_key,
             client_id,
             session_id,
@@ -167,37 +165,32 @@ impl Cdm {
             }
 
             let mut decrypted = encrypted_key.to_vec();
-            tracing::info!("am.cdm: AES-CBC decrypt: key_type={} iv_len={} enc_len={}", key_type, iv.len(), encrypted_key.len());
-            tracing::info!("am.cdm: enc_key for AES: {}", hex::encode(&encryption_key));
+            tracing::debug!("am.cdm: AES-CBC decrypt: key_type={} iv_len={} enc_len={}", key_type, iv.len(), encrypted_key.len());
+            tracing::debug!("am.cdm: enc_key for AES: {}", hex::encode(&encryption_key));
             let cipher = Aes128CbcDec::new(&encryption_key, GenericArray::from_slice(&iv[..16]));
             cipher.decrypt_padded_mut::<NoPadding>(&mut decrypted).map_err(|e| {
                 tracing::warn!("am.cdm: AES-CBC decrypt failed: {e}");
                 format!("{e}")
             })?;
-            tracing::info!("am.cdm: post-decrypt len={}", decrypted.len());
-            tracing::info!("am.cdm: post-decrypt first 32: {}", hex::encode(&decrypted[..decrypted.len().min(32)]));
+            tracing::debug!("am.cdm: post-decrypt len={}", decrypted.len());
+            tracing::debug!("am.cdm: post-decrypt first 32: {}", hex::encode(&decrypted[..decrypted.len().min(32)]));
 
             // PKCS7 unpad
             let last_byte = *decrypted.last().unwrap_or(&0);
-            tracing::info!("am.cdm: PKCS7 last_byte={}", last_byte);
             if last_byte > 0 && last_byte <= 16 && last_byte as usize <= decrypted.len() {
                 let pad_start = decrypted.len() - last_byte as usize;
                 let pad_valid = decrypted[pad_start..].iter().all(|&b| b == last_byte);
-                tracing::info!("am.cdm: PKCS7 pad_valid={} pad_len={}", pad_valid, last_byte);
+                tracing::debug!("am.cdm: PKCS7 pad_len={last_byte} valid={pad_valid}");
                 if pad_valid {
                     decrypted.truncate(pad_start);
                 }
             }
-            tracing::info!("am.cdm: final key len={}", decrypted.len());
 
-            tracing::info!("am.cdm: decrypted key id={} type={} value_len={} iv_ok={} enc_ok={}",
+            tracing::debug!("am.cdm: decrypted key id={} type={} value_len={}",
                 hex::encode(&key_container.id.as_deref().unwrap_or(&[])),
                 key_type,
                 decrypted.len(),
-                iv.len() >= 16,
-                encrypted_key.len() % 16 == 0,
             );
-            tracing::info!("am.cdm: decrypted key hex (first 32): {}", hex::encode(&decrypted[..decrypted.len().min(32)]));
 
             keys.push(CdmKey {
                 id: key_container.id.clone().unwrap_or_default(),
