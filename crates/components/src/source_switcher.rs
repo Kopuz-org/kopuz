@@ -33,15 +33,14 @@ const SWITCHER_CSS: &str = r#"
 .ss-tr:hover{background:color-mix(in oklab,var(--ss-fg) 6%,transparent)}
 .ss-tr.ss-open{background:color-mix(in oklab,var(--ss-fg) 6%,transparent);border-color:color-mix(in oklab,var(--ss-fg) 18%,transparent)}
 .ss-mini{width:40px;height:40px;padding:0;justify-content:center;border-radius:8px}
-.ss-tile{position:relative;width:30px;height:30px;border-radius:7px;display:grid;place-items:center;flex-shrink:0;background:color-mix(in oklab,var(--accent) 14%,transparent);color:var(--accent)}
-.ss-tile i{font-size:13px}
-.ss-dot{position:absolute;right:-2px;bottom:-2px;width:9px;height:9px;border-radius:50%;border:2px solid var(--ss-surface)}
+.ss-ico{display:grid;place-items:center;width:18px;flex-shrink:0;color:var(--accent);font-size:15px}
+.ss-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
 .ss-on{background:#3fb950}
 .ss-off{background:#e5534b}
 .ss-load{background:#d8a23a;animation:ss-pulse 1.1s ease-in-out infinite}
 @keyframes ss-pulse{0%,100%{opacity:.4}50%{opacity:1}}
 .ss-stk{flex:1;text-align:left;min-width:0}
-.ss-tname{display:block;font-size:14px;font-weight:500;letter-spacing:-.01em;color:var(--ss-fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ss-tname{display:block;font-size:13.5px;font-weight:500;letter-spacing:-.01em;color:var(--ss-fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ss-chev{font-size:10px;color:color-mix(in oklab,var(--ss-fg) 38%,transparent);transition:transform .18s}
 .ss-tr.ss-open .ss-chev{transform:rotate(180deg)}
 .ss-pop{position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:50;border-radius:10px;border:1px solid color-mix(in oklab,var(--ss-fg) 11%,transparent);overflow:hidden auto;max-height:60vh;background:var(--ss-surface);box-shadow:0 12px 30px -18px rgba(0,0,0,.55)}
@@ -145,19 +144,17 @@ pub fn SourceSwitcher(
                 },
                 title: "{active_label}",
                 onclick: move |_| open.set(!open()),
-                span { class: "ss-tile",
-                    i { class: "{active_icon}" }
+                span { class: "ss-ico", i { class: "{active_icon}" } }
+                if !collapsed {
+                    span { class: "ss-stk",
+                        span { class: "ss-tname", "{active_label}" }
+                    }
                     span {
                         class: match conn() {
                             ConnStatus::Online => "ss-dot ss-on",
                             ConnStatus::Connecting => "ss-dot ss-load",
                             _ => "ss-dot ss-off",
                         },
-                    }
-                }
-                if !collapsed {
-                    span { class: "ss-stk",
-                        span { class: "ss-tname", "{active_label}" }
                     }
                     i { class: "fa-solid fa-chevron-down ss-chev" }
                 }
@@ -185,7 +182,7 @@ pub fn SourceSwitcher(
                                             switch(src.clone());
                                             open.set(false);
                                         },
-                                        span { class: "ss-tile", i { class: "{icon}" } }
+                                        span { class: "ss-ico", i { class: "{icon}" } }
                                         span { class: "ss-meta",
                                             span { class: "ss-rname", "{label}" }
                                             if !collapsed {
