@@ -332,13 +332,13 @@ impl EqPreset {
         }
     }
 
-    pub const fn gains(self) -> [f32; 5] {
+    pub const fn gains(self) -> [f32; 10] {
         match self {
-            Self::Flat | Self::Custom => [0.0, 0.0, 0.0, 0.0, 0.0],
-            Self::BassBoost => [6.0, 4.5, 2.0, -0.5, -1.5],
-            Self::TrebleBoost => [-1.5, -0.5, 0.5, 4.0, 6.0],
-            Self::VocalBoost => [-2.0, 0.5, 3.5, 2.5, -0.5],
-            Self::Loudness => [4.0, 2.0, 0.5, 2.5, 4.0],
+            Self::Flat | Self::Custom => [0.0; 10],
+            Self::BassBoost => [7.0, 6.5, 5.0, 3.5, 1.0, -0.5, -1.0, -1.5, -1.5, -1.5],
+            Self::TrebleBoost => [-1.5, -1.5, -1.0, -0.5, 0.0, 0.5, 2.0, 4.0, 6.0, 6.5],
+            Self::VocalBoost => [-2.5, -2.0, -1.5, 0.0, 2.5, 3.5, 3.0, 2.5, 0.5, -0.5],
+            Self::Loudness => [5.0, 4.5, 3.0, 1.5, 0.5, 0.0, 1.0, 2.5, 4.0, 4.5],
         }
     }
 
@@ -354,8 +354,36 @@ impl EqPreset {
     }
 }
 
-fn default_eq_bands() -> [f32; 5] {
-    [0.0, 0.0, 0.0, 0.0, 0.0]
+fn default_eq_bands() -> [f32; 10] {
+    [0.0; 10]
+}
+
+/// Slots in the current 10-band layout (32/64/125/250/500/1k/2k/4k/8k/16k Hz)
+/// that the legacy 5-band layout (60/250/1k/4k/12k Hz) maps onto, picked as the
+/// nearest frequency: 60→64, 250→250, 1k→1k, 4k→4k, 12k→16k.
+const LEGACY_EQ_BAND_SLOTS: [usize; 5] = [1, 3, 5, 7, 9];
+
+fn deserialize_eq_bands<'de, D>(deserializer: D) -> Result<[f32; 10], D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let values: Vec<f32> = Vec::deserialize(deserializer)?;
+    let mut out = [0.0_f32; 10];
+
+    if values.len() == LEGACY_EQ_BAND_SLOTS.len() {
+        // Migrate a saved 5-band custom preset onto the nearest 10-band slots so
+        // existing boosts keep their original frequencies instead of shifting
+        // down (e.g. a 1 kHz boost must not be reinterpreted as a 125 Hz boost).
+        for (&slot, value) in LEGACY_EQ_BAND_SLOTS.iter().zip(values.iter().copied()) {
+            out[slot] = value;
+        }
+    } else {
+        for (slot, value) in out.iter_mut().zip(values.iter().copied()) {
+            *slot = value;
+        }
+    }
+
+    Ok(out)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -364,14 +392,14 @@ pub struct EqualizerSettings {
     pub enabled: bool,
     #[serde(default)]
     pub preset: EqPreset,
-    #[serde(default = "default_eq_bands")]
-    pub bands: [f32; 5],
+    #[serde(default = "default_eq_bands", deserialize_with = "deserialize_eq_bands")]
+    pub bands: [f32; 10],
     #[serde(default)]
     pub preamp_db: f32,
 }
 
 impl EqualizerSettings {
-    pub fn resolved_bands(&self) -> [f32; 5] {
+    pub fn resolved_bands(&self) -> [f32; 10] {
         if self.preset == EqPreset::Custom {
             self.bands
         } else {
@@ -1064,8 +1092,37 @@ impl AppConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::AppConfig;
+    use super::{AppConfig, EqualizerSettings};
     use std::path::PathBuf;
+
+    #[test]
+    fn legacy_five_band_custom_eq_migrates_to_nearest_slots() {
+        // A custom preset saved by the old 5-band UI: boosts at 60/250/1k/4k/12k Hz.
+        let json = r#"{
+            "enabled": true,
+            "preset": "Custom",
+            "bands": [3.0, 0.0, 5.0, -2.0, 4.0],
+            "preamp_db": 0.0
+        }"#;
+
+        let eq: EqualizerSettings = serde_json::from_str(json).unwrap();
+
+        // Each legacy value lands on the nearest 10-band slot (64/250/1k/4k/16k Hz),
+        // not the first five slots (which are now 32/64/125/250/500 Hz).
+        assert_eq!(eq.bands, [0.0, 3.0, 0.0, 0.0, 0.0, 5.0, 0.0, -2.0, 0.0, 4.0]);
+    }
+
+    #[test]
+    fn modern_ten_band_eq_round_trips_unchanged() {
+        let bands = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
+        let json = format!(
+            r#"{{ "enabled": true, "preset": "Custom", "bands": {bands:?}, "preamp_db": 0.0 }}"#
+        );
+
+        let eq: EqualizerSettings = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(eq.bands, bands);
+    }
 
     #[test]
     fn config_deserializes_legacy_single_music_directory() {
