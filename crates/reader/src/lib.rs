@@ -12,7 +12,7 @@ pub mod scanner;
 pub mod utils;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use metadata::{read, read_cover, write_tags};
+pub use metadata::{read, read_cover, set_artist_tag, write_tags};
 pub use models::{
     Album, ArtistImageRef, CoverChange, FavoritesStore, Library, PlaylistFolder, PlaylistStore,
     Track, TrackEdits, TrackId,
