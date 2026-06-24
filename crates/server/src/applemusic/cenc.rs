@@ -110,13 +110,13 @@ struct TrackInfo {
 
 // ── ExtractTrackInfo: read track info from init without modifying it ─
 
-fn extract_track_info(data: &[u8], init_end: usize) -> Result<Vec<TrackInfo>, String> {
+fn extract_track_info(data: &[u8], init_end: usize) -> Result<(Vec<TrackInfo>, Vec<usize>), String> {
     let mut track_infos = Vec::new();
+    let mut enca_positions = Vec::new();
 
-    let moov = find_deep(data, 0, init_end, MOOV);
-    let (moov_body_start, moov_body_end) = match moov {
+    let (moov_body_start, moov_body_end) = match find_deep(data, 0, init_end, MOOV) {
         Some(v) => v,
-        None => return Ok(track_infos),
+        None => return Ok((track_infos, enca_positions)),
     };
 
     for (trak_box_start, trak_body_start, trak_total) in find_all_children(data, moov_body_start, moov_body_end) {
@@ -143,6 +143,7 @@ fn extract_track_info(data: &[u8], init_end: usize) -> Result<Vec<TrackInfo>, St
                     let default_iv = get_tenc_iv_size(data, children_start, ee);
                     tracing::info!("am.decrypt: track {track_id}: tenc iv_size={default_iv}");
                     track_infos.push(TrackInfo { track_id, default_iv_size: default_iv });
+                    enca_positions.push(epos);
                 }
                 epos += etotal;
             }
@@ -150,7 +151,7 @@ fn extract_track_info(data: &[u8], init_end: usize) -> Result<Vec<TrackInfo>, St
         break;
     }
 
-    Ok(track_infos)
+    Ok((track_infos, enca_positions))
 }
 
 fn get_tenc_iv_size(data: &[u8], enca_body_start: usize, enca_body_end: usize) -> u8 {
@@ -275,13 +276,16 @@ pub fn decrypt_fmp4(data: &[u8], key: &[u8]) -> Result<Vec<u8>, String> {
     if init_end == 0 { return Err("no moov".to_string()); }
     tracing::info!("am.decrypt: init segment = {init_end} bytes");
 
-    // 2. DecryptInit: extract track info without modifying init segment
-    let track_infos = extract_track_info(data, init_end)?;
+    // 2. DecryptInit: extract track info and patch enca→mp4a in init
+    let (track_infos, enca_positions) = extract_track_info(data, init_end)?;
     tracing::info!("am.decrypt: {} encrypted tracks", track_infos.len());
 
-    // 3. Write clean init segment (verbatim — modifying box sizes breaks stts/stsc/etc.)
+    // 3. Write init segment with enca→mp4a (just overwrite 4-byte type, no size changes)
     let mut output = Vec::with_capacity(data.len());
     output.extend_from_slice(&data[..init_end]);
+    for pos in &enca_positions {
+        output[*pos + 4..*pos + 8].copy_from_slice(b"mp4a");
+    }
 
     // 4. Process each fragment (moof + mdat)
     pos = init_end;
