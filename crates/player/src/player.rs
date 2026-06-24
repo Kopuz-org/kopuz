@@ -139,9 +139,10 @@ type ActiveConsumerSlot = Arc<Mutex<Option<SharedConsumer>>>;
 pub struct Player {
     state: Arc<Mutex<PlaybackState>>,
     active_state_handle: Arc<Mutex<Arc<Mutex<PlaybackState>>>>,
-    _device: cpal::Device,
+    _device: Option<cpal::Device>,
     stream_config: cpal::StreamConfig,
     _stream: Option<cpal::Stream>,
+    audio_output_error: Option<String>,
     active_consumer: ActiveConsumerSlot,
     fading_consumer: ActiveConsumerSlot,
     crossfade_state: Arc<Mutex<Option<CrossfadeState>>>,
@@ -197,6 +198,61 @@ impl Player {
         }
     }
 
+    fn fallback_stream_config() -> cpal::StreamConfig {
+        cpal::StreamConfig {
+            channels: 2,
+            sample_rate: 48_000,
+            buffer_size: cpal::BufferSize::Default,
+        }
+    }
+
+    fn unavailable(error: String) -> Self {
+        tracing::error!(error = %error, "audio output unavailable");
+
+        let stream_config = Self::fallback_stream_config();
+        let sample_rate = stream_config.sample_rate;
+        let channels = stream_config.channels as usize;
+        let state = Arc::new(Mutex::new(PlaybackState {
+            paused: false,
+            stopped: true,
+            volume: 1.0,
+            seek_to: None,
+            finished: true,
+        }));
+
+        Self {
+            state: state.clone(),
+            active_state_handle: Arc::new(Mutex::new(state)),
+            _device: None,
+            stream_config,
+            _stream: None,
+            audio_output_error: Some(error),
+            active_consumer: Arc::new(Mutex::new(None::<Arc<Mutex<rb::Consumer<f32>>>>)),
+            fading_consumer: Arc::new(Mutex::new(None::<Arc<Mutex<rb::Consumer<f32>>>>)),
+            crossfade_state: Arc::new(Mutex::new(None::<CrossfadeState>)),
+            ring_buf_consumer: None,
+            ring_buf: None,
+            decoder_handle: None,
+            fading_session_state: Arc::new(Mutex::new(None::<Arc<Mutex<PlaybackState>>>)),
+            fading_ring_buf: None,
+            fading_decoder_handle: None,
+            now_playing: None,
+            position_micros: Arc::new(AtomicU64::new(0)),
+            finish_callback: None,
+            position_thread_handle: None,
+            position_thread_stop: Arc::default(),
+            equalizer: Arc::new(Mutex::new(Equalizer::new(sample_rate, channels))),
+            channel_mode: Arc::new(Mutex::new(ChannelMode::Stereo)),
+        }
+    }
+
+    fn ensure_audio_output(&self) -> Result<(), String> {
+        if let Some(error) = &self.audio_output_error {
+            return Err(error.clone());
+        }
+        Ok(())
+    }
+
     pub fn new() -> Self {
         // Android initialises the JNI media session + classloader cache here; the desktop
         // platforms set up their system integration from the app entry point instead.
@@ -204,13 +260,16 @@ impl Player {
         systemint::init();
 
         let host = cpal::default_host();
-        let device = host
-            .default_output_device()
-            .expect("no output device available");
+        let Some(device) = host.default_output_device() else {
+            return Self::unavailable("no output device available".to_string());
+        };
 
-        let supported_config = device
-            .default_output_config()
-            .expect("no default output config");
+        let supported_config = match device.default_output_config() {
+            Ok(config) => config,
+            Err(error) => {
+                return Self::unavailable(format!("no default output config: {error}"));
+            }
+        };
 
         let stream_config = Self::preferred_stream_config(&supported_config);
         let state = Arc::new(Mutex::new(PlaybackState {
@@ -404,9 +463,10 @@ impl Player {
         Self {
             state,
             active_state_handle,
-            _device: device,
+            _device: Some(device),
             stream_config,
             _stream: Some(stream),
+            audio_output_error: None,
             active_consumer,
             fading_consumer,
             crossfade_state,
@@ -450,6 +510,7 @@ impl Player {
         meta: NowPlayingMeta,
         hint: Hint,
     ) -> Result<(), String> {
+        self.ensure_audio_output()?;
         self.cleanup_finished_fading_session();
         self.stop_playback_session();
 
@@ -519,6 +580,7 @@ impl Player {
         hint: Hint,
         duration: Duration,
     ) -> Result<(), String> {
+        self.ensure_audio_output()?;
         self.cleanup_finished_fading_session();
 
         if duration.is_zero() || self.ring_buf_consumer.is_none() || self.decoder_handle.is_none() {

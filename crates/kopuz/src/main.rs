@@ -2396,17 +2396,16 @@ fn App() -> Element {
                 }
             }
 
-            // Only show playback errors when the active server is YouTube
-            // Music — other backends (Jellyfin/Subsonic/Custom) surface
-            // their own errors via the settings popup, and a lingering YT
-            // error from a previous session shouldn't haunt a switched-to
-            // server.
-            if config
-                .read()
-                .server
-                .as_ref()
-                .map(|s| s.service == config::MusicService::YtMusic)
-                .unwrap_or(false)
+            // Local playback errors do not have a settings popup sink. YouTube
+            // Music also uses this banner; other server backends surface their
+            // own errors elsewhere, so avoid carrying a stale YT error into them.
+            if active_source == config::Source::Local
+                || config
+                    .read()
+                    .server
+                    .as_ref()
+                    .map(|s| s.service == config::MusicService::YtMusic)
+                    .unwrap_or(false)
             {
                 if let Some(msg) = ctrl.playback_error.read().clone() {
                     div {

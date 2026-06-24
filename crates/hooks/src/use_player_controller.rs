@@ -1385,6 +1385,8 @@ impl PlayerController {
                         };
                         if let Err(e) = result {
                             tracing::error!(error = %e, "playback failed");
+                            self.playback_error
+                                .set(Some(format!("Playback failed:\n{e}")));
                             self.skip_in_progress.set(false);
                             return;
                         }
