@@ -189,6 +189,7 @@ pub enum MusicService {
     Custom,
     YtMusic,
     SoundCloud,
+    Spotify,
 }
 
 impl MusicService {
@@ -199,13 +200,14 @@ impl MusicService {
             Self::Custom => "Custom",
             Self::YtMusic => "YouTube Music",
             Self::SoundCloud => "SoundCloud",
+            Self::Spotify => "Spotify",
         }
     }
 
     /// Backends that authenticate via a browser sign-in window (OAuth/cookies)
     /// rather than a URL + username/password form.
     pub fn uses_browser_signin(&self) -> bool {
-        matches!(self, Self::YtMusic | Self::SoundCloud)
+        matches!(self, Self::YtMusic | Self::SoundCloud | Self::Spotify)
     }
 }
 

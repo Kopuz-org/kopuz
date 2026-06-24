@@ -442,7 +442,8 @@ fn PlaylistsGrid(
                 // after — all through the facade, so this loop is service-agnostic.
                 let metas = match source.fetch_playlists().await {
                     Ok(m) => m,
-                    Err(_) => {
+                    Err(e) => {
+                        tracing::error!(error = %e, "fetch_playlists failed");
                         yt_is_syncing.set(false);
                         return;
                     }

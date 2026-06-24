@@ -282,6 +282,36 @@ async fn run_rotation(mut config: Signal<config::AppConfig>) {
     }
 }
 
+/// Refresh the active Spotify server's OAuth access token from its refresh token
+/// (access tokens expire ~hourly) and write the re-packed pair back to config.
+#[cfg(not(target_arch = "wasm32"))]
+async fn run_spotify_refresh(mut config: Signal<config::AppConfig>) {
+    let packed = match config.peek().server.as_ref() {
+        Some(s) if s.service == config::MusicService::Spotify => s.access_token.clone(),
+        _ => return,
+    };
+    let Some(packed) = packed else { return };
+    let (_access, refresh) = server::spotify::auth::unpack_token(&packed);
+    if refresh.is_empty() {
+        return;
+    }
+    match server::spotify::auth::refresh(refresh.clone()).await {
+        Ok(auth) => {
+            let new_refresh = if auth.refresh_token.is_empty() {
+                refresh
+            } else {
+                auth.refresh_token
+            };
+            let new_packed = server::spotify::auth::pack_token(&auth.access_token, &new_refresh);
+            if let Some(srv) = config.write().server.as_mut() {
+                srv.access_token = Some(new_packed);
+            }
+            tracing::debug!("spotify token refreshed");
+        }
+        Err(e) => tracing::warn!(error = %e, "spotify token refresh failed"),
+    }
+}
+
 async fn persist_queue_state_snapshot(db: db::Db, queue_state: Option<PersistedQueueState>) {
     let snap = queue_state.map(queue_snapshot).unwrap_or_default();
     if let Err(e) = db.save_queue(&snap).await {
@@ -756,6 +786,9 @@ fn serve_artwork(uri: http::Uri, responder: RequestAsyncResponder) {
 }
 
 fn main() {
+    #[cfg(not(target_arch = "wasm32"))]
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
     {
         let log_dir = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
@@ -1136,15 +1169,19 @@ fn App() -> Element {
     // anon and also needs a content pot for deep ranges; only true Premium
     // subscribers (itag 774) are pot-exempt, and we can't know that until a
     // track resolves. So run the minter for any YtMusic session; Premium just
-    // leaves it idle. Reactive: fires when config loads or the server changes.
+    // leaves it idle. Spotify needs it too: it streams full tracks by matching
+    // to an *anonymous* YouTube video (see `spotify::match_yt`), which 403s on
+    // deep ranges without a content pot. Reactive: fires when config loads or
+    // the server changes.
     #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
     use_effect(move || {
-        let yt_active = config
-            .read()
-            .server
-            .as_ref()
-            .is_some_and(|s| s.service == config::MusicService::YtMusic);
-        if yt_active {
+        let needs_pot = config.read().server.as_ref().is_some_and(|s| {
+            matches!(
+                s.service,
+                config::MusicService::YtMusic | config::MusicService::Spotify
+            )
+        });
+        if needs_pot {
             crate::pot_minter::request();
         }
     });
@@ -1584,6 +1621,37 @@ fn App() -> Element {
                     return;
                 }
                 run_rotation(config).await;
+            }
+        });
+    });
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut spotify_refresh_identity = use_signal(|| None::<String>);
+    #[cfg(not(target_arch = "wasm32"))]
+    use_effect(move || {
+        if !*initial_load_done.read() {
+            return;
+        }
+        let identity: Option<String> = config.read().server.as_ref().and_then(|s| {
+            (s.service == config::MusicService::Spotify)
+                .then(|| s.user_id.clone())
+                .flatten()
+                .filter(|t| !t.is_empty())
+        });
+        if identity == *spotify_refresh_identity.peek() {
+            return;
+        }
+        spotify_refresh_identity.set(identity.clone());
+        let Some(my_identity) = identity else {
+            return;
+        };
+        spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(1800)).await;
+                if spotify_refresh_identity.peek().as_deref() != Some(my_identity.as_str()) {
+                    return;
+                }
+                run_spotify_refresh(config).await;
             }
         });
     });
