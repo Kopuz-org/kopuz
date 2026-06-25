@@ -528,6 +528,16 @@ pub trait MediaSource: Send + Sync {
 
     // --- uniform ops (default): a plain source-scoped DB read/write ---------
 
+    /// Tear down any per-source sign-in state on sign-out / saved-server
+    /// removal: stored creds (already removed from config by the caller) plus
+    /// any on-disk webview profile or cached data dir. The default is a no-op —
+    /// services whose only sign-in state is the stored cred need nothing here.
+    /// Browser-sign-in sources (YT Music, SoundCloud) override this to wipe
+    /// their isolated profile directory.
+    async fn cleanup_signin(&self) -> Result<(), SourceError> {
+        Ok(())
+    }
+
     /// One album's tracks (disc/track-ordered), read from this source's library
     /// cache. Uniform across sources — the UI goes through the source rather than
     /// touching the DB directly.
@@ -1911,6 +1921,14 @@ impl MediaSource for YtSource {
         }
     }
 
+    async fn cleanup_signin(&self) -> Result<(), SourceError> {
+        if let Source::Server(id) = self.source() {
+            crate::ytmusic::isolated_profile::delete_profile(id)
+                .map_err(|e| SourceError::Backend(e.to_string()))?;
+        }
+        Ok(())
+    }
+
     async fn start_radio(&self, seed_ref: &str) -> Result<Vec<reader::Track>, SourceError> {
         if seed_ref.trim().is_empty() {
             return Err(SourceError::InvalidInput("track has no video id".into()));
@@ -2301,6 +2319,28 @@ pub fn active(db: Db, config: &AppConfig) -> Box<dyn MediaSource> {
     resolve(db, config, &config.active_source)
 }
 
+/// Build a [`MediaSource`] for a saved server purely to run
+/// [`cleanup_signin`](MediaSource::cleanup_signin) on sign-out / removal —
+/// no live creds needed, since teardown only touches local on-disk state.
+/// Used by Settings so the delete path goes through the trait instead of
+/// branching on the concrete service.
+pub fn signin_cleanup(db: Db, id: &str, service: MusicService) -> Box<dyn MediaSource> {
+    let source = Source::Server(id.to_string());
+    match service {
+        MusicService::YtMusic => Box::new(YtSource {
+            db,
+            source,
+            client: YouTubeMusicClient::with_cookies(String::new()),
+        }),
+        MusicService::SoundCloud => Box::new(SoundcloudSource {
+            db,
+            source,
+            token: None,
+        }),
+        _ => Box::new(OfflineServerSource { db, source }),
+    }
+}
+
 // ============================ SoundCloud ===============================
 
 struct SoundcloudSource {
@@ -2336,6 +2376,14 @@ impl MediaSource for SoundcloudSource {
             albums: AlbumType::Standard,
             favorites_sync: FavoritesSync::Paginated,
         }
+    }
+
+    async fn cleanup_signin(&self) -> Result<(), SourceError> {
+        if let Source::Server(id) = self.source() {
+            crate::soundcloud::signin::delete_profile(id)
+                .map_err(|e| SourceError::Backend(e.to_string()))?;
+        }
+        Ok(())
     }
 
     async fn resolve_stream(&self, item_id: &str) -> Result<StreamInfo, SourceError> {

@@ -445,6 +445,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     };
 
     let db_for_switch = use_context::<hooks::ReadDb>();
+    let active_source_for_cleanup = use_context::<Signal<::server::source::ActiveSource>>();
     let handle_switch_server = move |id: String| {
         let db = db_for_switch.clone();
         spawn(async move {
@@ -474,15 +475,12 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     let handle_delete_saved = move |id: String| {
         let service = config.peek().find_saved_server(&id).map(|s| s.service);
         config.write().remove_saved_server(&id);
-        // Wipe the isolated browser-profile dir of browser-sign-in backends.
-        match service {
-            Some(MusicService::YtMusic) => {
-                let _ = ::server::ytmusic::isolated_profile::delete_profile(&id);
-            }
-            Some(MusicService::SoundCloud) => {
-                let _ = ::server::soundcloud::signin::delete_profile(&id);
-            }
-            _ => {}
+        if let Some(service) = service {
+            let db = active_source_for_cleanup.peek().db().clone();
+            spawn(async move {
+                let source = ::server::source::signin_cleanup(db, &id, service);
+                let _ = source.cleanup_signin().await;
+            });
         }
     };
 
