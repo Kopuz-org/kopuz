@@ -102,9 +102,11 @@ windows = { workspace = true, features = [
 [target.'cfg(target_os = "windows")'.build-dependencies]
 winres = { workspace = true }
 
-# Used by build.rs to generate Android launcher icons from assets/logo.png.
+# image: generate Android launcher icons from assets/logo.png.
+# base64: inline the vendored woff2 fonts into the bundled CSS as data: URIs.
 [build-dependencies]
 image = { workspace = true }
+base64 = "0.22"
 
 [features]
 default = []
