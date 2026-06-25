@@ -114,6 +114,13 @@ pub(super) async fn snapshot_if_pending(path: &Path) {
         return;
     }
     let stamp = applied.unwrap_or(0);
+    // Keep the first snapshot at this version as the authoritative rollback
+    // point. A retry of the same pending migration (or the EOL reconciler having
+    // since re-stamped `_sqlx_migrations`) must not overwrite it with an
+    // already-modified DB — `backup_name` is deterministic, so guard on it.
+    if backup_name(path, stamp, "").exists() {
+        return;
+    }
     for ext in ["", "-wal", "-shm"] {
         let src = with_ext(path, ext);
         if src.exists() {
