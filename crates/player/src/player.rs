@@ -136,6 +136,30 @@ type SharedConsumer = Arc<Mutex<rb::Consumer<f32>>>;
 type ActiveConsumerSlot = Arc<Mutex<Option<SharedConsumer>>>;
 
 #[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug)]
+pub enum PlayerInitError {
+    NoOutputDevice,
+    DefaultOutputConfig(cpal::DefaultStreamConfigError),
+    BuildOutputStream(cpal::BuildStreamError),
+    StartOutputStream(cpal::PlayStreamError),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl std::fmt::Display for PlayerInitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoOutputDevice => f.write_str("no output device available"),
+            Self::DefaultOutputConfig(e) => write!(f, "no default output config: {e}"),
+            Self::BuildOutputStream(e) => write!(f, "failed to build output stream: {e}"),
+            Self::StartOutputStream(e) => write!(f, "failed to start output stream: {e}"),
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl std::error::Error for PlayerInitError {}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub struct Player {
     state: Arc<Mutex<PlaybackState>>,
     active_state_handle: Arc<Mutex<Arc<Mutex<PlaybackState>>>>,
@@ -197,7 +221,7 @@ impl Player {
         }
     }
 
-    pub fn new() -> Self {
+    pub fn try_new() -> Result<Self, PlayerInitError> {
         // Android initialises the JNI media session + classloader cache here; the desktop
         // platforms set up their system integration from the app entry point instead.
         #[cfg(target_os = "android")]
@@ -206,11 +230,11 @@ impl Player {
         let host = cpal::default_host();
         let device = host
             .default_output_device()
-            .expect("no output device available");
+            .ok_or(PlayerInitError::NoOutputDevice)?;
 
         let supported_config = device
             .default_output_config()
-            .expect("no default output config");
+            .map_err(PlayerInitError::DefaultOutputConfig)?;
 
         let stream_config = Self::preferred_stream_config(&supported_config);
         let state = Arc::new(Mutex::new(PlaybackState {
@@ -395,13 +419,11 @@ impl Player {
                 },
                 None,
             )
-            .unwrap_or_else(|e| panic!("failed to build output stream: {e}"));
+            .map_err(PlayerInitError::BuildOutputStream)?;
 
-        stream
-            .play()
-            .unwrap_or_else(|e| panic!("failed to start output stream: {e}"));
+        stream.play().map_err(PlayerInitError::StartOutputStream)?;
 
-        Self {
+        Ok(Self {
             state,
             active_state_handle,
             _device: device,
@@ -423,7 +445,11 @@ impl Player {
             position_thread_stop: Arc::default(),
             equalizer,
             channel_mode,
-        }
+        })
+    }
+
+    pub fn new() -> Self {
+        Self::try_new().expect("failed to initialize audio player")
     }
 
     /// Register a callback that fires whenever a track finishes playing naturally
