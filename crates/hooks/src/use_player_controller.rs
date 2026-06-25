@@ -1,14 +1,14 @@
 use config::AppConfig;
-use config::BackBehavior;
 use config::MusicService;
 use dioxus::logger::tracing::Instrument;
 use dioxus::{logger::tracing, prelude::*};
 use player::player::{NowPlayingMeta, Player};
 use reader::Track;
-use scrobble;
-use std::collections::HashMap;
 use std::time::Duration;
 use utils;
+
+use crate::playback_ref::{PlaybackItemRef, ResolvedStreamRef};
+use crate::scrobble_scheduler::{self, ScrobbleOptions};
 
 #[cfg(not(target_arch = "wasm32"))]
 use player::decoder;
@@ -61,7 +61,7 @@ pub struct PlayerController {
     /// the source (and its HTTP client) on every play/skip.
     pub active_source: Signal<::server::source::ActiveSource>,
     pub play_generation: Signal<usize>,
-    pending_resume: Signal<Option<PendingResumeState>>,
+    pub(crate) pending_resume: Signal<Option<PendingResumeState>>,
     pub pending_crossfade_ui: Signal<Option<PendingCrossfadeUiState>>,
     pub radio_task: Signal<Option<dioxus_core::Task>>,
     pub station_registry: Signal<radio::registry::StationRegistry>,
@@ -73,7 +73,7 @@ pub struct PlayerController {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-struct PendingResumeState {
+pub(crate) struct PendingResumeState {
     track_path: String,
     progress_secs: u64,
 }
@@ -91,7 +91,7 @@ impl PlayerController {
         track.id.uid().to_string()
     }
 
-    fn shift_indices_at_or_after(indices: &mut [usize], at: usize, by: usize) {
+    pub(crate) fn shift_indices_at_or_after(indices: &mut [usize], at: usize, by: usize) {
         for idx in indices {
             if *idx >= at {
                 *idx += by;
@@ -134,7 +134,7 @@ impl PlayerController {
             .unwrap_or_else(|| utils::default_cover_url().as_ref().to_string())
     }
 
-    fn clear_current_track_metadata(&mut self) {
+    pub(crate) fn clear_current_track_metadata(&mut self) {
         self.current_song_title.set(String::new());
         self.current_song_artist.set(String::new());
         self.current_song_album.set(String::new());
@@ -146,7 +146,7 @@ impl PlayerController {
         self.current_track_snapshot.set(None);
     }
 
-    fn hydrate_current_track_metadata(&mut self, idx: usize, progress_secs: u64) {
+    pub(crate) fn hydrate_current_track_metadata(&mut self, idx: usize, progress_secs: u64) {
         if let Some(track) = self.get_track_at(idx) {
             let progress_secs = progress_secs.min(track.duration);
             self.current_queue_index.set(idx);
@@ -179,11 +179,11 @@ impl PlayerController {
         (restore_seek_secs, pending.is_some())
     }
 
-    fn clear_pending_resume(&mut self) {
+    pub(crate) fn clear_pending_resume(&mut self) {
         self.pending_resume.set(None);
     }
 
-    fn clear_pending_crossfade_ui(&mut self) {
+    pub(crate) fn clear_pending_crossfade_ui(&mut self) {
         self.pending_crossfade_ui.set(None);
     }
 
@@ -200,7 +200,7 @@ impl PlayerController {
         }
     }
 
-    fn schedule_pending_crossfade_ui(
+    pub(crate) fn schedule_pending_crossfade_ui(
         &mut self,
         next_idx: usize,
         outgoing_duration_secs: u64,
@@ -224,7 +224,7 @@ impl PlayerController {
         true
     }
 
-    fn set_pending_resume_for_track(&mut self, track: &Track, progress_secs: u64) {
+    pub(crate) fn set_pending_resume_for_track(&mut self, track: &Track, progress_secs: u64) {
         self.pending_resume.set(Some(PendingResumeState {
             track_path: Self::track_key(track),
             progress_secs: progress_secs.min(track.duration),
@@ -261,7 +261,7 @@ impl PlayerController {
     /// - if the item moved backward (`to < from`), every item that was between `to`
     ///   and `from - 1` shifts right by one slot
     /// - all other indices are unaffected
-    fn remap_queue_index(index: usize, from: usize, to: usize) -> usize {
+    pub(crate) fn remap_queue_index(index: usize, from: usize, to: usize) -> usize {
         if index == from {
             to
         } else if from < to && index > from && index <= to {
@@ -338,7 +338,11 @@ impl PlayerController {
     }
 
     #[tracing::instrument(name = "player.transition", skip(self), fields(idx, crossfade = allow_crossfade))]
-    fn play_track_no_history_with_transition(&mut self, idx: usize, allow_crossfade: bool) {
+    pub(crate) fn play_track_no_history_with_transition(
+        &mut self,
+        idx: usize,
+        allow_crossfade: bool,
+    ) {
         self.play_generation.with_mut(|g| *g += 1);
         let current_gen = *self.play_generation.peek();
         // Starting a new track clears the previous track's error banner —
@@ -361,21 +365,13 @@ impl PlayerController {
             }
             let crossfade_duration =
                 Duration::from_secs(self.config.peek().crossfade_seconds as u64);
-            let scheme = path_str
-                .split(':')
-                .next()
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            let is_radio_item = scheme.as_str() == "radio";
-            let is_server_item = matches!(
-                scheme.as_str(),
-                "jellyfin" | "subsonic" | "custom" | "ytmusic"
-            );
+            let item_ref = PlaybackItemRef::parse(&path_str);
+            let is_radio_item = item_ref.is_radio();
+            let is_server_item = item_ref.is_server();
 
             if is_server_item || is_radio_item {
-                let parts: Vec<&str> = path_str.split(':').collect();
-                let id = parts.get(1).unwrap_or(&"").to_string();
-                let stream_id = parts.get(2).unwrap_or(&"").to_string();
+                let id = item_ref.primary_id().unwrap_or_default().to_string();
+                let stream_id = item_ref.stream_id().unwrap_or_default().to_string();
 
                 // Check offline cache first
                 #[cfg(not(target_arch = "wasm32"))]
@@ -516,7 +512,7 @@ impl PlayerController {
                                 )
                                 .unwrap_or_default();
 
-                                (format!("__PENDING:{id}"), cover_url)
+                                (ResolvedStreamRef::pending_marker(&id), cover_url)
                             }
                             MusicService::Subsonic | MusicService::Custom => {
                                 // Stream resolves in the spawn below; build only the
@@ -548,7 +544,7 @@ impl PlayerController {
                                             .ok()
                                         })
                                         .unwrap_or_default();
-                                    (format!("__PENDING:{id}"), cover_url)
+                                    (ResolvedStreamRef::pending_marker(&id), cover_url)
                                 } else {
                                     (String::new(), String::new())
                                 }
@@ -572,13 +568,13 @@ impl PlayerController {
                                     90,
                                 )
                                 .unwrap_or_default();
-                                (format!("__PENDING:{id}"), cover_url)
+                                (ResolvedStreamRef::pending_marker(&id), cover_url)
                             }
                             // SoundCloud also resolves its stream async (progressive
                             // MP3 / HLS) via the source; the cover is the plain
                             // artwork URL already in `track.cover`.
                             MusicService::SoundCloud => (
-                                format!("__PENDING:{id}"),
+                                ResolvedStreamRef::pending_marker(&id),
                                 track.cover.clone().unwrap_or_default(),
                             ),
                         })
@@ -629,72 +625,74 @@ impl PlayerController {
 
                     self.is_loading.set(true);
 
-                    let is_radio = track.id.uid().starts_with("radio:");
+                    let is_radio = PlaybackItemRef::parse(&track.id.uid()).is_radio();
 
                     #[cfg(not(target_arch = "wasm32"))]
                     spawn(async move {
-                        let (stream_url, yt_format, yt_user_agent) = if let Some(item_id) =
-                            stream_url.strip_prefix("__PENDING:")
-                        {
-                            // The one genuinely per-source op: resolve the playable
-                            // stream through the active source's backend (a URL for
-                            // Jellyfin/Subsonic, a deciphered stream for YT).
-                            let source = active_source.peek().clone();
-                            match source.resolve_stream(item_id).await {
-                                Ok(info) => {
-                                    // Stale-resolve guard: don't stamp duration / mutate
-                                    // queue if the user clicked another track while we
-                                    // were awaiting the resolve. (YT carries probed
-                                    // duration/bitrate; other sources leave them None.)
-                                    if *play_generation.read() == current_gen
-                                        && let Some(secs) = info.duration_secs
-                                        && secs > 0
-                                    {
-                                        if let Some(p) = phys_idx
-                                            && let Some(t) = queue_for_yt.write().get_mut(p)
-                                        {
-                                            t.duration = secs;
+                        let (stream_url, yt_format, yt_user_agent) =
+                            match ResolvedStreamRef::parse(&stream_url) {
+                                ResolvedStreamRef::Pending(item_id) => {
+                                    // The one genuinely per-source op: resolve the playable
+                                    // stream through the active source's backend (a URL for
+                                    // Jellyfin/Subsonic, a deciphered stream for YT).
+                                    let source = active_source.peek().clone();
+                                    match source.resolve_stream(item_id).await {
+                                        Ok(info) => {
+                                            // Stale-resolve guard: don't stamp duration / mutate
+                                            // queue if the user clicked another track while we
+                                            // were awaiting the resolve. (YT carries probed
+                                            // duration/bitrate; other sources leave them None.)
+                                            if *play_generation.read() == current_gen
+                                                && let Some(secs) = info.duration_secs
+                                                && secs > 0
+                                            {
+                                                if let Some(p) = phys_idx
+                                                    && let Some(t) = queue_for_yt.write().get_mut(p)
+                                                {
+                                                    t.duration = secs;
+                                                }
+                                                if *current_queue_index_for_yt.peek() == idx {
+                                                    current_song_duration_for_yt.set(secs);
+                                                }
+                                            }
+                                            // Surface the resolved bitrate (kbps) for the debug
+                                            // readout; write it back onto the queue Track too (YT
+                                            // tracks carry no bitrate metadata) so a re-hydrate
+                                            // doesn't reset it.
+                                            if *play_generation.read() == current_gen
+                                                && let Some(bps) = info.bitrate
+                                            {
+                                                let kbps = (bps / 1000) as u16;
+                                                if let Some(p) = phys_idx
+                                                    && let Some(t) = queue_for_yt.write().get_mut(p)
+                                                {
+                                                    t.bitrate = kbps;
+                                                }
+                                                if *current_queue_index_for_yt.peek() == idx {
+                                                    current_song_bitrate_for_yt.set(kbps);
+                                                }
+                                            }
+                                            (info.url, info.format, info.user_agent)
                                         }
-                                        if *current_queue_index_for_yt.peek() == idx {
-                                            current_song_duration_for_yt.set(secs);
+                                        Err(e) => {
+                                            // Same guard: a stale error must NOT post a banner
+                                            // for or clear is_loading on the user's new track.
+                                            if *play_generation.read() != current_gen {
+                                                return;
+                                            }
+                                            tracing::error!(error = %e, "stream URL resolve failed");
+                                            playback_error.set(Some(format!(
+                                                "Couldn't load this track:\n{e}"
+                                            )));
+                                            is_loading.set(false);
+                                            skip_in_progress.set(false);
+                                            return;
                                         }
                                     }
-                                    // Surface the resolved bitrate (kbps) for the debug
-                                    // readout; write it back onto the queue Track too (YT
-                                    // tracks carry no bitrate metadata) so a re-hydrate
-                                    // doesn't reset it.
-                                    if *play_generation.read() == current_gen
-                                        && let Some(bps) = info.bitrate
-                                    {
-                                        let kbps = (bps / 1000) as u16;
-                                        if let Some(p) = phys_idx
-                                            && let Some(t) = queue_for_yt.write().get_mut(p)
-                                        {
-                                            t.bitrate = kbps;
-                                        }
-                                        if *current_queue_index_for_yt.peek() == idx {
-                                            current_song_bitrate_for_yt.set(kbps);
-                                        }
-                                    }
-                                    (info.url, info.format, info.user_agent)
                                 }
-                                Err(e) => {
-                                    // Same guard: a stale error must NOT post a banner
-                                    // for or clear is_loading on the user's new track.
-                                    if *play_generation.read() != current_gen {
-                                        return;
-                                    }
-                                    tracing::error!(error = %e, "stream URL resolve failed");
-                                    playback_error
-                                        .set(Some(format!("Couldn't load this track:\n{e}")));
-                                    is_loading.set(false);
-                                    skip_in_progress.set(false);
-                                    return;
-                                }
-                            }
-                        } else {
-                            (stream_url, None, None)
-                        };
+                                ResolvedStreamRef::SoundCloudHls(_)
+                                | ResolvedStreamRef::Direct(_) => (stream_url, None, None),
+                            };
                         let yt_format_for_blocking = yt_format;
                         let stream_url_for_blocking = stream_url.clone();
                         let yt_ua_for_blocking = yt_user_agent.clone();
@@ -740,8 +738,8 @@ impl PlayerController {
                                     hint.with_extension(fmt.extension());
                                     Ok::<_, std::io::Error>((source, hint))
                                 }
-                            } else if let Some(hls_url) =
-                                stream_url_for_blocking.strip_prefix("__SC_HLS:")
+                            } else if let ResolvedStreamRef::SoundCloudHls(hls_url) =
+                                ResolvedStreamRef::parse(&stream_url_for_blocking)
                             {
                                 // SoundCloud Go+ AAC: assemble the HLS playlist's
                                 // fMP4 segments into one in-memory buffer Symphonia
@@ -833,18 +831,13 @@ impl PlayerController {
                                 is_playing.set(true);
                                 skip_in_progress.set(false);
 
-                                let is_radio_item =
-                                    track.id.uid().starts_with("radio:");
-                                let path_lossy = track.id.uid().to_string();
-                                let parts: Vec<&str> = path_lossy.split(':').collect();
-                                let (station_id, stream_id) = if is_radio_item {
-                                    (
-                                        parts.get(1).unwrap_or(&"").to_string(),
-                                        parts.get(2).unwrap_or(&"").to_string(),
-                                    )
-                                } else {
-                                    (String::new(), String::new())
-                                };
+                                let item_uid = track.id.uid();
+                                let item_ref = PlaybackItemRef::parse(&item_uid);
+                                let is_radio_item = item_ref.is_radio();
+                                let station_id =
+                                    item_ref.primary_id().unwrap_or_default().to_string();
+                                let stream_id =
+                                    item_ref.stream_id().unwrap_or_default().to_string();
 
                                 if let Some(task) = radio_task.take() {
                                     task.cancel();
@@ -876,232 +869,15 @@ impl PlayerController {
                                 }
                                 // Don't scrobble if the track is a radio item
                                 if !is_radio_item {
-                                    let scrobble_track = track.clone();
-                                    let scrobble_gen = current_gen;
-                                    let scrobble_play_gen = play_generation;
-                                    let scrobble_cfg = cfg_signal;
-                                    let scrobble_source = active_source;
-                                    let scrobble_id = id.clone();
-                                    let duration_secs = scrobble_track.duration;
-                                    let threshold_secs = std::cmp::min(240, duration_secs / 2);
-
-                                    let scrobble_span =
-                                        tracing::info_span!("scrobble.submit", track = %scrobble_id);
-                                    spawn(async move {
-                                        // track must be longer than 30 seconds
-                                        if duration_secs < 30 {
-                                            return;
-                                        }
-
-                                        {
-                                            let source = scrobble_source.peek().clone();
-                                            if let Err(e) =
-                                                source.scrobble_now_playing(&scrobble_id).await
-                                            {
-                                                tracing::warn!("now-playing scrobble failed: {}", e);
-                                            }
-                                        }
-
-                                        // Last.fm now-playing
-                                        let lastfm_api_key =
-                                            scrobble_cfg.read().lastfm_api_key.clone();
-                                        let lastfm_api_secret =
-                                            scrobble_cfg.read().lastfm_api_secret.clone();
-                                        let lastfm_session_key =
-                                            scrobble_cfg.read().lastfm_session_key.clone();
-                                        let has_lastfm = !lastfm_api_key.is_empty()
-                                            && !lastfm_api_secret.is_empty();
-
-                                        if has_lastfm {
-                                            let playing_now = scrobble::lastfm::make_playing_now(
-                                                &scrobble_track.artist,
-                                                &scrobble_track.title,
-                                                Some(&scrobble_track.album),
-                                            );
-                                            if let Err(e) = scrobble::lastfm::submit_now_playing(
-                                                &lastfm_api_key,
-                                                &lastfm_api_secret,
-                                                &lastfm_session_key,
-                                                &playing_now,
-                                            )
-                                            .await
-                                            {
-                                                tracing::warn!("Last.fm now playing failed: {}", e);
-                                            }
-                                        }
-
-                                        // Libre.fm now-playing
-                                        let librefm_session_key =
-                                            scrobble_cfg.read().librefm_session_key.clone();
-                                        let has_librefm = !librefm_session_key.is_empty();
-
-                                        if has_librefm {
-                                            let playing_now = scrobble::librefm::make_playing_now(
-                                                &scrobble_track.artist,
-                                                &scrobble_track.title,
-                                                Some(&scrobble_track.album),
-                                            );
-                                            if let Err(e) = scrobble::librefm::submit_now_playing(
-                                                scrobble::librefm::API_KEY,
-                                                scrobble::librefm::API_SECRET,
-                                                &librefm_session_key,
-                                                &playing_now,
-                                            )
-                                            .await
-                                            {
-                                                tracing::warn!(
-                                                    "Libre.fm now playing failed: {}",
-                                                    e
-                                                );
-                                            }
-                                        }
-
-                                        // MusicBrainz playing_now
-                                        let token_raw =
-                                            scrobble_cfg.read().musicbrainz_token.clone();
-                                        if !token_raw.is_empty() {
-                                            let auth = if token_raw.contains(' ') {
-                                                token_raw.clone()
-                                            } else {
-                                                format!("Token {}", token_raw)
-                                            };
-                                            let playing_now =
-                                                scrobble::musicbrainz::make_playing_now(
-                                                    &scrobble_track.artist,
-                                                    &scrobble_track.title,
-                                                    Some(&scrobble_track.album),
-                                                    None,
-                                                );
-                                            if let Err(e) = scrobble::musicbrainz::submit_listens(
-                                                &auth,
-                                                vec![playing_now],
-                                                "playing_now",
-                                            )
-                                            .await
-                                            {
-                                                tracing::warn!(
-                                                    "MusicBrainz playing_now failed: {}",
-                                                    e
-                                                );
-                                            }
-                                        }
-
-                                        // threshold sleep
-                                        tokio::time::sleep(Duration::from_secs(threshold_secs))
-                                            .await;
-
-                                        if *scrobble_play_gen.read() != scrobble_gen {
-                                            return;
-                                        }
-
-                                        // post-threshold: actual scrobbles
-
-                                        // Subsonic scrobble
-                                        {
-                                            let source = scrobble_source.peek().clone();
-                                            match source.scrobble(&scrobble_id).await {
-                                                Ok(_) => tracing::info!(
-                                                    "scrobbled: {} - {}",
-                                                    scrobble_track.artist,
-                                                    scrobble_track.title
-                                                ),
-                                                Err(e) => {
-                                                    tracing::warn!("scrobble failed: {}", e)
-                                                }
-                                            }
-                                        }
-
-                                        // Last.fm scrobble
-                                        if has_lastfm {
-                                            let scrobble = scrobble::lastfm::make_scrobble(
-                                                &scrobble_track.artist,
-                                                &scrobble_track.title,
-                                                Some(&scrobble_track.album),
-                                            );
-                                            match scrobble::lastfm::submit_scrobble(
-                                                &lastfm_api_key,
-                                                &lastfm_api_secret,
-                                                &lastfm_session_key,
-                                                &scrobble,
-                                            )
-                                            .await
-                                            {
-                                                Ok(_) => tracing::info!(
-                                                    "Last.fm scrobbled: {} - {}",
-                                                    scrobble_track.artist,
-                                                    scrobble_track.title
-                                                ),
-                                                Err(e) => {
-                                                    tracing::warn!("Last.fm scrobble failed: {}", e)
-                                                }
-                                            }
-                                        }
-
-                                        // Libre.fm scrobble
-                                        if has_librefm {
-                                            let scrobble = scrobble::librefm::make_scrobble(
-                                                &scrobble_track.artist,
-                                                &scrobble_track.title,
-                                                Some(&scrobble_track.album),
-                                            );
-                                            match scrobble::librefm::submit_scrobble(
-                                                scrobble::librefm::API_KEY,
-                                                scrobble::librefm::API_SECRET,
-                                                &librefm_session_key,
-                                                &scrobble,
-                                            )
-                                            .await
-                                            {
-                                                Ok(_) => tracing::info!(
-                                                    "Libre.fm scrobbled: {} - {}",
-                                                    scrobble_track.artist,
-                                                    scrobble_track.title
-                                                ),
-                                                Err(e) => {
-                                                    tracing::warn!(
-                                                        "Libre.fm scrobble failed: {}",
-                                                        e
-                                                    )
-                                                }
-                                            }
-                                        }
-
-                                        // MusicBrainz single listen
-                                        let token_raw =
-                                            scrobble_cfg.read().musicbrainz_token.clone();
-                                        if !token_raw.is_empty() {
-                                            let auth = if token_raw.contains(' ') {
-                                                token_raw
-                                            } else {
-                                                format!("Token {}", token_raw)
-                                            };
-                                            let listen = scrobble::musicbrainz::make_listen(
-                                                &scrobble_track.artist,
-                                                &scrobble_track.title,
-                                                Some(&scrobble_track.album),
-                                                None,
-                                            );
-                                            match scrobble::musicbrainz::submit_listens(
-                                                &auth,
-                                                vec![listen],
-                                                "single",
-                                            )
-                                            .await
-                                            {
-                                                Ok(_) => tracing::info!(
-                                                    "MusicBrainz scrobbled: {} - {}",
-                                                    scrobble_track.artist,
-                                                    scrobble_track.title
-                                                ),
-                                                Err(e) => {
-                                                    tracing::warn!(
-                                                        "MusicBrainz scrobble failed: {}",
-                                                        e
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }.instrument(scrobble_span));
+                                    scrobble_scheduler::schedule(
+                                        track.clone(),
+                                        Some(id.clone()),
+                                        cfg_signal,
+                                        play_generation,
+                                        current_gen,
+                                        Some(active_source),
+                                        ScrobbleOptions::REMOTE_NATIVE,
+                                    );
 
                                     let cover_url = cover_url.clone();
                                     let track = track.clone();
@@ -1175,172 +951,15 @@ impl PlayerController {
 
                             if started {
                                 if !is_radio_item {
-                                    let scrobble_track = track.clone();
-                                    let scrobble_gen = current_gen;
-                                    let scrobble_play_gen = play_generation;
-                                    let scrobble_cfg = cfg_signal;
-                                    let scrobble_source = active_source;
-                                    let scrobble_id = id.clone();
-                                    let duration_secs = scrobble_track.duration;
-                                    let threshold_secs =
-                                        std::cmp::min(240, (duration_secs / 2) as u64);
-
-                                    spawn(async move {
-                                        if duration_secs < 30 {
-                                            return;
-                                        }
-
-                                        {
-                                            let source = scrobble_source.peek().clone();
-                                            if let Err(e) =
-                                                source.scrobble_now_playing(&scrobble_id).await
-                                            {
-                                                tracing::warn!(
-                                                    "now-playing scrobble failed: {}",
-                                                    e
-                                                );
-                                            }
-                                        }
-
-                                        let lastfm_api_key =
-                                            scrobble_cfg.read().lastfm_api_key.clone();
-                                        let lastfm_api_secret =
-                                            scrobble_cfg.read().lastfm_api_secret.clone();
-                                        let lastfm_session_key =
-                                            scrobble_cfg.read().lastfm_session_key.clone();
-                                        let has_lastfm = !lastfm_api_key.is_empty()
-                                            && !lastfm_api_secret.is_empty();
-
-                                        if has_lastfm {
-                                            let playing_now = scrobble::lastfm::make_playing_now(
-                                                &scrobble_track.artist,
-                                                &scrobble_track.title,
-                                                Some(&scrobble_track.album),
-                                            );
-                                            if let Err(e) = scrobble::lastfm::submit_now_playing(
-                                                &lastfm_api_key,
-                                                &lastfm_api_secret,
-                                                &lastfm_session_key,
-                                                &playing_now,
-                                            )
-                                            .await
-                                            {
-                                                tracing::warn!("Last.fm now playing failed: {}", e);
-                                            }
-                                        }
-
-                                        let token_raw =
-                                            scrobble_cfg.read().musicbrainz_token.clone();
-                                        if !token_raw.is_empty() {
-                                            let auth = if token_raw.contains(' ') {
-                                                token_raw.clone()
-                                            } else {
-                                                format!("Token {}", token_raw)
-                                            };
-                                            let playing_now =
-                                                scrobble::musicbrainz::make_playing_now(
-                                                    &scrobble_track.artist,
-                                                    &scrobble_track.title,
-                                                    Some(&scrobble_track.album),
-                                                    None,
-                                                );
-                                            if let Err(e) = scrobble::musicbrainz::submit_listens(
-                                                &auth,
-                                                vec![playing_now],
-                                                "playing_now",
-                                            )
-                                            .await
-                                            {
-                                                tracing::warn!(
-                                                    "MusicBrainz playing_now failed: {}",
-                                                    e
-                                                );
-                                            }
-                                        }
-
-                                        utils::sleep(std::time::Duration::from_secs(
-                                            threshold_secs,
-                                        ))
-                                        .await;
-
-                                        if *scrobble_play_gen.read() != scrobble_gen {
-                                            return;
-                                        }
-
-                                        {
-                                            let source = scrobble_source.peek().clone();
-                                            match source.scrobble(&scrobble_id).await {
-                                                Ok(_) => tracing::info!(
-                                                    "scrobbled: {} - {}",
-                                                    scrobble_track.artist,
-                                                    scrobble_track.title
-                                                ),
-                                                Err(e) => {
-                                                    tracing::warn!("scrobble failed: {}", e)
-                                                }
-                                            }
-                                        }
-
-                                        if has_lastfm {
-                                            let scrobble = scrobble::lastfm::make_scrobble(
-                                                &scrobble_track.artist,
-                                                &scrobble_track.title,
-                                                Some(&scrobble_track.album),
-                                            );
-                                            match scrobble::lastfm::submit_scrobble(
-                                                &lastfm_api_key,
-                                                &lastfm_api_secret,
-                                                &lastfm_session_key,
-                                                &scrobble,
-                                            )
-                                            .await
-                                            {
-                                                Ok(_) => tracing::info!(
-                                                    "Last.fm scrobbled: {} - {}",
-                                                    scrobble_track.artist,
-                                                    scrobble_track.title
-                                                ),
-                                                Err(e) => {
-                                                    tracing::warn!("Last.fm scrobble failed: {}", e)
-                                                }
-                                            }
-                                        }
-
-                                        let token_raw =
-                                            scrobble_cfg.read().musicbrainz_token.clone();
-                                        if !token_raw.is_empty() {
-                                            let auth = if token_raw.contains(' ') {
-                                                token_raw
-                                            } else {
-                                                format!("Token {}", token_raw)
-                                            };
-                                            let listen = scrobble::musicbrainz::make_listen(
-                                                &scrobble_track.artist,
-                                                &scrobble_track.title,
-                                                Some(&scrobble_track.album),
-                                                None,
-                                            );
-                                            match scrobble::musicbrainz::submit_listens(
-                                                &auth,
-                                                vec![listen],
-                                                "single",
-                                            )
-                                            .await
-                                            {
-                                                Ok(_) => tracing::info!(
-                                                    "MusicBrainz scrobbled: {} - {}",
-                                                    scrobble_track.artist,
-                                                    scrobble_track.title
-                                                ),
-                                                Err(e) => {
-                                                    tracing::warn!(
-                                                        "MusicBrainz scrobble failed: {}",
-                                                        e
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    });
+                                    scrobble_scheduler::schedule(
+                                        track.clone(),
+                                        Some(id.clone()),
+                                        cfg_signal,
+                                        play_generation,
+                                        current_gen,
+                                        Some(active_source),
+                                        ScrobbleOptions::REMOTE_WEB,
+                                    );
                                 }
                             }
                         } else {
@@ -1413,605 +1032,20 @@ impl PlayerController {
                             self.clear_pending_resume();
                         }
                         if !is_radio_item {
-                            let cfg_signal = self.config;
-                            let play_generation_signal = self.play_generation;
-                            let gen_snapshot = current_gen;
-                            let scrobble_track = track.clone();
-
-                            let duration_secs = scrobble_track.duration;
-                            let threshold_secs = std::cmp::min(240, duration_secs / 2);
-
-                            spawn(
-                                async move {
-                                    // track must be longer than 30 seconds
-                                    if duration_secs < 30 {
-                                        return;
-                                    }
-
-                                    let mut map: HashMap<&str, &str> = HashMap::new();
-                                    if let Some(ref mbid) = scrobble_track.musicbrainz_release_id {
-                                        map.insert("release_mbid", mbid.as_str());
-                                    }
-                                    if let Some(ref mbid) = scrobble_track.musicbrainz_recording_id
-                                    {
-                                        map.insert("recording_mbid", mbid.as_str());
-                                    }
-                                    if let Some(ref mbid) = scrobble_track.musicbrainz_track_id {
-                                        map.insert("track_mbid", mbid.as_str());
-                                    }
-
-                                    // Last.fm now-playing
-                                    let lastfm_api_key = cfg_signal.read().lastfm_api_key.clone();
-                                    let lastfm_api_secret =
-                                        cfg_signal.read().lastfm_api_secret.clone();
-                                    let lastfm_session_key =
-                                        cfg_signal.read().lastfm_session_key.clone();
-                                    let has_lastfm =
-                                        !lastfm_api_key.is_empty() && !lastfm_api_secret.is_empty();
-
-                                    if has_lastfm {
-                                        let playing_now = scrobble::lastfm::make_playing_now(
-                                            &scrobble_track.artist,
-                                            &scrobble_track.title,
-                                            Some(&scrobble_track.album),
-                                        );
-                                        if let Err(e) = scrobble::lastfm::submit_now_playing(
-                                            &lastfm_api_key,
-                                            &lastfm_api_secret,
-                                            &lastfm_session_key,
-                                            &playing_now,
-                                        )
-                                        .await
-                                        {
-                                            tracing::warn!("Last.fm now playing failed: {}", e);
-                                        }
-                                    }
-
-                                    // MusicBrainz playing_now
-                                    let token_raw = cfg_signal.read().musicbrainz_token.clone();
-                                    if !token_raw.is_empty() {
-                                        let auth = if token_raw.contains(' ') {
-                                            token_raw.clone()
-                                        } else {
-                                            format!("Token {}", token_raw)
-                                        };
-                                        let playing_now = scrobble::musicbrainz::make_playing_now(
-                                            &scrobble_track.artist,
-                                            &scrobble_track.title,
-                                            Some(&scrobble_track.album),
-                                            Some(map.clone()),
-                                        );
-                                        if let Err(e) = scrobble::musicbrainz::submit_listens(
-                                            &auth,
-                                            vec![playing_now],
-                                            "playing_now",
-                                        )
-                                        .await
-                                        {
-                                            tracing::warn!("MusicBrainz playing_now failed: {}", e);
-                                        }
-                                    }
-
-                                    tokio::time::sleep(std::time::Duration::from_secs(
-                                        threshold_secs,
-                                    ))
-                                    .await;
-
-                                    if *play_generation_signal.read() != gen_snapshot {
-                                        return;
-                                    }
-
-                                    if has_lastfm {
-                                        let scrobble = scrobble::lastfm::make_scrobble(
-                                            &scrobble_track.artist,
-                                            &scrobble_track.title,
-                                            Some(&scrobble_track.album),
-                                        );
-                                        match scrobble::lastfm::submit_scrobble(
-                                            &lastfm_api_key,
-                                            &lastfm_api_secret,
-                                            &lastfm_session_key,
-                                            &scrobble,
-                                        )
-                                        .await
-                                        {
-                                            Ok(_) => tracing::info!(
-                                                "Last.fm scrobbled: {} - {}",
-                                                scrobble_track.artist,
-                                                scrobble_track.title
-                                            ),
-                                            Err(e) => {
-                                                tracing::warn!("Last.fm scrobble failed: {}", e)
-                                            }
-                                        }
-                                    }
-
-                                    let token_raw = cfg_signal.read().musicbrainz_token.clone();
-                                    if !token_raw.is_empty() {
-                                        let auth = if token_raw.contains(' ') {
-                                            token_raw
-                                        } else {
-                                            format!("Token {}", token_raw)
-                                        };
-                                        let listen = scrobble::musicbrainz::make_listen(
-                                            &scrobble_track.artist,
-                                            &scrobble_track.title,
-                                            Some(&scrobble_track.album),
-                                            Some(map.clone()),
-                                        );
-                                        match scrobble::musicbrainz::submit_listens(
-                                            &auth,
-                                            vec![listen],
-                                            "single",
-                                        )
-                                        .await
-                                        {
-                                            Ok(_) => tracing::info!(
-                                                "MusicBrainz scrobbled: {} - {}",
-                                                scrobble_track.artist,
-                                                scrobble_track.title
-                                            ),
-                                            Err(e) => {
-                                                tracing::warn!("MusicBrainz scrobble failed: {}", e)
-                                            }
-                                        }
-                                    }
-                                }
-                                .instrument(tracing::info_span!("scrobble.submit")),
+                            scrobble_scheduler::schedule(
+                                track.clone(),
+                                None,
+                                self.config,
+                                self.play_generation,
+                                current_gen,
+                                None,
+                                ScrobbleOptions::LOCAL,
                             );
                         }
                     }
                 }
             }
         }
-    }
-
-    pub fn play_next(&mut self) {
-        self.play_next_with_transition(false);
-    }
-
-    pub fn play_next_with_crossfade(&mut self) {
-        self.play_next_with_transition(true);
-    }
-
-    fn play_next_with_transition(&mut self, allow_crossfade: bool) {
-        if *self.is_loading.peek() {
-            self.skip_in_progress.set(false);
-        }
-
-        let idx = *self.current_queue_index.peek();
-        let queue_len = self.queue.peek().len();
-
-        if queue_len == 0 {
-            self.skip_in_progress.set(false);
-            return;
-        }
-
-        let loop_mode = *self.loop_mode.peek();
-
-        match loop_mode {
-            LoopMode::Track => {
-                self.play_track_with_history(idx, allow_crossfade);
-            }
-            _ => {
-                if idx + 1 >= queue_len && loop_mode == LoopMode::None {
-                    self.skip_in_progress.set(false);
-                    self.player.write().pause();
-                    self.is_playing.set(false);
-                    return;
-                }
-                let next_idx = if idx + 1 < queue_len { idx + 1 } else { 0 };
-                self.play_track_with_history(next_idx, allow_crossfade);
-            }
-        }
-    }
-
-    fn play_track_with_history(&mut self, track_idx: usize, allow_crossfade: bool) {
-        let current_idx = *self.current_queue_index.peek();
-        self.history.with_mut(|h| {
-            if h.last() != Some(&current_idx) {
-                h.push(current_idx);
-            }
-        });
-        self.play_track_no_history_with_transition(track_idx, allow_crossfade);
-    }
-
-    pub fn play_prev(&mut self) {
-        let progress = *self.current_song_progress.peek();
-        let back_behavior = self.config.peek().back_behavior;
-
-        if back_behavior == BackBehavior::RewindThenPrev && progress > 3 {
-            self.player.write().seek(std::time::Duration::ZERO);
-            self.current_song_progress.set(0);
-            return;
-        }
-
-        let idx = *self.current_queue_index.peek();
-        let queue_len = self.queue.peek().len();
-
-        if queue_len == 0 {
-            return;
-        }
-
-        if let Some(prev_idx) = self.history.with_mut(|h| h.pop()) {
-            self.play_track_no_history_without_crossfade(prev_idx);
-            return;
-        }
-
-        if idx > 0 {
-            self.play_track_no_history_without_crossfade(idx - 1);
-        } else if *self.loop_mode.peek() == LoopMode::Queue {
-            self.play_track_no_history_without_crossfade(queue_len - 1);
-        }
-    }
-
-    /// Rebuilds `shuffle_order` as a full permutation of the queue: the
-    /// currently playing track at position 0, every other track after it
-    /// shuffled as a single pool. Resets `current_queue_index` to 0, which
-    /// acts as a pointer into `shuffle_order` while shuffle is on.
-    fn rebuild_shuffle_order(&mut self) {
-        use rand::seq::SliceRandom;
-        let queue_len = self.queue.peek().len();
-        let current_idx = *self.current_queue_index.peek();
-
-        if queue_len == 0 {
-            self.shuffle_order.set(Vec::new());
-            self.current_queue_index.set(0);
-            return;
-        }
-
-        // The current track keeps playing at position 0; every other track is
-        // shuffled as a single pool so the ones before and after it mix freely
-        // instead of playing as two separate groups (issue #362).
-        let mut order: Vec<usize> = Vec::with_capacity(queue_len);
-        order.push(current_idx);
-        let mut rest: Vec<usize> = (0..queue_len).filter(|&i| i != current_idx).collect();
-        rest.shuffle(&mut rand::rng());
-        order.extend(rest);
-
-        // reset current queue index to match the currently played track (now moved at pos 0)
-        // will be used as a pointer to the retrieve the current track in the shuffled order
-        self.current_queue_index.set(0);
-        self.shuffle_order.set(order);
-    }
-
-    pub fn play_queue_shuffled(&mut self, tracks: Vec<Track>) {
-        use rand::RngExt;
-        let queue_len = tracks.len();
-        if queue_len == 0 {
-            return;
-        }
-
-        self.queue.set(tracks);
-        let start = rand::rng().random_range(0..queue_len);
-        self.play_track(start);
-    }
-
-    pub fn play_queue_linear(&mut self, tracks: Vec<Track>) {
-        if tracks.is_empty() {
-            return;
-        }
-        self.queue.set(tracks);
-        // `play_track` already starts track 0 (with history + shuffle handling);
-        // a second bare play call here just bumped the play generation and
-        // spawned a duplicate stream resolve for the same video.
-        self.play_track(0);
-    }
-
-    pub fn add_to_queue(&mut self, tracks: impl IntoIterator<Item = Track>) {
-        let tracks: Vec<Track> = tracks.into_iter().collect();
-        let count = tracks.len();
-        if count == 0 {
-            return;
-        }
-
-        self.queue.with_mut(|q| q.extend(tracks));
-
-        if *self.shuffle.peek() {
-            let q_len = self.queue.peek().len();
-            let start_idx = q_len - count;
-            self.shuffle_order.with_mut(|so| {
-                (start_idx..q_len).for_each(|idx| so.push(idx));
-            });
-        }
-    }
-
-    pub fn queue_play_next(&mut self, tracks: impl IntoIterator<Item = Track>) {
-        let tracks: Vec<Track> = tracks.into_iter().collect();
-        let count = tracks.len();
-        if count == 0 {
-            return;
-        }
-
-        if *self.shuffle.peek() {
-            let insert_at = if self.shuffle_order.peek().is_empty() {
-                0
-            } else {
-                (*self.current_queue_index.peek() + 1).min(self.shuffle_order.peek().len())
-            };
-            let start_idx = self.queue.peek().len();
-            self.queue.with_mut(|queue| queue.extend(tracks));
-            self.shuffle_order.with_mut(|order| {
-                for offset in 0..count {
-                    order.insert(insert_at + offset, start_idx + offset);
-                }
-            });
-            self.history.with_mut(|history| {
-                Self::shift_indices_at_or_after(history, insert_at, count);
-            });
-        } else {
-            let insert_at = if self.queue.peek().is_empty() {
-                0
-            } else {
-                (*self.current_queue_index.peek() + 1).min(self.queue.peek().len())
-            };
-            self.queue.with_mut(|queue| {
-                for (offset, track) in tracks.into_iter().enumerate() {
-                    queue.insert(insert_at + offset, track);
-                }
-            });
-
-            self.history.with_mut(|history| {
-                Self::shift_indices_at_or_after(history, insert_at, count);
-            });
-        }
-    }
-
-    pub fn toggle_shuffle(&mut self) {
-        let now_on = !*self.shuffle.peek();
-        self.shuffle.set(now_on);
-        if now_on {
-            self.rebuild_shuffle_order();
-        } else {
-            // reset current queue index to match track index when turning off shuffle mode
-            let current_idx = *self.current_queue_index.peek();
-            self.current_queue_index.set(
-                *self
-                    .shuffle_order
-                    .peek()
-                    .get(current_idx)
-                    .unwrap_or(&current_idx),
-            );
-        }
-    }
-
-    pub fn set_loop_mode(&mut self, mode: LoopMode) {
-        self.loop_mode.set(mode);
-    }
-    fn cancel_radio_task(&mut self) {
-        if let Some(task) = self.radio_task.take() {
-            task.cancel();
-        }
-    }
-    pub fn play_radio(&mut self, station_id: &str, stream_id: &str) {
-        let path = format!("radio:{}:{}", station_id, stream_id);
-        let track = Track {
-            id: reader::models::TrackId::Local(std::path::PathBuf::from(path)),
-            cover: None,
-            album_id: "".to_string(),
-            title: stream_id.to_string(),
-            artist: station_id.to_string(),
-            album: "Live Radio".to_string(),
-            duration: u64::MAX,
-            khz: 0,
-            bitrate: 0,
-            track_number: None,
-            disc_number: None,
-            musicbrainz_release_id: None,
-            musicbrainz_recording_id: None,
-            musicbrainz_track_id: None,
-            playlist_item_id: None,
-            artists: vec![],
-        };
-
-        let mut q = self.queue.write();
-        q.clear();
-        q.push(track);
-        drop(q);
-
-        self.shuffle_order.set(vec![0]);
-        self.current_queue_index.set(0);
-        self.history.write().clear();
-        self.play_track_no_history_with_transition(0, false);
-    }
-
-    pub fn toggle_loop(&mut self) {
-        self.loop_mode.with_mut(|l| *l = l.next());
-    }
-
-    /// Hard reset: stop playback, drop the queue/history/current track,
-    /// clear any pending playback error. Called when the active server
-    /// changes — without it, a queued `ytmusic:` track would be replayed
-    /// through whichever backend's stream-builder is now active.
-    pub fn reset_for_backend_switch(&mut self) {
-        // Invalidate any in-flight track-load spawn (YT __YT_PENDING
-        // resolver, Jellyfin stream open, etc.) so its eventual
-        // completion doesn't start playback against the cleared queue
-        // or post a stale error banner / clear is_loading for the new
-        // backend's first track.
-        self.play_generation.with_mut(|g| *g += 1);
-        self.cancel_radio_task();
-        self.player.write().stop_for_transition();
-        self.is_playing.set(false);
-        self.is_loading.set(false);
-        self.skip_in_progress.set(false);
-        self.queue.write().clear();
-        self.history.write().clear();
-        self.current_queue_index.set(0);
-        self.clear_current_track_metadata();
-        self.playback_error.set(None);
-    }
-
-    pub fn pause(&mut self) {
-        let idx = *self.current_queue_index.peek();
-        let is_radio = self
-            .get_track_at(idx)
-            .is_some_and(|t| t.id.uid().starts_with("radio:"));
-
-        if is_radio {
-            self.player.write().stop_for_transition();
-        } else {
-            self.player.write().pause();
-        }
-        self.is_playing.set(false);
-    }
-
-    pub fn resume(&mut self) {
-        let idx = *self.current_queue_index.peek();
-        let is_radio = self
-            .get_track_at(idx)
-            .is_some_and(|t| t.id.uid().starts_with("radio:"));
-
-        if is_radio || !self.player.peek().can_resume() {
-            if let Some(track) = self.get_track_at(idx) {
-                if !is_radio {
-                    let progress_secs = (*self.current_song_progress.peek()).min(track.duration);
-                    self.set_pending_resume_for_track(&track, progress_secs);
-                }
-                self.play_track_no_history(idx);
-            }
-            return;
-        }
-
-        self.player.write().play_resume();
-        self.is_playing.set(true);
-    }
-
-    pub fn toggle(&mut self) {
-        if *self.is_playing.peek() {
-            self.pause();
-        } else {
-            self.resume();
-        }
-    }
-
-    // Swaps two queue items, taking into account shuffle state and current queue index
-    pub fn swap_queue_item(&mut self, from: usize, to: usize) {
-        let shuffle = *self.shuffle.peek();
-        let len = if shuffle {
-            self.shuffle_order.len()
-        } else {
-            self.queue.peek().len()
-        };
-
-        if from >= len || to >= len || from == to {
-            return;
-        }
-
-        if shuffle {
-            self.shuffle_order.with_mut(|so| so.swap(from, to));
-        } else {
-            self.queue.with_mut(|so| so.swap(from, to));
-        }
-
-        let current_idx = *self.current_queue_index.peek();
-        if current_idx == from {
-            self.current_queue_index.set(to);
-        } else if current_idx == to {
-            self.current_queue_index.set(from);
-        }
-
-        self.history.with_mut(|history| {
-            for idx in history.iter_mut() {
-                if *idx == from {
-                    *idx = to;
-                } else if *idx == to {
-                    *idx = from;
-                }
-            }
-        });
-    }
-
-    pub fn move_queue_item(&mut self, from: usize, to: usize) {
-        let shuffle = *self.shuffle.peek();
-        let len = if shuffle {
-            self.shuffle_order.len()
-        } else {
-            self.queue.peek().len()
-        };
-
-        if from >= len || to >= len || from == to {
-            return;
-        }
-
-        if shuffle {
-            let idx = self.shuffle_order.remove(from);
-            self.shuffle_order.insert(to, idx);
-
-            let current_idx = *self.current_queue_index.peek();
-            self.current_queue_index
-                .set(Self::remap_queue_index(current_idx, from, to));
-
-            self.history.with_mut(|history| {
-                for idx in history.iter_mut() {
-                    *idx = Self::remap_queue_index(*idx, from, to);
-                }
-            });
-        } else {
-            self.move_physical_queue_item(from, to);
-        }
-    }
-
-    /// Does not check bounds. use `move_queue_item` instead.
-    fn move_physical_queue_item(&mut self, from: usize, to: usize) {
-        self.queue.with_mut(|queue| {
-            let track = queue.remove(from);
-            queue.insert(to, track);
-        });
-
-        let current_idx = *self.current_queue_index.peek();
-        self.current_queue_index
-            .set(Self::remap_queue_index(current_idx, from, to));
-
-        self.history.with_mut(|history| {
-            for idx in history.iter_mut() {
-                *idx = Self::remap_queue_index(*idx, from, to);
-            }
-        });
-    }
-
-    pub fn restore_queue_state(
-        &mut self,
-        queue: Vec<Track>,
-        current_queue_index: usize,
-        progress_secs: u64,
-        shuffle_order: Vec<usize>,
-        shuffle_enabled: bool,
-    ) {
-        self.clear_pending_crossfade_ui();
-        self.player.write().stop();
-        self.is_playing.set(false);
-        self.is_loading.set(false);
-        self.skip_in_progress.set(false);
-        self.history.set(Vec::new());
-        self.queue.set(queue);
-        self.shuffle.set(shuffle_enabled);
-        self.shuffle_order.set(shuffle_order);
-
-        let queue_len = self.queue.peek().len();
-        if queue_len == 0 {
-            self.current_queue_index.set(0);
-            self.pending_resume.set(None);
-            self.clear_current_track_metadata();
-            return;
-        }
-
-        let idx = current_queue_index.min(queue_len - 1);
-        let Some(track) = self.get_track_at(idx) else {
-            self.current_queue_index.set(0);
-            self.pending_resume.set(None);
-            self.clear_current_track_metadata();
-            tracing::warn!(
-                "Could not find track at index {} while restoring queue state. (queue_len={})",
-                idx,
-                queue_len
-            );
-            return;
-        };
-        let progress_secs = progress_secs.min(track.duration);
-
-        self.hydrate_current_track_metadata(idx, progress_secs);
-        self.set_pending_resume_for_track(&track, progress_secs);
     }
 }
 

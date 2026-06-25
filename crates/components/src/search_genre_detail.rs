@@ -72,7 +72,7 @@ pub fn SearchGenreDetail(
                 if is_modern {
                     div { class: "flex items-end gap-6 mb-8 shrink-0",
                         div {
-                            class: "w-44 h-44 rounded-2xl overflow-hidden shrink-0 shadow-2xl bg-white/5",
+                            class: "w-44 h-44 rounded-lg overflow-hidden shrink-0 shadow-2xl bg-white/5",
                             style: "box-shadow: 0 20px 60px rgba(0,0,0,0.6);",
                             if let Some((_, Some(url))) = genres.iter().find(|(g, _)| g == &genre) {
                                 img { src: "{url.as_ref()}", class: "w-full h-full object-cover" }
@@ -84,7 +84,7 @@ pub fn SearchGenreDetail(
                         }
                         div { class: "flex flex-col gap-1 pb-1 min-w-0",
                             p {
-                                class: "text-xs font-bold tracking-widest uppercase mb-1",
+                                class: "text-xs font-bold mb-1",
                                 style: "color: rgba(255,255,255,0.35);",
                                 "{i18n::t(\"genre\")}"
                             }
@@ -151,7 +151,7 @@ pub fn SearchGenreDetail(
                          }
 
                          div {
-                             h2 { class: "text-sm font-bold text-white/60 uppercase tracking-widest mb-2", "{i18n::t(\"genre\")}" }
+                             h2 { class: "text-sm font-bold text-white/60 mb-2", "{i18n::t(\"genre\")}" }
                              h1 { class: "text-5xl font-bold text-white mb-4", "{genre}" }
                              p { class: "text-slate-400",
                                  {

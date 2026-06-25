@@ -67,6 +67,9 @@ pub(super) fn content_type_to_ext(content_type: &str) -> Option<&'static str> {
         "audio/mp4" | "audio/x-m4a" | "video/mp4" => Some("m4a"),
         "audio/ogg" | "audio/opus" => Some("ogg"),
         "audio/webm" | "video/webm" => Some("webm"),
+        "audio/x-matroska" | "audio/matroska" | "video/x-matroska" | "video/matroska" => {
+            Some("mka")
+        }
         "audio/aac" => Some("aac"),
         "audio/wav" | "audio/x-wav" => Some("wav"),
         "audio/aiff" | "audio/x-aiff" => Some("aiff"),
@@ -135,5 +138,39 @@ pub async fn download_tracks_batch(
                 Err(e) => tracing::warn!(%id, error = %e, "batch download failed"),
             }
         }
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::content_type_to_ext;
+
+    #[test]
+    fn maps_matroska_audio_to_mka() {
+        assert_eq!(content_type_to_ext("audio/x-matroska"), Some("mka"));
+        assert_eq!(content_type_to_ext("audio/matroska"), Some("mka"));
+        assert_eq!(content_type_to_ext("video/x-matroska"), Some("mka"));
+        assert_eq!(content_type_to_ext("video/matroska"), Some("mka"));
+    }
+
+    #[test]
+    fn maps_matroska_with_codec_parameters() {
+        assert_eq!(
+            content_type_to_ext("audio/x-matroska; codecs=opus"),
+            Some("mka")
+        );
+    }
+
+    #[test]
+    fn unknown_container_returns_none() {
+        assert_eq!(content_type_to_ext("application/octet-stream"), None);
+    }
+
+    #[test]
+    fn preserves_existing_mappings() {
+        assert_eq!(content_type_to_ext("audio/mpeg"), Some("mp3"));
+        assert_eq!(content_type_to_ext("audio/flac"), Some("flac"));
+        assert_eq!(content_type_to_ext("audio/mp4"), Some("m4a"));
+        assert_eq!(content_type_to_ext("audio/ogg"), Some("ogg"));
     }
 }

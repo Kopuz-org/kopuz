@@ -90,7 +90,7 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
         div { class: "w-full max-w-[1600px] mx-auto select-none flex-1 min-h-0 flex flex-col",
             div { class: "flex items-end gap-6 mb-8 px-6 pt-6 shrink-0",
                 div {
-                    class: if props.on_cover_click.is_some() { "w-44 h-44 rounded-2xl overflow-hidden shrink-0 shadow-2xl bg-white/5 cursor-pointer" } else { "w-44 h-44 rounded-2xl overflow-hidden shrink-0 shadow-2xl bg-white/5" },
+                    class: if props.on_cover_click.is_some() { "w-44 h-44 rounded-lg overflow-hidden shrink-0 shadow-2xl bg-white/5 cursor-pointer" } else { "w-44 h-44 rounded-lg overflow-hidden shrink-0 shadow-2xl bg-white/5" },
                     style: "box-shadow: 0 20px 60px rgba(0,0,0,0.6);",
                     onclick: move |_| {
                         if let Some(ref h) = props.on_cover_click {
@@ -116,14 +116,14 @@ pub fn ShowcaseModern(props: ShowcaseProps) -> Element {
                     if !props.description.is_empty() {
                         if let Some(on_description_click) = props.on_description_click {
                             button {
-                                class: "text-xs font-bold tracking-widest uppercase mb-1 text-left cursor-pointer hover:underline transition-colors",
+                                class: "text-xs font-bold mb-1 text-left cursor-pointer hover:underline transition-colors",
                                 style: "color: var(--color-white); opacity: 0.45;",
                                 onclick: move |_| on_description_click.call(()),
                                 "{props.description}"
                             }
                         } else {
                             p {
-                                class: "text-xs font-bold tracking-widest uppercase mb-1",
+                                class: "text-xs font-bold mb-1",
                                 style: "color: var(--color-white); opacity: 0.35;",
                                 "{props.description}"
                             }

@@ -23,7 +23,7 @@ pub fn StatCard(label: String, value: String, icon: &'static str) -> Element {
                 i { class: "fa-solid {icon} text-lg text-white/60" }
             }
             div {
-                p { class: "text-xs font-medium text-slate-500 uppercase tracking-wider", "{label}" }
+                p { class: "text-xs font-medium text-slate-500", "{label}" }
                 p { class: "text-2xl font-bold text-white", "{value}" }
             }
         }

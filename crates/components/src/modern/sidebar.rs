@@ -221,7 +221,7 @@ pub fn SidebarModern(props: SidebarProps) -> Element {
                         if !collapsed {
                             div { class: "px-4 pt-3 pb-1",
                                 span {
-                                    class: "text-[10px] font-bold tracking-widest uppercase",
+                                    class: "text-[10px] font-bold",
                                     style: "color: rgba(255,255,255,0.25);",
                                     "{i18n::t(section_key)}"
                                 }

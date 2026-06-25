@@ -1,7 +1,16 @@
 [package]
-name = "server"
+name = "kopuz-server"
 version.workspace = true
-edition = "2024"
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+
+[lib]
+name = "server"
 
 [lints]
 workspace = true
@@ -16,16 +25,17 @@ serde_json = { workspace = true }
 config = { workspace = true }
 rand = { workspace = true }
 uuid = { workspace = true }
-md5 = "0.8"
-sha1 = "0.10"
-httpdate = "1"
-hex = "0.4"
+md5 = { workspace = true }
+sha1 = { workspace = true }
+httpdate = { workspace = true }
+hex = { workspace = true }
+rookie = { workspace = true }
 web-time = { workspace = true }
 tokio = { workspace = true, features = ["fs", "process", "rt", "sync"] }
 reader = { workspace = true }
 db = { workspace = true }
 utils = { workspace = true }
-async-trait = "0.1"
+async-trait = { workspace = true }
 
 # Browser-cookie import. Not on Windows: rookie pulls `libesedb` (a bundled C
 # library) there, which can't cross-compile and is unusable anyway since

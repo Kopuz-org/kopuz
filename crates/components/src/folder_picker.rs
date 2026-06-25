@@ -25,7 +25,7 @@ pub fn FolderPickerModal(playlist_id: String, on_close: EventHandler<()>) -> Ele
             onclick: move |_| on_close.call(()),
 
             div {
-                class: "bg-neutral-900 border border-white/10 rounded-2xl p-6 w-80 shadow-2xl",
+                class: "bg-neutral-900 border border-white/10 rounded-lg p-6 w-80 shadow-2xl",
                 onclick: move |evt| evt.stop_propagation(),
 
                 h2 { class: "text-lg font-bold text-white mb-4", "{i18n::t(\"move_to_folder\")}" }
