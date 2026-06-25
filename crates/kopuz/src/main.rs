@@ -40,11 +40,10 @@ mod updates;
 mod windows_titlebar;
 
 const FAVICON: &str = include_str!(concat!(env!("OUT_DIR"), "/favicon.uri"));
-// CSS is compiled into the binary (not collected as assets) so styling applies
-// under a bare `cargo run` on any OS — not just `dx` builds. The fonts referenced
-// by FONT_AWESOME_CSS / JETBRAINS_MONO_CSS are inlined as data: URIs by build.rs.
-// main.css declares the nasin-nanpa @font-face, so it's routed through build.rs
-// to inline that font too; the others have no font refs and pass through unchanged.
+// CSS/fonts are compiled in (not `asset!()`-collected) so styling works under a
+// bare `cargo run` — see `build.rs::embed_fonts`, which bakes the font data: URIs.
+// The `OUT_DIR` ones pass through it; main.css does too, for its nasin-nanpa
+// @font-face (themes/tailwind/reduced have no font refs, so they're verbatim).
 const MAIN_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/main.css"));
 const THEME_CSS: &str = include_str!("../assets/themes.css");
 const TAILWIND_CSS: &str = include_str!("../assets/tailwind.css");
