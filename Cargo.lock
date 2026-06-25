@@ -948,48 +948,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "components"
-version = "0.7.0"
-dependencies = [
- "base64 0.22.1",
- "config",
- "dioxus",
- "directories",
- "hooks",
- "i18n",
- "kopuz_route",
- "player",
- "rand 0.10.1",
- "reader",
- "rfd",
- "scrobble",
- "serde_json",
- "server",
- "tokio",
- "tracing",
- "utils",
- "uuid 1.23.2",
- "webbrowser",
-]
-
-[[package]]
 name = "concurrent-queue"
 version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
 dependencies = [
  "crossbeam-utils",
-]
-
-[[package]]
-name = "config"
-version = "0.7.0"
-dependencies = [
- "directories",
- "serde",
- "serde_json",
- "tracing",
- "uuid 1.23.2",
 ]
 
 [[package]]
@@ -1450,22 +1414,6 @@ name = "data-encoding"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
-
-[[package]]
-name = "db"
-version = "0.7.0"
-dependencies = [
- "arc-swap",
- "async-trait",
- "config",
- "directories",
- "reader",
- "serde",
- "serde_json",
- "sqlx",
- "tokio",
- "tracing",
-]
 
 [[package]]
 name = "der"
@@ -2076,20 +2024,6 @@ dependencies = [
  "option-ext",
  "redox_users",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "discord-presence"
-version = "0.7.0"
-dependencies = [
- "discord-rich-presence",
- "reader",
- "reqwest 0.13.4",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "utils",
 ]
 
 [[package]]
@@ -3328,27 +3262,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hooks"
-version = "0.7.0"
-dependencies = [
- "config",
- "db",
- "dioxus",
- "discord-presence",
- "player",
- "radio",
- "rand 0.10.1",
- "reader",
- "reqwest 0.13.4",
- "scrobble",
- "server",
- "tokio",
- "tracing",
- "utils",
- "web-time",
-]
-
-[[package]]
 name = "html5ever"
 version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3522,14 +3435,6 @@ dependencies = [
  "tokio",
  "tower-service",
  "tracing",
-]
-
-[[package]]
-name = "i18n"
-version = "0.1.0"
-dependencies = [
- "fluent-bundle",
- "unic-langid",
 ]
 
 [[package]]
@@ -4000,41 +3905,41 @@ name = "kopuz"
 version = "0.7.0"
 dependencies = [
  "block2",
- "components",
- "config",
  "ctrlc",
- "db",
  "dioxus",
  "directories",
- "discord-presence",
  "discord-rich-presence",
  "getrandom 0.4.2",
- "hooks",
  "http 1.4.1",
- "i18n",
  "image",
- "kopuz_route",
+ "kopuz-components",
+ "kopuz-config",
+ "kopuz-db",
+ "kopuz-discord-presence",
+ "kopuz-hooks",
+ "kopuz-i18n",
+ "kopuz-pages",
+ "kopuz-player",
+ "kopuz-radio",
+ "kopuz-reader",
+ "kopuz-route",
+ "kopuz-server",
+ "kopuz-utils",
  "libloading 0.8.9",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
  "objc2-media-player",
- "pages",
  "percent-encoding",
- "player",
- "radio",
  "rand 0.10.1",
- "reader",
  "reqwest 0.13.4",
  "serde",
  "serde_json",
- "server",
  "tokio",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
  "urlencoding",
- "utils",
  "uuid 1.23.2",
  "web-sys",
  "webbrowser",
@@ -4044,8 +3949,249 @@ dependencies = [
 ]
 
 [[package]]
-name = "kopuz_route"
+name = "kopuz-components"
 version = "0.7.0"
+dependencies = [
+ "base64 0.22.1",
+ "dioxus",
+ "directories",
+ "kopuz-config",
+ "kopuz-hooks",
+ "kopuz-i18n",
+ "kopuz-player",
+ "kopuz-reader",
+ "kopuz-route",
+ "kopuz-scrobble",
+ "kopuz-server",
+ "kopuz-utils",
+ "rand 0.10.1",
+ "rfd",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid 1.23.2",
+ "webbrowser",
+]
+
+[[package]]
+name = "kopuz-config"
+version = "0.7.0"
+dependencies = [
+ "directories",
+ "serde",
+ "serde_json",
+ "tracing",
+ "uuid 1.23.2",
+]
+
+[[package]]
+name = "kopuz-db"
+version = "0.7.0"
+dependencies = [
+ "arc-swap",
+ "async-trait",
+ "directories",
+ "kopuz-config",
+ "kopuz-reader",
+ "serde",
+ "serde_json",
+ "sqlx",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "kopuz-discord-presence"
+version = "0.7.0"
+dependencies = [
+ "discord-rich-presence",
+ "kopuz-reader",
+ "kopuz-utils",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "kopuz-hooks"
+version = "0.7.0"
+dependencies = [
+ "dioxus",
+ "kopuz-config",
+ "kopuz-db",
+ "kopuz-discord-presence",
+ "kopuz-player",
+ "kopuz-radio",
+ "kopuz-reader",
+ "kopuz-scrobble",
+ "kopuz-server",
+ "kopuz-utils",
+ "rand 0.10.1",
+ "reqwest 0.13.4",
+ "tokio",
+ "tracing",
+ "web-time",
+]
+
+[[package]]
+name = "kopuz-i18n"
+version = "0.7.0"
+dependencies = [
+ "fluent-bundle",
+ "unic-langid",
+]
+
+[[package]]
+name = "kopuz-pages"
+version = "0.7.0"
+dependencies = [
+ "dioxus",
+ "directories",
+ "kopuz-components",
+ "kopuz-config",
+ "kopuz-hooks",
+ "kopuz-i18n",
+ "kopuz-player",
+ "kopuz-radio",
+ "kopuz-reader",
+ "kopuz-route",
+ "kopuz-server",
+ "kopuz-utils",
+ "lofty",
+ "rand 0.10.1",
+ "reqwest 0.13.4",
+ "rfd",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "uuid 1.23.2",
+]
+
+[[package]]
+name = "kopuz-player"
+version = "0.7.0"
+dependencies = [
+ "base64 0.22.1",
+ "block2",
+ "cpal",
+ "jni 0.21.1",
+ "kopuz-config",
+ "mpris-server",
+ "ndk-context",
+ "objc2",
+ "objc2-app-kit",
+ "objc2-av-foundation",
+ "objc2-avf-audio",
+ "objc2-foundation",
+ "objc2-media-player",
+ "rb",
+ "reqwest 0.13.4",
+ "symphonia",
+ "symphonia-adapter-libopus",
+ "tokio",
+ "tracing",
+ "wasm-bindgen",
+ "web-sys",
+ "windows 0.62.2",
+]
+
+[[package]]
+name = "kopuz-radio"
+version = "0.7.0"
+dependencies = [
+ "futures-util",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite",
+ "tracing",
+]
+
+[[package]]
+name = "kopuz-reader"
+version = "0.7.0"
+dependencies = [
+ "kopuz-config",
+ "lofty",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "symphonia",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "kopuz-route"
+version = "0.7.0"
+
+[[package]]
+name = "kopuz-scrobble"
+version = "0.7.0"
+dependencies = [
+ "dioxus",
+ "kopuz-config",
+ "md5",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "kopuz-server"
+version = "0.7.0"
+dependencies = [
+ "async-trait",
+ "directories",
+ "hex",
+ "httpdate",
+ "jellyfin-sdk-rust",
+ "kopuz-config",
+ "kopuz-db",
+ "kopuz-reader",
+ "kopuz-utils",
+ "md5",
+ "rand 0.10.1",
+ "reqwest 0.13.4",
+ "rookie",
+ "serde",
+ "serde_json",
+ "sha1",
+ "tokio",
+ "tracing",
+ "uuid 1.23.2",
+ "web-time",
+]
+
+[[package]]
+name = "kopuz-utils"
+version = "0.7.0"
+dependencies = [
+ "base64 0.22.1",
+ "color-thief",
+ "gloo-timers 0.4.0",
+ "hex",
+ "image",
+ "kopuz-db",
+ "lofty",
+ "md5",
+ "percent-encoding",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "time",
+ "tokio",
+ "tracing",
+ "urlencoding",
+]
 
 [[package]]
 name = "kuchikiki"
@@ -5339,33 +5485,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pages"
-version = "0.7.0"
-dependencies = [
- "components",
- "config",
- "dioxus",
- "directories",
- "hooks",
- "i18n",
- "kopuz_route",
- "lofty",
- "player",
- "radio",
- "rand 0.10.1",
- "reader",
- "reqwest 0.13.4",
- "rfd",
- "serde",
- "serde_json",
- "server",
- "tokio",
- "tracing",
- "utils",
- "uuid 1.23.2",
-]
-
-[[package]]
 name = "pango"
 version = "0.18.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5656,34 +5775,6 @@ name = "plain"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
-
-[[package]]
-name = "player"
-version = "0.7.0"
-dependencies = [
- "base64 0.22.1",
- "block2",
- "config",
- "cpal",
- "jni 0.21.1",
- "mpris-server",
- "ndk-context",
- "objc2",
- "objc2-app-kit",
- "objc2-av-foundation",
- "objc2-avf-audio",
- "objc2-foundation",
- "objc2-media-player",
- "rb",
- "reqwest 0.13.4",
- "symphonia",
- "symphonia-adapter-libopus",
- "tokio",
- "tracing",
- "wasm-bindgen",
- "web-sys",
- "windows 0.62.2",
-]
 
 [[package]]
 name = "png"
@@ -6043,21 +6134,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
-name = "radio"
-version = "0.7.0"
-dependencies = [
- "futures-util",
- "reqwest 0.13.4",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-tungstenite",
- "tracing",
-]
-
-[[package]]
 name = "rand"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6283,20 +6359,6 @@ name = "rb"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "56cf8381505b60ae18a4097f1d0be093287ca3bf4fbb23d36ac5ad3bba335daa"
-
-[[package]]
-name = "reader"
-version = "0.7.0"
-dependencies = [
- "config",
- "lofty",
- "reqwest 0.13.4",
- "serde",
- "serde_json",
- "symphonia",
- "tokio",
- "tracing",
-]
 
 [[package]]
 name = "redox_syscall"
@@ -6820,20 +6882,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
-name = "scrobble"
-version = "0.7.0"
-dependencies = [
- "config",
- "dioxus",
- "md5",
- "reqwest 0.13.4",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "security-framework"
 version = "3.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7002,32 +7050,6 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
-]
-
-[[package]]
-name = "server"
-version = "0.7.0"
-dependencies = [
- "async-trait",
- "config",
- "db",
- "directories",
- "hex",
- "httpdate",
- "jellyfin-sdk-rust",
- "md5",
- "rand 0.10.1",
- "reader",
- "reqwest 0.13.4",
- "rookie",
- "serde",
- "serde_json",
- "sha1",
- "tokio",
- "tracing",
- "utils",
- "uuid 1.23.2",
- "web-time",
 ]
 
 [[package]]
@@ -8653,28 +8675,6 @@ name = "utf8_iter"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
-
-[[package]]
-name = "utils"
-version = "0.7.0"
-dependencies = [
- "base64 0.22.1",
- "color-thief",
- "db",
- "gloo-timers 0.4.0",
- "hex",
- "image",
- "lofty",
- "md5",
- "percent-encoding",
- "reqwest 0.13.4",
- "serde",
- "serde_json",
- "time",
- "tokio",
- "tracing",
- "urlencoding",
-]
 
 [[package]]
 name = "uuid"
