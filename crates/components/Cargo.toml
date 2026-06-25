@@ -1,7 +1,16 @@
 [package]
-name = "components"
+name = "kopuz-components"
 version.workspace = true
-edition = "2024"
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+
+[lib]
+name = "components"
 
 [lints]
 workspace = true
@@ -14,9 +23,9 @@ directories = { workspace = true }
 dioxus = { workspace = true, features = ["web"] }
 
 [dependencies]
-webbrowser = "1.2.1"
-tracing = "0.1"
-base64 = "0.22"
+webbrowser = { workspace = true }
+tracing = { workspace = true }
+base64 = { workspace = true }
 scrobble = { workspace = true }
 uuid = { workspace = true }
 player = { workspace = true }

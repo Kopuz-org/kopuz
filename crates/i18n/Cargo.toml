@@ -1,14 +1,24 @@
 [package]
+name = "kopuz-i18n"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+include = ["build.rs", "src/**", "locales/*.ftl"]
+
+[lib]
 name = "i18n"
-version = "0.1.0"
-edition = "2024"
 
 [lints]
 workspace = true
 
 [dependencies]
-fluent-bundle = "0.16"
-unic-langid = "0.9"
+fluent-bundle = { workspace = true }
+unic-langid = { workspace = true }
 
 [build-dependencies]
 # build.rs uses only std

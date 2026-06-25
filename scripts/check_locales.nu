@@ -21,11 +21,11 @@ def main [] {
 
   let script_dir = $env.FILE_PWD
   let repo_root = ($script_dir | path dirname)
-  let locales_dir = ($repo_root | path join "locales")
+  let locales_dir = ($repo_root | path join "crates" "i18n" "locales")
   let baseline = ($locales_dir | path join "en.ftl")
 
   if not ($baseline | path exists) {
-    print --stderr "Missing baseline locale: locales/en.ftl"
+    print --stderr "Missing baseline locale: crates/i18n/locales/en.ftl"
     exit 1
   }
 

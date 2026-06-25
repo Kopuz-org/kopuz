@@ -1,7 +1,16 @@
 [package]
-name = "player"
+name = "kopuz-player"
 version.workspace = true
-edition = "2024"
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+
+[lib]
+name = "player"
 
 [lints]
 workspace = true
@@ -13,7 +22,7 @@ config = { workspace = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 cpal = { workspace = true }
 symphonia = { workspace = true }
-symphonia-adapter-libopus = "0.3"
+symphonia-adapter-libopus = { workspace = true }
 rb = { workspace = true }
 tokio = { workspace = true }
 
@@ -22,48 +31,48 @@ web-sys = { workspace = true }
 wasm-bindgen = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2 = { version = "0.6.4", features = ["std"] }
-objc2-foundation = { version = "0.3.2", features = [
-    "NSString",
-    "NSDictionary",
-    "NSValue",
-    "NSObject",
-    "NSURL",
-    "NSProcessInfo",
+objc2 = { workspace = true, features = ["std"] }
+objc2-foundation = { workspace = true, features = [
+  "NSString",
+  "NSDictionary",
+  "NSValue",
+  "NSObject",
+  "NSURL",
+  "NSProcessInfo",
 ] }
-objc2-media-player = { version = "0.3.2", features = [
-    "MPNowPlayingInfoCenter",
-    "MPMediaItem",
-    "MPRemoteCommandCenter",
-    "MPRemoteCommand",
+objc2-media-player = { workspace = true, features = [
+  "MPNowPlayingInfoCenter",
+  "MPMediaItem",
+  "MPRemoteCommandCenter",
+  "MPRemoteCommand",
 ] }
-objc2-app-kit = { version = "0.3.2", features = ["NSImage"] }
-objc2-av-foundation = { version = "0.3.2", features = ["AVAudioSession"] }
-objc2-avf-audio = { version = "0.3.2", features = ["AVAudioSession"] }
-block2 = "0.6"
+objc2-app-kit = { workspace = true, features = ["NSImage"] }
+objc2-av-foundation = { workspace = true, features = ["AVAudioSession"] }
+objc2-avf-audio = { workspace = true, features = ["AVAudioSession"] }
+block2 = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-mpris-server = "0.10.0"
+mpris-server = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.62", features = [
-    "Foundation",
-    "Media",
-    "Win32_Foundation",
-    "Win32_System_Threading",
-    "Win32_System_WinRT",
-    "Win32_UI_WindowsAndMessaging",
-    "Win32_UI_Shell",
-    "Storage_Streams",
-    "Win32_System_Com",
+windows = { workspace = true, features = [
+  "Foundation",
+  "Media",
+  "Win32_Foundation",
+  "Win32_System_Threading",
+  "Win32_System_WinRT",
+  "Win32_UI_WindowsAndMessaging",
+  "Win32_UI_Shell",
+  "Storage_Streams",
+  "Win32_System_Com",
 ] }
 tokio = { workspace = true, features = ["full"] }
 reqwest = { workspace = true, features = ["blocking"] }
 
 [target.'cfg(target_os = "android")'.dependencies]
-jni = "0.21"
-ndk-context = "0.1"
+jni = { workspace = true }
+ndk-context = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
-base64 = "0.22"
+base64 = { workspace = true }

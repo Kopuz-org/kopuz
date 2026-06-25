@@ -209,7 +209,7 @@ fn ShelfRow(
             div { class: "flex items-end justify-between mb-5 gap-4",
                 div { class: "min-w-0",
                     if let Some(strap) = shelf.strapline.clone() {
-                        p { class: "text-[10px] font-bold tracking-widest uppercase mb-0.5 text-white/40", "{strap}" }
+                        p { class: "text-[10px] font-bold mb-0.5 text-white/40", "{strap}" }
                     }
                     h2 { class: "text-2xl md:text-3xl font-bold text-white truncate", "{shelf.title}" }
                 }
@@ -284,7 +284,7 @@ fn SongListShelf(
                 h2 { class: "text-2xl md:text-3xl font-bold text-white truncate", "{shelf.title}" }
                 if let Some(more) = more {
                     button {
-                        class: "text-xs font-bold tracking-widest uppercase text-white/60 hover:text-white cursor-pointer transition-colors",
+                        class: "text-xs font-bold text-white/60 hover:text-white cursor-pointer transition-colors",
                         onclick: move |_| {
                             on_select_playlist.call((more.clone(), title_for_more.clone()))
                         },

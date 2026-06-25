@@ -437,7 +437,7 @@ pub fn HomeBody(
                                 class: if !enabled { "opacity-40" } else { "" },
                                 if edit {
                                     div { class: "flex items-center justify-between gap-2 mb-2 px-2 py-2 rounded-lg bg-white/5 border border-white/10",
-                                        div { class: "flex items-center gap-2 text-white/80 text-xs font-bold uppercase tracking-wider",
+                                        div { class: "flex items-center gap-2 text-white/80 text-xs font-bold",
                                             i { class: "fa-solid fa-grip-vertical text-white/30" }
                                             span { "{section_label(&key)}" }
                                         }
@@ -691,7 +691,7 @@ fn ServerHeroBanner(
     let section_class = if is_modern {
         "relative rounded-xl overflow-hidden mb-10"
     } else {
-        "relative rounded-3xl overflow-hidden mb-12"
+        "relative rounded-xl overflow-hidden mb-12"
     };
     let section_style = format!("height: {hero_height}px;");
 
@@ -730,7 +730,7 @@ fn ServerHeroBanner(
                     }
                 }
                 div { class: "relative h-full flex flex-col justify-center p-8 md:p-12",
-                    span { class: "text-indigo-400 font-bold tracking-widest uppercase text-[10px] mb-3 flex items-center gap-2",
+                    span { class: "text-indigo-400 font-bold text-[10px] mb-3 flex items-center gap-2",
                         i { class: "fa-solid fa-star text-[8px]" }
                         "{i18n::t(\"featured_album\")}"
                     }
@@ -836,7 +836,7 @@ fn render_continue_listening(
             div { class: "flex items-center justify-between mb-6",
                 div {
                     if is_modern {
-                        p { class: "text-[10px] font-bold tracking-widest uppercase mb-0.5", style: "color: rgba(255,255,255,0.35);", "{i18n::t(\"library\")}" }
+                        p { class: "text-[10px] font-bold mb-0.5", style: "color: rgba(255,255,255,0.35);", "{i18n::t(\"library\")}" }
                     }
                     h2 { class: if is_modern { "text-2xl font-bold text-white" } else { "text-2xl font-bold text-white tracking-tight" }, "{i18n::t(\"continue_listening\")}" }
                 }
@@ -920,7 +920,7 @@ fn render_listen_now(
             div { class: "flex items-end justify-between mb-6",
                 div {
                     if is_modern {
-                        p { class: "text-[10px] font-bold tracking-widest uppercase mb-0.5", style: "color: rgba(255,255,255,0.35);", "{i18n::t(\"music\")}" }
+                        p { class: "text-[10px] font-bold mb-0.5", style: "color: rgba(255,255,255,0.35);", "{i18n::t(\"music\")}" }
                     }
                     h2 { class: if is_modern { "text-2xl font-bold text-white" } else { "text-3xl font-extrabold text-white tracking-tight leading-none" }, "{i18n::t(\"listen_now\")}" }
                 }
@@ -959,7 +959,7 @@ fn render_listen_now(
                 div { class: "grid grid-cols-[repeat(auto-fill,minmax(350px,1fr))] gap-4",
                     for (album_id, title, artist, cover_url) in jellyfin_shuffled.iter().skip(1).take(8).cloned() {
                         div {
-                            class: "flex items-center bg-white/5 hover:bg-white/10 border border-white/5 rounded-2xl cursor-pointer transition-all duration-300 group overflow-hidden pr-4",
+                            class: "flex items-center bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg cursor-pointer transition-all duration-300 group overflow-hidden pr-4",
                             onclick: {
                                 let id = album_id.clone();
                                 move |_| on_select_album.call(id.clone())
@@ -1008,7 +1008,7 @@ fn render_top_artists(
             div { class: "flex items-center justify-between mb-6",
                 div {
                     if is_modern {
-                        p { class: "text-[10px] font-bold tracking-widest uppercase mb-0.5", style: "color: rgba(255,255,255,0.35);", "{i18n::t(\"artists\")}" }
+                        p { class: "text-[10px] font-bold mb-0.5", style: "color: rgba(255,255,255,0.35);", "{i18n::t(\"artists\")}" }
                     }
                     h2 { class: if is_modern { "text-2xl font-bold text-white" } else { "text-2xl font-bold text-white tracking-tight" }, "{i18n::t(\"top_artists\")}" }
                 }
@@ -1071,7 +1071,7 @@ fn render_albums_row(
             div { class: "flex items-center justify-between mb-6",
                 div {
                     if is_modern {
-                        p { class: "text-[10px] font-bold tracking-widest uppercase mb-0.5", style: "color: rgba(255,255,255,0.35);", "{eyebrow}" }
+                        p { class: "text-[10px] font-bold mb-0.5", style: "color: rgba(255,255,255,0.35);", "{eyebrow}" }
                     }
                     h2 { class: if is_modern { "text-2xl font-bold text-white" } else { "text-2xl font-bold text-white tracking-tight" }, "{title}" }
                 }
@@ -1098,11 +1098,11 @@ fn render_albums_row(
                             let id = album_id.clone();
                             move |_| on_select_album.call(id.clone())
                         },
-                        div { class: "aspect-square rounded-2xl bg-stone-800/80 mb-4 overflow-hidden transition-all duration-300 relative",
+                        div { class: "aspect-square rounded-lg bg-stone-800/80 mb-4 overflow-hidden transition-all duration-300 relative",
                             if let Some(url) = cover_url {
                                 img { src: "{url}", class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-500", decoding: "async", loading: "lazy" }
                             } else {
-                                div { class: "w-full h-full flex items-center justify-center border border-white/5 rounded-2xl",
+                                div { class: "w-full h-full flex items-center justify-center border border-white/5 rounded-lg",
                                     i { class: "fa-solid fa-compact-disc text-4xl text-white/20" }
                                 }
                             }
@@ -1138,7 +1138,7 @@ fn render_playlists(
             div { class: "flex items-center justify-between mb-6",
                 div {
                     if is_modern {
-                        p { class: "text-[10px] font-bold tracking-widest uppercase mb-0.5", style: "color: rgba(255,255,255,0.35);", "{i18n::t(\"library\")}" }
+                        p { class: "text-[10px] font-bold mb-0.5", style: "color: rgba(255,255,255,0.35);", "{i18n::t(\"library\")}" }
                     }
                     h2 { class: if is_modern { "text-2xl font-bold text-white" } else { "text-2xl font-bold text-white tracking-tight" }, "{i18n::t(\"playlists\")}" }
                 }
@@ -1168,7 +1168,7 @@ fn render_playlists(
                                     let id = id.clone();
                                     move |_| on_select_playlist.call(id.clone())
                                 },
-                                div { class: "aspect-square rounded-2xl bg-white/5 mb-4 overflow-hidden transition-all duration-500 relative",
+                                div { class: "aspect-square rounded-lg bg-white/5 mb-4 overflow-hidden transition-all duration-500 relative",
                                     if let Some(url) = cover_url {
                                         img { src: "{url}", class: "w-full h-full object-cover group-hover:scale-110 transition-transform duration-700", decoding: "async", loading: "lazy" }
                                     } else {

@@ -1,7 +1,16 @@
 [package]
-name = "pages"
+name = "kopuz-pages"
 version.workspace = true
-edition = "2024"
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+
+[lib]
+name = "pages"
 
 [lints]
 workspace = true

@@ -240,7 +240,7 @@ pub fn ServerSettings(
                                 div { class: "flex items-center gap-2",
                                     p { class: "text-sm font-medium text-white truncate", "{srv.name}" }
                                     if is_active {
-                                        span { class: "text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-indigo-500/30 text-indigo-200",
+                                        span { class: "text-[10px] px-2 py-0.5 rounded bg-indigo-500/30 text-indigo-200",
                                             "{active_text}"
                                         }
                                     }
@@ -814,7 +814,7 @@ pub fn EqualizerPanel(
                 }
 
                 div { class: "flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2",
-                    span { class: "text-xs uppercase tracking-[0.18em] text-slate-400", "{i18n::t(\"eq_preset\")}" }
+                    span { class: "text-xs text-slate-400", "{i18n::t(\"eq_preset\")}" }
                     select {
                         class: "bg-transparent text-sm text-white focus:outline-none",
                         value: "{draft.read().preset.as_storage()}",
@@ -867,7 +867,7 @@ pub fn EqualizerPanel(
 
                 div { class: "flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2 min-w-[220px] flex-1",
                     div { class: "min-w-0",
-                        p { class: "text-xs uppercase tracking-[0.18em] text-slate-400", "{i18n::t(\"eq_preamp\")}" }
+                        p { class: "text-xs text-slate-400", "{i18n::t(\"eq_preamp\")}" }
                         p { class: "text-[11px] text-slate-500", "{i18n::t(\"eq_preamp_desc\")}" }
                     }
                     input {
@@ -902,7 +902,7 @@ pub fn EqualizerPanel(
             p { class: "text-xs text-slate-500", "{i18n::t(\"eq_graph_hint\")}" }
 
             div {
-                class: "rounded-2xl border border-white/8 bg-white/5 p-4 select-none overflow-x-auto",
+                class: "rounded-lg border border-white/8 bg-white/5 p-4 select-none overflow-x-auto",
                 style: "background: color-mix(in oklab, var(--color-neutral-900) 78%, transparent); border-color: color-mix(in oklab, var(--color-white) 8%, transparent);",
                 svg {
                     class: "{graph_class}",
