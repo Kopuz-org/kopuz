@@ -20,17 +20,11 @@ mod writes;
 
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
-/// Run migrations, tolerating a checksum mismatch that is purely a line-ending
-/// difference of the *same* migration SQL.
-///
-/// sqlx checksums each migration's raw bytes at compile time, so a CRLF checkout
-/// (Windows) and an LF checkout (Linux/macOS) of the identical migration produce
-/// different checksums. A DB created by one build would then be rejected by the
-/// other — e.g. a v0.7.0 Windows user's DB (CRLF) opened by a cross-compiled
-/// build (LF). When a stored checksum matches this binary's migration content in
-/// the other line ending, the schema is provably identical, so we re-stamp the
-/// stored checksum to the canonical one and continue. A checksum matching
-/// neither line ending is a genuine modification and is left to fail.
+/// Run migrations, tolerating a checksum mismatch that's purely a line-ending
+/// difference of the same migration SQL: sqlx checksums raw bytes, so a CRLF
+/// (Windows) and an LF (Linux/macOS) checkout of an identical migration hash
+/// differently. On a `VersionMismatch` we reconcile and retry; a checksum that
+/// matches neither line ending is a genuine edit and still fails.
 async fn run_migrations(pool: &SqlitePool) -> Result<(), DbError> {
     match MIGRATOR.run(pool).await {
         Ok(()) => Ok(()),
@@ -60,10 +54,10 @@ async fn reconcile_eol_checksums(pool: &SqlitePool) -> Result<(), DbError> {
             continue;
         };
         if stored_ck.as_slice() == m.checksum.as_ref() {
-            continue; // already canonical
+            continue;
         }
-        // Hash this migration's SQL in both line endings; if either matches the
-        // stored checksum, the SQL (hence schema) is identical — only EOL differs.
+        // If either line-ending variant matches the stored checksum, the SQL
+        // (hence schema) is identical — only EOL differs.
         let lf = m.sql.replace("\r\n", "\n");
         let crlf = lf.replace('\n', "\r\n");
         let matches_eol_variant = [lf.as_bytes(), crlf.as_bytes()]
@@ -80,7 +74,6 @@ async fn reconcile_eol_checksums(pool: &SqlitePool) -> Result<(), DbError> {
                 "reconciled migration checksum (line-ending-only difference)"
             );
         }
-        // else: a real modification — leave it; the retry surfaces the error.
     }
     Ok(())
 }
