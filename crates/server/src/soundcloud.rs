@@ -751,6 +751,7 @@ pub mod signin {
 
     /// Decrypt the isolated profile's cookie store (via `rookie`) and return the
     /// value of the named cookie, if present and non-empty.
+    #[cfg(not(target_os = "windows"))]
     pub async fn extract_cookie(
         browser: Browser,
         profile_root: &Path,
@@ -758,24 +759,13 @@ pub mod signin {
     ) -> Result<Option<String>, String> {
         let db_path =
             pick_cookies_path(profile_root).ok_or_else(|| "no Cookies database yet".to_string())?;
-        let profile_owned = profile_root.to_path_buf();
         let browser_name = rookie_browser_name(browser);
 
         let cookies =
             tokio::task::spawn_blocking(move || -> Result<Vec<rookie::enums::Cookie>, String> {
                 let domains = Some(vec!["soundcloud.com".to_string()]);
-                #[cfg(not(target_os = "windows"))]
-                {
-                    let _ = profile_owned;
-                    let config = rookie::config::get_browser_config(browser_name);
-                    rookie::chromium_based(config, db_path, domains).map_err(|e| e.to_string())
-                }
-                #[cfg(target_os = "windows")]
-                {
-                    let _ = browser_name;
-                    let key_path = profile_owned.join("Local State");
-                    rookie::chromium_based(key_path, db_path, domains).map_err(|e| e.to_string())
-                }
+                let config = rookie::config::get_browser_config(browser_name);
+                rookie::chromium_based(config, db_path, domains).map_err(|e| e.to_string())
             })
             .await
             .map_err(|e| format!("cookie extract task: {e}"))??;
@@ -786,6 +776,19 @@ pub mod signin {
             .map(|c| c.value))
     }
 
+    /// Windows: see [`crate::ytmusic::cookies::extract_from`] — browser-cookie
+    /// import is unsupported (App-Bound Encryption + no `libesedb`).
+    #[cfg(target_os = "windows")]
+    pub async fn extract_cookie(
+        browser: Browser,
+        profile_root: &Path,
+        name: &str,
+    ) -> Result<Option<String>, String> {
+        let _ = (browser, profile_root, name);
+        Err("browser-cookie import isn't supported on Windows".to_string())
+    }
+
+    #[cfg(not(target_os = "windows"))]
     fn rookie_browser_name(browser: Browser) -> &'static str {
         match browser {
             Browser::Brave => "brave",
@@ -796,6 +799,7 @@ pub mod signin {
         }
     }
 
+    #[cfg(not(target_os = "windows"))]
     fn pick_cookies_path(profile_root: &Path) -> Option<PathBuf> {
         [
             profile_root.join("Default").join("Network").join("Cookies"),

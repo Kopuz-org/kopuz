@@ -37,6 +37,12 @@ db = { workspace = true }
 utils = { workspace = true }
 async-trait = { workspace = true }
 
+# Browser-cookie import. Not on Windows: rookie pulls `libesedb` (a bundled C
+# library) there, which can't cross-compile and is unusable anyway since
+# Chromium v20's App-Bound Encryption blocks non-admin cookie decryption.
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+rookie = "0.5"
+
 [[example]]
 name = "duration_probe"
 path = "examples/duration_probe.rs"
