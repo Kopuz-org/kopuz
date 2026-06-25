@@ -1,16 +1,19 @@
-/* Default Theme (matches tailwind.css/main.css) */
+/* Default Theme — warm copper accent (deliberately not the Tailwind/SaaS
+   indigo). The `--color-indigo-*` / `--color-purple-*` var NAMES are kept so the
+   existing utility classes (`bg-indigo-500`, `text-indigo-400`, …) recolour with
+   no markup churn; only the values move to a copper ramp. */
 .theme-default {
     --color-black: #000000;
     --color-white: #ffffff;
     --color-slate-400: #94a3b8;
     --color-slate-500: #64748b;
     --color-green-500: #22c55e;
-    --color-indigo-400: #818cf8;
-    --color-indigo-500: #6366f1;
-    --color-indigo-600: #4f46e5;
-    --color-indigo-900: #312e81;
-    --color-purple-600: #9333ea;
-    --color-purple-700: #7e22ce;
+    --color-indigo-400: #e8a866;
+    --color-indigo-500: #d9842f;
+    --color-indigo-600: #b86a22;
+    --color-indigo-900: #3a2410;
+    --color-purple-600: #cf7a3a;
+    --color-purple-700: #a85f28;
     --color-red-400: #f87171;
     --color-neutral-900: #171717;
 }

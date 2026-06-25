@@ -76,7 +76,6 @@ let
             (s + /.cargo)
             (s + /crates)
             (s + /data)
-            (s + /locales)
 
             (s + /Cargo.toml)
             (s + /Cargo.lock)

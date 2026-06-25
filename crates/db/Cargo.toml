@@ -1,7 +1,16 @@
 [package]
-name = "db"
+name = "kopuz-db"
 version.workspace = true
-edition = "2024"
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+
+[lib]
+name = "db"
 
 [lints]
 workspace = true
@@ -12,16 +21,21 @@ reader = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
-async-trait = "0.1"
+async-trait = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros", "migrate"] }
+sqlx = { workspace = true, features = [
+  "runtime-tokio",
+  "sqlite",
+  "macros",
+  "migrate",
+] }
 tokio = { workspace = true, features = ["rt", "sync"] }
-arc-swap = "1.7"
+arc-swap = { workspace = true }
 directories = { workspace = true }
 # Recompute sqlx's migration checksum (Sha384) to detect line-ending-only diffs.
 sha2 = "0.10"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"] }
+sqlx = { workspace = true, features = ["runtime-tokio", "sqlite"] }

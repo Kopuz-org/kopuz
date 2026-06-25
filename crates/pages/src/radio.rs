@@ -65,7 +65,7 @@ pub fn Radio(props: RadioProps) -> Element {
                 div { class: "mb-6 flex items-end justify-between",
                     div {
                         p {
-                            class: "text-[10px] font-bold tracking-widest uppercase mb-1",
+                            class: "text-[10px] font-bold mb-1",
                             style: "color: rgba(255,255,255,0.35);",
                             "{i18n::t(\"discover\")}"
                         }
@@ -169,7 +169,7 @@ pub fn Radio(props: RadioProps) -> Element {
                 if !filtered.is_empty() {
                     div { class: "flex flex-col",
                         div {
-                            class: "grid px-4 py-2 text-[10px] font-bold uppercase tracking-widest border-b mb-1",
+                            class: "grid px-4 py-2 text-[10px] font-bold border-b mb-1",
                             style: "grid-template-columns: 48px 1fr 1.5fr 180px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);",
                             div {}
                             div { class: "text-left", "{i18n::t(\"radio_station_col\")}" }
@@ -335,7 +335,7 @@ pub fn Radio(props: RadioProps) -> Element {
                         for station in filtered.iter() {
                             div {
                                 key: "{station.id}",
-                                class: "group relative rounded-2xl overflow-hidden border transition-all duration-300 cursor-pointer hover:border-white/15",
+                                class: "group relative rounded-lg overflow-hidden border transition-all duration-300 cursor-pointer hover:border-white/15",
                                 style: "border-color: rgba(255,255,255,0.06); background: rgba(255,255,255,0.03);",
                                 onclick: {
                                     let station_id = station.id.clone();

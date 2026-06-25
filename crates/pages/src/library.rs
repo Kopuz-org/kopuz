@@ -464,7 +464,7 @@ pub fn LibraryPage(
                 if is_modern {
                     div {
                         p {
-                            class: "text-[10px] font-bold tracking-widest uppercase mb-0.5 text-white/35",
+                            class: "text-[10px] font-bold mb-0.5 text-white/35",
                             "{i18n::t(\"library\")}"
                         }
                         h1 { class: "text-2xl font-bold text-white", "{i18n::t(\"your_library\")}" }

@@ -1,7 +1,5 @@
 #[cfg(not(target_os = "android"))]
 use crate::theme_editor::ThemeEditorPage;
-use ::server::provider::ProviderClient;
-
 #[cfg(not(target_os = "android"))]
 fn theme_editor_section(config: Signal<AppConfig>) -> Element {
     rsx! {
@@ -113,60 +111,9 @@ use components::settings_items::{
     ThemeSelector, ToggleSetting,
 };
 use components::settings_popups::{AddRegistryPopup, AddServerPopup, LoginPopup};
-use config::{AppConfig, ArtistPhotoSource, Browser, FetchStrategy, MusicService, OfflineQuality};
+use config::{AppConfig, ArtistPhotoSource, FetchStrategy, MusicService, OfflineQuality};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
-use tracing::Instrument;
-
-async fn validate(cookies: &str) -> bool {
-    ::server::provider::validate_ytmusic_cookies(cookies).await
-}
-
-async fn try_resume(seed: Option<String>) -> Option<String> {
-    if let Some(c) = &seed
-        && validate(c).await
-    {
-        return seed;
-    }
-    if let Some(c) = &seed
-        && let Ok(Some(rotated)) = ::server::ytmusic::verify_session_keepalive::tick(c).await
-        && validate(&rotated).await
-    {
-        return Some(rotated);
-    }
-    None
-}
-
-async fn ensure_signed_in(
-    config_cookies: Option<String>,
-    browser: Browser,
-    server_id: &str,
-) -> Result<String, String> {
-    if let Some(c) = try_resume(config_cookies).await {
-        return Ok(c);
-    }
-
-    let profile = ::server::ytmusic::isolated_profile::profile_dir(server_id);
-    if profile.is_dir() {
-        let from_profile = ::server::ytmusic::cookies::extract_from(browser, &profile)
-            .await
-            .ok();
-        if let Some(c) = try_resume(from_profile).await {
-            return Ok(c);
-        }
-    }
-
-    let cookies = ::server::ytmusic::isolated_profile::launch_signin_and_extract(
-        browser,
-        server_id,
-        std::time::Duration::from_secs(300),
-    )
-    .await?;
-    if !validate(&cookies).await {
-        return Err("Sign-in completed but YT validation still failed".to_string());
-    }
-    Ok(cookies)
-}
 
 #[component]
 pub fn Settings(config: Signal<AppConfig>) -> Element {
@@ -179,9 +126,9 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     let mut show_add_server = use_signal(|| false);
     let mut show_login = use_signal(|| false);
 
-    let mut server_name = use_signal(String::new);
-    let mut server_url = use_signal(String::new);
-    let mut server_service = use_signal(|| MusicService::Jellyfin);
+    let server_name = use_signal(String::new);
+    let server_url = use_signal(String::new);
+    let server_service = use_signal(|| MusicService::Jellyfin);
     let yt_browser = use_signal(|| {
         config
             .peek()
@@ -198,334 +145,71 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     let mut username = use_signal(String::new);
     let mut password = use_signal(String::new);
 
-    let mut error = use_signal(|| Option::<String>::None);
+    let error = use_signal(|| Option::<String>::None);
     let mut login_error = use_signal(|| Option::<String>::None);
-    let mut is_loading = use_signal(|| false);
+    let is_loading = use_signal(|| false);
 
     let mut show_add_registry = use_signal(|| false);
-    let mut registry_url = use_signal(String::new);
-    let mut registry_error = use_signal(|| Option::<String>::None);
-    let mut registry_loading = use_signal(|| false);
+    let registry_url = use_signal(String::new);
+    let registry_error = use_signal(|| Option::<String>::None);
+    let registry_loading = use_signal(|| false);
     let mut registry_toggle_error = use_signal(|| Option::<String>::None);
 
     let handle_add_registry = move |_| {
-        let url = registry_url().trim().to_string();
-        if url.is_empty() {
-            registry_error.set(Some(i18n::t("radio_registry_empty_path").to_string()));
-            return;
-        }
-
-        if config.read().radio_registries.iter().any(|r| r.url == url) {
-            registry_error.set(Some(i18n::t("radio_registry_exists").to_string()));
-            return;
-        }
-
-        registry_loading.set(true);
-        registry_error.set(None);
-
-        spawn(
-            async move {
-                let mut temp_registry = radio::registry::StationRegistry::new();
-                match temp_registry.import_registry(&url).await {
-                    Ok(_) => {
-                        let mut current_config = config.write();
-                        if !current_config.radio_registries.iter().any(|r| r.url == url) {
-                            current_config.radio_registries.push(config::RegistryEntry {
-                                url,
-                                enabled: true,
-                                is_default: false,
-                            });
-                        }
-                        registry_url.set(String::new());
-                        registry_error.set(None);
-                        show_add_registry.set(false);
-                    }
-                    Err(e) => {
-                        registry_error.set(Some(i18n::t_with(
-                            "radio_registry_import_failed",
-                            &[("error", e.to_string())],
-                        )));
-                    }
-                }
-                registry_loading.set(false);
-            }
-            .instrument(tracing::info_span!("radio.import_registry")),
+        crate::settings_actions::add_registry(
+            config,
+            registry_url,
+            registry_error,
+            registry_loading,
+            show_add_registry,
         );
     };
 
     let ytmusic_auto_login = move || {
-        // Prefer the browser already saved on the active server entry
-        // (set during a previous successful sign-in); fall back to the
-        // settings popup's selector for first-time setup.
-        let (browser, existing, server_id) = {
-            let cfg = config.peek();
-            let srv = cfg.server.as_ref();
-            (
-                srv.and_then(|s| s.yt_browser).unwrap_or(*yt_browser.peek()),
-                srv.and_then(|s| s.access_token.clone())
-                    .filter(|t| !t.is_empty()),
-                srv.and_then(|s| s.id.clone()).unwrap_or_default(),
-            )
-        };
-        let mut report = move |msg: String| {
-            error.set(Some(msg.clone()));
-            ctrl.playback_error.set(Some(msg));
-        };
-        spawn(async move {
-            let cookies = match ensure_signed_in(existing, browser, &server_id).await {
-                Ok(c) => c,
-                Err(e) => {
-                    report(format!("YT Music sign-in failed ({browser}): {e}"));
-                    return;
-                }
-            };
-
-            let yt_user_id =
-                ::server::ytmusic::derive_user_id(&cookies).unwrap_or_else(|| "me".to_string());
-            {
-                let mut cfg = config.write();
-                let saved_id = cfg.server.as_ref().and_then(|s| s.id.clone());
-                if let Some(srv) = cfg.server.as_mut() {
-                    srv.access_token = Some(cookies);
-                    srv.user_id = Some(yt_user_id);
-                    srv.yt_browser = Some(browser);
-                }
-                if let Some(id) = saved_id
-                    && let Some(saved) = cfg.servers.iter_mut().find(|s| s.id == id)
-                {
-                    saved.yt_browser = Some(browser);
-                }
-            }
-            error.set(None);
-        });
-    };
-
-    // SoundCloud sign-in: launch the chosen browser at soundcloud.com/signin in
-    // an isolated profile, extract the `oauth_token` cookie, and store it on the
-    // active server (mirrors `ytmusic_auto_login`).
-    let soundcloud_auto_login = move || {
-        let (browser, server_id) = {
-            let cfg = config.peek();
-            let srv = cfg.server.as_ref();
-            (
-                srv.and_then(|s| s.yt_browser).unwrap_or(*yt_browser.peek()),
-                srv.and_then(|s| s.id.clone()).unwrap_or_default(),
-            )
-        };
-        let mut report = move |msg: String| {
-            error.set(Some(msg.clone()));
-            ctrl.playback_error.set(Some(msg));
-        };
-        spawn(async move {
-            let token = match ::server::soundcloud::signin::launch_signin_and_extract(
-                browser,
-                &server_id,
-                std::time::Duration::from_secs(300),
-            )
-            .await
-            {
-                Ok(t) => t,
-                Err(e) => {
-                    report(format!("SoundCloud sign-in failed ({browser}): {e}"));
-                    return;
-                }
-            };
-            let user_id = ::server::soundcloud::derive_user_id(&token)
-                .await
-                .unwrap_or_else(|| "me".to_string());
-            {
-                let mut cfg = config.write();
-                let saved_id = cfg.server.as_ref().and_then(|s| s.id.clone());
-                if let Some(srv) = cfg.server.as_mut() {
-                    srv.access_token = Some(token);
-                    srv.user_id = Some(user_id);
-                    srv.yt_browser = Some(browser);
-                }
-                if let Some(id) = saved_id
-                    && let Some(saved) = cfg.servers.iter_mut().find(|s| s.id == id)
-                {
-                    saved.yt_browser = Some(browser);
-                }
-            }
-            error.set(None);
-        });
+        crate::settings_actions::ytmusic_auto_login(config, yt_browser, error, ctrl.playback_error);
     };
 
     let handle_add_server = move |_| {
-        let selected_service = server_service();
-        let is_ytmusic = selected_service == MusicService::YtMusic;
-        let is_soundcloud = selected_service == MusicService::SoundCloud;
-        let is_browser_signin = selected_service.uses_browser_signin();
-
-        // Browser-sign-in backends (YT, SoundCloud) have no user-entered URL.
-        if !is_browser_signin && !server_url().starts_with("http") {
-            error.set(Some(i18n::t("invalid_server_url").to_string()));
-            return;
-        }
-
-        // Snapshot the synchronous inputs so the async block doesn't have
-        // to re-read signals (which it could, but this keeps the data
-        // flow obvious).
-        let name_input = server_name();
-        let url_input = server_url();
-
-        spawn(
-            async move {
-                let display_name = if name_input.is_empty() {
-                    format!("Local {}", selected_service.display_name())
-                } else {
-                    name_input
-                };
-
-                let effective_url = if is_ytmusic {
-                    "https://music.youtube.com".to_string()
-                } else if is_soundcloud {
-                    "https://soundcloud.com".to_string()
-                } else {
-                    url_input
-                };
-
-                let mut new_server = config::MusicServer::new_with_service(
-                    display_name,
-                    effective_url,
-                    selected_service,
-                );
-                let is_anon = is_ytmusic && *yt_anonymous.peek();
-                new_server.yt_anonymous = is_anon;
-                if is_anon {
-                    // Mark anonymous mode at the server level. Empty access
-                    // token + yt_anonymous=true is what get_stream /
-                    // discover etc. read as "no cookies, public surfaces
-                    // only".
-                    new_server.access_token = Some(String::new());
-                }
-                // Persist the chosen browser on the active server too (not just the
-                // saved-list entry), so the sign-in flow knows which browser to use.
-                // Applies to every browser-sign-in backend (YT, SoundCloud).
-                new_server.yt_browser = (is_browser_signin && !is_anon).then(|| *yt_browser.peek());
-
-                let saved = config::SavedServer {
-                    id: new_server.id.clone().unwrap_or_default(),
-                    name: new_server.name.clone(),
-                    url: new_server.url.clone(),
-                    service: new_server.service,
-                    yt_browser: (is_browser_signin && !is_anon).then(|| *yt_browser.peek()),
-                    yt_anonymous: is_anon,
-                };
-                {
-                    let mut cfg = config.write();
-                    cfg.add_saved_server(saved);
-                    cfg.active_source = new_server
-                        .id
-                        .clone()
-                        .map_or(config::Source::Local, config::Source::Server);
-                    cfg.server = Some(new_server);
-                }
-
-                server_name.set(String::new());
-                server_url.set(String::new());
-                server_service.set(MusicService::Jellyfin);
-                error.set(None);
-                show_add_server.set(false);
-
-                if is_ytmusic && !is_anon {
-                    ytmusic_auto_login();
-                } else if is_soundcloud {
-                    soundcloud_auto_login();
-                } else if !is_browser_signin {
-                    show_login.set(true);
-                }
-                // Anonymous YT needs no further setup — the server entry
-                // is already active and playable.
-            }
-            .instrument(tracing::info_span!("yt.anon_setup")),
+        crate::settings_actions::add_server(
+            config,
+            server_name,
+            server_url,
+            server_service,
+            yt_browser,
+            yt_anonymous,
+            error,
+            show_add_server,
+            show_login,
+            ctrl.playback_error,
         );
     };
 
     let db_for_switch = use_context::<hooks::ReadDb>();
     let handle_switch_server = move |id: String| {
-        let db = db_for_switch.clone();
-        spawn(async move {
-            let Some(is_ytmusic) = config
-                .peek()
-                .find_saved_server(&id)
-                .map(|s| s.service == MusicService::YtMusic)
-            else {
-                return;
-            };
-            // Shared switch (sidebar + Settings): loads creds and sets the active
-            // source + server snapshot together. `usable` ⇒ has stored creds or is
-            // anonymous YT; otherwise launch the right sign-in flow.
-            let usable =
-                hooks::source_switch::apply_source_switch(config, db, config::Source::Server(id))
-                    .await;
-            if !usable {
-                if is_ytmusic {
-                    ytmusic_auto_login();
-                } else {
-                    show_login.set(true);
-                }
-            }
-        });
+        crate::settings_actions::switch_server(
+            config,
+            db_for_switch.clone(),
+            id,
+            yt_browser,
+            error,
+            show_login,
+            ctrl.playback_error,
+        );
     };
 
     let handle_delete_saved = move |id: String| {
-        let service = config.peek().find_saved_server(&id).map(|s| s.service);
-        config.write().remove_saved_server(&id);
-        // Wipe the isolated browser-profile dir of browser-sign-in backends.
-        match service {
-            Some(MusicService::YtMusic) => {
-                let _ = ::server::ytmusic::isolated_profile::delete_profile(&id);
-            }
-            Some(MusicService::SoundCloud) => {
-                let _ = ::server::soundcloud::signin::delete_profile(&id);
-            }
-            _ => {}
-        }
+        crate::settings_actions::delete_saved(config, id);
     };
 
     let handle_login = move |_| {
-        if username().is_empty() || password().is_empty() {
-            login_error.set(Some(i18n::t("username_and_password_required").to_string()));
-            return;
-        }
-
-        if let Some(server) = &config.read().server {
-            let service = server.service;
-            let server_url = server.url.clone();
-            let device_id = config.read().device_id.clone();
-            let user = username();
-            let pass = password();
-
-            is_loading.set(true);
-            login_error.set(None);
-
-            spawn(async move {
-                let remote = ProviderClient::new(service, server_url, device_id);
-                let result = remote.login(&user, &pass).await;
-
-                is_loading.set(false);
-
-                match result {
-                    Ok(session) => {
-                        if let Some(server) = config.write().server.as_mut() {
-                            server.access_token = Some(session.access_token);
-                            server.user_id = Some(session.user_id);
-                        }
-                        username.set(String::new());
-                        password.set(String::new());
-                        login_error.set(None);
-                        show_login.set(false);
-                    }
-                    Err(e) => {
-                        login_error.set(Some(i18n::t_with(
-                            "login_failed",
-                            &[("error", e.to_string())],
-                        )));
-                    }
-                }
-            });
-        }
+        crate::settings_actions::login_with_password(
+            config,
+            username,
+            password,
+            login_error,
+            is_loading,
+            show_login,
+        );
     };
 
     rsx! {

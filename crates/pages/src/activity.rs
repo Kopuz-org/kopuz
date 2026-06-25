@@ -113,7 +113,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
                     div {
                         if is_modern {
                             p {
-                                class: "text-[10px] font-bold tracking-widest uppercase mb-0.5",
+                                class: "text-[10px] font-bold mb-0.5",
                                 style: "color: rgba(255,255,255,0.35);",
                                 "{i18n::t(\"library\")}"
                             }
@@ -132,7 +132,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
                     }
                 }
 
-                div { class: "flex items-center px-4 py-3 mb-2 text-xs font-semibold tracking-wider text-slate-400 uppercase border-b border-white/10",
+                div { class: "flex items-center px-4 py-3 mb-2 text-xs font-semibold text-slate-400 border-b border-white/10",
                     div { class: "w-12 shrink-0 text-center", "#" }
                     div { class: "flex-1 min-w-0 pr-4", "{i18n::t(\"title\")}" }
                     div { class: "w-48 lg:w-64 shrink-0 hidden md:block pr-4", "{i18n::t(\"album\")}" }

@@ -33,7 +33,7 @@ pub fn Titlebar() -> Element {
                 div {
                     class: "absolute inset-0 flex items-center justify-center pointer-events-none",
                     span {
-                        class: "text-[11px] text-white/35 tracking-[0.2em] font-mono uppercase",
+                        class: "text-[11px] text-white/35 font-mono",
                         "Kopuz"
                     }
                 }

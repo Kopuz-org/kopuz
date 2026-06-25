@@ -1,15 +1,24 @@
 [package]
-name = "scrobble"
+name = "kopuz-scrobble"
 version.workspace = true
-edition = "2024"
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+
+[lib]
+name = "scrobble"
 
 [lints]
 workspace = true
 
 [dependencies]
-md5 = "0.8"
-tracing = "0.1"
-reqwest.workspace = true
+md5 = { workspace = true }
+tracing = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
 config.workspace = true
 serde.workspace = true
 serde_json.workspace = true

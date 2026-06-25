@@ -836,7 +836,7 @@ fn YtAlbumDetail(
                 // Left meta column.
                 div { class: "md:w-[320px] shrink-0 flex flex-col items-center md:items-start text-center md:text-left gap-5 md:pt-2",
                     div {
-                        class: "w-full max-w-[300px] aspect-square rounded-2xl bg-stone-800 overflow-hidden relative shrink-0 shadow-2xl shadow-black/40",
+                        class: "w-full max-w-[300px] aspect-square rounded-lg bg-stone-800 overflow-hidden relative shrink-0 shadow-2xl shadow-black/40",
                         if let Some(url) = &local_cover {
                             img { src: "{url.as_ref()}", class: "w-full h-full object-cover", decoding: "async" }
                         } else {

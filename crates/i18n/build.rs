@@ -2,7 +2,8 @@ use std::{env, fs, path::PathBuf};
 
 fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-    let locales_dir = PathBuf::from(&manifest_dir).join("../../locales");
+    let manifest_dir = PathBuf::from(manifest_dir);
+    let locales_dir = manifest_dir.join("locales");
 
     println!("cargo:rerun-if-changed={}", locales_dir.display());
 
@@ -42,8 +43,10 @@ fn main() {
     code.push_str("pub fn get_ftl_content(lang: &str) -> Option<&'static str> {\n");
     code.push_str("    match lang {\n");
     for (lang_code, _) in &languages {
+        let path = locales_dir.join(format!("{lang_code}.ftl"));
+        let path = path.display();
         code.push_str(&format!(
-            "        \"{lang_code}\" => Some(include_str!(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../../locales/{lang_code}.ftl\"))),\n"
+            "        \"{lang_code}\" => Some(include_str!(r#\"{path}\"#)),\n"
         ));
     }
     code.push_str("        _ => None,\n");

@@ -1,25 +1,139 @@
 [workspace]
-members = [
-   "crates/kopuz",
-   "crates/components",
-   "crates/hooks",
-   "crates/pages",
-   "crates/player",
-   "crates/reader",
-   "crates/server",
-   "crates/utils",
-   "crates/config",
-   "crates/db",
-   "crates/kopuz_route",
-   "crates/discord-presence",
-   "crates/scrobble",
-   "crates/i18n",
-   "crates/radio",
-]
+members = ["crates/*"]
 resolver = "3"
 
 [workspace.package]
 version = "0.7.0"
+edition = "2024"
+rust-version = "1.95.0"
+description = "A modern, lightweight music player built with Rust and Dioxus."
+license = "MIT"
+repository = "https://github.com/Kopuz-org/kopuz"
+homepage = "https://github.com/Kopuz-org/kopuz"
+keywords = ["music", "player", "audio", "dioxus"]
+
+[workspace.dependencies]
+dioxus = { version = "0.7.9", features = [] }
+getrandom = { version = "0.4", features = ["wasm_js"] }
+web-sys = { version = "0.3", features = [
+  "AudioContext",
+  "AudioDestinationNode",
+  "AudioNode",
+  "AudioParam",
+  "BiquadFilterNode",
+  "BiquadFilterType",
+  "ChannelMergerNode",
+  "ChannelSplitterNode",
+  "GainNode",
+  "HtmlAudioElement",
+  "HtmlMediaElement",
+  "MediaElementAudioSourceNode",
+  "MediaError",
+  "Window",
+  "Storage",
+] }
+wasm-bindgen = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = [
+  "rt",
+  "time",
+  "sync",
+  "macros",
+  "io-util",
+] }
+async-recursion = "1.0"
+discord-rich-presence = "1.1.0"
+lofty = "0.24.0"
+image = { version = "0.25", default-features = false, features = [
+  "jpeg",
+  "png",
+  "webp",
+] }
+rfd = "0.17.2"
+percent-encoding = "2.3.2"
+dotenvy = "0.15"
+http = "1.4.0"
+uuid = { version = "1.20.0", features = [
+  "v4",
+  "fast-rng",
+  "macro-diagnostics",
+  "js",
+] }
+cpal = "0.17"
+symphonia = { version = "0.6", features = ["all"] }
+rb = "0.4"
+jellyfin-sdk-rust = "0.1.2"
+reqwest = { version = "0.13", default-features = false, features = [
+  "rustls",
+  "http2",
+  "charset",
+  "query",
+  "form",
+] }
+rand = "0.10"
+web-time = "1.1"
+gloo-timers = { version = "0.4", features = ["futures"] }
+directories = "6.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = [
+  "env-filter",
+  "fmt",
+  "json",
+] }
+tracing-appender = "0.2"
+ctrlc = "3.5"
+webbrowser = "1.2.1"
+base64 = "0.22"
+async-trait = "0.1"
+sqlx = { version = "0.8", default-features = false }
+arc-swap = "1.7"
+fluent-bundle = "0.16"
+unic-langid = "0.9"
+urlencoding = "2.1.3"
+webkit2gtk = "2.0"
+libloading = "0.8"
+objc2 = "0.6.4"
+objc2-foundation = "0.3.2"
+objc2-media-player = "0.3.2"
+objc2-app-kit = "0.3.2"
+objc2-av-foundation = "0.3.2"
+objc2-avf-audio = "0.3.2"
+block2 = "0.6"
+windows = "0.62"
+winres = "0.1"
+symphonia-adapter-libopus = "0.3"
+mpris-server = "0.10.0"
+jni = "0.21"
+ndk-context = "0.1"
+thiserror = "2.0"
+tokio-tungstenite = "0.29.0"
+futures-util = "0.3.30"
+tempfile = "3.8.1"
+md5 = "0.8"
+sha1 = "0.10"
+httpdate = "1"
+hex = "0.4"
+rookie = "0.5"
+color-thief = "0.2.2"
+time = "0.3"
+
+# Workspace components
+i18n = { package = "kopuz-i18n", version = "0.7.0", path = "./crates/i18n" }
+player = { package = "kopuz-player", version = "0.7.0", path = "./crates/player" }
+reader = { package = "kopuz-reader", version = "0.7.0", path = "./crates/reader" }
+components = { package = "kopuz-components", version = "0.7.0", path = "./crates/components" }
+hooks = { package = "kopuz-hooks", version = "0.7.0", path = "./crates/hooks" }
+pages = { package = "kopuz-pages", version = "0.7.0", path = "./crates/pages" }
+utils = { package = "kopuz-utils", version = "0.7.0", path = "./crates/utils" }
+config = { package = "kopuz-config", version = "0.7.0", path = "./crates/config" }
+db = { package = "kopuz-db", version = "0.7.0", path = "./crates/db" }
+kopuz = { version = "0.7.0", path = "./crates/kopuz" }
+server = { package = "kopuz-server", version = "0.7.0", path = "./crates/server" }
+kopuz_route = { package = "kopuz-route", version = "0.7.0", path = "./crates/kopuz_route" }
+discord-presence = { package = "kopuz-discord-presence", version = "0.7.0", path = "./crates/discord-presence" }
+scrobble = { package = "kopuz-scrobble", version = "0.7.0", path = "./crates/scrobble" }
+radio = { package = "kopuz-radio", version = "0.7.0", path = "./crates/radio" }
 
 # Steer code toward the tracing subscriber (see crates/kopuz/src/logging.rs).
 # Inherited per-crate via `[lints] workspace = true`. Build scripts (cargo:
@@ -27,52 +141,6 @@ version = "0.7.0"
 [workspace.lints.clippy]
 print_stdout = "deny"
 print_stderr = "deny"
-
-[workspace.dependencies]
-dioxus = { version = "0.7.9", features = [] }
-getrandom = { version = "0.4", features = ["wasm_js"] }
-web-sys = { version = "0.3", features = ["AudioContext", "AudioDestinationNode", "AudioNode", "AudioParam", "BiquadFilterNode", "BiquadFilterType", "ChannelMergerNode", "ChannelSplitterNode", "GainNode", "HtmlAudioElement", "HtmlMediaElement", "MediaElementAudioSourceNode", "MediaError", "Window", "Storage"] }
-wasm-bindgen = "0.2"
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-tokio = { version = "1.0", features = ["rt", "time", "sync", "macros", "io-util"] }
-async-recursion = "1.0"
-discord-rich-presence = "1.1.0"
-lofty = "0.24.0"
-image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
-rfd = "0.17.2"
-percent-encoding = "2.3.2"
-dotenvy = "0.15"
-http = "1.4.0"
-uuid = { version = "1.20.0", features = ["v4", "fast-rng", "macro-diagnostics", "js"] }
-cpal = "0.17"
-symphonia = { version = "0.6", features = ["all"] }
-rb = "0.4"
-jellyfin-sdk-rust = "0.1.2"
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "charset", "query", "form"] }
-rand = "0.10"
-web-time = "1.1"
-gloo-timers = { version = "0.4", features = ["futures"] }
-directories = "6.0"
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
-tracing-appender = "0.2"
-ctrlc = "3.5"
-i18n = { path = "./crates/i18n" }
-player = { path = "./crates/player" }
-reader = { path = "./crates/reader" }
-components = { path = "./crates/components" }
-hooks = { path = "./crates/hooks" }
-pages = { path = "./crates/pages" }
-utils = { path = "./crates/utils" }
-config = { path = "./crates/config" }
-db = { path = "./crates/db" }
-kopuz = { path = "./crates/kopuz" }
-server = { path = "./crates/server" }
-kopuz_route = { path = "./crates/kopuz_route" }
-discord-presence = { path = "./crates/discord-presence" }
-scrobble = { path = "./crates/scrobble" }
-radio = { path = "./crates/radio" }
 
 [profile.release]
 strip = "symbols"

@@ -659,7 +659,7 @@ pub fn FavoritesBody(
                 }
             } else if !is_empty {
                 div {
-                    class: "flex items-center gap-3 mb-4 px-2 text-sm font-medium text-slate-500 uppercase tracking-wider",
+                    class: "flex items-center gap-3 mb-4 px-2 text-sm font-medium text-slate-500",
                     button {
                         class: if displayed_tracks.iter().all(|(track, _)| selected_tracks.read().contains(&track.id)) {
                             "w-4 h-4 rounded border border-indigo-400 bg-indigo-500 text-white flex items-center justify-center transition-colors"
@@ -685,9 +685,9 @@ pub fn FavoritesBody(
                 }
                 div {
                     class: if is_modern {
-                        "grid px-3 py-2 text-[10px] font-bold uppercase tracking-widest border-b mb-1"
+                        "grid px-3 py-2 text-[10px] font-bold border-b mb-1"
                     } else {
-                        "grid gap-6 px-2 py-2 border-b border-white/5 text-sm font-medium text-slate-500 mb-2 uppercase tracking-wider"
+                        "grid gap-6 px-2 py-2 border-b border-white/5 text-sm font-medium text-slate-500 mb-2"
                     },
                     style: if is_modern {
                         "grid-template-columns: 40px 1fr 180px 180px 56px 40px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);"
@@ -696,25 +696,25 @@ pub fn FavoritesBody(
                     },
                     div {}
                     button {
-                        class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
+                        class: "flex items-center gap-1 text-left hover:text-white transition-colors",
                         onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Title),
                         "{i18n::t(\"title\")}"
                         i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Title)} text-[10px]" }
                     }
                     button {
-                        class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
+                        class: "flex items-center gap-1 text-left hover:text-white transition-colors",
                         onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Artist),
                         "{i18n::t(\"artist\")}"
                         i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Artist)} text-[10px]" }
                     }
                     button {
-                        class: "flex items-center gap-1 uppercase tracking-wider text-left hover:text-white transition-colors",
+                        class: "flex items-center gap-1 text-left hover:text-white transition-colors",
                         onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Album),
                         "{i18n::t(\"album\")}"
                         i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Album)} text-[10px]" }
                     }
                     button {
-                        class: "flex items-center justify-end gap-1 uppercase tracking-wider text-right hover:text-white transition-colors",
+                        class: "flex items-center justify-end gap-1 text-right hover:text-white transition-colors",
                         onclick: move |_| showcase::toggle_sort_state(sort_state, SortField::Duration),
                         i { class: "fa-regular fa-clock" }
                         i { class: "{showcase::sort_icon(*sort_state.read(), SortField::Duration)} text-[10px]" }

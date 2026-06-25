@@ -29,7 +29,7 @@ pub fn FavoritesPage(
             if is_modern {
                 div { class: "mb-6",
                     p {
-                        class: "text-[10px] font-bold tracking-widest uppercase mb-1",
+                        class: "text-[10px] font-bold mb-1",
                         style: "color: rgba(255,255,255,0.35);",
                         "{i18n::t(\"library\")}"
                     }

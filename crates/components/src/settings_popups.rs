@@ -24,7 +24,7 @@ pub fn AddServerPopup(
         MusicService::SoundCloud => "soundcloud",
     };
 
-    let server_name_optional = i18n::t("server_name_optional").to_string();
+    let server_name_label = i18n::t("server_name").to_string();
     let server_url_placeholder = i18n::t("server_url_placeholder").to_string();
     let custom_manual = i18n::t("custom_manual").to_string();
     let cancel_text = i18n::t("cancel").to_string();
@@ -46,7 +46,7 @@ pub fn AddServerPopup(
                 }
 
                 input {
-                    placeholder: "{server_name_optional}",
+                    placeholder: "{server_name_label}",
                     value: "{server_name()}",
                     oninput: move |e| server_name.set(e.value()),
                     onkeydown: move |e| e.stop_propagation()
