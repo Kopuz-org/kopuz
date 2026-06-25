@@ -3,8 +3,11 @@
 
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 
+mod source;
 mod views;
+pub use source::{Browser, JellyfinServer, MusicServer, MusicService, SavedServer, Source};
 pub use views::{IntegrationConfig, LibraryConfig, PlaybackConfig, ServerAuth, UiConfig};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -137,79 +140,6 @@ pub struct YtdlpHistoryEntry {
 pub struct CustomTheme {
     pub name: String,
     pub vars: HashMap<String, String>,
-}
-use std::path::PathBuf;
-
-/// Where a track/playlist/favorite comes from, and what the app is currently
-/// sourcing from: the local library, or a specific media server (carrying its
-/// id). One type-safe serde value — the old `MusicSource` mode plus the separate
-/// `active_server_id` string, collapsed. The DB persists it as the `source`
-/// column (`"local"` or the server id) and re-exports this type.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
-pub enum Source {
-    #[default]
-    Local,
-    Server(String),
-}
-
-impl Source {
-    /// The `source` column value: `"local"` or the server id.
-    pub fn as_str(&self) -> &str {
-        match self {
-            Source::Local => "local",
-            Source::Server(id) => id.as_str(),
-        }
-    }
-
-    /// Build from a stored `source` column value.
-    pub fn from_column(s: &str) -> Self {
-        if s == "local" {
-            Source::Local
-        } else {
-            Source::Server(s.to_owned())
-        }
-    }
-
-    /// The server id, if this is a server source.
-    pub fn server_id(&self) -> Option<&str> {
-        match self {
-            Source::Server(id) => Some(id),
-            Source::Local => None,
-        }
-    }
-}
-
-// Source capabilities now live on the `MediaSource` trait (`server::source::
-// Capabilities`): each impl declares its own, so the UI reads them off the
-// resolved source instead of a central `match`. (Was `config::SourceCaps`.)
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
-pub enum MusicService {
-    #[default]
-    Jellyfin,
-    #[serde(alias = "Navidrome")]
-    Subsonic,
-    Custom,
-    YtMusic,
-    SoundCloud,
-}
-
-impl MusicService {
-    pub fn display_name(&self) -> &'static str {
-        match self {
-            Self::Jellyfin => "Jellyfin",
-            Self::Subsonic => "Subsonic",
-            Self::Custom => "Custom",
-            Self::YtMusic => "YouTube Music",
-            Self::SoundCloud => "SoundCloud",
-        }
-    }
-
-    /// Backends that authenticate via a browser sign-in window (OAuth/cookies)
-    /// rather than a URL + username/password form.
-    pub fn uses_browser_signin(&self) -> bool {
-        matches!(self, Self::YtMusic | Self::SoundCloud)
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -656,150 +586,6 @@ pub struct AppConfig {
     pub enable_musixmatch_lyrics: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct MusicServer {
-    pub name: String,
-    pub url: String,
-    #[serde(default)]
-    pub service: MusicService,
-    pub access_token: Option<String>,
-    pub user_id: Option<String>,
-    #[serde(default)]
-    pub id: Option<String>,
-    /// For `MusicService::YtMusic` only: which Chromium-family browser
-    /// the cookies were extracted from. Lets boot-time refresh hit the
-    /// right browser directly instead of falling through every
-    /// candidate.
-    #[serde(default)]
-    pub yt_browser: Option<Browser>,
-    /// For `MusicService::YtMusic` only: anonymous mode — no sign-in,
-    /// no cookies. Browse + play public surfaces work; Liked / Library
-    /// Playlists / follow / like are disabled. Set when the user picks
-    /// "Continue without signing in" (the only option on Windows for
-    /// now — see isolated_profile.rs).
-    #[serde(default)]
-    pub yt_anonymous: bool,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Browser {
-    Chrome,
-    Chromium,
-    Brave,
-    Edge,
-    Vivaldi,
-}
-
-impl Browser {
-    pub const ALL: &'static [Browser] = &[
-        Browser::Chrome,
-        Browser::Chromium,
-        Browser::Brave,
-        Browser::Edge,
-        Browser::Vivaldi,
-    ];
-
-    /// The stable id used in URL routes, settings UI option values,
-    /// libsecret lookups, etc.
-    pub fn id(self) -> &'static str {
-        match self {
-            Browser::Chrome => "chrome",
-            Browser::Chromium => "chromium",
-            Browser::Brave => "brave",
-            Browser::Edge => "edge",
-            Browser::Vivaldi => "vivaldi",
-        }
-    }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Browser::Chrome => "Chrome",
-            Browser::Chromium => "Chromium",
-            Browser::Brave => "Brave",
-            Browser::Edge => "Edge",
-            Browser::Vivaldi => "Vivaldi",
-        }
-    }
-
-    pub fn from_id(s: &str) -> Option<Browser> {
-        Browser::ALL.iter().copied().find(|b| b.id() == s)
-    }
-}
-
-impl std::fmt::Display for Browser {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.label())
-    }
-}
-
-pub type JellyfinServer = MusicServer;
-
-impl MusicServer {
-    pub fn new(name: String, url: String) -> Self {
-        Self::new_with_service(name, url, MusicService::Jellyfin)
-    }
-
-    pub fn new_with_service(name: String, url: String, service: MusicService) -> Self {
-        Self {
-            name,
-            // trim once here so every consumer gets a clean url to prevent broken links
-            url: url.trim_end_matches('/').to_string(),
-            service,
-            access_token: None,
-            user_id: None,
-            id: Some(uuid::Uuid::new_v4().to_string()),
-            yt_browser: None,
-            yt_anonymous: false,
-        }
-    }
-
-    pub fn yt_browser(&self) -> Option<Browser> {
-        self.yt_browser
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SavedServer {
-    pub id: String,
-    pub name: String,
-    pub url: String,
-    #[serde(default)]
-    pub service: MusicService,
-    /// Persisted browser choice for YT Music servers — without this, a
-    /// "switch to YT" click re-runs the sign-in flow against whatever
-    /// the popup's default browser was (Chrome) instead of the one the
-    /// user actually has installed.
-    #[serde(default)]
-    pub yt_browser: Option<Browser>,
-    /// Persisted anonymous-mode flag — when true a "switch to YT"
-    /// click skips the sign-in launch entirely and runs anonymously.
-    #[serde(default)]
-    pub yt_anonymous: bool,
-}
-
-impl SavedServer {
-    pub fn new(name: String, url: String, service: MusicService) -> Self {
-        Self {
-            id: uuid::Uuid::new_v4().to_string(),
-            name,
-            url: url.trim_end_matches('/').to_string(),
-            service,
-            yt_browser: None,
-            yt_anonymous: false,
-        }
-    }
-
-    pub fn matches(&self, server: &MusicServer) -> bool {
-        if let Some(sid) = server.id.as_ref()
-            && sid == &self.id
-        {
-            return true;
-        }
-        self.url == server.url && self.service == server.service
-    }
-}
-
 fn default_theme() -> String {
     "default".to_string()
 }
@@ -1028,22 +814,20 @@ impl AppConfig {
     }
 }
 
-impl Default for MusicServer {
-    fn default() -> Self {
-        Self {
-            name: String::new(),
-            url: String::new(),
-            service: MusicService::Jellyfin,
-            access_token: None,
-            user_id: None,
-            id: None,
-            yt_browser: None,
-            yt_anonymous: false,
-        }
-    }
-}
-
 impl AppConfig {
+    pub fn clear_active_server(&mut self) {
+        self.active_source = Source::Local;
+        self.server = None;
+        self.source_explicitly_set = true;
+    }
+
+    pub fn set_active_server_snapshot(&mut self, server: MusicServer) {
+        let source = server.id.clone().map_or(Source::Local, Source::Server);
+        self.active_source = source;
+        self.server = Some(server);
+        self.source_explicitly_set = true;
+    }
+
     pub fn active_service(&self) -> Option<MusicService> {
         self.active_source.server_id()?;
         self.server.as_ref().map(|server| server.service)
