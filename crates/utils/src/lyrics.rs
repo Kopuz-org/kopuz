@@ -43,6 +43,81 @@ pub enum Lyrics {
     Plain(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LyricsServerAuth {
+    pub url: String,
+    pub token: Option<String>,
+    pub user_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LyricsRequest {
+    pub artist: String,
+    pub title: String,
+    pub album: String,
+    pub duration: u64,
+    pub track_path: String,
+    pub server: Option<LyricsServerAuth>,
+    pub prefer_local: bool,
+    pub enable_musixmatch: bool,
+}
+
+impl LyricsRequest {
+    pub fn new(
+        artist: impl Into<String>,
+        title: impl Into<String>,
+        album: impl Into<String>,
+        duration: u64,
+        track_path: impl Into<String>,
+    ) -> Self {
+        Self {
+            artist: artist.into(),
+            title: title.into(),
+            album: album.into(),
+            duration,
+            track_path: track_path.into(),
+            server: None,
+            prefer_local: false,
+            enable_musixmatch: false,
+        }
+    }
+
+    pub fn with_server(
+        mut self,
+        url: Option<&str>,
+        token: Option<&str>,
+        user_id: Option<&str>,
+    ) -> Self {
+        self.server = url.map(|url| LyricsServerAuth {
+            url: url.to_string(),
+            token: token.map(ToString::to_string),
+            user_id: user_id.map(ToString::to_string),
+        });
+        self
+    }
+
+    pub fn prefer_local(mut self, value: bool) -> Self {
+        self.prefer_local = value;
+        self
+    }
+
+    pub fn enable_musixmatch(mut self, value: bool) -> Self {
+        self.enable_musixmatch = value;
+        self
+    }
+
+    fn cache_key(&self) -> String {
+        lyrics_cache_key(
+            &self.artist,
+            &self.title,
+            &self.album,
+            self.duration,
+            &self.track_path,
+            self.enable_musixmatch,
+        )
+    }
+}
+
 const LYRICS_CACHE_CAPACITY: usize = 256;
 const MUSIXMATCH_ROOT_URL: &str = "https://apic-desktop.musixmatch.com/ws/1.1/";
 const PAXSENIX_ROOT_URL: &str = "https://lyrics.paxsenix.org";
@@ -353,7 +428,22 @@ struct PaxsenixYoutubeSearchResult {
 // skip_all, not skip(track_path): a bare skip auto-records every other arg
 // as a span field, which would leak server_token (and url/user_id) into the
 // trace + log. Record only artist/title, explicitly.
-#[tracing::instrument(name = "lyrics.fetch", skip_all, fields(artist = %artist, title = %title))]
+#[tracing::instrument(name = "lyrics.fetch", skip_all, fields(artist = %request.artist, title = %request.title))]
+pub async fn fetch_lyrics_for_request(request: &LyricsRequest) -> Option<Lyrics> {
+    fetch_lyrics_with_progress(request, true, |_| {}).await
+}
+
+pub async fn fetch_lyrics_progressive_for_request<F>(
+    request: &LyricsRequest,
+    on_progress: F,
+) -> Option<Lyrics>
+where
+    F: FnMut(Lyrics),
+{
+    fetch_lyrics_with_progress(request, true, on_progress).await
+}
+
+#[deprecated(note = "use LyricsRequest with fetch_lyrics_for_request")]
 #[allow(clippy::too_many_arguments)]
 pub async fn fetch_lyrics(
     artist: &str,
@@ -367,23 +457,14 @@ pub async fn fetch_lyrics(
     prefer_local: bool,
     enable_musixmatch: bool,
 ) -> Option<Lyrics> {
-    fetch_lyrics_with_progress(
-        artist,
-        title,
-        album,
-        duration,
-        track_path,
-        server_url,
-        server_token,
-        server_user_id,
-        prefer_local,
-        enable_musixmatch,
-        true,
-        |_| {},
-    )
-    .await
+    let request = LyricsRequest::new(artist, title, album, duration, track_path)
+        .with_server(server_url, server_token, server_user_id)
+        .prefer_local(prefer_local)
+        .enable_musixmatch(enable_musixmatch);
+    fetch_lyrics_for_request(&request).await
 }
 
+#[deprecated(note = "use LyricsRequest with fetch_lyrics_progressive_for_request")]
 #[allow(clippy::too_many_arguments)]
 pub async fn fetch_lyrics_progressive<F>(
     artist: &str,
@@ -401,58 +482,47 @@ pub async fn fetch_lyrics_progressive<F>(
 where
     F: FnMut(Lyrics),
 {
-    fetch_lyrics_with_progress(
-        artist,
-        title,
-        album,
-        duration,
-        track_path,
-        server_url,
-        server_token,
-        server_user_id,
-        prefer_local,
-        enable_musixmatch,
-        true,
-        on_progress,
-    )
-    .await
+    let request = LyricsRequest::new(artist, title, album, duration, track_path)
+        .with_server(server_url, server_token, server_user_id)
+        .prefer_local(prefer_local)
+        .enable_musixmatch(enable_musixmatch);
+    fetch_lyrics_progressive_for_request(&request, on_progress).await
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn fetch_lyrics_with_progress<F>(
-    artist: &str,
-    title: &str,
-    album: &str,
-    duration: u64,
-    track_path: &str,
-    server_url: Option<&str>,
-    server_token: Option<&str>,
-    server_user_id: Option<&str>,
-    prefer_local: bool,
-    enable_musixmatch: bool,
+    request: &LyricsRequest,
     allow_lrclib: bool,
     mut on_progress: F,
 ) -> Option<Lyrics>
 where
     F: FnMut(Lyrics),
 {
-    let cache_key = lyrics_cache_key(
-        artist,
-        title,
-        album,
-        duration,
-        track_path,
-        enable_musixmatch,
-    );
+    let cache_key = request.cache_key();
+    let artist = request.artist.as_str();
+    let title = request.title.as_str();
+    let album = request.album.as_str();
+    let duration = request.duration;
+    let track_path = request.track_path.as_str();
+    let server_url = request.server.as_ref().map(|server| server.url.as_str());
+    let server_token = request
+        .server
+        .as_ref()
+        .and_then(|server| server.token.as_deref());
+    let server_user_id = request
+        .server
+        .as_ref()
+        .and_then(|server| server.user_id.as_deref());
+    let prefer_local = request.prefer_local;
+    let enable_musixmatch = request.enable_musixmatch;
     let cache_key_hash = log_lyrics_key_hash(&cache_key);
     let total_start = Instant::now();
     lyrics_debug!(
         "fetch start key_hash={} artist={:?} title={:?} duration={} prefer_local={}",
         cache_key_hash,
-        artist,
-        title,
-        duration,
-        prefer_local
+        request.artist,
+        request.title,
+        request.duration,
+        request.prefer_local
     );
     if let Some(cached) = lyrics_cache()
         .lock()
@@ -903,6 +973,14 @@ pub fn cached_lyrics(
         track_path,
         enable_musixmatch,
     );
+    lyrics_cache()
+        .lock()
+        .ok()
+        .and_then(|mut cache| cache.get_cloned(&cache_key))
+}
+
+pub fn cached_lyrics_for_request(request: &LyricsRequest) -> Option<Option<Lyrics>> {
+    let cache_key = request.cache_key();
     lyrics_cache()
         .lock()
         .ok()

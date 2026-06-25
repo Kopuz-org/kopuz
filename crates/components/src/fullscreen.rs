@@ -449,14 +449,17 @@ pub fn Fullscreen(
             return;
         }
 
-        if let Some(cached) = utils::lyrics::cached_lyrics(
-            &artist,
-            &title,
-            &album,
-            duration,
-            &track_path,
-            enable_musixmatch,
-        ) {
+        let lyrics_request =
+            utils::lyrics::LyricsRequest::new(artist, title, album, duration, track_path)
+                .with_server(
+                    server_url.as_deref(),
+                    server_token.as_deref(),
+                    server_user_id.as_deref(),
+                )
+                .prefer_local(prefer_local)
+                .enable_musixmatch(enable_musixmatch);
+
+        if let Some(cached) = utils::lyrics::cached_lyrics_for_request(&lyrics_request) {
             let display = cached.or_else(|| {
                 Some(utils::lyrics::Lyrics::Plain(
                     i18n::t("lyrics_not_found").to_string(),
@@ -470,25 +473,14 @@ pub fn Fullscreen(
 
         spawn(async move {
             let mut last_displayed: Option<utils::lyrics::Lyrics> = None;
-            let result = utils::lyrics::fetch_lyrics_progressive(
-                &artist,
-                &title,
-                &album,
-                duration,
-                &track_path,
-                server_url.as_deref(),
-                server_token.as_deref(),
-                server_user_id.as_deref(),
-                prefer_local,
-                enable_musixmatch,
-                |partial| {
+            let result =
+                utils::lyrics::fetch_lyrics_progressive_for_request(&lyrics_request, |partial| {
                     if *fetch_gen.peek() == fetch_id && last_displayed.as_ref() != Some(&partial) {
                         last_displayed = Some(partial.clone());
                         lyrics.set(Some(Some(partial)));
                     }
-                },
-            )
-            .await;
+                })
+                .await;
             if *fetch_gen.peek() == fetch_id {
                 let display = result.or_else(|| {
                     Some(utils::lyrics::Lyrics::Plain(

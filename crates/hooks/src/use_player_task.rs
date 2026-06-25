@@ -333,19 +333,21 @@ pub fn use_player_task(ctrl: PlayerController) {
 
                         spawn(async move {
                             let next_track_path = next_track.id.uid();
-                            let _ = utils::lyrics::fetch_lyrics(
-                                &next_track.artist,
-                                &next_track.title,
-                                &next_track.album,
+                            let lyrics_request = utils::lyrics::LyricsRequest::new(
+                                next_track.artist,
+                                next_track.title,
+                                next_track.album,
                                 next_track.duration,
-                                &next_track_path,
+                                next_track_path,
+                            )
+                            .with_server(
                                 server_url.as_deref(),
                                 server_token.as_deref(),
                                 server_user_id.as_deref(),
-                                prefer_local,
-                                enable_musixmatch,
                             )
-                            .await;
+                            .prefer_local(prefer_local)
+                            .enable_musixmatch(enable_musixmatch);
+                            let _ = utils::lyrics::fetch_lyrics_for_request(&lyrics_request).await;
                         });
                     }
                 }
