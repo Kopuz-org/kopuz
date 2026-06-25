@@ -13,70 +13,10 @@ use crate::{DbError, ReadStore, Storage};
 
 mod cfg_store;
 mod dump;
-mod migrate;
+mod migrations;
 mod queries;
 mod rows;
 mod writes;
-
-static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
-
-/// Run migrations, tolerating a checksum mismatch that's purely a line-ending
-/// difference of the same migration SQL: sqlx checksums raw bytes, so a CRLF
-/// (Windows) and an LF (Linux/macOS) checkout of an identical migration hash
-/// differently. On a `VersionMismatch` we reconcile and retry; a checksum that
-/// matches neither line ending is a genuine edit and still fails.
-async fn run_migrations(pool: &SqlitePool) -> Result<(), DbError> {
-    match MIGRATOR.run(pool).await {
-        Ok(()) => Ok(()),
-        Err(sqlx::migrate::MigrateError::VersionMismatch(_)) => {
-            reconcile_eol_checksums(pool).await?;
-            MIGRATOR.run(pool).await.map_err(Into::into)
-        }
-        Err(e) => Err(e.into()),
-    }
-}
-
-/// Re-stamp `_sqlx_migrations` rows whose checksum differs from this binary's
-/// only by line endings. `VersionMismatch` reports just the first offender, so
-/// reconcile every applied migration in one pass before retrying.
-async fn reconcile_eol_checksums(pool: &SqlitePool) -> Result<(), DbError> {
-    use sha2::{Digest, Sha384};
-
-    let stored: std::collections::HashMap<i64, Vec<u8>> =
-        sqlx::query_as::<_, (i64, Vec<u8>)>("SELECT version, checksum FROM _sqlx_migrations")
-            .fetch_all(pool)
-            .await?
-            .into_iter()
-            .collect();
-
-    for m in MIGRATOR.iter() {
-        let Some(stored_ck) = stored.get(&m.version) else {
-            continue;
-        };
-        if stored_ck.as_slice() == m.checksum.as_ref() {
-            continue;
-        }
-        // If either line-ending variant matches the stored checksum, the SQL
-        // (hence schema) is identical — only EOL differs.
-        let lf = m.sql.replace("\r\n", "\n");
-        let crlf = lf.replace('\n', "\r\n");
-        let matches_eol_variant = [lf.as_bytes(), crlf.as_bytes()]
-            .into_iter()
-            .any(|bytes| Sha384::digest(bytes).as_slice() == stored_ck.as_slice());
-        if matches_eol_variant {
-            sqlx::query("UPDATE _sqlx_migrations SET checksum = ?1 WHERE version = ?2")
-                .bind(m.checksum.as_ref())
-                .bind(m.version)
-                .execute(pool)
-                .await?;
-            tracing::warn!(
-                version = m.version,
-                "reconciled migration checksum (line-ending-only difference)"
-            );
-        }
-    }
-    Ok(())
-}
 
 pub struct Native {
     pool: ArcSwap<SqlitePool>,
@@ -89,9 +29,9 @@ impl Native {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| DbError::Io(e.to_string()))?;
         }
-        snapshot_if_pending(path).await;
+        migrations::snapshot_if_pending(path).await;
         let pool = open_pool(path).await?;
-        run_migrations(&pool).await?;
+        migrations::run_migrations(&pool).await?;
         Ok(Self {
             pool: ArcSwap::from_pointee(pool),
         })
@@ -122,46 +62,6 @@ async fn open_pool(path: &Path) -> Result<SqlitePool, DbError> {
         .map_err(Into::into)
 }
 
-/// Before applying new migrations to an existing DB, copy it (plus WAL sidecars)
-/// to `<db>.pre-<applied_version>.bak` so a downgrade can restore it. Best-effort.
-async fn snapshot_if_pending(path: &Path) {
-    if !path.exists() {
-        return; // fresh DB, nothing to snapshot
-    }
-    let Ok(pool) = open_pool(path).await else {
-        return;
-    };
-    // Max applied version (the table won't exist on a pre-migration legacy DB).
-    let applied: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations")
-        .fetch_one(&pool)
-        .await
-        .unwrap_or(None);
-    let available = MIGRATOR.iter().map(|m| m.version).max();
-    let pending = match (applied, available) {
-        (Some(a), Some(v)) => v > a,
-        (None, Some(_)) => false, // fresh/just-created DB with no migrations yet → not a downgrade risk
-        _ => false,
-    };
-    pool.close().await;
-    if !pending {
-        return;
-    }
-    let stamp = applied.unwrap_or(0);
-    for ext in ["", "-wal", "-shm"] {
-        let src = with_ext(path, ext);
-        if src.exists() {
-            let dst = backup_name(path, stamp, ext);
-            if let Err(e) = std::fs::copy(&src, &dst) {
-                tracing::warn!(error = %e, src = %src.display(), "db: pre-migration snapshot failed");
-            }
-        }
-    }
-    tracing::info!(
-        applied = stamp,
-        "db: snapshotted before applying pending migrations"
-    );
-}
-
 fn with_ext(path: &Path, suffix: &str) -> std::path::PathBuf {
     if suffix.is_empty() {
         path.to_path_buf()
@@ -170,12 +70,6 @@ fn with_ext(path: &Path, suffix: &str) -> std::path::PathBuf {
         s.push(suffix);
         std::path::PathBuf::from(s)
     }
-}
-
-fn backup_name(path: &Path, stamp: i64, suffix: &str) -> std::path::PathBuf {
-    let mut s = path.as_os_str().to_os_string();
-    s.push(format!(".pre-{stamp}.bak{suffix}"));
-    std::path::PathBuf::from(s)
 }
 
 #[async_trait::async_trait]
@@ -323,11 +217,11 @@ impl Storage for Native {
     }
 
     async fn import_legacy_json(&self, config_dir: &Path) -> Result<crate::ImportReport, DbError> {
-        migrate::run_json_import(&self.pool(), config_dir).await
+        migrations::run_json_import(&self.pool(), config_dir).await
     }
 
     async fn finalize_migration(&self, config_dir: &Path) -> Result<usize, DbError> {
-        migrate::finalize_migration(&self.pool(), config_dir).await
+        migrations::finalize_migration(&self.pool(), config_dir).await
     }
 
     async fn delete_tracks(&self, source: &crate::Source, keys: &[String]) -> Result<u64, DbError> {
@@ -502,7 +396,7 @@ impl Storage for Native {
             let _ = std::fs::remove_file(with_ext(db_path, ext));
         }
         let pool = open_pool(db_path).await?;
-        run_migrations(&pool).await?;
+        migrations::run_migrations(&pool).await?;
         self.swap_pool(pool);
         Ok(())
     }
@@ -524,7 +418,7 @@ impl Storage for Native {
             }
         }
         let pool = open_pool(db_path).await?;
-        run_migrations(&pool).await?;
+        migrations::run_migrations(&pool).await?;
         self.swap_pool(pool);
         Ok(())
     }
@@ -607,73 +501,5 @@ impl Storage for Native {
 
     async fn sweep_favorites(&self, server_id: &str, epoch: i64) -> Result<(), DbError> {
         writes::sweep_favorites(&self.pool(), server_id, epoch).await
-    }
-}
-
-#[cfg(test)]
-mod eol_reconcile_tests {
-    use super::*;
-    use sha2::{Digest, Sha384};
-
-    /// A DB created by a CRLF build (Windows) must open under this (LF) build,
-    /// and the stored checksums get re-stamped to canonical — while a genuine
-    /// migration edit is still rejected.
-    #[tokio::test]
-    async fn crlf_db_reconciles_but_real_edit_still_fails() {
-        let dir = std::env::temp_dir().join(format!("kopuz-eol-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
-        let db = dir.join("t.db");
-        for ext in ["", "-wal", "-shm"] {
-            let _ = std::fs::remove_file(with_ext(&db, ext));
-        }
-
-        let pool = open_pool(&db).await.unwrap();
-        run_migrations(&pool).await.unwrap();
-
-        // Simulate a DB written by a CRLF build: every stored checksum becomes
-        // the CRLF-variant hash of the same migration SQL.
-        for m in MIGRATOR.iter() {
-            let crlf = m.sql.replace("\r\n", "\n").replace('\n', "\r\n");
-            sqlx::query("UPDATE _sqlx_migrations SET checksum = ?1 WHERE version = ?2")
-                .bind(Sha384::digest(crlf.as_bytes()).to_vec())
-                .bind(m.version)
-                .execute(&pool)
-                .await
-                .unwrap();
-        }
-
-        // Reopen: the EOL-only mismatch must reconcile, not error.
-        run_migrations(&pool)
-            .await
-            .expect("CRLF-only checksum mismatch should reconcile");
-
-        // Checksums are now canonical (this binary's).
-        let stored: Vec<(i64, Vec<u8>)> =
-            sqlx::query_as("SELECT version, checksum FROM _sqlx_migrations")
-                .fetch_all(&pool)
-                .await
-                .unwrap();
-        for m in MIGRATOR.iter() {
-            let ck = stored.iter().find(|(v, _)| *v == m.version).map(|(_, c)| c);
-            assert_eq!(ck.unwrap().as_slice(), m.checksum.as_ref());
-        }
-
-        // A genuine modification (checksum matching neither line ending) must
-        // still be refused.
-        sqlx::query(
-            "UPDATE _sqlx_migrations SET checksum = ?1 \
-             WHERE version = (SELECT MIN(version) FROM _sqlx_migrations)",
-        )
-        .bind(vec![0u8; 48])
-        .execute(&pool)
-        .await
-        .unwrap();
-        assert!(
-            run_migrations(&pool).await.is_err(),
-            "a real migration edit must still be rejected"
-        );
-
-        drop(pool);
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }
