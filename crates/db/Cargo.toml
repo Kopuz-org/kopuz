@@ -33,8 +33,7 @@ sqlx = { workspace = true, features = [
 tokio = { workspace = true, features = ["rt", "sync"] }
 arc-swap = { workspace = true }
 directories = { workspace = true }
-# Recompute sqlx's migration checksum (Sha384) to detect line-ending-only diffs.
-sha2 = "0.10"
+sha2 = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }
