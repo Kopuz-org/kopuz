@@ -206,6 +206,55 @@ pub fn soundcloud_auto_login(
         error.set(None);
     });
 }
+pub fn applemusic_auto_login(
+    mut config: Signal<AppConfig>,
+    yt_browser: Signal<Browser>,
+    mut error: Signal<Option<String>>,
+    mut playback_error: Signal<Option<String>>,
+) {
+    let (browser, server_id) = {
+        let cfg = config.peek();
+        let srv = cfg.server.as_ref();
+        (
+            srv.and_then(|s| s.yt_browser).unwrap_or(*yt_browser.peek()),
+            srv.and_then(|s| s.id.clone()).unwrap_or_default(),
+        )
+    };
+    let mut report = move |msg: String| {
+        error.set(Some(msg.clone()));
+        playback_error.set(Some(msg));
+    };
+    spawn(async move {
+        let token = match ::server::applemusic::signin::launch_signin_and_extract(
+            browser,
+            &server_id,
+            std::time::Duration::from_secs(300),
+        )
+        .await
+        {
+            Ok(token) => token,
+            Err(err) => {
+                report(format!("Apple Music sign-in failed ({browser}): {err}"));
+                return;
+            }
+        };
+        {
+            let mut cfg = config.write();
+            let saved_id = cfg.server.as_ref().and_then(|server| server.id.clone());
+            if let Some(server) = cfg.server.as_mut() {
+                server.access_token = Some(token);
+                server.user_id = Some("me".to_string());
+                server.yt_browser = Some(browser);
+            }
+            if let Some(id) = saved_id
+                && let Some(saved) = cfg.servers.iter_mut().find(|server| server.id == id)
+            {
+                saved.yt_browser = Some(browser);
+            }
+        }
+        error.set(None);
+    });
+}
 
 #[allow(clippy::too_many_arguments)]
 pub fn add_server(
@@ -219,6 +268,10 @@ pub fn add_server(
     mut show_add_server: Signal<bool>,
     mut show_login: Signal<bool>,
     playback_error: Signal<Option<String>>,
+    apple_music_storefront: Signal<String>,
+    apple_music_language: Signal<String>,
+    apple_music_manual_token: Signal<String>,
+    apple_music_use_manual: Signal<bool>,
 ) {
     let selected_service = server_service();
     let is_ytmusic = selected_service == MusicService::YtMusic;
@@ -246,6 +299,8 @@ pub fn add_server(
                 "https://music.youtube.com".to_string()
             } else if is_soundcloud {
                 "https://soundcloud.com".to_string()
+            } else if selected_service == MusicService::AppleMusic {
+                "https://music.apple.com".to_string()
             } else {
                 url_input
             };
@@ -261,7 +316,16 @@ pub fn add_server(
                 new_server.access_token = Some(String::new());
             }
             new_server.yt_browser = (is_browser_signin && !is_anon).then(|| *yt_browser.peek());
-
+            // Apple Music: set storefront, language, and optionally manual token.
+            if selected_service == MusicService::AppleMusic {
+                new_server.apple_music_storefront = apple_music_storefront();
+                new_server.apple_music_language = apple_music_language();
+                let manual = apple_music_manual_token();
+                if !manual.is_empty() {
+                    new_server.access_token = Some(manual);
+                    new_server.user_id = Some("me".to_string());
+                }
+            }
             let saved = config::SavedServer::from_music_server(&new_server);
             {
                 let mut cfg = config.write();
@@ -279,6 +343,9 @@ pub fn add_server(
                 ytmusic_auto_login(config, yt_browser, error, playback_error);
             } else if is_soundcloud {
                 soundcloud_auto_login(config, yt_browser, error, playback_error);
+            } else if selected_service == MusicService::AppleMusic && !*apple_music_use_manual.peek()
+            {
+                applemusic_auto_login(config, yt_browser, error, playback_error);
             } else if !is_browser_signin {
                 show_login.set(true);
             }
@@ -312,6 +379,9 @@ pub fn switch_server(
             MusicService::SoundCloud => {
                 soundcloud_auto_login(config, yt_browser, error, playback_error)
             }
+            MusicService::AppleMusic => {
+                applemusic_auto_login(config, yt_browser, error, playback_error)
+            }
             _ => show_login.set(true),
         }
     });
@@ -329,6 +399,9 @@ pub fn delete_saved(mut config: Signal<AppConfig>, id: String) {
         }
         Some(MusicService::SoundCloud) => {
             let _ = ::server::soundcloud::signin::delete_profile(&id);
+        }
+        Some(MusicService::AppleMusic) => {
+            let _ = ::server::applemusic::signin::delete_profile(&id);
         }
         _ => {}
     }

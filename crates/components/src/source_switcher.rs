@@ -94,6 +94,7 @@ fn service_style(service: MusicService) -> (&'static str, &'static str) {
     match service {
         MusicService::YtMusic => ("fa-brands fa-youtube", "#ff3355"),
         MusicService::SoundCloud => ("fa-brands fa-soundcloud", "#ff7a33"),
+        MusicService::AppleMusic => ("fa-brands fa-apple", "#ffffff"),
         MusicService::Jellyfin => ("fa-solid fa-server", "#b277ee"),
         MusicService::Subsonic | MusicService::Custom => ("fa-solid fa-compact-disc", "#f0a84b"),
     }

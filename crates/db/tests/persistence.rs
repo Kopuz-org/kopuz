@@ -51,6 +51,8 @@ async fn seed_active_server(db: &db::Db, id: &str) {
             service: MusicService::YtMusic,
             yt_browser: None,
             yt_anonymous: false,
+            apple_music_storefront: "us".into(),
+            apple_music_language: "en".into(),
         }],
         server: Some(MusicServer {
             name: "yt".into(),
@@ -61,6 +63,8 @@ async fn seed_active_server(db: &db::Db, id: &str) {
             id: Some(id.into()),
             yt_browser: None,
             yt_anonymous: false,
+            apple_music_storefront: "us".into(),
+            apple_music_language: "en".into(),
         }),
         active_source: config::Source::Server(id.into()),
         ..Default::default()

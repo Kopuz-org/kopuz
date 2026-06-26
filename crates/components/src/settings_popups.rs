@@ -12,6 +12,14 @@ pub fn AddServerPopup(
     /// public surfaces only. Forced true on Windows (browser sign-in
     /// is disabled there for now).
     yt_anonymous: Signal<bool>,
+    /// Apple Music storefront code (e.g. "us", "gb", "jp").
+    apple_music_storefront: Signal<String>,
+    /// Apple Music language code (e.g. "en", "ja", "de").
+    apple_music_language: Signal<String>,
+    /// Apple Music manual media-user-token (when not using browser sign-in).
+    apple_music_manual_token: Signal<String>,
+    /// Apple Music: true = paste token manually, false = browser sign-in.
+    apple_music_use_manual: Signal<bool>,
     error: Signal<Option<String>>,
     on_close: EventHandler<()>,
     on_save: EventHandler<()>,
@@ -22,6 +30,7 @@ pub fn AddServerPopup(
         MusicService::Custom => "custom",
         MusicService::YtMusic => "ytmusic",
         MusicService::SoundCloud => "soundcloud",
+        MusicService::AppleMusic => "applemusic",
     };
 
     let server_name_label = i18n::t("server_name").to_string();
@@ -57,6 +66,10 @@ pub fn AddServerPopup(
                     server_url,
                     yt_browser,
                     yt_anonymous,
+                    apple_music_storefront,
+                    apple_music_language,
+                    apple_music_manual_token,
+                    apple_music_use_manual,
                     server_url_placeholder: server_url_placeholder.clone(),
                 }
 
@@ -67,6 +80,7 @@ pub fn AddServerPopup(
                             "custom" => MusicService::Custom,
                             "ytmusic" => MusicService::YtMusic,
                             "soundcloud" => MusicService::SoundCloud,
+                            "applemusic" => MusicService::AppleMusic,
                             _ => MusicService::Jellyfin,
                         };
                         server_service.set(service);
@@ -96,6 +110,11 @@ pub fn AddServerPopup(
                         value: "soundcloud",
                         selected: server_service() == MusicService::SoundCloud,
                         "SoundCloud"
+                    }
+                    option {
+                        value: "applemusic",
+                        selected: server_service() == MusicService::AppleMusic,
+                        "Apple Music"
                     }
                 }
 
@@ -238,6 +257,10 @@ fn ServerServiceFields(
     server_url: Signal<String>,
     yt_browser: Signal<Browser>,
     mut yt_anonymous: Signal<bool>,
+    apple_music_storefront: Signal<String>,
+    apple_music_language: Signal<String>,
+    apple_music_manual_token: Signal<String>,
+    apple_music_use_manual: Signal<bool>,
     server_url_placeholder: String,
 ) -> Element {
     // Browser sign-in must decrypt the browser's cookie store, which Chrome 127+
@@ -326,6 +349,87 @@ fn ServerServiceFields(
                         value: "{browser.id()}",
                         selected: yt_browser() == browser,
                         "{browser.label()}"
+                    }
+                }
+            }
+        },
+        MusicService::AppleMusic => rsx! {
+            // Storefront selector
+            div { class: "mb-2",
+                label { class: "text-xs text-white/60 block mb-1", "Storefront" }
+                select {
+                    onchange: move |e| apple_music_storefront.set(e.value()),
+                    onkeydown: move |e| e.stop_propagation(),
+                    for code in &["us", "gb", "jp", "de", "fr", "au", "br", "mx", "kr", "nl", "it", "es", "ca"] {
+                        option {
+                            value: "{code}",
+                            selected: apple_music_storefront() == *code,
+                            "{code}"
+                        }
+                    }
+                }
+            }
+            // Language selector
+            div { class: "mb-2",
+                label { class: "text-xs text-white/60 block mb-1", "Language" }
+                select {
+                    onchange: move |e| apple_music_language.set(e.value()),
+                    onkeydown: move |e| e.stop_propagation(),
+                    for code in &["en", "ja", "de", "fr", "es", "pt", "it", "nl", "ko", "zh-Hans", "zh-Hant"] {
+                        option {
+                            value: "{code}",
+                            selected: apple_music_language() == *code,
+                            "{code}"
+                        }
+                    }
+                }
+            }
+            // Auth method selector
+            div { class: "flex flex-col gap-2 mb-2",
+                label { class: "flex items-center gap-2 text-sm text-white cursor-pointer",
+                    input {
+                        r#type: "radio",
+                        name: "am-auth-method",
+                        checked: !apple_music_use_manual(),
+                        onchange: move |_| apple_music_use_manual.set(false),
+                    }
+                    span { "Sign in with a browser" }
+                }
+                label { class: "flex items-center gap-2 text-sm text-white cursor-pointer",
+                    input {
+                        r#type: "radio",
+                        name: "am-auth-method",
+                        checked: apple_music_use_manual(),
+                        onchange: move |_| apple_music_use_manual.set(true),
+                    }
+                    span { "Paste media-user-token manually" }
+                }
+            }
+            if apple_music_use_manual() {
+                input {
+                    class: "w-full",
+                    placeholder: "media-user-token",
+                    value: "{apple_music_manual_token()}",
+                    oninput: move |e| apple_music_manual_token.set(e.value()),
+                    onkeydown: move |e| e.stop_propagation(),
+                }
+            } else {
+                p { class: "text-xs text-white/60",
+                    "Pick which browser kopuz should use for the Apple Music sign-in window. It opens in an isolated profile (a fresh, separate session) — your normal browsing is untouched. Make sure the browser is installed."
+                }
+                select {
+                    onchange: move |e| {
+                        if let Some(b) = Browser::from_id(&e.value()) {
+                            yt_browser.set(b);
+                        }
+                    },
+                    onkeydown: move |e| e.stop_propagation(),
+                    for browser in Browser::ALL.iter().copied() {
+                        option {
+                            value: "{browser.id()}",
+                            selected: yt_browser() == browser,
+                            "{browser.label()}"
+                        }
                     }
                 }
             }

@@ -141,11 +141,15 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     // Windows (browser sign-in unsupported there — App-Bound Encryption), so the
     // popup opens on the only working method.
     let yt_anonymous = use_signal(|| cfg!(target_os = "windows"));
+    let apple_music_storefront = use_signal(|| "us".to_string());
+    let apple_music_language = use_signal(|| "en".to_string());
+    let apple_music_manual_token = use_signal(String::new);
+    let apple_music_use_manual = use_signal(|| false);
 
     let mut username = use_signal(String::new);
     let mut password = use_signal(String::new);
 
-    let error = use_signal(|| Option::<String>::None);
+    let mut error = use_signal(|| Option::<String>::None);
     let mut login_error = use_signal(|| Option::<String>::None);
     let is_loading = use_signal(|| false);
 
@@ -169,6 +173,51 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         crate::settings_actions::ytmusic_auto_login(config, yt_browser, error, ctrl.playback_error);
     };
 
+    let applemusic_auto_login = move || {
+        let (browser, server_id) = {
+            let cfg = config.peek();
+            let srv = cfg.server.as_ref();
+            (
+                srv.and_then(|s| s.yt_browser).unwrap_or(*yt_browser.peek()),
+                srv.and_then(|s| s.id.clone()).unwrap_or_default(),
+            )
+        };
+        let mut report = move |msg: String| {
+            error.set(Some(msg.clone()));
+            ctrl.playback_error.set(Some(msg));
+        };
+        spawn(async move {
+            let token = match ::server::applemusic::signin::launch_signin_and_extract(
+                browser,
+                &server_id,
+                std::time::Duration::from_secs(300),
+            )
+            .await
+            {
+                Ok(t) => t,
+                Err(e) => {
+                    report(format!("Apple Music sign-in failed ({browser}): {e}"));
+                    return;
+                }
+            };
+            {
+                let mut cfg = config.write();
+                let saved_id = cfg.server.as_ref().and_then(|s| s.id.clone());
+                if let Some(srv) = cfg.server.as_mut() {
+                    srv.access_token = Some(token);
+                    srv.user_id = Some("me".to_string());
+                    srv.yt_browser = Some(browser);
+                }
+                if let Some(id) = saved_id
+                    && let Some(saved) = cfg.servers.iter_mut().find(|s| s.id == id)
+                {
+                    saved.yt_browser = Some(browser);
+                }
+            }
+            error.set(None);
+        });
+    };
+
     let handle_add_server = move |_| {
         crate::settings_actions::add_server(
             config,
@@ -181,6 +230,10 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             show_add_server,
             show_login,
             ctrl.playback_error,
+            apple_music_storefront,
+            apple_music_language,
+            apple_music_manual_token,
+            apple_music_use_manual,
         );
     };
 
@@ -343,16 +396,21 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                         on_delete: handle_delete_saved,
                                         on_switch: handle_switch_server,
                                         on_login: move |_| {
-                                            let is_ytmusic = config
+                                            let service = config
                                                 .read()
                                                 .server
                                                 .as_ref()
-                                                .map(|s| s.service == MusicService::YtMusic)
-                                                .unwrap_or(false);
-                                            if is_ytmusic {
-                                                ytmusic_auto_login();
-                                            } else {
-                                                show_login.set(true);
+                                                .map(|s| s.service);
+                                            match service {
+                                                Some(MusicService::YtMusic) => {
+                                                    ytmusic_auto_login();
+                                                }
+                                                Some(MusicService::AppleMusic) => {
+                                                    applemusic_auto_login();
+                                                }
+                                                _ => {
+                                                    show_login.set(true);
+                                                }
                                             }
                                         },
                                     }
@@ -820,6 +878,10 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         server_service,
                         yt_browser,
                         yt_anonymous,
+                        apple_music_storefront,
+                        apple_music_language,
+                        apple_music_manual_token,
+                        apple_music_use_manual,
                         error,
                         on_close: move |_| show_add_server.set(false),
                         on_save: handle_add_server

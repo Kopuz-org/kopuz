@@ -449,6 +449,7 @@ pub fn Fullscreen(
             return;
         }
 
+        let track_path_for_spawn = track_path.clone();
         let lyrics_request =
             utils::lyrics::LyricsRequest::new(artist, title, album, duration, track_path)
                 .with_server(
@@ -472,6 +473,36 @@ pub fn Fullscreen(
         lyrics.set(None);
 
         spawn(async move {
+            // Lazily attach Apple Music auth for the lyrics provider.
+            let lyrics_request = if track_path_for_spawn.starts_with("applemusic:") {
+                let am_auth = config.peek().server.as_ref().and_then(|server| {
+                    if server.service != config::MusicService::AppleMusic {
+                        return None;
+                    }
+                    let token = server.access_token.clone()?;
+                    let catalog_id = track_path_for_spawn
+                        .strip_prefix("applemusic:")
+                        .unwrap_or(&track_path_for_spawn)
+                        .to_string();
+                    Some(utils::lyrics::AppleMusicLyricsAuth {
+                        token,
+                        bearer_token: String::new(),
+                        storefront: server.apple_music_storefront.clone(),
+                        language: server.apple_music_language.clone(),
+                        catalog_id,
+                    })
+                });
+                if let Some(mut auth) = am_auth {
+                    if let Ok(bt) = ::server::applemusic::auth::get_bearer_token().await {
+                        auth.bearer_token = bt;
+                    }
+                    lyrics_request.apple_music_auth(auth)
+                } else {
+                    lyrics_request
+                }
+            } else {
+                lyrics_request
+            };
             let mut last_displayed: Option<utils::lyrics::Lyrics> = None;
             let result =
                 utils::lyrics::fetch_lyrics_progressive_for_request(&lyrics_request, |partial| {

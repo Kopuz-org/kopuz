@@ -34,9 +34,11 @@ pub async fn load_config(pool: &SqlitePool) -> Result<Option<AppConfig>, DbError
     cfg.migrate_registry_paths();
 
     // Hydrate servers from their table (creds included for the active one).
-    let rows = sqlx::query!(
-        "SELECT id, name, url, service, access_token, user_id, yt_browser, yt_anonymous \
-         FROM servers"
+    use sqlx::Row;
+    let rows: Vec<sqlx::sqlite::SqliteRow> = sqlx::query(
+        "SELECT id, name, url, service, access_token, user_id, yt_browser, yt_anonymous, \
+         apple_music_storefront, apple_music_language \
+         FROM servers",
     )
     .fetch_all(pool)
     .await?;
@@ -44,26 +46,38 @@ pub async fn load_config(pool: &SqlitePool) -> Result<Option<AppConfig>, DbError
     cfg.servers = rows
         .iter()
         .map(|r| SavedServer {
-            id: r.id.clone(),
-            name: r.name.clone(),
-            url: r.url.clone(),
-            service: parse_service(&r.service),
-            yt_browser: parse_browser(r.yt_browser.as_deref()),
-            yt_anonymous: r.yt_anonymous != 0,
+            id: r.get("id"),
+            name: r.get("name"),
+            url: r.get("url"),
+            service: parse_service(r.get::<String, _>("service").as_str()),
+            yt_browser: r
+                .get::<Option<String>, _>("yt_browser")
+                .as_deref()
+                .and_then(|s| parse_browser(Some(s))),
+            yt_anonymous: r.get::<i64, _>("yt_anonymous") != 0,
+            apple_music_storefront: r.get("apple_music_storefront"),
+            apple_music_language: r.get("apple_music_language"),
         })
         .collect();
 
     cfg.server = cfg.active_source.server_id().and_then(|active| {
-        rows.iter().find(|r| r.id == active).map(|r| MusicServer {
-            name: r.name.clone(),
-            url: r.url.clone(),
-            service: parse_service(&r.service),
-            access_token: r.access_token.clone(),
-            user_id: r.user_id.clone(),
-            id: Some(r.id.clone()),
-            yt_browser: parse_browser(r.yt_browser.as_deref()),
-            yt_anonymous: r.yt_anonymous != 0,
-        })
+        rows.iter()
+            .find(|r| r.get::<String, _>("id") == *active)
+            .map(|r| MusicServer {
+                name: r.get("name"),
+                url: r.get("url"),
+                service: parse_service(r.get::<String, _>("service").as_str()),
+                access_token: r.get("access_token"),
+                user_id: r.get("user_id"),
+                id: Some(r.get("id")),
+                yt_browser: r
+                    .get::<Option<String>, _>("yt_browser")
+                    .as_deref()
+                    .and_then(|s| parse_browser(Some(s))),
+                yt_anonymous: r.get::<i64, _>("yt_anonymous") != 0,
+                apple_music_storefront: r.get("apple_music_storefront"),
+                apple_music_language: r.get("apple_music_language"),
+            })
     });
 
     // Hydrate play counts.
@@ -89,19 +103,21 @@ pub async fn save_config(pool: &SqlitePool, cfg: &AppConfig) -> Result<(), DbErr
         let service = service_str(s.service);
         let browser = s.yt_browser.map(browser_str);
         let anon = s.yt_anonymous as i64;
-        sqlx::query!(
-            "INSERT INTO servers (id, name, url, service, yt_browser, yt_anonymous, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
+        sqlx::query(
+            "INSERT INTO servers (id, name, url, service, yt_browser, yt_anonymous, apple_music_storefront, apple_music_language, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
              ON CONFLICT(id) DO UPDATE SET name=?2, url=?3, service=?4, yt_browser=?5, \
-               yt_anonymous=?6, updated_at=?7",
-            s.id,
-            s.name,
-            s.url,
-            service,
-            browser,
-            anon,
-            now
+               yt_anonymous=?6, apple_music_storefront=?7, apple_music_language=?8, updated_at=?9",
         )
+        .bind(&s.id)
+        .bind(&s.name)
+        .bind(&s.url)
+        .bind(service)
+        .bind(browser)
+        .bind(anon)
+        .bind(&s.apple_music_storefront)
+        .bind(&s.apple_music_language)
+        .bind(now)
         .execute(&mut *tx)
         .await?;
     }
@@ -122,23 +138,25 @@ pub async fn save_config(pool: &SqlitePool, cfg: &AppConfig) -> Result<(), DbErr
         } else {
             "unauthenticated"
         };
-        sqlx::query!(
+        sqlx::query(
             "INSERT INTO servers \
-               (id, name, url, service, access_token, user_id, yt_browser, yt_anonymous, auth_state, cred_updated_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10) \
+               (id, name, url, service, access_token, user_id, yt_browser, yt_anonymous, apple_music_storefront, apple_music_language, auth_state, cred_updated_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12) \
              ON CONFLICT(id) DO UPDATE SET name=?2, url=?3, service=?4, access_token=?5, \
-               user_id=?6, yt_browser=?7, yt_anonymous=?8, auth_state=?9, cred_updated_at=?10, updated_at=?10",
-            id,
-            srv.name,
-            srv.url,
-            service,
-            srv.access_token,
-            srv.user_id,
-            browser,
-            anon,
-            auth,
-            now
+               user_id=?6, yt_browser=?7, yt_anonymous=?8, apple_music_storefront=?9, apple_music_language=?10, auth_state=?11, cred_updated_at=?12, updated_at=?12",
         )
+        .bind(&id)
+        .bind(&srv.name)
+        .bind(&srv.url)
+        .bind(service)
+        .bind(&srv.access_token)
+        .bind(&srv.user_id)
+        .bind(browser)
+        .bind(anon)
+        .bind(&srv.apple_music_storefront)
+        .bind(&srv.apple_music_language)
+        .bind(auth)
+        .bind(now)
         .execute(&mut *tx)
         .await?;
         active_id = Some(id);
@@ -198,22 +216,29 @@ pub async fn save_config(pool: &SqlitePool, cfg: &AppConfig) -> Result<(), DbErr
 /// Hydrate one server row (creds included) — the server-switch path, so stored
 /// creds are reused instead of re-prompting sign-in.
 pub async fn load_server(pool: &SqlitePool, id: &str) -> Result<Option<MusicServer>, DbError> {
-    let row = sqlx::query!(
-        "SELECT id, name, url, service, access_token, user_id, yt_browser, yt_anonymous \
+    use sqlx::Row;
+    let row = sqlx::query(
+        "SELECT id, name, url, service, access_token, user_id, yt_browser, yt_anonymous, \
+         apple_music_storefront, apple_music_language \
          FROM servers WHERE id = ?1",
-        id
     )
+    .bind(id)
     .fetch_optional(pool)
     .await?;
     Ok(row.map(|r| MusicServer {
-        name: r.name,
-        url: r.url,
-        service: parse_service(&r.service),
-        access_token: r.access_token,
-        user_id: r.user_id,
-        id: Some(r.id),
-        yt_browser: parse_browser(r.yt_browser.as_deref()),
-        yt_anonymous: r.yt_anonymous != 0,
+        name: r.get("name"),
+        url: r.get("url"),
+        service: parse_service(r.get::<String, _>("service").as_str()),
+        access_token: r.get("access_token"),
+        user_id: r.get("user_id"),
+        id: Some(r.get("id")),
+        yt_browser: r
+            .get::<Option<String>, _>("yt_browser")
+            .as_deref()
+            .and_then(|s| parse_browser(Some(s))),
+        yt_anonymous: r.get::<i64, _>("yt_anonymous") != 0,
+        apple_music_storefront: r.get("apple_music_storefront"),
+        apple_music_language: r.get("apple_music_language"),
     }))
 }
 
@@ -287,6 +312,7 @@ fn parse_service(s: &str) -> MusicService {
         "Custom" => MusicService::Custom,
         "YtMusic" => MusicService::YtMusic,
         "SoundCloud" => MusicService::SoundCloud,
+        "AppleMusic" => MusicService::AppleMusic,
         _ => MusicService::Jellyfin,
     }
 }
@@ -298,6 +324,7 @@ fn service_str(s: MusicService) -> &'static str {
         MusicService::Custom => "Custom",
         MusicService::YtMusic => "YtMusic",
         MusicService::SoundCloud => "SoundCloud",
+        MusicService::AppleMusic => "AppleMusic",
     }
 }
 

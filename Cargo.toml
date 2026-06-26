@@ -62,6 +62,7 @@ uuid = { version = "1.20.0", features = [
 ] }
 cpal = "0.17"
 symphonia = { version = "0.6", features = ["all"] }
+quick-xml = "0.37"
 rb = "0.4"
 jellyfin-sdk-rust = "0.1.2"
 reqwest = { version = "0.13", default-features = false, features = [

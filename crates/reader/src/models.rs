@@ -85,6 +85,7 @@ impl TrackId {
             ("subsonic", config::MusicService::Subsonic),
             ("custom", config::MusicService::Custom),
             ("soundcloud", config::MusicService::SoundCloud),
+            ("applemusic", config::MusicService::AppleMusic),
         ] {
             if let Some(rest) = s.strip_prefix(prefix).and_then(|r| r.strip_prefix(':')) {
                 let item_id = rest.split(':').next().unwrap_or("").to_string();
@@ -105,6 +106,7 @@ fn service_prefix(s: config::MusicService) -> &'static str {
         config::MusicService::Subsonic => "subsonic",
         config::MusicService::Custom => "custom",
         config::MusicService::SoundCloud => "soundcloud",
+        config::MusicService::AppleMusic => "applemusic",
     }
 }
 

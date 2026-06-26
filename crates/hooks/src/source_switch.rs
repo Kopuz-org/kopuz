@@ -89,6 +89,8 @@ pub async fn apply_source_switch(
                 id: Some(saved.id.clone()),
                 yt_browser: saved.yt_browser,
                 yt_anonymous: is_anon,
+                apple_music_storefront: saved.apple_music_storefront,
+                apple_music_language: saved.apple_music_language,
             };
             {
                 let mut cfg = config.write();

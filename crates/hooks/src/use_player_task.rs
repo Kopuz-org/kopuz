@@ -333,12 +333,12 @@ pub fn use_player_task(ctrl: PlayerController) {
 
                         spawn(async move {
                             let next_track_path = next_track.id.uid();
-                            let lyrics_request = utils::lyrics::LyricsRequest::new(
+                            let mut lyrics_request = utils::lyrics::LyricsRequest::new(
                                 next_track.artist,
                                 next_track.title,
                                 next_track.album,
                                 next_track.duration,
-                                next_track_path,
+                                &next_track_path,
                             )
                             .with_server(
                                 server_url.as_deref(),
@@ -347,6 +347,32 @@ pub fn use_player_task(ctrl: PlayerController) {
                             )
                             .prefer_local(prefer_local)
                             .enable_musixmatch(enable_musixmatch);
+                            // Lazily attach Apple Music auth for the lyrics provider.
+                            if next_track_path.starts_with("applemusic:") {
+                                let am_auth = config.read().server.as_ref().and_then(|server| {
+                                    if server.service != MusicService::AppleMusic {
+                                        return None;
+                                    }
+                                    let token = server.access_token.clone()?;
+                                    let catalog_id = next_track_path
+                                        .strip_prefix("applemusic:")
+                                        .unwrap_or(&next_track_path)
+                                        .to_string();
+                                    Some(utils::lyrics::AppleMusicLyricsAuth {
+                                        token,
+                                        bearer_token: String::new(),
+                                        storefront: server.apple_music_storefront.clone(),
+                                        language: server.apple_music_language.clone(),
+                                        catalog_id,
+                                    })
+                                });
+                                if let Some(mut auth) = am_auth {
+                                    if let Ok(bt) = ::server::applemusic::auth::get_bearer_token().await {
+                                        auth.bearer_token = bt;
+                                    }
+                                    lyrics_request = lyrics_request.apple_music_auth(auth);
+                                }
+                            }
                             let _ = utils::lyrics::fetch_lyrics_for_request(&lyrics_request).await;
                         });
                     }

@@ -90,6 +90,7 @@ pub fn parse_service(s: &str) -> config::MusicService {
         "Custom" => config::MusicService::Custom,
         "YtMusic" => config::MusicService::YtMusic,
         "SoundCloud" => config::MusicService::SoundCloud,
+        "AppleMusic" => config::MusicService::AppleMusic,
         _ => config::MusicService::Jellyfin,
     }
 }

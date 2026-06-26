@@ -44,6 +44,7 @@ pub enum MusicService {
     Subsonic,
     Custom,
     YtMusic,
+    AppleMusic,
     SoundCloud,
 }
 
@@ -54,6 +55,7 @@ impl MusicService {
             Self::Subsonic => "Subsonic",
             Self::Custom => "Custom",
             Self::YtMusic => "YouTube Music",
+            Self::AppleMusic => "Apple Music",
             Self::SoundCloud => "SoundCloud",
         }
     }
@@ -61,7 +63,7 @@ impl MusicService {
     /// Backends that authenticate via a browser sign-in window (OAuth/cookies)
     /// rather than a URL + username/password form.
     pub fn uses_browser_signin(&self) -> bool {
-        matches!(self, Self::YtMusic | Self::SoundCloud)
+        matches!(self, Self::YtMusic | Self::AppleMusic | Self::SoundCloud)
     }
 }
 
@@ -81,6 +83,22 @@ pub struct MusicServer {
     /// For `MusicService::YtMusic` only: anonymous mode.
     #[serde(default)]
     pub yt_anonymous: bool,
+    /// For `MusicService::AppleMusic`: the storefront code (e.g. "us",
+    /// "gb", "jp") controlling catalog region and media availability.
+    #[serde(default = "default_apple_music_storefront")]
+    pub apple_music_storefront: String,
+    /// For `MusicService::AppleMusic`: language code (e.g. "en", "ja")
+    /// controlling track/album title and lyrics language.
+    #[serde(default = "default_apple_music_language")]
+    pub apple_music_language: String,
+}
+
+fn default_apple_music_storefront() -> String {
+    "us".to_string()
+}
+
+fn default_apple_music_language() -> String {
+    "en".to_string()
 }
 
 impl MusicServer {
@@ -98,6 +116,8 @@ impl MusicServer {
             id: Some(uuid::Uuid::new_v4().to_string()),
             yt_browser: None,
             yt_anonymous: false,
+            apple_music_storefront: "us".to_string(),
+            apple_music_language: "en".to_string(),
         }
     }
 
@@ -117,6 +137,8 @@ impl Default for MusicServer {
             id: None,
             yt_browser: None,
             yt_anonymous: false,
+            apple_music_storefront: "us".to_string(),
+            apple_music_language: "en".to_string(),
         }
     }
 }
@@ -191,6 +213,12 @@ pub struct SavedServer {
     /// Persisted anonymous-mode flag.
     #[serde(default)]
     pub yt_anonymous: bool,
+    /// Persisted Apple Music storefront (e.g. "us", "gb", "jp").
+    #[serde(default = "default_apple_music_storefront")]
+    pub apple_music_storefront: String,
+    /// Persisted Apple Music language (e.g. "en", "ja", "de").
+    #[serde(default = "default_apple_music_language")]
+    pub apple_music_language: String,
 }
 
 impl SavedServer {
@@ -202,6 +230,8 @@ impl SavedServer {
             service,
             yt_browser: None,
             yt_anonymous: false,
+            apple_music_storefront: "us".to_string(),
+            apple_music_language: "en".to_string(),
         }
     }
 
@@ -216,6 +246,8 @@ impl SavedServer {
             service: server.service,
             yt_browser: server.yt_browser,
             yt_anonymous: server.yt_anonymous,
+            apple_music_storefront: server.apple_music_storefront.clone(),
+            apple_music_language: server.apple_music_language.clone(),
         }
     }
 

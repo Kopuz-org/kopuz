@@ -28,6 +28,7 @@ image = { workspace = true }
 urlencoding = { workspace = true }
 md5 = { workspace = true }
 hex = { workspace = true }
+quick-xml = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 lofty = { workspace = true }

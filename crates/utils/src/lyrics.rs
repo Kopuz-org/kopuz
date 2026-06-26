@@ -10,6 +10,7 @@ mod lrc;
 mod model;
 mod request;
 mod server;
+mod apple_music;
 
 use cache::{
     LyricsInflightGuard, load_persisted_lyrics, lyrics_cache, store_lyrics, try_begin_lyrics_fetch,
@@ -17,7 +18,7 @@ use cache::{
 use local::fetch_local_lrc;
 use lrc::{extract_line_timestamps, parse_enhanced_words, parse_lrc};
 pub use model::{LyricChunk, LyricLine, Lyrics};
-pub use request::{LyricsRequest, LyricsServerAuth};
+pub use request::{AppleMusicLyricsAuth, LyricsRequest, LyricsServerAuth};
 use server::{fetch_jellyfin_lyrics, fetch_subsonic_lyrics};
 
 const LRCLIB_TIMEOUT: Duration = Duration::from_secs(5);
@@ -464,6 +465,45 @@ where
                     }
                     fallback.get_or_insert(lyrics);
                 }
+            }
+        }
+    }
+
+    if let Some(am_auth) = &request.apple_music_auth {
+        if track_path.starts_with("applemusic:") {
+            let started = Instant::now();
+            let am_lyrics = apple_music::fetch_apple_music_lyrics(am_auth).await;
+            tracing::info!(
+                target: "kopuz::lyrics",
+                "apple_music key_hash={} elapsed_ms={} kind={}",
+                log_lyrics_key_hash(&cache_key),
+                started.elapsed().as_millis(),
+                lyrics_kind(am_lyrics.as_ref())
+            );
+            lyrics_debug!(
+                "provider=apple_music elapsed_ms={} kind={}",
+                started.elapsed().as_millis(),
+                lyrics_kind(am_lyrics.as_ref())
+            );
+            if let Some(lyrics) = am_lyrics {
+                if has_word_timestamps(&lyrics) {
+                    store_lyrics(&cache_key, &Some(lyrics.clone())).await;
+                    tracing::info!(
+                        target: "kopuz::lyrics",
+                        "selected key_hash={} source=apple_music kind={} total_ms={}",
+                        log_lyrics_key_hash(&cache_key),
+                        lyrics_kind(Some(&lyrics)),
+                        total_start.elapsed().as_millis()
+                    );
+                    lyrics_debug!(
+                        "selected source=apple_music key_hash={} kind={} total_ms={}",
+                        cache_key_hash,
+                        lyrics_kind(Some(&lyrics)),
+                        total_start.elapsed().as_millis()
+                    );
+                    return Some(lyrics);
+                }
+                fallback.get_or_insert(lyrics);
             }
         }
     }

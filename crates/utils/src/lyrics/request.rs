@@ -5,6 +5,19 @@ pub struct LyricsServerAuth {
     pub user_id: Option<String>,
 }
 
+/// Credentials for the Apple Music lyrics provider. When present, the lyrics
+/// chain fetches TTML directly from the Apple Music amp-api instead of falling
+/// through to paxsenix. Carried on [`LyricsRequest`] so the provider can run
+/// lazily without pre-fetching.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppleMusicLyricsAuth {
+    pub token: String,
+    pub bearer_token: String,
+    pub storefront: String,
+    pub language: String,
+    pub catalog_id: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LyricsRequest {
     pub artist: String,
@@ -15,6 +28,10 @@ pub struct LyricsRequest {
     pub server: Option<LyricsServerAuth>,
     pub prefer_local: bool,
     pub enable_musixmatch: bool,
+    /// Optional Apple Music auth for the lyrics provider. When present and the
+    /// track path starts with `applemusic:`, the lyrics chain fetches TTML
+    /// directly from the amp-api instead of using the paxsenix proxy.
+    pub apple_music_auth: Option<AppleMusicLyricsAuth>,
 }
 
 impl LyricsRequest {
@@ -34,6 +51,7 @@ impl LyricsRequest {
             server: None,
             prefer_local: false,
             enable_musixmatch: false,
+            apple_music_auth: None,
         }
     }
 
@@ -58,6 +76,11 @@ impl LyricsRequest {
 
     pub fn enable_musixmatch(mut self, value: bool) -> Self {
         self.enable_musixmatch = value;
+        self
+    }
+
+    pub fn apple_music_auth(mut self, auth: AppleMusicLyricsAuth) -> Self {
+        self.apple_music_auth = Some(auth);
         self
     }
 

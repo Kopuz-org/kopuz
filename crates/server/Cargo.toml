@@ -30,12 +30,30 @@ sha1 = { workspace = true }
 httpdate = { workspace = true }
 hex = { workspace = true }
 rookie = { workspace = true }
+sha2 = "0.10"
 web-time = { workspace = true }
 tokio = { workspace = true, features = ["fs", "process", "rt", "sync"] }
 reader = { workspace = true }
 db = { workspace = true }
 utils = { workspace = true }
 async-trait = { workspace = true }
+quick-xml = { workspace = true }
+urlencoding = "2.1"
+regex = "1"
+rsa = "0.9"
+pkcs8 = "0.10"
+pkcs1 = "0.7"
+aes = "0.8"
+cbc = "0.1"
+cmac = "0.7"
+ctr = "0.9"
+base64 = "0.22"
+m3u8-rs = "6"
+prost = "0.13"
+symphonia = { workspace = true }
+
+[build-dependencies]
+prost-build = "0.13"
 
 # Browser-cookie import. Not on Windows: rookie pulls `libesedb` (a bundled C
 # library) there, which can't cross-compile and is unusable anyway since

@@ -1,0 +1,110 @@
+syntax = "proto2";
+
+package wv;
+
+enum WidevineCencHeader_Algorithm {
+  UNKNOWN = 0;
+  AESCTR = 1;
+}
+
+message WidevineCencHeader {
+  optional WidevineCencHeader_Algorithm algorithm = 1;
+  repeated bytes key_id = 2;
+  optional string provider = 3;
+  optional bytes content_id = 4;
+  optional string track_type_deprecated = 5;
+  optional string policy = 6;
+}
+
+enum SignedLicenseRequest_MessageType {
+  UNKNOWN_MESSAGETYPE = 0;
+  LICENSE_REQUEST = 1;
+}
+
+message SignedLicenseRequest {
+  optional SignedLicenseRequest_MessageType Type = 1;
+  optional bytes Msg = 2;
+  optional bytes Signature = 3;
+}
+
+enum LicenseRequest_RequestType {
+  UNKNOWN_REQUESTTYPE = 0;
+  NEW = 1;
+}
+
+enum ProtocolVersion {
+  UNKNOWN_PROTOCOLVERSION = 0;
+  CURRENT = 21;
+}
+
+enum LicenseType {
+  UNKNOWN_LICENSETYPE = 0;
+  DEFAULT = 1;
+  OFFLINE = 2;
+  STREAMING = 3;
+}
+
+message LicenseRequest_ContentIdentification_CENC {
+  optional bytes pssh = 1;
+  optional LicenseType license_type = 2;
+  optional bytes request_id = 3;
+}
+
+message LicenseRequest_ContentIdentification {
+  optional LicenseRequest_ContentIdentification_CENC cenc_id = 1;
+}
+
+message LicenseRequest {
+  optional bytes ClientId = 1;
+  optional LicenseRequest_ContentIdentification ContentId = 2;
+  optional LicenseRequest_RequestType Type = 3;
+  optional uint32 RequestTime = 4;
+  optional bytes KeyControlNonceDeprecated = 5;
+  optional ProtocolVersion ProtocolVersion = 6;
+  optional uint32 KeyControlNonce = 7;
+  optional bytes EncryptedClientId = 8;
+}
+
+enum ClientIdentification_TokenType {
+  KEYBOX = 0;
+  DRM_DEVICE = 1;
+  ANDROID_ID = 2;
+  BROADCAST = 3;
+  ELEMENTARY = 4;
+}
+
+message ClientIdentification {
+  optional ClientIdentification_TokenType Type = 1;
+  optional bytes Token = 2;
+}
+
+message SignedLicense {
+  optional int32 Type = 1;
+  optional bytes Msg = 2;
+  optional bytes Signature = 3;
+  optional bytes SessionKey = 4;
+}
+
+enum License_KeyContainer_KeyType {
+  SIGNING = 1;
+  CONTENT = 2;
+  KEY_CONTROL = 3;
+  OPERATOR_SESSION = 4;
+}
+
+message License_KeyContainer {
+  optional bytes Id = 1;
+  optional bytes Iv = 2;
+  optional bytes Key = 3;
+  optional License_KeyContainer_KeyType Type = 4;
+}
+
+message License {
+  optional bytes Id = 1;
+  optional bytes Policy = 2;
+  repeated License_KeyContainer Key = 3;
+  optional uint64 LicenseStartTime = 4;
+  optional bool RemoteAttestationVerified = 5;
+  optional bytes ProviderClientToken = 6;
+  optional uint32 ProtectionScheme = 7;
+}

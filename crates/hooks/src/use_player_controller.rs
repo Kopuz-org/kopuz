@@ -577,6 +577,12 @@ impl PlayerController {
                                 ResolvedStreamRef::pending_marker(&id),
                                 track.cover.clone().unwrap_or_default(),
                             ),
+                            // Apple Music resolves stream async; cover is the
+                            // plain artwork URL in `track.cover`.
+                            MusicService::AppleMusic => (
+                                format!("__PENDING:{id}"),
+                                track.cover.clone().unwrap_or_default(),
+                            ),
                         })
                     }
                 } {
@@ -626,6 +632,15 @@ impl PlayerController {
                     self.is_loading.set(true);
 
                     let is_radio = PlaybackItemRef::parse(&track.id.uid()).is_radio();
+                    // Extract Apple Music storefront/language for the stream resolver.
+                    let (am_storefront, am_language) = {
+                        let conf = self.config.read();
+                        conf.server
+                            .as_ref()
+                            .filter(|s| s.service == MusicService::AppleMusic)
+                            .map(|s| (s.apple_music_storefront.clone(), s.apple_music_language.clone()))
+                            .unwrap_or_else(|| ("us".into(), "en".into()))
+                    };
 
                     #[cfg(not(target_arch = "wasm32"))]
                     spawn(async move {
@@ -753,6 +768,46 @@ impl PlayerController {
                                 let (source, mut hint) = decoder::from_stream_with_len(cursor, len);
                                 hint.with_extension("m4a");
                                 Ok::<_, std::io::Error>((source, hint))
+                            } else if let Some(rest) =
+                                stream_url_for_blocking.strip_prefix("__AM_FMP4:")
+                            {
+                                // Apple Music: CDM key exchange + encrypted fMP4 download + decrypt.
+                                // Format: adam_id:base64_token
+                                let (adam_id, token_b64) = rest.split_once(':').unwrap_or((rest, ""));
+                                let token = String::from_utf8(
+                                    base64::Engine::decode(
+                                        &base64::engine::general_purpose::STANDARD,
+                                        token_b64,
+                                    )
+                                    .unwrap_or_default(),
+                                )
+                                .unwrap_or_default();
+                                let adam_id = adam_id.to_string();
+                                let rt = tokio::runtime::Handle::current();
+                                let bytes = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                    rt.block_on(async move {
+                                        server::applemusic::stream::resolve_and_decrypt(&adam_id, &token, &am_storefront, &am_language).await
+                                    })
+                                }))
+                                .unwrap_or_else(|panic| {
+                                    let msg = if let Some(s) = panic.downcast_ref::<&str>() {
+                                        s.to_string()
+                                    } else if let Some(s) = panic.downcast_ref::<String>() {
+                                        s.clone()
+                                    } else {
+                                        "unknown panic".to_string()
+                                    };
+                                    tracing::error!("am.playback: resolve_and_decrypt PANICKED: {msg}");
+                                    Err(format!("AM panic: {msg}"))
+                                });
+                                let bytes = bytes.map_err(|e| {
+                                    std::io::Error::new(std::io::ErrorKind::Other, e)
+                                })?;
+                                let len = Some(bytes.len() as u64);
+                                let cursor = std::io::Cursor::new(bytes);
+                                let (source, mut hint) = decoder::from_stream_with_len(cursor, len);
+                                hint.with_extension("m4a");
+                                Ok::<_, std::io::Error>((source, hint))
                             } else {
                                 let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
                                     stream_url_for_blocking,
@@ -773,6 +828,7 @@ impl PlayerController {
                                     Ok(Err(e)) => format!("Couldn't load this track:\n{e}"),
                                     _ => "Playback failed unexpectedly".to_string(),
                                 };
+                                tracing::error!("playback failed: {msg}");
                                 playback_error.set(Some(msg));
                                 is_loading.set(false);
                                 skip_in_progress.set(false);

@@ -142,6 +142,7 @@ pub struct CustomTheme {
     pub vars: HashMap<String, String>,
 }
 
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum SortOrder {
     Title,
@@ -586,6 +587,7 @@ pub struct AppConfig {
     pub enable_musixmatch_lyrics: bool,
 }
 
+
 fn default_theme() -> String {
     "default".to_string()
 }
@@ -765,6 +767,8 @@ impl AppConfig {
                     service: server.service,
                     yt_browser: server.yt_browser,
                     yt_anonymous: server.yt_anonymous,
+                    apple_music_storefront: server.apple_music_storefront.clone(),
+                    apple_music_language: server.apple_music_language.clone(),
                 });
             }
         }
@@ -813,6 +817,7 @@ impl AppConfig {
         }
     }
 }
+
 
 impl AppConfig {
     pub fn clear_active_server(&mut self) {
