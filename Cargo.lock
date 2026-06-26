@@ -4856,6 +4856,7 @@ name = "kopuz-components"
 version = "0.7.0"
 dependencies = [
  "base64 0.22.1",
+ "blitz-traits",
  "dioxus",
  "directories",
  "kopuz-config",
@@ -4874,6 +4875,7 @@ dependencies = [
  "tracing",
  "uuid 1.23.2",
  "webbrowser",
+ "winit",
 ]
 
 [[package]]

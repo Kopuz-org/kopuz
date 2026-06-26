@@ -18,6 +18,8 @@ workspace = true
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 dioxus = { workspace = true, features = ["desktop"] }
 directories = { workspace = true }
+blitz-traits = { workspace = true }
+winit = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 dioxus = { workspace = true, features = ["web"] }

@@ -32,7 +32,7 @@ dioxus = { workspace = true, features = ["desktop"] }
 # fixes filed upstream. Both renderers compile in; KOPUZ_BLITZ=1 selects
 # native at runtime. Default features minus "vello-hybrid" (panics on
 # kopuz's 0-alpha paints) and minus "incremental".
-dioxus-native = { git = "https://github.com/Kopuz-org/kopuz-blitz", rev = "3b8f6ae7303e585377d1a621c5a278a30ea2125e", package = "dioxus-native", default-features = false, features = [
+dioxus-native = { workspace = true, features = [
     "accessibility",
     "hot-reload",
     "net",

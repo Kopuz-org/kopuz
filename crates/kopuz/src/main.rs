@@ -919,8 +919,7 @@ fn App() -> Element {
     ))]
     use_effect(move || {
         let mode = config.read().titlebar_mode;
-        let win = dioxus::desktop::window();
-        win.set_decorations(mode == config::TitlebarMode::System);
+        components::window_host::set_decorations(mode == config::TitlebarMode::System);
     });
 
     #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
@@ -937,8 +936,9 @@ fn App() -> Element {
 
     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
     {
+        use components::window_host as wh;
         use dioxus::desktop::trayicon::TrayIcon;
-        use dioxus::desktop::{WindowCloseBehaviour, window};
+        use dioxus::desktop::trayicon::menu::MenuId;
         use std::cell::RefCell;
         use std::rc::Rc;
 
@@ -948,32 +948,39 @@ fn App() -> Element {
         const TRAY_SHOW_ID: &str = "kopuz-tray-show";
         const TRAY_QUIT_ID: &str = "kopuz-tray-quit";
 
-        let win_ctx = window();
-        let handle_menu = {
-            let win_ctx = win_ctx.clone();
-            move |id: &dioxus::desktop::trayicon::menu::MenuId| {
-                tracing::debug!("tray menu event id={:?}", id);
-                if *id == TRAY_SHOW_ID {
-                    if win_ctx.is_visible() {
-                        win_ctx.set_visible(false);
-                    } else {
-                        win_ctx.set_visible(true);
-                        win_ctx.set_focus();
-                    }
-                } else if *id == TRAY_QUIT_ID {
-                    win_ctx.set_close_behavior(WindowCloseBehaviour::WindowCloses);
-                    win_ctx.close();
+        // Window ops route through the window_host seam (webview DesktopContext
+        // or blitz winit window), so this is renderer-agnostic.
+        let handle_menu = move |id: &MenuId| {
+            tracing::debug!("tray menu event id={:?}", id);
+            if *id == TRAY_SHOW_ID {
+                if wh::is_visible() {
+                    wh::set_visible(false);
+                } else {
+                    wh::set_visible(true);
+                    wh::set_focus();
                 }
+            } else if *id == TRAY_QUIT_ID {
+                wh::set_hide_on_close(false);
+                wh::close();
             }
         };
-        dioxus::desktop::use_tray_menu_event_handler({
-            let handle_menu = handle_menu.clone();
-            move |event| handle_menu(&event.id)
-        });
-        dioxus::desktop::use_muda_event_handler({
-            let handle_menu = handle_menu.clone();
-            move |event| handle_menu(&event.id)
-        });
+
+        // Menu events: the webview pumps muda's global channel through tao's
+        // event loop; winit doesn't, so under the native renderer we poll it.
+        if wh::is_webview() {
+            dioxus::desktop::use_tray_menu_event_handler(move |event| handle_menu(&event.id));
+            dioxus::desktop::use_muda_event_handler(move |event| handle_menu(&event.id));
+        } else {
+            use_future(move || async move {
+                let rx = dioxus::desktop::trayicon::menu::MenuEvent::receiver();
+                loop {
+                    while let Ok(event) = rx.try_recv() {
+                        handle_menu(&event.id);
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+            });
+        }
 
         use_effect({
             let tray_slot = tray_slot.clone();
@@ -999,11 +1006,7 @@ fn App() -> Element {
                     *warned = false;
                 }
                 drop(warned);
-                window().set_close_behavior(if enabled {
-                    WindowCloseBehaviour::WindowHides
-                } else {
-                    WindowCloseBehaviour::WindowCloses
-                });
+                wh::set_hide_on_close(enabled);
 
                 let mut slot = tray_slot.borrow_mut();
                 match (enabled, slot.is_some()) {
@@ -1494,33 +1497,29 @@ fn App() -> Element {
     use_context_provider(|| components::CompactMode(compact_mode));
     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
     {
-        let mut saved_window_size = use_signal(|| None::<LogicalSize<f64>>);
+        let mut saved_window_size = use_signal(|| None::<(f64, f64)>);
         use_effect(move || {
+            use components::window_host as wh;
             let active = *compact_mode.read();
-            let win = dioxus::desktop::window();
             if active {
-                let scale = win.window.scale_factor();
-                let current = win.window.inner_size().to_logical::<f64>(scale);
-                saved_window_size.set(Some(current));
-                win.window.set_always_on_top(true);
+                saved_window_size.set(Some(wh::inner_size_logical()));
+                wh::set_always_on_top(true);
                 let compact_h = if cfg!(target_os = "macos") {
                     170.0
                 } else {
                     148.0
                 };
-                win.window.set_resizable(true);
-                win.window
-                    .set_min_inner_size(Some(LogicalSize::new(260.0, compact_h)));
-                win.window.set_max_inner_size(None::<LogicalSize<f64>>);
-                win.window
-                    .set_inner_size(LogicalSize::new(380.0, compact_h));
+                wh::set_resizable(true);
+                wh::set_min_inner_size(Some((260.0, compact_h)));
+                wh::set_max_inner_size(None);
+                wh::set_inner_size(380.0, compact_h);
             } else {
-                win.window.set_always_on_top(false);
-                win.window.set_resizable(true);
-                win.window.set_min_inner_size(None::<LogicalSize<f64>>);
-                win.window.set_max_inner_size(None::<LogicalSize<f64>>);
-                if let Some(size) = saved_window_size.take() {
-                    win.window.set_inner_size(size);
+                wh::set_always_on_top(false);
+                wh::set_resizable(true);
+                wh::set_min_inner_size(None);
+                wh::set_max_inner_size(None);
+                if let Some((w, h)) = saved_window_size.take() {
+                    wh::set_inner_size(w, h);
                 }
             }
         });

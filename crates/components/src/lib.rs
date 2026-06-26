@@ -9,6 +9,8 @@ pub fn blitz_active() -> bool {
     *ON.get_or_init(|| std::env::var_os("KOPUZ_BLITZ").is_some_and(|v| v == "1"))
 }
 
+pub mod window_host;
+
 pub mod modern;
 pub mod navigation_controller;
 pub mod normal;

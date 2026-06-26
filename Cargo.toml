@@ -14,6 +14,11 @@ keywords = ["music", "player", "audio", "dioxus"]
 
 [workspace.dependencies]
 dioxus = { version = "0.7.9", features = [] }
+# Native (Blitz/wgpu) renderer + its window-host API, pinned by rev to the
+# Kopuz-org fork. Crates add their own features.
+dioxus-native = { git = "https://github.com/Kopuz-org/kopuz-blitz", rev = "3b8f6ae7303e585377d1a621c5a278a30ea2125e", package = "dioxus-native", default-features = false }
+blitz-traits = { git = "https://github.com/Kopuz-org/kopuz-blitz", rev = "3b8f6ae7303e585377d1a621c5a278a30ea2125e" }
+winit = "=0.31.0-beta.2"
 getrandom = { version = "0.4", features = ["wasm_js"] }
 web-sys = { version = "0.3", features = [
   "AudioContext",
