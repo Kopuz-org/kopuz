@@ -225,8 +225,8 @@ fn main() {
             // carry over. Known-broken under blitz: YT playback (decipher needs
             // a JS engine), artwork:// covers, and the close-time persist flush.
             #[cfg(any(target_os = "linux", target_os = "windows"))]
-            let decorations = desktop_shell::read_titlebar_mode_from_disk()
-                == ::config::TitlebarMode::System;
+            let decorations =
+                desktop_shell::read_titlebar_mode_from_disk() == ::config::TitlebarMode::System;
             #[cfg(not(any(target_os = "linux", target_os = "windows")))]
             let decorations = true;
             let attrs = dioxus_native::WindowAttributes::default()
@@ -524,63 +524,67 @@ fn App() -> Element {
     // flush silently never ran. Signals are peeked here (not Send), the
     // joined thread does the blocking DB work. Idempotent across
     // CloseRequested/LoopDestroyed.
+    // Persist-on-close via a wry (webview) event subscription; wry *is* the
+    // webview, so it has no native-renderer form. Gated off under blitz.
     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-    dioxus::desktop::use_wry_event_handler(move |event, _| {
-        use dioxus::desktop::tao::event::{Event, WindowEvent};
-        if matches!(
-            event,
-            Event::LoopDestroyed
-                | Event::WindowEvent {
-                    event: WindowEvent::CloseRequested,
-                    ..
-                }
-        ) {
-            if let Some(db) = app_db::DB_HANDLE.get() {
-                let db = db.clone();
-                // None = the queue is empty (a cleared queue must persist as
-                // empty, not resurrect) — but only once the saved queue has
-                // actually been restored, else a quit during startup would
-                // wipe it.
-                let queue_snap = (*initial_load_done.peek()).then(|| {
-                    pending_queue_state_snapshot
-                        .peek()
-                        .clone()
-                        .map(queue_state::snapshot)
-                        .unwrap_or_default()
-                });
-                // Library/playlists/favorites need no flush — every mutation
-                // already committed as a targeted write when it happened.
-                let cfg = (*config_loaded_ok.peek()).then(|| {
-                    let mut cfg = config.peek().clone();
-                    cfg.volume = *volume.peek();
-                    cfg
-                });
-                let _ = std::thread::spawn(move || {
-                    let Ok(rt) = tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                    else {
-                        return;
-                    };
-                    rt.block_on(async move {
-                        if let Some(snap) = queue_snap
-                            && let Err(e) = db.save_queue(&snap).await
-                        {
-                            tracing::warn!(error = %e, "queue flush on close failed");
-                        }
-                        if let Some(cfg) = cfg {
-                            let _ = db.save_config(&cfg).await;
-                        }
+    if !components::blitz_active() {
+        dioxus::desktop::use_wry_event_handler(move |event, _| {
+            use dioxus::desktop::tao::event::{Event, WindowEvent};
+            if matches!(
+                event,
+                Event::LoopDestroyed
+                    | Event::WindowEvent {
+                        event: WindowEvent::CloseRequested,
+                        ..
+                    }
+            ) {
+                if let Some(db) = app_db::DB_HANDLE.get() {
+                    let db = db.clone();
+                    // None = the queue is empty (a cleared queue must persist as
+                    // empty, not resurrect) — but only once the saved queue has
+                    // actually been restored, else a quit during startup would
+                    // wipe it.
+                    let queue_snap = (*initial_load_done.peek()).then(|| {
+                        pending_queue_state_snapshot
+                            .peek()
+                            .clone()
+                            .map(queue_state::snapshot)
+                            .unwrap_or_default()
                     });
-                })
-                .join();
+                    // Library/playlists/favorites need no flush — every mutation
+                    // already committed as a targeted write when it happened.
+                    let cfg = (*config_loaded_ok.peek()).then(|| {
+                        let mut cfg = config.peek().clone();
+                        cfg.volume = *volume.peek();
+                        cfg
+                    });
+                    let _ = std::thread::spawn(move || {
+                        let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                            .enable_all()
+                            .build()
+                        else {
+                            return;
+                        };
+                        rt.block_on(async move {
+                            if let Some(snap) = queue_snap
+                                && let Err(e) = db.save_queue(&snap).await
+                            {
+                                tracing::warn!(error = %e, "queue flush on close failed");
+                            }
+                            if let Some(cfg) = cfg {
+                                let _ = db.save_config(&cfg).await;
+                            }
+                        });
+                    })
+                    .join();
+                }
+                // After the persists, so they (and any failure warnings) land in
+                // latest.log and the trace. Idempotent across CloseRequested/
+                // LoopDestroyed; Ctrl+C is covered by the SIGINT handler.
+                crate::logging::shutdown();
             }
-            // After the persists, so they (and any failure warnings) land in
-            // latest.log and the trace. Idempotent across CloseRequested/
-            // LoopDestroyed; Ctrl+C is covered by the SIGINT handler.
-            crate::logging::shutdown();
-        }
-    });
+        });
+    }
 
     #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
     use_effect(move || {
