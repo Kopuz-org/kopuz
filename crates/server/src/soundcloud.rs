@@ -626,183 +626,46 @@ pub(crate) async fn set_track_like(track_id: &str, like: bool, token: &str) -> R
     Ok(())
 }
 
-/// One-time SoundCloud sign-in via an isolated browser profile. Reuses the YT
-/// Music browser-launch machinery; the only differences are the sign-in URL,
-/// the cookie domain, and that we extract the single `oauth_token` cookie that
-/// the web app sends as `Authorization: OAuth <token>`.
+/// One-time SoundCloud sign-in via an isolated browser profile, reusing the
+/// shared [`crate::cookies`] machinery. We extract the single `oauth_token`
+/// cookie the web app sends as `Authorization: OAuth <token>`.
 pub mod signin {
-    use std::path::{Path, PathBuf};
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
 
     use config::Browser;
 
-    use crate::ytmusic::isolated_profile as ip;
+    use crate::cookies;
 
-    const SIGNIN_URL: &str = "https://soundcloud.com/signin";
-
-    pub fn profile_dir(server_id: &str) -> PathBuf {
-        let safe: String = server_id
-            .chars()
-            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
-            .collect();
-        let leaf = if safe.is_empty() {
-            "sc-profile".to_string()
-        } else {
-            format!("sc-profile-{safe}")
-        };
-        directories::ProjectDirs::from("com", "temidaradev", "kopuz")
-            .map(|d| {
-                #[cfg(target_os = "windows")]
-                let base = d.data_local_dir();
-                #[cfg(not(target_os = "windows"))]
-                let base = d.config_dir();
-                base.join(&leaf)
-            })
-            .unwrap_or_else(|| PathBuf::from(format!("./{leaf}")))
-    }
+    const PROFILE_PREFIX: &str = "sc-profile";
 
     pub fn delete_profile(server_id: &str) -> std::io::Result<()> {
-        match std::fs::remove_dir_all(profile_dir(server_id)) {
-            Ok(()) => Ok(()),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(e),
-        }
+        cookies::delete_profile(PROFILE_PREFIX, server_id)
     }
 
-    /// Launch the chosen browser at the SoundCloud sign-in page and poll the
-    /// isolated profile's cookie store until `oauth_token` appears. The browser
-    /// is always killed before returning.
     #[tracing::instrument(name = "sc.signin", skip(server_id, signin_timeout), fields(browser = %browser))]
     pub async fn launch_signin_and_extract(
         browser: Browser,
         server_id: &str,
         signin_timeout: Duration,
     ) -> Result<String, String> {
-        let profile = profile_dir(server_id);
-        match tokio::fs::remove_dir_all(&profile).await {
-            Ok(()) => {}
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => return Err(format!("wipe sc-profile: {e}")),
-        }
-        tokio::fs::create_dir_all(&profile)
-            .await
-            .map_err(|e| format!("mkdir sc-profile: {e}"))?;
-
-        let bin = if ip::in_flatpak() {
-            ip::find_host_browser_bin(browser).await.ok_or_else(|| {
-                format!(
-                    "{browser} not found on the host (looked for: {}). Install it on the host system.",
-                    ip::browser_candidates(browser).join(", ")
-                )
-            })?
-        } else {
-            ip::find_browser_bin(browser).ok_or_else(|| {
-                format!(
-                    "{browser} not found in PATH (looked for: {}). Install it, or set $KOPUZ_{}_BIN.",
-                    ip::browser_candidates(browser).join(", "),
-                    browser.id().to_uppercase().replace('-', "_")
-                )
-            })?
-        };
-
-        let mut cmd = ip::browser_command(&bin);
-        cmd.arg("--no-first-run")
-            .arg("--no-default-browser-check")
-            .arg(format!("--user-data-dir={}", profile.display()));
-        #[cfg(target_os = "windows")]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x0100_0000);
-        }
-        let mut child = cmd
-            .arg(SIGNIN_URL)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .kill_on_drop(true)
-            .spawn()
-            .map_err(|e| format!("spawn {bin}: {e}"))?;
-
-        let deadline = Instant::now() + signin_timeout;
-        let outcome = loop {
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            if Instant::now() > deadline {
-                break Err(format!(
-                    "Sign-in not detected within {}s",
-                    signin_timeout.as_secs()
-                ));
-            }
-            let _ = child.try_wait();
-            if let Ok(Some(token)) = extract_oauth_token(browser, &profile).await {
-                break Ok(token);
-            }
-        };
-        let _ = child.kill().await;
-        outcome
-    }
-
-    /// Pull the `oauth_token` cookie value out of the isolated profile's cookie
-    /// store (decrypted by `rookie`, exactly like the YT cookie reader).
-    pub async fn extract_oauth_token(
-        browser: Browser,
-        profile_root: &Path,
-    ) -> Result<Option<String>, String> {
-        extract_cookie(browser, profile_root, "oauth_token").await
-    }
-
-    /// Decrypt the isolated profile's cookie store (via `rookie`) and return the
-    /// value of the named cookie, if present and non-empty.
-    pub async fn extract_cookie(
-        browser: Browser,
-        profile_root: &Path,
-        name: &str,
-    ) -> Result<Option<String>, String> {
-        let db_path =
-            pick_cookies_path(profile_root).ok_or_else(|| "no Cookies database yet".to_string())?;
-        let profile_owned = profile_root.to_path_buf();
-        let browser_name = rookie_browser_name(browser);
-
-        let cookies =
-            tokio::task::spawn_blocking(move || -> Result<Vec<rookie::enums::Cookie>, String> {
-                let domains = Some(vec!["soundcloud.com".to_string()]);
-                #[cfg(not(target_os = "windows"))]
-                {
-                    let _ = profile_owned;
-                    let config = rookie::config::get_browser_config(browser_name);
-                    rookie::chromium_based(config, db_path, domains).map_err(|e| e.to_string())
-                }
-                #[cfg(target_os = "windows")]
-                {
-                    let _ = browser_name;
-                    let key_path = profile_owned.join("Local State");
-                    rookie::chromium_based(key_path, db_path, domains).map_err(|e| e.to_string())
-                }
-            })
-            .await
-            .map_err(|e| format!("cookie extract task: {e}"))??;
-
-        Ok(cookies
-            .into_iter()
-            .find(|c| c.name == name && !c.value.is_empty())
-            .map(|c| c.value))
-    }
-
-    fn rookie_browser_name(browser: Browser) -> &'static str {
-        match browser {
-            Browser::Brave => "brave",
-            Browser::Chrome => "chrome",
-            Browser::Chromium => "chromium",
-            Browser::Edge => "edge",
-            Browser::Vivaldi => "vivaldi",
-        }
-    }
-
-    fn pick_cookies_path(profile_root: &Path) -> Option<PathBuf> {
-        [
-            profile_root.join("Default").join("Network").join("Cookies"),
-            profile_root.join("Default").join("Cookies"),
-        ]
-        .into_iter()
-        .find(|p| p.exists())
+        cookies::launch_signin_and_extract(
+            browser,
+            server_id,
+            PROFILE_PREFIX,
+            "https://soundcloud.com/signin",
+            signin_timeout,
+            |browser, profile| async move {
+                Ok(cookies::read_cookies(browser, &profile, "soundcloud.com")
+                    .await
+                    .ok()
+                    .and_then(|cs| {
+                        cs.into_iter()
+                            .find(|c| c.name == "oauth_token" && !c.value.is_empty())
+                            .map(|c| c.value)
+                    }))
+            },
+        )
+        .await
     }
 }
 

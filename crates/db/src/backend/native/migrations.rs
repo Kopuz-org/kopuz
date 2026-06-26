@@ -1,4 +1,11 @@
-//! One-shot importer: legacy `*.json` store → SQLite (issue #347).
+//! Database migrations, both senses:
+//! 1. the sqlx **schema migrator** ([`run_migrations`]) that applies
+//!    `migrations/*.sql`, with a line-ending-tolerant checksum reconciler and a
+//!    pre-migration [`snapshot_if_pending`] backup; and
+//! 2. the one-shot **legacy `*.json` → SQLite importer** ([`run_json_import`],
+//!    issue #347).
+//!
+//! ## JSON importer
 //!
 //! Runs once per database (gated on the DB being empty), so it's safe to call
 //! on every launch. The whole import is a single transaction — a crash before
@@ -18,8 +25,122 @@ use std::path::Path;
 use serde::Deserialize;
 use sqlx::SqlitePool;
 
+use super::{open_pool, with_ext};
 use crate::{DbError, ImportReport};
 use reader::models::{Track, TrackId};
+
+static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
+
+/// Run migrations, tolerating a checksum mismatch that's purely a line-ending
+/// difference of the same migration SQL: sqlx checksums raw bytes, so a CRLF
+/// (Windows) and an LF (Linux/macOS) checkout of an identical migration hash
+/// differently. On a `VersionMismatch` we reconcile and retry; a checksum that
+/// matches neither line ending is a genuine edit and still fails.
+pub(super) async fn run_migrations(pool: &SqlitePool) -> Result<(), DbError> {
+    match MIGRATOR.run(pool).await {
+        Ok(()) => Ok(()),
+        Err(sqlx::migrate::MigrateError::VersionMismatch(_)) => {
+            reconcile_eol_checksums(pool).await?;
+            MIGRATOR.run(pool).await.map_err(Into::into)
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Re-stamp `_sqlx_migrations` rows whose checksum differs from this binary's
+/// only by line endings. `VersionMismatch` reports just the first offender, so
+/// reconcile every applied migration in one pass before retrying.
+async fn reconcile_eol_checksums(pool: &SqlitePool) -> Result<(), DbError> {
+    use sha2::{Digest, Sha384};
+
+    let stored: HashMap<i64, Vec<u8>> =
+        sqlx::query_as::<_, (i64, Vec<u8>)>("SELECT version, checksum FROM _sqlx_migrations")
+            .fetch_all(pool)
+            .await?
+            .into_iter()
+            .collect();
+
+    for m in MIGRATOR.iter() {
+        let Some(stored_ck) = stored.get(&m.version) else {
+            continue;
+        };
+        if stored_ck.as_slice() == m.checksum.as_ref() {
+            continue;
+        }
+        // If either line-ending variant matches the stored checksum, the SQL
+        // (hence schema) is identical — only EOL differs.
+        let lf = m.sql.replace("\r\n", "\n");
+        let crlf = lf.replace('\n', "\r\n");
+        let matches_eol_variant = [lf.as_bytes(), crlf.as_bytes()]
+            .into_iter()
+            .any(|bytes| Sha384::digest(bytes).as_slice() == stored_ck.as_slice());
+        if matches_eol_variant {
+            sqlx::query("UPDATE _sqlx_migrations SET checksum = ?1 WHERE version = ?2")
+                .bind(m.checksum.as_ref())
+                .bind(m.version)
+                .execute(pool)
+                .await?;
+            tracing::warn!(
+                version = m.version,
+                "reconciled migration checksum (line-ending-only difference)"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Before applying new migrations to an existing DB, copy it (plus WAL sidecars)
+/// to `<db>.pre-<applied_version>.bak` so a downgrade can restore it. Best-effort.
+pub(super) async fn snapshot_if_pending(path: &Path) {
+    if !path.exists() {
+        return; // fresh DB, nothing to snapshot
+    }
+    let Ok(pool) = open_pool(path).await else {
+        return;
+    };
+    // Max applied version (the table won't exist on a pre-migration legacy DB).
+    let applied: Option<i64> = sqlx::query_scalar("SELECT MAX(version) FROM _sqlx_migrations")
+        .fetch_one(&pool)
+        .await
+        .unwrap_or(None);
+    let available = MIGRATOR.iter().map(|m| m.version).max();
+    let pending = match (applied, available) {
+        (Some(a), Some(v)) => v > a,
+        (None, Some(_)) => false, // fresh/just-created DB with no migrations yet → not a downgrade risk
+        _ => false,
+    };
+    pool.close().await;
+    if !pending {
+        return;
+    }
+    let stamp = applied.unwrap_or(0);
+    // Keep the first snapshot at this version as the authoritative rollback
+    // point. A retry of the same pending migration (or the EOL reconciler having
+    // since re-stamped `_sqlx_migrations`) must not overwrite it with an
+    // already-modified DB — `backup_name` is deterministic, so guard on it.
+    if backup_name(path, stamp, "").exists() {
+        return;
+    }
+    for ext in ["", "-wal", "-shm"] {
+        let src = with_ext(path, ext);
+        if src.exists() {
+            let dst = backup_name(path, stamp, ext);
+            if let Err(e) = std::fs::copy(&src, &dst) {
+                tracing::warn!(error = %e, src = %src.display(), "db: pre-migration snapshot failed");
+            }
+        }
+    }
+    tracing::info!(
+        applied = stamp,
+        "db: snapshotted before applying pending migrations"
+    );
+}
+
+fn backup_name(path: &Path, stamp: i64, suffix: &str) -> std::path::PathBuf {
+    let mut s = path.as_os_str().to_os_string();
+    s.push(format!(".pre-{stamp}.bak{suffix}"));
+    std::path::PathBuf::from(s)
+}
 
 const LEGACY_FILES: [&str; 5] = [
     "config.json",
@@ -1009,4 +1130,72 @@ struct LegacyQueue {
     shuffle_order: Vec<u32>,
     #[serde(default)]
     shuffle_enabled: bool,
+}
+
+#[cfg(test)]
+mod eol_reconcile_tests {
+    use super::*;
+    use sha2::{Digest, Sha384};
+
+    /// A DB created by a CRLF build (Windows) must open under this (LF) build,
+    /// and the stored checksums get re-stamped to canonical — while a genuine
+    /// migration edit is still rejected.
+    #[tokio::test]
+    async fn crlf_db_reconciles_but_real_edit_still_fails() {
+        let dir = std::env::temp_dir().join(format!("kopuz-eol-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let db = dir.join("t.db");
+        for ext in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(with_ext(&db, ext));
+        }
+
+        let pool = open_pool(&db).await.unwrap();
+        run_migrations(&pool).await.unwrap();
+
+        // Simulate a DB written by a CRLF build: every stored checksum becomes
+        // the CRLF-variant hash of the same migration SQL.
+        for m in MIGRATOR.iter() {
+            let crlf = m.sql.replace("\r\n", "\n").replace('\n', "\r\n");
+            sqlx::query("UPDATE _sqlx_migrations SET checksum = ?1 WHERE version = ?2")
+                .bind(Sha384::digest(crlf.as_bytes()).to_vec())
+                .bind(m.version)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+
+        // Reopen: the EOL-only mismatch must reconcile, not error.
+        run_migrations(&pool)
+            .await
+            .expect("CRLF-only checksum mismatch should reconcile");
+
+        // Checksums are now canonical (this binary's).
+        let stored: Vec<(i64, Vec<u8>)> =
+            sqlx::query_as("SELECT version, checksum FROM _sqlx_migrations")
+                .fetch_all(&pool)
+                .await
+                .unwrap();
+        for m in MIGRATOR.iter() {
+            let ck = stored.iter().find(|(v, _)| *v == m.version).map(|(_, c)| c);
+            assert_eq!(ck.unwrap().as_slice(), m.checksum.as_ref());
+        }
+
+        // A genuine modification (checksum matching neither line ending) must
+        // still be refused.
+        sqlx::query(
+            "UPDATE _sqlx_migrations SET checksum = ?1 \
+             WHERE version = (SELECT MIN(version) FROM _sqlx_migrations)",
+        )
+        .bind(vec![0u8; 48])
+        .execute(&pool)
+        .await
+        .unwrap();
+        assert!(
+            run_migrations(&pool).await.is_err(),
+            "a real migration edit must still be rejected"
+        );
+
+        drop(pool);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

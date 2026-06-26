@@ -33,6 +33,7 @@ sqlx = { workspace = true, features = [
 tokio = { workspace = true, features = ["rt", "sync"] }
 arc-swap = { workspace = true }
 directories = { workspace = true }
+sha2 = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt", "macros"] }

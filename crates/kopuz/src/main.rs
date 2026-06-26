@@ -39,11 +39,17 @@ mod updates;
 #[cfg(target_os = "windows")]
 mod windows_titlebar;
 
-const FAVICON: Asset = asset!("../assets/favicon.ico");
-const MAIN_CSS: Asset = asset!("../assets/main.css");
-const THEME_CSS: Asset = asset!("../assets/themes.css");
-const TAILWIND_CSS: Asset = asset!("../assets/tailwind.css");
-const REDUCED_ANIMATIONS_CSS: Asset = asset!("../assets/reduced-animations.css");
+const FAVICON: &str = include_str!(concat!(env!("OUT_DIR"), "/favicon.uri"));
+// CSS/fonts are compiled in (not `asset!()`-collected) so styling works under a
+// bare `cargo run` — see `build.rs::embed_fonts`, which bakes the font data: URIs.
+// The `OUT_DIR` ones pass through it; main.css does too, for its nasin-nanpa
+// @font-face (themes/tailwind/reduced have no font refs, so they're verbatim).
+const MAIN_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/main.css"));
+const THEME_CSS: &str = include_str!("../assets/themes.css");
+const TAILWIND_CSS: &str = include_str!("../assets/tailwind.css");
+const REDUCED_ANIMATIONS_CSS: &str = include_str!("../assets/reduced-animations.css");
+const FONT_AWESOME_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/fontawesome.css"));
+const JETBRAINS_MONO_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/jetbrains-mono.css"));
 #[cfg(target_os = "windows")]
 const TOOLBAR_ICONS: Asset = asset!("../assets/toolbar_icons", AssetOptions::folder());
 /// Store saves (config/library/playlists/favorites) are full-replace and
@@ -67,6 +73,20 @@ fn WindowsToolbarIconAssets() -> Element {
 #[component]
 fn WindowsToolbarIconAssets() -> Element {
     rsx! {}
+}
+
+#[component]
+fn StaticHeadAssets() -> Element {
+    rsx! {
+        document::Link { rel: "icon", href: FAVICON }
+        document::Style { {MAIN_CSS} }
+        document::Style { {THEME_CSS} }
+        document::Style { {TAILWIND_CSS} }
+        document::Style { {REDUCED_ANIMATIONS_CSS} }
+        // fonts
+        document::Style { {JETBRAINS_MONO_CSS} }
+        document::Style { {FONT_AWESOME_CSS} }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1531,25 +1551,9 @@ fn App() -> Element {
     let switch_source = hooks::source_switch::use_switch_source();
 
     rsx! {
-        document::Link { rel: "icon", href: FAVICON }
-        document::Link { rel: "stylesheet", href: MAIN_CSS }
-        document::Link { rel: "stylesheet", href: THEME_CSS }
-        document::Link { rel: "stylesheet", href: TAILWIND_CSS }
-        document::Link { rel: "stylesheet", href: REDUCED_ANIMATIONS_CSS }
+        // we use this component here to prevent re-diffing to prevent warns in console
+        StaticHeadAssets {}
         WindowsToolbarIconAssets {}
-        // Font stylesheets injected declaratively rather than via a
-        // document::Script: a Script is processed once but App re-renders
-        // on every signal change, and dioxus_document warns "Changing the
-        // props of Script {} is not supported" each time. Links are
-        // re-render-safe and do the same job (and load a touch earlier).
-        document::Link {
-            rel: "stylesheet",
-            href: "https://fonts.bunny.net/css?family=jetbrains-mono:400,500,700,800&display=swap",
-        }
-        document::Link {
-            rel: "stylesheet",
-            href: "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css",
-        }
 
         div {
             class: "flex flex-col h-screen text-white select-none overflow-x-hidden {theme_class}",
