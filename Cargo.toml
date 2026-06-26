@@ -45,7 +45,9 @@ tokio = { version = "1.0", features = [
 async-recursion = "1.0"
 discord-rich-presence = "1.1.0"
 lofty = "0.24.0"
-image = { version = "0.25", default-features = false, features = [
+# Pinned exact: blitz-dom (dioxus-native) requires image =0.25.6, so the
+# resolver needs every consumer to agree on that one version.
+image = { version = "=0.25.6", default-features = false, features = [
   "jpeg",
   "png",
   "webp",
@@ -171,3 +173,16 @@ strip = "symbols"
 lto = "thin"
 codegen-units = 1
 panic = "abort"
+
+# Engine fixes for the native (Blitz) renderer, pinned by rev to the Kopuz-org
+# forks so the build is reproducible and the team can iterate without waiting on
+# upstream. Each rev is the HEAD of the working branch on its fork; the upstream
+# PRs are linked from the blitz-phoenix PR.
+#   taffy:       kopuz-taffy @ fix/block-child-available-height
+#   stylo/atoms: kopuz-stylo @ spike/kopuz-deps (0.18.0; servo main has drifted)
+#   wgpu_context: kopuz-anyrender @ fix/drop-surface-output-before-reconfigure
+[patch.crates-io]
+taffy = { git = "https://github.com/Kopuz-org/kopuz-taffy", rev = "8609e92f1a3b60da70ca0a0fd9fa090f62847f46" }
+stylo = { git = "https://github.com/Kopuz-org/kopuz-stylo", rev = "ca38e455ef376e5b8715ef80e5e7a13cb5d2962e" }
+stylo_atoms = { git = "https://github.com/Kopuz-org/kopuz-stylo", rev = "ca38e455ef376e5b8715ef80e5e7a13cb5d2962e" }
+wgpu_context = { git = "https://github.com/Kopuz-org/kopuz-anyrender", rev = "7af1a51e998ecb4a4b479fe29d707bbabe5ef9ac" }
