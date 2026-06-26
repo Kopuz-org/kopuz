@@ -78,7 +78,7 @@ dependencies = [
 [[package]]
 name = "accesskit_xplat"
 version = "0.1.1"
-source = "git+https://github.com/Kopuz-org/kopuz-blitz?rev=3d39b5fa4c3feef832d0af8f7dbb871094fbdaa8#3d39b5fa4c3feef832d0af8f7dbb871094fbdaa8"
+source = "git+https://github.com/Kopuz-org/kopuz-blitz?rev=3b8f6ae7303e585377d1a621c5a278a30ea2125e#3b8f6ae7303e585377d1a621c5a278a30ea2125e"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -854,7 +854,7 @@ checksum = "6099cdc01846bc367c4e7dd630dc5966dccf36b652fae7a74e17b640411a91b2"
 [[package]]
 name = "blitz-dom"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/Kopuz-org/kopuz-blitz?rev=3d39b5fa4c3feef832d0af8f7dbb871094fbdaa8#3d39b5fa4c3feef832d0af8f7dbb871094fbdaa8"
+source = "git+https://github.com/Kopuz-org/kopuz-blitz?rev=3b8f6ae7303e585377d1a621c5a278a30ea2125e#3b8f6ae7303e585377d1a621c5a278a30ea2125e"
 dependencies = [
  "accesskit",
  "anyrender",
@@ -865,7 +865,7 @@ dependencies = [
  "color",
  "cssparser 0.37.0",
  "cursor-icon",
- "debug_timer 0.1.3 (git+https://github.com/Kopuz-org/kopuz-blitz?rev=3d39b5fa4c3feef832d0af8f7dbb871094fbdaa8)",
+ "debug_timer 0.1.3 (git+https://github.com/Kopuz-org/kopuz-blitz?rev=3b8f6ae7303e585377d1a621c5a278a30ea2125e)",
  "euclid",
  "html-escape",
  "image",
@@ -877,15 +877,15 @@ dependencies = [
  "parley",
  "percent-encoding",
  "rayon",
- "selectors 0.38.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "selectors 0.38.0",
  "skrifa",
  "slab",
  "smallvec",
  "stylo",
- "stylo_dom 0.18.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "stylo_static_prefs 0.18.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "stylo_dom",
+ "stylo_static_prefs",
  "stylo_taffy",
- "stylo_traits 0.18.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "stylo_traits",
  "taffy",
  "thread_local",
  "url",
@@ -897,7 +897,7 @@ dependencies = [
 [[package]]
 name = "blitz-html"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/Kopuz-org/kopuz-blitz?rev=3d39b5fa4c3feef832d0af8f7dbb871094fbdaa8#3d39b5fa4c3feef832d0af8f7dbb871094fbdaa8"
+source = "git+https://github.com/Kopuz-org/kopuz-blitz?rev=3b8f6ae7303e585377d1a621c5a278a30ea2125e#3b8f6ae7303e585377d1a621c5a278a30ea2125e"
 dependencies = [
  "blitz-dom",
  "blitz-traits",
@@ -908,7 +908,7 @@ dependencies = [
 [[package]]
 name = "blitz-net"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/Kopuz-org/kopuz-blitz?rev=3d39b5fa4c3feef832d0af8f7dbb871094fbdaa8#3d39b5fa4c3feef832d0af8f7dbb871094fbdaa8"
+source = "git+https://github.com/Kopuz-org/kopuz-blitz?rev=3b8f6ae7303e585377d1a621c5a278a30ea2125e#3b8f6ae7303e585377d1a621c5a278a30ea2125e"
 dependencies = [
  "blitz-traits",
  "data-url",
@@ -920,7 +920,7 @@ dependencies = [
 [[package]]
 name = "blitz-paint"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/Kopuz-org/kopuz-blitz?rev=3d39b5fa4c3feef832d0af8f7dbb871094fbdaa8#3d39b5fa4c3feef832d0af8f7dbb871094fbdaa8"
+source = "git+https://github.com/Kopuz-org/kopuz-blitz?rev=3b8f6ae7303e585377d1a621c5a278a30ea2125e#3b8f6ae7303e585377d1a621c5a278a30ea2125e"
 dependencies = [
  "anyrender",
  "anyrender_svg",
@@ -939,7 +939,7 @@ dependencies = [
 [[package]]
 name = "blitz-shell"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/Kopuz-org/kopuz-blitz?rev=3d39b5fa4c3feef832d0af8f7dbb871094fbdaa8#3d39b5fa4c3feef832d0af8f7dbb871094fbdaa8"
+source = "git+https://github.com/Kopuz-org/kopuz-blitz?rev=3b8f6ae7303e585377d1a621c5a278a30ea2125e#3b8f6ae7303e585377d1a621c5a278a30ea2125e"
 dependencies = [
  "accesskit",
  "accesskit_xplat",
@@ -961,7 +961,7 @@ dependencies = [
 [[package]]
 name = "blitz-traits"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/Kopuz-org/kopuz-blitz?rev=3d39b5fa4c3feef832d0af8f7dbb871094fbdaa8#3d39b5fa4c3feef832d0af8f7dbb871094fbdaa8"
+source = "git+https://github.com/Kopuz-org/kopuz-blitz?rev=3b8f6ae7303e585377d1a621c5a278a30ea2125e#3b8f6ae7303e585377d1a621c5a278a30ea2125e"
 dependencies = [
  "bitflags 2.13.0",
  "bytes",
@@ -1936,7 +1936,7 @@ checksum = "da220af51a1a335e9a930beaaef53d261e41ea9eecfb3d973a3ddae1a7284b9c"
 [[package]]
 name = "debug_timer"
 version = "0.1.3"
-source = "git+https://github.com/Kopuz-org/kopuz-blitz?rev=3d39b5fa4c3feef832d0af8f7dbb871094fbdaa8#3d39b5fa4c3feef832d0af8f7dbb871094fbdaa8"
+source = "git+https://github.com/Kopuz-org/kopuz-blitz?rev=3b8f6ae7303e585377d1a621c5a278a30ea2125e#3b8f6ae7303e585377d1a621c5a278a30ea2125e"
 
 [[package]]
 name = "der"
@@ -2436,7 +2436,7 @@ dependencies = [
 [[package]]
 name = "dioxus-native"
 version = "0.7.0"
-source = "git+https://github.com/Kopuz-org/kopuz-blitz?rev=3d39b5fa4c3feef832d0af8f7dbb871094fbdaa8#3d39b5fa4c3feef832d0af8f7dbb871094fbdaa8"
+source = "git+https://github.com/Kopuz-org/kopuz-blitz?rev=3b8f6ae7303e585377d1a621c5a278a30ea2125e#3b8f6ae7303e585377d1a621c5a278a30ea2125e"
 dependencies = [
  "android-activity",
  "anyrender",
@@ -2469,7 +2469,7 @@ dependencies = [
 [[package]]
 name = "dioxus-native-dom"
 version = "0.7.0"
-source = "git+https://github.com/Kopuz-org/kopuz-blitz?rev=3d39b5fa4c3feef832d0af8f7dbb871094fbdaa8#3d39b5fa4c3feef832d0af8f7dbb871094fbdaa8"
+source = "git+https://github.com/Kopuz-org/kopuz-blitz?rev=3b8f6ae7303e585377d1a621c5a278a30ea2125e#3b8f6ae7303e585377d1a621c5a278a30ea2125e"
 dependencies = [
  "blitz-dom",
  "blitz-traits",
@@ -8286,28 +8286,10 @@ dependencies = [
  "phf_codegen 0.13.1",
  "precomputed-hash",
  "rustc-hash 2.1.2",
- "servo_arc 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "servo_arc 0.4.3",
  "smallvec",
-]
-
-[[package]]
-name = "selectors"
-version = "0.38.0"
-source = "git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e#ca38e455ef376e5b8715ef80e5e7a13cb5d2962e"
-dependencies = [
- "bitflags 2.13.0",
- "cssparser 0.37.0",
- "derive_more 2.1.1",
- "log",
- "new_debug_unreachable",
- "phf 0.13.1",
- "phf_codegen 0.13.1",
- "precomputed-hash",
- "rustc-hash 2.1.2",
- "servo_arc 0.4.3 (git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e)",
- "smallvec",
- "to_shmem 0.4.0 (git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e)",
- "to_shmem_derive 0.1.0 (git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e)",
+ "to_shmem",
+ "to_shmem_derive",
 ]
 
 [[package]]
@@ -8464,14 +8446,6 @@ name = "servo_arc"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "170fb83ab34de17dc69aa7c67482b22218ddb85da56546f9bd6b929e32a05930"
-dependencies = [
- "stable_deref_trait",
-]
-
-[[package]]
-name = "servo_arc"
-version = "0.4.3"
-source = "git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e#ca38e455ef376e5b8715ef80e5e7a13cb5d2962e"
 dependencies = [
  "serde",
  "stable_deref_trait",
@@ -9110,7 +9084,7 @@ dependencies = [
 [[package]]
 name = "stylo"
 version = "0.18.0"
-source = "git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e#ca38e455ef376e5b8715ef80e5e7a13cb5d2962e"
+source = "git+https://github.com/Kopuz-org/kopuz-stylo?rev=701ae9c8a28cd8da50970ff214ad986e689b2846#701ae9c8a28cd8da50970ff214ad986e689b2846"
 dependencies = [
  "app_units",
  "arrayvec",
@@ -9138,9 +9112,9 @@ dependencies = [
  "rayon",
  "rayon-core",
  "rustc-hash 2.1.2",
- "selectors 0.38.0 (git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e)",
+ "selectors 0.38.0",
  "serde",
- "servo_arc 0.4.3 (git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e)",
+ "servo_arc 0.4.3",
  "smallbitvec",
  "smallvec",
  "static_assertions",
@@ -9149,13 +9123,13 @@ dependencies = [
  "strum_macros 0.28.0",
  "stylo_atoms",
  "stylo_derive",
- "stylo_dom 0.18.0 (git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e)",
- "stylo_malloc_size_of 0.18.0 (git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e)",
- "stylo_static_prefs 0.18.0 (git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e)",
- "stylo_traits 0.18.0 (git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e)",
+ "stylo_dom",
+ "stylo_malloc_size_of",
+ "stylo_static_prefs",
+ "stylo_traits",
  "thin-vec",
- "to_shmem 0.4.0 (git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e)",
- "to_shmem_derive 0.1.0 (git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e)",
+ "to_shmem",
+ "to_shmem_derive",
  "uluru",
  "url",
  "void",
@@ -9166,7 +9140,7 @@ dependencies = [
 [[package]]
 name = "stylo_atoms"
 version = "0.18.0"
-source = "git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e#ca38e455ef376e5b8715ef80e5e7a13cb5d2962e"
+source = "git+https://github.com/Kopuz-org/kopuz-stylo?rev=96224381a814e4267ac7cab3f33a9827597b8f68#96224381a814e4267ac7cab3f33a9827597b8f68"
 dependencies = [
  "string_cache 0.9.0",
  "string_cache_codegen 0.6.1",
@@ -9175,7 +9149,8 @@ dependencies = [
 [[package]]
 name = "stylo_derive"
 version = "0.18.0"
-source = "git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e#ca38e455ef376e5b8715ef80e5e7a13cb5d2962e"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d312e035ba0b282b24f50c45378e9d45424cec68a9cde130df2b54ef59514a3"
 dependencies = [
  "darling 0.20.11",
  "proc-macro2",
@@ -9191,16 +9166,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8320050ce458da456b320dfa1252783e4113b3b1a05d0aefb41cbe2bb35ed849"
 dependencies = [
  "bitflags 2.13.0",
- "stylo_malloc_size_of 0.18.0 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
-name = "stylo_dom"
-version = "0.18.0"
-source = "git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e#ca38e455ef376e5b8715ef80e5e7a13cb5d2962e"
-dependencies = [
- "bitflags 2.13.0",
- "stylo_malloc_size_of 0.18.0 (git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e)",
+ "stylo_malloc_size_of",
 ]
 
 [[package]]
@@ -9212,25 +9178,8 @@ dependencies = [
  "app_units",
  "cssparser 0.37.0",
  "euclid",
- "selectors 0.38.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "servo_arc 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "smallbitvec",
- "smallvec",
- "string_cache 0.9.0",
- "thin-vec",
- "void",
-]
-
-[[package]]
-name = "stylo_malloc_size_of"
-version = "0.18.0"
-source = "git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e#ca38e455ef376e5b8715ef80e5e7a13cb5d2962e"
-dependencies = [
- "app_units",
- "cssparser 0.37.0",
- "euclid",
- "selectors 0.38.0 (git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e)",
- "servo_arc 0.4.3 (git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e)",
+ "selectors 0.38.0",
+ "servo_arc 0.4.3",
  "smallbitvec",
  "smallvec",
  "string_cache 0.9.0",
@@ -9248,17 +9197,9 @@ dependencies = [
 ]
 
 [[package]]
-name = "stylo_static_prefs"
-version = "0.18.0"
-source = "git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e#ca38e455ef376e5b8715ef80e5e7a13cb5d2962e"
-dependencies = [
- "toml 1.1.2+spec-1.1.0",
-]
-
-[[package]]
 name = "stylo_taffy"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/Kopuz-org/kopuz-blitz?rev=3d39b5fa4c3feef832d0af8f7dbb871094fbdaa8#3d39b5fa4c3feef832d0af8f7dbb871094fbdaa8"
+source = "git+https://github.com/Kopuz-org/kopuz-blitz?rev=3b8f6ae7303e585377d1a621c5a278a30ea2125e#3b8f6ae7303e585377d1a621c5a278a30ea2125e"
 dependencies = [
  "stylo",
  "stylo_atoms",
@@ -9276,35 +9217,14 @@ dependencies = [
  "cssparser 0.37.0",
  "euclid",
  "malloc_size_of_derive",
- "selectors 0.38.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "selectors 0.38.0",
  "serde",
- "servo_arc 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "servo_arc 0.4.3",
  "stylo_atoms",
- "stylo_malloc_size_of 0.18.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "stylo_malloc_size_of",
  "thin-vec",
- "to_shmem 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "to_shmem_derive 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "url",
-]
-
-[[package]]
-name = "stylo_traits"
-version = "0.18.0"
-source = "git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e#ca38e455ef376e5b8715ef80e5e7a13cb5d2962e"
-dependencies = [
- "app_units",
- "bitflags 2.13.0",
- "cssparser 0.37.0",
- "euclid",
- "malloc_size_of_derive",
- "selectors 0.38.0 (git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e)",
- "serde",
- "servo_arc 0.4.3 (git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e)",
- "stylo_atoms",
- "stylo_malloc_size_of 0.18.0 (git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e)",
- "thin-vec",
- "to_shmem 0.4.0 (git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e)",
- "to_shmem_derive 0.1.0 (git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e)",
+ "to_shmem",
+ "to_shmem_derive",
  "url",
 ]
 
@@ -9658,8 +9578,7 @@ dependencies = [
 [[package]]
 name = "taffy"
 version = "0.11.0-experimental-cache-fix.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e87b88128d417cd7c2c75b8a398177fb9efcb2ae5cddad22bcec106ba9c8e1c3"
+source = "git+https://github.com/Kopuz-org/kopuz-taffy?rev=edc3932b567dc5e3f0417fbe6041670418104294#edc3932b567dc5e3f0417fbe6041670418104294"
 dependencies = [
  "arrayvec",
  "grid",
@@ -9930,20 +9849,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8eb8396666f8344ad4b8849ac0d493ae960290ba89ba1aaf0cb8045d2023288"
 dependencies = [
  "cssparser 0.37.0",
- "servo_arc 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "smallbitvec",
- "smallvec",
- "string_cache 0.9.0",
- "thin-vec",
-]
-
-[[package]]
-name = "to_shmem"
-version = "0.4.0"
-source = "git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e#ca38e455ef376e5b8715ef80e5e7a13cb5d2962e"
-dependencies = [
- "cssparser 0.37.0",
- "servo_arc 0.4.3 (git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e)",
+ "servo_arc 0.4.3",
  "smallbitvec",
  "smallvec",
  "string_cache 0.9.0",
@@ -9955,18 +9861,6 @@ name = "to_shmem_derive"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2ba1f5563024b63bb6acb4558452d9ba737518c1d11fcc1861febe98d1e31cf4"
-dependencies = [
- "darling 0.20.11",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
- "synstructure",
-]
-
-[[package]]
-name = "to_shmem_derive"
-version = "0.1.0"
-source = "git+https://github.com/Kopuz-org/kopuz-stylo?rev=ca38e455ef376e5b8715ef80e5e7a13cb5d2962e#ca38e455ef376e5b8715ef80e5e7a13cb5d2962e"
 dependencies = [
  "darling 0.20.11",
  "proc-macro2",
@@ -12934,8 +12828,3 @@ dependencies = [
  "syn 2.0.117",
  "winnow 1.0.3",
 ]
-
-[[patch.unused]]
-name = "taffy"
-version = "0.11.0"
-source = "git+https://github.com/Kopuz-org/kopuz-taffy?rev=8609e92f1a3b60da70ca0a0fd9fa090f62847f46#8609e92f1a3b60da70ca0a0fd9fa090f62847f46"

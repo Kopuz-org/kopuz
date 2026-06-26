@@ -218,9 +218,33 @@ fn main() {
             config.with_menu(Some(menu))
         };
 
-        dioxus::LaunchBuilder::desktop()
-            .with_cfg(config)
-            .launch(App);
+        if components::blitz_active() {
+            tracing::info!("KOPUZ_BLITZ=1: launching the native (Blitz/wgpu) renderer");
+            // The webview `config` (artwork:// protocol, pot minter, macOS menu)
+            // doesn't apply to the native renderer; only the window attributes
+            // carry over. Known-broken under blitz: YT playback (decipher needs
+            // a JS engine), artwork:// covers, and the close-time persist flush.
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
+            let decorations = desktop_shell::read_titlebar_mode_from_disk()
+                == ::config::TitlebarMode::System;
+            #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+            let decorations = true;
+            let attrs = dioxus_native::WindowAttributes::default()
+                .with_title("Kopuz")
+                .with_decorations(decorations)
+                .with_surface_size(dioxus_native::LogicalSize::new(1350.0, 800.0));
+            dioxus_native::launch_cfg(
+                App,
+                vec![],
+                vec![Box::new(
+                    dioxus_native::Config::new().with_window_attributes(attrs),
+                )],
+            );
+        } else {
+            dioxus::LaunchBuilder::desktop()
+                .with_cfg(config)
+                .launch(App);
+        }
         // Window closed → flush the log file tail + finalize the
         // chrome trace's closing bracket.
         logging::shutdown();

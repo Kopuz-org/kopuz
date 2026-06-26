@@ -178,11 +178,13 @@ panic = "abort"
 # forks so the build is reproducible and the team can iterate without waiting on
 # upstream. Each rev is the HEAD of the working branch on its fork; the upstream
 # PRs are linked from the blitz-phoenix PR.
-#   taffy:       kopuz-taffy @ fix/block-child-available-height
-#   stylo/atoms: kopuz-stylo @ spike/kopuz-deps (0.18.0; servo main has drifted)
+#   taffy:        kopuz-taffy  @ spike/cache-fix-3   (0.11.0-experimental-cache-fix.3;
+#                 the 0.11.0 release dropped APIs stylo_taffy needs)
+#   stylo:        kopuz-stylo  @ spike/style-0.18    (0.18.0)
+#   stylo_atoms:  kopuz-stylo  @ spike/atoms-0.18    (0.18.0)
 #   wgpu_context: kopuz-anyrender @ fix/drop-surface-output-before-reconfigure
 [patch.crates-io]
-taffy = { git = "https://github.com/Kopuz-org/kopuz-taffy", rev = "8609e92f1a3b60da70ca0a0fd9fa090f62847f46" }
-stylo = { git = "https://github.com/Kopuz-org/kopuz-stylo", rev = "ca38e455ef376e5b8715ef80e5e7a13cb5d2962e" }
-stylo_atoms = { git = "https://github.com/Kopuz-org/kopuz-stylo", rev = "ca38e455ef376e5b8715ef80e5e7a13cb5d2962e" }
+taffy = { git = "https://github.com/Kopuz-org/kopuz-taffy", rev = "edc3932b567dc5e3f0417fbe6041670418104294" }
+stylo = { git = "https://github.com/Kopuz-org/kopuz-stylo", rev = "701ae9c8a28cd8da50970ff214ad986e689b2846" }
+stylo_atoms = { git = "https://github.com/Kopuz-org/kopuz-stylo", rev = "96224381a814e4267ac7cab3f33a9827597b8f68" }
 wgpu_context = { git = "https://github.com/Kopuz-org/kopuz-anyrender", rev = "7af1a51e998ecb4a4b479fe29d707bbabe5ef9ac" }
