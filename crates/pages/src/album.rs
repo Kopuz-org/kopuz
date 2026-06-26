@@ -288,7 +288,6 @@ fn AlbumGrid(
                                         onclick: move |_| album_id.set(id_for_nav.clone()),
                                         div {
                                             class: "aspect-square rounded-lg bg-stone-800 mb-3 overflow-hidden relative",
-                                            style: "-webkit-user-drag: none;",
                                             ondragstart: move |evt| evt.prevent_default(),
                                             if let Some(url) = &cover_url {
                                                 img { src: "{url}", class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-300", decoding: "async", loading: "lazy", draggable: "false", ondragstart: move |evt| evt.prevent_default() }
