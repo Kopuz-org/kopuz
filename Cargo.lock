@@ -4833,6 +4833,7 @@ dependencies = [
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
  "objc2-media-player",
+ "parley",
  "percent-encoding",
  "rand 0.10.1",
  "reqwest 0.13.4",

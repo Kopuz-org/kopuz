@@ -44,6 +44,8 @@ dioxus-native = { workspace = true, features = [
     "vello",
     "woff",
 ] }
+# Unused; pulls parley into the graph so its complex-scripts feature unifies.
+parley = { workspace = true }
 discord-rich-presence = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
