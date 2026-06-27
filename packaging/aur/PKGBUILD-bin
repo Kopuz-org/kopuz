@@ -27,7 +27,7 @@ optdepends=(
 )
 
 source=("$pkgname-$pkgver.tar.gz::https://github.com/Kopuz-org/kopuz/releases/download/v$pkgver/kopuz_v$pkgver_x86_64-linux.tar.gz")
-sha256sums=('73d99d1023b3605afc633984fdba8df0a05802b94f79b4459bf77c221eb0880a')
+sha256sums=('0e26f5e897b96645bbdabf58219205ea1ad4c125f64608503a1d617b11b8b520')
 
 package() {
     cd "kopuz-linux-x86_64"
