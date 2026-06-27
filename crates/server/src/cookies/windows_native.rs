@@ -14,17 +14,17 @@ use std::path::Path;
 
 use base64::Engine;
 use config::Browser;
-use windows::core::{interface, IUnknown, IUnknown_Vtbl, Interface, BSTR, GUID, HRESULT};
 use windows::Win32::Foundation::{SysAllocStringByteLen, SysStringByteLen};
 use windows::Win32::Security::Cryptography::{
-    CryptProtectData, CryptUnprotectData, CRYPT_INTEGER_BLOB,
+    CRYPT_INTEGER_BLOB, CryptProtectData, CryptUnprotectData,
 };
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoSetProxyBlanket, CLSCTX_LOCAL_SERVER,
-    COINIT_APARTMENTTHREADED, EOAC_DYNAMIC_CLOAKING, RPC_C_AUTHN_LEVEL_PKT_PRIVACY,
+    CLSCTX_LOCAL_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx,
+    CoSetProxyBlanket, EOAC_DYNAMIC_CLOAKING, RPC_C_AUTHN_LEVEL_PKT_PRIVACY,
     RPC_C_IMP_LEVEL_IMPERSONATE,
 };
 use windows::Win32::System::Rpc::{RPC_C_AUTHN_DEFAULT, RPC_C_AUTHZ_DEFAULT};
+use windows::core::{BSTR, GUID, HRESULT, IUnknown, IUnknown_Vtbl, Interface, interface};
 
 use super::store::Cookie;
 
@@ -101,11 +101,12 @@ fn elevator_encrypt(browser: Browser, plaintext: &[u8]) -> Result<Vec<u8>, Strin
                 break;
             }
         }
-        let unk = unk.ok_or("no registered IElevator interface (Chrome version rotated the IID?)")?;
+        let unk =
+            unk.ok_or("no registered IElevator interface (Chrome version rotated the IID?)")?;
         CoSetProxyBlanket(
             &unk.cast::<IUnknown>().map_err(|e| e.to_string())?,
             RPC_C_AUTHN_DEFAULT as u32,
-            RPC_C_AUTHZ_DEFAULT as u32,
+            RPC_C_AUTHZ_DEFAULT,
             None,
             RPC_C_AUTHN_LEVEL_PKT_PRIVACY,
             RPC_C_IMP_LEVEL_IMPERSONATE,
@@ -142,7 +143,12 @@ fn dpapi(data: &[u8], protect: bool) -> Result<Vec<u8>, String> {
         } else {
             CryptUnprotectData(&in_blob, None, None, None, None, 0, &mut out)
         };
-        res.map_err(|e| format!("DPAPI {}: {e}", if protect { "protect" } else { "unprotect" }))?;
+        res.map_err(|e| {
+            format!(
+                "DPAPI {}: {e}",
+                if protect { "protect" } else { "unprotect" }
+            )
+        })?;
         Ok(std::slice::from_raw_parts(out.pbData, out.cbData as usize).to_vec())
     }
 }
@@ -162,20 +168,20 @@ fn load_v10_key(profile_root: &Path) -> Option<Vec<u8>> {
     dpapi(stripped, false).ok()
 }
 
-/// True while the browser still holds the profile's cookie store open. Windows
-/// Chrome keeps the SQLite cookie DB open and buffers the signed-in auth cookies
-/// in memory until it closes — so the sign-in flow waits for this to flip false
-/// (browser closed → cookies flushed) before reading, instead of polling a store
-/// that's empty while the window is up.
+/// True while the browser holds the profile's cookie store open — an exclusive
+/// open then fails with `ERROR_SHARING_VIOLATION`.
 pub(crate) fn cookie_db_locked(profile_root: &Path) -> bool {
     use std::os::windows::fs::OpenOptionsExt;
     let p = profile_root.join("Default").join("Network").join("Cookies");
     if !p.exists() {
         return false;
     }
-    // share_mode(0) = deny-all: succeeds only if no other process has the file
-    // open. While the browser runs it fails with ERROR_SHARING_VIOLATION (32).
-    match std::fs::OpenOptions::new().read(true).share_mode(0).open(&p) {
+    // share_mode(0) = deny-all; 32 = ERROR_SHARING_VIOLATION.
+    match std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(&p)
+    {
         Ok(_) => false,
         Err(e) => e.raw_os_error() == Some(32),
     }
@@ -222,8 +228,11 @@ pub(crate) fn plant_app_bound_key(browser: Browser, profile_root: &Path) -> Resu
     if let Some(parent) = ls_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    std::fs::write(&ls_path, serde_json::to_vec(&ls).map_err(|e| e.to_string())?)
-        .map_err(|e| format!("write Local State: {e}"))?;
+    std::fs::write(
+        &ls_path,
+        serde_json::to_vec(&ls).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| format!("write Local State: {e}"))?;
 
     let wrapped = dpapi(&k, true)?;
     std::fs::write(profile_root.join(ABE_KEY_FILE), wrapped)
@@ -231,26 +240,44 @@ pub(crate) fn plant_app_bound_key(browser: Browser, profile_root: &Path) -> Resu
     Ok(())
 }
 
-/// AES-256-GCM cookie value: `<tag> | nonce[12] | ct+tag(16)`. Both v10 and v20
-/// in current Chrome prepend a 32-byte SHA(domain) block to the plaintext.
-fn decrypt_value(enc: &[u8], k_v10: &Option<Vec<u8>>, k_v20: &Option<Vec<u8>>) -> Option<String> {
+/// Chrome cookie-encryption tier, by the `encrypted_value` tag prefix.
+enum Scheme {
+    /// `v10`/`v11` — legacy DPAPI key.
+    Dpapi,
+    /// `v20` — planted app-bound key.
+    AppBound,
+}
+
+impl Scheme {
+    fn from_tag(tag: &[u8]) -> Option<Self> {
+        match tag {
+            b"v10" | b"v11" => Some(Self::Dpapi),
+            b"v20" => Some(Self::AppBound),
+            _ => None,
+        }
+    }
+}
+
+/// Decrypt one cookie value: `<tag> | nonce[12] | ct+tag`, AES-256-GCM, then drop
+/// the 32-byte SHA(domain) prefix current Chrome adds to both tiers.
+fn decrypt_value(enc: &[u8], dpapi: Option<&[u8]>, app_bound: Option<&[u8]>) -> Option<String> {
     use aes_gcm::aead::{Aead, KeyInit};
     use aes_gcm::{Aes256Gcm, Key, Nonce};
     if enc.len() < 3 + 12 + 16 {
         return None;
     }
-    let key = match &enc[..3] {
-        b"v10" | b"v11" => k_v10.as_ref()?,
-        b"v20" => k_v20.as_ref()?,
-        _ => return None,
+    let key = match Scheme::from_tag(&enc[..3])? {
+        Scheme::Dpapi => dpapi?,
+        Scheme::AppBound => app_bound?,
     };
     if key.len() != 32 {
         return None;
     }
     let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
-    let pt = cipher.decrypt(Nonce::from_slice(&enc[3..15]), &enc[15..]).ok()?;
-    let v = if pt.len() >= 32 { &pt[32..] } else { &pt[..] };
-    Some(String::from_utf8_lossy(v).into_owned())
+    let pt = cipher
+        .decrypt(Nonce::from_slice(&enc[3..15]), &enc[15..])
+        .ok()?;
+    Some(String::from_utf8_lossy(pt.get(32..).unwrap_or(&pt)).into_owned())
 }
 
 /// Copy the (possibly browser-locked) cookie store to a temp file and read every
@@ -277,11 +304,11 @@ pub(crate) async fn read_cookies(
         }
     }
 
-    let k_v10 = load_v10_key(profile_root);
-    let k_v20 = load_v20_key(profile_root);
+    let dpapi = load_v10_key(profile_root);
+    let app_bound = load_v20_key(profile_root);
 
-    // Open the temp copy read-write (not read_only): if the browser was killed
-    // mid-write the rollback journal needs recovery, which read_only can't do.
+    // Read-write (not read_only) so the rollback journal can recover if the
+    // browser was killed mid-write.
     let mut conn = sqlx::sqlite::SqliteConnectOptions::new()
         .filename(&db)
         .create_if_missing(false)
@@ -305,7 +332,7 @@ pub(crate) async fn read_cookies(
             plain
         } else {
             let enc: Vec<u8> = row.try_get("encrypted_value").unwrap_or_default();
-            match decrypt_value(&enc, &k_v10, &k_v20) {
+            match decrypt_value(&enc, dpapi.as_deref(), app_bound.as_deref()) {
                 Some(v) => v,
                 None => continue,
             }

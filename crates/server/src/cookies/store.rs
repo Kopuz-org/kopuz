@@ -32,7 +32,8 @@ pub(crate) async fn read_cookies(
 
     let cookies = tokio::task::spawn_blocking(move || -> Result<Vec<Cookie>, String> {
         let config = rookie::config::get_browser_config(browser_name);
-        let raw = rookie::chromium_based(config, db_path, Some(domains)).map_err(|e| e.to_string())?;
+        let raw =
+            rookie::chromium_based(config, db_path, Some(domains)).map_err(|e| e.to_string())?;
         Ok(raw
             .into_iter()
             .map(|c| Cookie {
@@ -43,7 +44,12 @@ pub(crate) async fn read_cookies(
     })
     .await
     .map_err(|e| format!("cookie extract task: {e}"))??;
-    tracing::trace!(browser = browser_name, domain, count = cookies.len(), "read cookies from isolated profile");
+    tracing::trace!(
+        browser = browser_name,
+        domain,
+        count = cookies.len(),
+        "read cookies from isolated profile"
+    );
     Ok(cookies)
 }
 

@@ -83,13 +83,24 @@ where
         .map_err(|e| format!("spawn {bin}: {e}"))?;
     tracing::debug!(%bin, pid = ?child.id(), "browser spawned — waiting for sign-in");
 
-    let deadline = Instant::now() + signin_timeout;
-    let outcome =
-        wait_for_signin(browser, &profile, &bin, &mut child, deadline, signin_timeout, &extract)
-            .await;
+    let wait = SigninWait {
+        browser,
+        profile: &profile,
+        bin: &bin,
+        timeout: signin_timeout,
+    };
+    let outcome = wait_for_signin(&wait, &mut child, &extract).await;
 
     let _ = child.kill().await;
     outcome
+}
+
+/// Fixed inputs for a sign-in wait, shared by both platform strategies.
+struct SigninWait<'a> {
+    browser: Browser,
+    profile: &'a Path,
+    bin: &'a str,
+    timeout: Duration,
 }
 
 /// Windows: seed a NONE-protected app-bound key into the fresh profile before
@@ -106,16 +117,12 @@ fn prepare_profile(browser: Browser, profile: &Path) {
 #[cfg(not(target_os = "windows"))]
 fn prepare_profile(_browser: Browser, _profile: &Path) {}
 
-/// Non-Windows: Chrome commits cookies to the store promptly, so poll `extract`
-/// every 500ms — the read succeeds while the sign-in window is still open.
+/// Non-Windows: Chrome commits cookies promptly, so poll `extract` every 500ms —
+/// the read succeeds while the sign-in window is still open.
 #[cfg(not(target_os = "windows"))]
 async fn wait_for_signin<F, Fut>(
-    browser: Browser,
-    profile: &Path,
-    bin: &str,
+    w: &SigninWait<'_>,
     child: &mut Child,
-    deadline: Instant,
-    signin_timeout: Duration,
     extract: &F,
 ) -> Result<String, String>
 where
@@ -123,9 +130,10 @@ where
     Fut: Future<Output = Result<Option<String>, String>>,
 {
     let started = Instant::now();
+    let deadline = started + w.timeout;
     let mut last_extract_err: Option<String> = None;
-    // Edge/Chrome sometimes spawn the UI detached and the launched parent exits
-    // early; the store is still on disk, so keep polling regardless of exit.
+    // Edge/Chrome sometimes spawn the UI detached and the launcher exits early;
+    // the store is still on disk, so keep polling regardless of exit.
     let mut child_exited_at: Option<Instant> = None;
     loop {
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -135,23 +143,32 @@ where
                 .map(|e| format!("; last extract error: {e}"))
                 .unwrap_or_default();
             let exited_note = child_exited_at
-                .map(|_| " — note: the browser process exited early (likely detached UI); close all browser windows and try again")
+                .map(|_| " — note: the browser exited early (likely detached UI); close all browser windows and try again")
                 .unwrap_or_default();
-            tracing::warn!(%bin, timeout_s = signin_timeout.as_secs(), exited_early = child_exited_at.is_some(), "sign-in timed out");
+            tracing::warn!(
+                bin = w.bin,
+                timeout_s = w.timeout.as_secs(),
+                exited_early = child_exited_at.is_some(),
+                "sign-in timed out"
+            );
             return Err(format!(
                 "Sign-in not detected within {}s{exited_note}{detail}",
-                signin_timeout.as_secs()
+                w.timeout.as_secs()
             ));
         }
         if child_exited_at.is_none()
             && let Ok(Some(status)) = child.try_wait()
         {
-            tracing::debug!(%bin, %status, "browser exited — still polling cookies (may be a detached UI)");
+            tracing::debug!(bin = w.bin, %status, "browser exited — still polling cookies");
             child_exited_at = Some(Instant::now());
         }
-        match extract(browser, profile.to_path_buf()).await {
+        match extract(w.browser, w.profile.to_path_buf()).await {
             Ok(Some(value)) => {
-                tracing::info!(%bin, elapsed_ms = started.elapsed().as_millis(), "sign-in detected — closing browser");
+                tracing::info!(
+                    bin = w.bin,
+                    elapsed_ms = started.elapsed().as_millis(),
+                    "sign-in detected"
+                );
                 return Ok(value);
             }
             Ok(None) => {}
@@ -165,18 +182,13 @@ where
     }
 }
 
-/// Windows: Chrome buffers the signed-in auth cookies in memory and only writes
-/// them to the cookie store when the browser closes. Polling while it's open is
-/// futile, so wait for the cookie DB to go from browser-held to released (the
-/// user closing the window) — then read.
+/// Windows: Chrome buffers the auth cookies in memory and writes them to the
+/// store only when the browser closes, so wait for the cookie DB to go from
+/// browser-held to released (the user closing the window), then read.
 #[cfg(target_os = "windows")]
 async fn wait_for_signin<F, Fut>(
-    browser: Browser,
-    profile: &Path,
-    bin: &str,
+    w: &SigninWait<'_>,
     _child: &mut Child,
-    deadline: Instant,
-    signin_timeout: Duration,
     extract: &F,
 ) -> Result<String, String>
 where
@@ -184,8 +196,9 @@ where
     Fut: Future<Output = Result<Option<String>, String>>,
 {
     let started = Instant::now();
-    // Latches once the browser has opened the cookie store, so a still-empty
-    // store before launch isn't mistaken for "browser closed".
+    let deadline = started + w.timeout;
+    // Latches once the browser has opened the store, so a fresh empty profile
+    // isn't read as "browser closed".
     let mut saw_browser = false;
     let mut last_extract_err: Option<String> = None;
     loop {
@@ -195,24 +208,31 @@ where
                 .as_deref()
                 .map(|e| format!("; last extract error: {e}"))
                 .unwrap_or_default();
-            tracing::warn!(%bin, timeout_s = signin_timeout.as_secs(), saw_browser, "sign-in timed out");
+            tracing::warn!(
+                bin = w.bin,
+                timeout_s = w.timeout.as_secs(),
+                saw_browser,
+                "sign-in timed out"
+            );
             return Err(format!(
-                "Sign-in not detected within {}s — finish signing in, then close the browser window to complete sign-in{detail}",
-                signin_timeout.as_secs()
+                "Sign-in not detected within {}s — finish signing in, then close the browser window{detail}",
+                w.timeout.as_secs()
             ));
         }
-        if super::windows_native::cookie_db_locked(profile) {
+        if super::windows_native::cookie_db_locked(w.profile) {
             saw_browser = true;
             continue;
         }
         if !saw_browser {
-            continue; // browser hasn't opened the cookie store yet
+            continue;
         }
-        // Browser opened the store and has now released it (closed) → cookies are
-        // flushed; read them.
-        match extract(browser, profile.to_path_buf()).await {
+        match extract(w.browser, w.profile.to_path_buf()).await {
             Ok(Some(value)) => {
-                tracing::info!(%bin, elapsed_ms = started.elapsed().as_millis(), "sign-in detected after browser close");
+                tracing::info!(
+                    bin = w.bin,
+                    elapsed_ms = started.elapsed().as_millis(),
+                    "sign-in detected after browser close"
+                );
                 return Ok(value);
             }
             Ok(None) => {}
