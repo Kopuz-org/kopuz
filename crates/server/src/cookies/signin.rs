@@ -1,8 +1,9 @@
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use config::Browser;
+use tokio::process::Child;
 
 use super::browser::{
     browser_candidates, browser_command, find_browser_bin, find_host_browser_bin, in_flatpak,
@@ -10,10 +11,10 @@ use super::browser::{
 use super::profile::profile_dir;
 
 /// Wipe the `<prefix>-<server_id>` profile, launch `browser` at `signin_url`,
-/// then poll via `extract` until it yields the signed-in result. `extract`
+/// then wait via `extract` until it yields the signed-in result. `extract`
 /// returns `Ok(Some(value))` when done, `Ok(None)` while pending, `Err` for a
 /// transient read error (logged, retried). The browser is always killed before
-/// returning.
+/// returning. The wait strategy is platform-specific (see `wait_for_signin`).
 pub async fn launch_signin_and_extract<F, Fut>(
     browser: Browser,
     server_id: &str,
@@ -40,6 +41,8 @@ where
     for name in ["SingletonLock", "SingletonCookie", "SingletonSocket"] {
         let _ = tokio::fs::remove_file(profile.join(name)).await;
     }
+
+    prepare_profile(browser, &profile);
 
     let bin = if in_flatpak() {
         find_host_browser_bin(browser).await.ok_or_else(|| {
@@ -68,7 +71,7 @@ where
     // CREATE_BREAKAWAY_FROM_JOB detaches the child so its own sandbox works.
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
+        // tokio's Command has an inherent `creation_flags` on Windows.
         cmd.creation_flags(0x0100_0000);
     }
     let mut child = cmd
@@ -78,16 +81,53 @@ where
         .kill_on_drop(true)
         .spawn()
         .map_err(|e| format!("spawn {bin}: {e}"))?;
-    tracing::debug!(%bin, pid = ?child.id(), "browser spawned — polling for sign-in cookies");
+    tracing::debug!(%bin, pid = ?child.id(), "browser spawned — waiting for sign-in");
 
+    let deadline = Instant::now() + signin_timeout;
+    let outcome =
+        wait_for_signin(browser, &profile, &bin, &mut child, deadline, signin_timeout, &extract)
+            .await;
+
+    let _ = child.kill().await;
+    outcome
+}
+
+/// Windows: seed a NONE-protected app-bound key into the fresh profile before
+/// launch, so v20 cookies stay decryptable if Google's Finch-gated App-Bound
+/// rollout flips on. Best-effort — today's cookies are v10 (DPAPI). No-op
+/// elsewhere.
+#[cfg(target_os = "windows")]
+fn prepare_profile(browser: Browser, profile: &Path) {
+    if let Err(e) = super::windows_native::plant_app_bound_key(browser, profile) {
+        tracing::warn!(error = %e, "app-bound key plant failed — v20 cookies (if any) won't decrypt; v10 still works");
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn prepare_profile(_browser: Browser, _profile: &Path) {}
+
+/// Non-Windows: Chrome commits cookies to the store promptly, so poll `extract`
+/// every 500ms — the read succeeds while the sign-in window is still open.
+#[cfg(not(target_os = "windows"))]
+async fn wait_for_signin<F, Fut>(
+    browser: Browser,
+    profile: &Path,
+    bin: &str,
+    child: &mut Child,
+    deadline: Instant,
+    signin_timeout: Duration,
+    extract: &F,
+) -> Result<String, String>
+where
+    F: Fn(Browser, PathBuf) -> Fut,
+    Fut: Future<Output = Result<Option<String>, String>>,
+{
     let started = Instant::now();
-    let deadline = started + signin_timeout;
     let mut last_extract_err: Option<String> = None;
-    // Edge/Chrome on Windows often spawn the UI detached and the launched parent
-    // exits ~0 in <1s. The cookie store is still on disk in our profile, so keep
-    // polling regardless of child exit; just note it for the timeout message.
+    // Edge/Chrome sometimes spawn the UI detached and the launched parent exits
+    // early; the store is still on disk, so keep polling regardless of exit.
     let mut child_exited_at: Option<Instant> = None;
-    let outcome = loop {
+    loop {
         tokio::time::sleep(Duration::from_millis(500)).await;
         if Instant::now() > deadline {
             let detail = last_extract_err
@@ -98,7 +138,7 @@ where
                 .map(|_| " — note: the browser process exited early (likely detached UI); close all browser windows and try again")
                 .unwrap_or_default();
             tracing::warn!(%bin, timeout_s = signin_timeout.as_secs(), exited_early = child_exited_at.is_some(), "sign-in timed out");
-            break Err(format!(
+            return Err(format!(
                 "Sign-in not detected within {}s{exited_note}{detail}",
                 signin_timeout.as_secs()
             ));
@@ -109,23 +149,79 @@ where
             tracing::debug!(%bin, %status, "browser exited — still polling cookies (may be a detached UI)");
             child_exited_at = Some(Instant::now());
         }
-        match extract(browser, profile.clone()).await {
+        match extract(browser, profile.to_path_buf()).await {
             Ok(Some(value)) => {
                 tracing::info!(%bin, elapsed_ms = started.elapsed().as_millis(), "sign-in detected — closing browser");
-                break Ok(value);
+                return Ok(value);
             }
             Ok(None) => {}
             Err(e) => {
-                // Usually just "cookie store not ready yet" while the user is
-                // still signing in; log once per distinct message to avoid spam.
                 if last_extract_err.as_deref() != Some(e.as_str()) {
                     tracing::trace!(error = %e, "cookie extract not ready yet");
                     last_extract_err = Some(e);
                 }
             }
         }
-    };
+    }
+}
 
-    let _ = child.kill().await;
-    outcome
+/// Windows: Chrome buffers the signed-in auth cookies in memory and only writes
+/// them to the cookie store when the browser closes. Polling while it's open is
+/// futile, so wait for the cookie DB to go from browser-held to released (the
+/// user closing the window) — then read.
+#[cfg(target_os = "windows")]
+async fn wait_for_signin<F, Fut>(
+    browser: Browser,
+    profile: &Path,
+    bin: &str,
+    _child: &mut Child,
+    deadline: Instant,
+    signin_timeout: Duration,
+    extract: &F,
+) -> Result<String, String>
+where
+    F: Fn(Browser, PathBuf) -> Fut,
+    Fut: Future<Output = Result<Option<String>, String>>,
+{
+    let started = Instant::now();
+    // Latches once the browser has opened the cookie store, so a still-empty
+    // store before launch isn't mistaken for "browser closed".
+    let mut saw_browser = false;
+    let mut last_extract_err: Option<String> = None;
+    loop {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        if Instant::now() > deadline {
+            let detail = last_extract_err
+                .as_deref()
+                .map(|e| format!("; last extract error: {e}"))
+                .unwrap_or_default();
+            tracing::warn!(%bin, timeout_s = signin_timeout.as_secs(), saw_browser, "sign-in timed out");
+            return Err(format!(
+                "Sign-in not detected within {}s — finish signing in, then close the browser window to complete sign-in{detail}",
+                signin_timeout.as_secs()
+            ));
+        }
+        if super::windows_native::cookie_db_locked(profile) {
+            saw_browser = true;
+            continue;
+        }
+        if !saw_browser {
+            continue; // browser hasn't opened the cookie store yet
+        }
+        // Browser opened the store and has now released it (closed) → cookies are
+        // flushed; read them.
+        match extract(browser, profile.to_path_buf()).await {
+            Ok(Some(value)) => {
+                tracing::info!(%bin, elapsed_ms = started.elapsed().as_millis(), "sign-in detected after browser close");
+                return Ok(value);
+            }
+            Ok(None) => {}
+            Err(e) => {
+                if last_extract_err.as_deref() != Some(e.as_str()) {
+                    tracing::trace!(error = %e, "cookie extract after close not ready");
+                    last_extract_err = Some(e);
+                }
+            }
+        }
+    }
 }

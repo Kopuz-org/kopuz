@@ -4151,7 +4151,9 @@ dependencies = [
 name = "kopuz-server"
 version = "0.7.0"
 dependencies = [
+ "aes-gcm",
  "async-trait",
+ "base64 0.22.1",
  "directories",
  "hex",
  "httpdate",
@@ -4167,10 +4169,13 @@ dependencies = [
  "serde",
  "serde_json",
  "sha1",
+ "sqlx",
  "tokio",
  "tracing",
  "uuid 1.23.2",
  "web-time",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
 ]
 
 [[package]]

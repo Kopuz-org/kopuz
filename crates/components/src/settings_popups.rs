@@ -9,8 +9,7 @@ pub fn AddServerPopup(
     /// Selected Chromium-family browser when service is YouTube Music.
     yt_browser: Signal<Browser>,
     /// YouTube Music anonymous mode — true = no sign-in, browse + play
-    /// public surfaces only. Forced true on Windows (browser sign-in
-    /// is disabled there for now).
+    /// public surfaces only.
     yt_anonymous: Signal<bool>,
     error: Signal<Option<String>>,
     on_close: EventHandler<()>,
@@ -237,35 +236,23 @@ fn ServerServiceFields(
     server_service: Signal<MusicService>,
     server_url: Signal<String>,
     yt_browser: Signal<Browser>,
-    mut yt_anonymous: Signal<bool>,
+    yt_anonymous: Signal<bool>,
     server_url_placeholder: String,
 ) -> Element {
-    // Browser sign-in must decrypt the browser's cookie store, which Chrome 127+
-    // App-Bound Encryption blocks for non-admin apps on Windows (HKLM-only policy,
-    // no in-app workaround). Force anonymous there and hide the sign-in option.
-    let windows = cfg!(target_os = "windows");
-    use_effect(move || {
-        if cfg!(target_os = "windows") && !*yt_anonymous.peek() {
-            yt_anonymous.set(true);
-        }
-    });
-
     match server_service() {
         MusicService::YtMusic => {
             let anon = yt_anonymous();
             rsx! {
-                // Auth method selector (sign-in row hidden on Windows).
+                // Auth method selector.
                 div { class: "flex flex-col gap-2 mb-2",
-                    if !windows {
-                        label { class: "flex items-center gap-2 text-sm text-white cursor-pointer",
-                            input {
-                                r#type: "radio",
-                                name: "yt-auth-method",
-                                checked: !anon,
-                                onchange: move |_| yt_anonymous.set(false),
-                            }
-                            span { "Sign in with a browser" }
+                    label { class: "flex items-center gap-2 text-sm text-white cursor-pointer",
+                        input {
+                            r#type: "radio",
+                            name: "yt-auth-method",
+                            checked: !anon,
+                            onchange: move |_| yt_anonymous.set(false),
                         }
+                        span { "Sign in with a browser" }
                     }
                     label { class: "flex items-center gap-2 text-sm text-white cursor-pointer",
                         input {
@@ -280,15 +267,18 @@ fn ServerServiceFields(
 
                 if anon {
                     p { class: "text-xs text-white/60",
-                        if windows {
-                            "On Windows, kopuz uses YouTube Music anonymously (browser sign-in isn't supported here yet). You can browse, search, and play — but Liked Music, library playlists, and following/liking are disabled."
-                        } else {
-                            "kopuz will use YouTube Music without signing in. You can browse, search, and play — but Liked Music, your library playlists, and following/liking are disabled."
-                        }
+                        "kopuz will use YouTube Music without signing in. You can browse, search, and play — but Liked Music, your library playlists, and following/liking are disabled."
                     }
                 } else {
                     p { class: "text-xs text-white/60",
                         "Pick which browser kopuz should use for the YouTube Music sign-in window. It opens in an isolated profile (a fresh, separate session) — your normal browsing is untouched. Make sure the browser is installed."
+                    }
+                    // Windows Chrome keeps the auth cookies in memory until the
+                    // browser closes, so kopuz can only read them after close.
+                    if cfg!(target_os = "windows") {
+                        p { class: "text-xs text-amber-300/90 mt-1",
+                            "After you finish signing in, close the browser window — kopuz completes sign-in once it does."
+                        }
                     }
                     select {
                         onchange: move |e| {

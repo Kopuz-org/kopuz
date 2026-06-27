@@ -105,11 +105,46 @@ pub fn add_registry(
     );
 }
 
-pub fn ytmusic_auto_login(
+/// Persist freshly-obtained browser-sign-in credentials onto the active server
+/// and mirror the browser choice into its saved entry. Shared by the YT Music
+/// and SoundCloud auto-login flows (the only per-service differences are how the
+/// token is obtained and how the user id is derived).
+fn apply_browser_login(
     mut config: Signal<AppConfig>,
-    yt_browser: Signal<Browser>,
+    browser: Browser,
+    token: String,
+    user_id: String,
+) {
+    let mut cfg = config.write();
+    let saved_id = cfg.server.as_ref().and_then(|server| server.id.clone());
+    if let Some(server) = cfg.server.as_mut() {
+        server.access_token = Some(token);
+        server.user_id = Some(user_id);
+        server.yt_browser = Some(browser);
+    }
+    if let Some(id) = saved_id
+        && let Some(saved) = cfg.servers.iter_mut().find(|server| server.id == id)
+    {
+        saved.yt_browser = Some(browser);
+    }
+}
+
+/// Surface a browser sign-in failure to both the settings error line and the
+/// player error banner.
+fn report_signin_failure(
     mut error: Signal<Option<String>>,
     mut playback_error: Signal<Option<String>>,
+    msg: String,
+) {
+    error.set(Some(msg.clone()));
+    playback_error.set(Some(msg));
+}
+
+pub fn ytmusic_auto_login(
+    config: Signal<AppConfig>,
+    yt_browser: Signal<Browser>,
+    mut error: Signal<Option<String>>,
+    playback_error: Signal<Option<String>>,
 ) {
     let (browser, existing, server_id) = {
         let cfg = config.peek();
@@ -121,44 +156,30 @@ pub fn ytmusic_auto_login(
             srv.and_then(|s| s.id.clone()).unwrap_or_default(),
         )
     };
-    let mut report = move |msg: String| {
-        error.set(Some(msg.clone()));
-        playback_error.set(Some(msg));
-    };
     spawn(async move {
         let cookies = match ensure_ytmusic_signed_in(existing, browser, &server_id).await {
             Ok(cookies) => cookies,
             Err(err) => {
-                report(format!("YT Music sign-in failed ({browser}): {err}"));
+                report_signin_failure(
+                    error,
+                    playback_error,
+                    format!("YT Music sign-in failed ({browser}): {err}"),
+                );
                 return;
             }
         };
-
         let yt_user_id =
             ::server::ytmusic::derive_user_id(&cookies).unwrap_or_else(|| "me".to_string());
-        {
-            let mut cfg = config.write();
-            let saved_id = cfg.server.as_ref().and_then(|server| server.id.clone());
-            if let Some(server) = cfg.server.as_mut() {
-                server.access_token = Some(cookies);
-                server.user_id = Some(yt_user_id);
-                server.yt_browser = Some(browser);
-            }
-            if let Some(id) = saved_id
-                && let Some(saved) = cfg.servers.iter_mut().find(|server| server.id == id)
-            {
-                saved.yt_browser = Some(browser);
-            }
-        }
+        apply_browser_login(config, browser, cookies, yt_user_id);
         error.set(None);
     });
 }
 
 pub fn soundcloud_auto_login(
-    mut config: Signal<AppConfig>,
+    config: Signal<AppConfig>,
     yt_browser: Signal<Browser>,
     mut error: Signal<Option<String>>,
-    mut playback_error: Signal<Option<String>>,
+    playback_error: Signal<Option<String>>,
 ) {
     let (browser, server_id) = {
         let cfg = config.peek();
@@ -167,10 +188,6 @@ pub fn soundcloud_auto_login(
             srv.and_then(|s| s.yt_browser).unwrap_or(*yt_browser.peek()),
             srv.and_then(|s| s.id.clone()).unwrap_or_default(),
         )
-    };
-    let mut report = move |msg: String| {
-        error.set(Some(msg.clone()));
-        playback_error.set(Some(msg));
     };
     spawn(async move {
         let token = match ::server::soundcloud::signin::launch_signin_and_extract(
@@ -182,27 +199,18 @@ pub fn soundcloud_auto_login(
         {
             Ok(token) => token,
             Err(err) => {
-                report(format!("SoundCloud sign-in failed ({browser}): {err}"));
+                report_signin_failure(
+                    error,
+                    playback_error,
+                    format!("SoundCloud sign-in failed ({browser}): {err}"),
+                );
                 return;
             }
         };
         let user_id = ::server::soundcloud::derive_user_id(&token)
             .await
             .unwrap_or_else(|| "me".to_string());
-        {
-            let mut cfg = config.write();
-            let saved_id = cfg.server.as_ref().and_then(|server| server.id.clone());
-            if let Some(server) = cfg.server.as_mut() {
-                server.access_token = Some(token);
-                server.user_id = Some(user_id);
-                server.yt_browser = Some(browser);
-            }
-            if let Some(id) = saved_id
-                && let Some(saved) = cfg.servers.iter_mut().find(|server| server.id == id)
-            {
-                saved.yt_browser = Some(browser);
-            }
-        }
+        apply_browser_login(config, browser, token, user_id);
         error.set(None);
     });
 }

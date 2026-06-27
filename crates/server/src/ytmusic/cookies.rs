@@ -6,7 +6,6 @@ use std::path::Path;
 
 use config::Browser;
 
-#[cfg(not(target_os = "windows"))]
 #[tracing::instrument(name = "yt.cookies_extract", skip(profile_root), fields(browser = %browser))]
 pub async fn extract_from(browser: Browser, profile_root: &Path) -> Result<String, String> {
     let cookies = crate::cookies::read_cookies(browser, profile_root, "youtube.com").await?;
@@ -33,15 +32,6 @@ pub async fn extract_from(browser: Browser, profile_root: &Path) -> Result<Strin
     Ok(header)
 }
 
-/// Windows: unsupported — App-Bound Encryption + no `libesedb`; callers fall
-/// back to anonymous access.
-#[cfg(target_os = "windows")]
-pub async fn extract_from(browser: Browser, profile_root: &Path) -> Result<String, String> {
-    let _ = (browser, profile_root);
-    Err("browser-cookie import isn't supported on Windows".to_string())
-}
-
-#[cfg(not(target_os = "windows"))]
 fn header_safe(s: &str) -> bool {
     !s.is_empty()
         && s.bytes()
