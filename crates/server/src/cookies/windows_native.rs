@@ -280,6 +280,12 @@ fn decrypt_value(enc: &[u8], dpapi: Option<&[u8]>, app_bound: Option<&[u8]>) -> 
     Some(String::from_utf8_lossy(pt.get(32..).unwrap_or(&pt)).into_owned())
 }
 
+/// A cookie `host_key` belongs to `domain` only as the domain itself or a
+/// dot-prefixed subdomain — never a bare substring (`notyoutube.com`).
+fn host_matches_domain(host: &str, domain: &str) -> bool {
+    host == domain || host.ends_with(&format!(".{domain}"))
+}
+
 /// Copy the (possibly browser-locked) cookie store to a temp file and read every
 /// cookie whose host is scoped to `domain`, decrypting v10/v20 values.
 pub(crate) async fn read_cookies(
@@ -294,7 +300,13 @@ pub(crate) async fn read_cookies(
         return Err(format!("no Cookies store under {}", profile_root.display()));
     }
     // Snapshot-copy so we read consistently even while the browser holds it open.
-    let tmp = std::env::temp_dir().join(format!("kopuz-ck-{}", std::process::id()));
+    // Unique per call (pid + counter) so concurrent reads don't clobber each other.
+    static SNAPSHOT_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let tmp = std::env::temp_dir().join(format!(
+        "kopuz-ck-{}-{}",
+        std::process::id(),
+        SNAPSHOT_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
     std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
     let db = tmp.join("Cookies");
     for ext in ["", "-wal", "-shm", "-journal"] {
@@ -323,7 +335,7 @@ pub(crate) async fn read_cookies(
     let mut out = Vec::new();
     for row in rows {
         let host: String = row.try_get("host_key").unwrap_or_default();
-        if !host.contains(domain) {
+        if !host_matches_domain(&host, domain) {
             continue;
         }
         let name: String = row.try_get("name").unwrap_or_default();
