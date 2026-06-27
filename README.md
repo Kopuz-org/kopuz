@@ -135,6 +135,14 @@ media source carries its own credentials and its own favorites.
 
 ## Installation
 
+### Cargo (crates.io)
+
+Install directly with Cargo:
+
+```bash
+cargo install kopuz
+```
+
 ### NixOS / Nix
 
 **Run directly without installing:**
