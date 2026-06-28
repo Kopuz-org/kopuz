@@ -2,9 +2,9 @@ use config::UiStyle;
 use dioxus::prelude::*;
 use player::player::Player;
 
-use crate::vaxry::bottombar::BottombarVaxry;
 use crate::normal::bottombar::BottombarNormal;
 use crate::queue_drag::{install_native_artwork_drag_prevention, set_queue_drag_enabled};
+use crate::vaxry::bottombar::BottombarVaxry;
 
 #[component]
 pub fn Bottombar(
