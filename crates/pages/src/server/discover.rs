@@ -705,7 +705,7 @@ fn Card(
             div { class: "h-10 flex items-center overflow-hidden",
                 p {
                     class: "text-sm font-semibold text-white break-words",
-                    style: "display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis;",
+                    style: "display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-clamp: 2; overflow: hidden; text-overflow: ellipsis;",
                     "{title}"
                 }
             }
@@ -826,7 +826,7 @@ fn SongCard(track: Track) -> Element {
             div { class: "h-10 flex items-center overflow-hidden",
                 p {
                     class: "text-sm font-semibold text-white break-words",
-                    style: "display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis;",
+                    style: "display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-clamp: 2; overflow: hidden; text-overflow: ellipsis;",
                     "{title}"
                 }
             }

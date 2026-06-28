@@ -218,9 +218,33 @@ fn main() {
             config.with_menu(Some(menu))
         };
 
-        dioxus::LaunchBuilder::desktop()
-            .with_cfg(config)
-            .launch(App);
+        if components::blitz_active() {
+            tracing::info!("KOPUZ_BLITZ=1: launching the native (Blitz/wgpu) renderer");
+            // The webview `config` (artwork:// protocol, pot minter, macOS menu)
+            // doesn't apply to the native renderer; only the window attributes
+            // carry over. Known-broken under blitz: YT playback (decipher needs
+            // a JS engine), artwork:// covers, and the close-time persist flush.
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
+            let decorations =
+                desktop_shell::read_titlebar_mode_from_disk() == ::config::TitlebarMode::System;
+            #[cfg(not(any(target_os = "linux", target_os = "windows")))]
+            let decorations = true;
+            let attrs = dioxus_native::WindowAttributes::default()
+                .with_title("Kopuz")
+                .with_decorations(decorations)
+                .with_surface_size(dioxus_native::LogicalSize::new(1350.0, 800.0));
+            dioxus_native::launch_cfg(
+                App,
+                vec![],
+                vec![Box::new(
+                    dioxus_native::Config::new().with_window_attributes(attrs),
+                )],
+            );
+        } else {
+            dioxus::LaunchBuilder::desktop()
+                .with_cfg(config)
+                .launch(App);
+        }
         // Window closed → flush the log file tail + finalize the
         // chrome trace's closing bracket.
         logging::shutdown();
@@ -500,63 +524,67 @@ fn App() -> Element {
     // flush silently never ran. Signals are peeked here (not Send), the
     // joined thread does the blocking DB work. Idempotent across
     // CloseRequested/LoopDestroyed.
+    // Persist-on-close via a wry (webview) event subscription; wry *is* the
+    // webview, so it has no native-renderer form. Gated off under blitz.
     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-    dioxus::desktop::use_wry_event_handler(move |event, _| {
-        use dioxus::desktop::tao::event::{Event, WindowEvent};
-        if matches!(
-            event,
-            Event::LoopDestroyed
-                | Event::WindowEvent {
-                    event: WindowEvent::CloseRequested,
-                    ..
-                }
-        ) {
-            if let Some(db) = app_db::DB_HANDLE.get() {
-                let db = db.clone();
-                // None = the queue is empty (a cleared queue must persist as
-                // empty, not resurrect) — but only once the saved queue has
-                // actually been restored, else a quit during startup would
-                // wipe it.
-                let queue_snap = (*initial_load_done.peek()).then(|| {
-                    pending_queue_state_snapshot
-                        .peek()
-                        .clone()
-                        .map(queue_state::snapshot)
-                        .unwrap_or_default()
-                });
-                // Library/playlists/favorites need no flush — every mutation
-                // already committed as a targeted write when it happened.
-                let cfg = (*config_loaded_ok.peek()).then(|| {
-                    let mut cfg = config.peek().clone();
-                    cfg.volume = *volume.peek();
-                    cfg
-                });
-                let _ = std::thread::spawn(move || {
-                    let Ok(rt) = tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                    else {
-                        return;
-                    };
-                    rt.block_on(async move {
-                        if let Some(snap) = queue_snap
-                            && let Err(e) = db.save_queue(&snap).await
-                        {
-                            tracing::warn!(error = %e, "queue flush on close failed");
-                        }
-                        if let Some(cfg) = cfg {
-                            let _ = db.save_config(&cfg).await;
-                        }
+    if !components::blitz_active() {
+        dioxus::desktop::use_wry_event_handler(move |event, _| {
+            use dioxus::desktop::tao::event::{Event, WindowEvent};
+            if matches!(
+                event,
+                Event::LoopDestroyed
+                    | Event::WindowEvent {
+                        event: WindowEvent::CloseRequested,
+                        ..
+                    }
+            ) {
+                if let Some(db) = app_db::DB_HANDLE.get() {
+                    let db = db.clone();
+                    // None = the queue is empty (a cleared queue must persist as
+                    // empty, not resurrect) — but only once the saved queue has
+                    // actually been restored, else a quit during startup would
+                    // wipe it.
+                    let queue_snap = (*initial_load_done.peek()).then(|| {
+                        pending_queue_state_snapshot
+                            .peek()
+                            .clone()
+                            .map(queue_state::snapshot)
+                            .unwrap_or_default()
                     });
-                })
-                .join();
+                    // Library/playlists/favorites need no flush — every mutation
+                    // already committed as a targeted write when it happened.
+                    let cfg = (*config_loaded_ok.peek()).then(|| {
+                        let mut cfg = config.peek().clone();
+                        cfg.volume = *volume.peek();
+                        cfg
+                    });
+                    let _ = std::thread::spawn(move || {
+                        let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                            .enable_all()
+                            .build()
+                        else {
+                            return;
+                        };
+                        rt.block_on(async move {
+                            if let Some(snap) = queue_snap
+                                && let Err(e) = db.save_queue(&snap).await
+                            {
+                                tracing::warn!(error = %e, "queue flush on close failed");
+                            }
+                            if let Some(cfg) = cfg {
+                                let _ = db.save_config(&cfg).await;
+                            }
+                        });
+                    })
+                    .join();
+                }
+                // After the persists, so they (and any failure warnings) land in
+                // latest.log and the trace. Idempotent across CloseRequested/
+                // LoopDestroyed; Ctrl+C is covered by the SIGINT handler.
+                crate::logging::shutdown();
             }
-            // After the persists, so they (and any failure warnings) land in
-            // latest.log and the trace. Idempotent across CloseRequested/
-            // LoopDestroyed; Ctrl+C is covered by the SIGINT handler.
-            crate::logging::shutdown();
-        }
-    });
+        });
+    }
 
     #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
     use_effect(move || {
@@ -891,8 +919,7 @@ fn App() -> Element {
     ))]
     use_effect(move || {
         let mode = config.read().titlebar_mode;
-        let win = dioxus::desktop::window();
-        win.set_decorations(mode == config::TitlebarMode::System);
+        components::window_host::set_decorations(mode == config::TitlebarMode::System);
     });
 
     #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
@@ -909,8 +936,9 @@ fn App() -> Element {
 
     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
     {
+        use components::window_host as wh;
         use dioxus::desktop::trayicon::TrayIcon;
-        use dioxus::desktop::{WindowCloseBehaviour, window};
+        use dioxus::desktop::trayicon::menu::MenuId;
         use std::cell::RefCell;
         use std::rc::Rc;
 
@@ -920,32 +948,39 @@ fn App() -> Element {
         const TRAY_SHOW_ID: &str = "kopuz-tray-show";
         const TRAY_QUIT_ID: &str = "kopuz-tray-quit";
 
-        let win_ctx = window();
-        let handle_menu = {
-            let win_ctx = win_ctx.clone();
-            move |id: &dioxus::desktop::trayicon::menu::MenuId| {
-                tracing::debug!("tray menu event id={:?}", id);
-                if *id == TRAY_SHOW_ID {
-                    if win_ctx.is_visible() {
-                        win_ctx.set_visible(false);
-                    } else {
-                        win_ctx.set_visible(true);
-                        win_ctx.set_focus();
-                    }
-                } else if *id == TRAY_QUIT_ID {
-                    win_ctx.set_close_behavior(WindowCloseBehaviour::WindowCloses);
-                    win_ctx.close();
+        // Window ops route through the window_host seam (webview DesktopContext
+        // or blitz winit window), so this is renderer-agnostic.
+        let handle_menu = move |id: &MenuId| {
+            tracing::debug!("tray menu event id={:?}", id);
+            if *id == TRAY_SHOW_ID {
+                if wh::is_visible() {
+                    wh::set_visible(false);
+                } else {
+                    wh::set_visible(true);
+                    wh::set_focus();
                 }
+            } else if *id == TRAY_QUIT_ID {
+                wh::set_hide_on_close(false);
+                wh::close();
             }
         };
-        dioxus::desktop::use_tray_menu_event_handler({
-            let handle_menu = handle_menu.clone();
-            move |event| handle_menu(&event.id)
-        });
-        dioxus::desktop::use_muda_event_handler({
-            let handle_menu = handle_menu.clone();
-            move |event| handle_menu(&event.id)
-        });
+
+        // Menu events: the webview pumps muda's global channel through tao's
+        // event loop; winit doesn't, so under the native renderer we poll it.
+        if wh::is_webview() {
+            dioxus::desktop::use_tray_menu_event_handler(move |event| handle_menu(&event.id));
+            dioxus::desktop::use_muda_event_handler(move |event| handle_menu(&event.id));
+        } else {
+            use_future(move || async move {
+                let rx = dioxus::desktop::trayicon::menu::MenuEvent::receiver();
+                loop {
+                    while let Ok(event) = rx.try_recv() {
+                        handle_menu(&event.id);
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                }
+            });
+        }
 
         use_effect({
             let tray_slot = tray_slot.clone();
@@ -971,11 +1006,7 @@ fn App() -> Element {
                     *warned = false;
                 }
                 drop(warned);
-                window().set_close_behavior(if enabled {
-                    WindowCloseBehaviour::WindowHides
-                } else {
-                    WindowCloseBehaviour::WindowCloses
-                });
+                wh::set_hide_on_close(enabled);
 
                 let mut slot = tray_slot.borrow_mut();
                 match (enabled, slot.is_some()) {
@@ -1466,33 +1497,29 @@ fn App() -> Element {
     use_context_provider(|| components::CompactMode(compact_mode));
     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
     {
-        let mut saved_window_size = use_signal(|| None::<LogicalSize<f64>>);
+        let mut saved_window_size = use_signal(|| None::<(f64, f64)>);
         use_effect(move || {
+            use components::window_host as wh;
             let active = *compact_mode.read();
-            let win = dioxus::desktop::window();
             if active {
-                let scale = win.window.scale_factor();
-                let current = win.window.inner_size().to_logical::<f64>(scale);
-                saved_window_size.set(Some(current));
-                win.window.set_always_on_top(true);
+                saved_window_size.set(Some(wh::inner_size_logical()));
+                wh::set_always_on_top(true);
                 let compact_h = if cfg!(target_os = "macos") {
                     170.0
                 } else {
                     148.0
                 };
-                win.window.set_resizable(true);
-                win.window
-                    .set_min_inner_size(Some(LogicalSize::new(260.0, compact_h)));
-                win.window.set_max_inner_size(None::<LogicalSize<f64>>);
-                win.window
-                    .set_inner_size(LogicalSize::new(380.0, compact_h));
+                wh::set_resizable(true);
+                wh::set_min_inner_size(Some((260.0, compact_h)));
+                wh::set_max_inner_size(None);
+                wh::set_inner_size(380.0, compact_h);
             } else {
-                win.window.set_always_on_top(false);
-                win.window.set_resizable(true);
-                win.window.set_min_inner_size(None::<LogicalSize<f64>>);
-                win.window.set_max_inner_size(None::<LogicalSize<f64>>);
-                if let Some(size) = saved_window_size.take() {
-                    win.window.set_inner_size(size);
+                wh::set_always_on_top(false);
+                wh::set_resizable(true);
+                wh::set_min_inner_size(None);
+                wh::set_max_inner_size(None);
+                if let Some((w, h)) = saved_window_size.take() {
+                    wh::set_inner_size(w, h);
                 }
             }
         });

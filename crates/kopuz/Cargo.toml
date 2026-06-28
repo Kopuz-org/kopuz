@@ -28,6 +28,24 @@ discord-presence = { workspace = true }
 # Desktop only. Android uses the mobile renderer, logs to logcat, and has no Discord IPC.
 [target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))'.dependencies]
 dioxus = { workspace = true, features = ["desktop"] }
+# Native renderer (Blitz/wgpu) from the Kopuz-org fork, carrying the engine
+# fixes filed upstream. Both renderers compile in; KOPUZ_BLITZ=1 selects
+# native at runtime. Default features minus "vello-hybrid" (panics on
+# kopuz's 0-alpha paints) and minus "incremental".
+dioxus-native = { workspace = true, features = [
+    "accessibility",
+    "hot-reload",
+    "net",
+    "html",
+    "svg",
+    "system-fonts",
+    "clipboard",
+    "file_dialog",
+    "vello",
+    "woff",
+] }
+# Unused; pulls parley into the graph so its complex-scripts feature unifies.
+parley = { workspace = true }
 discord-rich-presence = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }

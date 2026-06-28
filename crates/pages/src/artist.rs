@@ -479,7 +479,6 @@ pub fn Artist(
                                             onclick: move |_| artist_name.set(art.clone()),
                                             div {
                                                 class: "aspect-square w-full rounded-full bg-stone-800 mb-4 overflow-hidden relative transition-all",
-                                                style: "-webkit-user-drag: none;",
                                                 ondragstart: move |evt| evt.prevent_default(),
                                                 if let Some(url) = cover_url {
                                                     img {
@@ -777,7 +776,6 @@ pub fn Artist(
                                                     div { class: "cursor-pointer",
                                                         div {
                                                             class: "aspect-square rounded-lg bg-stone-800 mb-3 overflow-hidden relative",
-                                                            style: "-webkit-user-drag: none;",
                                                             ondragstart: move |evt| evt.prevent_default(),
                                                             if let Some(url) = &cover_url {
                                                                 img {

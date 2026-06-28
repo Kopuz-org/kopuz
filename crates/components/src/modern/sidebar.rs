@@ -1,5 +1,5 @@
 #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
-use dioxus::desktop::window;
+use crate::window_host;
 use dioxus::prelude::*;
 use kopuz_route::Route;
 
@@ -202,7 +202,7 @@ pub fn SidebarModern(props: SidebarProps) -> Element {
                     class: "h-10 flex-shrink-0",
                     onmousedown: move |_| {
                         #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
-                        window().drag();
+                        window_host::drag();
                     }
                 }
             }

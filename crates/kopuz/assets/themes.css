@@ -451,8 +451,6 @@ select optgroup {
 
 select {
     appearance: none !important;
-    -webkit-appearance: none !important;
-    -moz-appearance: none !important;
     background-color: #000000 !important;
     background: #000000 !important;
     color: #ffffff !important;

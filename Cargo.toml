@@ -14,6 +14,13 @@ keywords = ["music", "player", "audio", "dioxus"]
 
 [workspace.dependencies]
 dioxus = { version = "0.7.9", features = [] }
+# Native (Blitz/wgpu) renderer + its window-host API, pinned by rev to the
+# Kopuz-org fork. Crates add their own features.
+dioxus-native = { git = "https://github.com/Kopuz-org/kopuz-blitz", rev = "3b8f6ae7303e585377d1a621c5a278a30ea2125e", package = "dioxus-native", default-features = false }
+blitz-traits = { git = "https://github.com/Kopuz-org/kopuz-blitz", rev = "3b8f6ae7303e585377d1a621c5a278a30ea2125e" }
+winit = "=0.31.0-beta.2"
+# complex-scripts: dictionary-based CJK line-breaking in blitz's parley.
+parley = { version = "0.10", default-features = false, features = ["complex-scripts"] }
 getrandom = { version = "0.4", features = ["wasm_js"] }
 web-sys = { version = "0.3", features = [
   "AudioContext",
@@ -45,7 +52,9 @@ tokio = { version = "1.0", features = [
 async-recursion = "1.0"
 discord-rich-presence = "1.1.0"
 lofty = "0.24.0"
-image = { version = "0.25", default-features = false, features = [
+# Pinned exact: blitz-dom (dioxus-native) requires image =0.25.6, so the
+# resolver needs every consumer to agree on that one version.
+image = { version = "=0.25.6", default-features = false, features = [
   "jpeg",
   "png",
   "webp",
@@ -172,3 +181,18 @@ strip = "symbols"
 lto = "thin"
 codegen-units = 1
 panic = "abort"
+
+# Engine fixes for the native (Blitz) renderer, pinned by rev to the Kopuz-org
+# forks so the build is reproducible and the team can iterate without waiting on
+# upstream. Each rev is the HEAD of the working branch on its fork; the upstream
+# PRs are linked from the blitz-phoenix PR.
+#   taffy:        kopuz-taffy  @ spike/cache-fix-3   (0.11.0-experimental-cache-fix.3;
+#                 the 0.11.0 release dropped APIs stylo_taffy needs)
+#   stylo:        kopuz-stylo  @ spike/style-0.18    (0.18.0)
+#   stylo_atoms:  kopuz-stylo  @ spike/atoms-0.18    (0.18.0)
+#   wgpu_context: kopuz-anyrender @ fix/drop-surface-output-before-reconfigure
+[patch.crates-io]
+taffy = { git = "https://github.com/Kopuz-org/kopuz-taffy", rev = "edc3932b567dc5e3f0417fbe6041670418104294" }
+stylo = { git = "https://github.com/Kopuz-org/kopuz-stylo", rev = "701ae9c8a28cd8da50970ff214ad986e689b2846" }
+stylo_atoms = { git = "https://github.com/Kopuz-org/kopuz-stylo", rev = "96224381a814e4267ac7cab3f33a9827597b8f68" }
+wgpu_context = { git = "https://github.com/Kopuz-org/kopuz-anyrender", rev = "7af1a51e998ecb4a4b479fe29d707bbabe5ef9ac" }

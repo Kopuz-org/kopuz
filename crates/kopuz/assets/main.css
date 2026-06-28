@@ -1,26 +1,16 @@
 /* App-wide styling */
 
-/* Themed scrollbars — uses CSS vars so all themes apply automatically */
-::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+/* Themed scrollbars — standard css-scrollbars-1; uses CSS vars so themes
+   apply automatically. Transparent track resolves to the app's black
+   background. Both WebKitGTK and blitz honor these. */
+html {
+    scrollbar-color: var(--color-slate-500, #64748b) transparent;
 }
 
-::-webkit-scrollbar-track {
-    background: var(--color-black, #000000);
-}
-
-::-webkit-scrollbar-thumb {
-    background: var(--color-slate-500, #64748b);
-    border-radius: 3px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-    background: var(--color-slate-400, #94a3b8);
-}
-
-::-webkit-scrollbar-corner {
-    background: var(--color-black, #000000);
+/* Referenced throughout the markup (horizontal shelves); previously
+   undefined, so the renderer showed its scrollbars on these by accident. */
+.scrollbar-hide {
+    scrollbar-width: none;
 }
 
 @keyframes scan-slide {
@@ -274,7 +264,6 @@ body {
 
 [data-platform="android"],
 [data-platform="android"] * {
-    -webkit-user-select: none !important;
     user-select: none !important;
     -webkit-touch-callout: none !important;
     -webkit-tap-highlight-color: transparent !important;
@@ -283,7 +272,6 @@ body {
 [data-platform="android"] input,
 [data-platform="android"] textarea,
 [data-platform="android"] [contenteditable="true"] {
-    -webkit-user-select: text !important;
     user-select: text !important;
 }
 
