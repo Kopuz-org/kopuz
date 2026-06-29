@@ -6,7 +6,7 @@ use config::Browser;
 use tokio::process::Child;
 
 use super::browser::{
-    browser_candidates, browser_command, find_browser_bin, find_host_browser_bin, in_flatpak,
+    browser_candidates, browser_command, find_browser_bin, in_flatpak,
 };
 use super::profile::profile_dir;
 
@@ -43,22 +43,26 @@ where
     }
 
     prepare_profile(browser, &profile);
+    
 
-    let bin = if in_flatpak() {
-        find_host_browser_bin(browser).await.ok_or_else(|| {
-            format!(
-                "{browser} not found on the host (looked for: {}). Install it on the host system.",
-                browser_candidates(browser).join(", ")
-            )
-        })?
+    let bin = if let Ok(v) = std::env::var("KOPUZ_BROWSER_COMMAND") {
+            tracing::info!("$KOPUZ_BROWSER_COMMAND used to override browser command");
+            v.to_string().to_owned()
     } else {
-        find_browser_bin(browser).ok_or_else(|| {
-            format!(
-                "{browser} not found in PATH (looked for: {}). Install it, or set $KOPUZ_{}_BIN.",
-                browser_candidates(browser).join(", "),
-                browser.id().to_uppercase().replace('-', "_")
-            )
-        })?
+        let error = if in_flatpak() {
+                format!(
+                    "{browser} not found on the host (looked for: {}). Install it on the host system, or set $KOPUZ_{}_BIN.",
+                    browser_candidates(browser).join(", "),
+                    browser.id().to_uppercase().replace('-', "_")
+                )
+            } else {
+                format!(
+                    "{browser} not found in PATH (looked for: {}). Install it, or set $KOPUZ_{}_BIN.",
+                    browser_candidates(browser).join(", "),
+                    browser.id().to_uppercase().replace('-', "_")
+                )
+            };
+        find_browser_bin(browser).await.ok_or_else(|| {error})?
     };
     tracing::info!(%bin, profile = %profile.display(), "launching sign-in browser");
     let mut cmd = browser_command(&bin);
