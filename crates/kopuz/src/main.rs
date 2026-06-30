@@ -1410,11 +1410,24 @@ fn App() -> Element {
         if !*initial_load_done.read() || !*config_loaded_ok.read() {
             return;
         }
+    let db_for_reextract = db.clone();
+    #[cfg(not(target_arch = "wasm32"))]
+    let mut cover_reextract_in_flight = use_signal(|| false);
+    use_effect(move || {
+        if !*initial_load_done.read() || !*config_loaded_ok.read() {
+            return;
+        }
         if *trigger_cover_reextract.read() == 0 {
             return;
         }
         let db = db_for_reextract.clone();
         let gens = gens_for_albums;
+        #[cfg(not(target_arch = "wasm32"))]
+        if *cover_reextract_in_flight.peek() {
+            return;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        cover_reextract_in_flight.set(true);
         #[cfg(not(target_arch = "wasm32"))]
         let cover_cache_dir = cover_cache();
         #[cfg(not(target_arch = "wasm32"))]
