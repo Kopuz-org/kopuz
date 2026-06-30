@@ -734,7 +734,7 @@ fn ServerHeroBanner(
                         i { class: "fa-solid fa-star text-[8px]" }
                         "{i18n::t(\"featured_album\")}"
                     }
-                    h1 { class: "text-3xl md:text-5xl font-black text-white mb-4 leading-tight max-w-xl break-words", "{hero_title}" }
+                    h1 { class: "text-3xl md:text-5xl font-black text-white mb-4 leading-tight break-words", style: "overflow: hidden; text-overflow:ellipsis;white-space: nowrap;", "{hero_title}" }
                     if !hero_artist.is_empty() {
                         p { class: "text-base md:text-lg text-white/60 mb-8 font-medium line-clamp-1 max-w-md", "{i18n::t_with(\"by_artist_full\", &[(\"artist\", hero_artist.clone())])}" }
                     }
