@@ -484,7 +484,7 @@ fn album_section_contents(resp: &Value) -> Vec<&Value> {
 }
 
 fn find_album_header<'a>(resp: &'a Value, sections: &[&'a Value]) -> Option<&'a Value> {
-    // Two-pass: prefer the modern Responsive header across all
+    // Two-pass: prefer the vaxry Responsive header across all
     // sections before falling back to the legacy Detail header. A
     // single-pass interleaved scan would let a stray Detail in
     // section[0] win over a Responsive in section[1] during a YT

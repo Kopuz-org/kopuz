@@ -125,12 +125,12 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                      if !props.description.is_empty() {
                          if let Some(on_description_click) = props.on_description_click {
                              button {
-                                 class: "text-sm font-bold tracking-widest text-white/60 uppercase mb-2 text-left cursor-pointer hover:underline hover:text-white transition-colors",
+                                 class: "text-sm font-bold text-white/60 mb-2 text-left cursor-pointer hover:underline hover:text-white transition-colors",
                                  onclick: move |_| on_description_click.call(()),
                                  "{props.description}"
                              }
                          } else {
-                             h5 { class: "text-sm font-bold tracking-widest text-white/60 uppercase mb-2", "{props.description}" }
+                             h5 { class: "text-sm font-bold text-white/60 mb-2", "{props.description}" }
                          }
                      }
                      h1 { class: if cfg!(target_os = "android") { "text-3xl font-bold text-white mb-3" } else { "text-5xl md:text-7xl font-bold text-white mb-6" }, "{props.name}" }
@@ -208,7 +208,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                  } else {
                      div { class: "shrink-0",
                          Header {
-                             is_modern: false,
+                             is_vaxry: false,
                              is_album: props.is_album,
                              is_selection_mode: props.is_selection_mode,
                              on_select_all: props.on_select_all,

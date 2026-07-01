@@ -11,21 +11,21 @@ pub fn Home(
     on_search_artist: EventHandler<String>,
 ) -> Element {
     let mut config = use_context::<Signal<AppConfig>>();
-    let is_modern = config.read().ui_style == UiStyle::Modern;
+    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
     let mut edit_mode = use_signal(|| false);
 
     rsx! {
         div {
             class: if cfg!(target_os = "android") {
                 "px-4 pt-2 pb-28 space-y-8 w-full"
-            } else if is_modern {
+            } else if is_vaxry {
                 "px-6 pt-4 pb-24 w-full"
             } else {
                 "p-8 space-y-12 pb-32 animate-fade-in w-full"
             },
 
             div { class: "flex items-center justify-between mb-4",
-                if !is_modern {
+                if !is_vaxry {
                     h1 { class: "text-4xl font-black text-white tracking-tight", "{i18n::t(\"home\")}" }
                 } else {
                     div {}

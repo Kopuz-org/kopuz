@@ -17,19 +17,19 @@ pub fn FavoritesPage(
     mut queue: Signal<Vec<reader::models::Track>>,
     mut current_queue_index: Signal<usize>,
 ) -> Element {
-    let is_modern = config.read().ui_style == UiStyle::Modern;
+    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
 
     rsx! {
         div {
             // Height-constrained column so the server list can window its rows
             // behind its own scroller (837 favorites in the DOM at once was
             // the page's frame-rate problem).
-            class: if cfg!(target_os = "android") { "px-4 pt-2 absolute inset-0 flex flex-col overflow-x-hidden" } else if is_modern { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
+            class: if cfg!(target_os = "android") { "px-4 pt-2 absolute inset-0 flex flex-col overflow-x-hidden" } else if is_vaxry { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
 
-            if is_modern {
+            if is_vaxry {
                 div { class: "mb-6",
                     p {
-                        class: "text-[10px] font-bold tracking-widest uppercase mb-1",
+                        class: "text-[10px] font-bold mb-1",
                         style: "color: rgba(255,255,255,0.35);",
                         "{i18n::t(\"library\")}"
                     }

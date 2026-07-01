@@ -53,6 +53,7 @@ pub fn Artist(
 ) -> Element {
     let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
+    let nav_ctrl = use_context::<components::NavigationController>();
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     // Capabilities, read off the resolved source — the single seam the page gates
     // its divergent affordances on (no `is_server()` / `match service`).
@@ -507,11 +508,8 @@ pub fn Artist(
             } else {
                 div { class: "relative flex-1 min-h-0 flex flex-col w-full max-w-[1600px] mx-auto",
                     if !cfg!(target_os = "android") {
-                        button {
-                            class: "flex items-center gap-2 text-slate-400 hover:text-white transition-colors mb-6 group shrink-0",
-                            onclick: move |_| artist_name.set(String::new()),
-                            i { class: "fa-solid fa-chevron-left text-sm group-hover:-translate-x-0.5 transition-transform" }
-                            span { class: "text-sm font-medium", "{i18n::t(\"back_to_artists\")}" }
+                        components::back_button::BackButton {
+                            on_click: move |_| nav_ctrl.go_back(),
                         }
                     }
                     div { class: "relative flex-1 min-h-0 flex flex-col",

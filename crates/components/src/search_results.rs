@@ -31,7 +31,7 @@ pub fn SearchResults(
     let config = use_context::<Signal<AppConfig>>();
     let gens = hooks::db_reactivity::use_generations();
     let offline_tracks = config.read().offline_tracks.clone();
-    let is_modern = config.read().ui_style == UiStyle::Modern;
+    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
     let sort_state = use_signal(|| None);
     let sorted_tracks = showcase::sorted_track_pairs(&tracks, *sort_state.read());
     let search_queue: Vec<Track> = sorted_tracks.iter().map(|(t, _)| t.clone()).collect();
@@ -61,7 +61,7 @@ pub fn SearchResults(
                 div { class: "shrink-0 mb-4",
                     h2 { class: "text-xl font-semibold text-white/80 mb-4", "{i18n::t(\"tracks\")}" }
                     Header {
-                        is_modern: is_modern,
+                        is_vaxry: is_vaxry,
                         is_album: false,
                         sort_state: sort_state
                     }

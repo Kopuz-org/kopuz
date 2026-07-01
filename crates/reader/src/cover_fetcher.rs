@@ -57,7 +57,9 @@ impl CoverFetcher {
             .iter()
             .enumerate()
             .filter(|(_, a)| {
-                a.cover_path.is_none() && a.title != "Unknown Album" && !a.manual_cover
+                a.cover_path.as_ref().is_none_or(|p| !p.exists())
+                    && a.title != "Unknown Album"
+                    && !a.manual_cover
             })
             .map(|(i, _)| i)
             .collect();

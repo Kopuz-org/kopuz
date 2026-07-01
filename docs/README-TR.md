@@ -78,7 +78,7 @@ kendi favorilerini taşır.
   (banner, en popüler şarkılar, albümler, single'lar, benzer sanatçılar),
   albüm/playlist tarama ve **mix radyo** ("start radio" from any track) içeren
   tam bir streaming backend'i. Kütüphaneniz, Beğenilen Müzikleriniz ve
-  playlist'leriniz için hesabınızla giriş yapın — veya herkese açık parçaları
+  playlist'leriniz için hesabınızla giriş yapın - veya herkese açık parçaları
   aramak, göz atmak ve oynatmak için **anonymously** (no sign-in) çalıştırın.
   Bkz. [YouTube Music Setup](#youtube-music-setup).
 - **SoundCloud**: Arama, parça oynatma (progressive MP3 ve Go+ AAC/HLS),
@@ -143,6 +143,14 @@ kendi favorilerini taşır.
 
 ## Installation
 
+### Cargo (crates.io)
+
+Install directly with Cargo:
+
+```bash
+cargo install kopuz
+```
+
 ### NixOS / Nix
 
 **Run directly without installing:**
@@ -199,17 +207,10 @@ in {
 Tercih ettiğiniz yardımcıyı kullanarak AUR'dan yükleyin:
 
 ```bash
-yay -S kopuz
+yay -S kopuz-bin
 # veya
-paru -S kopuz
+paru -S kopuz-bin
 ```
-
-> **Note:** Öncelikle Dioxus 0.7.x sürümüyle eşleşen `dioxus-cli` kurulu
-> olmalıdır:
->
-> ```bash
-> cargo install dioxus-cli --version "^0.7"
-> ```
 
 ### Flatpak (Recommended)
 
@@ -372,37 +373,23 @@ rescan düğmesine basmanız yeterlidir.
 Kopuz, YouTube Music'i bir streaming backend'i olarak kullanabilir. Şuradan
 ekleyin: **Settings → Media servers → Add → YouTube Music**.
 
-> [!NOTE]
-> Artık harici bir yardımcıya gerek yok. Anonim oynatma bir content PO token
-> gerektirir; Kopuz bunu artık YouTube'un BotGuard'ını çalıştıran gizli bir
-> WebView ile **uygulama içinde** üretir. Eski `rustypipe-botguard` subprocess'i
-> kaldırıldı, yani `cargo install` yapacak bir şey yok ve Flatpak içinde de
-> çalışır.
-
 ### Choosing a mode
 
 Kurulum iletişim kutusu iki yöntem sunar:
 
-- **Sign in with a browser** — Kopuz, Google giriş sayfasını **isolated browser
+- **Sign in with a browser** - Kopuz, Google giriş sayfasını **isolated browser
   profile** (a fresh, separate session; your normal browsing is never touched)
   açar, giriş yapmanızı bekler ve oturum çerezlerini çıkarır. Hangi yüklü
   Chromium ailesi tarayıcının (Chrome, Chromium, Brave, Edge veya Vivaldi)
   kullanılacağını seçin. Bu, **library, Liked Music, playlists, and followed
   artists** kilidini açar.
 
-- **Continue without signing in (anonymous)** — giriş yok, çerez yok. **Göz
+- **Continue without signing in (anonymous)** - giriş yok, çerez yok. **Göz
   atabilir, arama yapabilir, sanatçı/albüm/playlist sayfalarını açabilir, mix
   radyoyu başlatabilir ve herkese açık parçaları oynatabilirsiniz**. Liked
   Music, library playlists, ve takip etme/beğenme devre dışı bırakılır (bu
   görünümler bir "sign in to enable" uyarısı gösterir). Music Premium-only
   parçalar anonim olarak oynatılamaz.
-
-> [!NOTE]
-> **Windows** üzerinde browser sign-in şu anda devre dışıdır — Google hesapları
-> sayfası isolated profile içinde boş olarak yüklenir. Windows kullanıcıları
-> otomatik olarak anonim modu alır. Giriş yapma Linux ve macOS üzerinde
-> çalışmaktadır. (`crates/server/src/ytmusic/isolated_profile.rs` dosyasında
-> `TODO(windows-signin)` olarak izlenmektedir.)
 
 ### Premium tracks
 
@@ -430,9 +417,9 @@ temizler.
 ## Logs & Debugging
 
 Kopuz, [`tracing`](https://docs.rs/tracing) aracılığıyla log tutar. Bunun büyük
-bir kısmına uygulamanın kendisinden erişilebilir — **Settings → Logs** bölümünde
+bir kısmına uygulamanın kendisinden erişilebilir - **Settings → Logs** bölümünde
 **Open logs folder**, **Export logs** ve **Enable Performance Tracing** geçişi
-bulunur — böylece kullanıcıların yararlı bir rapor göndermek için asla bir
+bulunur - böylece kullanıcıların yararlı bir rapor göndermek için asla bir
 terminale ihtiyacı olmaz.
 
 ### Where the files live
@@ -449,7 +436,7 @@ buraya gider):
 | `latest.log`            | Mevcut oturum. Span zamanlaması + olaylar; canlı log.                                                            |
 | `kopuz-<timestamp>.log` | Önceki oturumlar, başlangıçta arşivlenir (son 10 tanesi tutulur). Yeniden başlatma asla önceki çalışmayı silmez. |
 | `crash-<timestamp>.txt` | **only on a crash** (Rust paniği) yazılır: mesaj, backtrace, son log kuyruğu, uygulama/OS sürümü.                |
-| `kopuz-trace.json`      | Performance trace — yalnızca tracing etkinleştirildiğinde (aşağıya bakın). Her çalıştırmada üzerine yazılır.     |
+| `kopuz-trace.json`      | Performance trace - yalnızca tracing etkinleştirildiğinde (aşağıya bakın). Her çalıştırmada üzerine yazılır.     |
 
 Zaman damgaları UTC `YYYY-MM-DD_HH-MM-SS` formatındadır, böylece dosyalar
 kronolojik olarak sıralanır.
@@ -465,7 +452,7 @@ folder** diyerek en yeni `crash-*.txt` dosyasını almasını isteyin.
 yapmasını isteyin:
 
 1. **Settings → Logs → enable "Performance Tracing"**, ardından uygulamayı
-   **yeniden başlatın** (bu geçiş bununla ilgili uyarır — trace kaydedici
+   **yeniden başlatın** (bu geçiş bununla ilgili uyarır - trace kaydedici
    başlangıçta bir kez kurulur).
 2. Yavaş eylemi yeniden gerçekleştirin.
 3. **Uygulamadan çıkın** (bu, trace kaydını temiz bir şekilde kaydeder).
@@ -478,7 +465,7 @@ Trace dosyasını [speedscope.app](https://speedscope.app) veya
 taraması, indirmeler, oynatma geçişleri, bileşen başına render'lar)
 adlandırılmış span'ler olarak izlenir ve çalışan iş parçacığı (worker-thread)
 işleri onu başlatan eylemin altında yuvalanır, böylece trace zamanın tam olarak
-nereye gittiğini gösterir. İşiniz bittiğinde bunu tekrar kapatın — uzun
+nereye gittiğini gösterir. İşiniz bittiğinde bunu tekrar kapatın - uzun
 oturumlarda ek yük getirir ve trace dosyasını büyütür.
 
 ### Power-user env vars
@@ -501,7 +488,7 @@ KOPUZ_LOG="info,dioxus_core=trace" kopuz
 `RUST_LOG` da çalışır; `KOPUZ_LOG` önceliklidir.
 
 **Performance trace** yalnızca **Settings → Logs → Enable Performance Tracing**
-(ardından yeniden başlat) aracılığıyla etkinleştirilir — bunun için bir env var
+(ardından yeniden başlat) aracılığıyla etkinleştirilir - bunun için bir env var
 yoktur; UI tek doğruluk kaynağıdır. Varsayılan olarak kapalıdır → sıfır ek yük.
 
 > Debug derlemeleri, çökme raporu yolunu test etmek için Settings → Logs

@@ -209,7 +209,7 @@ fn ShelfRow(
             div { class: "flex items-end justify-between mb-5 gap-4",
                 div { class: "min-w-0",
                     if let Some(strap) = shelf.strapline.clone() {
-                        p { class: "text-[10px] font-bold tracking-widest uppercase mb-0.5 text-white/40", "{strap}" }
+                        p { class: "text-[10px] font-bold mb-0.5 text-white/40", "{strap}" }
                     }
                     h2 { class: "text-2xl md:text-3xl font-bold text-white truncate", "{shelf.title}" }
                 }
@@ -284,7 +284,7 @@ fn SongListShelf(
                 h2 { class: "text-2xl md:text-3xl font-bold text-white truncate", "{shelf.title}" }
                 if let Some(more) = more {
                     button {
-                        class: "text-xs font-bold tracking-widest uppercase text-white/60 hover:text-white cursor-pointer transition-colors",
+                        class: "text-xs font-bold text-white/60 hover:text-white cursor-pointer transition-colors",
                         onclick: move |_| {
                             on_select_playlist.call((more.clone(), title_for_more.clone()))
                         },
@@ -1011,7 +1011,7 @@ pub fn DiscoverPlaylistDetail(
     }
 
     // Loading / error keep a lightweight header + back button; the loaded state
-    // hands off to the shared modern TrackListView (same look as the local
+    // hands off to the shared vaxry TrackListView (same look as the local
     // playlist / album pages) so Discover playlists match everywhere else.
     if *loading.read() {
         return rsx! {
@@ -1043,7 +1043,6 @@ pub fn DiscoverPlaylistDetail(
                 name: header_title.clone(),
                 description: String::new(),
                 cover_url,
-                back_label: i18n::t("back").to_string(),
                 tracks: track_list,
                 is_album: false,
                 on_close: move |_| on_back.call(()),
@@ -1059,7 +1058,6 @@ fn BackButton(on_back: EventHandler<()>) -> Element {
             class: "inline-flex items-center gap-2 text-white/70 hover:text-white text-sm cursor-pointer mb-6 group",
             onclick: move |_| on_back.call(()),
             i { class: "fa-solid fa-chevron-left text-xs transition-transform group-hover:-translate-x-0.5" }
-            span { "{i18n::t(\"back\")}" }
         }
     }
 }
@@ -1189,7 +1187,6 @@ pub fn DiscoverArtistPage(
                 class: "inline-flex items-center gap-2 text-white/70 hover:text-white text-sm cursor-pointer mt-6 ml-6 md:ml-10 mb-2 group",
                 onclick: move |_| on_back.call(()),
                 i { class: "fa-solid fa-chevron-left text-xs transition-transform group-hover:-translate-x-0.5" }
-                span { "{i18n::t(\"back\")}" }
             }
 
             if *loading.read() {

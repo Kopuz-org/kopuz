@@ -399,7 +399,7 @@ pub fn HomeBody(
     });
 
     let conf_snapshot = config.read();
-    let is_modern = conf_snapshot.ui_style == UiStyle::Modern;
+    let is_vaxry = conf_snapshot.ui_style == UiStyle::Vaxry;
     let listen_now_style = conf_snapshot.listen_now_style;
     let sections: Vec<(String, bool)> = conf_snapshot
         .home_sections
@@ -437,7 +437,7 @@ pub fn HomeBody(
                                 class: if !enabled { "opacity-40" } else { "" },
                                 if edit {
                                     div { class: "flex items-center justify-between gap-2 mb-2 px-2 py-2 rounded-lg bg-white/5 border border-white/10",
-                                        div { class: "flex items-center gap-2 text-white/80 text-xs font-bold uppercase tracking-wider",
+                                        div { class: "flex items-center gap-2 text-white/80 text-xs font-bold",
                                             i { class: "fa-solid fa-grip-vertical text-white/30" }
                                             span { "{section_label(&key)}" }
                                         }
@@ -501,7 +501,7 @@ pub fn HomeBody(
                                     &key_for_render,
                                     config,
                                     edit,
-                                    is_modern,
+                                    is_vaxry,
                                     listen_now_style,
                                     jellyfin_shuffled(),
                                     jellyfin_hero_cover(),
@@ -532,7 +532,7 @@ fn render_server_section(
     key: &str,
     config: Signal<AppConfig>,
     edit: bool,
-    is_modern: bool,
+    is_vaxry: bool,
     listen_now_style: ListenNowStyle,
     jellyfin_shuffled: Vec<AlbumCard>,
     hero_cover: Option<String>,
@@ -554,32 +554,32 @@ fn render_server_section(
             ServerHeroBanner {
                 config,
                 edit,
-                is_modern,
+                is_vaxry,
                 hero_entry,
                 hero_cover,
                 on_play_album,
             }
         },
         "continue_listening" => render_continue_listening(
-            is_modern,
+            is_vaxry,
             continue_listening,
             on_select_album,
             on_play_album,
             scroll_container,
         ),
         "listen_now" => render_listen_now(
-            is_modern,
+            is_vaxry,
             listen_now_style,
             jellyfin_shuffled,
             on_select_album,
             on_play_album,
         ),
-        "top_artists" => render_top_artists(is_modern, artists, on_search_artist, scroll_container),
+        "top_artists" => render_top_artists(is_vaxry, artists, on_search_artist, scroll_container),
         "new_releases" => render_albums_row(
             "jelly-albums-scroll",
             i18n::t("new_releases").to_string(),
             i18n::t("albums").to_string(),
-            is_modern,
+            is_vaxry,
             new_releases,
             on_select_album,
             on_play_album,
@@ -596,7 +596,7 @@ fn render_server_section(
                 "jelly-made-for-you-scroll",
                 i18n::t("made_for_you").to_string(),
                 eyebrow,
-                is_modern,
+                is_vaxry,
                 albums,
                 on_select_album,
                 on_play_album,
@@ -607,7 +607,7 @@ fn render_server_section(
             "jelly-recently-added-scroll",
             i18n::t("recently_added").to_string(),
             i18n::t("library").to_string(),
-            is_modern,
+            is_vaxry,
             recently_added,
             on_select_album,
             on_play_album,
@@ -615,7 +615,7 @@ fn render_server_section(
         ),
         "playlists" => render_playlists(
             config,
-            is_modern,
+            is_vaxry,
             recent_playlists,
             on_select_playlist,
             scroll_container,
@@ -628,7 +628,7 @@ fn render_server_section(
 fn ServerHeroBanner(
     mut config: Signal<AppConfig>,
     edit: bool,
-    is_modern: bool,
+    is_vaxry: bool,
     hero_entry: Option<(Track, Option<Album>, Option<String>)>,
     hero_cover: Option<String>,
     on_play_album: EventHandler<String>,
@@ -688,10 +688,10 @@ fn ServerHeroBanner(
     });
 
     let hero_height = config.read().hero_height;
-    let section_class = if is_modern {
+    let section_class = if is_vaxry {
         "relative rounded-xl overflow-hidden mb-10"
     } else {
-        "relative rounded-3xl overflow-hidden mb-12"
+        "relative rounded-xl overflow-hidden mb-12"
     };
     let section_style = format!("height: {hero_height}px;");
 
@@ -730,11 +730,11 @@ fn ServerHeroBanner(
                     }
                 }
                 div { class: "relative h-full flex flex-col justify-center p-8 md:p-12",
-                    span { class: "text-indigo-400 font-bold tracking-widest uppercase text-[10px] mb-3 flex items-center gap-2",
+                    span { class: "text-indigo-400 font-bold text-[10px] mb-3 flex items-center gap-2",
                         i { class: "fa-solid fa-star text-[8px]" }
                         "{i18n::t(\"featured_album\")}"
                     }
-                    h1 { class: "text-3xl md:text-5xl font-black text-white mb-4 leading-tight max-w-xl break-words", "{hero_title}" }
+                    h1 { class: "text-3xl md:text-5xl font-black text-white mb-4 leading-tight break-words", style: "overflow: hidden; text-overflow:ellipsis;white-space: nowrap;", "{hero_title}" }
                     if !hero_artist.is_empty() {
                         p { class: "text-base md:text-lg text-white/60 mb-8 font-medium line-clamp-1 max-w-md", "{i18n::t_with(\"by_artist_full\", &[(\"artist\", hero_artist.clone())])}" }
                     }
@@ -822,7 +822,7 @@ fn ServerHeroBanner(
 }
 
 fn render_continue_listening(
-    is_modern: bool,
+    is_vaxry: bool,
     tracks: Vec<(Track, Option<Album>, Option<String>)>,
     on_select_album: EventHandler<String>,
     on_play_album: EventHandler<String>,
@@ -832,13 +832,13 @@ fn render_continue_listening(
         return rsx! { div {} };
     }
     rsx! {
-        section { class: if is_modern { "mb-10" } else { "mb-12" },
+        section { class: if is_vaxry { "mb-10" } else { "mb-12" },
             div { class: "flex items-center justify-between mb-6",
                 div {
-                    if is_modern {
-                        p { class: "text-[10px] font-bold tracking-widest uppercase mb-0.5", style: "color: rgba(255,255,255,0.35);", "{i18n::t(\"library\")}" }
+                    if is_vaxry {
+                        p { class: "text-[10px] font-bold mb-0.5", style: "color: rgba(255,255,255,0.35);", "{i18n::t(\"library\")}" }
                     }
-                    h2 { class: if is_modern { "text-2xl font-bold text-white" } else { "text-2xl font-bold text-white tracking-tight" }, "{i18n::t(\"continue_listening\")}" }
+                    h2 { class: if is_vaxry { "text-2xl font-bold text-white" } else { "text-2xl font-bold text-white tracking-tight" }, "{i18n::t(\"continue_listening\")}" }
                 }
                 div { class: "flex gap-2",
                     button {
@@ -905,7 +905,7 @@ fn render_continue_listening(
 }
 
 fn render_listen_now(
-    is_modern: bool,
+    is_vaxry: bool,
     listen_now_style: ListenNowStyle,
     jellyfin_shuffled: Vec<AlbumCard>,
     on_select_album: EventHandler<String>,
@@ -916,13 +916,13 @@ fn render_listen_now(
     }
     let use_cards = listen_now_style == ListenNowStyle::Cards;
     rsx! {
-        section { class: if is_modern { "mb-10" } else { "mb-12" },
+        section { class: if is_vaxry { "mb-10" } else { "mb-12" },
             div { class: "flex items-end justify-between mb-6",
                 div {
-                    if is_modern {
-                        p { class: "text-[10px] font-bold tracking-widest uppercase mb-0.5", style: "color: rgba(255,255,255,0.35);", "{i18n::t(\"music\")}" }
+                    if is_vaxry {
+                        p { class: "text-[10px] font-bold mb-0.5", style: "color: rgba(255,255,255,0.35);", "{i18n::t(\"music\")}" }
                     }
-                    h2 { class: if is_modern { "text-2xl font-bold text-white" } else { "text-3xl font-extrabold text-white tracking-tight leading-none" }, "{i18n::t(\"listen_now\")}" }
+                    h2 { class: if is_vaxry { "text-2xl font-bold text-white" } else { "text-3xl font-extrabold text-white tracking-tight leading-none" }, "{i18n::t(\"listen_now\")}" }
                 }
             }
             if use_cards {
@@ -959,7 +959,7 @@ fn render_listen_now(
                 div { class: "grid grid-cols-[repeat(auto-fill,minmax(350px,1fr))] gap-4",
                     for (album_id, title, artist, cover_url) in jellyfin_shuffled.iter().skip(1).take(8).cloned() {
                         div {
-                            class: "flex items-center bg-white/5 hover:bg-white/10 border border-white/5 rounded-2xl cursor-pointer transition-all duration-300 group overflow-hidden pr-4",
+                            class: "flex items-center bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg cursor-pointer transition-all duration-300 group overflow-hidden pr-4",
                             onclick: {
                                 let id = album_id.clone();
                                 move |_| on_select_album.call(id.clone())
@@ -995,7 +995,7 @@ fn render_listen_now(
 }
 
 fn render_top_artists(
-    is_modern: bool,
+    is_vaxry: bool,
     artists: Vec<(String, Option<String>)>,
     on_search_artist: EventHandler<String>,
     scroll_container: impl Fn(&str, i32) + Copy + 'static,
@@ -1004,13 +1004,13 @@ fn render_top_artists(
         return rsx! { div {} };
     }
     rsx! {
-        section { class: if is_modern { "mt-10" } else { "mt-12" },
+        section { class: if is_vaxry { "mt-10" } else { "mt-12" },
             div { class: "flex items-center justify-between mb-6",
                 div {
-                    if is_modern {
-                        p { class: "text-[10px] font-bold tracking-widest uppercase mb-0.5", style: "color: rgba(255,255,255,0.35);", "{i18n::t(\"artists\")}" }
+                    if is_vaxry {
+                        p { class: "text-[10px] font-bold mb-0.5", style: "color: rgba(255,255,255,0.35);", "{i18n::t(\"artists\")}" }
                     }
-                    h2 { class: if is_modern { "text-2xl font-bold text-white" } else { "text-2xl font-bold text-white tracking-tight" }, "{i18n::t(\"top_artists\")}" }
+                    h2 { class: if is_vaxry { "text-2xl font-bold text-white" } else { "text-2xl font-bold text-white tracking-tight" }, "{i18n::t(\"top_artists\")}" }
                 }
                 div { class: "flex gap-2",
                     button {
@@ -1057,7 +1057,7 @@ fn render_albums_row(
     scroll_id: &'static str,
     title: String,
     eyebrow: String,
-    is_modern: bool,
+    is_vaxry: bool,
     albums: Vec<AlbumCard>,
     on_select_album: EventHandler<String>,
     on_play_album: EventHandler<String>,
@@ -1067,13 +1067,13 @@ fn render_albums_row(
         return rsx! { div {} };
     }
     rsx! {
-        section { class: if is_modern { "mt-10" } else { "mt-12" },
+        section { class: if is_vaxry { "mt-10" } else { "mt-12" },
             div { class: "flex items-center justify-between mb-6",
                 div {
-                    if is_modern {
-                        p { class: "text-[10px] font-bold tracking-widest uppercase mb-0.5", style: "color: rgba(255,255,255,0.35);", "{eyebrow}" }
+                    if is_vaxry {
+                        p { class: "text-[10px] font-bold mb-0.5", style: "color: rgba(255,255,255,0.35);", "{eyebrow}" }
                     }
-                    h2 { class: if is_modern { "text-2xl font-bold text-white" } else { "text-2xl font-bold text-white tracking-tight" }, "{title}" }
+                    h2 { class: if is_vaxry { "text-2xl font-bold text-white" } else { "text-2xl font-bold text-white tracking-tight" }, "{title}" }
                 }
                 div { class: "flex gap-2",
                     button {
@@ -1098,11 +1098,11 @@ fn render_albums_row(
                             let id = album_id.clone();
                             move |_| on_select_album.call(id.clone())
                         },
-                        div { class: "aspect-square rounded-2xl bg-stone-800/80 mb-4 overflow-hidden transition-all duration-300 relative",
+                        div { class: "aspect-square rounded-lg bg-stone-800/80 mb-4 overflow-hidden transition-all duration-300 relative",
                             if let Some(url) = cover_url {
                                 img { src: "{url}", class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-500", decoding: "async", loading: "lazy" }
                             } else {
-                                div { class: "w-full h-full flex items-center justify-center border border-white/5 rounded-2xl",
+                                div { class: "w-full h-full flex items-center justify-center border border-white/5 rounded-lg",
                                     i { class: "fa-solid fa-compact-disc text-4xl text-white/20" }
                                 }
                             }
@@ -1125,7 +1125,7 @@ fn render_albums_row(
 
 fn render_playlists(
     _config: Signal<AppConfig>,
-    is_modern: bool,
+    is_vaxry: bool,
     recent_playlists: Vec<(String, String, usize, Option<String>)>,
     on_select_playlist: EventHandler<String>,
     scroll_container: impl Fn(&str, i32) + Copy + 'static,
@@ -1134,13 +1134,13 @@ fn render_playlists(
         return rsx! { div {} };
     }
     rsx! {
-        section { class: if is_modern { "mt-10" } else { "mt-16" },
+        section { class: if is_vaxry { "mt-10" } else { "mt-16" },
             div { class: "flex items-center justify-between mb-6",
                 div {
-                    if is_modern {
-                        p { class: "text-[10px] font-bold tracking-widest uppercase mb-0.5", style: "color: rgba(255,255,255,0.35);", "{i18n::t(\"library\")}" }
+                    if is_vaxry {
+                        p { class: "text-[10px] font-bold mb-0.5", style: "color: rgba(255,255,255,0.35);", "{i18n::t(\"library\")}" }
                     }
-                    h2 { class: if is_modern { "text-2xl font-bold text-white" } else { "text-2xl font-bold text-white tracking-tight" }, "{i18n::t(\"playlists\")}" }
+                    h2 { class: if is_vaxry { "text-2xl font-bold text-white" } else { "text-2xl font-bold text-white tracking-tight" }, "{i18n::t(\"playlists\")}" }
                 }
                 div { class: "flex gap-2",
                     button {
@@ -1168,7 +1168,7 @@ fn render_playlists(
                                     let id = id.clone();
                                     move |_| on_select_playlist.call(id.clone())
                                 },
-                                div { class: "aspect-square rounded-2xl bg-white/5 mb-4 overflow-hidden transition-all duration-500 relative",
+                                div { class: "aspect-square rounded-lg bg-white/5 mb-4 overflow-hidden transition-all duration-500 relative",
                                     if let Some(url) = cover_url {
                                         img { src: "{url}", class: "w-full h-full object-cover group-hover:scale-110 transition-transform duration-700", decoding: "async", loading: "lazy" }
                                     } else {

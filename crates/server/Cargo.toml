@@ -1,7 +1,16 @@
 [package]
-name = "server"
+name = "kopuz-server"
 version.workspace = true
-edition = "2024"
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+
+[lib]
+name = "server"
 
 [lints]
 workspace = true
@@ -16,17 +25,36 @@ serde_json = { workspace = true }
 config = { workspace = true }
 rand = { workspace = true }
 uuid = { workspace = true }
-md5 = "0.8"
-sha1 = "0.10"
-httpdate = "1"
-hex = "0.4"
-rookie = "0.5"
+md5 = { workspace = true }
+sha1 = { workspace = true }
+httpdate = { workspace = true }
+hex = { workspace = true }
 web-time = { workspace = true }
 tokio = { workspace = true, features = ["fs", "process", "rt", "sync"] }
 reader = { workspace = true }
 db = { workspace = true }
 utils = { workspace = true }
-async-trait = "0.1"
+async-trait = { workspace = true }
+
+# Browser-cookie import. Not on Windows: rookie pulls `libesedb` (a bundled C
+# library) there, which can't cross-compile.
+[target.'cfg(not(target_os = "windows"))'.dependencies]
+rookie = "0.5"
+
+# Windows native cookie decryption (v10 DPAPI + planted v20 app-bound). Reuses
+# the project's sqlx/sqlite (NOT rusqlite — that would double-link libsqlite3).
+[target.'cfg(windows)'.dependencies]
+base64 = { workspace = true }
+aes-gcm = { workspace = true }
+sqlx = { workspace = true, features = ["runtime-tokio", "sqlite"] }
+windows-core = "0.62"
+windows = { workspace = true, features = [
+    "Win32_Foundation",
+    "Win32_System_Com",
+    "Win32_System_Rpc",
+    "Win32_Security_Cryptography",
+    "Win32_System_Memory",
+] }
 
 [[example]]
 name = "duration_probe"

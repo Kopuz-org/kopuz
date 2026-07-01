@@ -232,7 +232,6 @@ pub fn PlaylistDetail(
             name: playlist_name.clone(),
             description: String::new(),
             cover_url: playlist_cover,
-            back_label: i18n::t("back_to_playlists").to_string(),
             tracks: tracks_val,
             on_close,
             enable_metadata: caps.edit_tags,

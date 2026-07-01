@@ -14,8 +14,8 @@ pub struct SidebarCollapsed(pub Signal<bool>);
 pub fn Sidebar(props: SidebarProps) -> Element {
     let config = use_context::<Signal<config::AppConfig>>();
     match config.read().ui_style {
-        config::UiStyle::Modern => rsx! {
-            crate::modern::sidebar::SidebarModern {
+        config::UiStyle::Vaxry => rsx! {
+            crate::vaxry::sidebar::SidebarVaxry {
                 current_route: props.current_route,
                 on_navigate: props.on_navigate,
             }

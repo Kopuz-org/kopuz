@@ -1,12 +1,13 @@
-//! Reusable Dioxus UI components for the Kopuz music player: modern/normal list views,
+//! Reusable Dioxus UI components for the Kopuz music player: vaxry/normal list views,
 //! navigation controller, titlebar, sidebar, bottombar, and shared UI primitives.
 
-pub mod modern;
 pub mod navigation_controller;
 pub mod normal;
 pub mod shared;
-pub use navigation_controller::NavigationController;
+pub mod vaxry;
+pub use navigation_controller::{NavSnapshot, NavigationController};
 pub mod album_play_button;
+pub mod back_button;
 pub mod bottombar;
 pub mod compact_player;
 pub use compact_player::{CompactMode, CompactPlayer};

@@ -57,8 +57,6 @@
             "buildsystem": "simple",
             "build-commands": [
                 "install -Dm755 kopuz /app/bin/kopuz",
-                "mkdir -p /app/bin/assets",
-                "cp -r assets/* /app/bin/assets/",
                 "install -Dm644 com.temidaradev.kopuz.desktop -t /app/share/applications/",
                 "install -Dm644 com.temidaradev.kopuz.metainfo.xml -t /app/share/metainfo/",
                 "install -Dm644 logo-512.png /app/share/icons/hicolor/512x512/apps/com.temidaradev.kopuz.png",
@@ -68,11 +66,6 @@
                 {
                     "type": "file",
                     "path": "../../target/dx/kopuz/release/linux/app/kopuz"
-                },
-                {
-                    "type": "dir",
-                    "path": "../../target/dx/kopuz/release/linux/app/assets",
-                    "dest": "assets"
                 },
                 {
                     "type": "file",

@@ -74,7 +74,7 @@ media source carries its own credentials and its own favorites.
   page (recommended songs, playlists, albums, artists, and moods), rich **artist
   profiles** (banner, top songs, albums, singles, related artists),
   album/playlist browsing, and **mix radio** ("start radio" from any track).
-  Sign in with your account for your library, Liked Music, and playlists — or
+  Sign in with your account for your library, Liked Music, and playlists - or
   run it **anonymously** (no sign-in) for browse, search, and playback of public
   tracks. See [YouTube Music Setup](#youtube-music-setup).
 - **SoundCloud**: Streaming backend with search, track playback (progressive MP3
@@ -136,6 +136,14 @@ media source carries its own credentials and its own favorites.
 
 ## Installation
 
+### Cargo (crates.io)
+
+Install directly with Cargo:
+
+```bash
+cargo install kopuz
+```
+
 ### NixOS / Nix
 
 **Run directly without installing:**
@@ -192,17 +200,10 @@ in {
 Install from the AUR using your preferred helper:
 
 ```bash
-yay -S kopuz
+yay -S kopuz-bin
 # or
-paru -S kopuz
+paru -S kopuz-bin
 ```
-
-> **Note:** `dioxus-cli` must be installed first at the version matching dioxus
-> 0.7.x:
->
-> ```bash
-> cargo install dioxus-cli --version "^0.7"
-> ```
 
 ### Flatpak (Recommended)
 
@@ -275,7 +276,7 @@ development environment.
 > The system tray icon (used by **minimize to tray**) requires the
 > **appindicator** library at runtime. It is included in the package
 > dependencies below. Without it the tray icon simply won't appear and closing
-> the window quits the app instead of hiding it — Kopuz still runs normally. The
+> the window quits the app instead of hiding it - Kopuz still runs normally. The
 > Nix dev shell already provides it.
 
 **Arch Linux Based Systems**
@@ -372,34 +373,22 @@ and hit rescan.
 Kopuz can use YouTube Music as a streaming backend. Add it from **Settings →
 Media servers → Add → YouTube Music**.
 
-> [!NOTE]
-> No external helper is needed anymore. Anonymous playback requires a content PO
-> token, which Kopuz now mints **in-app** with a hidden WebView running
-> YouTube's BotGuard. The old `rustypipe-botguard` subprocess is gone, so
-> there's nothing to `cargo install` and it works inside Flatpak.
-
 ### Choosing a mode
 
 The setup dialog offers two methods:
 
-- **Sign in with a browser** — kopuz opens the Google sign-in page in an
+- **Sign in with a browser** - kopuz opens the Google sign-in page in an
   **isolated browser profile** (a fresh, separate session; your normal browsing
   is never touched), waits for you to log in, and extracts the session cookies.
   Pick which installed Chromium-family browser to use (Chrome, Chromium, Brave,
   Edge, or Vivaldi). This unlocks your **library, Liked Music, playlists, and
   followed artists**.
 
-- **Continue without signing in (anonymous)** — no sign-in, no cookies. You can
+- **Continue without signing in (anonymous)** - no sign-in, no cookies. You can
   **browse, search, open artist/album/playlist pages, start mix radio, and play
   public tracks**. Liked Music, library playlists, and following/liking are
   disabled (those views show a "sign in to enable" prompt). Music Premium-only
   tracks can't be played anonymously.
-
-> [!NOTE]
-> On **Windows**, browser sign-in is currently disabled — the Google accounts
-> page renders blank inside the isolated profile. Windows users get anonymous
-> mode automatically. Sign-in works on Linux and macOS. (Tracked as
-> `TODO(windows-signin)` in `crates/server/src/ytmusic/isolated_profile.rs`.)
 
 ### Premium tracks
 
@@ -426,8 +415,8 @@ playlists, and like/unlike. Removing the source cleans up its isolated profile.
 ## Logs & Debugging
 
 Kopuz logs through [`tracing`](https://docs.rs/tracing). Most of this is
-reachable from the app itself — **Settings → Logs** has **Open logs folder**,
-**Export logs**, and an **Enable Performance Tracing** toggle — so users never
+reachable from the app itself - **Settings → Logs** has **Open logs folder**,
+**Export logs**, and an **Enable Performance Tracing** toggle - so users never
 need a terminal to send a useful report.
 
 ### Where the files live
@@ -444,7 +433,7 @@ straight here):
 | `latest.log`            | The current session. Span timing + events; the live log.                                         |
 | `kopuz-<timestamp>.log` | Previous sessions, archived on startup (last 10 kept). A restart never erases the run before it. |
 | `crash-<timestamp>.txt` | Written **only on a crash** (Rust panic): message, backtrace, recent log tail, app/OS version.   |
-| `kopuz-trace.json`      | Performance trace — only when tracing is enabled (see below). Overwritten each run.              |
+| `kopuz-trace.json`      | Performance trace - only when tracing is enabled (see below). Overwritten each run.              |
 
 Timestamps are UTC `YYYY-MM-DD_HH-MM-SS`, so the files sort chronologically.
 
@@ -458,7 +447,7 @@ crash report into one file), or **Open logs folder** and grab the newest
 **Performance issue (freeze / slow load / stutter) →** ask the user to:
 
 1. **Settings → Logs → enable "Performance Tracing"**, then **restart** the app
-   (the toggle warns about this — the trace recorder is set up once at startup).
+   (the toggle warns about this - the trace recorder is set up once at startup).
 2. Reproduce the slow action.
 3. **Quit the app** (this flushes the trace cleanly).
 4. **Settings → Logs → Open logs folder** and send `kopuz-trace.json` (or
@@ -469,7 +458,7 @@ Open the trace at [speedscope.app](https://speedscope.app) or
 resolve, browse/search/pagination, mix radio, library scan, downloads, playback
 transitions, per-component renders) are instrumented as named spans, and
 worker-thread work nests under the action that launched it, so the trace shows
-exactly where time goes. Turn it back off afterward — it adds overhead and grows
+exactly where time goes. Turn it back off afterward - it adds overhead and grows
 the trace file during long sessions.
 
 ### Power-user env vars
@@ -491,7 +480,7 @@ KOPUZ_LOG="info,dioxus_core=trace" kopuz
 `RUST_LOG` works too; `KOPUZ_LOG` takes precedence.
 
 The **performance trace** is enabled only via **Settings → Logs → Enable
-Performance Tracing** (then restart) — there's no env var for it; the UI is the
+Performance Tracing** (then restart) - there's no env var for it; the UI is the
 single source of truth. Off by default → zero overhead.
 
 > Debug builds add a **Trigger crash** button in Settings → Logs to exercise the

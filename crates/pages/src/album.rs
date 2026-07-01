@@ -58,6 +58,7 @@ pub fn Album(
     let source = use_active_source();
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let caps = use_memo(move || active_source.read().capabilities());
+    let nav_ctrl = use_context::<components::NavigationController>();
 
     let open_album_menu = use_signal(|| None::<String>);
     let mut show_album_playlist_modal = use_signal(|| false);
@@ -159,7 +160,7 @@ pub fn Album(
                     album_id_str: album_id.read().clone(),
                     queue,
                     current_queue_index,
-                    on_close: move |_| album_id.set(String::new()),
+                    on_close: move |_| nav_ctrl.go_back(),
                 }
             }
         }
@@ -657,7 +658,6 @@ fn AlbumDetail(
                 })),
                 cover_url,
                 is_album: true,
-                back_label: i18n::t("back_to_albums").to_string(),
                 tracks: tracks(),
                 on_close,
                 enable_metadata: cap.edit_tags,
@@ -823,11 +823,8 @@ fn YtAlbumDetail(
     rsx! {
         div { class: "w-full max-w-[1600px] mx-auto select-none flex-1 min-h-0 flex flex-col",
             if !cfg!(target_os = "android") {
-                button {
-                    class: "flex items-center gap-2 text-slate-400 hover:text-white transition-colors mb-6 shrink-0 self-start group",
-                    onclick: move |_| on_close.call(()),
-                    i { class: "fa-solid fa-arrow-left text-sm group-hover:-translate-x-0.5 transition-transform" }
-                    span { class: "text-sm font-medium", "{i18n::t(\"back_to_albums\")}" }
+                components::back_button::BackButton {
+                    on_click: move |_| on_close.call(()),
                 }
             }
 
@@ -836,7 +833,7 @@ fn YtAlbumDetail(
                 // Left meta column.
                 div { class: "md:w-[320px] shrink-0 flex flex-col items-center md:items-start text-center md:text-left gap-5 md:pt-2",
                     div {
-                        class: "w-full max-w-[300px] aspect-square rounded-2xl bg-stone-800 overflow-hidden relative shrink-0 shadow-2xl shadow-black/40",
+                        class: "w-full max-w-[300px] aspect-square rounded-lg bg-stone-800 overflow-hidden relative shrink-0 shadow-2xl shadow-black/40",
                         if let Some(url) = &local_cover {
                             img { src: "{url.as_ref()}", class: "w-full h-full object-cover", decoding: "async" }
                         } else {

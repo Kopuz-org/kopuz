@@ -25,6 +25,7 @@ pub fn PlaylistsPage(
     mut selected_playlist_id: Signal<Option<String>>,
 ) -> Element {
     let source = use_active_source();
+    let nav_ctrl = use_context::<components::NavigationController>();
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let caps = use_memo(move || active_source.read().capabilities());
 
@@ -91,10 +92,10 @@ pub fn PlaylistsPage(
         last_source.set(config.read().active_source.clone());
     }
 
-    let is_modern = config.read().ui_style == UiStyle::Modern;
+    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
 
     rsx! {
-        div { class: if cfg!(target_os = "android") { "px-4 pt-2 pb-28 absolute inset-0 flex flex-col" } else if is_modern { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
+        div { class: if cfg!(target_os = "android") { "px-4 pt-2 pb-28 absolute inset-0 flex flex-col" } else if is_vaxry { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
             if let Some(pid) = selected_playlist_id.read().clone() {
                 {
                     let pid_for_dl = pid.clone();
@@ -123,7 +124,7 @@ pub fn PlaylistsPage(
                         PlaylistDetail {
                             playlist_id: pid,
                             config,
-                            on_close: move |_| selected_playlist_id.set(None),
+                            on_close: move |_| nav_ctrl.go_back(),
                             is_downloading_all,
                             on_download_all: move |_| {
                                 let requests: Vec<(String, String, String)> = {
@@ -208,11 +209,11 @@ pub fn PlaylistsPage(
                     }
                 }
             } else {
-                div { class: if is_modern { "flex items-center justify-between mb-6" } else { "flex items-center justify-between mb-8" },
-                    if is_modern {
+                div { class: if is_vaxry { "flex items-center justify-between mb-6" } else { "flex items-center justify-between mb-8" },
+                    if is_vaxry {
                         div {
                             p {
-                                class: "text-[10px] font-bold tracking-widest uppercase mb-0.5",
+                                class: "text-[10px] font-bold mb-0.5",
                                 style: "color: rgba(255,255,255,0.35);",
                                 "{i18n::t(\"library\")}"
                             }
@@ -669,7 +670,7 @@ fn PlaylistsGrid(
                         rsx! {
                             div {
                                 key: "{playlist.id}",
-                                class: "bg-white/5 border border-white/5 rounded-2xl p-6 hover:bg-white/10 transition-all cursor-pointer group relative",
+                                class: "bg-white/5 border border-white/5 rounded-lg p-6 hover:bg-white/10 transition-all cursor-pointer group relative",
                                 onclick: move |_| selected_playlist_id.set(Some(playlist_id_nav.clone())),
                                 div { class: "mb-4 w-full aspect-square rounded-xl flex items-center justify-center overflow-hidden transition-all bg-white/5",
                                     if let Some(url) = cover_url {
@@ -820,7 +821,7 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
         rsx! {
             div {
                 key: "{pid}",
-                class: "bg-white/5 border border-white/5 rounded-2xl p-4 hover:bg-white/10 transition-all cursor-pointer group relative",
+                class: "bg-white/5 border border-white/5 rounded-lg p-4 hover:bg-white/10 transition-all cursor-pointer group relative",
                 onclick: move |_| selected_playlist_id.set(Some(pid_click.clone())),
                 div { class: "mb-4 w-full h-32 rounded-xl flex items-center justify-center overflow-hidden transition-all bg-white/5",
                     if let Some(url) = cover_url {
@@ -991,11 +992,9 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
             if let Some(ref folder) = open_folder {
                 div {
                     div { class: "flex items-center gap-3 mb-8",
-                        button {
-                            class: "flex items-center gap-2 text-slate-400 hover:text-white transition-colors",
-                            onclick: move |_| open_folder_id.set(None),
-                            i { class: "fa-solid fa-arrow-left" }
-                            "{i18n::t(\"back_to_playlists\")}"
+                        components::back_button::BackButton {
+                            class: "",
+                            on_click: move |_| open_folder_id.set(None),
                         }
                         span { class: "text-white/30", "/" }
                         span { class: "text-white font-semibold", "{folder.name}" }
@@ -1040,7 +1039,7 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                                     rsx! {
                                         div {
                                             key: "{fid}",
-                                            class: "bg-white/5 border border-white/5 rounded-2xl p-4 hover:bg-white/10 transition-all cursor-pointer group relative",
+                                            class: "bg-white/5 border border-white/5 rounded-lg p-4 hover:bg-white/10 transition-all cursor-pointer group relative",
                                             onclick: move |_| open_folder_id.set(Some(fid_open.clone())),
                                             div { class: "mb-4 w-full h-32 rounded-xl flex items-center justify-center overflow-hidden transition-all bg-white/5",
                                                 if let Some(url) = cover_url {
@@ -1100,7 +1099,7 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                         }
                         if !root_playlists.is_empty() {
                             if !folders.is_empty() {
-                                h2 { class: "text-sm font-semibold text-white/40 uppercase tracking-widest mb-4",
+                                h2 { class: "text-sm font-semibold text-white/40 mb-4",
                                     "{i18n::t(\"playlists\")}"
                                 }
                             }
@@ -1127,7 +1126,7 @@ fn RenameTextModal(
             class: "fixed inset-0 bg-black/70 flex items-center justify-center z-50",
             onclick: move |_| on_close.call(()),
             div {
-                class: "bg-neutral-900 border border-white/10 rounded-2xl p-6 w-80 shadow-2xl",
+                class: "bg-neutral-900 border border-white/10 rounded-lg p-6 w-80 shadow-2xl",
                 onclick: move |evt| evt.stop_propagation(),
                 h2 { class: "text-lg font-bold text-white mb-4", "{title}" }
                 input {

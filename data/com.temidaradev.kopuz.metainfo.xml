@@ -38,6 +38,27 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.8.2" date="2026-06-30">
+      <description>
+        <p>
+          Bug fix for cargo install.
+        </p>
+      </description>
+    </release>
+    <release version="0.8.1" date="2026-06-29">
+      <description>
+        <p>
+          Bug fix for back button.
+        </p>
+      </description>
+    </release>
+    <release version="0.8.0" date="2026-06-26">
+      <description>
+        <p>
+          This release adds new languages, better YouTube Music support, and a lot of stability work under the hood.
+        </p>
+      </description>
+    </release>
     <release version="0.7.0" date="2026-06-20">
       <description>
         <p>

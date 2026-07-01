@@ -12,7 +12,6 @@ pub struct TrackListViewProps {
     #[props(default)]
     pub on_description_click: Option<EventHandler<()>>,
     pub cover_url: Option<utils::CoverUrl>,
-    pub back_label: String,
     pub tracks: Vec<Track>,
     #[props(default = false)]
     pub is_album: bool,
@@ -77,11 +76,9 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
         div { class: "w-full max-w-[1600px] mx-auto select-none flex-1 min-h-0 flex flex-col",
             if !cfg!(target_os = "android") {
                 div { class: "flex items-center mb-8 shrink-0",
-                    button {
-                        class: "flex items-center gap-2 text-slate-400 hover:text-white transition-colors",
-                        onclick: move |_| props.on_close.call(()),
-                        i { class: "fa-solid fa-arrow-left" }
-                        "{props.back_label}"
+                    crate::back_button::BackButton {
+                        class: "",
+                        on_click: move |_| props.on_close.call(()),
                     }
                 }
             }
