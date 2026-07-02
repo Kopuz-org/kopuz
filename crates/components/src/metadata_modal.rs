@@ -14,7 +14,6 @@ fn fmt_dur(s: u64) -> String {
     format!("{}:{:02}", s / 60, s % 60)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn data_url(bytes: &[u8], mime: &str) -> String {
     use base64::Engine as _;
     let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
@@ -57,7 +56,6 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
     {
         let path = props.track.id.local_path().map(|p| p.to_path_buf());
         use_hook(move || {
-            #[cfg(not(target_arch = "wasm32"))]
             spawn(async move {
                 if let Some(p) = &path
                     && let Some((bytes, mime)) = reader::read_cover(p)
@@ -65,8 +63,6 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
                     cover_preview.set(Some(data_url(&bytes, &mime)));
                 }
             });
-            #[cfg(target_arch = "wasm32")]
-            let _ = path;
         });
     }
 
@@ -142,7 +138,7 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
     };
 
     let pick_cover = move |_| {
-        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+        #[cfg(not(target_os = "android"))]
         spawn(async move {
             let file = rfd::AsyncFileDialog::new()
                 .add_filter("Images", &["jpg", "jpeg", "png", "webp", "gif"])

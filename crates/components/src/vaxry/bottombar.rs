@@ -350,7 +350,7 @@ pub fn BottombarVaxry(
                     },
                     i { class: "fa-solid fa-share-nodes text-[10px]" }
                 }
-                if cfg!(all(not(target_arch = "wasm32"), not(target_os = "android"))) {
+                if cfg!(not(target_os = "android")) {
                     button {
                         class: "w-7 h-7 flex items-center justify-center text-slate-500 hover:text-white transition-colors",
                         title: i18n::t("mini_player").to_string(),

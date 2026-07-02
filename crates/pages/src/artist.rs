@@ -890,7 +890,7 @@ pub fn Artist(
                                 cover_url: artist_cover(),
                                 tracks: artist_tracks(),
                                 on_cover_click: move |_| {
-                                    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+                                    #[cfg(not(target_os = "android"))]
                                     {
                                         let artist = artist_name.peek().clone();
                                         if artist.is_empty() {

@@ -1,17 +1,9 @@
-#[cfg(not(target_arch = "wasm32"))]
 use config::AppConfig;
-#[cfg(not(target_arch = "wasm32"))]
 use dioxus::desktop::window;
 use dioxus::prelude::*;
 
 #[component]
 pub fn Titlebar() -> Element {
-    #[cfg(target_arch = "wasm32")]
-    {
-        return rsx! {};
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
     {
         let config = use_context::<Signal<AppConfig>>();
         if config.read().titlebar_mode != config::TitlebarMode::Custom {

@@ -20,8 +20,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 config = { workspace = true }
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 lofty = { workspace = true }
 symphonia = { workspace = true }
 tokio = { workspace = true, features = ["fs"] }

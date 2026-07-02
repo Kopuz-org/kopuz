@@ -113,14 +113,12 @@ impl From<serde_json::Error> for DbError {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl From<sqlx::Error> for DbError {
     fn from(e: sqlx::Error) -> Self {
         DbError::Backend(e.to_string())
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl From<sqlx::migrate::MigrateError> for DbError {
     fn from(e: sqlx::migrate::MigrateError) -> Self {
         DbError::Backend(e.to_string())
@@ -512,23 +510,15 @@ impl Db {
     }
 }
 
-/// Open the database and apply migrations (native), or build the in-memory stub
-/// (wasm). Native callers should `block_on` this in `main()` before mounting.
-#[cfg(not(target_arch = "wasm32"))]
+/// Open the database and apply migrations. Native callers should `block_on`
+/// this in `main()` before mounting.
 pub async fn init(db_path: &std::path::Path) -> Result<Db, DbError> {
-    let native = backend::native::Native::open(db_path).await?;
+    let native = backend::Native::open(db_path).await?;
     Ok(Db(Arc::new(native)))
-}
-
-/// wasm: an in-memory stub so `dx build --platform web` compiles. Not persistent.
-#[cfg(target_arch = "wasm32")]
-pub fn init_stub() -> Db {
-    Db(Arc::new(backend::stub::Stub::new()))
 }
 
 /// The on-disk database path: `KOPUZ_DB_PATH` override, else `<config_dir>/kopuz.db`
 /// (release) or `kopuz-debug.db` (debug builds, so `dx run` never touches real data).
-#[cfg(not(target_arch = "wasm32"))]
 pub fn default_db_path() -> std::path::PathBuf {
     if let Ok(p) = std::env::var("KOPUZ_DB_PATH") {
         return std::path::PathBuf::from(p);
@@ -546,7 +536,6 @@ pub fn default_db_path() -> std::path::PathBuf {
 /// the titlebar mode. Opens the DB read-only without running migrations; `None`
 /// if the DB or blob doesn't exist yet (first launch). Server/creds fields are
 /// NOT hydrated — blob fields only.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn peek_config(db_path: &std::path::Path) -> Option<config::AppConfig> {
     if !db_path.exists() {
         return None;
@@ -573,13 +562,11 @@ pub fn peek_config(db_path: &std::path::Path) -> Option<config::AppConfig> {
 
 /// The RELEASE database path (`kopuz.db`), independent of build profile — the
 /// debug panel's "load release DB" source.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn release_db_path() -> std::path::PathBuf {
     config_dir().join("kopuz.db")
 }
 
 /// `<config_dir>` for kopuz (matches the legacy JSON store location).
-#[cfg(not(target_arch = "wasm32"))]
 pub fn config_dir() -> std::path::PathBuf {
     directories::ProjectDirs::from("com", "temidaradev", "kopuz")
         .map(|d| d.config_dir().to_path_buf())

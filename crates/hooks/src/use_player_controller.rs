@@ -10,7 +10,6 @@ use utils;
 use crate::playback_ref::{PlaybackItemRef, ResolvedStreamRef};
 use crate::scrobble_scheduler::{self, ScrobbleOptions};
 
-#[cfg(not(target_arch = "wasm32"))]
 use player::decoder;
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -273,16 +272,10 @@ impl PlayerController {
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn should_crossfade(&self) -> bool {
         self.config.peek().crossfade_seconds > 0
             && *self.is_playing.peek()
             && self.player.peek().can_resume()
-    }
-
-    #[cfg(target_arch = "wasm32")]
-    pub fn should_crossfade(&self) -> bool {
-        false
     }
 
     pub fn has_next_track(&self) -> bool {
@@ -374,7 +367,6 @@ impl PlayerController {
                 let stream_id = item_ref.stream_id().unwrap_or_default().to_string();
 
                 // Check offline cache first
-                #[cfg(not(target_arch = "wasm32"))]
                 {
                     let offline_path = if is_server_item {
                         let raw = self
@@ -627,7 +619,6 @@ impl PlayerController {
 
                     let is_radio = PlaybackItemRef::parse(&track.id.uid()).is_radio();
 
-                    #[cfg(not(target_arch = "wasm32"))]
                     spawn(async move {
                         let (stream_url, yt_format, yt_user_agent) =
                             match ResolvedStreamRef::parse(&stream_url) {
@@ -918,67 +909,11 @@ impl PlayerController {
                             skip_in_progress.set(false);
                         }
                     }.instrument(tracing::info_span!("player.resolve_stream", idx)));
-
-                    #[cfg(target_arch = "wasm32")]
-                    spawn(async move {
-                        if *play_generation.read() == current_gen {
-                            let meta = NowPlayingMeta {
-                                title: track.title.clone(),
-                                artist: track.artist.clone(),
-                                album: track.album.clone(),
-                                duration: std::time::Duration::from_secs(track.duration),
-                                artwork: Some(cover_url.clone()),
-                            };
-
-                            let started = {
-                                let mut player = player.write();
-                                player.play_url(stream_url, meta);
-                                player.set_volume(*volume.peek());
-                                if let Some(seek_secs) = restore_seek_secs {
-                                    if seek_secs > 0 && player.can_resume() {
-                                        player.seek(Duration::from_secs(seek_secs));
-                                        current_song_progress.set(seek_secs);
-                                    }
-                                }
-                                player.can_resume()
-                            };
-                            if started && clear_pending_resume_on_success {
-                                pending_resume.set(None);
-                            }
-                            is_loading.set(false);
-                            is_playing.set(started);
-                            skip_in_progress.set(false);
-
-                            if started {
-                                if !is_radio_item {
-                                    scrobble_scheduler::schedule(
-                                        track.clone(),
-                                        Some(id.clone()),
-                                        cfg_signal,
-                                        play_generation,
-                                        current_gen,
-                                        Some(active_source),
-                                        ScrobbleOptions::REMOTE_WEB,
-                                    );
-                                }
-                            }
-                        } else {
-                            is_loading.set(false);
-                            skip_in_progress.set(false);
-                        }
-                    });
                 }
             } else {
-                #[cfg(not(target_arch = "wasm32"))]
                 if !use_crossfade {
                     self.current_queue_index.set(idx);
                 }
-                #[cfg(target_arch = "wasm32")]
-                {
-                    let _ = idx;
-                    return;
-                } // local files not supported on web
-                #[cfg(not(target_arch = "wasm32"))]
                 if let Some(track_path) = track.id.local_path()
                     && let Ok((source, hint)) = decoder::open_file(track_path)
                 {

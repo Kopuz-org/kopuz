@@ -29,7 +29,6 @@ md5 = { workspace = true }
 sha1 = { workspace = true }
 httpdate = { workspace = true }
 hex = { workspace = true }
-web-time = { workspace = true }
 tokio = { workspace = true, features = ["fs", "process", "rt", "sync"] }
 reader = { workspace = true }
 db = { workspace = true }

@@ -7,17 +7,12 @@ use dioxus::prelude::{ReadableExt, WritableExt};
 use std::path::PathBuf;
 
 pub(super) fn offline_cache_dir() -> PathBuf {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let base = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
-            .map(|dirs| dirs.cache_dir().to_path_buf())
-            .unwrap_or_else(|| PathBuf::from("./cache"));
-        let dir = base.join("offline_tracks");
-        let _ = std::fs::create_dir_all(&dir);
-        dir
-    }
-    #[cfg(target_arch = "wasm32")]
-    PathBuf::from("./cache/offline_tracks")
+    let base = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
+        .map(|dirs| dirs.cache_dir().to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("./cache"));
+    let dir = base.join("offline_tracks");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
 }
 
 pub fn build_download_url(item_id: &str, config: &AppConfig) -> Option<(String, &'static str)> {
@@ -58,7 +53,6 @@ pub fn build_download_url(item_id: &str, config: &AppConfig) -> Option<(String, 
     Some((url, ext))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn content_type_to_ext(content_type: &str) -> Option<&'static str> {
     let ct = content_type.split(';').next().unwrap_or("").trim();
     match ct {
@@ -77,7 +71,6 @@ pub(super) fn content_type_to_ext(content_type: &str) -> Option<&'static str> {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[tracing::instrument(name = "download.to_cache", skip(url), fields(item_id = %item_id))]
 pub async fn download_track_to_cache(
     item_id: &str,
@@ -109,7 +102,6 @@ pub async fn download_track_to_cache(
     Ok(file_path)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub async fn download_tracks_batch(
     item_ids: Vec<String>,
     mut config: dioxus::prelude::Signal<AppConfig>,
@@ -141,7 +133,7 @@ pub async fn download_tracks_batch(
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod tests {
     use super::content_type_to_ext;
 

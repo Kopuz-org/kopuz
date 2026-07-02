@@ -3,16 +3,12 @@
 
 pub mod color;
 pub mod db_cache;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod hls_source;
 pub mod jellyfin_image;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod logs;
 pub mod lyrics;
 pub mod musicbrainz;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod range_source;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod stream_buffer;
 pub mod subsonic_image;
 pub mod themes;
@@ -29,16 +25,9 @@ pub fn map_cover_url(url: Option<String>) -> Option<CoverUrl> {
     url.map(cover_url_from_string)
 }
 
-/// Cross-platform async sleep that works on both native (tokio) and WASM (gloo-timers).
+/// Cross-platform async sleep backed by tokio.
 pub async fn sleep(duration: std::time::Duration) {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        tokio::time::sleep(duration).await;
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        gloo_timers::future::sleep(duration).await;
-    }
+    tokio::time::sleep(duration).await;
 }
 
 fn format_artwork_url_impl(path: Option<&impl AsRef<Path>>, size: Option<u32>) -> Option<CoverUrl> {

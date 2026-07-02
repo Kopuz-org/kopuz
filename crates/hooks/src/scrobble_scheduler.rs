@@ -224,8 +224,5 @@ fn musicbrainz_ids(track: &Track, enabled: bool) -> Option<HashMap<&str, &str>> 
 }
 
 async fn sleep_threshold(duration: Duration) {
-    #[cfg(target_arch = "wasm32")]
-    utils::sleep(duration).await;
-    #[cfg(not(target_arch = "wasm32"))]
     tokio::time::sleep(duration).await;
 }

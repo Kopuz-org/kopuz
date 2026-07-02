@@ -25,12 +25,12 @@ fn theme_editor_section(_config: Signal<AppConfig>) -> Element {
 // Declared `-> ()` so the panic coerces here; calling it from the onclick
 // keeps the handler's return type `()` (a bare `panic!` in the closure infers
 // `!`, which the event-handler trait rejects).
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 fn trigger_test_crash() {
     panic!("manual crash trigger from settings (debug build)");
 }
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 fn logs_section(mut config: Signal<AppConfig>) -> Element {
     rsx! {
         section {
@@ -100,7 +100,7 @@ fn logs_section(mut config: Signal<AppConfig>) -> Element {
 /// Debug-build-only database panel: reset / load release DB / seed / re-run
 /// import / vacuum / info, all against the disposable debug DB with a live
 /// pool swap (no restart). English-only by design (dev tool).
-#[cfg(any(target_arch = "wasm32", target_os = "android"))]
+#[cfg(target_os = "android")]
 fn logs_section(_config: Signal<AppConfig>) -> Element {
     rsx! {}
 }
@@ -313,23 +313,21 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             }
                         }
 
-                        if !cfg!(target_arch = "wasm32") {
-                            SettingItem {
-                                title: i18n::t("music_directory").to_string(),
-                                    control: rsx! {
-                                    MultiDirectoryPicker {
-                                        current_paths: config.read().music_directory.clone(),
-                                        on_add: move |path| {
-                                            let mut config = config.write();
-                                            if !config.music_directory.contains(&path) {
-                                                config.music_directory.push(path);
-                                            }
-                                        },
-                                        on_remove: move |index| {
-                                            let mut config = config.write();
-                                            if index < config.music_directory.len() {
-                                                config.music_directory.remove(index);
-                                            }
+                        SettingItem {
+                            title: i18n::t("music_directory").to_string(),
+                                control: rsx! {
+                                MultiDirectoryPicker {
+                                    current_paths: config.read().music_directory.clone(),
+                                    on_add: move |path| {
+                                        let mut config = config.write();
+                                        if !config.music_directory.contains(&path) {
+                                            config.music_directory.push(path);
+                                        }
+                                    },
+                                    on_remove: move |index| {
+                                        let mut config = config.write();
+                                        if index < config.music_directory.len() {
+                                            config.music_directory.remove(index);
                                         }
                                     }
                                 }
@@ -430,18 +428,16 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
-                        if !cfg!(target_arch = "wasm32") {
-                            SettingItem {
-                                title: i18n::t("auto_check_updates").to_string(),
-                                control: rsx! {
-                                    ToggleSetting {
-                                        enabled: config.read().auto_check_updates,
-                                        on_change: move |val| config.write().auto_check_updates = val,
-                                    }
+                        SettingItem {
+                            title: i18n::t("auto_check_updates").to_string(),
+                            control: rsx! {
+                                ToggleSetting {
+                                    enabled: config.read().auto_check_updates,
+                                    on_change: move |val| config.write().auto_check_updates = val,
                                 }
                             }
                         }
-                        if !cfg!(any(target_arch = "wasm32", target_os = "android")) {
+                        if cfg!(not(target_os = "android")) {
                             SettingItem {
                                 title: i18n::t("minimize_to_tray").to_string(),
                                 control: rsx! {
@@ -452,14 +448,12 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
-                        if !cfg!(target_arch = "wasm32") {
-                            SettingItem {
-                                title: i18n::t("show_source_toggle").to_string(),
-                                    control: rsx! {
-                                    ToggleSetting {
-                                        enabled: config.read().show_source_toggle,
-                                        on_change: move |val| config.write().show_source_toggle = val,
-                                    }
+                        SettingItem {
+                            title: i18n::t("show_source_toggle").to_string(),
+                                control: rsx! {
+                                ToggleSetting {
+                                    enabled: config.read().show_source_toggle,
+                                    on_change: move |val| config.write().show_source_toggle = val,
                                 }
                             }
                         }
@@ -567,86 +561,84 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
-                        if !cfg!(target_arch = "wasm32") {
-                            section {
-                                h2 {
-                                    class: "text-lg font-semibold text-white/80 mb-4 border-b border-white/5 pb-2",
-                                    "{i18n::t(\"connectivity\")}"
+                        section {
+                            h2 {
+                                class: "text-lg font-semibold text-white/80 mb-4 border-b border-white/5 pb-2",
+                                "{i18n::t(\"connectivity\")}"
+                            }
+                            div {
+                                class: "space-y-4",
+                                if !cfg!(target_os = "android") {
+                                    SettingItem {
+                                        title: i18n::t("discord_presence").to_string(),
+                                        control: rsx! {
+                                            DiscordPresenceSettings {
+                                                enabled: config.read().discord_presence.unwrap_or(true),
+                                                on_change: move |val| config.write().discord_presence = Some(val),
+                                            }
+                                        }
+                                    }
+                                    SettingItem {
+                                        title: i18n::t("discord_presence_paused").to_string(),
+                                        control: rsx! {
+                                            DiscordPresencePausedSettings {
+                                                enabled: config.read().discord_presence_paused.unwrap_or(true),
+                                                on_change: move |val| config.write().discord_presence_paused = Some(val),
+                                            }
+                                        }
+                                    }
+                                    SettingItem {
+                                        title: i18n::t("discord_presence_source").to_string(),
+                                        control: rsx! {
+                                            ToggleSetting {
+                                                enabled: config.read().discord_presence_source.unwrap_or(true),
+                                                on_change: move |val| config.write().discord_presence_source = Some(val),
+                                            }
+                                        }
+                                    }
                                 }
-                                div {
-                                    class: "space-y-4",
-                                    if !cfg!(target_os = "android") {
-                                        SettingItem {
-                                            title: i18n::t("discord_presence").to_string(),
-                                            control: rsx! {
-                                                DiscordPresenceSettings {
-                                                    enabled: config.read().discord_presence.unwrap_or(true),
-                                                    on_change: move |val| config.write().discord_presence = Some(val),
-                                                }
-                                            }
-                                        }
-                                        SettingItem {
-                                            title: i18n::t("discord_presence_paused").to_string(),
-                                            control: rsx! {
-                                                DiscordPresencePausedSettings {
-                                                    enabled: config.read().discord_presence_paused.unwrap_or(true),
-                                                    on_change: move |val| config.write().discord_presence_paused = Some(val),
-                                                }
-                                            }
-                                        }
-                                        SettingItem {
-                                            title: i18n::t("discord_presence_source").to_string(),
-                                            control: rsx! {
-                                                ToggleSetting {
-                                                    enabled: config.read().discord_presence_source.unwrap_or(true),
-                                                    on_change: move |val| config.write().discord_presence_source = Some(val),
-                                                }
-                                            }
+                                SettingItem {
+                                    title: i18n::t("listenbrainz").to_string(),
+                                    control: rsx! {
+                                        MusicBrainzSettings {
+                                            current: config.read().musicbrainz_token.clone(),
+                                            on_save: move |token: String| {
+                                                config.write().musicbrainz_token = token;
+                                            },
                                         }
                                     }
-                                    SettingItem {
-                                        title: i18n::t("listenbrainz").to_string(),
-                                        control: rsx! {
-                                            MusicBrainzSettings {
-                                                current: config.read().musicbrainz_token.clone(),
-                                                on_save: move |token: String| {
-                                                    config.write().musicbrainz_token = token;
-                                                },
-                                            }
+                                }
+                                SettingItem {
+                                    title: i18n::t("lastfm").to_string(),
+                                    control: rsx! {
+                                        LastFmSettings {
+                                            api_key: config.read().lastfm_api_key.clone(),
+                                            api_secret: config.read().lastfm_api_secret.clone(),
+                                            session_key: config.read().lastfm_session_key.clone(),
+
+                                            on_api_key_save: move |value: String| {
+                                                config.write().lastfm_api_key = value;
+                                            },
+
+                                            on_api_secret_save: move |value: String| {
+                                                config.write().lastfm_api_secret = value;
+                                            },
+
+                                            on_session_key_save: move |value: String| {
+                                                config.write().lastfm_session_key = value;
+                                            },
                                         }
                                     }
-                                    SettingItem {
-                                        title: i18n::t("lastfm").to_string(),
-                                        control: rsx! {
-                                            LastFmSettings {
-                                                api_key: config.read().lastfm_api_key.clone(),
-                                                api_secret: config.read().lastfm_api_secret.clone(),
-                                                session_key: config.read().lastfm_session_key.clone(),
+                                }
+                                SettingItem {
+                                    title: i18n::t("librefm").to_string(),
+                                    control: rsx! {
+                                        LibreFmSettings {
+                                            session_key: config.read().librefm_session_key.clone(),
 
-                                                on_api_key_save: move |value: String| {
-                                                    config.write().lastfm_api_key = value;
-                                                },
-
-                                                on_api_secret_save: move |value: String| {
-                                                    config.write().lastfm_api_secret = value;
-                                                },
-
-                                                on_session_key_save: move |value: String| {
-                                                    config.write().lastfm_session_key = value;
-                                                },
-                                            }
-                                        }
-                                    }
-                                    SettingItem {
-                                        title: i18n::t("librefm").to_string(),
-                                        control: rsx! {
-                                            LibreFmSettings {
-                                                session_key: config.read().librefm_session_key.clone(),
-
-                                                on_session_key_save: move |value: String| {
-                                                    config.write().librefm_session_key = value;
-                                                },
-                                            }
+                                            on_session_key_save: move |value: String| {
+                                                config.write().librefm_session_key = value;
+                                            },
                                         }
                                     }
                                 }

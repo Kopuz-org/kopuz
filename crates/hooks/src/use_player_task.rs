@@ -5,9 +5,7 @@ use dioxus::logger::tracing::Instrument;
 use dioxus::prelude::*;
 use std::sync::Arc;
 
-#[cfg(not(target_arch = "wasm32"))]
 use discord_presence::Presence;
-#[cfg(not(target_arch = "wasm32"))]
 use discord_presence::cover_art;
 
 #[cfg(target_os = "macos")]
@@ -88,21 +86,14 @@ fn nudge_event_loop() {
 }
 
 pub fn use_player_task(ctrl: PlayerController) {
-    #[cfg(not(target_arch = "wasm32"))]
     let presence: Option<Arc<Presence>> = use_context();
     let mut config: Signal<AppConfig> = use_context();
 
-    #[cfg(not(target_arch = "wasm32"))]
     let mut last_title = use_signal(String::new);
-    #[cfg(not(target_arch = "wasm32"))]
     let mut last_source: Signal<Option<String>> = use_signal(|| None);
-    #[cfg(not(target_arch = "wasm32"))]
     let mut was_playing = use_signal(|| false);
-    #[cfg(not(target_arch = "wasm32"))]
     let mut discord_cover_url: Signal<Option<String>> = use_signal(|| None);
-    #[cfg(not(target_arch = "wasm32"))]
     let mut discord_cover_resolving_for = use_signal(String::new);
-    #[cfg(not(target_arch = "wasm32"))]
     let mut discord_cover_sent = use_signal(|| false);
 
     #[cfg(target_os = "macos")]
@@ -233,18 +224,13 @@ pub fn use_player_task(ctrl: PlayerController) {
     let gens = crate::db_reactivity::use_generations();
     use_future(move || {
         let mut ctrl = ctrl;
-        #[cfg(not(target_arch = "wasm32"))]
         let presence = presence.clone();
-        let mut last_ping = web_time::Instant::now();
-        let mut last_progress_report = web_time::Instant::now();
-        #[cfg(not(target_arch = "wasm32"))]
+        let mut last_ping = std::time::Instant::now();
+        let mut last_progress_report = std::time::Instant::now();
         let mut last_discord_enabled = false;
-        #[cfg(not(target_arch = "wasm32"))]
-        let mut last_jellyfin_id: Option<String> = None;
-        #[cfg(target_arch = "wasm32")]
         let mut last_jellyfin_id: Option<String> = None;
         #[cfg(target_os = "macos")]
-        let mut last_now_playing_refresh = web_time::Instant::now();
+        let mut last_now_playing_refresh = std::time::Instant::now();
         let mut last_lyrics_prefetch_track: Option<String> = None;
 
         async move {
@@ -252,16 +238,12 @@ pub fn use_player_task(ctrl: PlayerController) {
             let mut prev_playing = false;
             let mut crossfade_triggered_for_gen: Option<usize> = None;
             let mut last_recent_path: Option<String> = None;
-            #[cfg(not(target_arch = "wasm32"))]
             let bg_notify = BG_NOTIFY.get_or_init(tokio::sync::Notify::new);
             loop {
-                #[cfg(not(target_arch = "wasm32"))]
                 tokio::select! {
                     _ = bg_notify.notified() => {},
                     _ = tokio::time::sleep(std::time::Duration::from_millis(250)) => {},
                 }
-                #[cfg(target_arch = "wasm32")]
-                utils::sleep(std::time::Duration::from_millis(250)).await;
 
                 nudge_event_loop();
 
@@ -358,11 +340,9 @@ pub fn use_player_task(ctrl: PlayerController) {
                 // presence updates below are all skipped (the Presence context is None too).
                 #[cfg(target_os = "android")]
                 let discord_enabled = false;
-                #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+                #[cfg(not(target_os = "android"))]
                 let discord_enabled = config.read().discord_presence.unwrap_or(true);
-                #[cfg(not(target_arch = "wasm32"))]
                 let discord_paused_enabled = config.read().discord_presence_paused.unwrap_or(true);
-                #[cfg(not(target_arch = "wasm32"))]
                 let discord_source_name = config
                     .read()
                     .discord_presence_source
@@ -373,7 +353,6 @@ pub fn use_player_task(ctrl: PlayerController) {
                             .active_service()
                             .map_or("Local", |s| s.display_name())
                     });
-                #[cfg(not(target_arch = "wasm32"))]
                 let source_changed = last_source.peek().as_deref() != discord_source_name;
                 let pos = ctrl.player.read().get_position();
                 let mut defer_player_progress = false;
@@ -415,7 +394,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                             }
                             .instrument(tracing::info_span!("jellyfin.keepalive")),
                         );
-                        last_ping = web_time::Instant::now();
+                        last_ping = std::time::Instant::now();
                     }
 
                     let track = {
@@ -473,7 +452,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                                     }
                                     .instrument(tracing::info_span!("playback.report")),
                                 );
-                                last_progress_report = web_time::Instant::now();
+                                last_progress_report = std::time::Instant::now();
                             }
                         } else if let Some(old_id) = last_jellyfin_id.take() {
                             let source = ctrl.active_source.peek().clone();
@@ -500,7 +479,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                 #[cfg(target_os = "macos")]
                 if last_now_playing_refresh.elapsed().as_secs() >= 10 {
                     player::systemint::refresh_now_playing();
-                    last_now_playing_refresh = web_time::Instant::now();
+                    last_now_playing_refresh = std::time::Instant::now();
                 }
 
                 if is_playing {
@@ -512,7 +491,6 @@ pub fn use_player_task(ctrl: PlayerController) {
                         ctrl.current_song_progress.set(pos_secs);
                     }
 
-                    #[cfg(not(target_arch = "wasm32"))]
                     if let Some(ref p) = presence {
                         let title = ctrl.current_song_title.read().clone();
                         let artist = ctrl.current_song_artist.read().clone();
@@ -623,7 +601,6 @@ pub fn use_player_task(ctrl: PlayerController) {
                         ctrl.play_next_with_crossfade();
                         nudge_event_loop();
                         prev_playing = is_playing;
-                        #[cfg(not(target_arch = "wasm32"))]
                         {
                             was_playing.set(is_playing);
                             last_discord_enabled = discord_enabled;
@@ -663,7 +640,6 @@ pub fn use_player_task(ctrl: PlayerController) {
                         nudge_event_loop();
                     }
                 } else {
-                    #[cfg(not(target_arch = "wasm32"))]
                     if *was_playing.peek() {
                         if let Some(ref p) = presence {
                             let title = ctrl.current_song_title.read().clone();
@@ -708,7 +684,6 @@ pub fn use_player_task(ctrl: PlayerController) {
                 }
 
                 prev_playing = is_playing;
-                #[cfg(not(target_arch = "wasm32"))]
                 {
                     was_playing.set(is_playing);
                     last_discord_enabled = discord_enabled;

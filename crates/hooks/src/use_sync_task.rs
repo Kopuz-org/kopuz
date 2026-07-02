@@ -40,11 +40,6 @@ pub fn use_sync_task(config: Signal<config::AppConfig>, db: Db) {
     use_future(move || {
         let db = db.clone();
         async move {
-            #[cfg(target_arch = "wasm32")]
-            {
-                let _ = (&db, &gens);
-            }
-            #[cfg(not(target_arch = "wasm32"))]
             {
                 let mut consecutive_failures: u32 = 0;
                 loop {

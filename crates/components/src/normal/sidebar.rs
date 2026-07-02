@@ -1,4 +1,4 @@
-#[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
+#[cfg(target_os = "macos")]
 use dioxus::desktop::window;
 use dioxus::prelude::*;
 use kopuz_route::Route;
@@ -12,7 +12,7 @@ struct SidebarItem {
     icon: &'static str,
 }
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 const TOP_MENU: &[SidebarItem] = &[
     SidebarItem {
         key: "home",
@@ -72,60 +72,6 @@ const TOP_MENU: &[SidebarItem] = &[
 ];
 
 #[cfg(target_os = "android")]
-const TOP_MENU: &[SidebarItem] = &[
-    SidebarItem {
-        key: "home",
-        route: Route::Home,
-        icon: "fa-solid fa-house",
-    },
-    SidebarItem {
-        key: "search",
-        route: Route::Search,
-        icon: "fa-solid fa-magnifying-glass",
-    },
-    SidebarItem {
-        key: "discover",
-        route: Route::Discover,
-        icon: "fa-solid fa-compass",
-    },
-    SidebarItem {
-        key: "library",
-        route: Route::Library,
-        icon: "fa-solid fa-book",
-    },
-    SidebarItem {
-        key: "albums",
-        route: Route::Album,
-        icon: "fa-solid fa-music",
-    },
-    SidebarItem {
-        key: "artists",
-        route: Route::Artist,
-        icon: "fa-solid fa-user",
-    },
-    SidebarItem {
-        key: "playlists",
-        route: Route::Playlists,
-        icon: "fa-solid fa-list",
-    },
-    SidebarItem {
-        key: "favorites",
-        route: Route::Favorites,
-        icon: "fa-solid fa-heart",
-    },
-    SidebarItem {
-        key: "radio",
-        route: Route::Radio,
-        icon: "fa-solid fa-radio",
-    },
-    SidebarItem {
-        key: "activity",
-        route: Route::Activity,
-        icon: "fa-solid fa-chart-simple",
-    },
-];
-
-#[cfg(target_arch = "wasm32")]
 const TOP_MENU: &[SidebarItem] = &[
     SidebarItem {
         key: "home",
@@ -308,11 +254,11 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
                 }
             }
 
-            if cfg!(all(not(target_arch = "wasm32"), target_os = "macos")) {
+            if cfg!(target_os = "macos") {
                 div {
                     class: "absolute top-0 left-0 w-full h-10 z-50",
                     onmousedown: move |_| {
-                        #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
+                        #[cfg(target_os = "macos")]
                         window().drag();
                     }
                 }
@@ -321,7 +267,7 @@ pub fn SidebarNormal(props: SidebarProps) -> Element {
             div {
                 class: "flex-1 flex flex-col overflow-y-auto overflow-x-hidden pt-2",
 
-                if !*is_collapsed.read() && !cfg!(target_arch = "wasm32") && config.read().show_source_toggle {
+                if !*is_collapsed.read() && config.read().show_source_toggle {
                     crate::source_switcher::SourceSwitcher {
                         config,
                         on_manage: move |_| props.on_navigate.call(Route::Settings),

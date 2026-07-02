@@ -207,7 +207,6 @@ pub fn stream_url_with_bitrate(
 impl SubsonicClient {
     pub fn new(base_url: &str, username: &str, password: &str) -> Self {
         let builder = reqwest::Client::builder();
-        #[cfg(not(target_arch = "wasm32"))]
         let builder = builder.timeout(std::time::Duration::from_secs(10));
         let http_client = builder.build().unwrap_or_else(|_| reqwest::Client::new());
 

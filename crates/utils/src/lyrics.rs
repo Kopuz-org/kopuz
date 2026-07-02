@@ -763,15 +763,7 @@ fn log_lyrics_key_hash(key: &str) -> String {
 }
 
 fn lyrics_terminal_debug_enabled() -> bool {
-    #[cfg(target_arch = "wasm32")]
-    {
-        false
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        std::env::var_os("KOPUZ_LYRICS_DEBUG").is_some()
-    }
+    std::env::var_os("KOPUZ_LYRICS_DEBUG").is_some()
 }
 
 fn lyrics_cache_key(

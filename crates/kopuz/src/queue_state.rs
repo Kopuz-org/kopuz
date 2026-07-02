@@ -69,14 +69,8 @@ fn is_server_queue_track(track: &Track) -> bool {
     )
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn is_restorable_queue_track(track: &Track) -> bool {
     is_server_queue_track(track) || track.id.local_path().is_some_and(|p| p.exists())
-}
-
-#[cfg(target_arch = "wasm32")]
-fn is_restorable_queue_track(_track: &Track) -> bool {
-    true
 }
 
 pub fn sanitize(state: PersistedQueueState) -> Option<PersistedQueueState> {

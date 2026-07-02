@@ -1,6 +1,5 @@
 use super::{Lyrics, has_usable_line_timing, lrc::parse_lrc, lrc_has_usable_timing};
 
-#[cfg(not(target_arch = "wasm32"))]
 pub(super) async fn fetch_local_lrc(audio_path: &str) -> Option<Lyrics> {
     let content = read_local_lrc(audio_path).or_else(|| read_embedded_lyrics(audio_path))?;
     if content.trim().is_empty() {
@@ -18,7 +17,6 @@ pub(super) async fn fetch_local_lrc(audio_path: &str) -> Option<Lyrics> {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn read_embedded_lyrics(audio_path: &str) -> Option<String> {
     use lofty::file::TaggedFileExt;
     use lofty::probe::Probe;
@@ -31,7 +29,6 @@ fn read_embedded_lyrics(audio_path: &str) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn read_local_lrc(audio_path: &str) -> Option<String> {
     use std::path::Path;
 
@@ -77,10 +74,5 @@ fn read_local_lrc(audio_path: &str) -> Option<String> {
         }
     }
 
-    None
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(super) async fn fetch_local_lrc(_audio_path: &str) -> Option<Lyrics> {
     None
 }

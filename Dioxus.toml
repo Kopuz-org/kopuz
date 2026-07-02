@@ -14,17 +14,3 @@ targets = ["macos", "dmg", "nsis", "msi"]
 
 [bundle.macos]
 info_plist_path = "Info.plist"
-
-[web.app]
-title = "kopuz"
-
-[web.resource]
-style = []
-script = []
-
-[web.resource.dev]
-script = []
-
-[web.tailwind]
-input = "tailwind.css"
-config = "tailwind.config.js"

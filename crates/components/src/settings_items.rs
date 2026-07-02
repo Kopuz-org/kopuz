@@ -3,8 +3,7 @@ use config::{
     MusicServer, SavedServer,
 };
 use dioxus::prelude::*;
-#[cfg(not(target_arch = "wasm32"))]
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 use rfd::AsyncFileDialog;
 use scrobble::lastfm;
 use scrobble::librefm;
@@ -137,7 +136,7 @@ pub fn MultiDirectoryPicker(
     }
 }
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 #[component]
 fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -> Element {
     rsx! {
@@ -184,14 +183,6 @@ fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -
             "{add_text}"
         }
     }
-}
-
-#[cfg(target_arch = "wasm32")]
-#[component]
-fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -> Element {
-    let _ = on_add;
-    let _ = add_text;
-    rsx! {}
 }
 
 #[component]

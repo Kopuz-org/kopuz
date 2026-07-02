@@ -3,23 +3,23 @@
 
 pub mod cover_art;
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 use discord_rich_presence::{
     DiscordIpc, DiscordIpcClient,
     activity::{self, Assets, Timestamps},
 };
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 use std::sync::Mutex;
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 #[derive(Debug)]
 pub struct Presence {
     client: Mutex<DiscordIpcClient>,
 }
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 impl Presence {
     pub fn new(client_id: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let mut client = DiscordIpcClient::new(client_id);
@@ -125,7 +125,7 @@ impl Presence {
     }
 }
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 impl Drop for Presence {
     fn drop(&mut self) {
         let mut client = match self.client.lock() {

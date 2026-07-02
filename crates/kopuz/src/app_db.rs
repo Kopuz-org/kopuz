@@ -2,7 +2,6 @@
 /// the app via context.
 pub static DB_HANDLE: std::sync::OnceLock<db::Db> = std::sync::OnceLock::new();
 
-#[cfg(not(target_arch = "wasm32"))]
 pub fn init_blocking() -> db::Db {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
