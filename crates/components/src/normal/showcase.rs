@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use crate::NavigationController;
 use crate::constants::{COLUMNS_NORMAL, COLUMNS_NORMAL_ALBUM};
@@ -9,6 +10,17 @@ use crate::track_row::TrackRow;
 use config::AppConfig;
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
+use reader::Track;
+
+#[derive(PartialEq)]
+struct ShowcaseDerived {
+    /// `(track, original_index)` in display order.
+    pairs: Vec<(Track, usize)>,
+    /// The display-ordered tracks as a play queue, shared with the play
+    /// handlers so it isn't re-cloned per render.
+    queue: Arc<Vec<Track>>,
+    has_multiple_discs: bool,
+}
 
 #[component]
 pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
@@ -24,26 +36,41 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
 
     let offline_tracks = config.read().offline_tracks.clone();
     let sort_state = use_signal(|| None);
-    let indexed_tracks: Vec<_> = props
-        .tracks
-        .iter()
-        .cloned()
-        .enumerate()
-        .map(|(idx, track)| (track, idx))
-        .collect();
-    let sorted_track_pairs = showcase::sorted_track_pairs(&indexed_tracks, *sort_state.read());
-    let sorted_tracks: Vec<_> = sorted_track_pairs
-        .iter()
-        .map(|(track, _)| track.clone())
-        .collect();
-    let sorted_tracks_arc = std::sync::Arc::new(sorted_tracks.clone());
 
-    let has_multiple_discs = sorted_tracks
-        .iter()
-        .filter_map(|t| t.disc_number)
-        .collect::<HashSet<_>>()
-        .len()
-        > 1;
+    // The body re-renders on every scroll tick (it reads `scroll_stat`), but
+    // the clone + sort below depends only on the tracks and sort order.
+    // Memoize on `(tracks, sort)` so scrolling doesn't re-clone and re-sort
+    // the whole library. Borrowed deps keep the per-render change-check from
+    // cloning `tracks` itself.
+    let sort = *sort_state.read();
+    let derived = use_memo(use_reactive(
+        (&props.tracks, &sort),
+        move |(tracks, sort)| {
+            let indexed: Vec<(Track, usize)> = tracks
+                .iter()
+                .cloned()
+                .enumerate()
+                .map(|(idx, track)| (track, idx))
+                .collect();
+            let pairs = showcase::sorted_track_pairs(&indexed, sort);
+            let queue: Vec<Track> = pairs.iter().map(|(track, _)| track.clone()).collect();
+            let has_multiple_discs = queue
+                .iter()
+                .filter_map(|t| t.disc_number)
+                .collect::<HashSet<_>>()
+                .len()
+                > 1;
+            Arc::new(ShowcaseDerived {
+                pairs,
+                queue: Arc::new(queue),
+                has_multiple_discs,
+            })
+        },
+    ));
+    let derived = derived();
+    let sorted_track_pairs = &derived.pairs;
+    let sorted_tracks_arc = Arc::clone(&derived.queue);
+    let has_multiple_discs = derived.has_multiple_discs;
     let mut last_disc = None;
     let mut last_disc_size = 0;
 
@@ -55,13 +82,14 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
     let current_song_artist = ctrl.current_song_artist.read().clone();
     let current_song_album = ctrl.current_song_album.read().clone();
     let current_song_duration = *ctrl.current_song_duration.read();
-    let tracks_for_play_all = sorted_tracks.clone();
-    let selected_queue_tracks: Vec<_> = sorted_tracks
+    let play_all_queue = Arc::clone(&derived.queue);
+    let selected_queue_tracks: Vec<_> = derived
+        .queue
         .iter()
         .filter(|track| props.selected_tracks.contains(&track.id))
         .cloned()
         .collect();
-    let selected_queue_tracks_arc = std::sync::Arc::new(selected_queue_tracks.clone());
+    let selected_queue_tracks_arc = Arc::new(selected_queue_tracks);
 
     let all_downloaded = !props.tracks.is_empty()
         && props.tracks.iter().all(|t| {
@@ -164,9 +192,9 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                              onclick: move |_| {
                                 let is_shuffle = *ctrl.shuffle.peek();
                                 if is_shuffle {
-                                    ctrl.play_queue_shuffled(tracks_for_play_all.clone());
+                                    ctrl.play_queue_shuffled((*play_all_queue).clone());
                                 } else {
-                                    ctrl.play_queue_linear(tracks_for_play_all.clone());
+                                    ctrl.play_queue_linear((*play_all_queue).clone());
                                 }
                              },
                              i { class: "fa-solid fa-play text-xl ml-1" }
