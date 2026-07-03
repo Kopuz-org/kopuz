@@ -38,7 +38,8 @@ pub fn use_connection_status() -> Memo<ConnStatus> {
         }
         status.set(ConnStatus::Connecting);
         spawn(async move {
-            status.set(match src.validate().await {
+            let outcome = utils::offload(async move { src.validate().await }).await;
+            status.set(match outcome {
                 AuthOutcome::Valid => ConnStatus::Online,
                 AuthOutcome::Expired | AuthOutcome::Unreachable => ConnStatus::Offline,
             });

@@ -86,11 +86,17 @@ pub async fn run_rotation(mut config: Signal<config::AppConfig>) {
         return;
     }
     let started = std::time::Instant::now();
-    match server::ytmusic::verify_session_keepalive::tick(&cookies).await {
+    let from_len = cookies.len();
+    let outcome =
+        utils::offload(
+            async move { server::ytmusic::verify_session_keepalive::tick(&cookies).await },
+        )
+        .await;
+    match outcome {
         Ok(Some(updated)) => {
             tracing::debug!(
                 secs = started.elapsed().as_secs_f32(),
-                from = cookies.len(),
+                from = from_len,
                 to = updated.len(),
                 "verify_session OK - jar rotated",
             );

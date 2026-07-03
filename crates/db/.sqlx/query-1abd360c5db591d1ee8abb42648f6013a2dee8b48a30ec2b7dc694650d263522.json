@@ -1,10 +1,10 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT rowid_pk, source_pl_id, name, cover_path, image_tag FROM playlists WHERE source = ?1 AND source_pl_id != 'LM' ORDER BY position",
+  "query": "SELECT rowid_pk as \"rowid_pk!\", source_pl_id, name, cover_path, image_tag FROM playlists WHERE source = ?1 AND source_pl_id != 'LM' ORDER BY position",
   "describe": {
     "columns": [
       {
-        "name": "rowid_pk",
+        "name": "rowid_pk!",
         "ordinal": 0,
         "type_info": "Integer"
       },
@@ -40,5 +40,5 @@
       true
     ]
   },
-  "hash": "e623290c7daf9296ab46170b523bb3ca816f9190a8a7da6c023d71e2db1a1a5d"
+  "hash": "1abd360c5db591d1ee8abb42648f6013a2dee8b48a30ec2b7dc694650d263522"
 }

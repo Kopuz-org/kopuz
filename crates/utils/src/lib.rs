@@ -30,6 +30,31 @@ pub async fn sleep(duration: std::time::Duration) {
     tokio::time::sleep(duration).await;
 }
 
+/// Run a future on tokio's worker pool instead of the calling thread.
+///
+/// Dioxus polls its tasks (`use_resource`, `spawn`) on the UI thread, so any
+/// CPU spent inside them — sqlx row decoding, response JSON parsing — stalls
+/// rendering for that long. Wrapping the future here moves the work to a
+/// worker thread; the UI-side task only awaits the join handle. The `Send`
+/// bound is the guardrail: a future that touches a `Signal` won't compile.
+///
+/// Panics inside the future propagate to the caller unchanged.
+pub async fn offload<F>(fut: F) -> F::Output
+where
+    F: std::future::Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    match tokio::spawn(fut).await {
+        Ok(out) => out,
+        Err(err) => match err.try_into_panic() {
+            Ok(panic) => std::panic::resume_unwind(panic),
+            // Cancellation only happens on runtime shutdown, where the app is
+            // exiting anyway — there's no caller left to care about the value.
+            Err(err) => panic!("offloaded task cancelled: {err}"),
+        },
+    }
+}
+
 fn format_artwork_url_impl(path: Option<&impl AsRef<Path>>, size: Option<u32>) -> Option<CoverUrl> {
     let p = path?;
     let p = p.as_ref();

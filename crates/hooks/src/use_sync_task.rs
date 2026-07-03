@@ -82,7 +82,11 @@ pub fn use_sync_task(config: Signal<config::AppConfig>, db: Db) {
                     } else {
                         SyncReason::Interval
                     };
-                    match reconcile_favorites(source.as_ref(), reason).await {
+                    let outcome = utils::offload(async move {
+                        reconcile_favorites(source.as_ref(), reason).await
+                    })
+                    .await;
+                    match outcome {
                         Ok(report) => {
                             consecutive_failures = 0;
                             // did_pull, not pulled: a pull that only removed

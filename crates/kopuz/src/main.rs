@@ -642,26 +642,32 @@ fn App() -> Element {
         }
         last_radio_registry_key.set(Some(key));
 
-        spawn(
-            async move {
-                let mut new_registry = radio::registry::StationRegistry::new();
-                let mut import_count = 0;
+        spawn(async move {
+            let (new_registry, import_count) = utils::offload(
+                async move {
+                    let mut new_registry = radio::registry::StationRegistry::new();
+                    let mut import_count = 0;
 
-                for path in registry_paths {
-                    match new_registry.import_registry(&path).await {
-                        Ok(_) => import_count += 1,
-                        Err(e) => tracing::warn!("Failed to import registry from {}: {}", path, e),
+                    for path in registry_paths {
+                        match new_registry.import_registry(&path).await {
+                            Ok(_) => import_count += 1,
+                            Err(e) => {
+                                tracing::warn!("Failed to import registry from {}: {}", path, e)
+                            }
+                        }
                     }
+                    (new_registry, import_count)
                 }
+                .instrument(tracing::info_span!("radio.registry_load")),
+            )
+            .await;
 
-                station_registry.set(new_registry);
+            station_registry.set(new_registry);
 
-                if import_count > 0 {
-                    tracing::info!("Imported {} external radio registries", import_count);
-                }
+            if import_count > 0 {
+                tracing::info!("Imported {} external radio registries", import_count);
             }
-            .instrument(tracing::info_span!("radio.registry_load")),
-        );
+        });
     });
 
     let mut selected_album_id = use_signal(String::new);

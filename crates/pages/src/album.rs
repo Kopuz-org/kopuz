@@ -412,12 +412,12 @@ fn AlbumDetail(
             let db_has = album_res.read().clone().flatten().is_some();
             let id = album_id_memo();
             let src = active_source.peek().clone();
-            async move {
+            utils::offload(async move {
                 if !want || db_has || id.trim().is_empty() {
                     return None;
                 }
                 src.fetch_album_by_ref(&id).await.ok().flatten()
-            }
+            })
         })
     };
 
@@ -480,13 +480,13 @@ fn AlbumDetail(
         use_resource(move || {
             let _ = gens.generation(Table::Tracks);
             let (src, ids) = (active_source(), matching_ids());
-            async move {
+            utils::offload(async move {
                 let mut out = Vec::new();
                 for id in &ids {
                     out.extend(src.album_tracks(id).await.unwrap_or_default());
                 }
                 out
-            }
+            })
         })
     };
 
@@ -501,7 +501,7 @@ fn AlbumDetail(
             let want = caps().albums == ::server::source::AlbumType::YtMusic && !*is_offline.read();
             let album = album_res.read().clone().flatten();
             let src = active_source.peek().clone();
-            async move {
+            utils::offload(async move {
                 let album = album?;
                 if !want || album.title.trim().is_empty() {
                     return None;
@@ -510,7 +510,7 @@ fn AlbumDetail(
                     .await
                     .ok()
                     .flatten()
-            }
+            })
         })
     };
 
