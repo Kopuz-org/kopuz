@@ -78,10 +78,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use symphonia::core::audio::GenericAudioBufferRef;
-use symphonia::core::codecs::audio::{AudioDecoder, AudioDecoderOptions};
+use symphonia::core::codecs::audio::{AudioCodecParameters, AudioDecoder, AudioDecoderOptions};
 use symphonia::core::codecs::registry::RegisterableAudioDecoder;
 use symphonia::core::formats::probe::Hint;
-use symphonia::core::formats::{FormatOptions, SeekMode, SeekTo};
+use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo, Track};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::units::Time;
@@ -172,6 +172,302 @@ impl Player {
         stream_config
     }
 
+    fn output_config_for_sample_rate(
+        &self,
+        desired_sample_rate: Option<u32>,
+    ) -> Result<cpal::SupportedStreamConfig, PlayerInitError> {
+        let default_config = self
+            ._device
+            .default_output_config()
+            .map_err(PlayerInitError::DefaultOutputConfig)?;
+
+        let Some(desired_sample_rate) = desired_sample_rate else {
+            return Ok(default_config);
+        };
+
+        let default_channels = default_config.channels();
+        let default_sample_format = default_config.sample_format();
+        let supported_configs = match self._device.supported_output_configs() {
+            Ok(configs) => configs,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "failed to query supported output configs; using default output config"
+                );
+                return Ok(default_config);
+            }
+        };
+
+        let mut best_config = None;
+        let mut best_distance = u32::MAX;
+        for supported_config in supported_configs {
+            if supported_config.channels() != default_channels
+                || supported_config.sample_format() != default_sample_format
+            {
+                continue;
+            }
+
+            let sample_rate = desired_sample_rate.clamp(
+                supported_config.min_sample_rate(),
+                supported_config.max_sample_rate(),
+            );
+            let Some(config) = supported_config.try_with_sample_rate(sample_rate) else {
+                continue;
+            };
+            let distance = sample_rate.abs_diff(desired_sample_rate);
+            if distance < best_distance {
+                best_distance = distance;
+                best_config = Some(config);
+            }
+        }
+
+        Ok(best_config.unwrap_or(default_config))
+    }
+
+    fn build_output_stream(
+        &self,
+        stream_config: &cpal::StreamConfig,
+    ) -> Result<cpal::Stream, cpal::BuildStreamError> {
+        let channels = stream_config.channels as usize;
+        let device_sample_rate = stream_config.sample_rate;
+        let stream_active_state_handle = self.active_state_handle.clone();
+        let stream_position = self.position_micros.clone();
+        let stream_equalizer = self.equalizer.clone();
+        let stream_channel_mode = self.channel_mode.clone();
+        let stream_active_consumer = self.active_consumer.clone();
+        let stream_fading_consumer = self.fading_consumer.clone();
+        let stream_crossfade_state = self.crossfade_state.clone();
+        let stream_fading_session_state = self.fading_session_state.clone();
+
+        self._device.build_output_stream(
+            stream_config,
+            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                let active_state = stream_active_state_handle
+                    .lock()
+                    .map(|state| state.clone())
+                    .unwrap_or_else(|e| e.into_inner().clone());
+                let st = active_state.lock().unwrap_or_else(|e| e.into_inner());
+                let volume = st.volume;
+                let paused = st.paused;
+                drop(st);
+
+                if paused {
+                    for sample in data.iter_mut() {
+                        *sample = 0.0;
+                    }
+                    return;
+                }
+
+                let active_consumer = stream_active_consumer
+                    .lock()
+                    .ok()
+                    .and_then(|consumer| consumer.clone());
+                let fading_consumer = stream_fading_consumer
+                    .lock()
+                    .ok()
+                    .and_then(|consumer| consumer.clone());
+
+                let (_active_read, read, fade_completed) = if fading_consumer.is_none() {
+                    let active_read = if let Some(consumer) = active_consumer {
+                        let cons = consumer.lock().unwrap_or_else(|e| e.into_inner());
+                        cons.read(data).unwrap_or(0)
+                    } else {
+                        0
+                    };
+                    (active_read, active_read, false)
+                } else {
+                    let mut active_samples = vec![0.0_f32; data.len()];
+                    let mut fading_samples = vec![0.0_f32; data.len()];
+
+                    let active_read = if let Some(consumer) = active_consumer {
+                        let cons = consumer.lock().unwrap_or_else(|e| e.into_inner());
+                        cons.read(&mut active_samples).unwrap_or(0)
+                    } else {
+                        0
+                    };
+                    let fading_read = if let Some(consumer) = fading_consumer {
+                        let cons = consumer.lock().unwrap_or_else(|e| e.into_inner());
+                        cons.read(&mut fading_samples).unwrap_or(0)
+                    } else {
+                        0
+                    };
+
+                    let read = active_read.max(fading_read);
+                    let fade_completed = {
+                        let mut fade = stream_crossfade_state
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner());
+                        if let Some(fade) = fade.as_mut() {
+                            let frames = read / channels.max(1);
+                            if frames == 0 {
+                                false
+                            } else {
+                                for frame_idx in 0..frames {
+                                    let progress = ((fade.progress_frames + frame_idx as u64)
+                                        .min(fade.total_frames))
+                                        as f32
+                                        / fade.total_frames.max(1) as f32;
+                                    let fade_in_gain = progress.clamp(0.0, 1.0);
+                                    let fade_out_gain = 1.0 - fade_in_gain;
+                                    for ch in 0..channels {
+                                        let index = frame_idx * channels + ch;
+                                        let active =
+                                            active_samples.get(index).copied().unwrap_or(0.0);
+                                        let fading =
+                                            fading_samples.get(index).copied().unwrap_or(0.0);
+                                        data[index] =
+                                            active * fade_in_gain + fading * fade_out_gain;
+                                    }
+                                }
+                                fade.progress_frames =
+                                    fade.progress_frames.saturating_add(frames as u64);
+                                if fade.progress_frames >= fade.total_frames {
+                                    *fade = CrossfadeState {
+                                        total_frames: fade.total_frames,
+                                        progress_frames: fade.total_frames,
+                                    };
+                                    true
+                                } else {
+                                    false
+                                }
+                            }
+                        } else {
+                            if active_read > 0 {
+                                data[..active_read].copy_from_slice(&active_samples[..active_read]);
+                            }
+                            false
+                        }
+                    };
+
+                    (active_read, read, fade_completed)
+                };
+
+                if read > 0 {
+                    if let Ok(mut eq) = stream_equalizer.lock() {
+                        eq.process_in_place(&mut data[..read]);
+                    }
+                    let channel_mode = stream_channel_mode
+                        .lock()
+                        .map(|mode| *mode)
+                        .unwrap_or(ChannelMode::Stereo);
+                    apply_channel_mode_in_place(&mut data[..read], channels, channel_mode);
+                }
+
+                if fade_completed {
+                    if let Ok(mut fading_consumer) = stream_fading_consumer.lock() {
+                        *fading_consumer = None;
+                    }
+                    if let Ok(mut fade) = stream_crossfade_state.lock() {
+                        *fade = None;
+                    }
+                    if let Ok(fading_state_guard) = stream_fading_session_state.lock()
+                        && let Some(fading_state) = fading_state_guard.as_ref()
+                    {
+                        let mut st = fading_state.lock().unwrap_or_else(|e| e.into_inner());
+                        st.stopped = true;
+                        st.finished = true;
+                    }
+                }
+
+                if channels > 0 && device_sample_rate > 0 {
+                    stream_position.fetch_add(
+                        (read as u64 * 1_000_000) / (channels as u64 * device_sample_rate as u64),
+                        Ordering::Relaxed,
+                    );
+                }
+
+                for sample in data[..read].iter_mut() {
+                    *sample *= volume;
+                }
+                for sample in data[read..].iter_mut() {
+                    *sample = 0.0;
+                }
+            },
+            move |err| {
+                tracing::error!(error = %err, "cpal stream error");
+            },
+            None,
+        )
+    }
+
+    fn set_output_config(&mut self, stream_config: cpal::StreamConfig) -> Result<(), String> {
+        if self._stream.is_some() && self.stream_config == stream_config {
+            return Ok(());
+        }
+
+        let stream = self
+            .build_output_stream(&stream_config)
+            .map_err(|e| PlayerInitError::BuildOutputStream(e).to_string())?;
+        stream
+            .play()
+            .map_err(|e| PlayerInitError::StartOutputStream(e).to_string())?;
+
+        self.stream_config = stream_config;
+        self._stream = Some(stream);
+        Ok(())
+    }
+
+    fn probe_format(
+        source: Box<dyn symphonia::core::io::MediaSource>,
+        hint: Hint,
+    ) -> Result<Box<dyn FormatReader>, String> {
+        let mss = MediaSourceStream::new(source, Default::default());
+        symphonia::default::get_probe()
+            .probe(
+                &hint,
+                mss,
+                FormatOptions::default(),
+                MetadataOptions::default(),
+            )
+            .map_err(|e| {
+                tracing::error!(error = %e, "symphonia probe error");
+                format!("symphonia probe error: {e}")
+            })
+    }
+
+    fn audio_params_for_track(track: &Track) -> Option<AudioCodecParameters> {
+        let mut audio_params = track
+            .codec_params
+            .as_ref()
+            .and_then(|p| p.audio())
+            .cloned()?;
+
+        if audio_params.channels.is_none() {
+            let ch = audio_params
+                .extra_data
+                .as_deref()
+                .and_then(parse_opushead_channels)
+                .unwrap_or(2);
+            audio_params.channels = Some(symphonia::core::audio::Channels::Discrete(ch as u16));
+            if audio_params.sample_rate.is_none() {
+                audio_params.sample_rate = Some(48_000);
+            }
+        }
+
+        Some(audio_params)
+    }
+
+    fn source_sample_rate(format: &dyn FormatReader) -> Option<u32> {
+        format
+            .tracks()
+            .iter()
+            .find_map(Self::audio_params_for_track)
+            .and_then(|params| params.sample_rate)
+    }
+
+    fn prepare_source(
+        &self,
+        source: Box<dyn symphonia::core::io::MediaSource>,
+        hint: Hint,
+    ) -> Result<(Box<dyn FormatReader>, cpal::StreamConfig), String> {
+        let format = Self::probe_format(source, hint)?;
+        let supported_config = self
+            .output_config_for_sample_rate(Self::source_sample_rate(format.as_ref()))
+            .map_err(|e| e.to_string())?;
+
+        Ok((format, Self::preferred_stream_config(&supported_config)))
+    }
+
     fn play_output_stream(&self) {
         if let Some(stream) = &self._stream {
             let _ = stream.play();
@@ -219,179 +515,12 @@ impl Player {
         let crossfade_state = Arc::new(Mutex::new(None::<CrossfadeState>));
         let fading_session_state = Arc::new(Mutex::new(None::<Arc<Mutex<PlaybackState>>>));
 
-        let channels = stream_config.channels as usize;
-        let device_sample_rate = stream_config.sample_rate;
-        let stream_active_state_handle = active_state_handle.clone();
-        let stream_position = position_micros.clone();
-        let stream_equalizer = equalizer.clone();
-        let stream_channel_mode = channel_mode.clone();
-        let stream_active_consumer = active_consumer.clone();
-        let stream_fading_consumer = fading_consumer.clone();
-        let stream_crossfade_state = crossfade_state.clone();
-        let stream_fading_session_state = fading_session_state.clone();
-
-        let stream = device
-            .build_output_stream(
-                &stream_config,
-                move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                    let active_state = stream_active_state_handle
-                        .lock()
-                        .map(|state| state.clone())
-                        .unwrap_or_else(|e| e.into_inner().clone());
-                    let st = active_state.lock().unwrap_or_else(|e| e.into_inner());
-                    let volume = st.volume;
-                    let paused = st.paused;
-                    drop(st);
-
-                    if paused {
-                        for sample in data.iter_mut() {
-                            *sample = 0.0;
-                        }
-                        return;
-                    }
-
-                    let active_consumer = stream_active_consumer
-                        .lock()
-                        .ok()
-                        .and_then(|consumer| consumer.clone());
-                    let fading_consumer = stream_fading_consumer
-                        .lock()
-                        .ok()
-                        .and_then(|consumer| consumer.clone());
-
-                    let (_active_read, read, fade_completed) = if fading_consumer.is_none() {
-                        let active_read = if let Some(consumer) = active_consumer {
-                            let cons = consumer.lock().unwrap_or_else(|e| e.into_inner());
-                            cons.read(data).unwrap_or(0)
-                        } else {
-                            0
-                        };
-                        (active_read, active_read, false)
-                    } else {
-                        let mut active_samples = vec![0.0_f32; data.len()];
-                        let mut fading_samples = vec![0.0_f32; data.len()];
-
-                        let active_read = if let Some(consumer) = active_consumer {
-                            let cons = consumer.lock().unwrap_or_else(|e| e.into_inner());
-                            cons.read(&mut active_samples).unwrap_or(0)
-                        } else {
-                            0
-                        };
-                        let fading_read = if let Some(consumer) = fading_consumer {
-                            let cons = consumer.lock().unwrap_or_else(|e| e.into_inner());
-                            cons.read(&mut fading_samples).unwrap_or(0)
-                        } else {
-                            0
-                        };
-
-                        let read = active_read.max(fading_read);
-                        let fade_completed = {
-                            let mut fade = stream_crossfade_state
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner());
-                            if let Some(fade) = fade.as_mut() {
-                                let frames = read / channels.max(1);
-                                if frames == 0 {
-                                    false
-                                } else {
-                                    for frame_idx in 0..frames {
-                                        let progress = ((fade.progress_frames + frame_idx as u64)
-                                            .min(fade.total_frames))
-                                            as f32
-                                            / fade.total_frames.max(1) as f32;
-                                        let fade_in_gain = progress.clamp(0.0, 1.0);
-                                        let fade_out_gain = 1.0 - fade_in_gain;
-                                        for ch in 0..channels {
-                                            let index = frame_idx * channels + ch;
-                                            let active =
-                                                active_samples.get(index).copied().unwrap_or(0.0);
-                                            let fading =
-                                                fading_samples.get(index).copied().unwrap_or(0.0);
-                                            data[index] =
-                                                active * fade_in_gain + fading * fade_out_gain;
-                                        }
-                                    }
-                                    fade.progress_frames =
-                                        fade.progress_frames.saturating_add(frames as u64);
-                                    if fade.progress_frames >= fade.total_frames {
-                                        *fade = CrossfadeState {
-                                            total_frames: fade.total_frames,
-                                            progress_frames: fade.total_frames,
-                                        };
-                                        true
-                                    } else {
-                                        false
-                                    }
-                                }
-                            } else {
-                                if active_read > 0 {
-                                    data[..active_read]
-                                        .copy_from_slice(&active_samples[..active_read]);
-                                }
-                                false
-                            }
-                        };
-
-                        (active_read, read, fade_completed)
-                    };
-
-                    if read > 0 {
-                        if let Ok(mut eq) = stream_equalizer.lock() {
-                            eq.process_in_place(&mut data[..read]);
-                        }
-                        let channel_mode = stream_channel_mode
-                            .lock()
-                            .map(|mode| *mode)
-                            .unwrap_or(ChannelMode::Stereo);
-                        apply_channel_mode_in_place(&mut data[..read], channels, channel_mode);
-                    }
-
-                    if fade_completed {
-                        if let Ok(mut fading_consumer) = stream_fading_consumer.lock() {
-                            *fading_consumer = None;
-                        }
-                        if let Ok(mut fade) = stream_crossfade_state.lock() {
-                            *fade = None;
-                        }
-                        if let Ok(fading_state_guard) = stream_fading_session_state.lock()
-                            && let Some(fading_state) = fading_state_guard.as_ref()
-                        {
-                            let mut st = fading_state.lock().unwrap_or_else(|e| e.into_inner());
-                            st.stopped = true;
-                            st.finished = true;
-                        }
-                    }
-
-                    if channels > 0 && device_sample_rate > 0 {
-                        stream_position.fetch_add(
-                            (read as u64 * 1_000_000)
-                                / (channels as u64 * device_sample_rate as u64),
-                            Ordering::Relaxed,
-                        );
-                    }
-
-                    for sample in data[..read].iter_mut() {
-                        *sample *= volume;
-                    }
-                    for sample in data[read..].iter_mut() {
-                        *sample = 0.0;
-                    }
-                },
-                move |err| {
-                    tracing::error!(error = %err, "cpal stream error");
-                },
-                None,
-            )
-            .map_err(PlayerInitError::BuildOutputStream)?;
-
-        stream.play().map_err(PlayerInitError::StartOutputStream)?;
-
-        Ok(Self {
+        let mut player = Self {
             state,
             active_state_handle,
             _device: device,
             stream_config,
-            _stream: Some(stream),
+            _stream: None,
             active_consumer,
             fading_consumer,
             crossfade_state,
@@ -408,7 +537,15 @@ impl Player {
             position_thread_stop: Arc::default(),
             equalizer,
             channel_mode,
-        })
+        };
+        let stream_config = player.stream_config.clone();
+        let stream = player
+            .build_output_stream(&stream_config)
+            .map_err(PlayerInitError::BuildOutputStream)?;
+        stream.play().map_err(PlayerInitError::StartOutputStream)?;
+        player._stream = Some(stream);
+
+        Ok(player)
     }
 
     pub fn new() -> Self {
@@ -439,9 +576,20 @@ impl Player {
         meta: NowPlayingMeta,
         hint: Hint,
     ) -> Result<(), String> {
+        let (format, stream_config) = self.prepare_source(source, hint)?;
+
         self.cleanup_finished_fading_session();
         self.stop_playback_session();
+        self.set_output_config(stream_config)?;
 
+        self.play_prepared(format, meta)
+    }
+
+    fn play_prepared(
+        &mut self,
+        format: Box<dyn FormatReader>,
+        meta: NowPlayingMeta,
+    ) -> Result<(), String> {
         {
             let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
             st.paused = false;
@@ -481,8 +629,7 @@ impl Player {
 
         let handle = std::thread::spawn(move || {
             Self::decoder_thread(
-                source,
-                hint,
+                format,
                 producer,
                 decoder_state,
                 decoder_channels,
@@ -508,10 +655,18 @@ impl Player {
         hint: Hint,
         duration: Duration,
     ) -> Result<(), String> {
+        let (format, stream_config) = self.prepare_source(source, hint)?;
+
         self.cleanup_finished_fading_session();
 
-        if duration.is_zero() || self.ring_buf_consumer.is_none() || self.decoder_handle.is_none() {
-            return self.play(source, meta, hint);
+        if duration.is_zero()
+            || self.ring_buf_consumer.is_none()
+            || self.decoder_handle.is_none()
+            || self.stream_config != stream_config
+        {
+            self.stop_playback_session();
+            self.set_output_config(stream_config)?;
+            return self.play_prepared(format, meta);
         }
 
         self.stop_fading_session();
@@ -575,8 +730,7 @@ impl Player {
 
         let handle = std::thread::spawn(move || {
             Self::decoder_thread(
-                source,
-                hint,
+                format,
                 producer,
                 new_state,
                 channels,
@@ -693,16 +847,13 @@ impl Player {
     }
 
     fn decoder_thread(
-        source: Box<dyn symphonia::core::io::MediaSource>,
-        hint: Hint,
+        mut format: Box<dyn FormatReader>,
         producer: rb::Producer<f32>,
         state: Arc<Mutex<PlaybackState>>,
         target_channels: usize,
         target_sample_rate: u32,
         finish_cb: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
     ) {
-        let mss = MediaSourceStream::new(source, Default::default());
-
         let finish_natural = |state: &Arc<Mutex<PlaybackState>>| {
             state.lock().unwrap_or_else(|e| e.into_inner()).finished = true;
             if let Some(cb) = &finish_cb {
@@ -715,20 +866,6 @@ impl Player {
             {
                 systemint::bg_wake();
                 systemint::wake_run_loop();
-            }
-        };
-
-        let mut format = match symphonia::default::get_probe().probe(
-            &hint,
-            mss,
-            FormatOptions::default(),
-            MetadataOptions::default(),
-        ) {
-            Ok(f) => f,
-            Err(e) => {
-                tracing::error!(error = %e, "symphonia probe error");
-                finish_natural(&state);
-                return;
             }
         };
 
@@ -751,23 +888,7 @@ impl Player {
         // propagate it, and both the built-in Opus decoder and the
         // libopus adapter then bail with "channels required." Parse
         // OpusHead from extra_data, or fall back to stereo at 48 kHz.
-        let mut audio_params = track
-            .codec_params
-            .as_ref()
-            .and_then(|p| p.audio())
-            .cloned()
-            .unwrap();
-        if audio_params.channels.is_none() {
-            let ch = audio_params
-                .extra_data
-                .as_deref()
-                .and_then(parse_opushead_channels)
-                .unwrap_or(2);
-            audio_params.channels = Some(symphonia::core::audio::Channels::Discrete(ch as u16));
-            if audio_params.sample_rate.is_none() {
-                audio_params.sample_rate = Some(48_000);
-            }
-        }
+        let audio_params = Self::audio_params_for_track(track).unwrap();
         let source_sample_rate = audio_params.sample_rate.unwrap_or(target_sample_rate);
 
         let mut decoder: Box<dyn AudioDecoder> = match symphonia::default::get_codecs()
