@@ -5,6 +5,8 @@ use reader::Track;
 use std::collections::HashMap;
 use std::time::Duration;
 
+const NOW_PLAYING_INTERVAL_SECS: u64 = 30;
+
 #[derive(Clone, Copy)]
 pub struct ScrobbleOptions {
     pub include_librefm: bool,
@@ -34,23 +36,46 @@ pub fn schedule(
     config: Signal<AppConfig>,
     play_generation: Signal<usize>,
     generation: usize,
+    is_playing: Signal<bool>,
     active_source: Option<Signal<::server::source::ActiveSource>>,
     options: ScrobbleOptions,
 ) {
     let duration_secs = track.duration;
     let threshold_secs = std::cmp::min(240, duration_secs / 2);
+    let started_at = scrobble::musicbrainz::now_unix();
     let span = tracing::info_span!(
         "scrobble.submit",
         track = item_id.as_deref().unwrap_or(track.id.uid().as_str())
     );
 
+    schedule_playing_now_heartbeat(
+        &track,
+        config,
+        play_generation,
+        generation,
+        is_playing,
+        options,
+    );
+
     spawn(
         async move {
             if duration_secs < 30 {
+                tracing::info!(
+                    "scrobble skipped: track too short ({duration_secs}s < 30s): {} - {}",
+                    track.artist,
+                    track.title
+                );
                 return;
             }
 
-            let mbids = musicbrainz_ids(&track, options.include_musicbrainz_ids);
+            if track.artist.trim().is_empty() || track.title.trim().is_empty() {
+                tracing::info!(
+                    "scrobble skipped: missing artist or title metadata: {:?} - {:?}",
+                    track.artist,
+                    track.title
+                );
+                return;
+            }
 
             if let (Some(source), Some(id)) = (active_source, item_id.as_deref()) {
                 let source = source.peek().clone();
@@ -103,26 +128,20 @@ pub fn schedule(
                 }
             }
 
-            let token_raw = config.read().musicbrainz_token.clone();
-            if !token_raw.is_empty() {
-                let auth = musicbrainz_auth(&token_raw);
-                let playing_now = scrobble::musicbrainz::make_playing_now(
-                    &track.artist,
-                    &track.title,
-                    Some(&track.album),
-                    mbids.clone(),
+            let reached = wait_for_playtime(
+                Duration::from_secs(threshold_secs),
+                play_generation,
+                generation,
+                is_playing,
+            )
+            .await;
+
+            if !reached {
+                tracing::info!(
+                    "scrobble skipped: track changed before {threshold_secs}s of playback: {} - {}",
+                    track.artist,
+                    track.title
                 );
-                if let Err(error) =
-                    scrobble::musicbrainz::submit_listens(&auth, vec![playing_now], "playing_now")
-                        .await
-                {
-                    tracing::warn!("MusicBrainz playing_now failed: {}", error);
-                }
-            }
-
-            sleep_threshold(Duration::from_secs(threshold_secs)).await;
-
-            if *play_generation.read() != generation {
                 return;
             }
 
@@ -176,16 +195,17 @@ pub fn schedule(
                 }
             }
 
-            let token_raw = config.read().musicbrainz_token.clone();
-            if !token_raw.is_empty() {
-                let auth = musicbrainz_auth(&token_raw);
+            let token = config.read().musicbrainz_token.clone();
+            if !token.trim().is_empty() {
+                let info = listen_additional_info(&track, options.include_musicbrainz_ids);
                 let listen = scrobble::musicbrainz::make_listen(
                     &track.artist,
                     &track.title,
                     Some(&track.album),
-                    mbids,
+                    Some(info),
+                    started_at,
                 );
-                match scrobble::musicbrainz::submit_listens(&auth, vec![listen], "single").await {
+                match scrobble::musicbrainz::submit_listens(&token, vec![listen], "single").await {
                     Ok(_) => {
                         tracing::info!("MusicBrainz scrobbled: {} - {}", track.artist, track.title)
                     }
@@ -197,32 +217,120 @@ pub fn schedule(
     );
 }
 
-fn musicbrainz_auth(token: &str) -> String {
-    if token.contains(' ') {
-        token.to_string()
-    } else {
-        format!("Token {token}")
+fn schedule_playing_now_heartbeat(
+    track: &Track,
+    config: Signal<AppConfig>,
+    play_generation: Signal<usize>,
+    generation: usize,
+    is_playing: Signal<bool>,
+    options: ScrobbleOptions,
+) {
+    if track.duration < 30 {
+        return;
     }
+
+    let token = config.read().musicbrainz_token.clone();
+    if token.trim().is_empty() {
+        return;
+    }
+
+    let track = track.clone();
+    let include_ids = options.include_musicbrainz_ids;
+    let span = tracing::info_span!("scrobble.playing_now", track = track.id.uid().as_str());
+
+    spawn(
+        async move {
+            let mut announced = false;
+            loop {
+                if *play_generation.read() != generation {
+                    return;
+                }
+
+                if *is_playing.read() {
+                    let now_info = listen_additional_info(&track, include_ids);
+                    let playing_now = scrobble::musicbrainz::make_playing_now(
+                        &track.artist,
+                        &track.title,
+                        Some(&track.album),
+                        Some(now_info),
+                    );
+                    let sent = scrobble::musicbrainz::submit_listens(
+                        &token,
+                        vec![playing_now],
+                        "playing_now",
+                    )
+                    .await
+                    .is_ok();
+                    if sent && !announced {
+                        announced = true;
+                        tracing::info!(
+                            "ListenBrainz playing now: {} - {}",
+                            track.artist,
+                            track.title
+                        );
+                    }
+                }
+
+                tokio::time::sleep(Duration::from_secs(NOW_PLAYING_INTERVAL_SECS)).await;
+            }
+        }
+        .instrument(span),
+    );
 }
 
-fn musicbrainz_ids(track: &Track, enabled: bool) -> Option<HashMap<&str, &str>> {
-    if !enabled {
-        return None;
-    }
-
+fn listen_additional_info(
+    track: &Track,
+    include_ids: bool,
+) -> HashMap<&'static str, serde_json::Value> {
     let mut map = HashMap::new();
-    if let Some(mbid) = &track.musicbrainz_release_id {
-        map.insert("release_mbid", mbid.as_str());
+    map.insert("media_player", serde_json::Value::from("kopuz"));
+    map.insert("submission_client", serde_json::Value::from("kopuz"));
+    map.insert(
+        "submission_client_version",
+        serde_json::Value::from(env!("CARGO_PKG_VERSION")),
+    );
+    if track.duration > 0 {
+        map.insert(
+            "duration_ms",
+            serde_json::Value::from(track.duration * 1000),
+        );
     }
-    if let Some(mbid) = &track.musicbrainz_recording_id {
-        map.insert("recording_mbid", mbid.as_str());
+
+    if include_ids {
+        if let Some(mbid) = &track.musicbrainz_release_id {
+            map.insert("release_mbid", serde_json::Value::from(mbid.as_str()));
+        }
+        if let Some(mbid) = &track.musicbrainz_recording_id {
+            map.insert("recording_mbid", serde_json::Value::from(mbid.as_str()));
+        }
+        if let Some(mbid) = &track.musicbrainz_track_id {
+            map.insert("track_mbid", serde_json::Value::from(mbid.as_str()));
+        }
     }
-    if let Some(mbid) = &track.musicbrainz_track_id {
-        map.insert("track_mbid", mbid.as_str());
-    }
-    Some(map)
+
+    map
 }
 
-async fn sleep_threshold(duration: Duration) {
-    tokio::time::sleep(duration).await;
+async fn wait_for_playtime(
+    threshold: Duration,
+    play_generation: Signal<usize>,
+    generation: usize,
+    is_playing: Signal<bool>,
+) -> bool {
+    let tick = Duration::from_secs(1);
+    let mut played = Duration::ZERO;
+
+    while played < threshold {
+        tokio::time::sleep(tick).await;
+
+        if *play_generation.read() != generation {
+            return false;
+        }
+
+        if *is_playing.read() {
+            played += tick;
+        }
+    }
+
+    true
 }
