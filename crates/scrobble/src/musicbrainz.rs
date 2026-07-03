@@ -1,7 +1,11 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+const MAX_ATTEMPTS: u32 = 6;
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
+const MAX_BACKOFF: Duration = Duration::from_secs(60);
 
 #[derive(Serialize)]
 pub struct TrackMetadata<'a> {
@@ -58,23 +62,82 @@ pub async fn submit_listens(
     listens: Vec<Listen<'_>>,
     listen_type: &str,
 ) -> Result<reqwest::Response, reqwest::Error> {
-    let client = Client::new();
+    let client = Client::builder()
+        .timeout(REQUEST_TIMEOUT)
+        .build()
+        .unwrap_or_else(|_| Client::new());
     let url = "https://api.listenbrainz.org/1/submit-listens";
     let body = SubmitListens {
         listen_type,
         payload: listens,
     };
 
-    let resp = client
-        .post(url)
-        .header("Authorization", token)
-        .json(&body)
-        .send()
-        .await?;
+    let mut attempt: u32 = 0;
+    loop {
+        attempt += 1;
 
-    resp.error_for_status_ref()?;
+        let result = client
+            .post(url)
+            .header("Authorization", token)
+            .json(&body)
+            .send()
+            .await;
 
-    Ok(resp)
+        let resp = match result {
+            Ok(resp) => resp,
+            Err(error) => {
+                if attempt >= MAX_ATTEMPTS || !is_retryable_error(&error) {
+                    return Err(error);
+                }
+                tracing::warn!(
+                    "ListenBrainz {listen_type} transport error (attempt {attempt}/{MAX_ATTEMPTS}), retrying: {error}"
+                );
+                tokio::time::sleep(backoff_delay(attempt, None)).await;
+                continue;
+            }
+        };
+
+        let status = resp.status();
+
+        if status.is_success() {
+            return Ok(resp);
+        }
+
+        let retryable =
+            status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error();
+
+        if !retryable || attempt >= MAX_ATTEMPTS {
+            resp.error_for_status_ref()?;
+            return Ok(resp);
+        }
+
+        let retry_after = parse_retry_after(&resp);
+        tracing::warn!(
+            "ListenBrainz {listen_type} HTTP {status} (attempt {attempt}/{MAX_ATTEMPTS}), retrying"
+        );
+        tokio::time::sleep(backoff_delay(attempt, retry_after)).await;
+    }
+}
+
+fn is_retryable_error(error: &reqwest::Error) -> bool {
+    error.is_timeout() || error.is_connect() || error.is_request()
+}
+
+fn parse_retry_after(resp: &reqwest::Response) -> Option<Duration> {
+    let secs = resp
+        .headers()
+        .get(reqwest::header::RETRY_AFTER)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse::<u64>()
+        .ok()?;
+    Some(Duration::from_secs(secs))
+}
+
+fn backoff_delay(attempt: u32, retry_after: Option<Duration>) -> Duration {
+    let base = Duration::from_secs(1u64 << (attempt - 1).min(6));
+    retry_after.unwrap_or(base).min(MAX_BACKOFF)
 }
 
 pub fn make_listen<'a>(
