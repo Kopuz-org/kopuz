@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
-        mpsc::{self, Sender},
+        mpsc::{self, SyncSender},
     },
     thread::{self, JoinHandle},
     time::Instant,
@@ -52,7 +52,7 @@ enum Msg {
 }
 
 pub struct UiProfileLayer {
-    tx: Mutex<Sender<Msg>>,
+    tx: Mutex<SyncSender<Msg>>,
     start: Instant,
     aggs: Arc<Mutex<HashMap<String, Agg>>>,
 }
@@ -60,7 +60,7 @@ pub struct UiProfileLayer {
 /// Finalizes the trace JSON and writes the summary on drop, and shares the
 /// live aggregate map with the layer via `Arc`.
 pub struct UiProfileGuard {
-    tx: Sender<Msg>,
+    tx: SyncSender<Msg>,
     handle: Option<JoinHandle<()>>,
     aggs: Arc<Mutex<HashMap<String, Agg>>>,
     summary_path: PathBuf,
@@ -72,7 +72,7 @@ impl UiProfileLayer {
     /// beside it as `<stem>-summary.txt` when the guard drops.
     pub fn new(trace_path: &Path) -> std::io::Result<(Self, UiProfileGuard)> {
         let file = File::create(trace_path)?;
-        let (tx, rx) = mpsc::channel::<Msg>();
+        let (tx, rx) = mpsc::sync_channel::<Msg>(8192);
         let handle = thread::spawn(move || {
             let mut out = BufWriter::new(file);
             let _ = out.write_all(b"[");
@@ -188,7 +188,7 @@ where
             ("cat".into(), tracked.cat.into()),
         ]);
         if let Ok(tx) = self.tx.lock() {
-            let _ = tx.send(Msg::Entry(Value::Object(entry)));
+            let _ = tx.try_send(Msg::Entry(Value::Object(entry)));
         }
     }
 }
@@ -205,7 +205,13 @@ impl Drop for UiProfileGuard {
             return;
         }
         let report = render_report(&aggs, self.start.elapsed().as_secs_f64());
-        let _ = fs::write(&self.summary_path, &report);
+        if let Err(e) = fs::write(&self.summary_path, &report) {
+            tracing::warn!(
+                path = %self.summary_path.display(),
+                error = %e,
+                "failed to write UI profile summary"
+            );
+        }
         tracing::info!(summary = %self.summary_path.display(), "\n{}", report);
     }
 }
