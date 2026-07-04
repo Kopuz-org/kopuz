@@ -7,11 +7,19 @@
 use std::path::PathBuf;
 
 fn unique_dir() -> PathBuf {
+    // Unique by construction (pid + counter), not just by clock: macOS's
+    // µs-resolution clock let parallel tests land on the same nanos-only name,
+    // and the first finisher's cleanup deleted the other's live DB
+    // (SQLITE_CANTOPEN, code 14). Nanos stay so a killed run's leftover dir
+    // can't be picked up by a later run reusing the pid.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("kopuz-migrate-{nanos}"));
+    let pid = std::process::id();
+    let dir = std::env::temp_dir().join(format!("kopuz-migrate-{pid}-{nanos}-{seq}"));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
