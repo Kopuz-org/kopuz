@@ -72,43 +72,6 @@ where
     }
 }
 
-#[cfg(test)]
-mod offload_tests {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
-
-    /// Dropping the `offload` future must abort the spawned task — a
-    /// superseded `use_resource` rerun may not leave its query running.
-    #[tokio::test]
-    async fn dropping_offload_aborts_the_task() {
-        struct SetOnDrop(Arc<AtomicBool>);
-        impl Drop for SetOnDrop {
-            fn drop(&mut self) {
-                self.0.store(true, Ordering::SeqCst);
-            }
-        }
-        let dropped = Arc::new(AtomicBool::new(false));
-        let guard = SetOnDrop(dropped.clone());
-        let fut = super::offload(async move {
-            let _guard = guard;
-            tokio::time::sleep(std::time::Duration::from_secs(300)).await;
-        });
-        // Poll the offload future long enough to spawn, then drop it (select
-        // drops the loser when the timer wins).
-        tokio::select! {
-            _ = fut => panic!("offloaded sleep cannot have completed"),
-            _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {}
-        }
-        for _ in 0..100 {
-            if dropped.load(Ordering::SeqCst) {
-                return;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-        panic!("offloaded task kept running after its caller was dropped");
-    }
-}
-
 fn format_artwork_url_impl(path: Option<&impl AsRef<Path>>, size: Option<u32>) -> Option<CoverUrl> {
     let p = path?;
     let p = p.as_ref();
@@ -202,4 +165,41 @@ pub fn default_cover_url() -> CoverUrl {
     cover_url_from_string(
         "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400' viewBox='0 0 400 400'%3E%3Crect width='400' height='400' fill='%231e1b2e'/%3E%3Ccircle cx='200' cy='180' r='70' fill='none' stroke='%233d3466' stroke-width='6'/%3E%3Cpath d='M155 280 Q200 240 245 280' fill='none' stroke='%233d3466' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E".to_string()
     )
+}
+
+#[cfg(test)]
+mod offload_tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    /// Dropping the `offload` future must abort the spawned task — a
+    /// superseded `use_resource` rerun may not leave its query running.
+    #[tokio::test]
+    async fn dropping_offload_aborts_the_task() {
+        struct SetOnDrop(Arc<AtomicBool>);
+        impl Drop for SetOnDrop {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        let dropped = Arc::new(AtomicBool::new(false));
+        let guard = SetOnDrop(dropped.clone());
+        let fut = super::offload(async move {
+            let _guard = guard;
+            tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+        });
+        // Poll the offload future long enough to spawn, then drop it (select
+        // drops the loser when the timer wins).
+        tokio::select! {
+            _ = fut => panic!("offloaded sleep cannot have completed"),
+            _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {}
+        }
+        for _ in 0..100 {
+            if dropped.load(Ordering::SeqCst) {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("offloaded task kept running after its caller was dropped");
+    }
 }
