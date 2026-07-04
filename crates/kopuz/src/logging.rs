@@ -38,6 +38,9 @@ use tracing_subscriber::{
 struct LogGuards {
     _file: tracing_appender::non_blocking::WorkerGuard,
     _chrome: Option<crate::chrome_trace::FlushGuard>,
+    // Dropped on shutdown, finalizing the UI-profile trace JSON and writing
+    // the ranked render report. `None` unless `KOPUZ_UI_PROFILE` is set.
+    _ui_profile: Option<crate::ui_profile::UiProfileGuard>,
 }
 
 #[cfg(not(target_os = "android"))]
@@ -81,6 +84,15 @@ fn debug_mode() -> bool {
         .unwrap_or(false)
 }
 
+/// Whether the opt-in UI render profiler is active this session, from
+/// `KOPUZ_UI_PROFILE` (any non-empty, non-`0`/`false` value).
+#[cfg(not(target_os = "android"))]
+fn ui_profile_enabled() -> bool {
+    std::env::var("KOPUZ_UI_PROFILE")
+        .map(|v| !v.is_empty() && v != "0" && v != "false")
+        .unwrap_or(false)
+}
+
 #[cfg(not(target_os = "android"))]
 fn user_directives() -> Option<String> {
     std::env::var("KOPUZ_LOG")
@@ -118,41 +130,72 @@ pub fn init(log_dir: &Path, config_tracing_enabled: bool) {
     // and filters still come from `KOPUZ_LOG` / `RUST_LOG` / `KOPUZ_DEBUG`.
     let trace_path = log_dir.join("kopuz-trace.json");
 
-    let chrome_guard = if config_tracing_enabled {
+    // Both optional sinks are `Option<Layer>` (no-op when `None`) so the
+    // subscriber is assembled in one chain. Open failures are logged after
+    // `init`, since tracing isn't live yet here.
+    let mut chrome_err: Option<String> = None;
+    let (chrome_layer, chrome_guard) = if config_tracing_enabled {
         match crate::chrome_trace::ChromeTraceLayer::new(&trace_path) {
-            Ok((chrome_layer, guard)) => {
-                tracing_subscriber::registry()
-                    .with(file_layer)
-                    .with(console_layer)
-                    // Filter the chrome layer the same as the file so the
-                    // trace isn't 30MB of h2/wgpu/dioxus-internal spans
-                    // burying the kopuz spans you actually want to analyze.
-                    .with(chrome_layer.with_filter(file_filter()))
-                    .init();
-                tracing::info!(trace = %trace_path.display(), "chrome span trace enabled");
-                Some(guard)
-            }
+            // Filter the chrome layer the same as the file so the trace
+            // isn't 30MB of h2/wgpu/dioxus-internal spans burying the
+            // kopuz spans you actually want to analyze.
+            Ok((layer, guard)) => (Some(layer.with_filter(file_filter())), Some(guard)),
             Err(err) => {
-                tracing_subscriber::registry()
-                    .with(file_layer)
-                    .with(console_layer)
-                    .init();
-                tracing::warn!(trace = %trace_path.display(), %err, "failed to open chrome trace file — tracing disabled this session");
-                None
+                chrome_err = Some(err.to_string());
+                (None, None)
             }
         }
     } else {
-        tracing_subscriber::registry()
-            .with(file_layer)
-            .with(console_layer)
-            .init();
-        None
+        (None, None)
     };
+
+    // Opt-in developer profiler. Its per-layer filter re-enables Dioxus's
+    // trace-level render/memo spans (suppressed everywhere else via
+    // QUIET_DEPS) for this layer only, so the other sinks stay unaffected.
+    let ui_trace_path = log_dir.join("kopuz-ui-profile.json");
+    let mut ui_err: Option<String> = None;
+    let (ui_layer, ui_guard) = if ui_profile_enabled() {
+        match crate::ui_profile::UiProfileLayer::new(&ui_trace_path) {
+            Ok((layer, guard)) => (
+                Some(
+                    layer.with_filter(EnvFilter::new("off,dioxus_core=trace,dioxus_signals=trace")),
+                ),
+                Some(guard),
+            ),
+            Err(err) => {
+                ui_err = Some(err.to_string());
+                (None, None)
+            }
+        }
+    } else {
+        (None, None)
+    };
+
+    tracing_subscriber::registry()
+        .with(file_layer)
+        .with(console_layer)
+        .with(chrome_layer)
+        .with(ui_layer)
+        .init();
+
+    if chrome_guard.is_some() {
+        tracing::info!(trace = %trace_path.display(), "chrome span trace enabled");
+    }
+    if let Some(err) = chrome_err {
+        tracing::warn!(trace = %trace_path.display(), %err, "failed to open chrome trace file, tracing disabled this session");
+    }
+    if ui_guard.is_some() {
+        tracing::info!(trace = %ui_trace_path.display(), "UI render profiler enabled (KOPUZ_UI_PROFILE)");
+    }
+    if let Some(err) = ui_err {
+        tracing::warn!(trace = %ui_trace_path.display(), %err, "failed to open UI profile trace file, profiler disabled this session");
+    }
 
     let trace_enabled = chrome_guard.is_some();
     *GUARDS.lock().unwrap_or_else(|e| e.into_inner()) = Some(LogGuards {
         _file: file_guard,
         _chrome: chrome_guard,
+        _ui_profile: ui_guard,
     });
 
     // SIGINT (Ctrl+C from a terminal `cargo run`) skips stack/global

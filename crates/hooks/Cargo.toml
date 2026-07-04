@@ -25,6 +25,7 @@ player = { workspace = true }
 config = { workspace = true }
 rand = { workspace = true }
 reqwest = { workspace = true }
+serde_json = { workspace = true }
 server = { workspace = true }
 scrobble = { workspace = true }
 radio = { workspace = true }

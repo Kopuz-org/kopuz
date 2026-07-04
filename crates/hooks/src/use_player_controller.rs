@@ -866,6 +866,7 @@ impl PlayerController {
                                         cfg_signal,
                                         play_generation,
                                         current_gen,
+                                        is_playing,
                                         Some(active_source),
                                         ScrobbleOptions::REMOTE_NATIVE,
                                     );
@@ -973,6 +974,7 @@ impl PlayerController {
                                 self.config,
                                 self.play_generation,
                                 current_gen,
+                                self.is_playing,
                                 None,
                                 ScrobbleOptions::LOCAL,
                             );

@@ -32,6 +32,8 @@ mod logging;
 #[cfg(not(target_os = "android"))]
 mod pot_minter;
 mod queue_state;
+#[cfg(not(target_os = "android"))]
+mod ui_profile;
 mod updates;
 #[cfg(target_os = "windows")]
 mod windows_titlebar;
