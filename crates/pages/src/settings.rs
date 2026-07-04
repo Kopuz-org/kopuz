@@ -3,12 +3,10 @@ use crate::theme_editor::ThemeEditorPage;
 #[cfg(not(target_os = "android"))]
 fn theme_editor_section(config: Signal<AppConfig>) -> Element {
     rsx! {
-        section {
-            h2 {
-                class: "text-lg font-semibold text-white/80 mb-4 border-b border-white/5 pb-2",
-                "{i18n::t(\"theme_editor\")}"
+        SettingsSection { title: i18n::t("theme_editor").to_string(),
+            div { class: "py-2",
+                ThemeEditorPage { config, embedded: true }
             }
-            ThemeEditorPage { config, embedded: true }
         }
     }
 }
@@ -33,12 +31,8 @@ fn trigger_test_crash() {
 #[cfg(not(target_os = "android"))]
 fn logs_section(mut config: Signal<AppConfig>) -> Element {
     rsx! {
-        section {
-            h2 {
-                class: "text-lg font-semibold text-white/80 mb-4 border-b border-white/5 pb-2",
-                "{i18n::t(\"logs\")}"
-            }
-            div { class: "space-y-4",
+        SettingsSection { title: i18n::t("logs").to_string(),
+            div {
                 SettingItem {
                     title: i18n::t("enable_tracing").to_string(),
                     control: rsx! {
@@ -51,11 +45,11 @@ fn logs_section(mut config: Signal<AppConfig>) -> Element {
                     },
                 }
                 p {
-                    class: "text-xs text-amber-400/80 -mt-2",
+                    class: "text-xs text-amber-400/80 pb-3",
                     "{i18n::t(\"tracing_warning\")}"
                 }
             }
-            div { class: "flex flex-wrap gap-3 mt-4",
+            div { class: "flex flex-wrap gap-3 py-3",
                 button {
                     class: "px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors flex items-center gap-2",
                     onclick: move |_| {
@@ -171,7 +165,7 @@ use components::settings_items::{
     BackBehaviorSelector, ChannelModeSelector, DiscordPresencePausedSettings,
     DiscordPresenceSettings, EqualizerPanel, LanguageSelector, LastFmSettings, LibreFmSettings,
     MultiDirectoryPicker, MusicBrainzSettings, RadioRegistryDropdown, ServerSettings, SettingItem,
-    ThemeSelector, ToggleSetting,
+    SettingsSection, ThemeSelector, ToggleSetting,
 };
 use components::settings_popups::{AddRegistryPopup, AddServerPopup, LoginPopup};
 use config::{AppConfig, ArtistPhotoSource, FetchStrategy, MusicService, OfflineQuality};
@@ -280,14 +274,9 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                 h1 { class: "text-3xl font-bold text-white mb-6", "{i18n::t(\"settings\")}" }
             }
 
-            div { class: "space-y-8",
-                section {
-                    h2 {
-                        class: "text-lg font-semibold text-white/80 mb-4 border-b border-white/5 pb-2",
-                        "{i18n::t(\"general\")}"
-                    }
-
-                    div { class: "space-y-4",
+            div { class: "space-y-12",
+                SettingsSection {
+                    title: i18n::t("general").to_string(),
                         SettingItem {
                             title: i18n::t("language").to_string(),
                             control: rsx! {
@@ -561,13 +550,9 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
-                        section {
-                            h2 {
-                                class: "text-lg font-semibold text-white/80 mb-4 border-b border-white/5 pb-2",
-                                "{i18n::t(\"connectivity\")}"
-                            }
-                            div {
-                                class: "space-y-4",
+                }
+                SettingsSection {
+                    title: i18n::t("connectivity").to_string(),
                                 if !cfg!(target_os = "android") {
                                     SettingItem {
                                         title: i18n::t("discord_presence").to_string(),
@@ -642,18 +627,11 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                         }
                                     }
                                 }
-                            }
-                        }
-                    }
                 }
 
                 if config.read().server.is_some() {
-                    section {
-                        h2 {
-                            class: "text-lg font-semibold text-white/80 mb-4 border-b border-white/5 pb-2",
-                            "{i18n::t(\"offline_downloads\")}"
-                        }
-                        div { class: "space-y-4",
+                    SettingsSection {
+                        title: i18n::t("offline_downloads").to_string(),
                             SettingItem {
                                 title: i18n::t("download_quality").to_string(),
                                 control: rsx! {
@@ -672,16 +650,11 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     }
                                 }
                             }
-                        }
                     }
                 }
 
-                section {
-                    h2 {
-                        class: "text-lg font-semibold text-white/80 mb-4 border-b border-white/5 pb-2",
-                        "{i18n::t(\"metadata\")}"
-                    }
-                    div { class: "space-y-4",
+                SettingsSection {
+                    title: i18n::t("metadata").to_string(),
                         SettingItem {
                             title: i18n::t("auto_fetch_covers").to_string(),
                             control: rsx! {
@@ -779,17 +752,11 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
-                    }
                     ClearCacheButton {}
                 }
 
-                section {
-                    h2 {
-                        class: "text-lg font-semibold text-white/80 mb-4 border-b border-white/5 pb-2",
-                        "{i18n::t(\"player_settings\")}"
-                    }
-
-                    div { class: "space-y-4",
+                SettingsSection {
+                    title: i18n::t("player_settings").to_string(),
                         SettingItem {
                             title: i18n::t("crossfade").to_string(),
                             control: rsx! {
@@ -866,7 +833,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
-                    }
                 }
 
                 {logs_section(config)}
