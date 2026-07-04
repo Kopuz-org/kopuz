@@ -38,20 +38,74 @@ pub async fn sleep(duration: std::time::Duration) {
 /// worker thread; the UI-side task only awaits the join handle. The `Send`
 /// bound is the guardrail: a future that touches a `Signal` won't compile.
 ///
+/// Dropping the returned future aborts the spawned task, so cancellation
+/// passes through: when dioxus drops a superseded `use_resource` rerun, the
+/// offloaded query stops instead of running to completion in the background —
+/// the same semantics the un-offloaded future had.
+///
 /// Panics inside the future propagate to the caller unchanged.
 pub async fn offload<F>(fut: F) -> F::Output
 where
     F: std::future::Future + Send + 'static,
     F::Output: Send + 'static,
 {
-    match tokio::spawn(fut).await {
+    struct AbortOnDrop(tokio::task::AbortHandle);
+    impl Drop for AbortOnDrop {
+        fn drop(&mut self) {
+            self.0.abort();
+        }
+    }
+
+    let handle = tokio::spawn(fut);
+    // Aborting an already-finished task is a no-op, so the guard can simply
+    // live for the whole function — it only bites on mid-await drop.
+    let _guard = AbortOnDrop(handle.abort_handle());
+    match handle.await {
         Ok(out) => out,
         Err(err) => match err.try_into_panic() {
             Ok(panic) => std::panic::resume_unwind(panic),
-            // Cancellation only happens on runtime shutdown, where the app is
-            // exiting anyway — there's no caller left to care about the value.
+            // Unreachable via our own abort (the awaiter was dropped with the
+            // guard); a cancellation seen here means runtime shutdown, where
+            // the app is exiting anyway.
             Err(err) => panic!("offloaded task cancelled: {err}"),
         },
+    }
+}
+
+#[cfg(test)]
+mod offload_tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    /// Dropping the `offload` future must abort the spawned task — a
+    /// superseded `use_resource` rerun may not leave its query running.
+    #[tokio::test]
+    async fn dropping_offload_aborts_the_task() {
+        struct SetOnDrop(Arc<AtomicBool>);
+        impl Drop for SetOnDrop {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+        let dropped = Arc::new(AtomicBool::new(false));
+        let guard = SetOnDrop(dropped.clone());
+        let fut = super::offload(async move {
+            let _guard = guard;
+            tokio::time::sleep(std::time::Duration::from_secs(300)).await;
+        });
+        // Poll the offload future long enough to spawn, then drop it (select
+        // drops the loser when the timer wins).
+        tokio::select! {
+            _ = fut => panic!("offloaded sleep cannot have completed"),
+            _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {}
+        }
+        for _ in 0..100 {
+            if dropped.load(Ordering::SeqCst) {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        panic!("offloaded task kept running after its caller was dropped");
     }
 }
 
