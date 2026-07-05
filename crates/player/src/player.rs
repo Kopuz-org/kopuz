@@ -11,7 +11,7 @@ use config::{ChannelMode, EqualizerSettings};
 
 use crate::engine::{
     ActorMsg, AudioSink, Command, CpalSink, EngineHandle, EngineStatus, Event, LoadReply,
-    LoadRequest, Phase, SourceFactory, Transition,
+    LoadRequest, Phase, SinkEvent, SourceFactory, Transition,
 };
 #[cfg(any(
     target_os = "macos",
@@ -77,8 +77,12 @@ impl Player {
 
         let engine = EngineHandle::spawn(|tx| {
             let tx = tx.clone();
-            CpalSink::try_new(move || {
-                let _ = tx.send(ActorMsg::DeviceError);
+            CpalSink::try_new(move |event| {
+                let msg = match event {
+                    SinkEvent::StreamError => ActorMsg::DeviceError,
+                    SinkEvent::DefaultDeviceChanged => ActorMsg::DefaultDeviceChanged,
+                };
+                let _ = tx.send(msg);
             })
             .map(|sink| Box::new(sink) as Box<dyn AudioSink>)
         })?;

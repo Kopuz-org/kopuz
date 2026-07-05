@@ -35,24 +35,48 @@ pub trait AudioSink: Send {
     fn close(&mut self);
 }
 
+/// Out-of-band notifications from the audio backend.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SinkEvent {
+    /// The running stream errored (device unplugged, format lost).
+    StreamError,
+    /// The OS default output device changed while our stream kept playing on
+    /// the old one.
+    DefaultDeviceChanged,
+}
+
+/// How often the watcher compares the OS default output device. Enumeration is
+/// cheap on every backend, and a couple of seconds of migration latency is
+/// imperceptible next to the device switch itself.
+const DEVICE_WATCH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+
 pub struct CpalSink {
     device: cpal::Device,
     stream: Option<cpal::Stream>,
     config: Option<SinkConfig>,
-    on_error: std::sync::Arc<dyn Fn() + Send + Sync + 'static>,
+    on_event: std::sync::Arc<dyn Fn(SinkEvent) + Send + Sync + 'static>,
+    watcher_stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl CpalSink {
-    pub fn try_new(on_error: impl Fn() + Send + Sync + 'static) -> Result<Self, PlayerInitError> {
+    pub fn try_new(
+        on_event: impl Fn(SinkEvent) + Send + Sync + 'static,
+    ) -> Result<Self, PlayerInitError> {
         let host = cpal::default_host();
         let device = host
             .default_output_device()
             .ok_or(PlayerInitError::NoOutputDevice)?;
+
+        let on_event = std::sync::Arc::new(on_event);
+        let watcher_stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        spawn_default_device_watcher(on_event.clone(), watcher_stop.clone());
+
         Ok(Self {
             device,
             stream: None,
             config: None,
-            on_error: std::sync::Arc::new(on_error),
+            on_event,
+            watcher_stop,
         })
     }
 
@@ -159,7 +183,7 @@ impl AudioSink for CpalSink {
         };
 
         let mut data_cb = make_cb(config);
-        let on_error = self.on_error.clone();
+        let on_event = self.on_event.clone();
         let stream = self
             .device
             .build_output_stream(
@@ -167,7 +191,7 @@ impl AudioSink for CpalSink {
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| data_cb(data),
                 move |err| {
                     tracing::error!(error = %err, "cpal stream error");
-                    on_error();
+                    on_event(SinkEvent::StreamError);
                 },
                 None,
             )
@@ -203,4 +227,40 @@ impl AudioSink for CpalSink {
         self.stream = None;
         self.config = None;
     }
+}
+
+impl Drop for CpalSink {
+    fn drop(&mut self) {
+        self.watcher_stop
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// Poll the OS default output device and report transitions. On backends where
+/// the default is an alias that never renames (ALSA "default" under PipeWire,
+/// which moves streams itself) this never fires; on WASAPI/CoreAudio the name
+/// tracks the real device, which is exactly where Kopuz previously kept
+/// playing on the old output until relaunch (issue #451).
+fn spawn_default_device_watcher(
+    on_event: std::sync::Arc<dyn Fn(SinkEvent) + Send + Sync + 'static>,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    let _ = std::thread::Builder::new()
+        .name("kopuz-device-watch".to_string())
+        .spawn(move || {
+            let mut last: Option<cpal::DeviceId> = None;
+            while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                let current = cpal::default_host()
+                    .default_output_device()
+                    .and_then(|device| device.id().ok());
+                if let Some(current) = current {
+                    if last.as_ref().is_some_and(|previous| *previous != current) {
+                        tracing::info!(device = ?current, "default output device changed");
+                        on_event(SinkEvent::DefaultDeviceChanged);
+                    }
+                    last = Some(current);
+                }
+                std::thread::sleep(DEVICE_WATCH_INTERVAL);
+            }
+        });
 }

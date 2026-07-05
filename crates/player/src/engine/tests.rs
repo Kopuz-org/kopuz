@@ -673,3 +673,70 @@ fn full_stop_pauses_the_device() {
 
     engine.shutdown();
 }
+
+#[test]
+fn default_device_change_migrates_seekable_session() {
+    let (sink, engine, actor_tx) = spawn_engine_with_tx();
+    let (factory, duration) = wav_factory(30.0);
+    load(&engine, 1, factory, duration);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    wait_until("played one second", || {
+        sink.pull(TEST_CONFIG.sample_rate as usize * TEST_CONFIG.channels);
+        engine.status().position() >= Duration::from_secs(1)
+    });
+    let position_before = engine.status().position();
+    let opens_before = sink.open_calls();
+
+    let _ = actor_tx.send(super::actor::ActorMsg::DefaultDeviceChanged);
+
+    wait_until("stream rebuilt on the new default", || {
+        sink.open_calls() > opens_before
+    });
+    wait_until("still playing after migration", || {
+        engine.status().phase == Phase::Playing
+    });
+    assert!(
+        engine.status().position() >= position_before.saturating_sub(Duration::from_millis(500)),
+        "position survives the migration"
+    );
+    wait_until("audio after migration", || {
+        sink.pull(4096).iter().any(|s| *s != 0.0)
+    });
+
+    engine.shutdown();
+}
+
+#[test]
+fn default_device_change_leaves_radio_alone() {
+    let (sink, engine, actor_tx) = spawn_engine_with_tx();
+
+    let frames = TEST_CONFIG.sample_rate as usize * 10;
+    let bytes = wav_bytes(frames, TEST_CONFIG.sample_rate, TEST_CONFIG.channels as u16);
+    let factory: SourceFactory = Box::new(move || {
+        Ok(crate::decoder::from_stream_with_hint(
+            std::io::Cursor::new(bytes),
+            "wav",
+        ))
+    });
+    load(&engine, 1, factory, Duration::from_secs(u64::MAX / 2));
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    wait_until("audio flowing", || {
+        sink.pull(4096).iter().any(|s| *s != 0.0)
+    });
+    let opens_before = sink.open_calls();
+
+    let _ = actor_tx.send(super::actor::ActorMsg::DefaultDeviceChanged);
+    std::thread::sleep(Duration::from_millis(400));
+
+    assert_eq!(
+        sink.open_calls(),
+        opens_before,
+        "a live stream must not be migrated (it cannot re-seek)"
+    );
+    assert_eq!(engine.status().phase, Phase::Playing);
+    wait_until("radio audio continues", || {
+        sink.pull(4096).iter().any(|s| *s != 0.0)
+    });
+
+    engine.shutdown();
+}

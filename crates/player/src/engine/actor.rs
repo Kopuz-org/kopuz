@@ -38,6 +38,9 @@ pub(crate) enum ActorMsg {
     Cmd(Command),
     Worker(WorkerMsg),
     DeviceError,
+    /// The OS default output changed; migrate unless that would kill a live
+    /// (non-seekable) stream.
+    DefaultDeviceChanged,
 }
 
 pub struct EngineHandle {
@@ -255,6 +258,17 @@ impl Actor {
             ActorMsg::Cmd(cmd) => self.handle_command(cmd),
             ActorMsg::Worker(msg) => self.handle_worker(msg),
             ActorMsg::DeviceError => self.handle_device_error(),
+            ActorMsg::DefaultDeviceChanged => {
+                // Radio can't re-seek onto a rebuilt stream; playing on the old
+                // (still-working) device beats stopping.
+                if self.current.as_ref().is_some_and(|c| !c.seekable) {
+                    tracing::info!(
+                        "default output changed during a live stream; staying on the old device"
+                    );
+                    return;
+                }
+                self.handle_device_error();
+            }
         }
     }
 
