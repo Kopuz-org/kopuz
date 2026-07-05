@@ -60,6 +60,25 @@ impl PlayerController {
     }
 
     pub fn play_prev(&mut self) {
+        // During an active crossfade the engine already plays the *next* track
+        // while the UI still shows the outgoing one. "Previous" here means "go
+        // back to the track I see": restart it cleanly. Seeking instead would
+        // act on the incoming session and kill the fade while the deferred UI
+        // keeps pointing at a track that's no longer audible.
+        if self.pending_crossfade_ui.peek().is_some() {
+            let idx = *self.current_queue_index.peek();
+            self.clear_pending_crossfade_ui();
+            // The crossfade pushed the outgoing track onto history; restarting
+            // it un-does that transition, so drop the stale entry.
+            self.history.with_mut(|h| {
+                if h.last() == Some(&idx) {
+                    h.pop();
+                }
+            });
+            self.play_track_no_history_without_crossfade(idx);
+            return;
+        }
+
         let progress = *self.current_song_progress.peek();
         let back_behavior = self.config.peek().back_behavior;
 
