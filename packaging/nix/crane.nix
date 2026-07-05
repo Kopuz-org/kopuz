@@ -2,6 +2,7 @@
   lib,
   stdenv,
   craneLib,
+  fetchurl,
   pkg-config,
   cmake,
   git,
@@ -27,6 +28,27 @@
 let
   pname = "kopuz";
   version = "0.8.2";
+
+  # `deno_core` (used for the headless YouTube JS runtime) pulls in the `v8`
+  # crate, whose build script downloads a prebuilt librusty_v8 archive. The Nix
+  # sandbox has no network, so fetch it as a fixed-output derivation and hand it
+  # to the build via RUSTY_V8_ARCHIVE. build.rs' copy_archive() detects the gzip
+  # header and decompresses it, so we can point at the .a.gz directly.
+  # Keep rustyV8Version in sync with the `v8` crate version in Cargo.lock.
+  rustyV8Version = "130.0.7";
+  rustyV8Target = stdenv.hostPlatform.rust.rustcTarget;
+  rustyV8Hashes = {
+    "aarch64-apple-darwin" = "1sh0y3dq0llz6hfx8qgx13sc6vjbw1xzzwfrl236wx8f9w7x1nzn";
+    "x86_64-apple-darwin" = "1h0j3qw5ad2c83mh36pr18s1vp598rscj3zzxpl7vynzj6q321s3";
+    "aarch64-unknown-linux-gnu" = "0nli54vqcrfh9nkz7ma7230k0xmhcrk0jmfbyxcp3rxybarygvxy";
+    "x86_64-unknown-linux-gnu" = "0pdp6h7vbjvq5l9lh25qilmp6xrxg7mj8m263h44f0lv9swnqix6";
+  };
+  librustyV8 = fetchurl {
+    url = "https://github.com/denoland/rusty_v8/releases/download/v${rustyV8Version}/librusty_v8_release_${rustyV8Target}.a.gz";
+    sha256 =
+      rustyV8Hashes.${rustyV8Target}
+        or (throw "no prebuilt librusty_v8 hash for target ${rustyV8Target}");
+  };
 
   nativeBuildInputs = [
     pkg-config
@@ -63,6 +85,11 @@ let
       ;
     strictDeps = true;
     doCheck = false;
+
+    # Point the `v8` crate's build script at the prebuilt archive so it never
+    # tries to download or build V8 from source inside the sandbox. Set on
+    # commonArgs so both the deps-only and final derivations see it.
+    RUSTY_V8_ARCHIVE = librustyV8;
 
     src =
       let
