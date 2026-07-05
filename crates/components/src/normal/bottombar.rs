@@ -48,6 +48,18 @@ pub fn BottombarNormal(
         0.0
     };
 
+    // Glide between the once-a-second progress updates instead of stepping.
+    // Disabled while dragging and when progress JUMPS (seek, track change) so
+    // the bar snaps instead of sweeping across.
+    let prev_progress = use_hook(|| std::rc::Rc::new(std::cell::Cell::new(u64::MAX)));
+    let progress_jumped = display_progress.abs_diff(prev_progress.get()) > 2;
+    prev_progress.set(display_progress);
+    let bar_glide = if *is_dragging.read() || progress_jumped {
+        ""
+    } else {
+        "transition-[width] duration-1000 ease-linear"
+    };
+
     let volume_percent = *volume.read() * 100.0;
     let mut ctrl = use_context::<PlayerController>();
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
@@ -216,7 +228,7 @@ pub fn BottombarNormal(
                     div {
                         class: format!("flex-1 h-1 bg-white/10 rounded-full relative {}", if is_radio { "" } else { "group cursor-pointer" }),
                         div {
-                            class: "absolute top-0 left-0 h-full bg-white group-hover:bg-green-500 rounded-full transition-colors pointer-events-none",
+                            class: "absolute top-0 left-0 h-full bg-white group-hover:bg-green-500 rounded-full pointer-events-none {bar_glide}",
                             style: "width: {progress_percent}%",
                             div { class: "absolute -right-1.5 -top-1 w-3 h-3 bg-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity" }
                         }
@@ -225,7 +237,7 @@ pub fn BottombarNormal(
                             min: "0",
                             max: "{*current_song_duration.read()}",
                             value: "{display_progress}",
-                            class: format!("absolute top-0 left-0 w-full h-full opacity-0 z-10 {}", if is_radio { "pointer-events-none" } else { "cursor-pointer" }),
+                            class: format!("slider-hit absolute top-0 left-0 w-full h-full opacity-0 z-10 {}", if is_radio { "pointer-events-none" } else { "cursor-pointer" }),
                             disabled: is_radio,
                             onchange: move |evt| {
                                 if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
@@ -301,7 +313,7 @@ pub fn BottombarNormal(
                             max: "1",
                             step: "0.01",
                             value: "{*volume.read()}",
-                            class: "absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer z-10",
+                            class: "slider-hit absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer z-10",
                             onchange: move |evt| {
                                 if let Ok(val) = evt.value().parse::<f32>() {
                                     persisted_volume.set(val);

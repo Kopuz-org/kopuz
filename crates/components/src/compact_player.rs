@@ -69,6 +69,11 @@ pub fn CompactPlayer() -> Element {
     } else {
         *ctrl.current_song_progress.read()
     };
+    // See the bottombars: glide between 1Hz updates, snap on jumps.
+    let prev_progress = use_hook(|| std::rc::Rc::new(std::cell::Cell::new(u64::MAX)));
+    let progress_jumped = display_progress.abs_diff(prev_progress.get()) > 2;
+    prev_progress.set(display_progress);
+
     let progress_percent = if duration > 0 {
         (display_progress as f64 / duration as f64) * 100.0
     } else {
@@ -157,7 +162,15 @@ pub fn CompactPlayer() -> Element {
                 class: format!("relative z-10 h-[3px] w-full bg-white/10 shrink-0 {}", if is_radio { "" } else { "group cursor-pointer" }),
                 onmousedown: move |evt| evt.stop_propagation(),
                 div {
-                    class: format!("absolute top-0 left-0 h-full pointer-events-none {}", skin.progress_fill),
+                    class: format!(
+                        "absolute top-0 left-0 h-full pointer-events-none {} {}",
+                        skin.progress_fill,
+                        if *is_dragging.read() || progress_jumped {
+                            ""
+                        } else {
+                            "transition-[width] duration-1000 ease-linear"
+                        },
+                    ),
                     style: "width: {progress_percent}%",
                 }
                 input {
@@ -165,7 +178,7 @@ pub fn CompactPlayer() -> Element {
                     min: "0",
                     max: "{duration}",
                     value: "{display_progress}",
-                    class: format!("absolute top-0 left-0 w-full h-full opacity-0 z-10 {}", if is_radio { "pointer-events-none" } else { "cursor-pointer" }),
+                    class: format!("slider-hit absolute top-0 left-0 w-full h-full opacity-0 z-10 {}", if is_radio { "pointer-events-none" } else { "cursor-pointer" }),
                     disabled: is_radio,
                     onchange: move |evt| {
                         if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {

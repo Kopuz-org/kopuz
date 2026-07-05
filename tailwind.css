@@ -9,3 +9,24 @@
 @source "./crates/utils/**/*.rs";
 @source "./crates/config/**/*.rs";
 @source "./crates/kopuz_route/**/*.rs";
+/* Invisible range inputs overlaid on custom seek/volume tracks. The native
+   thumb (~17px) makes the browser inset its click-to-value mapping by half a
+   thumb on each side, so clicks land offset from the cursor. A zero-width
+   thumb makes the mapping match the pointer exactly. */
+.slider-hit {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+.slider-hit::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 0;
+  height: 0;
+  border: none;
+}
+.slider-hit::-moz-range-thumb {
+  width: 0;
+  height: 0;
+  border: none;
+}

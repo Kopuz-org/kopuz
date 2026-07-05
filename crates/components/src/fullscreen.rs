@@ -31,6 +31,23 @@ fn ProgressBarControl(
 
     let is_radio = *current_song_duration.read() == u64::MAX;
 
+    // Glide between the once-a-second progress updates instead of stepping.
+    // Disabled while dragging and when progress JUMPS (seek, track change) so
+    // the bar snaps instead of sweeping across.
+    let prev_progress = use_hook(|| std::rc::Rc::new(std::cell::Cell::new(u64::MAX)));
+    let progress_jumped = display_progress.abs_diff(prev_progress.get()) > 2;
+    prev_progress.set(display_progress);
+    let bar_glide = if *is_dragging.read() || progress_jumped {
+        ""
+    } else {
+        "transition-[width] duration-1000 ease-linear"
+    };
+    let thumb_glide = if *is_dragging.read() || progress_jumped {
+        ""
+    } else {
+        "transition-[left] duration-1000 ease-linear"
+    };
+
     rsx! {
         div {
             class: "w-full mb-6",
@@ -46,11 +63,11 @@ fn ProgressBarControl(
                         style: "height: 4px; top: 8px; left: 0; right: 0;"
                     }
                     div {
-                        class: "absolute rounded-full pointer-events-none",
+                        class: "absolute rounded-full pointer-events-none {bar_glide}",
                         style: "height: 4px; top: 8px; left: 0; width: {progress_percent}%; background: linear-gradient(to right, #5a9a9a, #ffffff);"
                     }
                     div {
-                        class: "absolute bg-white rounded-full pointer-events-none",
+                        class: "absolute bg-white rounded-full pointer-events-none {thumb_glide}",
                         style: "width: 12px; height: 12px; top: 4px; left: calc({progress_percent}% - 6px);"
                     }
                     input {
@@ -58,7 +75,7 @@ fn ProgressBarControl(
                         min: "0",
                         max: "{*current_song_duration.read()}",
                         value: "{display_progress}",
-                        class: format!("absolute top-0 left-0 w-full h-full opacity-0 {}", if is_radio { "" } else { "cursor-pointer" }),
+                        class: format!("slider-hit absolute top-0 left-0 w-full h-full opacity-0 {}", if is_radio { "" } else { "cursor-pointer" }),
                         disabled: is_radio,
                         onchange: move |evt| {
                             if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
@@ -130,7 +147,7 @@ fn VolumeControl(
                     max: "1",
                     step: "0.01",
                     value: "{*volume.read()}",
-                    class: "absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer",
+                    class: "slider-hit absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer",
                     onchange: move |evt| {
                         if let Ok(val) = evt.value().parse::<f32>() {
                             persisted_volume.set(val);
