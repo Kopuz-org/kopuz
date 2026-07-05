@@ -62,7 +62,103 @@ fn warn(msg: &str) {
     println!("cargo:warning={msg}");
 }
 
+/// Inline the vendored woff2 fonts into the bundled font CSS as base64 `data:`
+/// URIs, writing the result to `OUT_DIR`. `main.rs` pulls these in via
+/// `include_str!(concat!(env!("OUT_DIR"), "/..."))`, so the fonts are compiled
+/// straight into the binary — styling works under a bare `cargo run` on any OS
+/// (no CDN, no asset collection, no path resolution). The committed CSS keeps
+/// readable `url(fonts/NAME.woff2)` refs; the woff2 live in `assets/fonts/`.
+/// Regenerate the inputs with `nu scripts/vendor-fonts.nu`.
+fn embed_fonts(crate_dir: &Path) {
+    let assets = crate_dir.join("assets");
+    let fonts = assets.join("fonts");
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR not set"));
+
+    for css_name in ["fontawesome.css", "jetbrains-mono.css", "main.css"] {
+        let src = assets.join(css_name);
+        println!("cargo:rerun-if-changed={}", src.display());
+        let css = match fs::read_to_string(&src) {
+            Ok(c) => c,
+            Err(e) => {
+                warn(&format!("cannot read {}: {e}", src.display()));
+                continue;
+            }
+        };
+        let baked = bake_font_css(&css, &fonts);
+        let dst = out_dir.join(css_name);
+        if let Err(e) = fs::write(&dst, baked) {
+            warn(&format!("cannot write {}: {e}", dst.display()));
+        }
+    }
+}
+
+/// Emit the favicon as a `data:` URI string to `OUT_DIR/favicon.uri`, so it's
+/// compiled into the binary and renders under a bare `cargo run` (an `asset!()`
+/// favicon needs `dx` to collect it). `main.rs` reads it via `include_str!`.
+fn embed_favicon(crate_dir: &Path) {
+    use base64::Engine;
+    let src = crate_dir.join("assets").join("favicon.ico");
+    println!("cargo:rerun-if-changed={}", src.display());
+    let bytes = match fs::read(&src) {
+        Ok(b) => b,
+        Err(e) => {
+            warn(&format!("cannot read {}: {e}", src.display()));
+            return;
+        }
+    };
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    let uri = format!("data:image/x-icon;base64,{b64}");
+    let out_dir = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR not set"));
+    let dst = out_dir.join("favicon.uri");
+    if let Err(e) = fs::write(&dst, uri) {
+        warn(&format!("cannot write {}: {e}", dst.display()));
+    }
+}
+
+/// Replace every `url(fonts/NAME.EXT)` with an inline `data:` URI read from
+/// `fonts/NAME.EXT`. Panics on a missing/unterminated ref so a broken vendor
+/// step fails the build loudly instead of silently shipping unstyled icons.
+fn bake_font_css(css: &str, fonts: &Path) -> String {
+    use base64::Engine;
+    const PREFIX: &str = "url(fonts/";
+
+    let mut out = String::with_capacity(css.len());
+    let mut rest = css;
+    while let Some(idx) = rest.find(PREFIX) {
+        out.push_str(&rest[..idx]);
+        let after = &rest[idx + PREFIX.len()..];
+        let end = after
+            .find(')')
+            .unwrap_or_else(|| panic!("unterminated `{PREFIX}` in font CSS"));
+        let file = &after[..end];
+        let path = fonts.join(file);
+        println!("cargo:rerun-if-changed={}", path.display());
+        let bytes =
+            fs::read(&path).unwrap_or_else(|e| panic!("cannot read font {}: {e}", path.display()));
+        let mime = match Path::new(file).extension().and_then(|e| e.to_str()) {
+            Some("woff2") => "font/woff2",
+            Some("woff") => "font/woff",
+            Some("otf") => "font/otf",
+            Some("ttf") => "font/ttf",
+            _ => "application/octet-stream",
+        };
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+        out.push_str("url(data:");
+        out.push_str(mime);
+        out.push_str(";base64,");
+        out.push_str(&b64);
+        out.push(')');
+        rest = &after[end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
 fn main() {
+    let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    embed_fonts(&crate_dir);
+    embed_favicon(&crate_dir);
+
     #[cfg(target_os = "windows")]
     {
         let mut res = winres::WindowsResource::new();
@@ -79,7 +175,6 @@ fn main() {
         Err(_) => return,
     };
 
-    let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     // android-src lives at the repo root (crates/kopuz/../../android-src).
     let android_src = crate_dir.join("..").join("..").join("android-src");
     // Re-run when files are added/removed under android-src. Note: a directory's mtime

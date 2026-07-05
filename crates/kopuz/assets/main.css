@@ -37,7 +37,7 @@
 }
 @font-face {
     font-family: "nasin-nanpa";
-    src: url("https://github.com/etbcor/nasin-nanpa/releases/download/n4.0.2/nasin-nanpa-4.0.2-UCSUR.otf");
+    src: url(fonts/nasin-nanpa-4.0.2-UCSUR.otf);
     font-weight: normal;
     font-style: normal;
 }

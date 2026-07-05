@@ -2,11 +2,12 @@
 //! one to make it active. Replaces the old binary Local⇄Server toggle — no
 //! local-vs-server branching, and it reaches any number of servers.
 //!
-//! A compact trigger (the active source's brand-tinted "jack" + name) opens a
-//! glassy popover that springs in with a staggered reveal and scrolls past ~8
-//! sources, so the control stays neat with one source or a dozen. Each source
-//! carries its service's accent colour (a CSS `--accent` var the styles read);
-//! the active row glows with it. Mono micro-labels use the app's JetBrains Mono.
+//! A compact trigger (the active source's brand-tinted icon tile + name, with a
+//! small connection dot on the tile corner) opens a flat popover that scrolls
+//! past ~8 sources, so the control stays neat with one source or a dozen. Each
+//! source carries its service's accent colour (a CSS `--accent` var the styles
+//! read); the active row is highlighted. Styling matches the sidebar's flat,
+//! single-line nav items rather than a glassy stand-alone widget.
 
 use config::{AppConfig, MusicService, Source};
 use dioxus::prelude::*;
@@ -28,41 +29,36 @@ pub struct SettingsAnchor(pub Signal<Option<String>>);
 // harmonises with the theme (e.g. gruvbox) in both UI styles and tracks
 // light/dark. Per-service brand accents stay fixed regardless.
 const SWITCHER_CSS: &str = r#"
-.ss-tr{width:100%;display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:12px;background:color-mix(in oklab,var(--ss-fg) 4%,transparent);border:1px solid color-mix(in oklab,var(--ss-fg) 12%,transparent);cursor:pointer;color:inherit;transition:background .15s,border-color .15s}
-.ss-tr:hover{background:color-mix(in oklab,var(--ss-fg) 8%,transparent)}
-.ss-tr.ss-open{border-color:color-mix(in oklab,var(--accent) 45%,transparent)}
-.ss-mini{width:40px;height:40px;padding:0;justify-content:center;border-radius:11px}
-.ss-tile{width:28px;height:28px;border-radius:8px;display:grid;place-items:center;flex-shrink:0;background:color-mix(in oklab,var(--accent) 16%,var(--ss-surface));border:1px solid color-mix(in oklab,var(--accent) 32%,transparent)}
-.ss-tile i{font-size:12px;color:var(--accent)}
+.ss-tr{width:100%;display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;background:transparent;border:1px solid color-mix(in oklab,var(--ss-fg) 9%,transparent);cursor:pointer;color:inherit;transition:background .15s,border-color .15s}
+.ss-tr:hover{background:color-mix(in oklab,var(--ss-fg) 6%,transparent)}
+.ss-tr.ss-open{background:color-mix(in oklab,var(--ss-fg) 6%,transparent);border-color:color-mix(in oklab,var(--ss-fg) 18%,transparent)}
+.ss-mini{width:40px;height:40px;padding:0;justify-content:center;border-radius:8px}
+.ss-ico{display:grid;place-items:center;width:18px;flex-shrink:0;color:var(--accent);font-size:15px}
+.ss-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.ss-on{background:#3fb950}
+.ss-off{background:#e5534b}
+.ss-load{background:#d8a23a;animation:ss-pulse 1.1s ease-in-out infinite}
+@keyframes ss-pulse{0%,100%{opacity:.4}50%{opacity:1}}
 .ss-stk{flex:1;text-align:left;min-width:0}
-.ss-kick{display:block;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:8.5px;letter-spacing:.2em;text-transform:uppercase;color:color-mix(in oklab,var(--ss-fg) 42%,transparent);margin-bottom:2px}
-.ss-stat{display:flex;align-items:center;gap:6px;height:11px;margin-bottom:2px}
-.ss-stat .ss-kick{margin-bottom:0}
-.ss-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;transition:background .2s}
-.ss-on{background:#36d399;box-shadow:0 0 6px color-mix(in oklab,#36d399 70%,transparent)}
-.ss-off{background:#ff5f56;box-shadow:0 0 6px color-mix(in oklab,#ff5f56 55%,transparent)}
-.ss-bar{position:relative;width:42px;height:3px;border-radius:2px;overflow:hidden;background:color-mix(in oklab,var(--ss-fg) 14%,transparent)}
-.ss-bar::after{content:"";position:absolute;top:0;bottom:0;left:0;width:45%;border-radius:2px;background:#ff5f56;animation:ss-load 1.1s ease-in-out infinite}
-@keyframes ss-load{0%{transform:translateX(-110%)}100%{transform:translateX(235%)}}
-.ss-tname{display:block;font-size:13px;font-weight:600;letter-spacing:-.01em;color:var(--ss-fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ss-chev{font-size:9px;color:color-mix(in oklab,var(--ss-fg) 42%,transparent);transition:transform .18s}
-.ss-tr.ss-open .ss-chev{transform:rotate(180deg);color:var(--accent)}
-.ss-pop{position:absolute;top:calc(100% + 7px);left:0;right:0;z-index:50;border-radius:12px;border:1px solid color-mix(in oklab,var(--ss-fg) 12%,transparent);overflow:hidden auto;max-height:60vh;background:var(--ss-surface);box-shadow:0 16px 40px -20px rgba(0,0,0,.7)}
+.ss-tname{display:block;font-size:13.5px;font-weight:500;letter-spacing:-.01em;color:var(--ss-fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ss-chev{font-size:10px;color:color-mix(in oklab,var(--ss-fg) 38%,transparent);transition:transform .18s}
+.ss-tr.ss-open .ss-chev{transform:rotate(180deg)}
+.ss-pop{position:absolute;top:calc(100% + 6px);left:0;right:0;z-index:50;border-radius:10px;border:1px solid color-mix(in oklab,var(--ss-fg) 11%,transparent);overflow:hidden auto;max-height:60vh;background:var(--ss-surface);box-shadow:0 12px 30px -18px rgba(0,0,0,.55)}
 .ss-pop-mini{left:calc(100% + 12px);right:auto;top:-4px;width:218px}
-.ss-head{display:flex;align-items:center;justify-content:space-between;padding:11px 13px 9px;border-bottom:1px solid color-mix(in oklab,var(--ss-fg) 10%,transparent)}
-.ss-head .t{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:color-mix(in oklab,var(--ss-fg) 42%,transparent)}
-.ss-head .c{font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9px;color:color-mix(in oklab,var(--ss-fg) 32%,transparent)}
+.ss-head{display:flex;align-items:center;justify-content:space-between;padding:10px 12px 8px;border-bottom:1px solid color-mix(in oklab,var(--ss-fg) 9%,transparent)}
+.ss-head .t{font-size:12px;font-weight:600;color:color-mix(in oklab,var(--ss-fg) 70%,transparent)}
+.ss-head .c{font-size:12px;color:color-mix(in oklab,var(--ss-fg) 38%,transparent)}
 .ss-list{padding:5px}
-.ss-row{position:relative;width:100%;display:flex;align-items:center;gap:11px;padding:8px 9px;border-radius:9px;cursor:pointer;color:inherit;background:none;border:0;text-align:left;transition:background .12s}
+.ss-row{position:relative;width:100%;display:flex;align-items:center;gap:10px;padding:8px 9px;border-radius:7px;cursor:pointer;color:inherit;background:none;border:0;text-align:left;transition:background .12s}
 .ss-row:hover{background:color-mix(in oklab,var(--ss-fg) 7%,transparent)}
 .ss-meta{flex:1;min-width:0}
-.ss-rname{display:block;font-size:13px;font-weight:550;letter-spacing:-.01em;color:color-mix(in oklab,var(--ss-fg) 82%,transparent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.ss-rsub{display:block;font-family:'JetBrains Mono',ui-monospace,monospace;font-size:9px;letter-spacing:.04em;text-transform:uppercase;color:color-mix(in oklab,var(--ss-fg) 42%,transparent);margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ss-rname{display:block;font-size:14px;font-weight:500;letter-spacing:-.01em;color:color-mix(in oklab,var(--ss-fg) 85%,transparent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ss-rsub{display:block;font-size:11px;color:color-mix(in oklab,var(--ss-fg) 45%,transparent);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ss-row.ss-act{background:color-mix(in oklab,var(--ss-fg) 7%,transparent)}
-.ss-row.ss-act .ss-rname{color:var(--ss-fg);font-weight:650}
-.ss-check{font-size:10px;color:var(--accent)}
-.ss-foot{padding:5px;border-top:1px solid color-mix(in oklab,var(--ss-fg) 10%,transparent)}
-.ss-foot button{width:100%;display:flex;align-items:center;gap:10px;padding:8px 9px;border-radius:9px;color:color-mix(in oklab,var(--ss-fg) 60%,transparent);font-size:12px;font-weight:550;background:none;border:0;cursor:pointer;text-align:left;transition:background .12s,color .12s}
+.ss-row.ss-act .ss-rname{color:var(--ss-fg);font-weight:600}
+.ss-check{font-size:11px;color:var(--accent)}
+.ss-foot{padding:5px;border-top:1px solid color-mix(in oklab,var(--ss-fg) 9%,transparent)}
+.ss-foot button{width:100%;display:flex;align-items:center;gap:10px;padding:8px 9px;border-radius:7px;color:color-mix(in oklab,var(--ss-fg) 60%,transparent);font-size:13px;font-weight:500;background:none;border:0;cursor:pointer;text-align:left;transition:background .12s,color .12s}
 .ss-foot button:hover{background:color-mix(in oklab,var(--ss-fg) 7%,transparent);color:var(--ss-fg)}
 .ss-foot button .ar{margin-left:auto;font-size:9px}
 "#;
@@ -149,20 +145,17 @@ pub fn SourceSwitcher(
                 },
                 title: "{active_label}",
                 onclick: move |_| open.set(!open()),
-                span { class: "ss-tile", i { class: "{active_icon}" } }
+                span { class: "ss-ico", i { class: "{active_icon}" } }
                 if !collapsed {
                     span { class: "ss-stk",
-                        span { class: "ss-stat",
-                            span {
-                                class: if conn() == ConnStatus::Online { "ss-dot ss-on" } else { "ss-dot ss-off" },
-                            }
-                            if conn() == ConnStatus::Connecting {
-                                span { class: "ss-bar" }
-                            } else {
-                                span { class: "ss-kick", "{i18n::t(\"source\")}" }
-                            }
-                        }
                         span { class: "ss-tname", "{active_label}" }
+                    }
+                    span {
+                        class: match conn() {
+                            ConnStatus::Online => "ss-dot ss-on",
+                            ConnStatus::Connecting => "ss-dot ss-load",
+                            _ => "ss-dot ss-off",
+                        },
                     }
                     i { class: "fa-solid fa-chevron-down ss-chev" }
                 }
@@ -190,7 +183,7 @@ pub fn SourceSwitcher(
                                             switch(src.clone());
                                             open.set(false);
                                         },
-                                        span { class: "ss-tile", i { class: "{icon}" } }
+                                        span { class: "ss-ico", i { class: "{icon}" } }
                                         span { class: "ss-meta",
                                             span { class: "ss-rname", "{label}" }
                                             if !collapsed {

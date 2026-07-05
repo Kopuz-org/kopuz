@@ -3,8 +3,7 @@ use config::{
     MusicServer, SavedServer,
 };
 use dioxus::prelude::*;
-#[cfg(not(target_arch = "wasm32"))]
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 use rfd::AsyncFileDialog;
 use scrobble::lastfm;
 use scrobble::librefm;
@@ -13,9 +12,23 @@ use tracing::Instrument;
 #[component]
 pub fn SettingItem(title: String, control: Element) -> Element {
     rsx! {
-        div { class: "flex items-center justify-between py-2",
-            p { class: "text-white font-medium", "{title}" }
+        div { class: "flex items-center justify-between gap-4 py-3",
+            p { class: "text-sm text-white font-medium", "{title}" }
             {control}
+        }
+    }
+}
+
+#[component]
+pub fn SettingsSection(title: String, children: Element) -> Element {
+    rsx! {
+        section { class: "rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden",
+            div { class: "px-5 py-3 border-b border-white/10 bg-white/[0.03]",
+                h2 { class: "text-xs font-semibold uppercase tracking-wider text-white/60",
+                    "{title}"
+                }
+            }
+            div { class: "px-5 py-1 divide-y divide-white/[0.06]", {children} }
         }
     }
 }
@@ -137,7 +150,7 @@ pub fn MultiDirectoryPicker(
     }
 }
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 #[component]
 fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -> Element {
     rsx! {
@@ -186,14 +199,6 @@ fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -
     }
 }
 
-#[cfg(target_arch = "wasm32")]
-#[component]
-fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -> Element {
-    let _ = on_add;
-    let _ = add_text;
-    rsx! {}
-}
-
 #[component]
 pub fn ServerSettings(
     active: Option<MusicServer>,
@@ -240,7 +245,7 @@ pub fn ServerSettings(
                                 div { class: "flex items-center gap-2",
                                     p { class: "text-sm font-medium text-white truncate", "{srv.name}" }
                                     if is_active {
-                                        span { class: "text-[10px] uppercase tracking-wider px-2 py-0.5 rounded bg-indigo-500/30 text-indigo-200",
+                                        span { class: "text-[10px] px-2 py-0.5 rounded bg-indigo-500/30 text-indigo-200",
                                             "{active_text}"
                                         }
                                     }
@@ -814,7 +819,7 @@ pub fn EqualizerPanel(
                 }
 
                 div { class: "flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2",
-                    span { class: "text-xs uppercase tracking-[0.18em] text-slate-400", "{i18n::t(\"eq_preset\")}" }
+                    span { class: "text-xs text-slate-400", "{i18n::t(\"eq_preset\")}" }
                     select {
                         class: "bg-transparent text-sm text-white focus:outline-none",
                         value: "{draft.read().preset.as_storage()}",
@@ -867,7 +872,7 @@ pub fn EqualizerPanel(
 
                 div { class: "flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2 min-w-[220px] flex-1",
                     div { class: "min-w-0",
-                        p { class: "text-xs uppercase tracking-[0.18em] text-slate-400", "{i18n::t(\"eq_preamp\")}" }
+                        p { class: "text-xs text-slate-400", "{i18n::t(\"eq_preamp\")}" }
                         p { class: "text-[11px] text-slate-500", "{i18n::t(\"eq_preamp_desc\")}" }
                     }
                     input {
@@ -902,7 +907,7 @@ pub fn EqualizerPanel(
             p { class: "text-xs text-slate-500", "{i18n::t(\"eq_graph_hint\")}" }
 
             div {
-                class: "rounded-2xl border border-white/8 bg-white/5 p-4 select-none overflow-x-auto",
+                class: "rounded-lg border border-white/8 bg-white/5 p-4 select-none overflow-x-auto",
                 style: "background: color-mix(in oklab, var(--color-neutral-900) 78%, transparent); border-color: color-mix(in oklab, var(--color-white) 8%, transparent);",
                 svg {
                     class: "{graph_class}",

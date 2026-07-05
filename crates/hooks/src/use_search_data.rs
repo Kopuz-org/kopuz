@@ -55,7 +55,7 @@ pub fn use_search_data(search_query: Signal<String>, config: Signal<AppConfig>) 
         let conf = config.read().clone();
         let source = active_source.read().clone();
 
-        async move {
+        utils::offload(async move {
             if query.trim().is_empty() {
                 return None;
             }
@@ -75,7 +75,7 @@ pub fn use_search_data(search_query: Signal<String>, config: Signal<AppConfig>) 
                 })
                 .collect();
             Some((result_tracks, result_albums))
-        }
+        })
     });
 
     SearchData {

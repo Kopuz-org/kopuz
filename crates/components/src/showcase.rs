@@ -150,8 +150,8 @@ pub struct ShowcaseProps {
 pub fn Showcase(props: ShowcaseProps) -> Element {
     let config = use_context::<Signal<AppConfig>>();
     match config.read().ui_style {
-        config::UiStyle::Modern => rsx! {
-            crate::modern::showcase::ShowcaseModern { ..props }
+        config::UiStyle::Vaxry => rsx! {
+            crate::vaxry::showcase::ShowcaseVaxry { ..props }
         },
         config::UiStyle::Normal => rsx! {
             crate::normal::showcase::ShowcaseNormal { ..props }

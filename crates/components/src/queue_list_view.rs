@@ -186,10 +186,10 @@ pub fn QueueSummary(
         div {
             class: match layout {
                 LayoutMode::Fullscreen => {
-                    "pt-2 px-4 pb-3 flex gap-2 justify-between uppercase tracking-[0.18em] text-xs"
+                    "pt-2 px-4 pb-3 flex gap-2 justify-between text-xs"
                 }
                 LayoutMode::Rightbar => {
-                    "pt-1 px-2 pb-2 flex gap-2 justify-between uppercase tracking-[0.18em] text-[11px]"
+                    "pt-1 px-2 pb-2 flex gap-2 justify-between text-[11px]"
                 }
             },
 

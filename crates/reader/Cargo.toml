@@ -1,7 +1,16 @@
 [package]
-name = "reader"
+name = "kopuz-reader"
 version.workspace = true
-edition = "2024"
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+
+[lib]
+name = "reader"
 
 [lints]
 workspace = true
@@ -11,8 +20,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 config = { workspace = true }
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 lofty = { workspace = true }
 symphonia = { workspace = true }
 tokio = { workspace = true, features = ["fs"] }

@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{use_playlists, use_tracks_by_keys};
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 use rfd::AsyncFileDialog;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -117,9 +117,12 @@ pub fn PlaylistDetail(
                 let mut position: i64 = 0;
                 let mut completed = true;
                 loop {
-                    let page = match source
-                        .fetch_playlist_entries_page(&pid_clone, cursor.clone())
-                        .await
+                    let (src, id, cur) = (source.clone(), pid_clone.clone(), cursor.clone());
+                    let page = match utils::offload(
+                        async move { src.fetch_playlist_entries_page(&id, cur).await }
+                            .instrument(tracing::Span::current()),
+                    )
+                    .await
                     {
                         Ok(p) => p,
                         Err(e) => {
@@ -151,12 +154,20 @@ pub fn PlaylistDetail(
                         fresh.iter().map(|t| t.id.key().to_string()).collect();
                     let start = position;
                     position += fresh.len() as i64;
-                    for chunk in fresh.chunks(100) {
-                        let _ = source.upsert_tracks(chunk).await;
-                    }
-                    let _ = source
-                        .upsert_playlist_tracks_page(&pid_clone, &page_refs, start, epoch)
-                        .await;
+                    let (src, id) = (source.clone(), pid_clone.clone());
+                    let fresh = utils::offload(
+                        async move {
+                            for chunk in fresh.chunks(100) {
+                                let _ = src.upsert_tracks(chunk).await;
+                            }
+                            let _ = src
+                                .upsert_playlist_tracks_page(&id, &page_refs, start, epoch)
+                                .await;
+                            fresh
+                        }
+                        .instrument(tracing::Span::current()),
+                    )
+                    .await;
                     acc.extend(fresh);
                     // Grow-only: never shrink the visible list mid-walk.
                     if acc.len() > tracks.peek().len() {
@@ -172,10 +183,15 @@ pub fn PlaylistDetail(
                 if completed {
                     tracing::debug!(count = acc.len(), "playlist reconciled");
                     tracks.set(acc);
-                    let _ = source.sweep_playlist_tracks(&pid_clone, epoch).await;
-                    let _ = source
-                        .set_meta("pl_pull", &pid_clone, &unix_secs().to_string())
-                        .await;
+                    let (src, id) = (source.clone(), pid_clone.clone());
+                    utils::offload(
+                        async move {
+                            let _ = src.sweep_playlist_tracks(&id, epoch).await;
+                            let _ = src.set_meta("pl_pull", &id, &unix_secs().to_string()).await;
+                        }
+                        .instrument(tracing::Span::current()),
+                    )
+                    .await;
                     gens.bump(Table::Playlists);
                     gens.bump(Table::Tracks);
                 }
@@ -232,7 +248,6 @@ pub fn PlaylistDetail(
             name: playlist_name.clone(),
             description: String::new(),
             cover_url: playlist_cover,
-            back_label: i18n::t("back_to_playlists").to_string(),
             tracks: tracks_val,
             on_close,
             enable_metadata: caps.edit_tags,
@@ -240,7 +255,7 @@ pub fn PlaylistDetail(
                 let _ = &pid_for_cover;
                 let _ = &name_for_cover;
                 let _ = &tag_for_cover;
-                #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+                #[cfg(not(target_os = "android"))]
                 {
                     let pid = pid_for_cover.clone();
                     let pl_name = name_for_cover.clone();
@@ -269,24 +284,21 @@ pub fn PlaylistDetail(
             },
             on_delete_track: move |idx: usize| {
                 if caps.delete_from_disk
-                    && let Some(t) = tracks.read().get(idx).cloned() {
-                        #[cfg(not(target_arch = "wasm32"))]
-                        if let Some(del_path) = t.id.local_path()
-                            && std::fs::remove_file(del_path).is_ok()
-                        {
-                            let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
-                            let key = t.id.key().into_owned();
-                            spawn(async move {
-                                if source.delete_tracks(&[key]).await.is_ok() {
-                                    gens.bump(Table::Tracks);
-                                }
-                            });
+                    && let Some(t) = tracks.read().get(idx).cloned()
+                    && let Some(del_path) = t.id.local_path()
+                    && std::fs::remove_file(del_path).is_ok()
+                {
+                    let source = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
+                    let key = t.id.key().into_owned();
+                    spawn(async move {
+                        if source.delete_tracks(&[key]).await.is_ok() {
+                            gens.bump(Table::Tracks);
                         }
-                    }
+                    });
+                }
             },
             on_selection_delete: move |paths: Vec<PathBuf>| {
                 if caps.delete_from_disk {
-                    #[cfg(not(target_arch = "wasm32"))]
                     {
                         let mut keys = Vec::new();
                         for path in &paths {

@@ -26,7 +26,7 @@
 }:
 let
   pname = "kopuz";
-  version = "0.7.0";
+  version = "0.8.2";
 
   nativeBuildInputs = [
     pkg-config
@@ -76,7 +76,6 @@ let
             (s + /.cargo)
             (s + /crates)
             (s + /data)
-            (s + /locales)
 
             (s + /Cargo.toml)
             (s + /Cargo.lock)

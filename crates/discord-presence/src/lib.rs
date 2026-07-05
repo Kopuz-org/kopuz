@@ -3,23 +3,23 @@
 
 pub mod cover_art;
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 use discord_rich_presence::{
     DiscordIpc, DiscordIpcClient,
     activity::{self, Assets, Timestamps},
 };
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 use std::sync::Mutex;
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 #[derive(Debug)]
 pub struct Presence {
     client: Mutex<DiscordIpcClient>,
 }
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 impl Presence {
     pub fn new(client_id: &str) -> Result<Self, Box<dyn std::error::Error>> {
         let mut client = DiscordIpcClient::new(client_id);
@@ -45,6 +45,7 @@ impl Presence {
         elapsed_secs: u64,
         duration_secs: u64,
         cover_url: Option<&str>,
+        source: Option<&str>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
 
@@ -58,6 +59,7 @@ impl Presence {
         };
 
         let state = artist.to_string();
+        let name = source.map(|s| format!("Kopuz - on {s}"));
 
         let mut activity = activity::Activity::new()
             .details(title)
@@ -65,6 +67,10 @@ impl Presence {
             .status_display_type(activity::StatusDisplayType::State)
             .timestamps(timestamps)
             .activity_type(activity::ActivityType::Listening);
+
+        if let Some(ref name) = name {
+            activity = activity.name(name);
+        }
 
         if let Some(url) = cover_url {
             let assets = Assets::new().large_image(url).large_text(album);
@@ -84,13 +90,19 @@ impl Presence {
         artist: &str,
         album: &str,
         cover_url: Option<&str>,
+        source: Option<&str>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let state = format!("{artist} • Paused");
+        let name = source.map(|s| format!("Kopuz - on {s}"));
         let mut activity = activity::Activity::new()
             .details(title)
             .state(&state)
             .status_display_type(activity::StatusDisplayType::State)
             .activity_type(activity::ActivityType::Listening);
+
+        if let Some(ref name) = name {
+            activity = activity.name(name);
+        }
 
         if let Some(url) = cover_url {
             let assets = Assets::new().large_image(url).large_text(album);
@@ -113,7 +125,7 @@ impl Presence {
     }
 }
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 impl Drop for Presence {
     fn drop(&mut self) {
         let mut client = match self.client.lock() {
@@ -149,6 +161,7 @@ impl Presence {
         _elapsed_secs: u64,
         _duration_secs: u64,
         _cover_url: Option<&str>,
+        _source: Option<&str>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }
@@ -159,6 +172,7 @@ impl Presence {
         _artist: &str,
         _album: &str,
         _cover_url: Option<&str>,
+        _source: Option<&str>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         Ok(())
     }

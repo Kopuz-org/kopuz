@@ -31,7 +31,7 @@ pub fn SearchGenreDetail(
     let config = use_context::<Signal<AppConfig>>();
     let gens = hooks::db_reactivity::use_generations();
     let offline_tracks = config.read().offline_tracks.clone();
-    let is_modern = config.read().ui_style == UiStyle::Modern;
+    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
     let sort_state = use_signal(|| None);
     let sorted_genre_tracks = showcase::sorted_track_pairs(&genre_tracks, *sort_state.read());
     let genre_tracks_list: Vec<Track> =
@@ -65,14 +65,13 @@ pub fn SearchGenreDetail(
                         class: "mb-4 flex items-center gap-2 text-slate-400 hover:text-white transition-colors",
                          onclick: move |_| on_back.call(()),
                          i { class: "fa-solid fa-arrow-left" }
-                         "{i18n::t(\"back_to_browse\")}"
                     }
                 }
 
-                if is_modern {
+                if is_vaxry {
                     div { class: "flex items-end gap-6 mb-8 shrink-0",
                         div {
-                            class: "w-44 h-44 rounded-2xl overflow-hidden shrink-0 shadow-2xl bg-white/5",
+                            class: "w-44 h-44 rounded-lg overflow-hidden shrink-0 shadow-2xl bg-white/5",
                             style: "box-shadow: 0 20px 60px rgba(0,0,0,0.6);",
                             if let Some((_, Some(url))) = genres.iter().find(|(g, _)| g == &genre) {
                                 img { src: "{url.as_ref()}", class: "w-full h-full object-cover" }
@@ -84,7 +83,7 @@ pub fn SearchGenreDetail(
                         }
                         div { class: "flex flex-col gap-1 pb-1 min-w-0",
                             p {
-                                class: "text-xs font-bold tracking-widest uppercase mb-1",
+                                class: "text-xs font-bold mb-1",
                                 style: "color: rgba(255,255,255,0.35);",
                                 "{i18n::t(\"genre\")}"
                             }
@@ -151,7 +150,7 @@ pub fn SearchGenreDetail(
                          }
 
                          div {
-                             h2 { class: "text-sm font-bold text-white/60 uppercase tracking-widest mb-2", "{i18n::t(\"genre\")}" }
+                             h2 { class: "text-sm font-bold text-white/60 mb-2", "{i18n::t(\"genre\")}" }
                              h1 { class: "text-5xl font-bold text-white mb-4", "{genre}" }
                              p { class: "text-slate-400",
                                  {
@@ -168,7 +167,7 @@ pub fn SearchGenreDetail(
                 }
                 div { class: "shrink-0 mb-4",
                     Header{
-                        is_modern: is_modern,
+                        is_vaxry: is_vaxry,
                         is_album: false,
                         sort_state: sort_state
                     }

@@ -2,82 +2,55 @@ use components::{
     bottombar::Bottombar, compact_player::CompactPlayer, download_overlay::DownloadOverlay,
     fullscreen::Fullscreen, rightbar::Rightbar, sidebar::Sidebar, titlebar::Titlebar,
 };
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-use dioxus::desktop::RequestAsyncResponder;
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 use dioxus::desktop::tao::dpi::LogicalSize;
-#[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
+#[cfg(target_os = "macos")]
 use dioxus::desktop::tao::platform::macos::WindowBuilderExtMacOS;
-#[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
+#[cfg(target_os = "windows")]
 use dioxus::desktop::tao::platform::windows::WindowExtWindows;
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-use dioxus::desktop::tao::window::Icon;
 use dioxus::prelude::*;
-#[cfg(not(target_arch = "wasm32"))]
 use discord_presence::Presence;
 use kopuz_route::Route;
 use pages::server::download_manager::DownloadQueue;
 use player::player::Player;
 use queue_state::PersistedQueueState;
-#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
-#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 use tracing::Instrument;
-#[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
+#[cfg(target_os = "windows")]
 use windows::Win32::Foundation::HWND;
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+mod app_db;
+mod app_lifecycle;
+#[cfg(not(target_os = "android"))]
+mod artwork_protocol;
+#[cfg(not(target_os = "android"))]
 mod chrome_trace;
+mod desktop_shell;
+mod legacy;
 mod logging;
-#[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 mod pot_minter;
 mod queue_state;
+#[cfg(not(target_os = "android"))]
+mod ui_profile;
+mod updates;
 #[cfg(target_os = "windows")]
 mod windows_titlebar;
 
-#[cfg(not(target_arch = "wasm32"))]
-fn migrate_legacy_locations() {
-    let Some(dirs) = directories::ProjectDirs::from("com", "temidaradev", "kopuz") else {
-        return;
-    };
-    let new_config = dirs.config_dir().to_path_buf();
-    let sentinel = new_config.join(".migrated");
-    if sentinel.exists() {
-        return;
-    }
-
-    let old_cache = dirs.cache_dir().to_path_buf();
-    let files = [
-        "library.json",
-        "playlists.json",
-        "favorites.json",
-        "queue_state.json",
-    ];
-    for file in files {
-        let src = old_cache.join(file);
-        let dst = new_config.join(file);
-        if src.exists() && !dst.exists() {
-            if let Err(e) = std::fs::rename(&src, &dst) {
-                tracing::warn!("Failed to migrate {file} from cache to config: {e}");
-            } else {
-                tracing::info!("Migrated {file} to config dir");
-            }
-        }
-    }
-
-    let _ = std::fs::write(&sentinel, "");
-}
-
-const FAVICON: Asset = asset!("../assets/favicon.ico");
-const MAIN_CSS: Asset = asset!("../assets/main.css");
-const THEME_CSS: Asset = asset!("../assets/themes.css");
-const TAILWIND_CSS: Asset = asset!("../assets/tailwind.css");
-const REDUCED_ANIMATIONS_CSS: Asset = asset!("../assets/reduced-animations.css");
+const FAVICON: &str = include_str!(concat!(env!("OUT_DIR"), "/favicon.uri"));
+// CSS/fonts are compiled in (not `asset!()`-collected) so styling works under a
+// bare `cargo run` — see `build.rs::embed_fonts`, which bakes the font data: URIs.
+// The `OUT_DIR` ones pass through it; main.css does too, for its nasin-nanpa
+// @font-face (themes/tailwind/reduced have no font refs, so they're verbatim).
+const MAIN_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/main.css"));
+const THEME_CSS: &str = include_str!("../assets/themes.css");
+const TAILWIND_CSS: &str = include_str!("../assets/tailwind.css");
+const REDUCED_ANIMATIONS_CSS: &str = include_str!("../assets/reduced-animations.css");
+const FONT_AWESOME_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/fontawesome.css"));
+const JETBRAINS_MONO_CSS: &str = include_str!(concat!(env!("OUT_DIR"), "/jetbrains-mono.css"));
 #[cfg(target_os = "windows")]
 const TOOLBAR_ICONS: Asset = asset!("../assets/toolbar_icons", AssetOptions::folder());
-const QUEUE_STATE_SAVE_DEBOUNCE_MS: u64 = 1200;
-const QUEUE_STATE_PROGRESS_STEP_SECS: u64 = 5;
 /// Store saves (config/library/playlists/favorites) are full-replace and
 /// expensive; bursts of mutations (batch downloads, syncs) coalesce into one
 /// save per settle+cooldown window instead of one per mutation.
@@ -101,695 +74,29 @@ fn WindowsToolbarIconAssets() -> Element {
     rsx! {}
 }
 
-#[cfg(not(target_arch = "wasm32"))]
+#[component]
+fn StaticHeadAssets() -> Element {
+    rsx! {
+        document::Link { rel: "icon", href: FAVICON }
+        document::Style { {MAIN_CSS} }
+        document::Style { {THEME_CSS} }
+        document::Style { {TAILWIND_CSS} }
+        document::Style { {REDUCED_ANIMATIONS_CSS} }
+        // fonts
+        document::Style { {JETBRAINS_MONO_CSS} }
+        document::Style { {FONT_AWESOME_CSS} }
+    }
+}
+
 static PRESENCE: std::sync::OnceLock<Option<Arc<Presence>>> = std::sync::OnceLock::new();
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-fn build_window_icon() -> Option<Icon> {
-    let image = image::load_from_memory(include_bytes!("../assets/logo-512.png")).ok()?;
-    let image = image.into_rgba8();
-    let (width, height) = image.dimensions();
-    Icon::from_rgba(image.into_raw(), width, height).ok()
-}
-
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-fn build_tray_icon() -> Option<dioxus::desktop::trayicon::Icon> {
-    let image = image::load_from_memory(include_bytes!("../assets/logo-512.png")).ok()?;
-    let image = image.into_rgba8();
-    let (width, height) = image.dimensions();
-    dioxus::desktop::trayicon::Icon::from_rgba(image.into_raw(), width, height).ok()
-}
-
-#[cfg(target_os = "linux")]
-fn tray_backend_available() -> bool {
-    const CANDIDATES: &[&str] = &[
-        "libayatana-appindicator3.so.1",
-        "libappindicator3.so.1",
-        "libayatana-appindicator3.so",
-        "libappindicator3.so",
-    ];
-    CANDIDATES
-        .iter()
-        .any(|name| unsafe { libloading::Library::new(name) }.is_ok())
-}
-
-#[cfg(all(
-    not(target_arch = "wasm32"),
-    not(target_os = "android"),
-    not(target_os = "linux")
-))]
-fn tray_backend_available() -> bool {
-    true
-}
-
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-fn show_tray_missing_popup() {
-    let msg = "System tray unavailable: appindicator library not found. \
-               Install libayatana-appindicator (Debian/Ubuntu/Arch) or \
-               libappindicator-gtk3 (Fedora). Closing the window will quit \
-               the app instead of minimizing to tray.";
-    let escaped = serde_json::to_string(msg).unwrap_or_else(|_| "\"\"".to_string());
-    let js = format!(
-        r#"(function(m){{
-            let t = document.getElementById('kopuz-tray-popup');
-            if (!t) {{
-                t = document.createElement('div');
-                t.id = 'kopuz-tray-popup';
-                t.style.cssText = 'position:fixed;right:16px;top:16px;max-width:360px;background:rgba(28,28,30,0.97);color:#fff;padding:14px 16px;border-radius:10px;font:13px/1.45 system-ui,sans-serif;z-index:99999;box-shadow:0 8px 28px rgba(0,0,0,0.5);border:1px solid rgba(255,170,60,0.45);opacity:0;transition:opacity 200ms;';
-                t.onclick = () => {{ t.style.opacity = '0'; }};
-                document.body.appendChild(t);
-            }}
-            t.innerHTML = '<div style="font-weight:600;margin-bottom:4px;color:#ffb347;">Tray icon unavailable</div>' + m;
-            requestAnimationFrame(() => {{ t.style.opacity = '1'; }});
-            clearTimeout(t._h);
-            t._h = setTimeout(() => {{ t.style.opacity = '0'; }}, 8000);
-        }})({escaped});"#
-    );
-    let _ = dioxus::document::eval(&js);
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct AvailableUpdate {
-    version: String,
-    release_url: String,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-#[derive(serde::Deserialize)]
-struct GithubRelease {
-    tag_name: String,
-    html_url: String,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn parse_version_parts(version: &str) -> Option<Vec<u64>> {
-    let core = version
-        .trim()
-        .trim_start_matches(['v', 'V'])
-        .split(['-', '+'])
-        .next()
-        .unwrap_or_default();
-    let parts: Option<Vec<u64>> = core
-        .split('.')
-        .map(|part| part.parse::<u64>().ok())
-        .collect();
-    parts.filter(|parts| !parts.is_empty())
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn is_newer_version(current: &str, candidate: &str) -> bool {
-    let Some(current_parts) = parse_version_parts(current) else {
-        return false;
-    };
-    let Some(candidate_parts) = parse_version_parts(candidate) else {
-        return false;
-    };
-
-    let max_len = current_parts.len().max(candidate_parts.len());
-    for idx in 0..max_len {
-        let current_part = *current_parts.get(idx).unwrap_or(&0);
-        let candidate_part = *candidate_parts.get(idx).unwrap_or(&0);
-        match candidate_part.cmp(&current_part) {
-            std::cmp::Ordering::Greater => return true,
-            std::cmp::Ordering::Less => return false,
-            std::cmp::Ordering::Equal => {}
-        }
-    }
-
-    false
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-async fn fetch_available_update() -> Option<AvailableUpdate> {
-    let client = reqwest::Client::builder()
-        .user_agent(format!("kopuz/{}", env!("CARGO_PKG_VERSION")))
-        .timeout(std::time::Duration::from_secs(8))
-        .build()
-        .ok()?;
-    let release = client
-        .get("https://api.github.com/repos/Kopuz-org/kopuz/releases/latest")
-        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-        .send()
-        .await
-        .ok()?
-        .error_for_status()
-        .ok()?
-        .json::<GithubRelease>()
-        .await
-        .ok()?;
-
-    if is_newer_version(env!("CARGO_PKG_VERSION"), &release.tag_name) {
-        Some(AvailableUpdate {
-            version: release.tag_name.trim_start_matches(['v', 'V']).to_string(),
-            release_url: release.html_url,
-        })
-    } else {
-        None
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-async fn run_rotation(mut config: Signal<config::AppConfig>) {
-    let cookies = match config.peek().server.as_ref() {
-        Some(s) if s.service == config::MusicService::YtMusic => s.access_token.clone(),
-        _ => return,
-    };
-    let Some(cookies) = cookies else { return };
-    // Anonymous YT carries an empty token — nothing to keep alive.
-    if cookies.is_empty() {
-        return;
-    }
-    let started = std::time::Instant::now();
-    // Logging policy: noisy in the rare cases (jar rotated, error),
-    // silent on the steady-state OK-no-change tick. The keepalive
-    // fires every 5 min and 99% of ticks are no-change; the original
-    // per-tick OK line drowned stderr.
-    match server::ytmusic::verify_session_keepalive::tick(&cookies).await {
-        Ok(Some(updated)) => {
-            tracing::debug!(
-                secs = started.elapsed().as_secs_f32(),
-                from = cookies.len(),
-                to = updated.len(),
-                "verify_session OK — jar rotated",
-            );
-            if let Some(srv) = config.write().server.as_mut() {
-                srv.access_token = Some(updated);
-            }
-        }
-        Ok(None) => {}
-        Err(e) => tracing::warn!(error = %e, "verify_session failed"),
-    }
-}
-
-/// Refresh the active Spotify server's OAuth access token from its refresh token
-/// (access tokens expire ~hourly) and write the re-packed pair back to config.
-#[cfg(not(target_arch = "wasm32"))]
-async fn run_spotify_refresh(mut config: Signal<config::AppConfig>) {
-    let packed = match config.peek().server.as_ref() {
-        Some(s) if s.service == config::MusicService::Spotify => s.access_token.clone(),
-        _ => return,
-    };
-    let Some(packed) = packed else { return };
-    let (_access, refresh) = server::spotify::auth::unpack_token(&packed);
-    if refresh.is_empty() {
-        return;
-    }
-    match server::spotify::auth::refresh(refresh.clone()).await {
-        Ok(auth) => {
-            let new_refresh = if auth.refresh_token.is_empty() {
-                refresh
-            } else {
-                auth.refresh_token
-            };
-            let new_packed = server::spotify::auth::pack_token(&auth.access_token, &new_refresh);
-            if let Some(srv) = config.write().server.as_mut() {
-                srv.access_token = Some(new_packed);
-            }
-            tracing::debug!("spotify token refreshed");
-        }
-        Err(e) => tracing::warn!(error = %e, "spotify token refresh failed"),
-    }
-}
-
-async fn persist_queue_state_snapshot(db: db::Db, queue_state: Option<PersistedQueueState>) {
-    let snap = queue_state.map(queue_snapshot).unwrap_or_default();
-    if let Err(e) = db.save_queue(&snap).await {
-        tracing::error!("Failed to save queue state: {}", e);
-    }
-}
-
-fn queue_snapshot(q: PersistedQueueState) -> db::QueueSnapshot {
-    db::QueueSnapshot {
-        version: q.version,
-        queue: q.queue,
-        current_queue_index: q.current_queue_index,
-        progress_secs: q.progress_secs,
-        shuffle_order: q.shuffle_order,
-        shuffle_enabled: q.shuffle_enabled,
-    }
-}
-
-fn is_server_queue_track(track: &reader::Track) -> bool {
-    matches!(
-        track
-            .id
-            .uid()
-            .split(':')
-            .next()
-            .unwrap_or_default()
-            .to_ascii_lowercase()
-            .as_str(),
-        "jellyfin" | "subsonic" | "custom"
-    )
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn is_restorable_queue_track(track: &reader::Track) -> bool {
-    is_server_queue_track(track) || track.id.local_path().is_some_and(|p| p.exists())
-}
-
-#[cfg(target_arch = "wasm32")]
-fn is_restorable_queue_track(_track: &reader::Track) -> bool {
-    true
-}
-
-fn sanitize_queue_state(state: PersistedQueueState) -> Option<PersistedQueueState> {
-    if state.queue.is_empty() {
-        return None;
-    }
-
-    let original_index = state
-        .current_queue_index
-        .min(state.queue.len().saturating_sub(1));
-    let mut selected_track_survived = false;
-    let survivors: Vec<(usize, reader::Track)> = state
-        .queue
-        .into_iter()
-        .enumerate()
-        .filter(|(idx, track)| {
-            let keep = is_restorable_queue_track(track);
-            if keep && *idx == original_index {
-                selected_track_survived = true;
-            }
-            keep
-        })
-        .collect();
-
-    if survivors.is_empty() {
-        return None;
-    }
-
-    let restored_index = if selected_track_survived {
-        survivors
-            .iter()
-            .position(|(idx, _)| *idx == original_index)
-            .unwrap_or(0)
-    } else {
-        survivors
-            .iter()
-            .enumerate()
-            .min_by_key(|(_, (idx, _))| (idx.abs_diff(original_index), *idx > original_index))
-            .map(|(restored_idx, _)| restored_idx)
-            .unwrap_or(0)
-    };
-
-    let old_queue_len = survivors
-        .iter()
-        .map(|(old_idx, _)| *old_idx)
-        .max()
-        .map_or(0, |m| m + 1);
-
-    let mut old_to_new_index: Vec<Option<usize>> = vec![None; old_queue_len];
-    for (new_idx, (old_idx, _)) in survivors.iter().enumerate() {
-        old_to_new_index[*old_idx] = Some(new_idx);
-    }
-
-    let shuffle_order: Vec<usize> = state
-        .shuffle_order
-        .into_iter()
-        .filter_map(|old_idx| old_to_new_index.get(old_idx).and_then(|&new_idx| new_idx))
-        .collect();
-
-    let queue: Vec<_> = survivors.into_iter().map(|(_, track)| track).collect();
-    let progress_secs = if selected_track_survived {
-        queue
-            .get(restored_index)
-            .map(|track| state.progress_secs.min(track.duration))
-            .unwrap_or(0)
-    } else {
-        0
-    };
-
-    Some(PersistedQueueState {
-        version: state.version,
-        queue,
-        current_queue_index: restored_index,
-        progress_secs,
-        shuffle_order,
-        shuffle_enabled: state.shuffle_enabled,
-    })
-}
-
-fn build_queue_state_snapshot(
-    queue: &[reader::Track],
-    current_queue_index: usize,
-    current_song_progress: u64,
-    is_playing: bool,
-    shuffle_order: &[usize],
-    shuffle_enabled: bool,
-) -> Option<PersistedQueueState> {
-    if queue.is_empty() {
-        return None;
-    }
-
-    let current_idx = current_queue_index.min(queue.len() - 1);
-    let progress_secs = queue
-        .get(current_idx)
-        .map(|track| current_song_progress.min(track.duration))
-        .unwrap_or(0);
-    let progress_secs = if is_playing {
-        progress_secs - (progress_secs % QUEUE_STATE_PROGRESS_STEP_SECS)
-    } else {
-        progress_secs
-    };
-
-    Some(PersistedQueueState {
-        version: 1,
-        queue: queue.to_vec(),
-        current_queue_index: current_idx,
-        progress_secs,
-        shuffle_order: shuffle_order.to_vec(),
-        shuffle_enabled,
-    })
-}
-
-#[cfg(any(target_os = "linux", target_os = "windows"))]
-fn read_titlebar_mode_from_disk() -> config::TitlebarMode {
-    db::peek_config(&db::default_db_path())
-        .map(|c| c.titlebar_mode)
-        .unwrap_or_default()
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn thumb_cache_path(file_path: &str) -> std::path::PathBuf {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    file_path.hash(&mut hasher);
-    let hash = hasher.finish();
-    std::env::temp_dir().join(format!("rusic_thumb_{:016x}.jpg", hash))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn hq_cache_path(file_path: &str) -> std::path::PathBuf {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    "hq".hash(&mut hasher);
-    file_path.hash(&mut hasher);
-    let hash = hasher.finish();
-    std::env::temp_dir().join(format!("rusic_hq_{:016x}.jpg", hash))
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn make_thumbnail(raw: &[u8], cache_path: &std::path::Path) -> Option<Vec<u8>> {
-    use image::codecs::jpeg::JpegEncoder;
-    let img = image::load_from_memory(raw).ok()?;
-    const MAX: u32 = 400;
-    let img = if img.width() > MAX || img.height() > MAX {
-        img.thumbnail(MAX, MAX)
-    } else {
-        img
-    };
-    let mut out: Vec<u8> = Vec::new();
-    img.write_with_encoder(JpegEncoder::new_with_quality(&mut out, 75))
-        .ok()?;
-    let _ = std::fs::write(cache_path, &out);
-    Some(out)
-}
-
-// Returns Some(compressed) when the image exceeded the size/dimension limit,
-// or None when the original is already small enough to serve as-is.
-#[cfg(not(target_arch = "wasm32"))]
-fn make_hq_image(raw: &[u8], cache_path: &std::path::Path) -> Option<Vec<u8>> {
-    use image::codecs::jpeg::JpegEncoder;
-    const SIZE_LIMIT: usize = 2 * 1024 * 1024; // 2 MB
-    const MAX_DIM: u32 = 1920;
-    const QUALITY: u8 = 85;
-
-    if raw.len() <= SIZE_LIMIT {
-        return None;
-    }
-    let img = image::load_from_memory(raw).ok()?;
-    let img = if img.width() > MAX_DIM || img.height() > MAX_DIM {
-        img.thumbnail(MAX_DIM, MAX_DIM)
-    } else {
-        img
-    };
-    let mut out: Vec<u8> = Vec::new();
-    img.write_with_encoder(JpegEncoder::new_with_quality(&mut out, QUALITY))
-        .ok()?;
-    let _ = std::fs::write(cache_path, &out);
-    Some(out)
-}
-
-/// Process-wide database handle. Opened (and the legacy JSON migrated) once in
-/// `main` before the UI mounts, then provided to the app via context.
-static DB_HANDLE: std::sync::OnceLock<db::Db> = std::sync::OnceLock::new();
-
-/// Open the DB and run the one-shot legacy import, blocking. sqlx-sqlite does its
-/// work on dedicated connection threads, so the throwaway runtime here is safe to
-/// drop — the pool keeps working under the app's runtime afterwards.
-#[cfg(not(target_arch = "wasm32"))]
-fn init_db_blocking() -> db::Db {
-    let rt = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("tokio runtime for db init");
-    rt.block_on(async {
-        let db_path = db::default_db_path();
-        let handle = match db::init(&db_path).await {
-            Ok(h) => h,
-            Err(e) => {
-                // A corrupt DB must not brick the app before a window exists:
-                // move it aside (kept for inspection) and recreate — the
-                // importer below repopulates from *.json.bak. ONLY for real
-                // corruption, though: lock contention (a second instance),
-                // disk-full, or a failed migration would otherwise get a
-                // healthy database renamed away and replaced by stale data.
-                let msg = e.to_string().to_lowercase();
-                let is_corruption = msg.contains("malformed")
-                    || msg.contains("not a database")
-                    || msg.contains("corrupt");
-                if !is_corruption {
-                    panic!("kopuz database failed to open (not corruption — refusing to discard it): {e}");
-                }
-                tracing::error!(error = %e, "kopuz database is corrupt — moving it aside and recreating");
-                let ts = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-                for ext in ["", "-wal", "-shm"] {
-                    let mut src = db_path.as_os_str().to_os_string();
-                    src.push(ext);
-                    let mut dst = db_path.as_os_str().to_os_string();
-                    dst.push(format!(".corrupt-{ts}{ext}"));
-                    let _ = std::fs::rename(src, dst);
-                }
-                db::init(&db_path).await.expect("recreate kopuz database")
-            }
-        };
-        match handle.import_legacy_json(&db::config_dir()).await {
-            Ok(r) if r.ran => tracing::info!(
-                tracks = r.tracks,
-                albums = r.albums,
-                playlists = r.playlists,
-                favorites = r.favorites,
-                servers = r.servers,
-                "kopuz: migrated legacy JSON store into SQLite"
-            ),
-            Ok(_) => {}
-            Err(e) => tracing::error!(error = %e, "kopuz: legacy JSON import failed"),
-        }
-        // Nothing reads or writes the legacy JSONs anymore — move them aside as
-        // *.json.bak (kept for downgrade; never deleted). RELEASE only: debug
-        // builds leave them in place so deleting kopuz-debug.db re-tests the
-        // migration without restoring anything (the import is gated on the DB
-        // being empty, so the lingering JSONs are otherwise inert).
-        if cfg!(debug_assertions) {
-            tracing::info!("kopuz: debug build — leaving legacy *.json in place for re-testing");
-        } else {
-            match handle.finalize_migration(&db::config_dir()).await {
-                Ok(n) if n > 0 => {
-                    tracing::info!(files = n, "kopuz: legacy *.json renamed to *.json.bak")
-                }
-                Ok(_) => {}
-                Err(e) => tracing::warn!(error = %e, "kopuz: legacy json backup rename failed"),
-            }
-        }
-        server::ytmusic::player::init_tier_store(handle.clone());
-        utils::db_cache::init(handle.clone());
-        handle
-    })
-}
-
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
-fn serve_artwork(uri: http::Uri, responder: RequestAsyncResponder) {
-    fn resp(
-        status: u16,
-        headers: &[(&str, &str)],
-        body: Vec<u8>,
-    ) -> http::Response<std::borrow::Cow<'static, [u8]>> {
-        let mut b = http::Response::builder().status(status);
-        b = b.header("Access-Control-Allow-Origin", "*");
-        for (k, v) in headers {
-            b = b.header(*k, *v);
-        }
-        b.body(std::borrow::Cow::from(body)).unwrap_or_else(|_| {
-            http::Response::builder()
-                .status(500)
-                .header("Access-Control-Allow-Origin", "*")
-                .body(std::borrow::Cow::from(Vec::new()))
-                .expect("static fallback response")
-        })
-    }
-
-    tokio::spawn(
-        async move {
-            let query = uri.query().unwrap_or_default();
-            let file_path: String = query
-                .split('&')
-                .find_map(|kv| kv.strip_prefix("p="))
-                .map(|encoded| {
-                    percent_encoding::percent_decode_str(encoded)
-                        .decode_utf8_lossy()
-                        .into_owned()
-                })
-                .unwrap_or_default();
-            let high_quality = query.split('&').any(|kv| kv == "hq=1");
-
-            if file_path.is_empty() {
-                responder.respond(resp(400, &[], Vec::new()));
-                return;
-            }
-
-            #[cfg(target_os = "windows")]
-            let file_path = file_path.replace('/', "\\");
-
-            #[cfg(not(target_os = "windows"))]
-            let file_path = if file_path.starts_with('~') {
-                if let Ok(home) = std::env::var("HOME") {
-                    file_path.replacen('~', &home, 1)
-                } else {
-                    file_path
-                }
-            } else {
-                file_path
-            };
-
-            if high_quality {
-                let hq_path = hq_cache_path(&file_path);
-                if hq_path.exists()
-                    && let Ok(b) = tokio::fs::read(&hq_path).await
-                {
-                    responder.respond(resp(
-                        200,
-                        &[
-                            ("Content-Type", "image/jpeg"),
-                            ("Cache-Control", "public, max-age=31536000"),
-                        ],
-                        b,
-                    ));
-                    return;
-                }
-                match tokio::fs::read(&file_path).await {
-                    Ok(raw) => {
-                        let file_path_clone = file_path.clone();
-                        let result = tokio::task::spawn_blocking(move || {
-                            make_hq_image(&raw, &hq_path)
-                                .map(|b| (b, "image/jpeg"))
-                                .unwrap_or_else(|| {
-                                    let mime = if file_path_clone.ends_with(".png") {
-                                        "image/png"
-                                    } else {
-                                        "image/jpeg"
-                                    };
-                                    (raw, mime)
-                                })
-                        })
-                        .await;
-                        match result {
-                            Ok((bytes, mime)) => responder.respond(resp(
-                                200,
-                                &[
-                                    ("Content-Type", mime),
-                                    ("Cache-Control", "public, max-age=31536000"),
-                                ],
-                                bytes,
-                            )),
-                            Err(_) => responder.respond(resp(500, &[], Vec::new())),
-                        }
-                    }
-                    Err(_) => responder.respond(resp(404, &[], Vec::new())),
-                }
-                return;
-            }
-
-            let thumb_path = thumb_cache_path(&file_path);
-
-            let (bytes, mime) = if thumb_path.exists() {
-                match tokio::fs::read(&thumb_path).await {
-                    Ok(b) => (b, "image/jpeg"),
-                    Err(_) => {
-                        let _ = std::fs::remove_file(&thumb_path);
-                        match tokio::fs::read(&file_path).await {
-                            Ok(b) => (
-                                b,
-                                if file_path.ends_with(".png") {
-                                    "image/png"
-                                } else {
-                                    "image/jpeg"
-                                },
-                            ),
-                            Err(_) => {
-                                responder.respond(resp(404, &[], Vec::new()));
-                                return;
-                            }
-                        }
-                    }
-                }
-            } else {
-                match tokio::fs::read(&file_path).await {
-                    Ok(raw) => {
-                        let thumb_path_clone = thumb_path.clone();
-                        match tokio::task::spawn_blocking(move || {
-                            match make_thumbnail(&raw, &thumb_path_clone) {
-                                Some(b) => Ok(b),
-                                None => Err(raw),
-                            }
-                        })
-                        .await
-                        {
-                            Ok(Ok(b)) => (b, "image/jpeg"),
-                            Ok(Err(raw)) => (
-                                raw,
-                                if file_path.ends_with(".png") {
-                                    "image/png"
-                                } else {
-                                    "image/jpeg"
-                                },
-                            ),
-                            Err(_) => {
-                                responder.respond(resp(500, &[], Vec::new()));
-                                return;
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!("[artwork] not found {}: {}", file_path, e);
-                        responder.respond(resp(404, &[], Vec::new()));
-                        return;
-                    }
-                }
-            };
-
-            responder.respond(resp(
-                200,
-                &[
-                    ("Content-Type", mime),
-                    ("Cache-Control", "public, max-age=31536000"),
-                ],
-                bytes,
-            ));
-        }
-        .instrument(tracing::info_span!("artwork.serve")),
-    );
-}
-
 fn main() {
-    #[cfg(not(target_arch = "wasm32"))]
+    // Install a process-wide rustls CryptoProvider: the dep graph has both
+    // aws-lc-rs and ring, so rustls 0.23 can't auto-pick one and librespot's
+    // token-exchange/connect TLS would panic.
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     {
         let log_dir = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
             .map(|dirs| dirs.cache_dir().join("logs"))
@@ -807,9 +114,9 @@ fn main() {
         // logging::shutdown() after launch returns or on Ctrl+C.
         logging::init(&log_dir, config_tracing_enabled);
 
-        migrate_legacy_locations();
+        legacy::migrate_locations();
 
-        let _ = DB_HANDLE.set(init_db_blocking());
+        let _ = app_db::DB_HANDLE.set(app_db::init_blocking());
 
         let presence: Option<Arc<Presence>> = match Presence::new("1470087339639443658") {
             Ok(p) => {
@@ -834,7 +141,7 @@ fn main() {
             .with_resizable(true)
             .with_inner_size(LogicalSize::new(1350.0, 800.0));
 
-        if let Some(icon) = build_window_icon() {
+        if let Some(icon) = desktop_shell::build_window_icon() {
             window = window.with_window_icon(Some(icon));
         }
 
@@ -848,7 +155,7 @@ fn main() {
 
         #[cfg(any(target_os = "linux", target_os = "windows"))]
         {
-            let initial_titlebar_mode = read_titlebar_mode_from_disk();
+            let initial_titlebar_mode = desktop_shell::read_titlebar_mode_from_disk();
             window = window.with_decorations(initial_titlebar_mode == config::TitlebarMode::System);
         }
 
@@ -873,8 +180,8 @@ fn main() {
             })
             .with_asynchronous_custom_protocol(
                 "artwork",
-                |_id, request, responder: RequestAsyncResponder| {
-                    serve_artwork(request.uri().clone(), responder);
+                |_id, request, responder: dioxus::desktop::RequestAsyncResponder| {
+                    artwork_protocol::serve(request.uri().clone(), responder);
                 },
             );
 
@@ -928,7 +235,7 @@ fn main() {
         // OnceLock), but doing it up front means the session exists before first playback.
         player::systemint::init();
 
-        let _ = DB_HANDLE.set(init_db_blocking());
+        let _ = app_db::DB_HANDLE.set(app_db::init_blocking());
 
         let config = dioxus::mobile::Config::new()
             .with_background_color((0, 0, 0, 255))
@@ -1009,12 +316,6 @@ fn main() {
 
         dioxus::LaunchBuilder::mobile().with_cfg(config).launch(App);
     }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        let _ = DB_HANDLE.set(db::init_stub());
-        dioxus::launch(App);
-    }
 }
 
 #[component]
@@ -1029,47 +330,7 @@ fn App() -> Element {
     // first would leave the final queue/config persists (and any failure
     // warnings) out of latest.log and the trace.
 
-    // Native YouTube sig/n deciphering runs in this WebView's own
-    // JavaScriptCore (issue #349): register a JS engine that forwards each
-    // solver program to this task, which executes it via `document::eval` and
-    // returns the printed result. No external JS runtime, no yt-dlp, no
-    // botguard — the decipher path uses the engine already loaded for the UI.
-    use_hook(|| {
-        let (engine, mut rx) = server::ytmusic::decipher::webview_channel();
-        if server::ytmusic::decipher::set_engine(engine).is_err() {
-            tracing::warn!("yt-decipher engine already registered — webview solver not active");
-        }
-        spawn(async move {
-            while let Some(req) = rx.recv().await {
-                // Always send exactly one message back: the printed result, or
-                // the JS error prefixed with a NUL marker. Without the
-                // try/catch a throwing solver would never call `dioxus.send`
-                // and `recv()` below would hang forever, stalling playback.
-                let wrapped = format!(
-                    "globalThis.print=function(s){{dioxus.send(s);}};\
-                     try{{{}}}catch(e){{dioxus.send('\\u0000ERR'+(e&&e.stack?e.stack:e));}}",
-                    req.program
-                );
-                // Bound the wait — a non-returning solver script must not stall
-                // the decipher queue forever.
-                let mut eval = dioxus::document::eval(&wrapped);
-                let result = match tokio::time::timeout(
-                    std::time::Duration::from_secs(20),
-                    eval.recv::<String>(),
-                )
-                .await
-                {
-                    Ok(Ok(s)) => match s.strip_prefix('\u{0}') {
-                        Some(err) => Err(format!("webview JS: {}", err.trim_start_matches("ERR"))),
-                        None => Ok(s),
-                    },
-                    Ok(Err(e)) => Err(format!("webview eval recv: {e}")),
-                    Err(_) => Err("webview decipher timed out".to_string()),
-                };
-                let _ = req.reply.send(result);
-            }
-        });
-    });
+    app_lifecycle::use_webview_decipher_engine();
 
     // The whole-Library signal is GONE — pages/components read the DB through
     // query hooks, and every track self-resolves its cover via the cover seam
@@ -1100,7 +361,7 @@ fn App() -> Element {
             }
             path
         }
-        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+        #[cfg(not(target_os = "android"))]
         {
             let path = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
                 .map(|dirs| dirs.cache_dir().to_path_buf())
@@ -1108,14 +369,12 @@ fn App() -> Element {
             let _ = std::fs::create_dir_all(&path);
             path
         }
-        #[cfg(target_arch = "wasm32")]
-        std::path::PathBuf::from("./cache")
     });
     // ROOT-owned: detached tasks (download workers, close-flush) read/write
     // these after the spawning page — and in principle this component — is
     // gone; owning them at ROOT keeps Dioxus's cross-scope lint honest.
     let mut config = use_hook(|| Signal::new_in_scope(config::AppConfig::default(), ScopeId::ROOT));
-    let db = DB_HANDLE
+    let db = app_db::DB_HANDLE
         .get()
         .cloned()
         .expect("db initialized in main before launch");
@@ -1173,7 +432,7 @@ fn App() -> Element {
     // to an *anonymous* YouTube video (see `spotify::match_yt`), which 403s on
     // deep ranges without a content pot. Reactive: fires when config loads or
     // the server changes.
-    #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     use_effect(move || {
         let needs_pot = config.read().server.as_ref().is_some_and(|s| {
             matches!(
@@ -1189,16 +448,17 @@ fn App() -> Element {
     let mut initial_load_done = use_signal(|| false);
     #[allow(unused_variables)]
     let cover_cache = use_memo(move || cache_dir().join("covers"));
-    #[cfg(not(target_arch = "wasm32"))]
     let _ = std::fs::create_dir_all(cover_cache());
     let download_queue = use_hook(|| Signal::new_in_scope(DownloadQueue::default(), ScopeId::ROOT));
     let download_progress =
         use_hook(|| Signal::new_in_scope(::server::DownloadProgress::default(), ScopeId::ROOT));
     pages::server::download_manager::register_progress_signal(download_progress);
     let mut trigger_rescan = use_signal(|| 0);
+    let trigger_cover_reextract = use_signal(|| 0);
+    use_context_provider(|| hooks::CoverReextractTrigger(trigger_cover_reextract));
     // Applies detached yt-dlp completions (history + rescan) in this scope —
     // the job drivers outlive the downloads page and can't write these.
-    pages::ytdlp::use_ytdlp_completion_sink(config, trigger_rescan);
+    pages::ytdlp_jobs::use_ytdlp_completion_sink(config, trigger_rescan);
     let mut last_scan_key = use_signal(|| None::<String>);
     let mut scan_current_file = use_signal(|| Option::<String>::None);
     let current_playing = use_signal(|| 0);
@@ -1240,7 +500,7 @@ fn App() -> Element {
     // flush silently never ran. Signals are peeked here (not Send), the
     // joined thread does the blocking DB work. Idempotent across
     // CloseRequested/LoopDestroyed.
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     dioxus::desktop::use_wry_event_handler(move |event, _| {
         use dioxus::desktop::tao::event::{Event, WindowEvent};
         if matches!(
@@ -1251,7 +511,7 @@ fn App() -> Element {
                     ..
                 }
         ) {
-            if let Some(db) = DB_HANDLE.get() {
+            if let Some(db) = app_db::DB_HANDLE.get() {
                 let db = db.clone();
                 // None = the queue is empty (a cleared queue must persist as
                 // empty, not resurrect) — but only once the saved queue has
@@ -1261,7 +521,7 @@ fn App() -> Element {
                     pending_queue_state_snapshot
                         .peek()
                         .clone()
-                        .map(queue_snapshot)
+                        .map(queue_state::snapshot)
                         .unwrap_or_default()
                 });
                 // Library/playlists/favorites need no flush — every mutation
@@ -1298,7 +558,7 @@ fn App() -> Element {
         }
     });
 
-    #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
+    #[cfg(target_os = "macos")]
     use_effect(move || {
         let _ = dioxus::document::eval(
             r#"(function(){
@@ -1366,9 +626,7 @@ fn App() -> Element {
         }
     });
 
-    #[cfg(not(target_arch = "wasm32"))]
     let presence = PRESENCE.get().cloned().flatten();
-    #[cfg(not(target_arch = "wasm32"))]
     provide_context(presence.clone());
 
     let mut station_registry = use_signal(radio::registry::StationRegistry::new);
@@ -1395,26 +653,32 @@ fn App() -> Element {
         }
         last_radio_registry_key.set(Some(key));
 
-        spawn(
-            async move {
-                let mut new_registry = radio::registry::StationRegistry::new();
-                let mut import_count = 0;
+        spawn(async move {
+            let (new_registry, import_count) = utils::offload(
+                async move {
+                    let mut new_registry = radio::registry::StationRegistry::new();
+                    let mut import_count = 0;
 
-                for path in registry_paths {
-                    match new_registry.import_registry(&path).await {
-                        Ok(_) => import_count += 1,
-                        Err(e) => tracing::warn!("Failed to import registry from {}: {}", path, e),
+                    for path in registry_paths {
+                        match new_registry.import_registry(&path).await {
+                            Ok(_) => import_count += 1,
+                            Err(e) => {
+                                tracing::warn!("Failed to import registry from {}: {}", path, e)
+                            }
+                        }
                     }
+                    (new_registry, import_count)
                 }
+                .instrument(tracing::info_span!("radio.registry_load")),
+            )
+            .await;
 
-                station_registry.set(new_registry);
+            station_registry.set(new_registry);
 
-                if import_count > 0 {
-                    tracing::info!("Imported {} external radio registries", import_count);
-                }
+            if import_count > 0 {
+                tracing::info!("Imported {} external radio registries", import_count);
             }
-            .instrument(tracing::info_span!("radio.registry_load")),
-        );
+        });
     });
 
     let mut selected_album_id = use_signal(String::new);
@@ -1436,9 +700,7 @@ fn App() -> Element {
     let current_queue_index = use_signal(|| 0usize);
 
     let mut network_banner: Signal<Option<bool>> = use_signal(|| None);
-    #[cfg(not(target_arch = "wasm32"))]
-    let mut update_banner: Signal<Option<AvailableUpdate>> = use_signal(|| None);
-    #[cfg(not(target_arch = "wasm32"))]
+    let mut update_banner: Signal<Option<updates::AvailableUpdate>> = use_signal(|| None);
     let mut did_check_updates = use_signal(|| false);
     let mut ctrl = hooks::use_player_controller(
         player,
@@ -1497,7 +759,6 @@ fn App() -> Element {
         }
     });
 
-    #[cfg(not(target_arch = "wasm32"))]
     use_effect(move || {
         if !*initial_load_done.read() {
             return;
@@ -1518,7 +779,7 @@ fn App() -> Element {
         did_check_updates.set(true);
         spawn(
             async move {
-                if let Some(update) = fetch_available_update().await {
+                if let Some(update) = updates::fetch_available().await {
                     update_banner.set(Some(update));
                 }
             }
@@ -1585,9 +846,7 @@ fn App() -> Element {
     // re-runs cheap, but only spawns a new loop when the identity
     // changes (sign-in, account switch). Sign-out clears the
     // identity and the running loop exits on its next tick.
-    #[cfg(not(target_arch = "wasm32"))]
     let mut yt_keepalive_identity = use_signal(|| None::<String>);
-    #[cfg(not(target_arch = "wasm32"))]
     use_effect(move || {
         if !*initial_load_done.read() {
             return;
@@ -1614,20 +873,18 @@ fn App() -> Element {
             return;
         };
         spawn(async move {
-            run_rotation(config).await;
+            updates::run_rotation(config).await;
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(300)).await;
                 if yt_keepalive_identity.peek().as_deref() != Some(my_identity.as_str()) {
                     return;
                 }
-                run_rotation(config).await;
+                updates::run_rotation(config).await;
             }
         });
     });
 
-    #[cfg(not(target_arch = "wasm32"))]
     let mut spotify_refresh_identity = use_signal(|| None::<String>);
-    #[cfg(not(target_arch = "wasm32"))]
     use_effect(move || {
         if !*initial_load_done.read() {
             return;
@@ -1651,22 +908,19 @@ fn App() -> Element {
                 if spotify_refresh_identity.peek().as_deref() != Some(my_identity.as_str()) {
                     return;
                 }
-                run_spotify_refresh(config).await;
+                updates::run_spotify_refresh(config).await;
             }
         });
     });
 
-    #[cfg(all(
-        not(target_arch = "wasm32"),
-        any(target_os = "linux", target_os = "windows")
-    ))]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     use_effect(move || {
         let mode = config.read().titlebar_mode;
         let win = dioxus::desktop::window();
         win.set_decorations(mode == config::TitlebarMode::System);
     });
 
-    #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
+    #[cfg(target_os = "windows")]
     use_effect(move || {
         let mode = config.read().titlebar_mode;
         let win = dioxus::desktop::window();
@@ -1678,7 +932,7 @@ fn App() -> Element {
     // Library/playlists/favorites have no save loops anymore — every mutation
     // commits as a targeted write at the call site and bumps a generation.
 
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     {
         use dioxus::desktop::trayicon::TrayIcon;
         use dioxus::desktop::{WindowCloseBehaviour, window};
@@ -1724,7 +978,7 @@ fn App() -> Element {
             move || {
                 use dioxus::desktop::trayicon::TrayIconBuilder;
                 let want_tray = config.read().minimize_to_tray;
-                let enabled = want_tray && tray_backend_available();
+                let enabled = want_tray && desktop_shell::tray_backend_available();
                 let mut warned = tray_warned.borrow_mut();
                 if want_tray && !enabled {
                     tracing::error!(
@@ -1735,7 +989,7 @@ fn App() -> Element {
                          Closing the window will quit the app instead of hiding to tray."
                     );
                     if !*warned {
-                        show_tray_missing_popup();
+                        desktop_shell::show_tray_missing_popup();
                         *warned = true;
                     }
                 } else {
@@ -1764,7 +1018,7 @@ fn App() -> Element {
                             .with_tooltip("Kopuz")
                             .with_menu(Box::new(menu))
                             .with_menu_on_left_click(false);
-                        if let Some(icon) = build_tray_icon() {
+                        if let Some(icon) = desktop_shell::build_tray_icon() {
                             builder = builder.with_icon(icon);
                         }
                         match builder.build() {
@@ -1788,7 +1042,7 @@ fn App() -> Element {
         let shuffle_order_snapshot = ctrl.shuffle_order.read().clone();
         let shuffle_enabled_snapshot = *ctrl.shuffle.read();
 
-        let queue_state = build_queue_state_snapshot(
+        let queue_state = queue_state::build_snapshot(
             &queue_snapshot,
             *current_queue_index.read(),
             *current_song_progress.read(),
@@ -1817,7 +1071,7 @@ fn App() -> Element {
                 }
 
                 utils::sleep(std::time::Duration::from_millis(
-                    QUEUE_STATE_SAVE_DEBOUNCE_MS,
+                    queue_state::SAVE_DEBOUNCE_MS,
                 ))
                 .await;
 
@@ -1827,7 +1081,7 @@ fn App() -> Element {
                 }
 
                 let snapshot = pending_queue_state_snapshot.read().clone();
-                persist_queue_state_snapshot(db.clone(), snapshot)
+                queue_state::persist_snapshot(db.clone(), snapshot)
                     .instrument(tracing::info_span!("queue.persist"))
                     .await;
                 flushed_revision = latest_revision;
@@ -1835,78 +1089,10 @@ fn App() -> Element {
         }
     });
 
-    let mut is_offline = use_signal(|| false);
-    use_context_provider(|| is_offline);
-
-    // Global connectivity probe — a source-agnostic "is there internet" check,
-    // NOT tied to any media server (pinging a Jellyfin endpoint says nothing
-    // about the internet and is meaningless for other services). Hits a neutral
-    // host (Cloudflare 1.1.1.1); any response = online, a connect/DNS/timeout
-    // error = offline. Debounced (2 misses before flipping) and only while a
-    // server is configured — a pure-local setup needs no network. This only
-    // SETS `is_offline`; nothing auto-switches the source (offline mode is gone,
-    // Local is the default). Per-server reachability (server down but internet
-    // up) is surfaced separately by the operations that actually fail.
-    #[cfg(not(target_arch = "wasm32"))]
-    use_future(move || async move {
-        let Ok(client) = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(5))
-            .build()
-        else {
-            return;
-        };
-        let mut misses: u8 = 0;
-        loop {
-            if config.peek().server.is_none() {
-                if *is_offline.peek() {
-                    is_offline.set(false);
-                }
-                misses = 0;
-                utils::sleep(std::time::Duration::from_secs(30)).await;
-                continue;
-            }
-            let online = client
-                .get("https://1.1.1.1")
-                .send()
-                .instrument(tracing::info_span!("net.connectivity"))
-                .await
-                .is_ok();
-            if online {
-                misses = 0;
-                if *is_offline.peek() {
-                    is_offline.set(false);
-                }
-            } else {
-                misses = misses.saturating_add(1);
-                if misses >= 2 && !*is_offline.peek() {
-                    is_offline.set(true);
-                }
-            }
-            // Re-check sooner while offline so recovery is noticed quickly.
-            let secs = if *is_offline.peek() { 10 } else { 30 };
-            utils::sleep(std::time::Duration::from_secs(secs)).await;
-        }
-    });
-
-    // The connectivity banner mirrors the global `is_offline` state.
-    #[cfg(not(target_arch = "wasm32"))]
-    use_effect(move || {
-        if *is_offline.read() {
-            network_banner.set(Some(true));
-        } else if network_banner.peek().as_ref() == Some(&true) {
-            network_banner.set(Some(false));
-            spawn(async move {
-                utils::sleep(std::time::Duration::from_secs(4)).await;
-                if network_banner.read().as_ref() == Some(&false) {
-                    network_banner.set(None);
-                }
-            });
-        }
-    });
+    let _is_offline = app_lifecycle::use_connectivity_probe(config, network_banner);
 
     let db_for_load = db.clone();
     use_hook(move || {
-        #[cfg(not(target_arch = "wasm32"))]
         {
             let db = db_for_load;
             let mut ctrl = ctrl;
@@ -1950,7 +1136,7 @@ fn App() -> Element {
                 // the user picks a server explicitly via the sidebar.
 
                 if let Some(snap) = queue_loaded
-                    && let Some(queue_state) = sanitize_queue_state(PersistedQueueState {
+                    && let Some(queue_state) = queue_state::sanitize(PersistedQueueState {
                         version: snap.version,
                         queue: snap.queue,
                         current_queue_index: snap.current_queue_index,
@@ -1974,14 +1160,6 @@ fn App() -> Element {
                 // multi-minute interval.
                 hooks::use_sync_task::nudge_activate();
             }.instrument(tracing::info_span!("startup.load")));
-        }
-        // wasm: the stub Db yields defaults (web is not a shipped target); just
-        // unblock the save effects.
-        #[cfg(target_arch = "wasm32")]
-        {
-            // Local is the default source; no auto-switch to a server.
-            config_loaded_ok.set(true);
-            initial_load_done.set(true);
         }
     });
 
@@ -2027,7 +1205,6 @@ fn App() -> Element {
 
         let db_scan = db_for_rescan.clone();
         let gens_scan = gens_for_albums;
-        #[cfg(not(target_arch = "wasm32"))]
         spawn(async move {
             let db = db_scan;
             let gens = gens_scan;
@@ -2186,7 +1363,10 @@ fn App() -> Element {
                         let missing_before: std::collections::HashSet<String> = lib
                             .albums
                             .iter()
-                            .filter(|a| a.cover_path.is_none() && !a.manual_cover)
+                            .filter(|a| {
+                                a.cover_path.as_ref().is_none_or(|p| !p.exists())
+                                    && !a.manual_cover
+                            })
                             .map(|a| a.id.clone())
                             .collect();
                         let report = fetcher.fetch_missing_covers(&mut lib).await;
@@ -2228,6 +1408,84 @@ fn App() -> Element {
                 gens.bump(hooks::db_reactivity::Table::Albums);
             }
         }.instrument(tracing::info_span!("library.rescan")));
+    });
+
+    // Force re-extraction of local covers (embedded art, then folder art) for
+    // any album whose cached cover file is missing. No online fetch — this is
+    // the "force rescan photos" action and is independent of auto_fetch_covers.
+    let db_for_reextract = db.clone();
+    let mut cover_reextract_in_flight = use_signal(|| false);
+    use_effect(move || {
+        if !*initial_load_done.read() || !*config_loaded_ok.read() {
+            return;
+        }
+        if *trigger_cover_reextract.read() == 0 {
+            return;
+        }
+        let db = db_for_reextract.clone();
+        let gens = gens_for_albums;
+        if *cover_reextract_in_flight.peek() {
+            return;
+        }
+        cover_reextract_in_flight.set(true);
+        let cover_cache_dir = cover_cache();
+        spawn(
+            async move {
+                let albums = match db.albums(&db::Source::Local).await {
+                    Ok(a) => a,
+                    Err(e) => {
+                        tracing::error!(error = %e, "cover re-extract: album query failed");
+                        return;
+                    }
+                };
+                let mut changed = 0u32;
+                for album in &albums {
+                    // Manual covers are user-set; a present file needs nothing.
+                    if album.manual_cover || album.cover_path.as_ref().is_some_and(|p| p.exists()) {
+                        continue;
+                    }
+                    let tracks = match db.album_tracks(&db::Source::Local, &album.id).await {
+                        Ok(t) => t,
+                        Err(_) => continue,
+                    };
+                    let mut new_cover: Option<std::path::PathBuf> = None;
+                    for track in &tracks {
+                        let Some(path) = track.id.local_path() else {
+                            continue;
+                        };
+                        // Embedded art first, then a folder image beside the track.
+                        if let Some((data, _mime)) = reader::read_cover(path)
+                            && let Ok(saved) =
+                                reader::utils::save_cover(&album.id, &data, None, &cover_cache_dir)
+                        {
+                            new_cover = Some(saved);
+                            break;
+                        }
+                        if let Some(folder) =
+                            path.parent().and_then(reader::utils::find_folder_cover)
+                        {
+                            new_cover = Some(folder);
+                            break;
+                        }
+                    }
+                    if let Some(cover) = new_cover {
+                        let p = cover.to_string_lossy().into_owned();
+                        if db
+                            .update_album_cover(&db::Source::Local, &album.id, Some(&p), false)
+                            .await
+                            .is_ok()
+                        {
+                            changed += 1;
+                        }
+                    }
+                }
+                if changed > 0 {
+                    gens.bump(hooks::db_reactivity::Table::Albums);
+                }
+                tracing::info!(updated = changed, "cover re-extract: complete");
+            }
+            .instrument(tracing::info_span!("library.cover_reextract")),
+        );
     });
 
     use_effect(move || {
@@ -2288,12 +1546,47 @@ fn App() -> Element {
     provide_context(scroll_positions);
     provide_context(components::source_switcher::SettingsAnchor(settings_anchor));
     provide_context(fetched_artist_images);
-    provide_context(components::NavigationController {
+    let mut nav_history = use_signal(Vec::<components::NavSnapshot>::new);
+    let mut nav_restoring = use_signal(|| false);
+    let mut nav_last = use_signal(|| None::<components::NavSnapshot>);
+    use_effect(move || {
+        let snap = components::NavSnapshot {
+            route: *current_route.read(),
+            album_id: selected_album_id.read().clone(),
+            artist_name: selected_artist_name.read().clone(),
+            artist_channel_id: selected_artist_channel_id.read().clone(),
+            playlist_id: selected_playlist_id.read().clone(),
+            discover_playlist_id: discover_selected_playlist_id.read().clone(),
+            discover_playlist_title: discover_selected_playlist_title.read().clone(),
+        };
+        if *nav_restoring.peek() {
+            nav_restoring.set(false);
+            nav_last.set(Some(snap));
+            return;
+        }
+        let prev = nav_last.peek().clone();
+        match prev {
+            Some(prev) if prev != snap => {
+                nav_history.write().push(prev);
+                nav_last.set(Some(snap));
+            }
+            None => nav_last.set(Some(snap)),
+            _ => {}
+        }
+    });
+
+    let nav_ctrl = components::NavigationController {
         current_route,
         selected_artist_name,
         selected_artist_channel_id,
         selected_album_id,
-    });
+        selected_playlist_id,
+        discover_playlist_id: discover_selected_playlist_id,
+        discover_playlist_title: discover_selected_playlist_title,
+        history: nav_history,
+        restoring: nav_restoring,
+    };
+    provide_context(nav_ctrl);
 
     // Sidebar collapse state. On Android the sidebar is an overlay drawer that
     // starts collapsed and is toggled by the mobile header hamburger; the
@@ -2302,7 +1595,7 @@ fn App() -> Element {
     use_context_provider(|| components::sidebar::SidebarCollapsed(is_sidebar_collapsed));
 
     use_context_provider(|| components::CompactMode(compact_mode));
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     {
         let mut saved_window_size = use_signal(|| None::<LogicalSize<f64>>);
         use_effect(move || {
@@ -2373,7 +1666,6 @@ fn App() -> Element {
     let is_rtl = i18n::is_rtl();
     let dir = if is_rtl { "rtl" } else { "ltr" };
     let content_row_class = "flex flex-1 overflow-hidden";
-    #[cfg(not(target_arch = "wasm32"))]
     let update_banner_state = update_banner.read().clone();
 
     let background_style = use_memo(move || {
@@ -2386,27 +1678,12 @@ fn App() -> Element {
 
     let reduce_animations = use_memo(move || config.read().reduce_animations);
     let active_source = use_memo(move || config.read().active_source.clone());
+    let switch_source = hooks::source_switch::use_switch_source();
 
     rsx! {
-        document::Link { rel: "icon", href: FAVICON }
-        document::Link { rel: "stylesheet", href: MAIN_CSS }
-        document::Link { rel: "stylesheet", href: THEME_CSS }
-        document::Link { rel: "stylesheet", href: TAILWIND_CSS }
-        document::Link { rel: "stylesheet", href: REDUCED_ANIMATIONS_CSS }
+        // we use this component here to prevent re-diffing to prevent warns in console
+        StaticHeadAssets {}
         WindowsToolbarIconAssets {}
-        // Font stylesheets injected declaratively rather than via a
-        // document::Script: a Script is processed once but App re-renders
-        // on every signal change, and dioxus_document warns "Changing the
-        // props of Script {} is not supported" each time. Links are
-        // re-render-safe and do the same job (and load a touch earlier).
-        document::Link {
-            rel: "stylesheet",
-            href: "https://fonts.bunny.net/css?family=jetbrains-mono:400,500,700,800&display=swap",
-        }
-        document::Link {
-            rel: "stylesheet",
-            href: "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css",
-        }
 
         div {
             class: "flex flex-col h-screen text-white select-none overflow-x-hidden {theme_class}",
@@ -2521,7 +1798,7 @@ fn App() -> Element {
                                     onclick: move |_| {
                                         let target = config.peek().server_toggle_target();
                                         if let Some(s) = target {
-                                            config.write().active_source = s;
+                                            switch_source(s);
                                         }
                                         network_banner.set(None);
                                     },
@@ -2538,16 +1815,7 @@ fn App() -> Element {
                 }
             }
 
-            if let Some(update) = {
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    update_banner_state.clone()
-                }
-                #[cfg(target_arch = "wasm32")]
-                {
-                    None
-                }
-            } {
+            if let Some(update) = update_banner_state.clone() {
                 div {
                     class: "flex-shrink-0",
                     div {
@@ -2563,7 +1831,7 @@ fn App() -> Element {
                                     onclick: {
                                         let release_url = update.release_url.clone();
                                         move |_| {
-                                            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+                                            #[cfg(not(target_os = "android"))]
                                             if let Err(e) = webbrowser::open(&release_url) {
                                                 tracing::error!("Failed to open release page: {}", e);
                                             }
@@ -2666,17 +1934,7 @@ fn App() -> Element {
                                     if is_details {
                                         button {
                                             class: "w-10 h-10 flex items-center justify-center rounded-xl bg-white/5 text-white active:scale-95 transition-all border border-white/10",
-                                            onclick: move |_| {
-                                                match *current_route.peek() {
-                                                    Route::Album => selected_album_id.set(String::new()),
-                                                    Route::Artist => {
-                                                        selected_artist_name.set(String::new());
-                                                        selected_artist_channel_id.set(None);
-                                                    }
-                                                    Route::Playlists => selected_playlist_id.set(None),
-                                                    _ => {}
-                                                }
-                                            },
+                                            onclick: move |_| nav_ctrl.go_back(),
                                             i { class: "fa-solid fa-arrow-left text-lg" }
                                         }
                                     } else {
@@ -2770,13 +2028,7 @@ fn App() -> Element {
                             pages::server::discover::DiscoverPlaylistDetail {
                                 selected_playlist_id: discover_selected_playlist_id,
                                 selected_playlist_title: discover_selected_playlist_title,
-                                on_back: move |_| {
-                                    // Mirror DiscoverArtist: clear id so
-                                    // re-opening the same playlist refetches.
-                                    discover_selected_playlist_id.set(None);
-                                    discover_selected_playlist_title.set(None);
-                                    current_route.set(Route::Discover);
-                                },
+                                on_back: move |_| nav_ctrl.go_back(),
                             }
                         },
                         Route::Search => rsx! {
@@ -2824,10 +2076,8 @@ fn App() -> Element {
                             }
                         },
                         Route::Artist => {
-                            // YT Music gets the rich YT-backed profile (banner,
-                            // top songs, albums, related) ONLY when an artist
-                            // is actually selected. The Artists sidebar tab /
-                            // back-to-list navigation lands with both signals
+                            // YT Music gets the rich YT-backed profile (banner, top songs, albums, related) ONLY when an artist is actually selected. The Artists sidebar tab / back-to-list navigation
+                            //  lands with both signals
                             // cleared — fall through to the library-driven
                             // grid in that case (populated on YT from followed
                             // artists + liked-song artists by the library
@@ -2846,12 +2096,7 @@ fn App() -> Element {
                                     pages::server::discover::DiscoverArtistPage {
                                         selected_artist_id: selected_artist_channel_id,
                                         selected_artist_name: selected_artist_name,
-                                        on_back: move |_| {
-                                            // Empty selection on Route::Artist renders the grid.
-                                            selected_artist_name.set(String::new());
-                                            selected_artist_channel_id.set(None);
-                                            current_route.set(Route::Artist);
-                                        },
+                                        on_back: move |_| nav_ctrl.go_back(),
                                         on_select_album: move |id: String| {
                                             selected_album_id.set(id);
                                             current_route.set(Route::Album);
@@ -2925,10 +2170,8 @@ fn App() -> Element {
                                 config: config,
                             }
                         },
-                        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+                        #[cfg(not(target_os = "android"))]
                         Route::Ytdlp => rsx! { pages::ytdlp::YtdlpPage { config } },
-                        #[cfg(target_arch = "wasm32")]
-                        Route::Ytdlp => rsx! { pages::settings::Settings { config } },
                         Route::Settings => rsx! { pages::settings::Settings { config } },
                         #[cfg(not(target_os = "android"))]
                         Route::ThemeEditor => rsx! { pages::theme_editor::ThemeEditorPage { config } },

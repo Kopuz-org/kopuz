@@ -86,7 +86,7 @@ pub fn TrackRow(
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let mut ctrl = use_context::<PlayerController>();
     let nav_ctrl = use_context::<NavigationController>();
-    let is_modern = config.read().ui_style == UiStyle::Modern;
+    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
     let show_selection_highlight = is_selection_mode && is_selected;
     let selection_shadow = if show_selection_highlight {
         "inset 0 0 0 9999px rgba(255,255,255,0.07)"
@@ -112,9 +112,9 @@ pub fn TrackRow(
     let share_text = i18n::t("share_musicbrainz").to_string();
     let view_metadata_text = i18n::t("view_metadata").to_string();
 
-    // The track to share, cloned once per layout closure (modern / normal) since
+    // The track to share, cloned once per layout closure (vaxry / normal) since
     // each moves it in; `share_track` picks the link form from the source.
-    let share_track_modern = track.clone();
+    let share_track_vaxry = track.clone();
     let share_track_normal = track.clone();
 
     let mut actions = Vec::new();
@@ -257,20 +257,20 @@ pub fn TrackRow(
         })
         .map(|e| e.to_uppercase());
 
-    let columns_modern = if is_album {
-        COLUMNS_MODERN_ALBUM
+    let columns_vaxry = if is_album {
+        COLUMNS_VAXRY_ALBUM
     } else {
-        COLUMNS_MODERN
+        COLUMNS_VAXRY
     };
 
-    if is_modern {
+    if is_vaxry {
         return rsx! {
             div {
                 class: "track-row-draggable grid px-2 py-1.5 rounded-lg mx-1 group cursor-grab active:cursor-grabbing transition-colors hover:bg-white/5 select-none",
                 style: if is_currently_playing {
-                    format!("grid-template-columns: {columns_modern}; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent); box-shadow: {selection_shadow};")
+                    format!("grid-template-columns: {columns_vaxry}; background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent); box-shadow: {selection_shadow};")
                 } else {
-                    format!("grid-template-columns: {columns_modern}; box-shadow: {selection_shadow};")
+                    format!("grid-template-columns: {columns_vaxry}; box-shadow: {selection_shadow};")
                 },
                 onclick: move |evt| {
                     evt.stop_propagation();
@@ -515,7 +515,7 @@ pub fn TrackRow(
                                     if let Some(handler) = on_download { handler.call(()); }
                                 } else if idx == share_idx {
                                     let src = active_source.peek().clone();
-                                    share_track(share_track_modern.clone(), src);
+                                    share_track(share_track_vaxry.clone(), src);
                                     on_close_menu.call(());
                                 } else if mix_idx == Some(idx) {
                                     if let Some(handler) = on_start_radio {

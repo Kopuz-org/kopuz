@@ -1,22 +1,26 @@
 [package]
-name = "components"
+name = "kopuz-components"
 version.workspace = true
-edition = "2024"
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+
+[lib]
+name = "components"
 
 [lints]
 workspace = true
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+[dependencies]
 dioxus = { workspace = true, features = ["desktop"] }
 directories = { workspace = true }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-dioxus = { workspace = true, features = ["web"] }
-
-[dependencies]
-webbrowser = "1.2.1"
-tracing = "0.1"
-base64 = "0.22"
+webbrowser = { workspace = true }
+tracing = { workspace = true }
+base64 = { workspace = true }
 scrobble = { workspace = true }
 uuid = { workspace = true }
 player = { workspace = true }
@@ -31,7 +35,7 @@ tokio = { workspace = true, features = ["time", "fs"] }
 serde_json = { workspace = true }
 i18n = { workspace = true }
 
-# Native file dialogs (folder/cover pickers). Not used on web, and rfd doesn't work on
-# Android (which auto-detects the music dir via JNI instead).
-[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))'.dependencies]
+# Native file dialogs (folder/cover pickers). rfd doesn't work on Android
+# (which auto-detects the music dir via JNI instead).
+[target.'cfg(not(target_os = "android"))'.dependencies]
 rfd = { workspace = true }

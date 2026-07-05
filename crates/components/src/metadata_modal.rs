@@ -14,7 +14,6 @@ fn fmt_dur(s: u64) -> String {
     format!("{}:{:02}", s / 60, s % 60)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn data_url(bytes: &[u8], mime: &str) -> String {
     use base64::Engine as _;
     let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
@@ -57,7 +56,6 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
     {
         let path = props.track.id.local_path().map(|p| p.to_path_buf());
         use_hook(move || {
-            #[cfg(not(target_arch = "wasm32"))]
             spawn(async move {
                 if let Some(p) = &path
                     && let Some((bytes, mime)) = reader::read_cover(p)
@@ -65,8 +63,6 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
                     cover_preview.set(Some(data_url(&bytes, &mime)));
                 }
             });
-            #[cfg(target_arch = "wasm32")]
-            let _ = path;
         });
     }
 
@@ -142,7 +138,7 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
     };
 
     let pick_cover = move |_| {
-        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+        #[cfg(not(target_os = "android"))]
         spawn(async move {
             let file = rfd::AsyncFileDialog::new()
                 .add_filter("Images", &["jpg", "jpeg", "png", "webp", "gif"])
@@ -232,7 +228,7 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
                 div { class: "max-h-[60vh] overflow-y-auto space-y-3",
                     if *editing.read() {
                         div { class: "flex flex-col gap-1",
-                            span { class: "text-[10px] font-bold tracking-widest uppercase text-white/35", "{title_text}" }
+                            span { class: "text-[10px] font-bold text-white/35", "{title_text}" }
                             input {
                                 class: input_class,
                                 value: "{title}",
@@ -241,7 +237,7 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
                             }
                         }
                         div { class: "flex flex-col gap-1",
-                            span { class: "text-[10px] font-bold tracking-widest uppercase text-white/35", "{artist_text}" }
+                            span { class: "text-[10px] font-bold text-white/35", "{artist_text}" }
                             input {
                                 class: input_class,
                                 value: "{artist}",
@@ -250,7 +246,7 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
                             }
                         }
                         div { class: "flex flex-col gap-1",
-                            span { class: "text-[10px] font-bold tracking-widest uppercase text-white/35", "{album_text}" }
+                            span { class: "text-[10px] font-bold text-white/35", "{album_text}" }
                             input {
                                 class: input_class,
                                 value: "{album}",
@@ -260,7 +256,7 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
                         }
                         div { class: "flex gap-3",
                             div { class: "flex flex-col gap-1 flex-1",
-                                span { class: "text-[10px] font-bold tracking-widest uppercase text-white/35", "{track_number_text}" }
+                                span { class: "text-[10px] font-bold text-white/35", "{track_number_text}" }
                                 input {
                                     r#type: "number",
                                     class: input_class,
@@ -270,7 +266,7 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
                                 }
                             }
                             div { class: "flex flex-col gap-1 flex-1",
-                                span { class: "text-[10px] font-bold tracking-widest uppercase text-white/35", "{disc_number_text}" }
+                                span { class: "text-[10px] font-bold text-white/35", "{disc_number_text}" }
                                 input {
                                     r#type: "number",
                                     class: input_class,
@@ -326,7 +322,7 @@ fn MetaRow(label: String, value: String) -> Element {
     }
     rsx! {
         div { class: "flex flex-col gap-0.5",
-            span { class: "text-[10px] font-bold tracking-widest uppercase text-white/35", "{label}" }
+            span { class: "text-[10px] font-bold text-white/35", "{label}" }
             span { class: "text-sm text-white break-all select-text", "{value}" }
         }
     }

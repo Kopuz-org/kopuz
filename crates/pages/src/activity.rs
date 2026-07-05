@@ -41,7 +41,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
             .collect::<HashMap<String, String>>()
     });
 
-    let is_modern = config.read().ui_style == UiStyle::Modern;
+    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
     let mut scroll_positions = use_context::<Signal<std::collections::HashMap<Route, f64>>>();
     let saved_scroll = scroll_positions
         .peek()
@@ -107,23 +107,23 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
     let subtitle = i18n::t("most_played_tracks");
 
     rsx! {
-        div { class: if is_modern { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
+        div { class: if is_vaxry { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
             div { class: "max-w-[1600px] mx-auto w-full shrink-0",
                 div { class: "mb-8 flex items-end justify-between",
                     div {
-                        if is_modern {
+                        if is_vaxry {
                             p {
-                                class: "text-[10px] font-bold tracking-widest uppercase mb-0.5",
+                                class: "text-[10px] font-bold mb-0.5",
                                 style: "color: rgba(255,255,255,0.35);",
                                 "{i18n::t(\"library\")}"
                             }
                         }
-                        h1 { class: if is_modern { "text-2xl font-bold text-white mb-1" } else { "text-3xl font-bold text-white mb-2" },
+                        h1 { class: if is_vaxry { "text-2xl font-bold text-white mb-1" } else { "text-3xl font-bold text-white mb-2" },
                             "{i18n::t(\"listening_logs\")}"
                         }
                         p { class: "text-slate-400 text-sm", "{subtitle}" }
                     }
-                    if !is_modern {
+                    if !is_vaxry {
                         div {
                             div { class: "w-12 h-12 rounded-full flex items-center justify-center bg-white/5 border border-white/10 text-slate-400",
                                 i { class: "fa-solid fa-chart-simple" }
@@ -132,7 +132,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
                     }
                 }
 
-                div { class: "flex items-center px-4 py-3 mb-2 text-xs font-semibold tracking-wider text-slate-400 uppercase border-b border-white/10",
+                div { class: "flex items-center px-4 py-3 mb-2 text-xs font-semibold text-slate-400 border-b border-white/10",
                     div { class: "w-12 shrink-0 text-center", "#" }
                     div { class: "flex-1 min-w-0 pr-4", "{i18n::t(\"title\")}" }
                     div { class: "w-48 lg:w-64 shrink-0 hidden md:block pr-4", "{i18n::t(\"album\")}" }
@@ -193,7 +193,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
 
                                             div { class: "flex-1 min-w-0 pr-4 flex items-center",
                                                 div {
-                                                    class: if is_modern { "w-8 h-8 bg-white/5 rounded-md flex items-center justify-center mr-4 shrink-0 text-slate-500 group-hover:text-slate-300 transition-colors overflow-hidden" } else { "w-10 h-10 bg-white/5 rounded-md flex items-center justify-center mr-4 shrink-0 text-slate-500 group-hover:text-slate-300 transition-colors overflow-hidden" },
+                                                    class: if is_vaxry { "w-8 h-8 bg-white/5 rounded-md flex items-center justify-center mr-4 shrink-0 text-slate-500 group-hover:text-slate-300 transition-colors overflow-hidden" } else { "w-10 h-10 bg-white/5 rounded-md flex items-center justify-center mr-4 shrink-0 text-slate-500 group-hover:text-slate-300 transition-colors overflow-hidden" },
                                                     if let Some(url) = cover_url {
                                                         img { src: "{url.as_ref()}", class: "w-full h-full object-cover", decoding: "async", loading: "lazy" }
                                                     } else {
@@ -202,11 +202,11 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
                                                 }
                                                 div { class: "flex-1 min-w-0",
                                                     div {
-                                                        class: if is_modern { "text-white font-medium truncate text-sm" } else { "text-white font-medium truncate text-[15px] mb-0.5" },
+                                                        class: if is_vaxry { "text-white font-medium truncate text-sm" } else { "text-white font-medium truncate text-[15px] mb-0.5" },
                                                         "{track.title}"
                                                     }
                                                     div {
-                                                        class: if is_modern { "text-slate-400 text-xs truncate group-hover:text-slate-300 transition-colors" } else { "text-slate-400 text-sm truncate group-hover:text-slate-300 transition-colors" },
+                                                        class: if is_vaxry { "text-slate-400 text-xs truncate group-hover:text-slate-300 transition-colors" } else { "text-slate-400 text-sm truncate group-hover:text-slate-300 transition-colors" },
                                                         "{track.artist}"
                                                     }
                                                 }

@@ -303,10 +303,10 @@ pub fn LibraryPage(
             .collect::<Vec<_>>()
     };
 
-    let is_modern = config.read().ui_style == UiStyle::Modern;
+    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
     rsx! {
         div {
-            class: if cfg!(target_os = "android") { "px-3 pt-3 absolute inset-0 flex flex-col overflow-x-hidden" } else if is_modern { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
+            class: if cfg!(target_os = "android") { "px-3 pt-3 absolute inset-0 flex flex-col overflow-x-hidden" } else if is_vaxry { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "px-8 pt-8 absolute inset-0 flex flex-col" },
 
             if *show_playlist_modal.read() {
                 PlaylistModal {
@@ -461,10 +461,10 @@ pub fn LibraryPage(
 
             div {
                 class: "flex items-center justify-between mb-6",
-                if is_modern {
+                if is_vaxry {
                     div {
                         p {
-                            class: "text-[10px] font-bold tracking-widest uppercase mb-0.5 text-white/35",
+                            class: "text-[10px] font-bold mb-0.5 text-white/35",
                             "{i18n::t(\"library\")}"
                         }
                         h1 { class: "text-2xl font-bold text-white", "{i18n::t(\"your_library\")}" }
@@ -579,7 +579,7 @@ pub fn LibraryPage(
                     }
                 }
             }
-            Header { is_modern: is_modern, is_album: false }
+            Header { is_vaxry: is_vaxry, is_album: false }
             VirtualScrollView {
                 id: "library-scroll".to_string(),
                 class: if cfg!(target_os = "android") { "flex-1 overflow-y-auto overflow-x-hidden pb-20".to_string() } else { "flex-1 overflow-y-auto pb-20".to_string() },

@@ -15,6 +15,7 @@ use db::{Page, ReadDb, Source, TrackFilter};
 use dioxus::prelude::*;
 use server::source::TrackFavorite;
 use tracing::Instrument;
+use utils::offload;
 
 use crate::db_reactivity::{Table, use_generations};
 
@@ -54,15 +55,17 @@ pub fn use_tracks_window(filter: Memo<TrackFilter>, page: Memo<Page>) -> TracksW
                 limit = p.limit,
                 rows = tracing::field::Empty,
             );
-            async move {
-                let rows = db.tracks_page(&f, p).await.unwrap_or_default();
-                tracing::Span::current().record("rows", rows.len());
-                WindowRows {
-                    offset: p.offset,
-                    rows,
+            offload(
+                async move {
+                    let rows = db.tracks_page(&f, p).await.unwrap_or_default();
+                    tracing::Span::current().record("rows", rows.len());
+                    WindowRows {
+                        offset: p.offset,
+                        rows,
+                    }
                 }
-            }
-            .instrument(span)
+                .instrument(span),
+            )
         }
     });
 
@@ -72,12 +75,14 @@ pub fn use_tracks_window(filter: Memo<TrackFilter>, page: Memo<Page>) -> TracksW
             let _ = gens.generation(Table::Tracks);
             let (db, f) = (db.clone(), filter());
             let span = tracing::info_span!("query.tracks_count", filter = ?f, total = tracing::field::Empty);
-            async move {
-                let total = db.tracks_count(&f).await.unwrap_or(0);
-                tracing::Span::current().record("total", total);
-                total
-            }
-            .instrument(span)
+            offload(
+                async move {
+                    let total = db.tracks_count(&f).await.unwrap_or(0);
+                    tracing::Span::current().record("total", total);
+                    total
+                }
+                .instrument(span),
+            )
         }
     });
 
@@ -101,16 +106,18 @@ pub fn use_album_tracks(
             album_id = %id,
             rows = tracing::field::Empty,
         );
-        async move {
-            if id.is_empty() {
-                tracing::Span::current().record("rows", 0);
-                return Vec::new();
+        offload(
+            async move {
+                if id.is_empty() {
+                    tracing::Span::current().record("rows", 0);
+                    return Vec::new();
+                }
+                let rows = db.album_tracks(&s, &id).await.unwrap_or_default();
+                tracing::Span::current().record("rows", rows.len());
+                rows
             }
-            let rows = db.album_tracks(&s, &id).await.unwrap_or_default();
-            tracing::Span::current().record("rows", rows.len());
-            rows
-        }
-        .instrument(span)
+            .instrument(span),
+        )
     })
 }
 
@@ -130,12 +137,14 @@ pub fn use_artist_tracks(
             artist = %a,
             rows = tracing::field::Empty,
         );
-        async move {
-            let rows = db.artist_tracks(&s, &a).await.unwrap_or_default();
-            tracing::Span::current().record("rows", rows.len());
-            rows
-        }
-        .instrument(span)
+        offload(
+            async move {
+                let rows = db.artist_tracks(&s, &a).await.unwrap_or_default();
+                tracing::Span::current().record("rows", rows.len());
+                rows
+            }
+            .instrument(span),
+        )
     })
 }
 
@@ -153,16 +162,18 @@ pub fn use_genre_tracks(source: Memo<Source>, genre: Memo<String>) -> Resource<V
             genre = %g,
             rows = tracing::field::Empty,
         );
-        async move {
-            if g.is_empty() {
-                tracing::Span::current().record("rows", 0);
-                return Vec::new();
+        offload(
+            async move {
+                if g.is_empty() {
+                    tracing::Span::current().record("rows", 0);
+                    return Vec::new();
+                }
+                let rows = db.genre_tracks(&s, &g).await.unwrap_or_default();
+                tracing::Span::current().record("rows", rows.len());
+                rows
             }
-            let rows = db.genre_tracks(&s, &g).await.unwrap_or_default();
-            tracing::Span::current().record("rows", rows.len());
-            rows
-        }
-        .instrument(span)
+            .instrument(span),
+        )
     })
 }
 
@@ -179,12 +190,14 @@ pub fn use_artist_sample_tracks(source: Memo<Source>, limit: u32) -> Resource<Ve
             limit,
             rows = tracing::field::Empty,
         );
-        async move {
-            let rows = db.artist_sample_tracks(&s, limit).await.unwrap_or_default();
-            tracing::Span::current().record("rows", rows.len());
-            rows
-        }
-        .instrument(span)
+        offload(
+            async move {
+                let rows = db.artist_sample_tracks(&s, limit).await.unwrap_or_default();
+                tracing::Span::current().record("rows", rows.len());
+                rows
+            }
+            .instrument(span),
+        )
     })
 }
 
@@ -196,7 +209,7 @@ pub fn use_top_genre(source: Memo<Source>) -> Resource<Option<String>> {
         let _ = gens.generation(Table::Tracks);
         let (db, s) = (db.clone(), source());
         let span = tracing::info_span!("query.top_genre", source = s.as_str());
-        async move { db.top_genre(&s).await.unwrap_or_default() }.instrument(span)
+        offload(async move { db.top_genre(&s).await.unwrap_or_default() }.instrument(span))
     })
 }
 
@@ -216,16 +229,18 @@ pub fn use_tracks_by_keys(
             keys = k.len(),
             rows = tracing::field::Empty,
         );
-        async move {
-            if k.is_empty() {
-                tracing::Span::current().record("rows", 0);
-                return Vec::new();
+        offload(
+            async move {
+                if k.is_empty() {
+                    tracing::Span::current().record("rows", 0);
+                    return Vec::new();
+                }
+                let rows = db.tracks_by_keys(&s, &k).await.unwrap_or_default();
+                tracing::Span::current().record("rows", rows.len());
+                rows
             }
-            let rows = db.tracks_by_keys(&s, &k).await.unwrap_or_default();
-            tracing::Span::current().record("rows", rows.len());
-            rows
-        }
-        .instrument(span)
+            .instrument(span),
+        )
     })
 }
 
@@ -238,14 +253,16 @@ pub fn use_recently_played(source: Memo<Source>) -> Resource<Vec<reader::Track>>
         let _ = gens.generation(Table::Recents);
         let (db, s) = (db.clone(), source());
         let span = tracing::info_span!("query.recently_played", source = s.as_str());
-        async move {
-            let keys = db.recently_played(&s, 50).await.unwrap_or_default();
-            if keys.is_empty() {
-                return Vec::new();
+        offload(
+            async move {
+                let keys = db.recently_played(&s, 50).await.unwrap_or_default();
+                if keys.is_empty() {
+                    return Vec::new();
+                }
+                db.tracks_by_keys(&s, &keys).await.unwrap_or_default()
             }
-            db.tracks_by_keys(&s, &keys).await.unwrap_or_default()
-        }
-        .instrument(span)
+            .instrument(span),
+        )
     })
 }
 
@@ -257,7 +274,7 @@ pub fn use_album(source: Memo<Source>, album_id: Memo<String>) -> Resource<Optio
         let _ = gens.generation(Table::Albums);
         let (db, s, id) = (db.clone(), source(), album_id());
         let span = tracing::info_span!("query.album", source = s.as_str(), album_id = %id);
-        async move { db.album(&s, &id).await.unwrap_or_default() }.instrument(span)
+        offload(async move { db.album(&s, &id).await.unwrap_or_default() }.instrument(span))
     })
 }
 
@@ -273,12 +290,14 @@ pub fn use_artists(source: Memo<Source>) -> Resource<Vec<(String, u32)>> {
             source = s.as_str(),
             rows = tracing::field::Empty
         );
-        async move {
-            let rows = db.artists(&s).await.unwrap_or_default();
-            tracing::Span::current().record("rows", rows.len());
-            rows
-        }
-        .instrument(span)
+        offload(
+            async move {
+                let rows = db.artists(&s).await.unwrap_or_default();
+                tracing::Span::current().record("rows", rows.len());
+                rows
+            }
+            .instrument(span),
+        )
     })
 }
 
@@ -300,7 +319,7 @@ pub fn use_playlists() -> Resource<reader::PlaylistStore> {
         let _ = gens.generation(Table::Folders);
         let (db, src) = (db.clone(), source());
         let span = tracing::info_span!("query.playlists", source = %src.as_str());
-        async move { db.load_playlists(&src).await.unwrap_or_default() }.instrument(span)
+        offload(async move { db.load_playlists(&src).await.unwrap_or_default() }.instrument(span))
     })
 }
 
@@ -312,7 +331,7 @@ pub fn use_artist_images() -> Resource<db::ArtistImages> {
         let _ = gens.generation(Table::Tracks);
         let db = db.clone();
         let span = tracing::info_span!("query.artist_images");
-        async move { db.artist_images().await.unwrap_or_default() }.instrument(span)
+        offload(async move { db.artist_images().await.unwrap_or_default() }.instrument(span))
     })
 }
 
@@ -328,12 +347,14 @@ pub fn use_albums(source: Memo<Source>) -> Resource<Vec<reader::Album>> {
             source = s.as_str(),
             rows = tracing::field::Empty
         );
-        async move {
-            let rows = db.albums(&s).await.unwrap_or_default();
-            tracing::Span::current().record("rows", rows.len());
-            rows
-        }
-        .instrument(span)
+        offload(
+            async move {
+                let rows = db.albums(&s).await.unwrap_or_default();
+                tracing::Span::current().record("rows", rows.len());
+                rows
+            }
+            .instrument(span),
+        )
     })
 }
 
@@ -356,7 +377,7 @@ pub fn use_favorites() -> Resource<Vec<String>> {
     use_resource(move || {
         let _ = gens.generation(Table::Favorites);
         let source = active_source.read().clone();
-        async move { source.favorites().await.unwrap_or_default() }
+        offload(async move { source.favorites().await.unwrap_or_default() })
     })
 }
 
@@ -374,12 +395,12 @@ pub fn use_track_is_favorite(track: Memo<Option<reader::Track>>) -> Memo<bool> {
         let _ = gens.generation(Table::Favorites);
         let source = active_source.read().clone();
         let track = track();
-        async move {
+        offload(async move {
             match track {
                 Some(t) => t.is_favorite(&source).await,
                 None => false,
             }
-        }
+        })
     });
     use_memo(move || res.read().unwrap_or(false))
 }

@@ -12,7 +12,7 @@
   </a>
   <img src="https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white" alt="Rust">
   <img src="https://github.com/Kopuz-org/kopuz/actions/workflows/build.yml/badge.svg" alt="Build">
-  <img src="https://github.com/user-attachments/assets/b7322455-d407-4f42-ae43-8a83fbb8f74f" alt="Kopuz">
+  <img src="https://github.com/user-attachments/assets/3234bb1b-6702-4802-946a-32f46e63d225" alt="Kopuz">
 
 <br/>
   <br/>
@@ -75,7 +75,7 @@ próprias credenciais e os seus próprios favoritos.
 - **YouTube Music**: Backend de streaming completo com uma página **Descobrir** no estilo do Spotify (músicas recomendadas, playlists, álbuns, artistas e ambientes), perfis ricos de informação sobre os **artistas**
   (banner, melhores músicas, álbuns, singles, artistas relacionados),
   navegação por álbuns/playlists, e **rádio de mistura** ("iniciar rádio" a partir de qualquer faixa).
-  Inicie sessão com a sua conta para a sua biblioteca, Músicas Gostadas e playlists — ou
+  Inicie sessão com a sua conta para a sua biblioteca, Músicas Gostadas e playlists - ou
   execute-o **anonimamente** (sem iniciar sessão) para navegar, pesquisar e reproduzir faixas públicas. Veja [Configuração do YouTube Music](#configuração-do-youtube-music).
 - **SoundCloud**: Backend de streaming com pesquisa, reprodução de faixas (MP3 progressivo
   e Go+ AAC/HLS), as suas **faixas gostadas** como favoritos, playlists só de leitura, e
@@ -126,6 +126,14 @@ próprias credenciais e os seus próprios favoritos.
   apareça em branco.
 
 ## Instalação
+
+### Cargo (crates.io)
+
+Instale diretamente com o Cargo:
+
+```bash
+cargo install kopuz
+```
 
 ### NixOS / Nix
 
@@ -183,17 +191,10 @@ in {
 Instale a partir do AUR usando o seu ajudante preferido:
 
 ```bash
-yay -S kopuz
+yay -S kopuz-bin
 # or
-paru -S kopuz
+paru -S kopuz-bin
 ```
-
-> **Nota:** `dioxus-cli` deve ser instalado primeiro na versão correspondente ao
-> dioxus 0.7.x:
->
-> ```bash
-> cargo install dioxus-cli --version "^0.7"
-> ```
 
 ### Flatpak (Recomendado)
 
@@ -268,7 +269,7 @@ dentro do ambiente de desenvolvimento.
 > O ícone da bandeja do sistema (usado por **minimizar para a bandeja**) requer
 > a biblioteca **appindicator** em tempo de execução. Está incluída nas
 > dependências do pacote abaixo. Sem ela o ícone da bandeja simplesmente não
-> aparece e fechar a janela sai da aplicação em vez de a ocultar — o Kopuz
+> aparece e fechar a janela sai da aplicação em vez de a ocultar - o Kopuz
 > continua a funcionar normalmente. A shell de desenvolvimento Nix já a fornece.
 
 **Sistemas Baseados em Arch Linux**
@@ -366,36 +367,23 @@ apagar a pasta de cache e clicar em pesquisar novamente.
 O Kopuz pode usar o YouTube Music como backend de streaming. Adicione-o a partir
 de **Definições → Servidores de média → Adicionar → YouTube Music**.
 
-> [!NOTE]
-> Já não é necessário nenhum auxiliar externo. A reprodução anónima requer um
-> token de conteúdo PO , que o Kopuz agora gera **dentro da aplicação** com um
-> WebView oculto a executar o BotGuard do YouTube. O antigo subprocesso
-> `rustypipe-botguard` desapareceu, por isso não há nada para `cargo install` e
-> funciona dentro do Flatpak.
-
 ### Escolher um modo
 
 O diálogo de configuração oferece dois métodos:
 
-- **Iniciar sessão com um navegador** — o kopuz abre a página de início de
+- **Iniciar sessão com um navegador** - o kopuz abre a página de início de
   sessão da Google num **perfil de navegador isolado** (uma sessão fresca e
   separada; a sua navegação normal nunca é tocada), espera que inicie sessão e
   extrai os cookies da sessão. Escolha qual navegador da família Chromium
   instalado usar (Chrome, Chromium, Brave, Edge ou Vivaldi). Isto desbloqueia a
   sua **biblioteca, Músicas Gostadas, playlists e artistas seguidos**.
 
-- **Continuar sem iniciar sessão (anónimo)** — sem início de sessão, sem
+- **Continuar sem iniciar sessão (anónimo)** - sem início de sessão, sem
   cookies. Pode **navegar, pesquisar, abrir páginas de artista/álbum/playlist,
   iniciar rádio de mistura e reproduzir faixas públicas**. Músicas Gostadas,
   playlists da biblioteca e seguir/gostar estão desativados (essas vistas
   mostram um prompt "inicie sessão para ativar"). Faixas exclusivas do Music
   Premium não podem ser reproduzidas anonimamente.
-
-> [!NOTE]
-> No **Windows**, o início de sessão com navegador está atualmente desativado — a página de contas da Google
-> aparece em branco dentro do perfil isolado. Os utilizadores de Windows obtêm o modo anónimo
-> automaticamente. O início de sessão funciona no Linux e macOS. (Seguido como
-> `TODO(windows-signin)` em `crates/server/src/ytmusic/isolated_profile.rs`.)
 
 ### Faixas Premium
 
@@ -421,9 +409,9 @@ playlists, e a funcionalidade de gostar ou não gostar das faixas disponiveis. R
 ## Registos e Debugging
 
 O Kopuz regista através de [`tracing`](https://docs.rs/tracing). A maioria disto
-é acessível a partir da própria aplicação — **Definições → Registos tem Abrir
+é acessível a partir da própria aplicação - **Definições → Registos tem Abrir
 pasta de registos, Exportar registos**, e um interruptor **Ativar Rastreio de
-Desempenho** — por isso os utilizadores nunca precisam de um terminal para
+Desempenho** - por isso os utilizadores nunca precisam de um terminal para
 enviar um relatório útil.
 
 ### Onde os ficheiros estão
@@ -440,7 +428,7 @@ registos** salta diretamente para aqui):
 | `latest.log`            | A sessão atual. Temporização de spans + eventos; o registo em tempo real.                                       |
 | `kopuz-<timestamp>.log` | Sessões anteriores, arquivadas no arranque (mantém as últimas 10). Um reinício nunca apaga a execução anterior. |
 | `crash-<timestamp>.txt` | Escrito **apenas num crash** (pânico do Rust): mensagem, backtrace, cauda do registo recente, versão da app/SO. |
-| `kopuz-trace.json`      | Rastreio de desempenho — apenas quando o rastreio está ativado (ver abaixo). Sobrescrito em cada execução.      |
+| `kopuz-trace.json`      | Rastreio de desempenho - apenas quando o rastreio está ativado (ver abaixo). Sobrescrito em cada execução.      |
 
 Os timestamps são em UTC `YYYY-MM-DD_HH-MM-S`, por isso os ficheiros ordenam-se
 cronologicamente.
@@ -456,7 +444,7 @@ de registos** e apanhe o `crash-*.txt` mais recente.
 peça ao utilizador para:
 
 1. **Definições → Registos → ativar "Rastreio de Desempenho"**, depois
-   **reiniciar** a aplicação (o interruptor avisa sobre isto — o gravador de
+   **reiniciar** a aplicação (o interruptor avisa sobre isto - o gravador de
    rastreio é configurado uma vez no arranque).
 2. Reproduzir a ação lenta.
 3. **Sair da aplicação** (isto liberta o rastreio corretamente).
@@ -469,7 +457,7 @@ stream do YouTube, navegação/pesquisa/paginação, rádio de mistura, pesquisa
 biblioteca, transferências, transições de reprodução, renders por componente)
 estão instrumentados como spans nomeados, e o trabalho em threads de trabalhador
 aninha-se sob a ação que o lançou, por isso o rastreio mostra exatamente onde o
-tempo vai. Desative-o depois — adiciona overhead e aumenta o ficheiro de
+tempo vai. Desative-o depois - adiciona overhead e aumenta o ficheiro de
 rastreio durante sessões longas.
 
 ### Variáveis de ambiente para utilizadores avançados
@@ -492,7 +480,7 @@ KOPUZ_LOG="info,dioxus_core=trace" kopuz
 `RUST_LOG` também funciona; `KOPUZ_LOG` tem precedência.
 
 O **rastreio de desempenho** só é ativado via **Definições → Registos → Ativar
-Rastreio de Desempenho** (depois reiniciar) — não há variável de ambiente para
+Rastreio de Desempenho** (depois reiniciar) - não há variável de ambiente para
 isso; a interface é a única fonte de verdade. Desativado por predefinição → zero
 overhead.
 

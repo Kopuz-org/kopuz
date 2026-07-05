@@ -11,7 +11,7 @@ use crate::shared::fmt_time;
 pub struct CompactMode(pub Signal<bool>);
 
 /// Style-dependent classes so the mini player visually relates to the active
-/// UI style (Normal vs Modern / "Vaxry"), mirroring how the bottom bar splits.
+/// UI style (Normal vs Vaxry), mirroring how the bottom bar splits.
 struct CompactSkin {
     container: &'static str,
     title: &'static str,
@@ -33,7 +33,7 @@ fn skin_for(style: UiStyle) -> CompactSkin {
             ctrl_btn: "w-8 h-8 flex items-center justify-center rounded-full text-slate-300 hover:text-white hover:bg-white/10 transition-all",
             progress_fill: "bg-white group-hover:bg-green-500",
         },
-        UiStyle::Modern => CompactSkin {
+        UiStyle::Vaxry => CompactSkin {
             container: "bg-black",
             title: "text-[13px] font-mono font-semibold uppercase tracking-wide text-white/90 truncate leading-tight",
             cover: "rounded-none ring-1 ring-white/10",
@@ -89,7 +89,7 @@ pub fn CompactPlayer() -> Element {
                 if macos_top { "pt-[22px]" } else { "" },
             ),
             onmousedown: move |_| {
-                #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+                #[cfg(not(target_os = "android"))]
                 dioxus::desktop::window().drag();
             },
 

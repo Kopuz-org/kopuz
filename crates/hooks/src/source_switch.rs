@@ -38,7 +38,8 @@ pub fn use_connection_status() -> Memo<ConnStatus> {
         }
         status.set(ConnStatus::Connecting);
         spawn(async move {
-            status.set(match src.validate().await {
+            let outcome = utils::offload(async move { src.validate().await }).await;
+            status.set(match outcome {
                 AuthOutcome::Valid => ConnStatus::Online,
                 AuthOutcome::Expired | AuthOutcome::Unreachable => ConnStatus::Offline,
             });
@@ -59,10 +60,7 @@ pub async fn apply_source_switch(
 ) -> bool {
     match source {
         Source::Local => {
-            let mut cfg = config.write();
-            cfg.active_source = Source::Local;
-            cfg.server = None;
-            cfg.source_explicitly_set = true;
+            config.write().clear_active_server();
             tracing::info!(target: "kopuz::source", source = "local", "source switched");
             true
         }
@@ -95,9 +93,7 @@ pub async fn apply_source_switch(
             };
             {
                 let mut cfg = config.write();
-                cfg.active_source = Source::Server(saved.id);
-                cfg.server = Some(active);
-                cfg.source_explicitly_set = true;
+                cfg.set_active_server_snapshot(active);
             }
             tracing::info!(target: "kopuz::source", server = %id, "source switched");
             has_creds || is_anon

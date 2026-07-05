@@ -1,23 +1,27 @@
 [package]
-name = "pages"
+name = "kopuz-pages"
 version.workspace = true
-edition = "2024"
+edition.workspace = true
+rust-version.workspace = true
+description.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+
+[lib]
+name = "pages"
 
 [lints]
 workspace = true
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-dioxus = { workspace = true, features = ["desktop"] }
-directories = { workspace = true }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-dioxus = { workspace = true, features = ["web"] }
-
-# rfd is only used by the yt-dlp page, which is desktop/web only (excluded on Android).
-[target.'cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))'.dependencies]
+# rfd is only used by the yt-dlp page, which is desktop only (excluded on Android).
+[target.'cfg(not(target_os = "android"))'.dependencies]
 rfd = { workspace = true }
 
 [dependencies]
+dioxus = { workspace = true, features = ["desktop"] }
+directories = { workspace = true }
 uuid = { workspace = true }
 player = { workspace = true }
 reader = { workspace = true }

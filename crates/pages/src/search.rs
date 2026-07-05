@@ -59,11 +59,11 @@ pub fn Search(
             .collect()
     });
 
-    let is_modern = config.read().ui_style == UiStyle::Modern;
+    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
 
     rsx! {
         div {
-            class: if is_modern { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "p-8 absolute inset-0 flex flex-col" },
+            class: if is_vaxry { "px-6 pt-6 absolute inset-0 flex flex-col" } else { "p-8 absolute inset-0 flex flex-col" },
 
             if *show_playlist_modal.read() {
                 PlaylistModal {

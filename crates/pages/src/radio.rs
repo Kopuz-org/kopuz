@@ -17,7 +17,7 @@ pub fn Radio(props: RadioProps) -> Element {
     let _ = &props;
     let mut ctrl = use_context::<PlayerController>();
     let config = props.config;
-    let is_modern = config.read().ui_style == UiStyle::Modern;
+    let is_vaxry = config.read().ui_style == UiStyle::Vaxry;
 
     let registry = use_context::<Signal<radio::registry::StationRegistry>>();
     // can panic, will check again later.
@@ -55,17 +55,17 @@ pub fn Radio(props: RadioProps) -> Element {
         div {
             class: if cfg!(target_os = "android") {
                 "px-4 pt-2 pb-28 w-full h-full overflow-y-auto"
-            } else if is_modern {
+            } else if is_vaxry {
                 "px-6 pt-6 pb-24 w-full h-full overflow-y-auto"
             } else {
                 "p-8 w-full h-full overflow-y-auto"
             },
 
-            if is_modern {
+            if is_vaxry {
                 div { class: "mb-6 flex items-end justify-between",
                     div {
                         p {
-                            class: "text-[10px] font-bold tracking-widest uppercase mb-1",
+                            class: "text-[10px] font-bold mb-1",
                             style: "color: rgba(255,255,255,0.35);",
                             "{i18n::t(\"discover\")}"
                         }
@@ -74,7 +74,7 @@ pub fn Radio(props: RadioProps) -> Element {
                             "{i18n::t(\"radio\")}"
                         }
                     }
-                    // Search — Modern
+                    // Search — Vaxry
                     div { class: "relative w-64",
                         i {
                             class: "fa-solid fa-magnifying-glass absolute top-1/2 -translate-y-1/2 text-xs",
@@ -164,12 +164,12 @@ pub fn Radio(props: RadioProps) -> Element {
                 }
             }
 
-            if is_modern {
-                // Modern
+            if is_vaxry {
+                // Vaxry
                 if !filtered.is_empty() {
                     div { class: "flex flex-col",
                         div {
-                            class: "grid px-4 py-2 text-[10px] font-bold uppercase tracking-widest border-b mb-1",
+                            class: "grid px-4 py-2 text-[10px] font-bold border-b mb-1",
                             style: "grid-template-columns: 48px 1fr 1.5fr 180px; color: rgba(255,255,255,0.25); border-color: rgba(255,255,255,0.06);",
                             div {}
                             div { class: "text-left", "{i18n::t(\"radio_station_col\")}" }
@@ -335,7 +335,7 @@ pub fn Radio(props: RadioProps) -> Element {
                         for station in filtered.iter() {
                             div {
                                 key: "{station.id}",
-                                class: "group relative rounded-2xl overflow-hidden border transition-all duration-300 cursor-pointer hover:border-white/15",
+                                class: "group relative rounded-lg overflow-hidden border transition-all duration-300 cursor-pointer hover:border-white/15",
                                 style: "border-color: rgba(255,255,255,0.06); background: rgba(255,255,255,0.03);",
                                 onclick: {
                                     let station_id = station.id.clone();
