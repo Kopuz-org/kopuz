@@ -453,7 +453,7 @@ fn App() -> Element {
     let mut last_scan_key = use_signal(|| None::<String>);
     let mut scan_current_file = use_signal(|| Option::<String>::None);
     let current_playing = use_signal(|| 0);
-    let mut player = use_signal(Player::new);
+    let player = use_signal(Player::new);
     let current_song_cover_url = use_signal(String::new);
     let current_song_title = use_signal(String::new);
     let current_song_artist = use_signal(String::new);
@@ -1087,9 +1087,9 @@ fn App() -> Element {
                     configured_music_dirs.set(loaded.music_directory.clone());
                     volume.set(loaded.volume);
                     persisted_volume.set(loaded.volume);
-                    player.write().set_volume(loaded.volume);
-                    player.write().set_channel_mode(loaded.channel_mode);
-                    player.write().set_equalizer(loaded.equalizer.clone());
+                    player.peek().set_volume(loaded.volume);
+                    player.peek().set_channel_mode(loaded.channel_mode);
+                    player.peek().set_equalizer(loaded.equalizer.clone());
                     i18n::set_locale(&loaded.language);
                 }
 

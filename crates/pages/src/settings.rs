@@ -174,7 +174,7 @@ use hooks::use_player_controller::PlayerController;
 
 #[component]
 pub fn Settings(config: Signal<AppConfig>) -> Element {
-    let mut ctrl = use_context::<PlayerController>();
+    let ctrl = use_context::<PlayerController>();
     let crossfade_label = if config.read().crossfade_seconds == 0 {
         i18n::t("crossfade_off")
     } else {
@@ -815,7 +815,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     current: config.read().channel_mode,
                                     on_change: move |mode| {
                                         config.write().channel_mode = mode;
-                                        ctrl.player.write().set_channel_mode(mode);
+                                        ctrl.player.peek().set_channel_mode(mode);
                                     }
                                 }
                             }
@@ -825,11 +825,11 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             EqualizerPanel {
                                 current: config.read().equalizer.clone(),
                                 on_preview: move |equalizer: config::EqualizerSettings| {
-                                    ctrl.player.write().set_equalizer(equalizer);
+                                    ctrl.player.peek().set_equalizer(equalizer);
                                 },
                                 on_commit: move |equalizer: config::EqualizerSettings| {
                                     config.write().equalizer = equalizer.clone();
-                                    ctrl.player.write().set_equalizer(equalizer);
+                                    ctrl.player.peek().set_equalizer(equalizer);
                                 }
                             }
                         }

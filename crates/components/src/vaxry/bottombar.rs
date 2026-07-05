@@ -265,13 +265,13 @@ pub fn BottombarVaxry(
                             let muted = *is_muted.read();
                             if muted {
                                 let vol = *volume_before_mute.read();
-                                player.write().set_volume(vol);
+                                player.peek().set_volume(vol);
                                 volume.set(vol);
                                 persisted_volume.set(vol);
                                 is_muted.set(false);
                             } else {
                                 volume_before_mute.set(*volume.read());
-                                player.write().set_volume(0.0);
+                                player.peek().set_volume(0.0);
                                 volume.set(0.0);
                                 persisted_volume.set(0.0);
                                 is_muted.set(true);
@@ -291,7 +291,7 @@ pub fn BottombarVaxry(
                             let dir = if dy < 0.0 { 1.0 } else { -1.0 };
                             let current = *volume.read();
                             let new_val = (current + dir * step).clamp(0.0, 1.0);
-                            player.write().set_volume(new_val);
+                            player.peek().set_volume(new_val);
                             volume.set(new_val);
                             persisted_volume.set(new_val);
                             is_muted.set(new_val <= f32::EPSILON);
@@ -322,7 +322,7 @@ pub fn BottombarVaxry(
                             },
                             oninput: move |evt| {
                                 if let Ok(val) = evt.value().parse::<f32>() {
-                                    player.write().set_volume(val);
+                                    player.peek().set_volume(val);
                                     volume.set(val);
                                     is_muted.set(val == 0.0);
                                     if val > f32::EPSILON {

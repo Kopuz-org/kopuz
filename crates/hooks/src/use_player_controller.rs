@@ -239,7 +239,7 @@ impl PlayerController {
         if let Some(task) = self.load_task.take() {
             task.cancel();
         }
-        self.player.write().cancel_pending_load();
+        self.player.peek().cancel_pending_load();
     }
 
     /// Seek the current track. All progress-bar / lyric scrubbers route here.
@@ -252,7 +252,7 @@ impl PlayerController {
         if self.pending_crossfade_ui.peek().is_some() {
             self.commit_pending_crossfade_ui(time.as_secs());
         }
-        self.player.write().seek(time);
+        self.player.peek().seek(time);
         self.current_song_progress.set(time.as_secs());
     }
 
@@ -547,7 +547,7 @@ impl PlayerController {
             if is_server_item || is_radio_item {
                 // Deliberate UX: silence while a (possibly slow) load resolves.
                 // Pure local files switch seamlessly inside the engine instead.
-                self.player.write().stop_for_transition();
+                self.player.peek().stop_for_transition();
                 self.is_playing.set(false);
             }
             self.hydrate_current_track_metadata(idx, restore_seek_secs.unwrap_or(0));

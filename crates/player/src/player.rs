@@ -128,21 +128,21 @@ impl Player {
     }
 
     /// Drop a load that is still resolving without touching live playback.
-    pub fn cancel_pending_load(&mut self) {
+    pub fn cancel_pending_load(&self) {
         self.engine.send(Command::CancelPending);
     }
 
-    pub fn pause(&mut self) {
+    pub fn pause(&self) {
         self.engine.send(Command::Pause);
         self.push_now_playing(self.get_position(), false);
     }
 
-    pub fn play_resume(&mut self) {
+    pub fn play_resume(&self) {
         self.engine.send(Command::Resume);
         self.push_now_playing(self.get_position(), true);
     }
 
-    pub fn seek(&mut self, time: Duration) {
+    pub fn seek(&self, time: Duration) {
         // Mirror the engine's end-guard clamp so the system position display
         // matches what will actually play.
         const END_GUARD: Duration = Duration::from_millis(2000);
@@ -181,21 +181,21 @@ impl Player {
         systemint::stop_session();
     }
 
-    pub fn stop_for_transition(&mut self) {
+    pub fn stop_for_transition(&self) {
         self.engine.send(Command::Stop {
             pause_device: false,
         });
     }
 
-    pub fn set_volume(&mut self, volume: f32) {
+    pub fn set_volume(&self, volume: f32) {
         self.engine.send(Command::SetVolume(volume));
     }
 
-    pub fn set_channel_mode(&mut self, mode: ChannelMode) {
+    pub fn set_channel_mode(&self, mode: ChannelMode) {
         self.engine.send(Command::SetChannelMode(mode));
     }
 
-    pub fn set_equalizer(&mut self, settings: EqualizerSettings) {
+    pub fn set_equalizer(&self, settings: EqualizerSettings) {
         self.engine.send(Command::SetEqualizer(settings));
     }
 

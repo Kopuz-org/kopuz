@@ -39,7 +39,7 @@ impl PlayerController {
                     self.play_generation.with_mut(|g| *g += 1);
                     self.clear_pending_crossfade_ui();
                     self.is_loading.set(false);
-                    self.player.write().pause();
+                    self.player.peek().pause();
                     self.is_playing.set(false);
                     return;
                 }
@@ -291,7 +291,7 @@ impl PlayerController {
         self.cancel_load_task();
         self.play_generation.with_mut(|g| *g += 1);
         self.cancel_radio_task();
-        self.player.write().stop_for_transition();
+        self.player.peek().stop_for_transition();
         self.is_playing.set(false);
         self.is_loading.set(false);
         self.queue.write().clear();
@@ -308,9 +308,9 @@ impl PlayerController {
             .is_some_and(|t| PlaybackItemRef::parse(&t.id.uid()).is_radio());
 
         if is_radio {
-            self.player.write().stop_for_transition();
+            self.player.peek().stop_for_transition();
         } else {
-            self.player.write().pause();
+            self.player.peek().pause();
         }
         self.is_playing.set(false);
     }
@@ -332,7 +332,7 @@ impl PlayerController {
             return;
         }
 
-        self.player.write().play_resume();
+        self.player.peek().play_resume();
         self.is_playing.set(true);
     }
 

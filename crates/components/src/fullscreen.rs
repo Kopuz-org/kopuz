@@ -108,7 +108,7 @@ fn VolumeControl(
                     let dir = if dy < 0.0 { 1.0 } else { -1.0 };
                     let current = *volume.read();
                     let new_val = (current + dir * step).clamp(0.0, 1.0);
-                    player.write().set_volume(new_val);
+                    player.peek().set_volume(new_val);
                     volume.set(new_val);
                     persisted_volume.set(new_val);
                 },
@@ -138,7 +138,7 @@ fn VolumeControl(
                     },
                     oninput: move |evt| {
                         if let Ok(val) = evt.value().parse::<f32>() {
-                            player.write().set_volume(val);
+                            player.peek().set_volume(val);
                             volume.set(val);
                         }
                     }
