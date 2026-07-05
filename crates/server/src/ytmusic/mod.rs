@@ -19,6 +19,21 @@ pub use player::YtStreamInfo;
 
 pub const SOURCE_PREFIX: &str = "ytmusic";
 
+/// Initialize the V8 platform exactly once, before any isolate is created.
+///
+/// The decipher and BotGuard runtimes are independent `deno_core` isolates on
+/// separate threads. V8's platform is process-global and must be set up before
+/// the first isolate; if each runtime lazily initializes it from its own thread,
+/// the second one races the first and segfaults. Both call this (before spawning
+/// their thread) so init happens once, serialized, and only when a YouTube JS
+/// operation actually needs a runtime — a non-YouTube session never touches V8.
+#[cfg(not(target_os = "android"))]
+pub(crate) fn ensure_v8_platform() {
+    use std::sync::Once;
+    static INIT: Once = Once::new();
+    INIT.call_once(|| deno_core::JsRuntime::init_platform(None, false));
+}
+
 /// Build the typed id for a YouTube Music track (video id).
 pub(crate) fn yt_id(video_id: impl Into<String>) -> TrackId {
     TrackId::Server {

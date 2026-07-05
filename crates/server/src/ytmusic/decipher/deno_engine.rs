@@ -86,6 +86,9 @@ impl DenoCoreEngine {
     /// Spawn the isolate thread and return an engine handle. The thread lives
     /// for the process; the isolate is reused across every solve.
     pub fn new() -> Self {
+        // Init the shared V8 platform before this isolate's thread spawns, so it
+        // can't race the BotGuard runtime's isolate (see `ytmusic::ensure_v8_platform`).
+        crate::ytmusic::ensure_v8_platform();
         let (tx, rx) = mpsc::unbounded_channel::<SolveJob>();
         std::thread::Builder::new()
             .name("decipher-js".into())

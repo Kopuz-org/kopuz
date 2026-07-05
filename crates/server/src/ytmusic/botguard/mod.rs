@@ -50,6 +50,9 @@ pub fn ensure_started() {
     use std::sync::Once;
     static START: Once = Once::new();
     START.call_once(|| {
+        // Init the shared V8 platform before this isolate's thread spawns, so it
+        // can't race the decipher runtime's isolate (see `ytmusic::ensure_v8_platform`).
+        crate::ytmusic::ensure_v8_platform();
         let (tx, rx) = mpsc::unbounded_channel::<MintRequest>();
         // Register synchronously so `mint_content_pot` sends succeed the instant
         // this returns; the thread drains `rx` once V8 is up.

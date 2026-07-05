@@ -578,5 +578,17 @@ mod tests {
             206,
             "deno-deciphered URL must stream"
         );
+
+        // Now spin up the BotGuard isolate too, in the same process — this is
+        // the second-V8-isolate scenario that segfaulted on the anon path. If
+        // the shared platform init is correct, both isolates coexist.
+        let pot = super::super::botguard::mint_content_pot(vid)
+            .await
+            .expect("botguard mint alongside a live decipher isolate");
+        assert!(!pot.is_empty(), "pot minted with both isolates alive");
+        eprintln!(
+            "both isolates OK: deciphered + minted pot len={}",
+            pot.len()
+        );
     }
 }

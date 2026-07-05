@@ -318,7 +318,6 @@ fn App() -> Element {
     // first would leave the final queue/config persists (and any failure
     // warnings) out of latest.log and the trace.
 
-
     // The whole-Library signal is GONE — pages/components read the DB through
     // query hooks, and every track self-resolves its cover via the cover seam
     // (a local row's cover_path is projected from its album in the DB read layer).
