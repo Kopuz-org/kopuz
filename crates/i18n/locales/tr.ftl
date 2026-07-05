@@ -349,6 +349,7 @@ replaygain_off = Kapalı
 replaygain_track = Parça
 replaygain_album = Albüm
 replaygain_preamp = ReplayGain ön kuvvetlendirme
+now_playing_api = Şimdi Çalıyor API'si
 
 crossfade = Çapraz Geçiş
 crossfade_off = Kapalı

@@ -349,6 +349,7 @@ replaygain_off = Off
 replaygain_track = Track
 replaygain_album = Album
 replaygain_preamp = ReplayGain pre-amp
+now_playing_api = Now Playing API
 
 crossfade = 크로스페이드
 crossfade_off = 끄기

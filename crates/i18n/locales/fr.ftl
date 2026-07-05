@@ -350,6 +350,7 @@ replaygain_off = Désactivé
 replaygain_track = Piste
 replaygain_album = Album
 replaygain_preamp = Préampli ReplayGain
+now_playing_api = Now Playing API
 
 crossfade = Fondu enchaîné
 crossfade_off = Désactivé

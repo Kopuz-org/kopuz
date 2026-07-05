@@ -349,6 +349,7 @@ replaygain_off = 关闭
 replaygain_track = 单曲
 replaygain_album = 专辑
 replaygain_preamp = 回放增益前置放大
+now_playing_api = 正在播放 API
 
 crossfade = 交叉淡入淡出
 crossfade_off = 关闭

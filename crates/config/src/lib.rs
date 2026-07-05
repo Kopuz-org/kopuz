@@ -588,6 +588,11 @@ pub struct AppConfig {
     /// a track actually has gain tags).
     #[serde(default)]
     pub replaygain_preamp_db: f32,
+    /// Serve now-playing info as JSON on localhost for widgets/OBS overlays.
+    #[serde(default)]
+    pub now_playing_api: bool,
+    #[serde(default = "default_now_playing_api_port")]
+    pub now_playing_api_port: u16,
     #[serde(default)]
     pub ytdlp_output_dir: String,
     #[serde(default)]
@@ -687,6 +692,10 @@ fn default_crossfade_seconds() -> u8 {
     0
 }
 
+fn default_now_playing_api_port() -> u16 {
+    27636
+}
+
 fn default_language() -> String {
     "en".to_string()
 }
@@ -749,6 +758,8 @@ impl Default for AppConfig {
             equalizer: EqualizerSettings::default(),
             replaygain_mode: ReplayGainMode::Off,
             replaygain_preamp_db: 0.0,
+            now_playing_api: false,
+            now_playing_api_port: default_now_playing_api_port(),
             ytdlp_output_dir: String::new(),
             ytdlp_options: YtdlpOptions::default(),
             ytdlp_history: Vec::new(),

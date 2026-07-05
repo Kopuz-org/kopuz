@@ -25,9 +25,10 @@ player = { workspace = true }
 config = { workspace = true }
 rand = { workspace = true }
 reqwest = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 server = { workspace = true }
 scrobble = { workspace = true }
 radio = { workspace = true }
 discord-presence = { workspace = true }
-tokio = { workspace = true, features = ["fs", "sync", "macros"] }
+tokio = { workspace = true, features = ["fs", "sync", "macros", "net"] }

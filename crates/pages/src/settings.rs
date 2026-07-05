@@ -849,6 +849,21 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+                        SettingItem {
+                            title: format!(
+                                "{} (127.0.0.1:{})",
+                                i18n::t("now_playing_api"),
+                                config.read().now_playing_api_port,
+                            ),
+                            control: rsx! {
+                                ToggleSetting {
+                                    enabled: config.read().now_playing_api,
+                                    on_change: move |enabled| {
+                                        config.write().now_playing_api = enabled;
+                                    }
+                                }
+                            }
+                        }
                         div { class: "py-2",
                             p { class: "text-white font-medium mb-3", "{i18n::t(\"equalizer\")}" }
                             EqualizerPanel {

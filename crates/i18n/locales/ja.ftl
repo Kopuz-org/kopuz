@@ -355,6 +355,7 @@ replaygain_off = オフ
 replaygain_track = トラック
 replaygain_album = アルバム
 replaygain_preamp = ReplayGain プリアンプ
+now_playing_api = 再生中 API
 
 crossfade = クロスフェード
 crossfade_off = オフ

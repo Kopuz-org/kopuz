@@ -350,6 +350,7 @@ replaygain_off = Выключено
 replaygain_track = Трек
 replaygain_album = Альбом
 replaygain_preamp = Предусиление ReplayGain
+now_playing_api = API «Сейчас играет»
 
 crossfade = Кроссфейд
 crossfade_off = Выкл

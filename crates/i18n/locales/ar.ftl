@@ -355,6 +355,7 @@ replaygain_off = Off
 replaygain_track = Track
 replaygain_album = Album
 replaygain_preamp = ReplayGain pre-amp
+now_playing_api = Now Playing API
 
 crossfade = تلاشي متقاطع
 crossfade_off = إيقاف

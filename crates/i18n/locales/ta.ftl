@@ -56,6 +56,7 @@ replaygain_off = Off
 replaygain_track = Track
 replaygain_album = Album
 replaygain_preamp = ReplayGain pre-amp
+now_playing_api = Now Playing API
 discord_presence = Discord இருப்பு
 connectivity = இணைப்புத்தன்மை
 discord_presence_paused = இடைநிறுத்தப்பட்ட Discord நிலையைக் காட்டு
