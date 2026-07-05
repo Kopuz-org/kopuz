@@ -36,6 +36,16 @@ impl PlayerController {
             }
             _ => {
                 if idx + 1 >= queue_len && loop_mode == LoopMode::None {
+                    // End of queue. Fully reset the transition state — otherwise a
+                    // crossfade that fired just before this skip left a resolve in
+                    // flight (with its index commit deferred): bumping the
+                    // generation invalidates that stale resolve so it can't restart
+                    // playback, and clearing is_loading keeps the player from
+                    // freezing (every auto-advance gates on !is_loading, so a stuck
+                    // is_loading can't be recovered by pause/resume).
+                    self.play_generation.with_mut(|g| *g += 1);
+                    self.clear_pending_crossfade_ui();
+                    self.is_loading.set(false);
                     self.skip_in_progress.set(false);
                     self.player.write().pause();
                     self.is_playing.set(false);
