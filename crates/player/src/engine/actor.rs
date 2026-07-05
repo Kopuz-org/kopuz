@@ -14,7 +14,7 @@ use config::{ChannelMode, EqualizerSettings};
 use super::rt::{Retired, RtCmd, RtSession, RtState};
 use super::sink::{AudioSink, DataCallbackFactory, SinkConfig};
 use super::worker::{WorkerCmd, WorkerHandle, WorkerMsg};
-use super::{Command, EngineStatus, Event, LoadRequest, Phase, Transition};
+use super::{Command, EngineStatus, Event, LoadOutcome, LoadReply, LoadRequest, Phase, Transition};
 use crate::player::PlayerInitError;
 #[cfg(any(target_os = "android", target_os = "linux", target_os = "macos"))]
 use crate::systemint;
@@ -131,7 +131,7 @@ struct Pending {
     duration: Duration,
     transition: Transition,
     start_at: Option<Duration>,
-    reply: Option<Sender<Result<(), String>>>,
+    reply: Option<LoadReply>,
 }
 
 /// Producer/consumer halves of a fresh session ring plus its counters.
@@ -251,6 +251,7 @@ impl Actor {
     fn handle_command(&mut self, cmd: Command) {
         match cmd {
             Command::Load(request) => self.handle_load(request),
+            Command::CancelPending => self.discard_pending(),
             Command::Seek(target) => self.handle_seek(target),
             Command::Pause => {
                 self.paused.store(true, Ordering::Relaxed);
@@ -290,16 +291,18 @@ impl Actor {
         }
     }
 
-    fn handle_load(&mut self, request: LoadRequest) {
-        // Supersede any load still probing: dropping its command sender makes
-        // the worker exit on its own; never join a live worker here — it may
-        // be stuck in network I/O.
+    /// Drop the probing load, if any. Its reply resolves as cancelled (channel
+    /// closed, no error) and the detached worker exits on its own — never join
+    /// a live worker here, it may be stuck in network I/O.
+    fn discard_pending(&mut self) {
         if let Some(old) = self.pending.take() {
-            if let Some(reply) = old.reply {
-                let _ = reply.send(Err("superseded by a newer load".to_string()));
-            }
+            drop(old.reply);
             self.graveyard.push(old.worker.join);
         }
+    }
+
+    fn handle_load(&mut self, request: LoadRequest) {
+        self.discard_pending();
 
         let LoadRequest {
             token,
@@ -370,21 +373,57 @@ impl Actor {
             reply,
         } = pending;
 
-        let fail = |actor: &mut Self, worker: WorkerHandle, error: String| {
-            if let Some(reply) = &reply {
-                let _ = reply.send(Err(error.clone()));
+        match self.try_start_session(
+            token,
+            worker,
+            duration,
+            transition,
+            start_at,
+            source_sample_rate,
+            seekable,
+        ) {
+            Ok(outcome) => {
+                // Publish before resolving the reply so a caller that reads
+                // status right after awaiting sees the new session.
+                self.publish();
+                if let Some(reply) = reply {
+                    let _ = reply.send(Ok(outcome));
+                }
+                self.emit(Event::Loaded { token });
             }
-            let _ = worker.cmd_tx.send(WorkerCmd::Stop);
-            actor.graveyard.push(worker.join);
-            actor.emit(Event::Error {
-                token,
-                message: error,
-            });
-        };
+            Err(error) => {
+                if let Some(reply) = reply {
+                    let _ = reply.send(Err(error.clone()));
+                }
+                self.emit(Event::Error {
+                    token,
+                    message: error,
+                });
+            }
+        }
+    }
 
+    /// Stop and detach a worker whose session never started.
+    fn abort_start(&mut self, worker: WorkerHandle, error: String) -> String {
+        let _ = worker.cmd_tx.send(WorkerCmd::Stop);
+        self.graveyard.push(worker.join);
+        error
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn try_start_session(
+        &mut self,
+        token: u64,
+        worker: WorkerHandle,
+        duration: Duration,
+        transition: Transition,
+        start_at: Option<Duration>,
+        source_sample_rate: Option<u32>,
+        seekable: bool,
+    ) -> Result<LoadOutcome, String> {
         let desired_config = match self.sink.probe_config(source_sample_rate) {
             Ok(config) => config,
-            Err(e) => return fail(self, worker, e),
+            Err(e) => return Err(self.abort_start(worker, e)),
         };
 
         let fade = match transition {
@@ -441,6 +480,7 @@ impl Actor {
                 source_sample_rate,
                 start_at,
             );
+            Ok(LoadOutcome { crossfaded: true })
         } else {
             // Immediate switch: stop the outgoing sessions first.
             if let Some(current) = self.current.take() {
@@ -455,10 +495,10 @@ impl Actor {
             if (self.sink.config() != Some(desired_config) || self.rt_tx.is_none())
                 && let Err(e) = self.open_output(source_sample_rate)
             {
-                return fail(self, worker, e);
+                return Err(self.abort_start(worker, e));
             }
             let Some(config) = self.sink.config() else {
-                return fail(self, worker, "no output stream".to_string());
+                return Err(self.abort_start(worker, "no output stream".to_string()));
             };
 
             let RingParts {
@@ -496,13 +536,8 @@ impl Actor {
                 source_sample_rate,
                 start_at,
             );
+            Ok(LoadOutcome { crossfaded: false })
         }
-
-        if let Some(reply) = reply {
-            let _ = reply.send(Ok(()));
-        }
-        self.emit(Event::Loaded { token });
-        self.publish();
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -581,12 +616,7 @@ impl Actor {
     }
 
     fn handle_stop(&mut self, pause_device: bool) {
-        if let Some(pending) = self.pending.take() {
-            if let Some(reply) = pending.reply {
-                let _ = reply.send(Err("stopped".to_string()));
-            }
-            self.graveyard.push(pending.worker.join);
-        }
+        self.discard_pending();
         if let Some(current) = self.current.take() {
             let _ = current.worker.cmd_tx.send(WorkerCmd::Stop);
             self.graveyard.push(current.worker.join);
@@ -836,9 +866,7 @@ impl Actor {
     fn teardown(&mut self) {
         let mut joins = Vec::new();
         if let Some(pending) = self.pending.take() {
-            if let Some(reply) = pending.reply {
-                let _ = reply.send(Err("player shut down".to_string()));
-            }
+            drop(pending.reply);
             joins.push(pending.worker.join);
         }
         if let Some(current) = self.current.take() {

@@ -16,15 +16,10 @@ impl PlayerController {
     }
 
     fn play_next_with_transition(&mut self, allow_crossfade: bool) {
-        if *self.is_loading.peek() {
-            self.skip_in_progress.set(false);
-        }
-
         let idx = *self.current_queue_index.peek();
         let queue_len = self.queue.peek().len();
 
         if queue_len == 0 {
-            self.skip_in_progress.set(false);
             return;
         }
 
@@ -36,17 +31,14 @@ impl PlayerController {
             }
             _ => {
                 if idx + 1 >= queue_len && loop_mode == LoopMode::None {
-                    // End of queue. Fully reset the transition state — otherwise a
-                    // crossfade that fired just before this skip left a resolve in
-                    // flight (with its index commit deferred): bumping the
-                    // generation invalidates that stale resolve so it can't restart
-                    // playback, and clearing is_loading keeps the player from
-                    // freezing (every auto-advance gates on !is_loading, so a stuck
-                    // is_loading can't be recovered by pause/resume).
+                    // End of queue: kill any in-flight load (e.g. a crossfade
+                    // that armed just before this skip) both controller- and
+                    // engine-side, so it can't restart playback later, and
+                    // clear is_loading since no load task will.
+                    self.cancel_load_task();
                     self.play_generation.with_mut(|g| *g += 1);
                     self.clear_pending_crossfade_ui();
                     self.is_loading.set(false);
-                    self.skip_in_progress.set(false);
                     self.player.write().pause();
                     self.is_playing.set(false);
                     return;
@@ -274,17 +266,15 @@ impl PlayerController {
     /// changes — without it, a queued `ytmusic:` track would be replayed
     /// through whichever backend's stream-builder is now active.
     pub fn reset_for_backend_switch(&mut self) {
-        // Invalidate any in-flight track-load spawn (YT __YT_PENDING
-        // resolver, Jellyfin stream open, etc.) so its eventual
-        // completion doesn't start playback against the cleared queue
-        // or post a stale error banner / clear is_loading for the new
-        // backend's first track.
+        // Kill any in-flight track load (YT __YT_PENDING resolver, Jellyfin
+        // stream open, etc.) so its eventual completion doesn't start playback
+        // against the cleared queue or post a stale error banner.
+        self.cancel_load_task();
         self.play_generation.with_mut(|g| *g += 1);
         self.cancel_radio_task();
         self.player.write().stop_for_transition();
         self.is_playing.set(false);
         self.is_loading.set(false);
-        self.skip_in_progress.set(false);
         self.queue.write().clear();
         self.history.write().clear();
         self.current_queue_index.set(0);
@@ -428,11 +418,11 @@ impl PlayerController {
         shuffle_order: Vec<usize>,
         shuffle_enabled: bool,
     ) {
+        self.cancel_load_task();
         self.clear_pending_crossfade_ui();
         self.player.write().stop();
         self.is_playing.set(false);
         self.is_loading.set(false);
-        self.skip_in_progress.set(false);
         self.history.set(Vec::new());
         self.queue.set(queue);
         self.shuffle.set(shuffle_enabled);

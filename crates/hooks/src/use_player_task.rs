@@ -216,14 +216,32 @@ pub fn use_player_task(ctrl: PlayerController) {
             // genuinely periodic work (Jellyfin reports, Discord, refreshes).
             let mut engine_events = ctrl.player.peek().subscribe();
             loop {
+                let mut woke_event = None;
                 tokio::select! {
                     _ = bg_notify.notified() => {},
                     _ = tokio::time::sleep(std::time::Duration::from_millis(1000)) => {},
-                    _ = engine_events.recv() => {},
+                    event = engine_events.recv() => { woke_event = event; },
                 }
-                // Collapse whatever queued while we were asleep; the loop body
-                // below reads the live status snapshot, not the events.
-                while engine_events.try_recv().is_ok() {}
+                // Drain whatever queued while we were asleep. Progress and
+                // completion are read from the live status snapshot below;
+                // only phase transitions need the events themselves.
+                while let Some(event) = woke_event.take().or_else(|| engine_events.try_recv().ok())
+                {
+                    use player::engine::{Event, Phase};
+                    match event {
+                        // The engine confirms audible state: a load's session
+                        // started, or a seek revived an ended track.
+                        Event::PhaseChanged {
+                            phase: Phase::Playing,
+                            ..
+                        } => ctrl.is_playing.set(true),
+                        Event::PhaseChanged {
+                            phase: Phase::Paused,
+                            ..
+                        } => ctrl.is_playing.set(false),
+                        _ => {}
+                    }
+                }
 
                 nudge_event_loop();
 
@@ -559,12 +577,8 @@ pub fn use_player_task(ctrl: PlayerController) {
                         && remaining_secs <= config.read().crossfade_seconds as u64
                         && crossfade_triggered_for_gen != Some(current_gen);
 
-                    if should_crossfade
-                        && !*ctrl.is_loading.read()
-                        && !*ctrl.skip_in_progress.read()
-                    {
+                    if should_crossfade && !*ctrl.is_loading.read() {
                         crossfade_triggered_for_gen = Some(current_gen);
-                        ctrl.skip_in_progress.set(true);
                         {
                             let mut config_write = config.write();
                             let idx = *ctrl.current_queue_index.peek();
@@ -596,8 +610,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                             || (duration > 0 && pos.as_secs() >= duration.saturating_add(5))
                     };
 
-                    if should_skip && !*ctrl.is_loading.read() && !*ctrl.skip_in_progress.read() {
-                        ctrl.skip_in_progress.set(true);
+                    if should_skip && !*ctrl.is_loading.read() {
                         if !is_radio && duration > 0 && last_progress_secs != duration {
                             last_progress_secs = duration;
                             ctrl.current_song_progress.set(duration);

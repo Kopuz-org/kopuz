@@ -130,7 +130,8 @@ fn wav_factory(seconds: f64) -> (SourceFactory, Duration) {
 }
 
 fn load(engine: &EngineHandle, token: u64, factory: SourceFactory, duration: Duration) {
-    load_with(engine, token, factory, duration, Transition::Immediate);
+    let outcome = load_with(engine, token, factory, duration, Transition::Immediate);
+    assert!(!outcome.crossfaded);
 }
 
 fn load_with(
@@ -139,8 +140,8 @@ fn load_with(
     factory: SourceFactory,
     duration: Duration,
     transition: Transition,
-) {
-    let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+) -> LoadOutcome {
+    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
     engine.send(Command::Load(LoadRequest {
         token,
         factory,
@@ -150,9 +151,9 @@ fn load_with(
         reply: Some(reply_tx),
     }));
     reply_rx
-        .recv_timeout(Duration::from_secs(5))
+        .blocking_recv()
         .expect("load reply")
-        .expect("load ok");
+        .expect("load ok")
 }
 
 fn wait_until(what: &str, mut predicate: impl FnMut() -> bool) {
@@ -352,7 +353,7 @@ fn superseding_load_drops_stale_session() {
         let _ = gate_rx.recv();
         Ok(crate::decoder::from_stream(std::io::Cursor::new(bytes)))
     });
-    let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+    let (reply_tx, mut reply_rx) = tokio::sync::oneshot::channel();
     engine.send(Command::Load(LoadRequest {
         token: 1,
         factory: slow_factory,
@@ -365,13 +366,13 @@ fn superseding_load_drops_stale_session() {
     // Supersede while the first is still "probing".
     let (factory, duration) = wav_factory(5.0);
     load(&engine, 2, factory, duration);
-    assert!(
-        reply_rx
-            .recv_timeout(Duration::from_secs(5))
-            .expect("reply")
-            .is_err(),
-        "superseded load must resolve as an error"
-    );
+    // Cancellation resolves as a dropped reply channel, not an error.
+    wait_until("superseded reply dropped", || {
+        matches!(
+            reply_rx.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Closed)
+        )
+    });
 
     // Release the stale worker; the engine must stay on token 2.
     let _ = gate_tx.send(());

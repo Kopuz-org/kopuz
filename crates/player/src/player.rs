@@ -8,11 +8,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use config::{ChannelMode, EqualizerSettings};
-use symphonia::core::formats::probe::Hint;
 
 use crate::engine::{
-    ActorMsg, AudioSink, Command, CpalSink, EngineHandle, EngineStatus, Event, LoadRequest, Phase,
-    SourceFactory, Transition,
+    ActorMsg, AudioSink, Command, CpalSink, EngineHandle, EngineStatus, Event, LoadReply,
+    LoadRequest, Phase, SourceFactory, Transition,
 };
 #[cfg(any(
     target_os = "macos",
@@ -51,14 +50,22 @@ impl std::fmt::Display for PlayerInitError {
 
 impl std::error::Error for PlayerInitError {}
 
-/// How long a blocking `play()` waits for the engine to probe and start the
-/// source. Generous: remote probes can do real network I/O.
-const LOAD_TIMEOUT: Duration = Duration::from_secs(60);
+/// Everything the engine needs to start playing a new source.
+pub struct LoadArgs {
+    /// Caller-chosen monotonic token; every engine event and the reply are
+    /// correlated to it (the controller uses its play generation).
+    pub token: u64,
+    pub factory: SourceFactory,
+    pub meta: NowPlayingMeta,
+    pub transition: Transition,
+    pub start_at: Option<Duration>,
+    /// Resolves once the source is playing or failed; dropped on cancellation.
+    pub reply: Option<LoadReply>,
+}
 
 pub struct Player {
     engine: EngineHandle,
     now_playing: Option<NowPlayingMeta>,
-    next_token: u64,
 }
 
 impl Player {
@@ -79,7 +86,6 @@ impl Player {
         Ok(Self {
             engine,
             now_playing: None,
-            next_token: 0,
         })
     }
 
@@ -103,60 +109,35 @@ impl Player {
         rx
     }
 
-    #[tracing::instrument(name = "player.play", skip_all, fields(title = %meta.title))]
-    pub fn play(
-        &mut self,
-        source: Box<dyn symphonia::core::io::MediaSource>,
-        meta: NowPlayingMeta,
-        hint: Hint,
-    ) -> Result<(), String> {
-        self.load(source, meta, hint, Transition::Immediate)
-    }
-
-    #[tracing::instrument(name = "player.crossfade", skip_all, fields(title = %meta.title))]
-    pub fn crossfade_to(
-        &mut self,
-        source: Box<dyn symphonia::core::io::MediaSource>,
-        meta: NowPlayingMeta,
-        hint: Hint,
-        duration: Duration,
-    ) -> Result<(), String> {
-        self.load(source, meta, hint, Transition::Crossfade(duration))
-    }
-
-    /// Blocking bridge kept for the poll-loop era: waits until the engine has
-    /// probed and started the source so callers see errors synchronously, the
-    /// same contract the old in-place engine had.
-    fn load(
-        &mut self,
-        source: Box<dyn symphonia::core::io::MediaSource>,
-        meta: NowPlayingMeta,
-        hint: Hint,
-        transition: Transition,
-    ) -> Result<(), String> {
-        self.next_token += 1;
-        let token = self.next_token;
-        let (reply_tx, reply_rx) = std::sync::mpsc::channel();
-        let factory: SourceFactory = Box::new(move || Ok((source, hint)));
-
+    /// Start loading a new source. Fire-and-forget: the source is built and
+    /// probed on an engine worker thread; completion arrives through
+    /// `args.reply` and the event stream. The OS now-playing display switches
+    /// immediately, consistent with the UI hydrating before the load resolves.
+    #[tracing::instrument(name = "player.load", skip_all, fields(title = %args.meta.title))]
+    pub fn load(&mut self, args: LoadArgs) {
+        let LoadArgs {
+            token,
+            factory,
+            meta,
+            transition,
+            start_at,
+            reply,
+        } = args;
         self.engine.send(Command::Load(LoadRequest {
             token,
             factory,
             duration: meta.duration,
             transition,
-            start_at: None,
-            reply: Some(reply_tx),
+            start_at,
+            reply,
         }));
+        self.now_playing = Some(meta);
+        self.push_now_playing(start_at.unwrap_or(Duration::ZERO), true);
+    }
 
-        match reply_rx.recv_timeout(LOAD_TIMEOUT) {
-            Ok(Ok(())) => {
-                self.now_playing = Some(meta);
-                self.update_now_playing_system();
-                Ok(())
-            }
-            Ok(Err(e)) => Err(e),
-            Err(_) => Err("player load timed out".to_string()),
-        }
+    /// Drop a load that is still resolving without touching live playback.
+    pub fn cancel_pending_load(&mut self) {
+        self.engine.send(Command::CancelPending);
     }
 
     pub fn pause(&mut self) {

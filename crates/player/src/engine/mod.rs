@@ -47,23 +47,38 @@ pub enum Phase {
     Ended,
 }
 
+/// What actually happened when a load started playing.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LoadOutcome {
+    /// False when a requested crossfade fell back to an immediate switch
+    /// (config mismatch, idle/drained outgoing session, or paused).
+    pub crossfaded: bool,
+}
+
+/// Resolved once the source is playing (`Ok`) or failed to load (`Err`).
+/// Dropped without a send when the load is cancelled (superseded, stopped,
+/// shutdown) — cancellation is not an error.
+pub type LoadReply = tokio::sync::oneshot::Sender<Result<LoadOutcome, String>>;
+
 pub struct LoadRequest {
     pub token: u64,
     pub factory: SourceFactory,
     pub duration: Duration,
     pub transition: Transition,
     pub start_at: Option<Duration>,
-    /// Present while the façade's blocking `play()` bridge is in use; resolved
-    /// once the source is playing (or failed to load).
-    pub reply: Option<std::sync::mpsc::Sender<Result<(), String>>>,
+    pub reply: Option<LoadReply>,
 }
 
 pub enum Command {
     Load(LoadRequest),
+    /// Drop a load that is still probing without touching the live session.
+    CancelPending,
     Seek(Duration),
     Pause,
     Resume,
-    Stop { pause_device: bool },
+    Stop {
+        pause_device: bool,
+    },
     SetVolume(f32),
     SetChannelMode(ChannelMode),
     SetEqualizer(EqualizerSettings),
