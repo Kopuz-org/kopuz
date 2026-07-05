@@ -1,4 +1,4 @@
-#[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
+#[cfg(target_os = "macos")]
 use dioxus::desktop::window;
 use dioxus::prelude::*;
 use kopuz_route::Route;
@@ -75,7 +75,7 @@ const SECTIONS: &[(&str, &[NavItem])] = &[
     ),
 ];
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 const TOOL_ITEMS: &[NavItem] = &[
     NavItem {
         key: "ytdlp",
@@ -89,7 +89,7 @@ const TOOL_ITEMS: &[NavItem] = &[
     },
 ];
 
-#[cfg(any(target_arch = "wasm32", target_os = "android"))]
+#[cfg(target_os = "android")]
 const TOOL_ITEMS: &[NavItem] = &[NavItem {
     key: "settings",
     route: Route::Settings,
@@ -197,17 +197,17 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
                 }
             }
 
-            if cfg!(all(not(target_arch = "wasm32"), target_os = "macos")) {
+            if cfg!(target_os = "macos") {
                 div {
                     class: "h-10 flex-shrink-0",
                     onmousedown: move |_| {
-                        #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
+                        #[cfg(target_os = "macos")]
                         window().drag();
                     }
                 }
             }
 
-            if !cfg!(target_arch = "wasm32") && config.read().show_source_toggle {
+            if config.read().show_source_toggle {
                 crate::source_switcher::SourceSwitcher {
                     config,
                     collapsed,

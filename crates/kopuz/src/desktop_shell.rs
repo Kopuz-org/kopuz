@@ -1,4 +1,4 @@
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 pub fn build_window_icon() -> Option<dioxus::desktop::tao::window::Icon> {
     let image = image::load_from_memory(include_bytes!("../assets/logo-512.png")).ok()?;
     let image = image.into_rgba8();
@@ -6,7 +6,7 @@ pub fn build_window_icon() -> Option<dioxus::desktop::tao::window::Icon> {
     dioxus::desktop::tao::window::Icon::from_rgba(image.into_raw(), width, height).ok()
 }
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 pub fn build_tray_icon() -> Option<dioxus::desktop::trayicon::Icon> {
     let image = image::load_from_memory(include_bytes!("../assets/logo-512.png")).ok()?;
     let image = image.into_rgba8();
@@ -27,16 +27,12 @@ pub fn tray_backend_available() -> bool {
         .any(|name| unsafe { libloading::Library::new(name) }.is_ok())
 }
 
-#[cfg(all(
-    not(target_arch = "wasm32"),
-    not(target_os = "android"),
-    not(target_os = "linux")
-))]
+#[cfg(all(not(target_os = "android"), not(target_os = "linux")))]
 pub fn tray_backend_available() -> bool {
     true
 }
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 pub fn show_tray_missing_popup() {
     let msg = "System tray unavailable: appindicator library not found. \
                Install libayatana-appindicator (Debian/Ubuntu/Arch) or \

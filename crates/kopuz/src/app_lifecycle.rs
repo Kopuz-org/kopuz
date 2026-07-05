@@ -1,6 +1,5 @@
 use config::AppConfig;
 use dioxus::prelude::*;
-#[cfg(not(target_arch = "wasm32"))]
 use tracing::Instrument;
 
 pub fn use_webview_decipher_engine() {
@@ -43,7 +42,6 @@ pub fn use_connectivity_probe(
     let mut is_offline = use_signal(|| false);
     use_context_provider(|| is_offline);
 
-    #[cfg(not(target_arch = "wasm32"))]
     use_future(move || async move {
         let Ok(client) = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(5))
@@ -83,7 +81,6 @@ pub fn use_connectivity_probe(
         }
     });
 
-    #[cfg(not(target_arch = "wasm32"))]
     use_effect(move || {
         if *is_offline.read() {
             network_banner.set(Some(true));

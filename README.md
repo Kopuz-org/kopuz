@@ -12,7 +12,7 @@
   </a>
   <img src="https://img.shields.io/badge/Rust-000000?style=flat&logo=rust&logoColor=white" alt="Rust">
   <img src="https://github.com/Kopuz-org/kopuz/actions/workflows/build.yml/badge.svg" alt="Build">
-  <img src="https://github.com/user-attachments/assets/b7322455-d407-4f42-ae43-8a83fbb8f74f" alt="Kopuz">
+  <img src="https://github.com/user-attachments/assets/3234bb1b-6702-4802-946a-32f46e63d225" alt="Kopuz">
 
 <br/>
   <br/>

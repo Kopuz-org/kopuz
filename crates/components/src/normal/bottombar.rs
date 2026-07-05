@@ -338,7 +338,7 @@ pub fn BottombarNormal(
                     },
                     i { class: "fa-solid fa-share-nodes text-xs" }
                 }
-                if cfg!(all(not(target_arch = "wasm32"), not(target_os = "android"))) {
+                if cfg!(not(target_os = "android")) {
                     button {
                         class: "text-slate-400 hover:text-white",
                         title: i18n::t("mini_player").to_string(),

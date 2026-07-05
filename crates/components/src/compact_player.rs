@@ -89,7 +89,7 @@ pub fn CompactPlayer() -> Element {
                 if macos_top { "pt-[22px]" } else { "" },
             ),
             onmousedown: move |_| {
-                #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+                #[cfg(not(target_os = "android"))]
                 dioxus::desktop::window().drag();
             },
 

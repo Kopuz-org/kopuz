@@ -10,6 +10,7 @@
   - [Testing Expectations](#testing-expectations)
   - [Code Style](#code-style)
   - [Pull Requests and Submitting Changes](#pull-requests-and-submitting-changes)
+    - [History Hygiene](#history-hygiene)
     - [Commit Messages](#commit-messages)
   - [Maintainer Communication](#maintainer-communication)
   - [AI Policy](#ai-policy)
@@ -137,6 +138,18 @@ Maintainers may ask for narrower diffs, clearer tests, or a different boundary.
 Please handle review comments in follow-up commits instead of force-pushing away
 review context unless a maintainer asks you to clean up the branch.
 
+### History Hygiene
+
+Keep the final history reviewable; each commit should be an atomic, squashed
+logical change with a useful subject. Before asking for final review, squash
+fixup commits, typo-only follow-ups, formatter-only repair commits, and
+review-addressing noise into the commit that introduced the behavior.
+
+Avoid merge commits in pull request branches. Rebase on the target branch when
+needed, then force-push with lease. A pull request may contain more than one
+commit when the changes are genuinely separate, but each commit should build on
+its own idea and pass the commit message rules below.
+
 ### Commit Messages
 
 [scoped commits]
@@ -177,6 +190,11 @@ We also use `nix` specifically for Nix-related packaging.
 In most cases, the format will be `<crate-name>/<module-name>: <description>`.
 You should also strive to make your commits atomic, and focus each commit on one
 logical change. Ensure that your messages are _descriptive_ .
+
+CI enforces these commit subject rules on pull requests and pushes:
+
+- the subject must be no longer than 80 characters;
+- the subject must use `scope: description` or `scope/module: description`.
 
 > [!TIP]
 > You do not need to reference issues in commit bodies, but you _may_ add

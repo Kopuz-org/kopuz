@@ -11,11 +11,16 @@ use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Row, SqliteConnection};
 
 fn unique_dir(tag: &str) -> PathBuf {
+    // pid + counter, not just clock: macOS's µs clock let parallel tests
+    // collide on a nanos-only name and delete each other's live DB.
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let dir = std::env::temp_dir().join(format!("kopuz-import-{tag}-{nanos}"));
+    let pid = std::process::id();
+    let dir = std::env::temp_dir().join(format!("kopuz-import-{tag}-{pid}-{nanos}-{seq}"));
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }

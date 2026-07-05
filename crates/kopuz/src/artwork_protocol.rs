@@ -1,6 +1,5 @@
 use tracing::Instrument;
 
-#[cfg(not(target_arch = "wasm32"))]
 fn thumb_cache_path(file_path: &str) -> std::path::PathBuf {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -9,7 +8,6 @@ fn thumb_cache_path(file_path: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("rusic_thumb_{hash:016x}.jpg"))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn hq_cache_path(file_path: &str) -> std::path::PathBuf {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -19,7 +17,6 @@ fn hq_cache_path(file_path: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!("rusic_hq_{hash:016x}.jpg"))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn make_thumbnail(raw: &[u8], cache_path: &std::path::Path) -> Option<Vec<u8>> {
     use image::codecs::jpeg::JpegEncoder;
     let img = image::load_from_memory(raw).ok()?;
@@ -36,7 +33,6 @@ fn make_thumbnail(raw: &[u8], cache_path: &std::path::Path) -> Option<Vec<u8>> {
     Some(out)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn make_hq_image(raw: &[u8], cache_path: &std::path::Path) -> Option<Vec<u8>> {
     use image::codecs::jpeg::JpegEncoder;
     const SIZE_LIMIT: usize = 2 * 1024 * 1024;
@@ -59,7 +55,7 @@ fn make_hq_image(raw: &[u8], cache_path: &std::path::Path) -> Option<Vec<u8>> {
     Some(out)
 }
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 pub fn serve(uri: http::Uri, responder: dioxus::desktop::RequestAsyncResponder) {
     fn resp(
         status: u16,

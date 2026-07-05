@@ -22,8 +22,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 async-trait = { workspace = true }
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 sqlx = { workspace = true, features = [
   "runtime-tokio",
   "sqlite",

@@ -18,17 +18,11 @@ workspace = true
 [dependencies]
 tracing = { workspace = true }
 config = { workspace = true }
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 cpal = { workspace = true }
 symphonia = { workspace = true }
 symphonia-adapter-libopus = { workspace = true }
 rb = { workspace = true }
 tokio = { workspace = true }
-
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-web-sys = { workspace = true }
-wasm-bindgen = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { workspace = true, features = ["std"] }

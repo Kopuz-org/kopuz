@@ -2,41 +2,38 @@ use components::{
     bottombar::Bottombar, compact_player::CompactPlayer, download_overlay::DownloadOverlay,
     fullscreen::Fullscreen, rightbar::Rightbar, sidebar::Sidebar, titlebar::Titlebar,
 };
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 use dioxus::desktop::tao::dpi::LogicalSize;
-#[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
+#[cfg(target_os = "macos")]
 use dioxus::desktop::tao::platform::macos::WindowBuilderExtMacOS;
-#[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
+#[cfg(target_os = "windows")]
 use dioxus::desktop::tao::platform::windows::WindowExtWindows;
 use dioxus::prelude::*;
-#[cfg(not(target_arch = "wasm32"))]
 use discord_presence::Presence;
 use kopuz_route::Route;
 use pages::server::download_manager::DownloadQueue;
 use player::player::Player;
 use queue_state::PersistedQueueState;
-#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
-#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 use tracing::Instrument;
-#[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
+#[cfg(target_os = "windows")]
 use windows::Win32::Foundation::HWND;
 
 mod app_db;
 mod app_lifecycle;
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 mod artwork_protocol;
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 mod chrome_trace;
-#[cfg(all(not(debug_assertions), any(target_os = "linux", target_os = "macos")))]
-mod desktop_integration;
 mod desktop_shell;
 mod legacy;
 mod logging;
-#[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 mod pot_minter;
 mod queue_state;
+#[cfg(not(target_os = "android"))]
+mod ui_profile;
 mod updates;
 #[cfg(target_os = "windows")]
 mod windows_titlebar;
@@ -91,15 +88,11 @@ fn StaticHeadAssets() -> Element {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 static PRESENCE: std::sync::OnceLock<Option<Arc<Presence>>> = std::sync::OnceLock::new();
 
 fn main() {
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     {
-        #[cfg(all(not(debug_assertions), any(target_os = "linux", target_os = "macos")))]
-        desktop_integration::sync();
-
         let log_dir = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
             .map(|dirs| dirs.cache_dir().join("logs"))
             .unwrap_or_else(|| std::path::PathBuf::from("logs"));
@@ -318,12 +311,6 @@ fn main() {
 
         dioxus::LaunchBuilder::mobile().with_cfg(config).launch(App);
     }
-
-    #[cfg(target_arch = "wasm32")]
-    {
-        let _ = app_db::DB_HANDLE.set(db::init_stub());
-        dioxus::launch(App);
-    }
 }
 
 #[component]
@@ -369,7 +356,7 @@ fn App() -> Element {
             }
             path
         }
-        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+        #[cfg(not(target_os = "android"))]
         {
             let path = directories::ProjectDirs::from("com", "temidaradev", "kopuz")
                 .map(|dirs| dirs.cache_dir().to_path_buf())
@@ -377,8 +364,6 @@ fn App() -> Element {
             let _ = std::fs::create_dir_all(&path);
             path
         }
-        #[cfg(target_arch = "wasm32")]
-        std::path::PathBuf::from("./cache")
     });
     // ROOT-owned: detached tasks (download workers, close-flush) read/write
     // these after the spawning page — and in principle this component — is
@@ -439,7 +424,7 @@ fn App() -> Element {
     // subscribers (itag 774) are pot-exempt, and we can't know that until a
     // track resolves. So run the minter for any YtMusic session; Premium just
     // leaves it idle. Reactive: fires when config loads or the server changes.
-    #[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     use_effect(move || {
         let yt_active = config
             .read()
@@ -454,7 +439,6 @@ fn App() -> Element {
     let mut initial_load_done = use_signal(|| false);
     #[allow(unused_variables)]
     let cover_cache = use_memo(move || cache_dir().join("covers"));
-    #[cfg(not(target_arch = "wasm32"))]
     let _ = std::fs::create_dir_all(cover_cache());
     let download_queue = use_hook(|| Signal::new_in_scope(DownloadQueue::default(), ScopeId::ROOT));
     let download_progress =
@@ -507,7 +491,7 @@ fn App() -> Element {
     // flush silently never ran. Signals are peeked here (not Send), the
     // joined thread does the blocking DB work. Idempotent across
     // CloseRequested/LoopDestroyed.
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     dioxus::desktop::use_wry_event_handler(move |event, _| {
         use dioxus::desktop::tao::event::{Event, WindowEvent};
         if matches!(
@@ -565,7 +549,7 @@ fn App() -> Element {
         }
     });
 
-    #[cfg(all(not(target_arch = "wasm32"), target_os = "macos"))]
+    #[cfg(target_os = "macos")]
     use_effect(move || {
         let _ = dioxus::document::eval(
             r#"(function(){
@@ -633,9 +617,7 @@ fn App() -> Element {
         }
     });
 
-    #[cfg(not(target_arch = "wasm32"))]
     let presence = PRESENCE.get().cloned().flatten();
-    #[cfg(not(target_arch = "wasm32"))]
     provide_context(presence.clone());
 
     let mut station_registry = use_signal(radio::registry::StationRegistry::new);
@@ -662,26 +644,32 @@ fn App() -> Element {
         }
         last_radio_registry_key.set(Some(key));
 
-        spawn(
-            async move {
-                let mut new_registry = radio::registry::StationRegistry::new();
-                let mut import_count = 0;
+        spawn(async move {
+            let (new_registry, import_count) = utils::offload(
+                async move {
+                    let mut new_registry = radio::registry::StationRegistry::new();
+                    let mut import_count = 0;
 
-                for path in registry_paths {
-                    match new_registry.import_registry(&path).await {
-                        Ok(_) => import_count += 1,
-                        Err(e) => tracing::warn!("Failed to import registry from {}: {}", path, e),
+                    for path in registry_paths {
+                        match new_registry.import_registry(&path).await {
+                            Ok(_) => import_count += 1,
+                            Err(e) => {
+                                tracing::warn!("Failed to import registry from {}: {}", path, e)
+                            }
+                        }
                     }
+                    (new_registry, import_count)
                 }
+                .instrument(tracing::info_span!("radio.registry_load")),
+            )
+            .await;
 
-                station_registry.set(new_registry);
+            station_registry.set(new_registry);
 
-                if import_count > 0 {
-                    tracing::info!("Imported {} external radio registries", import_count);
-                }
+            if import_count > 0 {
+                tracing::info!("Imported {} external radio registries", import_count);
             }
-            .instrument(tracing::info_span!("radio.registry_load")),
-        );
+        });
     });
 
     let mut selected_album_id = use_signal(String::new);
@@ -703,9 +691,7 @@ fn App() -> Element {
     let current_queue_index = use_signal(|| 0usize);
 
     let mut network_banner: Signal<Option<bool>> = use_signal(|| None);
-    #[cfg(not(target_arch = "wasm32"))]
     let mut update_banner: Signal<Option<updates::AvailableUpdate>> = use_signal(|| None);
-    #[cfg(not(target_arch = "wasm32"))]
     let mut did_check_updates = use_signal(|| false);
     let mut ctrl = hooks::use_player_controller(
         player,
@@ -764,7 +750,6 @@ fn App() -> Element {
         }
     });
 
-    #[cfg(not(target_arch = "wasm32"))]
     use_effect(move || {
         if !*initial_load_done.read() {
             return;
@@ -852,9 +837,7 @@ fn App() -> Element {
     // re-runs cheap, but only spawns a new loop when the identity
     // changes (sign-in, account switch). Sign-out clears the
     // identity and the running loop exits on its next tick.
-    #[cfg(not(target_arch = "wasm32"))]
     let mut yt_keepalive_identity = use_signal(|| None::<String>);
-    #[cfg(not(target_arch = "wasm32"))]
     use_effect(move || {
         if !*initial_load_done.read() {
             return;
@@ -892,17 +875,14 @@ fn App() -> Element {
         });
     });
 
-    #[cfg(all(
-        not(target_arch = "wasm32"),
-        any(target_os = "linux", target_os = "windows")
-    ))]
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
     use_effect(move || {
         let mode = config.read().titlebar_mode;
         let win = dioxus::desktop::window();
         win.set_decorations(mode == config::TitlebarMode::System);
     });
 
-    #[cfg(all(not(target_arch = "wasm32"), target_os = "windows"))]
+    #[cfg(target_os = "windows")]
     use_effect(move || {
         let mode = config.read().titlebar_mode;
         let win = dioxus::desktop::window();
@@ -914,7 +894,7 @@ fn App() -> Element {
     // Library/playlists/favorites have no save loops anymore — every mutation
     // commits as a targeted write at the call site and bumps a generation.
 
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     {
         use dioxus::desktop::trayicon::TrayIcon;
         use dioxus::desktop::{WindowCloseBehaviour, window};
@@ -1075,7 +1055,6 @@ fn App() -> Element {
 
     let db_for_load = db.clone();
     use_hook(move || {
-        #[cfg(not(target_arch = "wasm32"))]
         {
             let db = db_for_load;
             let mut ctrl = ctrl;
@@ -1144,14 +1123,6 @@ fn App() -> Element {
                 hooks::use_sync_task::nudge_activate();
             }.instrument(tracing::info_span!("startup.load")));
         }
-        // wasm: the stub Db yields defaults (web is not a shipped target); just
-        // unblock the save effects.
-        #[cfg(target_arch = "wasm32")]
-        {
-            // Local is the default source; no auto-switch to a server.
-            config_loaded_ok.set(true);
-            initial_load_done.set(true);
-        }
     });
 
     let db_for_rescan = db.clone();
@@ -1196,7 +1167,6 @@ fn App() -> Element {
 
         let db_scan = db_for_rescan.clone();
         let gens_scan = gens_for_albums;
-        #[cfg(not(target_arch = "wasm32"))]
         spawn(async move {
             let db = db_scan;
             let gens = gens_scan;
@@ -1406,7 +1376,6 @@ fn App() -> Element {
     // any album whose cached cover file is missing. No online fetch — this is
     // the "force rescan photos" action and is independent of auto_fetch_covers.
     let db_for_reextract = db.clone();
-    #[cfg(not(target_arch = "wasm32"))]
     let mut cover_reextract_in_flight = use_signal(|| false);
     use_effect(move || {
         if !*initial_load_done.read() || !*config_loaded_ok.read() {
@@ -1417,15 +1386,11 @@ fn App() -> Element {
         }
         let db = db_for_reextract.clone();
         let gens = gens_for_albums;
-        #[cfg(not(target_arch = "wasm32"))]
         if *cover_reextract_in_flight.peek() {
             return;
         }
-        #[cfg(not(target_arch = "wasm32"))]
         cover_reextract_in_flight.set(true);
-        #[cfg(not(target_arch = "wasm32"))]
         let cover_cache_dir = cover_cache();
-        #[cfg(not(target_arch = "wasm32"))]
         spawn(
             async move {
                 let albums = match db.albums(&db::Source::Local).await {
@@ -1592,7 +1557,7 @@ fn App() -> Element {
     use_context_provider(|| components::sidebar::SidebarCollapsed(is_sidebar_collapsed));
 
     use_context_provider(|| components::CompactMode(compact_mode));
-    #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     {
         let mut saved_window_size = use_signal(|| None::<LogicalSize<f64>>);
         use_effect(move || {
@@ -1663,7 +1628,6 @@ fn App() -> Element {
     let is_rtl = i18n::is_rtl();
     let dir = if is_rtl { "rtl" } else { "ltr" };
     let content_row_class = "flex flex-1 overflow-hidden";
-    #[cfg(not(target_arch = "wasm32"))]
     let update_banner_state = update_banner.read().clone();
 
     let background_style = use_memo(move || {
@@ -1813,16 +1777,7 @@ fn App() -> Element {
                 }
             }
 
-            if let Some(update) = {
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    update_banner_state.clone()
-                }
-                #[cfg(target_arch = "wasm32")]
-                {
-                    None
-                }
-            } {
+            if let Some(update) = update_banner_state.clone() {
                 div {
                     class: "flex-shrink-0",
                     div {
@@ -1838,7 +1793,7 @@ fn App() -> Element {
                                     onclick: {
                                         let release_url = update.release_url.clone();
                                         move |_| {
-                                            #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+                                            #[cfg(not(target_os = "android"))]
                                             if let Err(e) = webbrowser::open(&release_url) {
                                                 tracing::error!("Failed to open release page: {}", e);
                                             }
@@ -2177,10 +2132,8 @@ fn App() -> Element {
                                 config: config,
                             }
                         },
-                        #[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+                        #[cfg(not(target_os = "android"))]
                         Route::Ytdlp => rsx! { pages::ytdlp::YtdlpPage { config } },
-                        #[cfg(target_arch = "wasm32")]
-                        Route::Ytdlp => rsx! { pages::settings::Settings { config } },
                         Route::Settings => rsx! { pages::settings::Settings { config } },
                         #[cfg(not(target_os = "android"))]
                         Route::ThemeEditor => rsx! { pages::theme_editor::ThemeEditorPage { config } },

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT folder_id, playlist_ref FROM folder_playlists ORDER BY folder_id, position",
+  "describe": {
+    "columns": [
+      {
+        "name": "folder_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "playlist_ref",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "910ae1b581fcc6a9c15ce3b5d8d257e420b2b5786e015d6e95bfcee8ef65fa79"
+}

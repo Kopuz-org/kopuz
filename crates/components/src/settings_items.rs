@@ -3,8 +3,7 @@ use config::{
     MusicServer, SavedServer,
 };
 use dioxus::prelude::*;
-#[cfg(not(target_arch = "wasm32"))]
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 use rfd::AsyncFileDialog;
 use scrobble::lastfm;
 use scrobble::librefm;
@@ -13,9 +12,23 @@ use tracing::Instrument;
 #[component]
 pub fn SettingItem(title: String, control: Element) -> Element {
     rsx! {
-        div { class: "flex items-center justify-between py-2",
-            p { class: "text-white font-medium", "{title}" }
+        div { class: "flex items-center justify-between gap-4 py-3",
+            p { class: "text-sm text-white font-medium", "{title}" }
             {control}
+        }
+    }
+}
+
+#[component]
+pub fn SettingsSection(title: String, children: Element) -> Element {
+    rsx! {
+        section { class: "rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden",
+            div { class: "px-5 py-3 border-b border-white/10 bg-white/[0.03]",
+                h2 { class: "text-xs font-semibold uppercase tracking-wider text-white/60",
+                    "{title}"
+                }
+            }
+            div { class: "px-5 py-1 divide-y divide-white/[0.06]", {children} }
         }
     }
 }
@@ -137,7 +150,7 @@ pub fn MultiDirectoryPicker(
     }
 }
 
-#[cfg(all(not(target_arch = "wasm32"), not(target_os = "android")))]
+#[cfg(not(target_os = "android"))]
 #[component]
 fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -> Element {
     rsx! {
@@ -184,14 +197,6 @@ fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -
             "{add_text}"
         }
     }
-}
-
-#[cfg(target_arch = "wasm32")]
-#[component]
-fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -> Element {
-    let _ = on_add;
-    let _ = add_text;
-    rsx! {}
 }
 
 #[component]

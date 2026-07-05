@@ -18,6 +18,16 @@ pub(crate) fn browser_candidates(browser: Browser) -> &'static [&'static str] {
     }
 }
 
+pub(crate) fn browser_flatpak_ids(browser: Browser) -> &'static [&'static str] {
+    match browser {
+        Browser::Brave => &["com.brave.Browser"],
+        Browser::Chrome => &["com.google.Chrome", "com.google.ChromeDev"],
+        Browser::Chromium => &["org.chromium.Chromium"],
+        Browser::Edge => &["com.microsoft.Edge"],
+        Browser::Vivaldi => &["com.vivaldi.Vivaldi"],
+    }
+}
+
 #[cfg(target_os = "macos")]
 fn macos_app_paths(browser: Browser) -> &'static [&'static str] {
     match browser {
@@ -71,7 +81,37 @@ fn windows_install_paths(browser: Browser) -> Vec<PathBuf> {
     out
 }
 
-pub(crate) fn find_browser_bin(browser: Browser) -> Option<String> {
+/// True inside a flatpak sandbox, where the host browser is only reachable via
+/// `flatpak-spawn --host`.
+pub(crate) fn in_flatpak() -> bool {
+    std::path::Path::new("/.flatpak-info").exists()
+}
+
+/// True if the command does not error, uses `sh -c` for executing in shell
+/// If running in flatpak container uses `flatpak-spawn --host`.
+pub(crate) async fn check_browser_command(arg: String) -> bool {
+    let mut command = if in_flatpak() {
+        let mut c = Command::new("flatpak-spawn");
+        c.args(["--host", "sh", "-c"]);
+        c
+    } else {
+        let mut c = Command::new("sh");
+        c.arg("-c");
+        c
+    };
+
+    command.arg(arg);
+
+    command
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+pub(crate) async fn find_browser_bin(browser: Browser) -> Option<String> {
     let env_key = format!(
         "KOPUZ_{}_BIN",
         browser.id().to_uppercase().replace('-', "_")
@@ -81,16 +121,41 @@ pub(crate) fn find_browser_bin(browser: Browser) -> Option<String> {
     {
         return Some(v.to_string_lossy().into_owned());
     }
-    let path = std::env::var_os("PATH").unwrap_or_default();
-    let dirs: Vec<PathBuf> = std::env::split_paths(&path).collect();
-    for candidate in browser_candidates(browser) {
-        for dir in &dirs {
-            let p = dir.join(candidate);
-            if p.is_file() {
-                return Some(candidate.to_string());
+
+    if in_flatpak() {
+        for cand in browser_candidates(browser) {
+            if check_browser_command(format!("command -v {cand}")).await {
+                return Some(cand.to_string());
+            }
+        }
+    } else {
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let dirs: Vec<PathBuf> = std::env::split_paths(&path).collect();
+        for candidate in browser_candidates(browser) {
+            for dir in &dirs {
+                let p = dir.join(candidate);
+                if p.is_file() {
+                    return Some(candidate.to_string());
+                }
             }
         }
     }
+
+    if let Ok(v) = std::env::var("KOPUZ_BROWSER_FLATPAK_ID")
+        && !v.trim().is_empty()
+    {
+        let id = v.to_string().to_owned();
+        if check_browser_command(format!("flatpak info {id}")).await {
+            return Some(format!("flatpak run {id}"));
+        }
+    }
+
+    for cand in browser_flatpak_ids(browser) {
+        if check_browser_command(format!("flatpak info {cand}")).await {
+            return Some(format!("flatpak run {cand}"));
+        }
+    }
+
     #[cfg(target_os = "macos")]
     for path in macos_app_paths(browser) {
         if std::path::Path::new(path).is_file() {
@@ -106,49 +171,18 @@ pub(crate) fn find_browser_bin(browser: Browser) -> Option<String> {
     None
 }
 
-/// True inside a flatpak sandbox, where the host browser is only reachable via
-/// `flatpak-spawn --host`.
-pub(crate) fn in_flatpak() -> bool {
-    std::path::Path::new("/.flatpak-info").exists()
-}
-
-/// Resolve the browser on the *host* PATH (the sandbox can't stat host
-/// binaries), probing each candidate with `flatpak-spawn --host command -v`.
-pub(crate) async fn find_host_browser_bin(browser: Browser) -> Option<String> {
-    let env_key = format!(
-        "KOPUZ_{}_BIN",
-        browser.id().to_uppercase().replace('-', "_")
-    );
-    if let Some(v) = std::env::var_os(&env_key)
-        && !v.is_empty()
-    {
-        return Some(v.to_string_lossy().into_owned());
-    }
-    for cand in browser_candidates(browser) {
-        let ok = Command::new("flatpak-spawn")
-            .args(["--host", "sh", "-c"])
-            .arg(format!("command -v {cand}"))
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .await
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if ok {
-            return Some(cand.to_string());
-        }
-    }
-    None
-}
-
 /// Plain `Command` natively; `flatpak-spawn --host --watch-bus` when packaged,
 /// so `child.kill()`/`kill_on_drop` still tears the host browser down.
 pub(crate) fn browser_command(bin: &str) -> Command {
+    let cmd: Vec<&str> = bin.split(' ').collect();
     if in_flatpak() {
         let mut c = Command::new("flatpak-spawn");
-        c.args(["--host", "--watch-bus", bin]);
+        c.args(["--host", "--watch-bus"]);
+        c.args(cmd);
         c
     } else {
-        Command::new(bin)
+        let mut c = Command::new(cmd[0]);
+        c.args(&cmd[1..]);
+        c
     }
 }

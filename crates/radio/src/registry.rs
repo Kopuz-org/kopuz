@@ -88,7 +88,6 @@ async fn fetch_content(
     let is_http = |s: &str| s.starts_with("http://") || s.starts_with("https://");
 
     if is_http(url_or_path) || base_url_or_dir.is_some_and(is_http) {
-        #[cfg(not(target_arch = "wasm32"))]
         {
             let url = if is_http(url_or_path) {
                 url_or_path.to_string()
@@ -124,12 +123,6 @@ async fn fetch_content(
             };
 
             Ok((text, new_base))
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            Err(RegistryError::Network(
-                "HTTP fetching not supported on WASM yet".into(),
-            ))
         }
     } else {
         let path = if let Some(base) = base_url_or_dir {

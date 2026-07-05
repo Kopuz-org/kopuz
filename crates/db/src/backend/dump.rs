@@ -48,47 +48,68 @@ pub async fn load_playlists(pool: &SqlitePool, source: &Source) -> Result<Playli
     // favorites view's domain — so it never appears in the playlists grid even
     // if an older sync materialized a row for it.
     let rows = sqlx::query!(
-        "SELECT rowid_pk, source_pl_id, name, cover_path, image_tag \
+        "SELECT rowid_pk as \"rowid_pk!\", source_pl_id, name, cover_path, image_tag \
          FROM playlists WHERE source = ?1 AND source_pl_id != 'LM' ORDER BY position",
         src
     )
     .fetch_all(pool)
     .await?;
 
-    let mut playlists = Vec::new();
-    for r in rows {
-        let tracks: Vec<String> = sqlx::query_scalar!(
-            "SELECT track_ref FROM playlist_tracks WHERE playlist_pk = ?1 ORDER BY position",
-            r.rowid_pk
-        )
-        .fetch_all(pool)
-        .await?;
-        playlists.push(Playlist {
+    // One query for every playlist's tracks (not one per playlist), grouped
+    // by playlist afterwards. Order by playlist first so each group's tracks
+    // arrive contiguous and position-sorted.
+    let track_rows = sqlx::query!(
+        "SELECT pt.playlist_pk, pt.track_ref \
+         FROM playlist_tracks pt \
+         JOIN playlists p ON p.rowid_pk = pt.playlist_pk \
+         WHERE p.source = ?1 \
+         ORDER BY pt.playlist_pk, pt.position",
+        src
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut tracks_by_pk: HashMap<i64, Vec<String>> = HashMap::new();
+    for t in track_rows {
+        tracks_by_pk
+            .entry(t.playlist_pk)
+            .or_default()
+            .push(t.track_ref);
+    }
+
+    let playlists = rows
+        .into_iter()
+        .map(|r| Playlist {
             id: r.source_pl_id,
             name: r.name,
-            tracks,
+            tracks: tracks_by_pk.remove(&r.rowid_pk).unwrap_or_default(),
             image_tag: r.image_tag,
             cover_path: r.cover_path.map(PathBuf::from),
-        });
-    }
+        })
+        .collect();
 
     let folder_rows = sqlx::query!("SELECT id, name FROM folders")
         .fetch_all(pool)
         .await?;
-    let mut folders = Vec::new();
-    for f in folder_rows {
-        let playlist_ids: Vec<String> = sqlx::query_scalar!(
-            "SELECT playlist_ref FROM folder_playlists WHERE folder_id = ?1 ORDER BY position",
-            f.id
-        )
-        .fetch_all(pool)
-        .await?;
-        folders.push(PlaylistFolder {
+    let member_rows = sqlx::query!(
+        "SELECT folder_id, playlist_ref FROM folder_playlists ORDER BY folder_id, position"
+    )
+    .fetch_all(pool)
+    .await?;
+    let mut members_by_folder: HashMap<String, Vec<String>> = HashMap::new();
+    for m in member_rows {
+        members_by_folder
+            .entry(m.folder_id)
+            .or_default()
+            .push(m.playlist_ref);
+    }
+    let folders = folder_rows
+        .into_iter()
+        .map(|f| PlaylistFolder {
+            playlist_ids: members_by_folder.remove(&f.id).unwrap_or_default(),
             id: f.id,
             name: f.name,
-            playlist_ids,
-        });
-    }
+        })
+        .collect();
 
     Ok(PlaylistStore { playlists, folders })
 }
