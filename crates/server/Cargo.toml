@@ -44,12 +44,11 @@ rookie = "0.5"
 # Blitz renderer). ONE bundled V8: `deno_core` runs the sig/n decipher solver on
 # our own JsRuntime, and `rustypipe-botguard` (deno_core + a minimal jsdom shim)
 # mints PoTokens on the same V8 when YouTube's backend demands one. Desktop only
-# — V8 isn't viable on Android. VERSION LOCK: rustypipe-botguard 0.1.2 pins
-# deno_core ^0.331 (0.331.x only), so deno_core MUST match or the two won't share
-# one V8 link.
+# — V8 isn't viable on Android. Versions (incl. the deno_core ^0.331 lock) live in
+# the workspace manifest.
 [target.'cfg(not(target_os = "android"))'.dependencies]
-deno_core = "0.331"
-rustypipe-botguard = "0.1.2"
+deno_core = { workspace = true }
+rustypipe-botguard = { workspace = true }
 
 # Windows native cookie decryption (v10 DPAPI + planted v20 app-bound). Reuses
 # the project's sqlx/sqlite (NOT rusqlite — that would double-link libsqlite3).
