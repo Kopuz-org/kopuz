@@ -345,6 +345,11 @@ channel_mode_mono = 󱤴 󱥯
 channel_mode_left_only = 󱥭 󱤿 󱥔
 channel_mode_right_only = 󱥭 󱥬 󱥔
 channel_mode_swap_left_right = 󱤴 󱥭
+replaygain = ReplayGain
+replaygain_off = Off
+replaygain_track = Track
+replaygain_album = Album
+replaygain_preamp = ReplayGain pre-amp
 
 crossfade = 󱥭 󱤴
 crossfade_off = 󱤄

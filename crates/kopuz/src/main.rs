@@ -1090,6 +1090,9 @@ fn App() -> Element {
                     player.peek().set_volume(loaded.volume);
                     player.peek().set_channel_mode(loaded.channel_mode);
                     player.peek().set_equalizer(loaded.equalizer.clone());
+                    player
+                        .peek()
+                        .set_replaygain(loaded.replaygain_mode, loaded.replaygain_preamp_db);
                     i18n::set_locale(&loaded.language);
                 }
 

@@ -344,6 +344,11 @@ channel_mode_mono = מונו
 channel_mode_left_only = שמאל בלבד
 channel_mode_right_only = ימין בלבד
 channel_mode_swap_left_right = החלף ש/י
+replaygain = ReplayGain
+replaygain_off = Off
+replaygain_track = Track
+replaygain_album = Album
+replaygain_preamp = ReplayGain pre-amp
 
 crossfade = מעבר הדרגתי
 crossfade_off = כבוי

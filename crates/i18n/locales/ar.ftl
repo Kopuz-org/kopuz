@@ -350,6 +350,11 @@ channel_mode_mono = أحادي
 channel_mode_left_only = الأيسر فقط
 channel_mode_right_only = الأيمن فقط
 channel_mode_swap_left_right = تبديل اليسار/اليمين
+replaygain = ReplayGain
+replaygain_off = Off
+replaygain_track = Track
+replaygain_album = Album
+replaygain_preamp = ReplayGain pre-amp
 
 crossfade = تلاشي متقاطع
 crossfade_off = إيقاف

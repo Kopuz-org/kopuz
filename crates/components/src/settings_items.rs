@@ -1,6 +1,6 @@
 use config::{
     AppConfig, BackBehavior, ChannelMode, EqPreset, EqualizerSettings as EqualizerConfig,
-    MusicServer, SavedServer,
+    MusicServer, ReplayGainMode, SavedServer,
 };
 use dioxus::prelude::*;
 #[cfg(not(target_os = "android"))]
@@ -1203,6 +1203,58 @@ pub fn ChannelModeSelector(current: ChannelMode, on_change: EventHandler<Channel
                     "{channel_mode_label(*mode)}"
                 }
             }
+        }
+    }
+}
+
+fn replaygain_mode_label(mode: ReplayGainMode) -> String {
+    match mode {
+        ReplayGainMode::Off => i18n::t("replaygain_off"),
+        ReplayGainMode::Track => i18n::t("replaygain_track"),
+        ReplayGainMode::Album => i18n::t("replaygain_album"),
+    }
+}
+
+#[component]
+pub fn ReplayGainModeSelector(
+    current: ReplayGainMode,
+    on_change: EventHandler<ReplayGainMode>,
+) -> Element {
+    rsx! {
+        select {
+            class: "bg-white/5 border border-white/10 rounded px-3 py-1 text-sm text-white focus:outline-none focus:border-white/20",
+            value: current.value_str(),
+            onchange: move |evt| on_change.call(ReplayGainMode::from_value_str(&evt.value())),
+            for mode in ReplayGainMode::ALL {
+                option {
+                    value: mode.value_str(),
+                    selected: *mode == current,
+                    "{replaygain_mode_label(*mode)}"
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub fn ReplayGainPreampSlider(value_db: f32, on_change: EventHandler<f32>) -> Element {
+    rsx! {
+        div { class: "flex items-center gap-3 min-w-[220px]",
+            input {
+                r#type: "range",
+                min: "-12",
+                max: "12",
+                step: "0.5",
+                value: format!("{value_db:.1}"),
+                class: "flex-1",
+                style: "accent-color: var(--color-indigo-500);",
+                onchange: move |evt| {
+                    if let Ok(value) = evt.value().parse::<f32>() {
+                        on_change.call(value);
+                    }
+                }
+            }
+            span { class: "text-xs font-mono text-white/80 w-14 text-right", {format!("{value_db:+.1} dB")} }
         }
     }
 }

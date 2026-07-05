@@ -344,6 +344,11 @@ channel_mode_mono = 모노
 channel_mode_left_only = 왼쪽만
 channel_mode_right_only = 오른쪽만
 channel_mode_swap_left_right = L/R 스왑
+replaygain = ReplayGain
+replaygain_off = Off
+replaygain_track = Track
+replaygain_album = Album
+replaygain_preamp = ReplayGain pre-amp
 
 crossfade = 크로스페이드
 crossfade_off = 끄기

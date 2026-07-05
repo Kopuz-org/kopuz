@@ -344,6 +344,11 @@ channel_mode_mono = Mono
 channel_mode_left_only = Nur links
 channel_mode_right_only = Nur rechts
 channel_mode_swap_left_right = L/R tauschen
+replaygain = ReplayGain
+replaygain_off = Aus
+replaygain_track = Titel
+replaygain_album = Album
+replaygain_preamp = ReplayGain-Vorverstärkung
 
 crossfade = Überblendung
 crossfade_off = Aus

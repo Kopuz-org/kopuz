@@ -350,6 +350,11 @@ channel_mode_mono = モノラル
 channel_mode_left_only = 左のみ
 channel_mode_right_only = 右のみ
 channel_mode_swap_left_right = 左右を入れ替え
+replaygain = ReplayGain
+replaygain_off = オフ
+replaygain_track = トラック
+replaygain_album = アルバム
+replaygain_preamp = ReplayGain プリアンプ
 
 crossfade = クロスフェード
 crossfade_off = オフ

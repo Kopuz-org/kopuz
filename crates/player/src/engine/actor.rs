@@ -14,7 +14,10 @@ use config::{ChannelMode, EqualizerSettings};
 use super::rt::{Retired, RtCmd, RtSession, RtState};
 use super::sink::{AudioSink, DataCallbackFactory, SinkConfig};
 use super::worker::{WorkerCmd, WorkerHandle, WorkerMsg};
-use super::{Command, EngineStatus, Event, LoadOutcome, LoadReply, LoadRequest, Phase, Transition};
+use super::{
+    Command, EngineStatus, Event, LoadOutcome, LoadReply, LoadRequest, Phase, ReplayGainInfo,
+    Transition,
+};
 use crate::player::PlayerInitError;
 #[cfg(any(target_os = "android", target_os = "linux", target_os = "macos"))]
 use crate::systemint;
@@ -121,6 +124,7 @@ struct Session {
     duration: Duration,
     seekable: bool,
     source_sample_rate: Option<u32>,
+    replaygain: ReplayGainInfo,
     eof: bool,
     ended: bool,
 }
@@ -142,7 +146,7 @@ struct RingParts {
     rt_session: RtSession,
 }
 
-fn make_ring(config: SinkConfig) -> RingParts {
+fn make_ring(config: SinkConfig, gain: f32) -> RingParts {
     let size = (config.sample_rate as usize * config.channels * RING_BUF_SECONDS).max(1);
     let (producer, consumer) = rtrb::RingBuffer::new(size);
     let written = Arc::new(AtomicU64::new(0));
@@ -151,7 +155,11 @@ fn make_ring(config: SinkConfig) -> RingParts {
         producer,
         written,
         played: played.clone(),
-        rt_session: RtSession { consumer, played },
+        rt_session: RtSession {
+            consumer,
+            played,
+            gain,
+        },
     }
 }
 
@@ -166,6 +174,8 @@ struct Actor {
     paused: Arc<AtomicBool>,
     eq_settings: EqualizerSettings,
     channel_mode: ChannelMode,
+    replaygain_mode: config::ReplayGainMode,
+    replaygain_preamp_db: f32,
 
     rt_tx: Option<Sender<RtCmd>>,
     retire_rx: Option<Receiver<Retired>>,
@@ -203,6 +213,8 @@ impl Actor {
             paused: Arc::new(AtomicBool::new(false)),
             eq_settings: EqualizerSettings::default(),
             channel_mode: ChannelMode::Stereo,
+            replaygain_mode: config::ReplayGainMode::Off,
+            replaygain_preamp_db: 0.0,
             rt_tx: None,
             retire_rx: None,
             current: None,
@@ -277,6 +289,14 @@ impl Actor {
                 self.eq_settings = settings.clone();
                 self.send_rt(RtCmd::SetEqualizer(settings));
             }
+            Command::SetReplayGain { mode, preamp_db } => {
+                self.replaygain_mode = mode;
+                self.replaygain_preamp_db = preamp_db;
+                if let Some(current) = &self.current {
+                    let gain = self.session_gain(&current.replaygain);
+                    self.send_rt(RtCmd::SetActiveGain(gain));
+                }
+            }
             Command::SetDuration(duration) => {
                 if let Some(current) = &mut self.current {
                     current.duration = duration;
@@ -327,6 +347,7 @@ impl Actor {
                 token,
                 source_sample_rate,
                 seekable,
+                replaygain,
             } => {
                 if self.pending.as_ref().is_none_or(|p| p.token != token) {
                     // Stale probe from a superseded load; its command sender is
@@ -334,7 +355,7 @@ impl Actor {
                     return;
                 }
                 let pending = self.pending.take().expect("checked above");
-                self.start_session(pending, source_sample_rate, seekable);
+                self.start_session(pending, source_sample_rate, seekable, replaygain);
             }
             WorkerMsg::Eof { token } => {
                 if let Some(current) = &mut self.current
@@ -360,7 +381,13 @@ impl Actor {
     }
 
     /// A probed source is ready: decide crossfade vs immediate and start it.
-    fn start_session(&mut self, pending: Pending, source_sample_rate: Option<u32>, seekable: bool) {
+    fn start_session(
+        &mut self,
+        pending: Pending,
+        source_sample_rate: Option<u32>,
+        seekable: bool,
+        replaygain: ReplayGainInfo,
+    ) {
         let Pending {
             token,
             worker,
@@ -378,6 +405,7 @@ impl Actor {
             start_at,
             source_sample_rate,
             seekable,
+            replaygain,
         ) {
             Ok(outcome) => {
                 // Publish before resolving the reply so a caller that reads
@@ -417,6 +445,7 @@ impl Actor {
         start_at: Option<Duration>,
         source_sample_rate: Option<u32>,
         seekable: bool,
+        replaygain: ReplayGainInfo,
     ) -> Result<LoadOutcome, String> {
         let desired_config = match self.sink.probe_config(source_sample_rate) {
             Ok(config) => config,
@@ -440,12 +469,13 @@ impl Actor {
 
         if let Some(fade) = fade {
             let config = desired_config;
+            let gain = self.session_gain(&replaygain);
             let RingParts {
                 producer,
                 written,
                 played,
                 rt_session,
-            } = make_ring(config);
+            } = make_ring(config, gain);
             let fade_frames = (fade.as_secs_f64() * config.sample_rate as f64).round() as u64;
 
             if let Some(old_fading) = self.fading.take() {
@@ -475,6 +505,7 @@ impl Actor {
                 duration,
                 seekable,
                 source_sample_rate,
+                replaygain,
                 start_at,
             );
             Ok(LoadOutcome { crossfaded: true })
@@ -498,12 +529,13 @@ impl Actor {
                 return Err(self.abort_start(worker, "no output stream".to_string()));
             };
 
+            let gain = self.session_gain(&replaygain);
             let RingParts {
                 producer,
                 written,
                 played,
                 rt_session,
-            } = make_ring(config);
+            } = make_ring(config, gain);
             let _ = worker.cmd_tx.send(WorkerCmd::Start {
                 producer,
                 written: written.clone(),
@@ -537,6 +569,7 @@ impl Actor {
                 duration,
                 seekable,
                 source_sample_rate,
+                replaygain,
                 start_at,
             );
             Ok(LoadOutcome { crossfaded: false })
@@ -553,6 +586,7 @@ impl Actor {
         duration: Duration,
         seekable: bool,
         source_sample_rate: Option<u32>,
+        replaygain: ReplayGainInfo,
         start_at: Option<Duration>,
     ) {
         self.current = Some(Session {
@@ -564,6 +598,7 @@ impl Actor {
             duration,
             seekable,
             source_sample_rate,
+            replaygain,
             eof: false,
             ended: false,
         });
@@ -597,7 +632,12 @@ impl Actor {
         }
 
         // Fresh ring: pre-seek samples die with the old one, no drain races.
-        let ring = make_ring(config);
+        let gain = session_gain_for(
+            self.replaygain_mode,
+            self.replaygain_preamp_db,
+            &current.replaygain,
+        );
+        let ring = make_ring(config, gain);
         let _ = current.worker.cmd_tx.send(WorkerCmd::Seek {
             target,
             producer: ring.producer,
@@ -822,6 +862,10 @@ impl Actor {
         }
     }
 
+    fn session_gain(&self, replaygain: &ReplayGainInfo) -> f32 {
+        session_gain_for(self.replaygain_mode, self.replaygain_preamp_db, replaygain)
+    }
+
     fn send_rt(&self, cmd: RtCmd) {
         if let Some(rt_tx) = &self.rt_tx {
             let _ = rt_tx.send(cmd);
@@ -892,5 +936,98 @@ impl Actor {
             }
         }
         self.status.store(Arc::new(EngineStatus::idle()));
+    }
+}
+
+/// Linear normalization gain for a session: the mode-selected ReplayGain value
+/// plus the pre-amp, clamped so known peaks don't clip. Unity when off or when
+/// the source carries no gain tags.
+fn session_gain_for(
+    mode: config::ReplayGainMode,
+    preamp_db: f32,
+    replaygain: &ReplayGainInfo,
+) -> f32 {
+    use config::ReplayGainMode;
+    let (gain_db, peak) = match mode {
+        ReplayGainMode::Off => return 1.0,
+        ReplayGainMode::Track => (
+            replaygain.track_gain_db.or(replaygain.album_gain_db),
+            replaygain.track_peak.or(replaygain.album_peak),
+        ),
+        ReplayGainMode::Album => (
+            replaygain.album_gain_db.or(replaygain.track_gain_db),
+            replaygain.album_peak.or(replaygain.track_peak),
+        ),
+    };
+    let Some(gain_db) = gain_db else {
+        return 1.0;
+    };
+    let mut gain = 10.0_f32.powf((gain_db + preamp_db) / 20.0);
+    // Peak protection: don't let gain push a known peak past full scale.
+    if let Some(peak) = peak.filter(|p| *p > 0.0) {
+        gain = gain.min(1.0 / peak);
+    }
+    if gain.is_finite() {
+        gain.clamp(0.0, 8.0)
+    } else {
+        1.0
+    }
+}
+
+#[cfg(test)]
+mod gain_tests {
+    use super::super::ReplayGainInfo;
+    use super::session_gain_for;
+    use config::ReplayGainMode;
+
+    fn rg(track: Option<f32>, album: Option<f32>, peak: Option<f32>) -> ReplayGainInfo {
+        ReplayGainInfo {
+            track_gain_db: track,
+            album_gain_db: album,
+            track_peak: peak,
+            album_peak: None,
+        }
+    }
+
+    #[test]
+    fn off_and_untagged_are_unity() {
+        assert_eq!(
+            session_gain_for(ReplayGainMode::Off, 0.0, &rg(Some(-6.0), None, None)),
+            1.0
+        );
+        assert_eq!(
+            session_gain_for(ReplayGainMode::Track, 3.0, &rg(None, None, None)),
+            1.0
+        );
+    }
+
+    #[test]
+    fn track_mode_applies_gain_and_preamp() {
+        let gain = session_gain_for(ReplayGainMode::Track, 0.0, &rg(Some(-6.0), None, None));
+        assert!((gain - 0.501).abs() < 0.01, "-6 dB ≈ 0.501: {gain}");
+        let gain = session_gain_for(ReplayGainMode::Track, 6.0, &rg(Some(-6.0), None, None));
+        assert!(
+            (gain - 1.0).abs() < 0.01,
+            "-6 dB + 6 dB preamp = unity: {gain}"
+        );
+    }
+
+    #[test]
+    fn album_mode_prefers_album_and_falls_back() {
+        let gain = session_gain_for(
+            ReplayGainMode::Album,
+            0.0,
+            &rg(Some(-12.0), Some(-6.0), None),
+        );
+        assert!((gain - 0.501).abs() < 0.01, "album gain wins: {gain}");
+        let gain = session_gain_for(ReplayGainMode::Album, 0.0, &rg(Some(-6.0), None, None));
+        assert!((gain - 0.501).abs() < 0.01, "falls back to track: {gain}");
+    }
+
+    #[test]
+    fn peak_limits_positive_gain() {
+        // +6 dB requested but peak at 0.9 → gain capped at 1/0.9.
+        let gain = session_gain_for(ReplayGainMode::Track, 0.0, &rg(Some(6.0), None, Some(0.9)));
+        assert!((gain - 1.0 / 0.9).abs() < 0.001, "peak clamp: {gain}");
     }
 }

@@ -344,6 +344,11 @@ channel_mode_mono = Μονοφωνικό
 channel_mode_left_only = Μόνο αριστερά
 channel_mode_right_only = Μόνο δεξιά
 channel_mode_swap_left_right = Εναλλαγή Α/Δ
+replaygain = ReplayGain
+replaygain_off = Off
+replaygain_track = Track
+replaygain_album = Album
+replaygain_preamp = ReplayGain pre-amp
 
 crossfade = Crossfade (Σταδιακή μίξη)
 crossfade_off = Ανενεργό

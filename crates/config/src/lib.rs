@@ -209,6 +209,35 @@ impl ChannelMode {
     }
 }
 
+/// Loudness normalization from ReplayGain / R128 tags in the source metadata.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum ReplayGainMode {
+    #[default]
+    Off,
+    Track,
+    Album,
+}
+
+impl ReplayGainMode {
+    pub const ALL: &'static [Self] = &[Self::Off, Self::Track, Self::Album];
+
+    pub const fn value_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Track => "track",
+            Self::Album => "album",
+        }
+    }
+
+    pub fn from_value_str(value: &str) -> Self {
+        match value {
+            "track" => Self::Track,
+            "album" => Self::Album,
+            _ => Self::Off,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum EqPreset {
     #[default]
@@ -554,6 +583,12 @@ pub struct AppConfig {
     #[serde(default)]
     pub equalizer: EqualizerSettings,
     #[serde(default)]
+    pub replaygain_mode: ReplayGainMode,
+    /// Extra gain in dB applied on top of the ReplayGain adjustment (only when
+    /// a track actually has gain tags).
+    #[serde(default)]
+    pub replaygain_preamp_db: f32,
+    #[serde(default)]
     pub ytdlp_output_dir: String,
     #[serde(default)]
     pub ytdlp_options: YtdlpOptions,
@@ -712,6 +747,8 @@ impl Default for AppConfig {
             back_behavior: BackBehavior::RewindThenPrev,
             channel_mode: ChannelMode::Stereo,
             equalizer: EqualizerSettings::default(),
+            replaygain_mode: ReplayGainMode::Off,
+            replaygain_preamp_db: 0.0,
             ytdlp_output_dir: String::new(),
             ytdlp_options: YtdlpOptions::default(),
             ytdlp_history: Vec::new(),

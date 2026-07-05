@@ -344,6 +344,11 @@ channel_mode_mono = 单声道
 channel_mode_left_only = 仅左声道
 channel_mode_right_only = 仅右声道
 channel_mode_swap_left_right = 交换左右
+replaygain = 回放增益
+replaygain_off = 关闭
+replaygain_track = 单曲
+replaygain_album = 专辑
+replaygain_preamp = 回放增益前置放大
 
 crossfade = 交叉淡入淡出
 crossfade_off = 关闭
