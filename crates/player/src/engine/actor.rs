@@ -182,6 +182,7 @@ struct Actor {
     graveyard: Vec<std::thread::JoinHandle<()>>,
     last_phase: Phase,
     last_token: u64,
+    last_position_emitted: Option<(u64, u64)>,
     last_output_rebuild: Option<Instant>,
     shutting_down: bool,
 }
@@ -212,6 +213,7 @@ impl Actor {
             graveyard: Vec::new(),
             last_phase: Phase::Idle,
             last_token: 0,
+            last_position_emitted: None,
             last_output_rebuild: None,
             shutting_down: false,
         }
@@ -711,10 +713,16 @@ impl Actor {
         if self.phase() == Phase::Playing {
             let position = self.status.load().position();
             if let Some(current) = &self.current {
-                self.emit(Event::Position {
-                    token: current.token,
-                    position,
-                });
+                // Throttled to second boundaries: subscribers render seconds,
+                // and every event is a wakeup on their side.
+                let mark = (current.token, position.as_secs());
+                if self.last_position_emitted != Some(mark) {
+                    self.last_position_emitted = Some(mark);
+                    self.emit(Event::Position {
+                        token: current.token,
+                        position,
+                    });
+                }
             }
             // MPRIS reads position on demand from this stored value; the old
             // engine ran a dedicated 250ms thread for it.

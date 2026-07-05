@@ -44,6 +44,7 @@ fn bump_listen_count_db(track_uid: String, db: db::Db) {
     });
 }
 
+#[cfg(any(target_os = "macos", target_os = "android"))]
 fn init_bg_channel() {
     BG_CMD_TX.get_or_init(|| {
         let (tx, rx) = std::sync::mpsc::channel::<BgCmd>();
@@ -98,7 +99,6 @@ pub fn use_player_task(ctrl: PlayerController) {
 
     #[cfg(target_os = "macos")]
     use_hook(move || {
-        let mut ctrl = ctrl;
         init_bg_channel();
 
         // let the CFRunLoopTimer heartbeat poke our tokio task so it
@@ -120,24 +120,6 @@ pub fn use_player_task(ctrl: PlayerController) {
             };
             send_bg_cmd(cmd);
             nudge_event_loop();
-        });
-
-        ctrl.player.write().set_finish_callback(|| {
-            if let Some(notify) = BG_NOTIFY.get() {
-                notify.notify_one();
-            }
-            player::systemint::wake_run_loop();
-        });
-    });
-
-    #[cfg(target_os = "linux")]
-    use_hook(move || {
-        let mut ctrl = ctrl;
-        init_bg_channel();
-        ctrl.player.write().set_finish_callback(|| {
-            if let Some(notify) = BG_NOTIFY.get() {
-                notify.notify_one();
-            }
         });
     });
 
@@ -192,10 +174,9 @@ pub fn use_player_task(ctrl: PlayerController) {
 
     // Android routes media-notification button taps through a JNI callback (no event
     // queue), so we register a background handler like macOS and let the shared loop
-    // drain the resulting BgCmds. Track finishing also wakes the loop for auto-advance.
+    // drain the resulting BgCmds.
     #[cfg(target_os = "android")]
     use_hook(move || {
-        let mut ctrl = ctrl;
         init_bg_channel();
 
         player::systemint::set_background_handler(move |event| {
@@ -209,13 +190,6 @@ pub fn use_player_task(ctrl: PlayerController) {
                 SystemEvent::Stop => BgCmd::Pause,
             };
             send_bg_cmd(cmd);
-        });
-
-        ctrl.player.write().set_finish_callback(|| {
-            if let Some(notify) = BG_NOTIFY.get() {
-                notify.notify_one();
-            }
-            player::systemint::wake_run_loop();
         });
     });
 
@@ -237,11 +211,19 @@ pub fn use_player_task(ctrl: PlayerController) {
             let mut crossfade_triggered_for_gen: Option<usize> = None;
             let mut last_recent_path: Option<String> = None;
             let bg_notify = BG_NOTIFY.get_or_init(tokio::sync::Notify::new);
+            // Engine events (Position once per second while playing, Ended,
+            // phase changes) wake this loop; the coarse timer only covers the
+            // genuinely periodic work (Jellyfin reports, Discord, refreshes).
+            let mut engine_events = ctrl.player.peek().subscribe();
             loop {
                 tokio::select! {
                     _ = bg_notify.notified() => {},
-                    _ = tokio::time::sleep(std::time::Duration::from_millis(250)) => {},
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(1000)) => {},
+                    _ = engine_events.recv() => {},
                 }
+                // Collapse whatever queued while we were asleep; the loop body
+                // below reads the live status snapshot, not the events.
+                while engine_events.try_recv().is_ok() {}
 
                 nudge_event_loop();
 
