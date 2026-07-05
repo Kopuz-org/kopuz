@@ -10,10 +10,10 @@ use player::player::Player;
 
 #[component]
 fn ProgressBarControl(
-    mut player: Signal<Player>,
     current_song_duration: Signal<u64>,
     current_song_progress: Signal<u64>,
 ) -> Element {
+    let mut ctrl = use_context::<PlayerController>();
     let mut is_dragging = use_signal(|| false);
     let mut drag_progress = use_signal(|| 0u64);
 
@@ -62,8 +62,7 @@ fn ProgressBarControl(
                         disabled: is_radio,
                         onchange: move |evt| {
                             if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
-                                player.write().seek(std::time::Duration::from_secs(val));
-                                current_song_progress.set(val);
+                                ctrl.seek(std::time::Duration::from_secs(val));
                                 drag_progress.set(val);
                                 is_dragging.set(false);
                             }
@@ -569,7 +568,7 @@ pub fn Fullscreen(
                             current_song_album,
                             current_song_bitrate,
                         }
-                        ProgressBarControl { player, current_song_duration, current_song_progress }
+                        ProgressBarControl { current_song_duration, current_song_progress }
                         PlaybackControl { is_playing }
                         VolumeControl { player, config, volume, persisted_volume }
                     }
@@ -624,7 +623,6 @@ pub fn Fullscreen(
                     }
 
                     ProgressBarControl {
-                        player,
                         current_song_duration,
                         current_song_progress,
                     }

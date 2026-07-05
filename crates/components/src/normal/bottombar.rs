@@ -229,8 +229,7 @@ pub fn BottombarNormal(
                             disabled: is_radio,
                             onchange: move |evt| {
                                 if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
-                                    player.write().seek(std::time::Duration::from_secs(val));
-                                    current_song_progress.set(val);
+                                    ctrl.seek(std::time::Duration::from_secs(val));
                                     drag_progress.set(val);
                                     is_dragging.set(false);
                                 }

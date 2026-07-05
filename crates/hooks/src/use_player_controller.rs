@@ -235,6 +235,27 @@ impl PlayerController {
         self.current_song_progress.set(seek_secs);
     }
 
+    /// Seek the current track. All progress-bar / lyric scrubbers route here.
+    ///
+    /// If the track has already ended, its decode thread has exited and a plain
+    /// `Player::seek` would be dropped (the playhead snaps back to the end). Re-open
+    /// the current track with a pending-resume at this position so it plays from
+    /// where the playhead was dropped instead.
+    pub fn seek(&mut self, time: Duration) {
+        if self.player.read().track_ended() {
+            let idx = *self.current_queue_index.peek();
+            if let Some(track) = self.get_track_at(idx) {
+                let secs = time.as_secs().min(track.duration);
+                self.set_pending_resume_for_track(&track, secs);
+                self.current_song_progress.set(secs);
+                self.play_track_no_history_with_transition(idx, false);
+                return;
+            }
+        }
+        self.player.write().seek(time);
+        self.current_song_progress.set(time.as_secs());
+    }
+
     pub fn displayed_progress_secs_f64(&self) -> f64 {
         let pos = self.player.peek().get_position().as_secs_f64();
 
@@ -406,7 +427,10 @@ impl PlayerController {
 
                         let cover_url = self.cover_url_for_track(&track);
                         if !use_crossfade {
-                            self.hydrate_current_track_metadata(idx, 0);
+                            self.hydrate_current_track_metadata(
+                                idx,
+                                restore_seek_secs.unwrap_or(0),
+                            );
                             self.current_song_cover_url.set(cover_url.clone());
                         }
                         self.is_loading.set(true);
@@ -462,7 +486,7 @@ impl PlayerController {
                                         ),
                                     ));
                                 } else {
-                                    current_song_progress.set(0);
+                                    current_song_progress.set(restore_seek_secs.unwrap_or(0));
                                 }
                                 is_playing.set(true);
                                 is_loading.set(false);
@@ -611,7 +635,7 @@ impl PlayerController {
                     let phys_idx = self.get_queue_index(idx);
 
                     if !use_crossfade {
-                        self.hydrate_current_track_metadata(idx, 0);
+                        self.hydrate_current_track_metadata(idx, restore_seek_secs.unwrap_or(0));
                         self.current_song_cover_url.set(cover_url.clone());
                     }
 
@@ -627,7 +651,8 @@ impl PlayerController {
                                     // stream through the active source's backend (a URL for
                                     // Jellyfin/Subsonic, a deciphered stream for YT).
                                     let source = active_source.peek().clone();
-                                    match source.resolve_stream(item_id).await {
+                                    let resolved = source.resolve_stream(item_id).await;
+                                    match resolved {
                                         Ok(info) => {
                                             // Stale-resolve guard: don't stamp duration / mutate
                                             // queue if the user clicked another track while we
@@ -813,7 +838,7 @@ impl PlayerController {
                                         ),
                                     ));
                                 } else {
-                                    current_song_progress.set(0);
+                                    current_song_progress.set(restore_seek_secs.unwrap_or(0));
                                 }
                                 if clear_pending_resume_on_success {
                                     pending_resume.set(None);
@@ -948,7 +973,10 @@ impl PlayerController {
                         self.skip_in_progress.set(false);
 
                         if !use_crossfade {
-                            self.hydrate_current_track_metadata(idx, 0);
+                            self.hydrate_current_track_metadata(
+                                idx,
+                                restore_seek_secs.unwrap_or(0),
+                            );
                         } else {
                             self.schedule_pending_crossfade_ui(
                                 idx,

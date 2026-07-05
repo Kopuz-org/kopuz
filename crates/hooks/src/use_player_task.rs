@@ -180,9 +180,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                     Some(SystemEvent::Next) => ctrl.play_next(),
                     Some(SystemEvent::Prev) => ctrl.play_prev(),
                     Some(SystemEvent::Seek(secs)) => {
-                        ctrl.player
-                            .write()
-                            .seek(std::time::Duration::from_secs_f64(secs));
+                        ctrl.seek(std::time::Duration::from_secs_f64(secs));
                     }
                     None => {
                         tokio::time::sleep(std::time::Duration::from_millis(50)).await;

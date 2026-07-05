@@ -1008,7 +1008,9 @@ impl Player {
                     }
                 }
                 match producer.write(&samples[offset..]) {
-                    Ok(written) => offset += written,
+                    Ok(written) => {
+                        offset += written;
+                    }
                     Err(_) => {
                         std::thread::sleep(Duration::from_millis(5));
                     }
@@ -1135,10 +1137,19 @@ impl Player {
         };
 
         self.stop_fading_session();
+
         {
             let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            // If the track already ended, its decode thread has exited (every exit path
+            // sets `finished` before returning) — nothing is left to service `seek_to`.
+            // Clearing `finished` here would strand the player in limbo: not "complete"
+            // (so the player task won't auto-advance) yet with no live decoder (so the
+            // seek never happens) — a hang the user can only escape with Next. Leave it
+            // finished so playback advances normally instead.
+            if st.finished {
+                return;
+            }
             st.seek_to = Some(time);
-            st.finished = false;
             self.position_micros
                 .store(time.as_micros() as u64, Ordering::Relaxed);
 
@@ -1154,6 +1165,14 @@ impl Player {
     }
 
     pub fn is_empty(&self) -> bool {
+        let st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        st.finished
+    }
+
+    /// True once the track has ended (its decode thread has exited). A seek on an
+    /// ended track can't be serviced in-place and needs a re-open — see
+    /// `PlayerController::seek`.
+    pub fn track_ended(&self) -> bool {
         let st = self.state.lock().unwrap_or_else(|e| e.into_inner());
         st.finished
     }

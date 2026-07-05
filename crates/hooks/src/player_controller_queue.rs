@@ -72,8 +72,7 @@ impl PlayerController {
         let back_behavior = self.config.peek().back_behavior;
 
         if back_behavior == BackBehavior::RewindThenPrev && progress > 3 {
-            self.player.write().seek(std::time::Duration::ZERO);
-            self.current_song_progress.set(0);
+            self.seek(std::time::Duration::ZERO);
             return;
         }
 
