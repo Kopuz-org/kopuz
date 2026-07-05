@@ -16,6 +16,7 @@ struct FakeShared {
     playing: bool,
     play_calls: usize,
     pause_calls: usize,
+    open_calls: usize,
 }
 
 #[derive(Clone, Default)]
@@ -39,6 +40,14 @@ impl FakeSinkHandle {
     fn pause_calls(&self) -> usize {
         self.0.lock().unwrap().pause_calls
     }
+
+    fn open_calls(&self) -> usize {
+        self.0.lock().unwrap().open_calls
+    }
+
+    fn is_playing(&self) -> bool {
+        self.0.lock().unwrap().playing
+    }
 }
 
 struct FakeSink(FakeSinkHandle);
@@ -58,6 +67,7 @@ impl AudioSink for FakeSink {
         shared.callback = Some(callback);
         shared.opened = Some(TEST_CONFIG);
         shared.playing = true;
+        shared.open_calls += 1;
         Ok(TEST_CONFIG)
     }
 
@@ -87,12 +97,27 @@ impl AudioSink for FakeSink {
 }
 
 fn spawn_engine() -> (FakeSinkHandle, EngineHandle) {
+    let (sink, engine, _tx) = spawn_engine_with_tx();
+    (sink, engine)
+}
+
+fn spawn_engine_with_tx() -> (
+    FakeSinkHandle,
+    EngineHandle,
+    std::sync::mpsc::Sender<super::actor::ActorMsg>,
+) {
     let sink_handle = FakeSinkHandle::default();
     let for_actor = sink_handle.clone();
-    let engine =
-        EngineHandle::spawn(move |_tx| Ok(Box::new(FakeSink(for_actor)) as Box<dyn AudioSink>))
-            .expect("engine spawn");
-    (sink_handle, engine)
+    let tx_slot: Arc<Mutex<Option<std::sync::mpsc::Sender<super::actor::ActorMsg>>>> =
+        Arc::new(Mutex::new(None));
+    let slot = tx_slot.clone();
+    let engine = EngineHandle::spawn(move |tx| {
+        *slot.lock().unwrap() = Some(tx.clone());
+        Ok(Box::new(FakeSink(for_actor)) as Box<dyn AudioSink>)
+    })
+    .expect("engine spawn");
+    let tx = tx_slot.lock().unwrap().take().expect("actor tx captured");
+    (sink_handle, engine, tx)
 }
 
 /// Minimal 16-bit PCM WAV with a deterministic non-zero pattern.
@@ -181,17 +206,16 @@ fn load_plays_and_position_advances() {
 
     wait_until("phase Playing", || engine.status().phase == Phase::Playing);
 
-    // Pull one second of audio; expect real samples (worker feeding the ring).
+    // Expect real samples (worker feeding the ring), then pull ~1s of audio;
+    // the ring fills asynchronously, so keep pulling until position moved.
     wait_until("non-silent audio", || {
         sink.pull(4410).iter().any(|s| *s != 0.0)
     });
     let before = engine.status().position();
-    sink.pull(TEST_CONFIG.sample_rate as usize * TEST_CONFIG.channels);
-    let after = engine.status().position();
-    assert!(
-        after >= before + Duration::from_millis(900),
-        "position should advance ~1s with pulled audio: {before:?} -> {after:?}"
-    );
+    wait_until("position advances ~1s with pulled audio", || {
+        sink.pull(TEST_CONFIG.sample_rate as usize * TEST_CONFIG.channels / 4);
+        engine.status().position() >= before + Duration::from_millis(900)
+    });
 
     engine.shutdown();
 }
@@ -385,6 +409,267 @@ fn superseding_load_drops_stale_session() {
     wait_until("audio from token 2", || {
         sink.pull(4096).iter().any(|s| *s != 0.0)
     });
+
+    engine.shutdown();
+}
+
+fn try_load_with(
+    engine: &EngineHandle,
+    token: u64,
+    factory: SourceFactory,
+    duration: Duration,
+    transition: Transition,
+) -> Result<LoadOutcome, String> {
+    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+    engine.send(Command::Load(LoadRequest {
+        token,
+        factory,
+        duration,
+        transition,
+        start_at: None,
+        reply: Some(reply_tx),
+    }));
+    reply_rx.blocking_recv().expect("load reply")
+}
+
+#[test]
+fn factory_error_reports_and_keeps_prior_audio() {
+    let (sink, engine) = spawn_engine();
+    let mut events = engine_subscribe(&engine);
+
+    let (factory, duration) = wav_factory(10.0);
+    load(&engine, 1, factory, duration);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+
+    let broken: SourceFactory = Box::new(|| Err("boom".to_string()));
+    let result = try_load_with(
+        &engine,
+        2,
+        broken,
+        Duration::from_secs(1),
+        Transition::Immediate,
+    );
+    assert!(result.is_err(), "broken factory must fail the load");
+
+    // Prior session is untouched: still token 1, still playing real audio.
+    assert_eq!(engine.status().token, 1);
+    assert_eq!(engine.status().phase, Phase::Playing);
+    wait_until("audio from token 1", || {
+        sink.pull(4096).iter().any(|s| *s != 0.0)
+    });
+    let mut seen = Vec::new();
+    drain_events(&mut events, &mut seen);
+    assert!(
+        seen.iter()
+            .any(|e| matches!(e, Event::Error { token: 2, .. })),
+        "Error event carries the failed token: {seen:?}"
+    );
+
+    engine.shutdown();
+}
+
+#[test]
+fn seek_moves_position_immediately_on_fresh_counters() {
+    let (sink, engine) = spawn_engine();
+    let (factory, duration) = wav_factory(10.0);
+    load(&engine, 1, factory, duration);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    wait_until("audio flowing", || {
+        sink.pull(4096).iter().any(|s| *s != 0.0)
+    });
+
+    let target = Duration::from_secs(3);
+    engine.send(Command::Seek(target));
+    wait_until("position jumps to the seek target", || {
+        engine.status().position() == target
+    });
+
+    // Playback continues from the fresh ring.
+    wait_until("audio after seek", || {
+        sink.pull(4096).iter().any(|s| *s != 0.0)
+    });
+    assert!(engine.status().position() > target);
+
+    engine.shutdown();
+}
+
+#[test]
+fn crossfade_while_paused_falls_back_and_stays_paused() {
+    let (sink, engine) = spawn_engine();
+    let (factory_a, duration_a) = wav_factory(10.0);
+    load(&engine, 1, factory_a, duration_a);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+
+    engine.send(Command::Pause);
+    wait_until("phase Paused", || engine.status().phase == Phase::Paused);
+
+    let (factory_b, duration_b) = wav_factory(10.0);
+    let outcome = load_with(
+        &engine,
+        2,
+        factory_b,
+        duration_b,
+        Transition::Crossfade(Duration::from_secs(1)),
+    );
+    assert!(!outcome.crossfaded, "paused crossfade must fall back");
+    assert_eq!(engine.status().phase, Phase::Paused, "pause is honored");
+    assert!(!sink.is_playing(), "device stays paused");
+    for _ in 0..5 {
+        assert!(sink.pull(4096).iter().all(|s| *s == 0.0));
+    }
+
+    engine.send(Command::Resume);
+    wait_until("phase Playing after resume", || {
+        engine.status().phase == Phase::Playing
+    });
+    wait_until("audio from the new track", || {
+        sink.pull(4096).iter().any(|s| *s != 0.0)
+    });
+
+    engine.shutdown();
+}
+
+#[test]
+fn crossfade_on_idle_engine_falls_back_to_immediate() {
+    let (sink, engine) = spawn_engine();
+    let (factory, duration) = wav_factory(5.0);
+    let outcome = load_with(
+        &engine,
+        1,
+        factory,
+        duration,
+        Transition::Crossfade(Duration::from_secs(2)),
+    );
+    assert!(!outcome.crossfaded, "nothing to fade from");
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    wait_until("audio flowing", || {
+        sink.pull(4096).iter().any(|s| *s != 0.0)
+    });
+    engine.shutdown();
+}
+
+#[test]
+fn seek_during_crossfade_kills_the_fade() {
+    let (sink, engine) = spawn_engine();
+    let mut events = engine_subscribe(&engine);
+
+    let (factory_a, duration_a) = wav_factory(30.0);
+    load(&engine, 1, factory_a, duration_a);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    wait_until("audio from A", || sink.pull(4096).iter().any(|s| *s != 0.0));
+
+    let (factory_b, duration_b) = wav_factory(30.0);
+    let outcome = load_with(
+        &engine,
+        2,
+        factory_b,
+        duration_b,
+        Transition::Crossfade(Duration::from_secs(5)),
+    );
+    assert!(outcome.crossfaded);
+
+    // Seek immediately: the fade must be dropped, so even after pulling far
+    // more audio than the fade length no TrackSwitched ever fires.
+    engine.send(Command::Seek(Duration::from_secs(10)));
+    wait_until("position at seek target", || {
+        engine.status().position() >= Duration::from_secs(10)
+    });
+    let mut seen = Vec::new();
+    for _ in 0..80 {
+        sink.pull(8192);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    drain_events(&mut events, &mut seen);
+    assert!(
+        !seen
+            .iter()
+            .any(|e| matches!(e, Event::TrackSwitched { .. })),
+        "fade was killed, no TrackSwitched expected: {seen:?}"
+    );
+    assert_eq!(engine.status().phase, Phase::Playing);
+
+    engine.shutdown();
+}
+
+#[test]
+fn radio_source_ignores_seek_and_ends_at_eof() {
+    let (sink, engine) = spawn_engine();
+
+    // Non-seekable source, like internet radio.
+    let frames = (0.25 * TEST_CONFIG.sample_rate as f64) as usize;
+    let bytes = wav_bytes(frames, TEST_CONFIG.sample_rate, TEST_CONFIG.channels as u16);
+    let factory: SourceFactory = Box::new(move || {
+        Ok(crate::decoder::from_stream_with_hint(
+            std::io::Cursor::new(bytes),
+            "wav",
+        ))
+    });
+    // Radio uses the u64::MAX duration sentinel.
+    load(&engine, 1, factory, Duration::from_secs(u64::MAX / 2));
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    wait_until("audio flowing", || {
+        sink.pull(4096).iter().any(|s| *s != 0.0)
+    });
+
+    let before = engine.status().position();
+    engine.send(Command::Seek(Duration::from_secs(60)));
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        engine.status().position() < before + Duration::from_secs(30),
+        "seek on a non-seekable source must be ignored"
+    );
+
+    wait_until("stream end drains to Ended", || {
+        sink.pull(8192);
+        engine.status().phase == Phase::Ended
+    });
+
+    engine.shutdown();
+}
+
+#[test]
+fn device_error_rebuilds_stream_and_resumes_position() {
+    let (sink, engine, actor_tx) = spawn_engine_with_tx();
+    let (factory, duration) = wav_factory(30.0);
+    load(&engine, 1, factory, duration);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    // Play a couple of seconds in (the ring fills asynchronously).
+    wait_until("played two seconds", || {
+        sink.pull(TEST_CONFIG.sample_rate as usize * TEST_CONFIG.channels);
+        engine.status().position() >= Duration::from_secs(2)
+    });
+    let position_before = engine.status().position();
+    let opens_before = sink.open_calls();
+
+    let _ = actor_tx.send(super::actor::ActorMsg::DeviceError);
+
+    wait_until("stream rebuilt", || sink.open_calls() > opens_before);
+    wait_until("still playing after rebuild", || {
+        engine.status().phase == Phase::Playing
+    });
+    // Position resumed near where the device died (seek-to-current protocol).
+    let resumed = engine.status().position();
+    assert!(
+        resumed >= position_before.saturating_sub(Duration::from_millis(500)),
+        "position must survive the rebuild: {position_before:?} -> {resumed:?}"
+    );
+    wait_until("audio after rebuild", || {
+        sink.pull(4096).iter().any(|s| *s != 0.0)
+    });
+
+    engine.shutdown();
+}
+
+#[test]
+fn full_stop_pauses_the_device() {
+    let (sink, engine) = spawn_engine();
+    let (factory, duration) = wav_factory(5.0);
+    load(&engine, 1, factory, duration);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+
+    engine.send(Command::Stop { pause_device: true });
+    wait_until("phase Idle", || engine.status().phase == Phase::Idle);
+    assert!(!sink.is_playing(), "full stop pauses the device");
 
     engine.shutdown();
 }

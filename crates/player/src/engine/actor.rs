@@ -161,7 +161,6 @@ struct Actor {
     sink: Box<dyn AudioSink>,
     status: Arc<ArcSwap<EngineStatus>>,
     events: Option<tokio::sync::mpsc::UnboundedSender<Event>>,
-    finish_cb: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
 
     volume: Arc<AtomicU32>,
     paused: Arc<AtomicBool>,
@@ -200,7 +199,6 @@ impl Actor {
             sink,
             status,
             events: None,
-            finish_cb: None,
             volume: Arc::new(AtomicU32::new(super::rt::volume_bits(1.0))),
             paused: Arc::new(AtomicBool::new(false)),
             eq_settings: EqualizerSettings::default(),
@@ -285,7 +283,6 @@ impl Actor {
                 }
                 self.publish();
             }
-            Command::SetFinishCallback(cb) => self.finish_cb = Some(cb),
             Command::Subscribe(tx) => self.events = Some(tx),
             Command::Shutdown => self.shutting_down = true,
         }
@@ -519,11 +516,17 @@ impl Actor {
                 fade_frames: None,
             });
 
-            // A load always un-pauses, including the device — a paused stream
-            // would play the new track silently.
-            self.paused.store(false, Ordering::Relaxed);
-            if let Err(e) = self.sink.play() {
-                tracing::warn!(error = %e, "failed to start output stream");
+            // A load un-pauses, including the device — a paused stream would
+            // play the new track silently. Exception: a crossfade that fell
+            // back *because* the user is paused honors the pause instead of
+            // blasting the next track through it; it starts on Resume.
+            let honor_pause = matches!(transition, Transition::Crossfade(f) if !f.is_zero())
+                && self.paused.load(Ordering::Relaxed);
+            if !honor_pause {
+                self.paused.store(false, Ordering::Relaxed);
+                if let Err(e) = self.sink.play() {
+                    tracing::warn!(error = %e, "failed to start output stream");
+                }
             }
 
             self.install_session(
@@ -727,17 +730,9 @@ impl Actor {
             _ => None,
         };
         if let Some(token) = ended_token {
+            // emit() wakes the platform run loop, so the subscriber's
+            // auto-advance fires without waiting for a poll tick.
             self.emit(Event::Ended { token });
-            if let Some(cb) = &self.finish_cb {
-                cb();
-            }
-            // Android: wake the background player loop immediately so
-            // auto-advance fires without waiting for the next poll tick.
-            #[cfg(target_os = "android")]
-            {
-                systemint::bg_wake();
-                systemint::wake_run_loop();
-            }
         }
 
         if self.phase() == Phase::Playing {

@@ -38,27 +38,13 @@ pub fn get_android_music_dir() -> Option<String> {
 }
 
 // --- Event-driven wakes for the background loops ---------------------------------
-// Let the player/back loops sleep on a long interval while idle instead of busy-polling
-// at 10Hz, then wake them the instant something happens (media command, track finished,
-// back press). notify_one stores one permit, so a wake fired before the loop re-awaits
-// is never lost. Compiled for all native targets (systemint is excluded on wasm).
+// Let the back-handling loop sleep on a long interval while idle instead of
+// busy-polling at 10Hz, then wake it the instant a back press happens.
+// notify_one stores one permit, so a wake fired before the loop re-awaits is
+// never lost. Compiled for all native targets (systemint is excluded on wasm).
+// (The player task loop wakes through the engine's event stream instead.)
 use std::sync::OnceLock;
 use tokio::sync::Notify;
-
-fn bg_notify() -> &'static Notify {
-    static N: OnceLock<Notify> = OnceLock::new();
-    N.get_or_init(Notify::new)
-}
-
-/// Wake the player task loop now (media command or track finished). Sync, any thread.
-pub fn bg_wake() {
-    bg_notify().notify_one();
-}
-
-/// Awaited by the player task loop's adaptive sleep.
-pub async fn bg_wait() {
-    bg_notify().notified().await;
-}
 
 fn back_notify() -> &'static Notify {
     static N: OnceLock<Notify> = OnceLock::new();

@@ -93,14 +93,6 @@ impl Player {
         Self::try_new().expect("failed to initialize audio player")
     }
 
-    /// Register a callback that fires whenever a track finishes playing naturally
-    /// (e.g. EOF or decode error) but NOT when playback is explicitly stopped.
-    /// Use this to trigger auto-skip from a background thread without depending
-    /// on the Dioxus event loop being active.
-    pub fn set_finish_callback(&mut self, f: impl Fn() + Send + Sync + 'static) {
-        self.engine.send(Command::SetFinishCallback(Arc::new(f)));
-    }
-
     /// Subscribe to the engine's event stream. Intended for a single pump task;
     /// a later subscription replaces the previous one.
     pub fn subscribe(&self) -> tokio::sync::mpsc::UnboundedReceiver<Event> {
@@ -166,16 +158,6 @@ impl Player {
 
         self.engine.send(Command::Seek(time));
         self.push_now_playing(time, !self.is_paused());
-    }
-
-    pub fn is_empty(&self) -> bool {
-        matches!(self.status().phase, Phase::Idle | Phase::Ended)
-    }
-
-    /// True once the track has ended (drained past its last sample). Unlike the
-    /// old engine, a seek on an ended track revives it in place.
-    pub fn track_ended(&self) -> bool {
-        matches!(self.status().phase, Phase::Idle | Phase::Ended)
     }
 
     pub fn is_playback_complete(&self) -> bool {

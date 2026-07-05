@@ -83,7 +83,6 @@ pub enum Command {
     SetChannelMode(ChannelMode),
     SetEqualizer(EqualizerSettings),
     SetDuration(Duration),
-    SetFinishCallback(Arc<dyn Fn() + Send + Sync + 'static>),
     Subscribe(tokio::sync::mpsc::UnboundedSender<Event>),
     Shutdown,
 }
