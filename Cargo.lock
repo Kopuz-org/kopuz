@@ -4425,7 +4425,6 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "deno_core",
- "deno_error",
  "directories",
  "hex",
  "httpdate",

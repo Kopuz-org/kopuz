@@ -49,7 +49,6 @@ rookie = "0.5"
 # one V8 link.
 [target.'cfg(not(target_os = "android"))'.dependencies]
 deno_core = "0.331"
-deno_error = "0.5.5"
 rustypipe-botguard = "0.1.2"
 
 # Windows native cookie decryption (v10 DPAPI + planted v20 app-bound). Reuses

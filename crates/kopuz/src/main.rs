@@ -30,7 +30,6 @@ mod desktop_shell;
 mod legacy;
 mod logging;
 #[cfg(not(target_os = "android"))]
-mod pot_minter;
 mod queue_state;
 #[cfg(not(target_os = "android"))]
 mod ui_profile;
@@ -167,12 +166,6 @@ fn main() {
             .with_background_color((0, 0, 0, 255))
             .with_data_directory(webview_data_dir)
             .with_window(window)
-            // Anon PoToken minter: stand up the hidden music.youtube.com webview
-            // once we have the event-loop target (issue #349).
-            .with_custom_event_handler(|_event, _target| {
-                crate::pot_minter::install_if_wanted(_target);
-                crate::pot_minter::pump();
-            })
             .with_asynchronous_custom_protocol(
                 "artwork",
                 |_id, request, responder: dioxus::desktop::RequestAsyncResponder| {
@@ -325,7 +318,6 @@ fn App() -> Element {
     // first would leave the final queue/config persists (and any failure
     // warnings) out of latest.log and the trace.
 
-    app_lifecycle::use_webview_decipher_engine();
 
     // The whole-Library signal is GONE — pages/components read the DB through
     // query hooks, and every track self-resolves its cover via the cover seam
@@ -418,23 +410,9 @@ fn App() -> Element {
     // Capabilities of the active source — drives source-agnostic routing (e.g.
     // which artist view to render) without hardcoding services in the router.
     let active_caps = use_memo(move || active_source.read().capabilities());
-    // Start the PoToken minter whenever a YouTube Music server is active — not
-    // just anon. A *signed-in but non-Premium* account streams the same 251 as
-    // anon and also needs a content pot for deep ranges; only true Premium
-    // subscribers (itag 774) are pot-exempt, and we can't know that until a
-    // track resolves. So run the minter for any YtMusic session; Premium just
-    // leaves it idle. Reactive: fires when config loads or the server changes.
-    #[cfg(not(target_os = "android"))]
-    use_effect(move || {
-        let yt_active = config
-            .read()
-            .server
-            .as_ref()
-            .is_some_and(|s| s.service == config::MusicService::YtMusic);
-        if yt_active {
-            crate::pot_minter::request();
-        }
-    });
+    // The PoToken minter is no longer proactively armed here: it's a headless
+    // deno_core runtime that self-starts on the first `mint_content_pot`, which
+    // `player::resolve` calls only when YouTube's backend actually demands a pot.
     hooks::use_sync_task::use_sync_task(config, db.clone());
     let mut initial_load_done = use_signal(|| false);
     #[allow(unused_variables)]

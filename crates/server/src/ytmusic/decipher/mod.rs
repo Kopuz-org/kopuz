@@ -13,15 +13,13 @@
 //!
 //! ## Engine seam
 //!
-//! Actual JS execution is abstracted behind [`JsEngine`]. The end goal is to
-//! run it inside Dioxus' own resident WebView JavaScriptCore — zero extra
-//! dependencies, since the engine is already loaded to render the UI. That
-//! binding lives in the UI layer (it needs `dioxus::document::eval`) and is
-//! injected here via [`set_engine`]. Until one is registered we fall back to
-//! a system JS runtime ([`SubprocessEngine`]: deno / node / bun / qjs), so
-//! the path works headlessly, in tests, and on first run before the WebView
-//! engine is wired. If no runtime is available either, deciphering fails and
-//! the caller falls through to its existing chain — strictly additive.
+//! Actual JS execution is abstracted behind [`JsEngine`]. On desktop the
+//! default is [`DenoCoreEngine`], an in-process `deno_core` V8 isolate — no
+//! WebView (the Blitz renderer removes it) and no external runtime. Android
+//! (no V8) falls back to a system JS runtime ([`SubprocessEngine`]: deno /
+//! node / bun / qjs). A different engine can be injected via [`set_engine`]
+//! before the first solve. If nothing can run the solver, deciphering fails
+//! and the caller falls through to its existing chain — strictly additive.
 //!
 //! ## Solver scripts
 //!
@@ -38,7 +36,6 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use tokio::sync::{mpsc, oneshot};
 
 // Headless deno_core decipher engine (the post-WebView path). Not on Android,
 // which keeps the WebView.
@@ -72,7 +69,22 @@ pub fn set_engine(engine: Box<dyn JsEngine>) -> Result<(), Box<dyn JsEngine>> {
 }
 
 fn engine() -> &'static dyn JsEngine {
-    ENGINE.get_or_init(|| Box::new(SubprocessEngine)).as_ref()
+    ENGINE
+        .get_or_init(|| {
+            // Desktop: the headless deno_core isolate (no WebView, post-Blitz).
+            // Android has no V8, so it keeps the WebView engine (installed via
+            // `set_engine` at startup) with the system-runtime subprocess as the
+            // fallback if that isn't wired.
+            #[cfg(not(target_os = "android"))]
+            {
+                Box::new(DenoCoreEngine::new()) as Box<dyn JsEngine>
+            }
+            #[cfg(target_os = "android")]
+            {
+                Box::new(SubprocessEngine) as Box<dyn JsEngine>
+            }
+        })
+        .as_ref()
 }
 
 /// Build the playable URL for one `adaptiveFormats[]` entry. Handles both
@@ -420,46 +432,6 @@ impl JsEngine for SubprocessEngine {
             Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
         })
     }
-}
-
-// ---- WebView engine bridge ---------------------------------------------
-
-/// A unit of work for the UI-layer solver loop: a JS `program` to run in the
-/// resident WebView, plus a one-shot `reply` for whatever it prints.
-pub struct SolveRequest {
-    pub program: String,
-    pub reply: oneshot::Sender<Result<String, String>>,
-}
-
-/// [`JsEngine`] that forwards each program to a solver loop running in the UI
-/// layer, which executes it via `dioxus::document::eval` inside the WebView's
-/// own JavaScriptCore — the zero-external-dependency path (issue #349). Built
-/// by [`webview_channel`]; the UI registers it via [`set_engine`] and drains
-/// the returned receiver.
-pub struct ChannelEngine {
-    tx: mpsc::UnboundedSender<SolveRequest>,
-}
-
-impl JsEngine for ChannelEngine {
-    fn run<'a>(&'a self, program: String) -> BoxFuture<'a, Result<String, String>> {
-        Box::pin(async move {
-            let (reply, rx) = oneshot::channel();
-            self.tx
-                .send(SolveRequest { program, reply })
-                .map_err(|_| "webview solver loop is gone".to_string())?;
-            rx.await
-                .map_err(|_| "webview solver dropped the reply".to_string())?
-        })
-    }
-}
-
-/// Create a WebView-backed engine plus the receiver its solver loop drains.
-/// The UI calls this once at startup, `set_engine`s the returned engine, and
-/// spawns a Dioxus task that runs each `SolveRequest.program` via
-/// `document::eval` and answers on `reply`.
-pub fn webview_channel() -> (Box<dyn JsEngine>, mpsc::UnboundedReceiver<SolveRequest>) {
-    let (tx, rx) = mpsc::unbounded_channel();
-    (Box::new(ChannelEngine { tx }), rx)
 }
 
 #[cfg(test)]

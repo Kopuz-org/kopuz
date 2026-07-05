@@ -3,9 +3,9 @@
 //! - **Premium (cookies):** WEB_REMIX + native sig/n decipher → Premium itags
 //!   (~270 kbps), no PO token — an authenticated session is its own
 //!   proof-of-origin.
-//! - **Anonymous:** ANDROID_VR + a content-bound PO token minted by the in-app
-//!   WebView (`botguard`). Anon googlevideo URLs 403 on deep/seek ranges
-//!   without it; ANDROID_VR's plain URLs + the pot sustain full tracks.
+//! - **Anonymous:** ANDROID_VR + a content-bound PO token minted headlessly by
+//!   `rustypipe-botguard` (`botguard`). Anon googlevideo URLs 403 on deep/seek
+//!   ranges without it; ANDROID_VR's plain URLs + the pot sustain full tracks.
 //! - **Last resort:** ANDROID_VR bare (no pot — won't survive deep ranges, but
 //!   better than nothing if the minter is down).
 //!
@@ -81,7 +81,7 @@ async fn visitor_data(cookies: Option<&str>) -> Result<&'static str, String> {
 }
 
 /// Resolve a YT video to a playable stream. Premium (cookies) → decipher;
-/// anonymous → ANDROID_VR + a webview-minted content pot; last resort →
+/// anonymous → ANDROID_VR + a headless-minted content pot; last resort →
 /// ANDROID_VR bare.
 #[tracing::instrument(name = "yt.resolve", skip(cookies), fields(video_id = %video_id, anon = cookies.is_none()))]
 pub async fn resolve(video_id: &str, cookies: Option<&str>) -> Result<YtStreamInfo, String> {

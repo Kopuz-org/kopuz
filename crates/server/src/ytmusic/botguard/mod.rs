@@ -2,8 +2,8 @@
 //!
 //! Anonymous googlevideo URLs 403 on deep/seek ranges without a content-bound
 //! PO token (premium sessions are exempt — see `player::resolve`). The token is
-//! minted by [`runtime`], a dedicated thread that runs YouTube's BotGuard VM
-//! (the vendored `bgutils.js`) on an in-process `deno_core` V8 runtime. This
+//! minted by [`runtime`], a dedicated thread running `rustypipe-botguard` (a
+//! `deno_core` V8 isolate + a minimal jsdom shim) — headless, no WebView. This
 //! module is the typed channel to it plus the lazy bootstrap.
 //!
 //! The minter starts itself on the first [`mint_content_pot`] call, so there is
