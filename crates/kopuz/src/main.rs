@@ -409,9 +409,8 @@ fn App() -> Element {
     // Capabilities of the active source — drives source-agnostic routing (e.g.
     // which artist view to render) without hardcoding services in the router.
     let active_caps = use_memo(move || active_source.read().capabilities());
-    // The PoToken minter is no longer proactively armed here: it's a headless
-    // deno_core runtime that self-starts on the first `mint_content_pot`, which
-    // `player::resolve` calls only when YouTube's backend actually demands a pot.
+    // The PoToken minter isn't armed here: it's a headless deno_core runtime that
+    // self-starts on the first `mint_content_pot` (only when YT demands a pot).
     hooks::use_sync_task::use_sync_task(config, db.clone());
     let mut initial_load_done = use_signal(|| false);
     #[allow(unused_variables)]

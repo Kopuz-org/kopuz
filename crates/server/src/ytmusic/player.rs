@@ -1,13 +1,9 @@
 //! Resolve a video_id to a playable stream URL.
 //!
-//! - **Premium (cookies):** WEB_REMIX + native sig/n decipher → Premium itags
-//!   (~270 kbps), no PO token — an authenticated session is its own
-//!   proof-of-origin.
-//! - **Anonymous:** ANDROID_VR + a content-bound PO token minted headlessly by
-//!   `rustypipe-botguard` (`botguard`). Anon googlevideo URLs 403 on deep/seek
-//!   ranges without it; ANDROID_VR's plain URLs + the pot sustain full tracks.
-//! - **Last resort:** ANDROID_VR bare (no pot — won't survive deep ranges, but
-//!   better than nothing if the minter is down).
+//! - **Premium (cookies):** WEB_REMIX + native sig/n decipher, no PO token.
+//! - **Anonymous:** ANDROID_VR + a content-bound PO token (`botguard`); anon
+//!   googlevideo URLs 403 on deep/seek ranges without it.
+//! - **Last resort:** ANDROID_VR bare, if the minter is down.
 //!
 //! No yt-dlp, no external binary (issue #349).
 

@@ -13,13 +13,9 @@
 //!
 //! ## Engine seam
 //!
-//! Actual JS execution is abstracted behind [`JsEngine`]. On desktop the
-//! default is [`DenoCoreEngine`], an in-process `deno_core` V8 isolate — no
-//! WebView (the Blitz renderer removes it) and no external runtime. Android
-//! (no V8) falls back to a system JS runtime ([`SubprocessEngine`]: deno /
-//! node / bun / qjs). A different engine can be injected via [`set_engine`]
-//! before the first solve. If nothing can run the solver, deciphering fails
-//! and the caller falls through to its existing chain — strictly additive.
+//! JS execution is behind [`JsEngine`]: desktop defaults to [`DenoCoreEngine`]
+//! (in-process `deno_core`, no WebView/external runtime); Android falls back to
+//! a system runtime ([`SubprocessEngine`]). Injectable via [`set_engine`].
 //!
 //! ## Solver scripts
 //!
@@ -37,8 +33,7 @@ use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 
-// Headless deno_core decipher engine (the post-WebView path). Not on Android,
-// which keeps the WebView.
+// Headless deno_core engine (post-WebView). Android keeps the WebView.
 #[cfg(not(target_os = "android"))]
 mod deno_engine;
 #[cfg(not(target_os = "android"))]
@@ -71,10 +66,8 @@ pub fn set_engine(engine: Box<dyn JsEngine>) -> Result<(), Box<dyn JsEngine>> {
 fn engine() -> &'static dyn JsEngine {
     ENGINE
         .get_or_init(|| {
-            // Desktop: the headless deno_core isolate (no WebView, post-Blitz).
-            // Android has no V8, so it keeps the WebView engine (installed via
-            // `set_engine` at startup) with the system-runtime subprocess as the
-            // fallback if that isn't wired.
+            // Desktop: headless deno_core isolate. Android has no V8, so it
+            // keeps the WebView engine (or the subprocess fallback).
             #[cfg(not(target_os = "android"))]
             {
                 Box::new(DenoCoreEngine::new()) as Box<dyn JsEngine>
@@ -533,8 +526,7 @@ mod tests {
         assert_eq!(resp.status().as_u16(), 206, "deciphered URL must stream");
     }
 
-    /// Same end-to-end proof, but through the headless [`DenoCoreEngine`] (no
-    /// WebView, no system runtime) — the post-Blitz decipher path. Run alone:
+    /// End-to-end proof through the headless [`DenoCoreEngine`]. Run alone:
     /// `cargo test -p kopuz-server deno_decipher -- --ignored --nocapture`.
     #[cfg(not(target_os = "android"))]
     #[tokio::test]
@@ -575,9 +567,8 @@ mod tests {
             "deno-deciphered URL must stream"
         );
 
-        // Now spin up the BotGuard isolate too, in the same process — this is
-        // the second-V8-isolate scenario that segfaulted on the anon path. If
-        // the shared platform init is correct, both isolates coexist.
+        // A second isolate in-process — the scenario that segfaulted before the
+        // shared platform init. Both must coexist.
         let pot = super::super::botguard::mint_content_pot(vid)
             .await
             .expect("botguard mint alongside a live decipher isolate");

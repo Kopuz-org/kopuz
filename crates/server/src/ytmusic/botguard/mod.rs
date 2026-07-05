@@ -1,15 +1,10 @@
 //! Content PoToken minting for anonymous YouTube streaming.
 //!
-//! Anonymous googlevideo URLs 403 on deep/seek ranges without a content-bound
-//! PO token (premium sessions are exempt — see `player::resolve`). The token is
-//! minted by [`runtime`], a dedicated thread running `rustypipe-botguard` (a
-//! `deno_core` V8 isolate + a minimal jsdom shim) — headless, no WebView. This
-//! module is the typed channel to it plus the lazy bootstrap.
-//!
-//! The minter starts itself on the first [`mint_content_pot`] call, so there is
-//! no UI wiring — any code path that needs a pot just asks for one. On Android
-//! (no V8) the minter is absent and callers get the "not running" error, the
-//! same anonymous-degraded behaviour as before the native minter existed.
+//! Anon googlevideo URLs 403 on deep/seek ranges without a content-bound PO
+//! token (Premium sessions are exempt). Minted headlessly by [`runtime`]; this
+//! module is the typed channel + lazy bootstrap, self-starting on the first
+//! [`mint_content_pot`]. Absent on Android (no V8) — callers get the same
+//! anonymous-degraded path as before.
 
 use std::sync::OnceLock;
 
@@ -18,8 +13,7 @@ use tokio::sync::{mpsc, oneshot};
 #[cfg(not(target_os = "android"))]
 mod runtime;
 
-/// One mint job: a `video_id` to bind the content pot to, and a one-shot for
-/// the result (the base64url pot, or an error string).
+/// One mint job: the `video_id` to bind the pot to, and a one-shot for the result.
 pub struct MintRequest {
     pub video_id: String,
     pub reply: oneshot::Sender<Result<String, String>>,
@@ -27,9 +21,7 @@ pub struct MintRequest {
 
 static MINTER: OnceLock<mpsc::UnboundedSender<MintRequest>> = OnceLock::new();
 
-/// Register the minter channel. Called once by [`ensure_started`] when the
-/// runtime thread is spawned. A second call is ignored (returns the sender
-/// back).
+/// Register the minter channel. A second call is ignored (returns the sender back).
 pub fn set_minter(
     tx: mpsc::UnboundedSender<MintRequest>,
 ) -> Result<(), mpsc::UnboundedSender<MintRequest>> {
@@ -41,21 +33,17 @@ pub fn is_available() -> bool {
     MINTER.get().is_some()
 }
 
-/// Spawn the BotGuard runtime thread exactly once, registering its channel. The
-/// channel sender is set *before* the thread starts its (slow) V8 boot, so a
-/// caller that races in can enqueue immediately and the reply lands once the
-/// runtime is warm. No-op on Android (no V8).
+/// Spawn the BotGuard runtime thread once. The channel is registered before the
+/// (slow) V8 boot so racing callers can enqueue immediately. No-op on Android.
 #[cfg(not(target_os = "android"))]
 pub fn ensure_started() {
     use std::sync::Once;
     static START: Once = Once::new();
     START.call_once(|| {
-        // Init the shared V8 platform before this isolate's thread spawns, so it
-        // can't race the decipher runtime's isolate (see `ytmusic::ensure_v8_platform`).
+        // Before spawning, so it can't race the decipher isolate (see
+        // `ytmusic::ensure_v8_platform`).
         crate::ytmusic::ensure_v8_platform();
         let (tx, rx) = mpsc::unbounded_channel::<MintRequest>();
-        // Register synchronously so `mint_content_pot` sends succeed the instant
-        // this returns; the thread drains `rx` once V8 is up.
         let _ = set_minter(tx);
         if let Err(e) = std::thread::Builder::new()
             .name("botguard".into())
@@ -88,10 +76,8 @@ mod tests {
     }
 }
 
-/// Mint a content-bound PO token for `video_id`. Boots the runtime on first use.
-/// Sub-ms in steady state: the runtime negotiates the BotGuard integrity token
-/// once (refreshed near its TTL) and mints each content pot from it locally.
-/// Errors if the minter isn't available (Android) or the runtime failed.
+/// Mint a content-bound PO token for `video_id`, booting the runtime on first
+/// use. Errors if the minter is unavailable (Android) or the runtime failed.
 #[tracing::instrument(name = "yt.mint_pot", fields(video_id = %video_id))]
 pub async fn mint_content_pot(video_id: &str) -> Result<String, String> {
     ensure_started();
@@ -104,8 +90,8 @@ pub async fn mint_content_pot(video_id: &str) -> Result<String, String> {
         reply,
     })
     .map_err(|_| "PO token minter channel closed".to_string())?;
-    // Bound the wait: the very first mint pays the V8 boot + integrity-token
-    // negotiation (a few seconds); a hung runtime must not hang the caller.
+    // The first mint pays V8 boot + token negotiation; a hung runtime must not
+    // hang the caller.
     match tokio::time::timeout(std::time::Duration::from_secs(20), rx).await {
         Ok(Ok(result)) => result,
         Ok(Err(_)) => Err("PO token minter dropped the reply".to_string()),

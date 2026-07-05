@@ -1,20 +1,11 @@
-//! The BotGuard mint runtime: a dedicated thread owning a [`rustypipe_botguard::Botguard`]
-//! (itself a `deno_core` V8 isolate + a minimal jsdom shim) that mints content
-//! PO tokens when YouTube's backend demands one.
+//! BotGuard mint runtime: a dedicated thread owning a
+//! [`rustypipe_botguard::Botguard`] (a `deno_core` V8 isolate + jsdom shim),
+//! reachable only via [`super::MintRequest`] since V8 is `!Send`.
 //!
-//! Why the crate and not a hand-rolled runtime: BotGuard's VM fingerprints a
-//! browser environment, so a bare `deno_core` with hand-written globals mints a
-//! degraded snapshot that never emits the mint signal (empirically
-//! `webPoSignalOutput` stays empty → `PMD:Undefined`). `rustypipe-botguard`
-//! ships the proven minimal-jsdom shim + a cached V8 snapshot. It rides the same
-//! `deno_core` version the decipher runtime uses, so there's one V8 in the
-//! binary, not two.
-//!
-//! V8 is `!Send`, so the `Botguard` lives entirely on this one thread; the app
-//! talks to it only through the [`super::MintRequest`] channel. The integrity
-//! token it negotiates is valid for hours ([`Botguard::lifetime`]); we keep the
-//! instance warm and re-initialize just before it expires. A snapshot file makes
-//! that re-init (and cold start) fast.
+//! Uses the crate over a hand-rolled runtime because BotGuard fingerprints a
+//! browser: bare `deno_core` with hand-written globals mints a degraded
+//! snapshot that never emits the mint signal. Kept warm and re-initialized near
+//! the integrity token's expiry; a snapshot file makes (re-)init fast.
 
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -28,8 +19,7 @@ use super::MintRequest;
 const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
                   (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
-/// A live, warm minter and the instant its integrity token should be refreshed
-/// (80% of the token lifetime, mirroring the old WebView minter's policy).
+/// A warm minter and when to refresh its integrity token (80% of TTL).
 struct Warm {
     bg: Botguard,
     refresh_at: Instant,
@@ -58,8 +48,8 @@ async fn init() -> Result<Warm, String> {
     Ok(Warm { bg, refresh_at })
 }
 
-/// Thread entrypoint: keep one warm minter and serve mint requests until the
-/// channel closes, re-initializing when the token nears expiry.
+/// Thread entrypoint: serve mint requests from one warm minter, re-initializing
+/// when the token nears expiry.
 pub fn run(mut rx: mpsc::UnboundedReceiver<MintRequest>) {
     let rt = match tokio::runtime::Builder::new_current_thread()
         .enable_all()

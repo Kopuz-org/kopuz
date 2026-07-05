@@ -1,15 +1,8 @@
-//! A headless [`JsEngine`] backed by an in-process `deno_core` V8 isolate.
-//!
-//! This is the decipher engine for the post-WebView world (the Blitz renderer
-//! removes the WebView whose JavaScriptCore the old path leaned on). The sig/n
-//! transforms are pure computation — no DOM — so a bare `deno_core` isolate runs
-//! the vendored `yt_dlp_ejs` solver directly; the only browser globals the
-//! solver touches are `print`/`console.log` (captured here) and a `new URL(...)`
-//! it assigns to a dead property (shimmed).
-//!
-//! The isolate is `!Send`, so it lives on one dedicated thread and serves solve
-//! programs over a channel. Keeping it alive across tracks amortizes V8 init and
-//! lets the JIT warm the sig/n functions.
+//! Headless [`JsEngine`] backed by an in-process `deno_core` V8 isolate — the
+//! decipher path once the WebView (and its JavaScriptCore) is gone. sig/n are
+//! pure computation, so a bare isolate runs the vendored `yt_dlp_ejs` solver
+//! directly. Lives on one dedicated thread (`!Send`), reused across tracks to
+//! amortize V8 init and warm the JIT.
 
 use std::cell::RefCell;
 
@@ -18,8 +11,8 @@ use tokio::sync::{mpsc, oneshot};
 
 use super::JsEngine;
 
-// Per-run capture of what the solver program `print`s. The isolate is
-// single-threaded (the actor thread), so a thread-local is the simplest sink.
+// Per-run capture of the solver's `print` output (thread-local: the isolate is
+// single-threaded).
 thread_local! {
     static OUT: RefCell<String> = const { RefCell::new(String::new()) };
 }
@@ -35,18 +28,15 @@ fn op_capture(#[string] s: String) {
 
 deno_core::extension!(decipher_ext, ops = [op_capture]);
 
-/// Browser globals the `yt_dlp_ejs` solver expects that bare `deno_core` lacks.
-/// `print`/`console.log` funnel to the capture op; `URL` is a stub because the
-/// solver only assigns `new URL(...)` to a dead property (see `solve`'s
-/// `__kopuz_loc` rename) and never reads it back.
+/// Browser globals the solver expects but bare `deno_core` lacks: `print`/
+/// `console.log` → capture op, plus a minimal `URL`/`location`.
 const PRELUDE: &str = r#"
 globalThis.print = function(s) { Deno.core.ops.op_capture(String(s)); };
 globalThis.console = {
   log: globalThis.print, info: globalThis.print,
   warn: globalThis.print, error: globalThis.print, debug: function() {}
 };
-// Minimal URL: base.js reads .hostname/.origin off URLs and off `location`.
-// Bare deno_core has neither; a light parse covers what the solver touches.
+// base.js reads .hostname/.origin off URLs and `location`; a light parse covers it.
 if (typeof globalThis.URL !== 'function') {
   globalThis.URL = function(u) {
     u = String(u);
@@ -62,8 +52,7 @@ if (typeof globalThis.URL !== 'function') {
     this.hash = (rest.match(/#.*/) || [''])[0];
   };
 }
-// `solve()` renames the solver's own `globalThis.location =` (a WebView
-// anti-navigation hack), so provide it here for the headless isolate.
+// `solve()` renames the solver's own `globalThis.location =`, so provide one here.
 globalThis.location = new globalThis.URL('https://www.youtube.com/watch?v=yt-dlp-wins');
 "#;
 
@@ -83,11 +72,10 @@ impl Default for DenoCoreEngine {
 }
 
 impl DenoCoreEngine {
-    /// Spawn the isolate thread and return an engine handle. The thread lives
-    /// for the process; the isolate is reused across every solve.
+    /// Spawn the isolate thread; it lives for the process and is reused across solves.
     pub fn new() -> Self {
-        // Init the shared V8 platform before this isolate's thread spawns, so it
-        // can't race the BotGuard runtime's isolate (see `ytmusic::ensure_v8_platform`).
+        // Before spawning, so it can't race the BotGuard isolate (see
+        // `ytmusic::ensure_v8_platform`).
         crate::ytmusic::ensure_v8_platform();
         let (tx, rx) = mpsc::unbounded_channel::<SolveJob>();
         std::thread::Builder::new()
@@ -148,8 +136,7 @@ fn run(mut rx: mpsc::UnboundedReceiver<SolveJob>) {
 
 async fn solve_one(js: &mut JsRuntime, program: String) -> Result<String, String> {
     OUT.with(|o| o.borrow_mut().clear());
-    // The solver program is synchronous, but resolve the completion value
-    // through the event loop anyway so any stray microtasks settle.
+    // Solver is synchronous, but drive the event loop so stray microtasks settle.
     let value = js
         .execute_script("decipher:solve", program)
         .map_err(|e| e.to_string())?;
