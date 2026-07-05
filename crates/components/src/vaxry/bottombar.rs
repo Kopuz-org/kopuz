@@ -36,6 +36,7 @@ pub fn BottombarVaxry(
         }
     });
 
+    let bar_ctrl = use_context::<PlayerController>();
     let display_progress = if *is_dragging.read() {
         *drag_progress.read()
     } else {
@@ -49,20 +50,22 @@ pub fn BottombarVaxry(
     };
 
     // Glide between the once-a-second progress updates instead of stepping.
-    // Disabled while dragging and when progress JUMPS (seek, track change) so
-    // the bar snaps instead of sweeping across.
+    // Disabled while paused (freeze exactly where the user hit pause instead
+    // of drifting on for up to a second), while dragging, and when progress
+    // JUMPS (seek, track change) so those snap instead of sweeping across.
     let prev_progress = use_hook(|| std::rc::Rc::new(std::cell::Cell::new(u64::MAX)));
     let progress_jumped = display_progress.abs_diff(prev_progress.get()) > 2;
     prev_progress.set(display_progress);
-    let bar_glide = if *is_dragging.read() || progress_jumped {
-        ""
-    } else {
+    let gliding = !*is_dragging.read() && !progress_jumped && *bar_ctrl.is_playing.read();
+    let bar_glide = if gliding {
         "transition-[width] duration-1000 ease-linear"
-    };
-    let thumb_glide = if *is_dragging.read() || progress_jumped {
-        ""
     } else {
+        ""
+    };
+    let thumb_glide = if gliding {
         "transition-[left] duration-1000 ease-linear"
+    } else {
+        ""
     };
 
     let volume_percent = *volume.read() * 100.0;
