@@ -3675,6 +3675,7 @@ dependencies = [
 name = "kopuz-player"
 version = "0.8.2"
 dependencies = [
+ "arc-swap",
  "base64 0.22.1",
  "block2",
  "cpal",
@@ -3688,8 +3689,8 @@ dependencies = [
  "objc2-avf-audio",
  "objc2-foundation",
  "objc2-media-player",
- "rb",
  "reqwest 0.13.4",
+ "rtrb",
  "symphonia",
  "symphonia-adapter-libopus",
  "tokio",
@@ -5902,12 +5903,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rb"
-version = "0.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56cf8381505b60ae18a4097f1d0be093287ca3bf4fbb23d36ac5ad3bba335daa"
-
-[[package]]
 name = "redox_syscall"
 version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6157,6 +6152,12 @@ dependencies = [
  "subtle",
  "zeroize",
 ]
+
+[[package]]
+name = "rtrb"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ade083ccbb4bf536df69d1f6432cc23deb7acccff86b183f3923a6fd56a1153"
 
 [[package]]
 name = "rusqlite"

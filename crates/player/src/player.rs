@@ -1,5 +1,26 @@
-use std::sync::atomic::AtomicBool;
+//! Public playback handle.
+//!
+//! `Player` is a thin façade over the engine actor (`crate::engine`): methods
+//! send serialized commands; reads come from the actor's lock-free
+//! `EngineStatus` snapshot. No audio state lives on the caller's thread.
+
+use std::sync::Arc;
 use std::time::Duration;
+
+use config::{ChannelMode, EqualizerSettings};
+use symphonia::core::formats::probe::Hint;
+
+use crate::engine::{
+    ActorMsg, AudioSink, Command, CpalSink, EngineHandle, EngineStatus, Event, LoadRequest, Phase,
+    SourceFactory, Transition,
+};
+#[cfg(any(
+    target_os = "macos",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "android"
+))]
+use crate::systemint;
 
 pub struct NowPlayingMeta {
     pub title: String,
@@ -8,100 +29,6 @@ pub struct NowPlayingMeta {
     pub duration: Duration,
     pub artwork: Option<String>,
 }
-
-fn parse_opushead_channels(extra: &[u8]) -> Option<u8> {
-    if extra.len() >= 10 && &extra[..8] == b"OpusHead" {
-        Some(extra[9])
-    } else {
-        None
-    }
-}
-
-fn apply_channel_mode_to_frame(frame: &mut [f32], mode: ChannelMode) {
-    if frame.len() < 2 {
-        return;
-    }
-
-    let left = frame[0];
-    let right = frame[1];
-
-    match mode {
-        ChannelMode::Stereo => {}
-        ChannelMode::Mono => {
-            let mixed = (left + right) * 0.5;
-            frame[0] = mixed;
-            frame[1] = mixed;
-            for sample in &mut frame[2..] {
-                *sample = 0.0;
-            }
-        }
-        ChannelMode::LeftOnly => {
-            frame[0] = left;
-            frame[1] = 0.0;
-            for sample in &mut frame[2..] {
-                *sample = 0.0;
-            }
-        }
-        ChannelMode::RightOnly => {
-            frame[0] = 0.0;
-            frame[1] = right;
-            for sample in &mut frame[2..] {
-                *sample = 0.0;
-            }
-        }
-        ChannelMode::SwapLeftRight => {
-            frame[0] = right;
-            frame[1] = left;
-            for sample in &mut frame[2..] {
-                *sample = 0.0;
-            }
-        }
-    }
-}
-
-fn apply_channel_mode_in_place(samples: &mut [f32], channels: usize, mode: ChannelMode) {
-    if matches!(mode, ChannelMode::Stereo) || channels < 2 {
-        return;
-    }
-
-    for frame in samples.chunks_exact_mut(channels.max(1)) {
-        apply_channel_mode_to_frame(frame, mode);
-    }
-}
-
-use crate::eq::Equalizer;
-use crate::systemint;
-use config::{ChannelMode, EqualizerSettings};
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use rb::{RB, RbConsumer, RbInspector, RbProducer, SpscRb};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-
-use symphonia::core::audio::GenericAudioBufferRef;
-use symphonia::core::codecs::audio::{AudioCodecParameters, AudioDecoder, AudioDecoderOptions};
-use symphonia::core::codecs::registry::RegisterableAudioDecoder;
-use symphonia::core::formats::probe::Hint;
-use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo, Track};
-use symphonia::core::io::MediaSourceStream;
-use symphonia::core::meta::MetadataOptions;
-use symphonia::core::units::Time;
-
-struct PlaybackState {
-    paused: bool,
-    stopped: bool,
-    volume: f32,
-    seek_to: Option<Duration>,
-    finished: bool,
-}
-
-struct CrossfadeState {
-    total_frames: u64,
-    progress_frames: u64,
-}
-
-type SharedConsumer = Arc<Mutex<rb::Consumer<f32>>>;
-
-type ActiveConsumerSlot = Arc<Mutex<Option<SharedConsumer>>>;
 
 #[derive(Debug)]
 pub enum PlayerInitError {
@@ -124,428 +51,36 @@ impl std::fmt::Display for PlayerInitError {
 
 impl std::error::Error for PlayerInitError {}
 
+/// How long a blocking `play()` waits for the engine to probe and start the
+/// source. Generous: remote probes can do real network I/O.
+const LOAD_TIMEOUT: Duration = Duration::from_secs(60);
+
 pub struct Player {
-    state: Arc<Mutex<PlaybackState>>,
-    active_state_handle: Arc<Mutex<Arc<Mutex<PlaybackState>>>>,
-    _device: cpal::Device,
-    stream_config: cpal::StreamConfig,
-    _stream: Option<cpal::Stream>,
-    active_consumer: ActiveConsumerSlot,
-    fading_consumer: ActiveConsumerSlot,
-    crossfade_state: Arc<Mutex<Option<CrossfadeState>>>,
-    ring_buf_consumer: Option<SharedConsumer>,
-    ring_buf: Option<SpscRb<f32>>,
-    decoder_handle: Option<std::thread::JoinHandle<()>>,
-    fading_session_state: Arc<Mutex<Option<Arc<Mutex<PlaybackState>>>>>,
-    fading_ring_buf: Option<SpscRb<f32>>,
-    fading_decoder_handle: Option<std::thread::JoinHandle<()>>,
-
+    engine: EngineHandle,
     now_playing: Option<NowPlayingMeta>,
-    position_micros: Arc<AtomicU64>,
-    finish_callback: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
-
-    position_thread_handle: Option<std::thread::JoinHandle<()>>,
-    position_thread_stop: Arc<AtomicBool>,
-    equalizer: Arc<Mutex<Equalizer>>,
-    channel_mode: Arc<Mutex<ChannelMode>>,
+    next_token: u64,
 }
 
 impl Player {
-    fn preferred_stream_config(
-        supported_config: &cpal::SupportedStreamConfig,
-    ) -> cpal::StreamConfig {
-        let mut stream_config = supported_config.config();
-        stream_config.buffer_size = match supported_config.buffer_size() {
-            cpal::SupportedBufferSize::Range { min, max } => {
-                // Android: larger buffer for stability under thermal throttling and when the
-                // UI thread is busy (scroll, layout, image decode). ~46ms at 44.1kHz is the
-                // sweet spot — low enough latency for media controls, big enough that the OS
-                // scheduler doesn't drop frames.
-                #[cfg(target_os = "android")]
-                let target = 2048u32.clamp(*min, *max);
-                #[cfg(not(target_os = "android"))]
-                let target = 512u32.clamp(*min, *max);
-                cpal::BufferSize::Fixed(target)
-            }
-            cpal::SupportedBufferSize::Unknown => cpal::BufferSize::Default,
-        };
-        stream_config
-    }
-
-    fn output_config_for_sample_rate(
-        &self,
-        desired_sample_rate: Option<u32>,
-    ) -> Result<cpal::SupportedStreamConfig, PlayerInitError> {
-        let default_config = self
-            ._device
-            .default_output_config()
-            .map_err(PlayerInitError::DefaultOutputConfig)?;
-
-        let Some(desired_sample_rate) = desired_sample_rate else {
-            return Ok(default_config);
-        };
-
-        let default_channels = default_config.channels();
-        let default_sample_format = default_config.sample_format();
-        let supported_configs = match self._device.supported_output_configs() {
-            Ok(configs) => configs,
-            Err(e) => {
-                tracing::warn!(
-                    error = %e,
-                    "failed to query supported output configs; using default output config"
-                );
-                return Ok(default_config);
-            }
-        };
-
-        let mut best_config = None;
-        let mut best_distance = u32::MAX;
-        for supported_config in supported_configs {
-            if supported_config.channels() != default_channels
-                || supported_config.sample_format() != default_sample_format
-            {
-                continue;
-            }
-
-            let sample_rate = desired_sample_rate.clamp(
-                supported_config.min_sample_rate(),
-                supported_config.max_sample_rate(),
-            );
-            let Some(config) = supported_config.try_with_sample_rate(sample_rate) else {
-                continue;
-            };
-            let distance = sample_rate.abs_diff(desired_sample_rate);
-            if distance < best_distance {
-                best_distance = distance;
-                best_config = Some(config);
-            }
-        }
-
-        Ok(best_config.unwrap_or(default_config))
-    }
-
-    fn build_output_stream(
-        &self,
-        stream_config: &cpal::StreamConfig,
-    ) -> Result<cpal::Stream, cpal::BuildStreamError> {
-        let channels = stream_config.channels as usize;
-        let device_sample_rate = stream_config.sample_rate;
-        let stream_active_state_handle = self.active_state_handle.clone();
-        let stream_position = self.position_micros.clone();
-        let stream_equalizer = self.equalizer.clone();
-        let stream_channel_mode = self.channel_mode.clone();
-        let stream_active_consumer = self.active_consumer.clone();
-        let stream_fading_consumer = self.fading_consumer.clone();
-        let stream_crossfade_state = self.crossfade_state.clone();
-        let stream_fading_session_state = self.fading_session_state.clone();
-
-        self._device.build_output_stream(
-            stream_config,
-            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                let active_state = stream_active_state_handle
-                    .lock()
-                    .map(|state| state.clone())
-                    .unwrap_or_else(|e| e.into_inner().clone());
-                let st = active_state.lock().unwrap_or_else(|e| e.into_inner());
-                let volume = st.volume;
-                let paused = st.paused;
-                drop(st);
-
-                if paused {
-                    for sample in data.iter_mut() {
-                        *sample = 0.0;
-                    }
-                    return;
-                }
-
-                let active_consumer = stream_active_consumer
-                    .lock()
-                    .ok()
-                    .and_then(|consumer| consumer.clone());
-                let fading_consumer = stream_fading_consumer
-                    .lock()
-                    .ok()
-                    .and_then(|consumer| consumer.clone());
-
-                let (_active_read, read, fade_completed) = if fading_consumer.is_none() {
-                    let active_read = if let Some(consumer) = active_consumer {
-                        let cons = consumer.lock().unwrap_or_else(|e| e.into_inner());
-                        cons.read(data).unwrap_or(0)
-                    } else {
-                        0
-                    };
-                    (active_read, active_read, false)
-                } else {
-                    let mut active_samples = vec![0.0_f32; data.len()];
-                    let mut fading_samples = vec![0.0_f32; data.len()];
-
-                    let active_read = if let Some(consumer) = active_consumer {
-                        let cons = consumer.lock().unwrap_or_else(|e| e.into_inner());
-                        cons.read(&mut active_samples).unwrap_or(0)
-                    } else {
-                        0
-                    };
-                    let fading_read = if let Some(consumer) = fading_consumer {
-                        let cons = consumer.lock().unwrap_or_else(|e| e.into_inner());
-                        cons.read(&mut fading_samples).unwrap_or(0)
-                    } else {
-                        0
-                    };
-
-                    let read = active_read.max(fading_read);
-                    let fade_completed = {
-                        let mut fade = stream_crossfade_state
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner());
-                        if let Some(fade) = fade.as_mut() {
-                            let frames = read / channels.max(1);
-                            if frames == 0 {
-                                false
-                            } else {
-                                for frame_idx in 0..frames {
-                                    let progress = ((fade.progress_frames + frame_idx as u64)
-                                        .min(fade.total_frames))
-                                        as f32
-                                        / fade.total_frames.max(1) as f32;
-                                    let fade_in_gain = progress.clamp(0.0, 1.0);
-                                    let fade_out_gain = 1.0 - fade_in_gain;
-                                    for ch in 0..channels {
-                                        let index = frame_idx * channels + ch;
-                                        let active =
-                                            active_samples.get(index).copied().unwrap_or(0.0);
-                                        let fading =
-                                            fading_samples.get(index).copied().unwrap_or(0.0);
-                                        data[index] =
-                                            active * fade_in_gain + fading * fade_out_gain;
-                                    }
-                                }
-                                fade.progress_frames =
-                                    fade.progress_frames.saturating_add(frames as u64);
-                                if fade.progress_frames >= fade.total_frames {
-                                    *fade = CrossfadeState {
-                                        total_frames: fade.total_frames,
-                                        progress_frames: fade.total_frames,
-                                    };
-                                    true
-                                } else {
-                                    false
-                                }
-                            }
-                        } else {
-                            if active_read > 0 {
-                                data[..active_read].copy_from_slice(&active_samples[..active_read]);
-                            }
-                            false
-                        }
-                    };
-
-                    (active_read, read, fade_completed)
-                };
-
-                if read > 0 {
-                    if let Ok(mut eq) = stream_equalizer.lock() {
-                        eq.process_in_place(&mut data[..read]);
-                    }
-                    let channel_mode = stream_channel_mode
-                        .lock()
-                        .map(|mode| *mode)
-                        .unwrap_or(ChannelMode::Stereo);
-                    apply_channel_mode_in_place(&mut data[..read], channels, channel_mode);
-                }
-
-                if fade_completed {
-                    if let Ok(mut fading_consumer) = stream_fading_consumer.lock() {
-                        *fading_consumer = None;
-                    }
-                    if let Ok(mut fade) = stream_crossfade_state.lock() {
-                        *fade = None;
-                    }
-                    if let Ok(fading_state_guard) = stream_fading_session_state.lock()
-                        && let Some(fading_state) = fading_state_guard.as_ref()
-                    {
-                        let mut st = fading_state.lock().unwrap_or_else(|e| e.into_inner());
-                        st.stopped = true;
-                        st.finished = true;
-                    }
-                }
-
-                if channels > 0 && device_sample_rate > 0 {
-                    stream_position.fetch_add(
-                        (read as u64 * 1_000_000) / (channels as u64 * device_sample_rate as u64),
-                        Ordering::Relaxed,
-                    );
-                }
-
-                for sample in data[..read].iter_mut() {
-                    *sample *= volume;
-                }
-                for sample in data[read..].iter_mut() {
-                    *sample = 0.0;
-                }
-            },
-            move |err| {
-                tracing::error!(error = %err, "cpal stream error");
-            },
-            None,
-        )
-    }
-
-    fn set_output_config(&mut self, stream_config: cpal::StreamConfig) -> Result<(), String> {
-        if self._stream.is_some() && self.stream_config == stream_config {
-            return Ok(());
-        }
-
-        let stream = self
-            .build_output_stream(&stream_config)
-            .map_err(|e| PlayerInitError::BuildOutputStream(e).to_string())?;
-        stream
-            .play()
-            .map_err(|e| PlayerInitError::StartOutputStream(e).to_string())?;
-
-        self.stream_config = stream_config;
-        self._stream = Some(stream);
-        Ok(())
-    }
-
-    fn probe_format(
-        source: Box<dyn symphonia::core::io::MediaSource>,
-        hint: Hint,
-    ) -> Result<Box<dyn FormatReader>, String> {
-        let mss = MediaSourceStream::new(source, Default::default());
-        symphonia::default::get_probe()
-            .probe(
-                &hint,
-                mss,
-                FormatOptions::default(),
-                MetadataOptions::default(),
-            )
-            .map_err(|e| {
-                tracing::error!(error = %e, "symphonia probe error");
-                format!("symphonia probe error: {e}")
-            })
-    }
-
-    fn audio_params_for_track(track: &Track) -> Option<AudioCodecParameters> {
-        let mut audio_params = track
-            .codec_params
-            .as_ref()
-            .and_then(|p| p.audio())
-            .cloned()?;
-
-        if audio_params.channels.is_none() {
-            let ch = audio_params
-                .extra_data
-                .as_deref()
-                .and_then(parse_opushead_channels)
-                .unwrap_or(2);
-            audio_params.channels = Some(symphonia::core::audio::Channels::Discrete(ch as u16));
-            if audio_params.sample_rate.is_none() {
-                audio_params.sample_rate = Some(48_000);
-            }
-        }
-
-        Some(audio_params)
-    }
-
-    fn source_sample_rate(format: &dyn FormatReader) -> Option<u32> {
-        format
-            .tracks()
-            .iter()
-            .find_map(Self::audio_params_for_track)
-            .and_then(|params| params.sample_rate)
-    }
-
-    fn prepare_source(
-        &self,
-        source: Box<dyn symphonia::core::io::MediaSource>,
-        hint: Hint,
-    ) -> Result<(Box<dyn FormatReader>, cpal::StreamConfig), String> {
-        let format = Self::probe_format(source, hint)?;
-        let supported_config = self
-            .output_config_for_sample_rate(Self::source_sample_rate(format.as_ref()))
-            .map_err(|e| e.to_string())?;
-
-        Ok((format, Self::preferred_stream_config(&supported_config)))
-    }
-
-    fn play_output_stream(&self) {
-        if let Some(stream) = &self._stream {
-            let _ = stream.play();
-        }
-    }
-
-    fn pause_output_stream(&self) {
-        if let Some(stream) = &self._stream {
-            let _ = stream.pause();
-        }
-    }
-
     pub fn try_new() -> Result<Self, PlayerInitError> {
         // Android initialises the JNI media session + classloader cache here; the desktop
         // platforms set up their system integration from the app entry point instead.
         #[cfg(target_os = "android")]
         systemint::init();
 
-        let host = cpal::default_host();
-        let device = host
-            .default_output_device()
-            .ok_or(PlayerInitError::NoOutputDevice)?;
+        let engine = EngineHandle::spawn(|tx| {
+            let tx = tx.clone();
+            CpalSink::try_new(move || {
+                let _ = tx.send(ActorMsg::DeviceError);
+            })
+            .map(|sink| Box::new(sink) as Box<dyn AudioSink>)
+        })?;
 
-        let supported_config = device
-            .default_output_config()
-            .map_err(PlayerInitError::DefaultOutputConfig)?;
-
-        let stream_config = Self::preferred_stream_config(&supported_config);
-        let state = Arc::new(Mutex::new(PlaybackState {
-            paused: false,
-            stopped: false,
-            volume: 1.0,
-            seek_to: None,
-            finished: false,
-        }));
-        let active_state_handle = Arc::new(Mutex::new(state.clone()));
-        let position_micros = Arc::new(AtomicU64::new(0));
-        let equalizer = Arc::new(Mutex::new(Equalizer::new(
-            stream_config.sample_rate,
-            stream_config.channels as usize,
-        )));
-        let channel_mode = Arc::new(Mutex::new(ChannelMode::Stereo));
-        let active_consumer = Arc::new(Mutex::new(None::<Arc<Mutex<rb::Consumer<f32>>>>));
-        let fading_consumer = Arc::new(Mutex::new(None::<Arc<Mutex<rb::Consumer<f32>>>>));
-        let crossfade_state = Arc::new(Mutex::new(None::<CrossfadeState>));
-        let fading_session_state = Arc::new(Mutex::new(None::<Arc<Mutex<PlaybackState>>>));
-
-        let mut player = Self {
-            state,
-            active_state_handle,
-            _device: device,
-            stream_config,
-            _stream: None,
-            active_consumer,
-            fading_consumer,
-            crossfade_state,
-            ring_buf_consumer: None,
-            ring_buf: None,
-            decoder_handle: None,
-            fading_session_state,
-            fading_ring_buf: None,
-            fading_decoder_handle: None,
+        Ok(Self {
+            engine,
             now_playing: None,
-            position_micros,
-            finish_callback: None,
-            position_thread_handle: None,
-            position_thread_stop: Arc::default(),
-            equalizer,
-            channel_mode,
-        };
-        let stream_config = player.stream_config.clone();
-        let stream = player
-            .build_output_stream(&stream_config)
-            .map_err(PlayerInitError::BuildOutputStream)?;
-        stream.play().map_err(PlayerInitError::StartOutputStream)?;
-        player._stream = Some(stream);
-
-        Ok(player)
+            next_token: 0,
+        })
     }
 
     pub fn new() -> Self {
@@ -557,17 +92,16 @@ impl Player {
     /// Use this to trigger auto-skip from a background thread without depending
     /// on the Dioxus event loop being active.
     pub fn set_finish_callback(&mut self, f: impl Fn() + Send + Sync + 'static) {
-        self.finish_callback = Some(Arc::new(f));
+        self.engine.send(Command::SetFinishCallback(Arc::new(f)));
     }
 
-    /// Ring buffer length between the decoder thread and the audio callback.
-    /// - Desktop: 2s — plenty of headroom for big seeks and metadata stalls.
-    /// - Android: 1s — smaller heap footprint matters on phones with 2-3GB RAM,
-    ///   and a smaller buffer recovers from underruns faster.
-    #[cfg(target_os = "android")]
-    const RING_BUF_SECONDS: usize = 1;
-    #[cfg(not(target_os = "android"))]
-    const RING_BUF_SECONDS: usize = 2;
+    /// Subscribe to the engine's event stream. Intended for a single pump task;
+    /// a later subscription replaces the previous one.
+    pub fn subscribe(&self) -> tokio::sync::mpsc::UnboundedReceiver<Event> {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        self.engine.send(Command::Subscribe(tx));
+        rx
+    }
 
     #[tracing::instrument(name = "player.play", skip_all, fields(title = %meta.title))]
     pub fn play(
@@ -576,75 +110,7 @@ impl Player {
         meta: NowPlayingMeta,
         hint: Hint,
     ) -> Result<(), String> {
-        let (format, stream_config) = self.prepare_source(source, hint)?;
-
-        self.cleanup_finished_fading_session();
-        self.stop_playback_session();
-        self.set_output_config(stream_config)?;
-
-        self.play_prepared(format, meta)
-    }
-
-    fn play_prepared(
-        &mut self,
-        format: Box<dyn FormatReader>,
-        meta: NowPlayingMeta,
-    ) -> Result<(), String> {
-        {
-            let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
-            st.paused = false;
-            st.stopped = false;
-            st.seek_to = None;
-            st.finished = false;
-        }
-        if let Ok(mut active_state_handle) = self.active_state_handle.lock() {
-            *active_state_handle = self.state.clone();
-        }
-        self.position_micros.store(0, Ordering::SeqCst);
-
-        let channels = self.stream_config.channels as usize;
-        let device_sample_rate = self.stream_config.sample_rate;
-
-        // Ring buffer between the decoder thread and the audio callback (see RING_BUF_SECONDS).
-        let ring_buf_size = device_sample_rate as usize * channels * Self::RING_BUF_SECONDS;
-        let ring_buf = SpscRb::new(ring_buf_size);
-        let (producer, consumer) = (ring_buf.producer(), ring_buf.consumer());
-        let consumer = Arc::new(Mutex::new(consumer));
-        self.ring_buf_consumer = Some(consumer.clone());
-        self.ring_buf = Some(ring_buf);
-        if let Ok(mut active_consumer) = self.active_consumer.lock() {
-            *active_consumer = Some(consumer.clone());
-        }
-
-        self.start_position_thread();
-
-        let decoder_state = self.state.clone();
-        let decoder_channels = channels;
-        let decoder_sample_rate = device_sample_rate;
-        let finish_cb = self.finish_callback.clone();
-
-        if let Ok(mut eq) = self.equalizer.lock() {
-            eq.update_output_format(device_sample_rate, channels);
-        }
-
-        let handle = std::thread::spawn(move || {
-            Self::decoder_thread(
-                format,
-                producer,
-                decoder_state,
-                decoder_channels,
-                decoder_sample_rate,
-                finish_cb,
-            );
-        });
-        self.decoder_handle = Some(handle);
-
-        self.now_playing = Some(meta);
-        self.play_output_stream();
-
-        self.update_now_playing_system();
-
-        Ok(())
+        self.load(source, meta, hint, Transition::Immediate)
     }
 
     #[tracing::instrument(name = "player.crossfade", skip_all, fields(title = %meta.title))]
@@ -655,480 +121,61 @@ impl Player {
         hint: Hint,
         duration: Duration,
     ) -> Result<(), String> {
-        let (format, stream_config) = self.prepare_source(source, hint)?;
+        self.load(source, meta, hint, Transition::Crossfade(duration))
+    }
 
-        self.cleanup_finished_fading_session();
+    /// Blocking bridge kept for the poll-loop era: waits until the engine has
+    /// probed and started the source so callers see errors synchronously, the
+    /// same contract the old in-place engine had.
+    fn load(
+        &mut self,
+        source: Box<dyn symphonia::core::io::MediaSource>,
+        meta: NowPlayingMeta,
+        hint: Hint,
+        transition: Transition,
+    ) -> Result<(), String> {
+        self.next_token += 1;
+        let token = self.next_token;
+        let (reply_tx, reply_rx) = std::sync::mpsc::channel();
+        let factory: SourceFactory = Box::new(move || Ok((source, hint)));
 
-        if duration.is_zero()
-            || self.ring_buf_consumer.is_none()
-            || self.decoder_handle.is_none()
-            || self.stream_config != stream_config
-        {
-            self.stop_playback_session();
-            self.set_output_config(stream_config)?;
-            return self.play_prepared(format, meta);
-        }
-
-        self.stop_fading_session();
-
-        let previous_volume = { self.state.lock().unwrap_or_else(|e| e.into_inner()).volume };
-        let old_state = self.state.clone();
-        let old_consumer = self.ring_buf_consumer.take();
-        let old_ring_buf = self.ring_buf.take();
-        let old_decoder_handle = self.decoder_handle.take();
-
-        if let Some(old_consumer) = old_consumer
-            && let Ok(mut fading_consumer) = self.fading_consumer.lock()
-        {
-            *fading_consumer = Some(old_consumer);
-        }
-        if let Ok(mut fading_state) = self.fading_session_state.lock() {
-            *fading_state = Some(old_state);
-        }
-        self.fading_ring_buf = old_ring_buf;
-        self.fading_decoder_handle = old_decoder_handle;
-
-        let new_state = Arc::new(Mutex::new(PlaybackState {
-            paused: false,
-            stopped: false,
-            volume: previous_volume,
-            seek_to: None,
-            finished: false,
+        self.engine.send(Command::Load(LoadRequest {
+            token,
+            factory,
+            duration: meta.duration,
+            transition,
+            start_at: None,
+            reply: Some(reply_tx),
         }));
-        self.state = new_state.clone();
-        if let Ok(mut active_state_handle) = self.active_state_handle.lock() {
-            *active_state_handle = new_state.clone();
-        }
-        self.position_micros.store(0, Ordering::SeqCst);
 
-        let channels = self.stream_config.channels as usize;
-        let device_sample_rate = self.stream_config.sample_rate;
-        // Ring buffer between the decoder thread and the audio callback (see RING_BUF_SECONDS).
-        let ring_buf_size = device_sample_rate as usize * channels * Self::RING_BUF_SECONDS;
-        let ring_buf = SpscRb::new(ring_buf_size);
-        let (producer, consumer) = (ring_buf.producer(), ring_buf.consumer());
-        let consumer = Arc::new(Mutex::new(consumer));
-        self.ring_buf_consumer = Some(consumer.clone());
-        self.ring_buf = Some(ring_buf);
-        if let Ok(mut active_consumer) = self.active_consumer.lock() {
-            *active_consumer = Some(consumer);
-        }
-        if let Ok(mut fade) = self.crossfade_state.lock() {
-            let total_frames = (duration.as_secs_f64() * device_sample_rate as f64).round() as u64;
-            *fade = Some(CrossfadeState {
-                total_frames: total_frames.max(1),
-                progress_frames: 0,
-            });
-        }
-
-        self.start_position_thread();
-
-        let finish_cb = self.finish_callback.clone();
-        if let Ok(mut eq) = self.equalizer.lock() {
-            eq.update_output_format(device_sample_rate, channels);
-        }
-
-        let handle = std::thread::spawn(move || {
-            Self::decoder_thread(
-                format,
-                producer,
-                new_state,
-                channels,
-                device_sample_rate,
-                finish_cb,
-            );
-        });
-        self.decoder_handle = Some(handle);
-        self.now_playing = Some(meta);
-        self.play_output_stream();
-        self.update_now_playing_system();
-
-        Ok(())
-    }
-
-    fn start_position_thread(&mut self) {
-        #[cfg(target_os = "linux")]
-        {
-            self.position_thread_stop.store(true, Ordering::Relaxed);
-            if let Some(handle) = self.position_thread_handle.take() {
-                let _ = handle.join();
+        match reply_rx.recv_timeout(LOAD_TIMEOUT) {
+            Ok(Ok(())) => {
+                self.now_playing = Some(meta);
+                self.update_now_playing_system();
+                Ok(())
             }
-
-            let stop = Arc::new(AtomicBool::new(false));
-            self.position_thread_stop = stop.clone();
-            let pos = self.position_micros.clone();
-            let state = self.state.clone();
-
-            let handle = std::thread::spawn(move || {
-                loop {
-                    if stop.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    let st = state.lock().unwrap_or_else(|e| e.into_inner());
-                    if st.finished {
-                        break;
-                    }
-                    let paused = st.paused;
-                    drop(st);
-                    if !paused {
-                        let micros = pos.load(std::sync::atomic::Ordering::Relaxed);
-                        systemint::update_position(micros as f64 / 1_000_000.0);
-                    }
-                    std::thread::sleep(Duration::from_millis(250));
-                }
-            });
-            self.position_thread_handle = Some(handle);
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err("player load timed out".to_string()),
         }
-    }
-
-    fn cleanup_finished_fading_session(&mut self) {
-        let should_cleanup = self
-            .fading_decoder_handle
-            .as_ref()
-            .is_some_and(std::thread::JoinHandle::is_finished);
-
-        let fade_active = self
-            .crossfade_state
-            .lock()
-            .map(|fade| fade.is_some())
-            .unwrap_or(false);
-
-        if should_cleanup && !fade_active {
-            if let Some(handle) = self.fading_decoder_handle.take() {
-                let _ = handle.join();
-            }
-            self.fading_ring_buf = None;
-            if let Ok(mut fading_state) = self.fading_session_state.lock() {
-                *fading_state = None;
-            }
-        }
-    }
-
-    fn spawn_cleanup(
-        decoder_handle: Option<std::thread::JoinHandle<()>>,
-        ring_buf: Option<SpscRb<f32>>,
-        position_handle: Option<std::thread::JoinHandle<()>>,
-    ) {
-        if decoder_handle.is_none() && ring_buf.is_none() && position_handle.is_none() {
-            return;
-        }
-
-        std::thread::spawn(move || {
-            if let Some(handle) = decoder_handle {
-                let _ = handle.join();
-            }
-            drop(ring_buf);
-            if let Some(handle) = position_handle {
-                let _ = handle.join();
-            }
-        });
-    }
-
-    fn stop_fading_session(&mut self) {
-        if let Ok(fading_state) = self.fading_session_state.lock()
-            && let Some(state) = fading_state.as_ref()
-        {
-            let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
-            st.stopped = true;
-            st.finished = true;
-        }
-        if let Ok(mut fade) = self.crossfade_state.lock() {
-            *fade = None;
-        }
-        if let Ok(mut fading_consumer) = self.fading_consumer.lock() {
-            *fading_consumer = None;
-        }
-        let fading_decoder_handle = self.fading_decoder_handle.take();
-        let fading_ring_buf = self.fading_ring_buf.take();
-        if let Ok(mut fading_state) = self.fading_session_state.lock() {
-            *fading_state = None;
-        }
-        Self::spawn_cleanup(fading_decoder_handle, fading_ring_buf, None);
-    }
-
-    fn decoder_thread(
-        mut format: Box<dyn FormatReader>,
-        producer: rb::Producer<f32>,
-        state: Arc<Mutex<PlaybackState>>,
-        target_channels: usize,
-        target_sample_rate: u32,
-        finish_cb: Option<Arc<dyn Fn() + Send + Sync + 'static>>,
-    ) {
-        let finish_natural = |state: &Arc<Mutex<PlaybackState>>| {
-            state.lock().unwrap_or_else(|e| e.into_inner()).finished = true;
-            if let Some(cb) = &finish_cb {
-                cb();
-            }
-            // Android: wake the background player loop immediately so auto-advance fires
-            // without waiting for the next poll tick — this lets the loop sleep on a long
-            // idle interval instead of busy-polling while the app is backgrounded.
-            #[cfg(target_os = "android")]
-            {
-                systemint::bg_wake();
-                systemint::wake_run_loop();
-            }
-        };
-
-        let track = match format
-            .tracks()
-            .iter()
-            .find(|t| t.codec_params.as_ref().and_then(|p| p.audio()).is_some())
-        {
-            Some(t) => t,
-            None => {
-                tracing::error!("no supported audio tracks found");
-                finish_natural(&state);
-                return;
-            }
-        };
-
-        let track_id = track.id;
-        // YouTube Music WebM/Opus streams reach the codec layer with
-        // channels empty — symphonia's matroska demuxer doesn't always
-        // propagate it, and both the built-in Opus decoder and the
-        // libopus adapter then bail with "channels required." Parse
-        // OpusHead from extra_data, or fall back to stereo at 48 kHz.
-        let audio_params = Self::audio_params_for_track(track).unwrap();
-        let source_sample_rate = audio_params.sample_rate.unwrap_or(target_sample_rate);
-
-        let mut decoder: Box<dyn AudioDecoder> = match symphonia::default::get_codecs()
-            .make_audio_decoder(&audio_params, &AudioDecoderOptions::default())
-        {
-            Ok(d) => d,
-            Err(_) => match symphonia_adapter_libopus::OpusDecoder::try_registry_new(
-                &audio_params,
-                &AudioDecoderOptions::default(),
-            ) {
-                Ok(d) => d,
-                Err(e) => {
-                    tracing::error!(error = %e, "symphonia codec error");
-                    finish_natural(&state);
-                    return;
-                }
-            },
-        };
-
-        loop {
-            {
-                let mut st = state.lock().unwrap_or_else(|e| e.into_inner());
-                if st.stopped {
-                    st.finished = true;
-                    return;
-                }
-
-                if let Some(seek_time) = st.seek_to.take() {
-                    let time = Time::try_from_secs_f64(seek_time.as_secs_f64()).unwrap_or_default();
-                    let seek_to = SeekTo::Time {
-                        time,
-                        track_id: Some(track_id),
-                    };
-                    drop(st);
-                    let seek_result =
-                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            format.seek(SeekMode::Coarse, seek_to)
-                        }));
-                    match seek_result {
-                        Ok(Ok(_)) => decoder.reset(),
-                        Ok(Err(e)) => tracing::warn!(error = %e, "seek error"),
-                        Err(_) => {
-                            tracing::warn!(
-                                "seek panicked inside symphonia demuxer; continuing playback"
-                            );
-                            decoder.reset();
-                        }
-                    }
-                    continue;
-                }
-
-                while st.paused && !st.stopped {
-                    drop(st);
-                    std::thread::sleep(Duration::from_millis(10));
-                    st = state.lock().unwrap_or_else(|e| e.into_inner());
-                }
-                if st.stopped {
-                    st.finished = true;
-                    return;
-                }
-            }
-
-            let packet = match format.next_packet() {
-                Ok(Some(p)) => p,
-                Ok(None) => {
-                    // Natural end of track — fire the finish callback.
-                    finish_natural(&state);
-                    return;
-                }
-                Err(symphonia::core::errors::Error::IoError(ref e))
-                    if e.kind() == std::io::ErrorKind::UnexpectedEof =>
-                {
-                    finish_natural(&state);
-                    return;
-                }
-                Err(symphonia::core::errors::Error::ResetRequired) => {
-                    decoder.reset();
-                    continue;
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "format error — ending track");
-                    finish_natural(&state);
-                    return;
-                }
-            };
-
-            if packet.track_id != track_id {
-                continue;
-            }
-
-            let decoded = match decoder.decode(&packet) {
-                Ok(d) => d,
-                Err(symphonia::core::errors::Error::DecodeError(e)) => {
-                    tracing::debug!(error = %e, "recoverable decode error — skipping packet");
-                    continue;
-                }
-                Err(e) => {
-                    tracing::error!(error = %e, "fatal decode error");
-                    finish_natural(&state);
-                    return;
-                }
-            };
-
-            let samples = Self::audio_buf_to_f32_interleaved(
-                &decoded,
-                target_channels,
-                source_sample_rate,
-                target_sample_rate,
-            );
-
-            let mut offset = 0;
-            while offset < samples.len() {
-                {
-                    let st = state.lock().unwrap_or_else(|e| e.into_inner());
-                    if st.stopped {
-                        return;
-                    }
-                }
-                match producer.write(&samples[offset..]) {
-                    Ok(written) => {
-                        offset += written;
-                    }
-                    Err(_) => {
-                        std::thread::sleep(Duration::from_millis(5));
-                    }
-                }
-            }
-        }
-    }
-
-    fn audio_buf_to_f32_interleaved(
-        buf: &GenericAudioBufferRef,
-        target_channels: usize,
-        source_sample_rate: u32,
-        target_sample_rate: u32,
-    ) -> Vec<f32> {
-        let src_chans = buf.num_planes().max(1);
-        let mut interleaved: Vec<f32> = Vec::with_capacity(buf.frames() * src_chans);
-        buf.copy_to_vec_interleaved(&mut interleaved);
-
-        let interleaved = if src_chans != target_channels {
-            Self::convert_channels(&interleaved, src_chans, target_channels)
-        } else {
-            interleaved
-        };
-
-        if source_sample_rate != target_sample_rate {
-            Self::resample(
-                &interleaved,
-                target_channels,
-                source_sample_rate,
-                target_sample_rate,
-            )
-        } else {
-            interleaved
-        }
-    }
-
-    fn convert_channels(samples: &[f32], src_channels: usize, dst_channels: usize) -> Vec<f32> {
-        let frames = samples.len() / src_channels;
-        let mut out = Vec::with_capacity(frames * dst_channels);
-
-        for frame in 0..frames {
-            let src_offset = frame * src_channels;
-            for ch in 0..dst_channels {
-                if ch < src_channels {
-                    out.push(samples[src_offset + ch]);
-                } else if src_channels == 1 {
-                    // Mono to multi: duplicate
-                    out.push(samples[src_offset]);
-                } else {
-                    out.push(0.0);
-                }
-            }
-        }
-        out
-    }
-
-    fn resample(samples: &[f32], channels: usize, src_rate: u32, dst_rate: u32) -> Vec<f32> {
-        if channels == 0 || src_rate == 0 || dst_rate == 0 {
-            return samples.to_vec();
-        }
-        let src_frames = samples.len() / channels;
-        let ratio = dst_rate as f64 / src_rate as f64;
-        if ratio.is_nan() || ratio.is_infinite() {
-            return samples.to_vec();
-        }
-        let dst_frames = (src_frames as f64 * ratio).ceil() as usize;
-        let mut out = Vec::with_capacity(dst_frames * channels);
-
-        for i in 0..dst_frames {
-            let src_pos = i as f64 / ratio;
-            let src_idx = src_pos.floor() as usize;
-            let frac = src_pos - src_idx as f64;
-
-            for ch in 0..channels {
-                let s0 = if src_idx < src_frames {
-                    samples[src_idx * channels + ch]
-                } else {
-                    0.0
-                };
-                let s1 = if src_idx + 1 < src_frames {
-                    samples[(src_idx + 1) * channels + ch]
-                } else {
-                    s0
-                };
-                out.push(s0 + (s1 - s0) * frac as f32);
-            }
-        }
-        out
     }
 
     pub fn pause(&mut self) {
-        let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        if !st.paused {
-            st.paused = true;
-            drop(st);
-            self.pause_output_stream();
-
-            self.update_now_playing_system();
-        }
+        self.engine.send(Command::Pause);
+        self.push_now_playing(self.get_position(), false);
     }
 
     pub fn play_resume(&mut self) {
-        let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        if st.paused {
-            st.paused = false;
-            drop(st);
-            self.play_output_stream();
-
-            self.update_now_playing_system();
-        }
+        self.engine.send(Command::Resume);
+        self.push_now_playing(self.get_position(), true);
     }
 
     pub fn seek(&mut self, time: Duration) {
+        // Mirror the engine's end-guard clamp so the system position display
+        // matches what will actually play.
         const END_GUARD: Duration = Duration::from_millis(2000);
         let time = if let Some(meta) = &self.now_playing {
             if meta.duration > END_GUARD {
-                let max = meta.duration - END_GUARD;
-                if time > max { max } else { time }
+                time.min(meta.duration - END_GUARD)
             } else {
                 Duration::ZERO
             }
@@ -1136,70 +183,34 @@ impl Player {
             time
         };
 
-        self.stop_fading_session();
-
-        {
-            let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
-            // If the track already ended, its decode thread has exited (every exit path
-            // sets `finished` before returning) — nothing is left to service `seek_to`.
-            // Clearing `finished` here would strand the player in limbo: not "complete"
-            // (so the player task won't auto-advance) yet with no live decoder (so the
-            // seek never happens) — a hang the user can only escape with Next. Leave it
-            // finished so playback advances normally instead.
-            if st.finished {
-                return;
-            }
-            st.seek_to = Some(time);
-            self.position_micros
-                .store(time.as_micros() as u64, Ordering::Relaxed);
-
-            if let Some(cons) = &self.ring_buf_consumer
-                && let Ok(cons) = cons.lock()
-            {
-                let mut dummy = [0.0f32; 2048];
-                while cons.read(&mut dummy).unwrap_or(0) > 0 {}
-            }
-        }
-
-        self.update_now_playing_system();
+        self.engine.send(Command::Seek(time));
+        self.push_now_playing(time, !self.is_paused());
     }
 
     pub fn is_empty(&self) -> bool {
-        let st = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        st.finished
+        matches!(self.status().phase, Phase::Idle | Phase::Ended)
     }
 
-    /// True once the track has ended (its decode thread has exited). A seek on an
-    /// ended track can't be serviced in-place and needs a re-open — see
-    /// `PlayerController::seek`.
+    /// True once the track has ended (drained past its last sample). Unlike the
+    /// old engine, a seek on an ended track revives it in place.
     pub fn track_ended(&self) -> bool {
-        let st = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        st.finished
+        matches!(self.status().phase, Phase::Idle | Phase::Ended)
     }
 
     pub fn is_playback_complete(&self) -> bool {
-        let st = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        if !st.finished {
-            return false;
-        }
-        if let Some(rb) = &self.ring_buf {
-            return rb.is_empty();
-        }
-        true
+        matches!(self.status().phase, Phase::Idle | Phase::Ended)
     }
 
     pub fn is_paused(&self) -> bool {
-        let st = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        st.paused
+        self.status().paused
     }
 
     pub fn can_resume(&self) -> bool {
-        let st = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        !st.stopped && !st.finished && self._stream.is_some()
+        matches!(self.status().phase, Phase::Playing | Phase::Paused)
     }
 
     pub fn stop(&mut self) {
-        self.stop_internal();
+        self.engine.send(Command::Stop { pause_device: true });
         self.now_playing = None;
         // Tear down the Android foreground service + media notification so the OS can
         // reclaim the process; otherwise the dismissed-notification state lingers.
@@ -1208,125 +219,68 @@ impl Player {
     }
 
     pub fn stop_for_transition(&mut self) {
-        self.stop_playback_session();
-        self.position_micros.store(0, Ordering::SeqCst);
-    }
-
-    fn stop_internal(&mut self) {
-        self.pause_output_stream();
-        self.stop_playback_session();
-        self.position_micros.store(0, Ordering::SeqCst);
-    }
-
-    fn stop_playback_session(&mut self) {
-        self.position_thread_stop.store(true, Ordering::Relaxed);
-        {
-            let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
-            st.stopped = true;
-            st.paused = false;
-            st.seek_to = None;
-            st.finished = true;
-        }
-
-        if let Ok(mut active_consumer) = self.active_consumer.lock() {
-            *active_consumer = None;
-        }
-        self.ring_buf_consumer = None;
-        let ring_buf = self.ring_buf.take();
-        let decoder_handle = self.decoder_handle.take();
-        let position_handle = self.position_thread_handle.take();
-
-        self.stop_fading_session();
-        Self::spawn_cleanup(decoder_handle, ring_buf, position_handle);
+        self.engine.send(Command::Stop {
+            pause_device: false,
+        });
     }
 
     pub fn set_volume(&mut self, volume: f32) {
-        let gain = volume.clamp(0.0, 1.0).powi(3);
-        let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        st.volume = gain;
+        self.engine.send(Command::SetVolume(volume));
     }
 
     pub fn set_channel_mode(&mut self, mode: ChannelMode) {
-        if let Ok(mut channel_mode) = self.channel_mode.lock() {
-            *channel_mode = mode;
-        }
+        self.engine.send(Command::SetChannelMode(mode));
     }
 
     pub fn set_equalizer(&mut self, settings: EqualizerSettings) {
-        if let Ok(mut eq) = self.equalizer.lock() {
-            eq.set_settings(settings);
-        }
+        self.engine.send(Command::SetEqualizer(settings));
     }
 
     pub fn update_metadata(&mut self, meta: NowPlayingMeta) {
+        self.engine.send(Command::SetDuration(meta.duration));
         self.now_playing = Some(meta);
         self.update_now_playing_system();
     }
 
-    fn update_now_playing_system(&self) {
-        #[cfg(target_os = "macos")]
-        if let Some(meta) = &self.now_playing {
-            systemint::update_now_playing(
-                &meta.title,
-                &meta.artist,
-                &meta.album,
-                meta.duration.as_secs_f64(),
-                self.get_position().as_secs_f64(),
-                !self.is_paused(),
-                meta.artwork.as_deref(),
-            );
-        }
-
-        #[cfg(target_os = "linux")]
-        if let Some(meta) = &self.now_playing {
-            systemint::update_now_playing(
-                &meta.title,
-                &meta.artist,
-                &meta.album,
-                meta.duration.as_secs_f64(),
-                self.get_position().as_secs_f64(),
-                !self.is_paused(),
-                meta.artwork.as_deref(),
-            );
-        }
-
-        #[cfg(target_os = "windows")]
-        if let Some(meta) = &self.now_playing {
-            systemint::update_now_playing(
-                &meta.title,
-                &meta.artist,
-                &meta.album,
-                meta.duration.as_secs_f64(),
-                self.get_position().as_secs_f64(),
-                !self.is_paused(),
-                meta.artwork.as_deref(),
-            );
-        }
-
-        #[cfg(target_os = "android")]
-        if let Some(meta) = &self.now_playing {
-            systemint::update_now_playing(
-                &meta.title,
-                &meta.artist,
-                &meta.album,
-                meta.duration.as_secs_f64(),
-                self.get_position().as_secs_f64(),
-                !self.is_paused(),
-                meta.artwork.as_deref(),
-            );
-        }
+    pub fn get_position(&self) -> Duration {
+        self.status().position()
     }
 
-    pub fn get_position(&self) -> Duration {
-        let raw = Duration::from_micros(self.position_micros.load(Ordering::Relaxed));
+    fn status(&self) -> Arc<EngineStatus> {
+        self.engine.status()
+    }
 
-        if let Some(meta) = &self.now_playing
-            && meta.duration > Duration::ZERO
-            && raw > meta.duration
-        {
-            return meta.duration;
+    fn update_now_playing_system(&self) {
+        self.push_now_playing(self.get_position(), !self.is_paused());
+    }
+
+    /// Position/playing are passed explicitly: right after a command the status
+    /// snapshot may not reflect it yet, and the OS display should show intent.
+    fn push_now_playing(&self, position: Duration, playing: bool) {
+        #[cfg(any(
+            target_os = "macos",
+            target_os = "linux",
+            target_os = "windows",
+            target_os = "android"
+        ))]
+        if let Some(meta) = &self.now_playing {
+            systemint::update_now_playing(
+                &meta.title,
+                &meta.artist,
+                &meta.album,
+                meta.duration.as_secs_f64(),
+                position.as_secs_f64(),
+                playing,
+                meta.artwork.as_deref(),
+            );
         }
-        raw
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "linux",
+            target_os = "windows",
+            target_os = "android"
+        )))]
+        let _ = (position, playing);
     }
 }
 
@@ -1335,12 +289,3 @@ impl Default for Player {
         Self::new()
     }
 }
-
-impl Drop for Player {
-    fn drop(&mut self) {
-        self.stop_playback_session();
-        self._stream = None;
-    }
-}
-
-// ─────────────────────────────────────────────

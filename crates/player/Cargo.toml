@@ -21,7 +21,8 @@ config = { workspace = true }
 cpal = { workspace = true }
 symphonia = { workspace = true }
 symphonia-adapter-libopus = { workspace = true }
-rb = { workspace = true }
+rtrb = { workspace = true }
+arc-swap = { workspace = true }
 tokio = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
