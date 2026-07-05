@@ -350,6 +350,9 @@ replaygain_track = Titel
 replaygain_album = Album
 replaygain_preamp = ReplayGain-Vorverstärkung
 now_playing_api = Now-Playing-API
+device_change_behavior = Bei Wechsel des Ausgabegeräts
+device_change_resume = Weiterspielen
+device_change_pause = Pausieren
 
 crossfade = Überblendung
 crossfade_off = Aus

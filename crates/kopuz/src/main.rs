@@ -1093,6 +1093,9 @@ fn App() -> Element {
                     player
                         .peek()
                         .set_replaygain(loaded.replaygain_mode, loaded.replaygain_preamp_db);
+                    player
+                        .peek()
+                        .set_device_change_behavior(loaded.device_change_behavior);
                     i18n::set_locale(&loaded.language);
                 }
 

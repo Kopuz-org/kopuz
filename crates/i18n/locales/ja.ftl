@@ -356,6 +356,9 @@ replaygain_track = トラック
 replaygain_album = アルバム
 replaygain_preamp = ReplayGain プリアンプ
 now_playing_api = 再生中 API
+device_change_behavior = 出力デバイス変更時
+device_change_resume = 再生を続ける
+device_change_pause = 一時停止
 
 crossfade = クロスフェード
 crossfade_off = オフ

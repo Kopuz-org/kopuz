@@ -350,6 +350,9 @@ replaygain_track = Track
 replaygain_album = Album
 replaygain_preamp = ReplayGain pre-amp
 now_playing_api = Now Playing API
+device_change_behavior = On output device change
+device_change_resume = Keep playing
+device_change_pause = Pause
 
 crossfade = Áttűnés
 crossfade_off = Ki

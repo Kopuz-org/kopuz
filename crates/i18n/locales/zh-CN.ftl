@@ -350,6 +350,9 @@ replaygain_track = 单曲
 replaygain_album = 专辑
 replaygain_preamp = 回放增益前置放大
 now_playing_api = 正在播放 API
+device_change_behavior = 输出设备变更时
+device_change_resume = 继续播放
+device_change_pause = 暂停
 
 crossfade = 交叉淡入淡出
 crossfade_off = 关闭

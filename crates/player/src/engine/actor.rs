@@ -179,6 +179,7 @@ struct Actor {
     channel_mode: ChannelMode,
     replaygain_mode: config::ReplayGainMode,
     replaygain_preamp_db: f32,
+    device_change_behavior: config::DeviceChangeBehavior,
 
     rt_tx: Option<Sender<RtCmd>>,
     retire_rx: Option<Receiver<Retired>>,
@@ -218,6 +219,7 @@ impl Actor {
             channel_mode: ChannelMode::Stereo,
             replaygain_mode: config::ReplayGainMode::Off,
             replaygain_preamp_db: 0.0,
+            device_change_behavior: config::DeviceChangeBehavior::Resume,
             rt_tx: None,
             retire_rx: None,
             current: None,
@@ -310,6 +312,9 @@ impl Actor {
                     let gain = self.session_gain(&current.replaygain);
                     self.send_rt(RtCmd::SetActiveGain(gain));
                 }
+            }
+            Command::SetDeviceChangeBehavior(behavior) => {
+                self.device_change_behavior = behavior;
             }
             Command::SetDuration(duration) => {
                 if let Some(current) = &mut self.current {
@@ -710,6 +715,8 @@ impl Actor {
             self.graveyard.push(fading.join);
         }
 
+        let was_playing = self.current.is_some() && !self.paused.load(Ordering::Relaxed);
+
         match self.open_output(source_rate) {
             Ok(_) => {
                 let resumable = self.current.as_ref().is_some_and(|c| c.seekable);
@@ -725,6 +732,15 @@ impl Actor {
                         token,
                         message: "output device lost".to_string(),
                     });
+                }
+                // The user chooses whether a device change keeps playing on the
+                // new output or holds paused there (e.g. unplugged headphones
+                // shouldn't blast the speakers).
+                if was_playing
+                    && self.device_change_behavior == config::DeviceChangeBehavior::Pause
+                    && self.current.is_some()
+                {
+                    self.paused.store(true, Ordering::Relaxed);
                 }
                 if self.paused.load(Ordering::Relaxed) {
                     self.sink.pause();

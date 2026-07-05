@@ -162,11 +162,11 @@ fn ClearCacheButton() -> Element {
 }
 
 use components::settings_items::{
-    BackBehaviorSelector, ChannelModeSelector, DiscordPresencePausedSettings,
-    DiscordPresenceSettings, EqualizerPanel, LanguageSelector, LastFmSettings, LibreFmSettings,
-    MultiDirectoryPicker, MusicBrainzSettings, RadioRegistryDropdown, ReplayGainModeSelector,
-    ReplayGainPreampSlider, ServerSettings, SettingItem, SettingsSection, ThemeSelector,
-    ToggleSetting,
+    BackBehaviorSelector, ChannelModeSelector, DeviceChangeBehaviorSelector,
+    DiscordPresencePausedSettings, DiscordPresenceSettings, EqualizerPanel, LanguageSelector,
+    LastFmSettings, LibreFmSettings, MultiDirectoryPicker, MusicBrainzSettings,
+    RadioRegistryDropdown, ReplayGainModeSelector, ReplayGainPreampSlider, ServerSettings,
+    SettingItem, SettingsSection, ThemeSelector, ToggleSetting,
 };
 use components::settings_popups::{AddRegistryPopup, AddServerPopup, LoginPopup};
 use config::{AppConfig, ArtistPhotoSource, FetchStrategy, MusicService, OfflineQuality};
@@ -817,6 +817,18 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     on_change: move |mode| {
                                         config.write().channel_mode = mode;
                                         ctrl.player.peek().set_channel_mode(mode);
+                                    }
+                                }
+                            }
+                        }
+                        SettingItem {
+                            title: i18n::t("device_change_behavior").to_string(),
+                            control: rsx! {
+                                DeviceChangeBehaviorSelector {
+                                    current: config.read().device_change_behavior,
+                                    on_change: move |behavior| {
+                                        config.write().device_change_behavior = behavior;
+                                        ctrl.player.peek().set_device_change_behavior(behavior);
                                     }
                                 }
                             }

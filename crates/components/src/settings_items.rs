@@ -1,6 +1,6 @@
 use config::{
-    AppConfig, BackBehavior, ChannelMode, EqPreset, EqualizerSettings as EqualizerConfig,
-    MusicServer, ReplayGainMode, SavedServer,
+    AppConfig, BackBehavior, ChannelMode, DeviceChangeBehavior, EqPreset,
+    EqualizerSettings as EqualizerConfig, MusicServer, ReplayGainMode, SavedServer,
 };
 use dioxus::prelude::*;
 #[cfg(not(target_os = "android"))]
@@ -1201,6 +1201,34 @@ pub fn ChannelModeSelector(current: ChannelMode, on_change: EventHandler<Channel
                     value: mode.value_str(),
                     selected: *mode == current,
                     "{channel_mode_label(*mode)}"
+                }
+            }
+        }
+    }
+}
+
+fn device_change_behavior_label(behavior: DeviceChangeBehavior) -> String {
+    match behavior {
+        DeviceChangeBehavior::Resume => i18n::t("device_change_resume"),
+        DeviceChangeBehavior::Pause => i18n::t("device_change_pause"),
+    }
+}
+
+#[component]
+pub fn DeviceChangeBehaviorSelector(
+    current: DeviceChangeBehavior,
+    on_change: EventHandler<DeviceChangeBehavior>,
+) -> Element {
+    rsx! {
+        select {
+            class: "bg-white/5 border border-white/10 rounded px-3 py-1 text-sm text-white focus:outline-none focus:border-white/20",
+            value: current.value_str(),
+            onchange: move |evt| on_change.call(DeviceChangeBehavior::from_value_str(&evt.value())),
+            for behavior in DeviceChangeBehavior::ALL {
+                option {
+                    value: behavior.value_str(),
+                    selected: *behavior == current,
+                    "{device_change_behavior_label(*behavior)}"
                 }
             }
         }

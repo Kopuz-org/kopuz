@@ -351,6 +351,9 @@ replaygain_track = Трек
 replaygain_album = Альбом
 replaygain_preamp = Предусиление ReplayGain
 now_playing_api = API «Сейчас играет»
+device_change_behavior = При смене устройства вывода
+device_change_resume = Продолжать воспроизведение
+device_change_pause = Пауза
 
 crossfade = Кроссфейд
 crossfade_off = Выкл

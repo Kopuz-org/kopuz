@@ -209,6 +209,12 @@ impl Player {
         self.engine.send(Command::SetReplayGain { mode, preamp_db });
     }
 
+    /// Whether playback keeps going or holds paused after migrating to a new
+    /// output device.
+    pub fn set_device_change_behavior(&self, behavior: config::DeviceChangeBehavior) {
+        self.engine.send(Command::SetDeviceChangeBehavior(behavior));
+    }
+
     pub fn update_metadata(&mut self, meta: NowPlayingMeta) {
         self.engine.send(Command::SetDuration(meta.duration));
         self.now_playing = Some(meta);

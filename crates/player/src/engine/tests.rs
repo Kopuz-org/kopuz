@@ -740,3 +740,44 @@ fn default_device_change_leaves_radio_alone() {
 
     engine.shutdown();
 }
+
+#[test]
+fn device_change_pause_behavior_holds_after_migration() {
+    let (sink, engine, actor_tx) = spawn_engine_with_tx();
+    engine.send(Command::SetDeviceChangeBehavior(
+        config::DeviceChangeBehavior::Pause,
+    ));
+
+    let (factory, duration) = wav_factory(30.0);
+    load(&engine, 1, factory, duration);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    wait_until("played one second", || {
+        sink.pull(TEST_CONFIG.sample_rate as usize * TEST_CONFIG.channels);
+        engine.status().position() >= Duration::from_secs(1)
+    });
+    let position_before = engine.status().position();
+    let opens_before = sink.open_calls();
+
+    let _ = actor_tx.send(super::actor::ActorMsg::DeviceError);
+
+    wait_until("stream rebuilt", || sink.open_calls() > opens_before);
+    wait_until("held paused on the new device", || {
+        engine.status().phase == Phase::Paused
+    });
+    assert!(!sink.is_playing(), "device stays paused");
+    assert!(
+        engine.status().position() >= position_before.saturating_sub(Duration::from_millis(500)),
+        "position preserved while paused"
+    );
+
+    // Resume continues where the migration left off.
+    engine.send(Command::Resume);
+    wait_until("phase Playing after resume", || {
+        engine.status().phase == Phase::Playing
+    });
+    wait_until("audio after resume", || {
+        sink.pull(4096).iter().any(|s| *s != 0.0)
+    });
+
+    engine.shutdown();
+}

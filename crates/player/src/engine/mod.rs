@@ -103,6 +103,7 @@ pub enum Command {
         mode: config::ReplayGainMode,
         preamp_db: f32,
     },
+    SetDeviceChangeBehavior(config::DeviceChangeBehavior),
     SetDuration(Duration),
     Subscribe(tokio::sync::mpsc::UnboundedSender<Event>),
     Shutdown,

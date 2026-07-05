@@ -351,6 +351,9 @@ replaygain_track = Piste
 replaygain_album = Album
 replaygain_preamp = Préampli ReplayGain
 now_playing_api = Now Playing API
+device_change_behavior = Au changement de périphérique
+device_change_resume = Continuer la lecture
+device_change_pause = Mettre en pause
 
 crossfade = Fondu enchaîné
 crossfade_off = Désactivé

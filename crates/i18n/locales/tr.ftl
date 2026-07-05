@@ -350,6 +350,9 @@ replaygain_track = Parça
 replaygain_album = Albüm
 replaygain_preamp = ReplayGain ön kuvvetlendirme
 now_playing_api = Şimdi Çalıyor API'si
+device_change_behavior = Ses aygıtı değiştiğinde
+device_change_resume = Çalmaya devam et
+device_change_pause = Duraklat
 
 crossfade = Çapraz Geçiş
 crossfade_off = Kapalı
