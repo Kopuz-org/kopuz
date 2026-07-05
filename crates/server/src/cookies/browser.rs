@@ -174,15 +174,25 @@ pub(crate) async fn find_browser_bin(browser: Browser) -> Option<String> {
 /// Plain `Command` natively; `flatpak-spawn --host --watch-bus` when packaged,
 /// so `child.kill()`/`kill_on_drop` still tears the host browser down.
 pub(crate) fn browser_command(bin: &str) -> Command {
-    let cmd: Vec<&str> = bin.split(' ').collect();
-    if in_flatpak() {
-        let mut c = Command::new("flatpak-spawn");
-        c.args(["--host", "--watch-bus"]);
-        c.args(cmd);
-        c
-    } else {
-        let mut c = Command::new(cmd[0]);
-        c.args(&cmd[1..]);
-        c
+    // On Windows `bin` is a single executable path that can contain spaces
+    // (e.g. `C:\Program Files\...`), so it must not be split. Elsewhere `bin`
+    // may be a multi-token command like `flatpak run <id>`, so split on spaces.
+    #[cfg(windows)]
+    {
+        Command::new(bin)
+    }
+    #[cfg(not(windows))]
+    {
+        let cmd: Vec<&str> = bin.split(' ').collect();
+        if in_flatpak() {
+            let mut c = Command::new("flatpak-spawn");
+            c.args(["--host", "--watch-bus"]);
+            c.args(cmd);
+            c
+        } else {
+            let mut c = Command::new(cmd[0]);
+            c.args(&cmd[1..]);
+            c
+        }
     }
 }
