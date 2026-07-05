@@ -80,11 +80,6 @@ mod tests {
             .await
             .expect("mint should succeed");
         assert!(!pot.is_empty(), "pot must be non-empty");
-        eprintln!(
-            "minted pot: len={} head={}",
-            pot.len(),
-            &pot[..pot.len().min(24)]
-        );
         // A second mint within TTL should reuse the cached WebPoMinter.
         let pot2 = super::mint_content_pot("9bZkp7q19f0")
             .await

@@ -560,13 +560,9 @@ mod tests {
             .filter(|f| f["mimeType"].as_str().unwrap_or("").starts_with("audio/"))
             .max_by_key(|f| f["bitrate"].as_u64().unwrap_or(0))
             .expect("audio format");
-        let t = std::time::Instant::now();
         let url = deciphered_url(&player.0, fmt).await.expect("decipher");
-        eprintln!("deno cold decipher: {} ms", t.elapsed().as_millis());
-        // A second solve on the warm isolate, to eyeball the warm cost.
-        let t2 = std::time::Instant::now();
+        // A second solve exercises reuse of the warm isolate.
         let _ = deciphered_url(&player.0, fmt).await.expect("decipher 2");
-        eprintln!("deno warm decipher: {} ms", t2.elapsed().as_millis());
         let resp = reqwest::Client::new()
             .get(&url)
             .header("Range", "bytes=0-1023")
@@ -586,9 +582,5 @@ mod tests {
             .await
             .expect("botguard mint alongside a live decipher isolate");
         assert!(!pot.is_empty(), "pot minted with both isolates alive");
-        eprintln!(
-            "both isolates OK: deciphered + minted pot len={}",
-            pot.len()
-        );
     }
 }
