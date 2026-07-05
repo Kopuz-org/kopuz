@@ -40,6 +40,13 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use tokio::sync::{mpsc, oneshot};
 
+// Headless deno_core decipher engine (the post-WebView path). Not on Android,
+// which keeps the WebView.
+#[cfg(not(target_os = "android"))]
+mod deno_engine;
+#[cfg(not(target_os = "android"))]
+pub use deno_engine::DenoCoreEngine;
+
 const LIB: &str = include_str!("solver/lib.min.js");
 const CORE: &str = include_str!("solver/core.min.js");
 const WEB_UA: &str =
@@ -552,5 +559,52 @@ mod tests {
             .await
             .expect("range GET");
         assert_eq!(resp.status().as_u16(), 206, "deciphered URL must stream");
+    }
+
+    /// Same end-to-end proof, but through the headless [`DenoCoreEngine`] (no
+    /// WebView, no system runtime) — the post-Blitz decipher path. Run alone:
+    /// `cargo test -p kopuz-server deno_decipher -- --ignored --nocapture`.
+    #[cfg(not(target_os = "android"))]
+    #[tokio::test]
+    #[ignore = "hits live YouTube; run manually and alone (registers the global engine)"]
+    async fn live_deno_decipher_streams() {
+        use super::super::{clients::WEB_REMIX, innertube};
+        super::set_engine(Box::new(super::DenoCoreEngine::new()))
+            .unwrap_or_else(|_| panic!("engine already set — run this test alone"));
+        let vid = "dQw4w9WgXcQ";
+        let player = player_js(vid).await.expect("base.js");
+        let extras = innertube::PlayerExtras {
+            signature_timestamp: Some(player.1),
+            ..Default::default()
+        };
+        let json = innertube::player(WEB_REMIX, vid, None, extras)
+            .await
+            .expect("player");
+        let fmt = json
+            .pointer("/streamingData/adaptiveFormats")
+            .and_then(|v| v.as_array())
+            .expect("formats")
+            .iter()
+            .filter(|f| f["mimeType"].as_str().unwrap_or("").starts_with("audio/"))
+            .max_by_key(|f| f["bitrate"].as_u64().unwrap_or(0))
+            .expect("audio format");
+        let t = std::time::Instant::now();
+        let url = deciphered_url(&player.0, fmt).await.expect("decipher");
+        eprintln!("deno cold decipher: {} ms", t.elapsed().as_millis());
+        // A second solve on the warm isolate, to eyeball the warm cost.
+        let t2 = std::time::Instant::now();
+        let _ = deciphered_url(&player.0, fmt).await.expect("decipher 2");
+        eprintln!("deno warm decipher: {} ms", t2.elapsed().as_millis());
+        let resp = reqwest::Client::new()
+            .get(&url)
+            .header("Range", "bytes=0-1023")
+            .send()
+            .await
+            .expect("range GET");
+        assert_eq!(
+            resp.status().as_u16(),
+            206,
+            "deno-deciphered URL must stream"
+        );
     }
 }

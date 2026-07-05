@@ -77,9 +77,7 @@ pub fn run(mut rx: mpsc::UnboundedReceiver<MintRequest>) {
 
         while let Some(req) = rx.recv().await {
             // (Re)negotiate the integrity token on first use or near expiry.
-            let needs_init = warm
-                .as_ref()
-                .is_none_or(|w| Instant::now() >= w.refresh_at);
+            let needs_init = warm.as_ref().is_none_or(|w| Instant::now() >= w.refresh_at);
             if needs_init {
                 match init().await {
                     Ok(w) => {
@@ -97,11 +95,10 @@ pub fn run(mut rx: mpsc::UnboundedReceiver<MintRequest>) {
             }
 
             let w = warm.as_mut().expect("warm set above");
-            let result = w
-                .bg
-                .mint_token(&req.video_id)
-                .await
-                .map_err(|e| format!("mint: {e}"));
+            let result =
+                w.bg.mint_token(&req.video_id)
+                    .await
+                    .map_err(|e| format!("mint: {e}"));
             // A mint failure often means the token went stale early — drop the
             // instance so the next request re-negotiates.
             if result.is_err() {
