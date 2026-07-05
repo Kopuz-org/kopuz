@@ -138,6 +138,9 @@ pub fn use_player_task(ctrl: PlayerController) {
                         SystemEvent::Toggle => ctrl.toggle(),
                         SystemEvent::Next => ctrl.play_next(),
                         SystemEvent::Prev => ctrl.play_prev(),
+                        SystemEvent::Seek(secs) => {
+                            ctrl.seek(std::time::Duration::from_secs_f64(secs));
+                        }
                     }
                 }
                 if !processed {

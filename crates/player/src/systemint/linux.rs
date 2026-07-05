@@ -13,7 +13,13 @@ pub enum SystemEvent {
     Toggle,
     Next,
     Prev,
+    /// Absolute target position in seconds.
+    Seek(f64),
 }
+
+/// MPRIS SetPosition requires a `mpris:trackid`; we expose a constant one
+/// (position always refers to the current track).
+const TRACK_ID: &str = "/org/kopuz/track/current";
 
 static TX: OnceLock<Sender<SystemEvent>> = OnceLock::new();
 static RX: OnceLock<Mutex<Receiver<SystemEvent>>> = OnceLock::new();
@@ -110,10 +116,18 @@ impl PlayerInterface for P {
         self.1.send(SystemEvent::Play).ok();
         Ok(())
     }
-    async fn seek(&self, _: Time) -> fdo::Result<()> {
+    async fn seek(&self, offset: Time) -> fdo::Result<()> {
+        // MPRIS Seek is relative to the current position.
+        let current = self.0.lock().map(|s| s.2).unwrap_or(Time::ZERO);
+        let target = (current.as_micros() + offset.as_micros()).max(0);
+        self.1.send(SystemEvent::Seek(target as f64 / 1e6)).ok();
         Ok(())
     }
-    async fn set_position(&self, _: mpris_server::TrackId, _: Time) -> fdo::Result<()> {
+    async fn set_position(&self, _: mpris_server::TrackId, position: Time) -> fdo::Result<()> {
+        // The trackid is constant (always the current track), so any request
+        // that reached us refers to it.
+        let target = position.as_micros().max(0);
+        self.1.send(SystemEvent::Seek(target as f64 / 1e6)).ok();
         Ok(())
     }
     async fn open_uri(&self, _: String) -> fdo::Result<()> {
@@ -175,7 +189,7 @@ impl PlayerInterface for P {
         Ok(true)
     }
     async fn can_seek(&self) -> fdo::Result<bool> {
-        Ok(false)
+        Ok(true)
     }
     async fn can_control(&self) -> fdo::Result<bool> {
         Ok(true)
@@ -246,6 +260,9 @@ pub fn update_now_playing(
             .artist([artist])
             .album(album)
             .length(Time::from_micros((duration * 1e6) as i64));
+        if let Ok(trackid) = mpris_server::TrackId::try_from(TRACK_ID) {
+            b = b.trackid(trackid);
+        }
         if let Some(art) = artwork_path {
             // MPRIS art_url accepts any URI. Pass remote URLs (Jellyfin
             // thumbs, YT Music covers) through unchanged so clients can
