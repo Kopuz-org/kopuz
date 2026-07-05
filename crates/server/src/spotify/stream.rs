@@ -70,9 +70,12 @@ pub fn fetch_track_audio(
         let spotify_id =
             SpotifyId::from_base62(&track_id).map_err(|e| format!("spotify id: {e}"))?;
 
-        let track = SpTrack::get(&session, &librespot_core::SpotifyUri::Track { id: spotify_id })
-            .await
-            .map_err(|e| format!("spotify track metadata: {e}"))?;
+        let track = SpTrack::get(
+            &session,
+            &librespot_core::SpotifyUri::Track { id: spotify_id },
+        )
+        .await
+        .map_err(|e| format!("spotify track metadata: {e}"))?;
 
         let candidates = playable_candidates(&session, &track).await;
         if candidates.is_empty() {

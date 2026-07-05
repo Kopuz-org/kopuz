@@ -78,6 +78,12 @@ pub fn FavoritesBody(
             return;
         }
         let nonce = *refresh_nonce.read();
+        // Never overlap syncs: two concurrent walks stamp rows with different
+        // epochs, and each end-of-walk sweep deletes the other's rows. (Read
+        // the nonce first so the effect stays subscribed to it.)
+        if *is_syncing.peek() {
+            return;
+        }
         // The capability — not the service — decides how favorites sync.
         let sync_mode = caps().favorites_sync;
         let read_db = consume_context::<hooks::ReadDb>();
@@ -85,6 +91,9 @@ pub fn FavoritesBody(
         let sid = active_server_id();
         spawn(
             async move {
+                // Claim the in-flight flag before the first await so a nonce
+                // bump landing mid-staleness-check can't start a second walk.
+                is_syncing.set(true);
                 // Staleness/once guard: paginated (YT) skips if a prior sync stamped
                 // or clean rows already exist; instant skips a recent pull.
                 if nonce == 0 {
@@ -111,6 +120,7 @@ pub fn FavoritesBody(
                                 .is_some()
                                 || favorites > dirty;
                             if already_synced {
+                                is_syncing.set(false);
                                 return;
                             }
                         }
@@ -129,13 +139,13 @@ pub fn FavoritesBody(
                             // clearing then re-adding, so a refresh is invisible — no
                             // flicker to ration against.
                             if last_pull <= now && now - last_pull < 15 * 60 {
+                                is_syncing.set(false);
                                 return;
                             }
                         }
                     }
                 }
 
-                is_syncing.set(true);
                 synced_so_far.set(0);
 
                 match sync_mode {

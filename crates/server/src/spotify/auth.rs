@@ -114,8 +114,5 @@ pub async fn refresh(refresh_token: String) -> Result<SpotifyAuth, String> {
 /// indistinguishable here).
 pub async fn validate(access_token: &str) -> Result<(), String> {
     let access = access_token.to_string();
-    session::on_rt(async move {
-        session::ensure_session(&access).await.map(|_| ())
-    })
-    .await?
+    session::on_rt(async move { session::ensure_session(&access).await.map(|_| ()) }).await?
 }

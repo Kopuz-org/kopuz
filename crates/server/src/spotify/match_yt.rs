@@ -51,9 +51,8 @@ pub async fn resolve(
     tracing::info!(track = %track_id, %query, "spotify→yt: searching YouTube for a full-track match");
 
     let candidates = search::music_search_tracks(&query, None).await?;
-    let video_id = pick_best(&meta, &candidates).ok_or_else(|| {
-        format!("no YouTube match for \"{}\" by {}", meta.title, meta.artist)
-    })?;
+    let video_id = pick_best(&meta, &candidates)
+        .ok_or_else(|| format!("no YouTube match for \"{}\" by {}", meta.title, meta.artist))?;
     tracing::info!(track = %track_id, video = %video_id, "spotify→yt: matched");
 
     cache()
@@ -91,7 +90,10 @@ fn score(target: &reader::Track, cand: &reader::Track) -> f32 {
     let artist = if want_artist.is_empty() {
         0.0
     } else {
-        let hits = want_artist.iter().filter(|w| have_artist.contains(*w)).count();
+        let hits = want_artist
+            .iter()
+            .filter(|w| have_artist.contains(*w))
+            .count();
         hits as f32 / want_artist.len() as f32
     };
 
@@ -109,8 +111,22 @@ fn score(target: &reader::Track, cand: &reader::Track) -> f32 {
 /// Stop-words that add noise to title/artist matching (release adornments,
 /// upload tags). Stripped before comparison.
 const NOISE: &[&str] = &[
-    "feat", "ft", "featuring", "official", "video", "audio", "lyrics", "lyric",
-    "remaster", "remastered", "hd", "hq", "mv", "the", "a", "an",
+    "feat",
+    "ft",
+    "featuring",
+    "official",
+    "video",
+    "audio",
+    "lyrics",
+    "lyric",
+    "remaster",
+    "remastered",
+    "hd",
+    "hq",
+    "mv",
+    "the",
+    "a",
+    "an",
 ];
 
 /// Lowercase, split on non-alphanumerics, drop noise words → comparable tokens.

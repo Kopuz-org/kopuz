@@ -76,30 +76,63 @@ fn map_track(t: &SpTrack) -> reader::Track {
 }
 
 /// Fetch full track metadata for a batch of track URIs, bounded by [`FANOUT`].
+/// Returns the resolved tracks plus the count of URIs that still failed after
+/// retries. Callers decide whether a shortfall is tolerable: for favorites it
+/// is not — a partial result fed into the epoch sweep would delete every
+/// favorite the fetch happened to miss.
 async fn fetch_tracks(
     session: &librespot_core::session::Session,
     uris: Vec<SpotifyUri>,
-) -> Vec<reader::Track> {
-    let sem = Arc::new(Semaphore::new(FANOUT));
-    let mut handles = Vec::with_capacity(uris.len());
-    for uri in uris {
-        if !matches!(uri, SpotifyUri::Track { .. }) {
-            continue;
+) -> (Vec<reader::Track>, usize) {
+    let mut pending: Vec<SpotifyUri> = uris
+        .into_iter()
+        .filter(|u| matches!(u, SpotifyUri::Track { .. }))
+        .collect();
+    let mut out = Vec::with_capacity(pending.len());
+    let mut lost = 0usize;
+    // Rate-limited fetches fail in bursts; give stragglers a breather and
+    // retry instead of dropping them.
+    for attempt in 0..3u32 {
+        if pending.is_empty() {
+            break;
         }
-        let s = session.clone();
-        let sem = sem.clone();
-        handles.push(tokio::spawn(async move {
-            let _permit = sem.acquire().await.ok()?;
-            SpTrack::get(&s, &uri).await.ok().map(|t| map_track(&t))
-        }));
-    }
-    let mut out = Vec::with_capacity(handles.len());
-    for h in handles {
-        if let Ok(Some(t)) = h.await {
-            out.push(t);
+        if attempt > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(500 * u64::from(attempt))).await;
+        }
+        let sem = Arc::new(Semaphore::new(FANOUT));
+        let mut handles = Vec::with_capacity(pending.len());
+        for uri in pending.drain(..) {
+            let s = session.clone();
+            let sem = sem.clone();
+            handles.push(tokio::spawn(async move {
+                let _permit = match sem.acquire().await {
+                    Ok(p) => p,
+                    Err(_) => return Err(uri),
+                };
+                match SpTrack::get(&s, &uri).await {
+                    Ok(t) => Ok(map_track(&t)),
+                    Err(_) => Err(uri),
+                }
+            }));
+        }
+        for h in handles {
+            match h.await {
+                Ok(Ok(t)) => out.push(t),
+                Ok(Err(uri)) => pending.push(uri),
+                // Join error: the uri moved into the task, so it can't be retried.
+                Err(_) => lost += 1,
+            }
         }
     }
-    out
+    let failed = pending.len() + lost;
+    if failed > 0 {
+        tracing::warn!(
+            failed,
+            resolved = out.len(),
+            "spotify: track metadata fetches failed after retries"
+        );
+    }
+    (out, failed)
 }
 
 /// Fetch one track's tags (title/artist/album/duration) by base62 id. Used by
@@ -198,7 +231,17 @@ pub async fn liked_tracks(token: String) -> Result<Vec<reader::Track>, String> {
             .filter_map(|u| SpotifyUri::from_uri(u).ok())
             .collect();
         tracing::info!(count = uris.len(), "spotify: liked track uris");
-        Ok::<Vec<reader::Track>, String>(fetch_tracks(&session, uris).await)
+        let total = uris.len();
+        let (tracks, failed) = fetch_tracks(&session, uris).await;
+        // A partial result must be an error, not a success: the favorites sync
+        // treats a successful fetch as the complete remote set and sweeps
+        // (deletes) every favorite not in it.
+        if failed > 0 {
+            return Err(format!(
+                "spotify liked songs: {failed} of {total} tracks failed to resolve"
+            ));
+        }
+        Ok::<Vec<reader::Track>, String>(tracks)
     })
     .await?
 }
@@ -216,7 +259,10 @@ pub async fn playlist_entries(
             .await
             .map_err(|e| format!("spotify playlist: {e}"))?;
         let uris: Vec<SpotifyUri> = plist.tracks().cloned().collect();
-        Ok::<Vec<reader::Track>, String>(fetch_tracks(&session, uris).await)
+        // Unlike favorites, a playlist shortfall only under-renders the list —
+        // nothing is deleted — so partial results are acceptable here.
+        let (tracks, _failed) = fetch_tracks(&session, uris).await;
+        Ok::<Vec<reader::Track>, String>(tracks)
     })
     .await?
 }
