@@ -3,9 +3,8 @@ use config::AppConfig;
 use config::MusicService;
 use dioxus::logger::tracing::Instrument;
 use dioxus::prelude::*;
-use std::sync::Arc;
 
-use discord_presence::Presence;
+use discord_presence::PresenceHandle;
 use discord_presence::cover_art;
 
 #[cfg(target_os = "macos")]
@@ -87,7 +86,7 @@ fn nudge_event_loop() {
 }
 
 pub fn use_player_task(ctrl: PlayerController) {
-    let presence: Option<Arc<Presence>> = use_context();
+    let presence_handle: PresenceHandle = use_context();
     let mut config: Signal<AppConfig> = use_context();
 
     let mut last_title = use_signal(String::new);
@@ -217,7 +216,7 @@ pub fn use_player_task(ctrl: PlayerController) {
     let gens = crate::db_reactivity::use_generations();
     use_future(move || {
         let mut ctrl = ctrl;
-        let presence = presence.clone();
+        let presence_handle = presence_handle.clone();
         let mut last_ping = std::time::Instant::now();
         let mut last_progress_report = std::time::Instant::now();
         let mut last_discord_enabled = false;
@@ -263,6 +262,8 @@ pub fn use_player_task(ctrl: PlayerController) {
                         _ => {}
                     }
                 }
+
+                let presence = presence_handle.get();
 
                 nudge_event_loop();
 
