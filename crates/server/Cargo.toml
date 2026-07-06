@@ -54,6 +54,13 @@ futures-util = { workspace = true }
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 rookie = "0.5"
 
+# Headless JS for YouTube (desktop only; no V8 on Android): deno_core runs the
+# sig/n decipher solver and rustypipe-botguard mints PoTokens, sharing one V8.
+# Versions (incl. the deno_core lock) live in the workspace manifest.
+[target.'cfg(not(target_os = "android"))'.dependencies]
+deno_core = { workspace = true }
+rustypipe-botguard = { workspace = true }
+
 # Windows native cookie decryption (v10 DPAPI + planted v20 app-bound). Reuses
 # the project's sqlx/sqlite (NOT rusqlite — that would double-link libsqlite3).
 [target.'cfg(windows)'.dependencies]

@@ -2,39 +2,6 @@ use config::AppConfig;
 use dioxus::prelude::*;
 use tracing::Instrument;
 
-pub fn use_webview_decipher_engine() {
-    use_hook(|| {
-        let (engine, mut rx) = server::ytmusic::decipher::webview_channel();
-        if server::ytmusic::decipher::set_engine(engine).is_err() {
-            tracing::warn!("yt-decipher engine already registered — webview solver not active");
-        }
-        spawn(async move {
-            while let Some(req) = rx.recv().await {
-                let wrapped = format!(
-                    "globalThis.print=function(s){{dioxus.send(s);}};\
-                     try{{{}}}catch(e){{dioxus.send('\\u0000ERR'+(e&&e.stack?e.stack:e));}}",
-                    req.program
-                );
-                let mut eval = dioxus::document::eval(&wrapped);
-                let result = match tokio::time::timeout(
-                    std::time::Duration::from_secs(20),
-                    eval.recv::<String>(),
-                )
-                .await
-                {
-                    Ok(Ok(s)) => match s.strip_prefix('\u{0}') {
-                        Some(err) => Err(format!("webview JS: {}", err.trim_start_matches("ERR"))),
-                        None => Ok(s),
-                    },
-                    Ok(Err(error)) => Err(format!("webview eval recv: {error}")),
-                    Err(_) => Err("webview decipher timed out".to_string()),
-                };
-                let _ = req.reply.send(result);
-            }
-        });
-    });
-}
-
 pub fn use_connectivity_probe(
     config: Signal<AppConfig>,
     mut network_banner: Signal<Option<bool>>,
