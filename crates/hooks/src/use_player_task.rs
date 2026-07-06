@@ -1,3 +1,5 @@
+#[cfg(target_os = "linux")]
+use crate::use_player_controller::LoopMode;
 use crate::use_player_controller::PlayerController;
 use config::AppConfig;
 use config::MusicService;
@@ -122,11 +124,23 @@ pub fn use_player_task(ctrl: PlayerController) {
         });
     });
 
+    // Keep MPRIS shuffle/repeat in sync with the UI's own toggles.
+    #[cfg(target_os = "linux")]
+    use_effect(move || {
+        let shuffle = *ctrl.shuffle.read();
+        let repeat = match *ctrl.loop_mode.read() {
+            LoopMode::None => player::systemint::RepeatMode::Off,
+            LoopMode::Queue => player::systemint::RepeatMode::Playlist,
+            LoopMode::Track => player::systemint::RepeatMode::Track,
+        };
+        player::systemint::update_modes(shuffle, repeat);
+    });
+
     #[cfg(target_os = "linux")]
     use_future(move || {
         let mut ctrl = ctrl;
         async move {
-            use player::systemint::{SystemEvent, poll_event};
+            use player::systemint::{RepeatMode, SystemEvent, poll_event};
             loop {
                 let mut processed = false;
                 while let Some(event) = poll_event() {
@@ -140,6 +154,12 @@ pub fn use_player_task(ctrl: PlayerController) {
                         SystemEvent::Seek(secs) => {
                             ctrl.seek(std::time::Duration::from_secs_f64(secs));
                         }
+                        SystemEvent::SetShuffle(on) => ctrl.set_shuffle(on),
+                        SystemEvent::SetRepeat(mode) => ctrl.set_loop_mode(match mode {
+                            RepeatMode::Off => LoopMode::None,
+                            RepeatMode::Playlist => LoopMode::Queue,
+                            RepeatMode::Track => LoopMode::Track,
+                        }),
                     }
                 }
                 if !processed {

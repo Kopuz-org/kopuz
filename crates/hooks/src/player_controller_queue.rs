@@ -218,6 +218,12 @@ impl PlayerController {
         }
     }
 
+    pub fn set_shuffle(&mut self, on: bool) {
+        if *self.shuffle.peek() != on {
+            self.toggle_shuffle();
+        }
+    }
+
     pub fn toggle_shuffle(&mut self) {
         let now_on = !*self.shuffle.peek();
         self.shuffle.set(now_on);
