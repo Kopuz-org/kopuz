@@ -20,7 +20,7 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::units::Time;
 
-use super::{ReplayGainInfo, SourceFactory};
+use super::SourceFactory;
 
 pub(crate) enum WorkerCmd {
     /// Begin decoding into the given ring. Sent once, after `Ready`.
@@ -47,7 +47,6 @@ pub(crate) enum WorkerMsg {
         token: u64,
         source_sample_rate: Option<u32>,
         seekable: bool,
-        replaygain: ReplayGainInfo,
     },
     /// Natural end of the source. The worker stays parked and seekable.
     Eof { token: u64 },
@@ -155,12 +154,10 @@ fn run<M, F>(
         },
     };
 
-    let replaygain = read_replaygain(format.as_mut());
     send(WorkerMsg::Ready {
         token,
         source_sample_rate,
         seekable,
-        replaygain,
     });
 
     // Wait for the actor's decision. A superseded load simply drops our
@@ -531,68 +528,4 @@ fn resample(samples: &[f32], channels: usize, src_rate: u32, dst_rate: u32) -> V
         }
     }
     out
-}
-
-/// Collect ReplayGain values from the container metadata. Handles the standard
-/// ReplayGain tags (any container symphonia maps them for) plus raw Opus/EBU
-/// `R128_*` tags, which are Q7.8 dB relative to -23 LUFS — converted to the
-/// ReplayGain -18 LUFS reference by adding 5 dB.
-fn read_replaygain(format: &mut dyn FormatReader) -> ReplayGainInfo {
-    use symphonia::core::meta::StandardTag;
-
-    let mut info = ReplayGainInfo::default();
-    let mut metadata = format.metadata();
-    let Some(revision) = metadata.skip_to_latest() else {
-        return info;
-    };
-
-    for tag in &revision.media.tags {
-        match &tag.std {
-            Some(StandardTag::ReplayGainTrackGain(v)) => info.track_gain_db = parse_db(v),
-            Some(StandardTag::ReplayGainAlbumGain(v)) => info.album_gain_db = parse_db(v),
-            Some(StandardTag::ReplayGainTrackPeak(v)) => info.track_peak = parse_db(v),
-            Some(StandardTag::ReplayGainAlbumPeak(v)) => info.album_peak = parse_db(v),
-            _ => {
-                let key = tag.raw.key.to_ascii_uppercase();
-                match key.as_str() {
-                    "R128_TRACK_GAIN" => {
-                        info.track_gain_db = parse_r128(&tag.raw.value).or(info.track_gain_db);
-                    }
-                    "R128_ALBUM_GAIN" => {
-                        info.album_gain_db = parse_r128(&tag.raw.value).or(info.album_gain_db);
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-    if !info.is_empty() {
-        tracing::debug!(?info, "replaygain tags found");
-    }
-    info
-}
-
-/// Parse a ReplayGain tag value: a float with an optional " dB" suffix.
-fn parse_db(value: &str) -> Option<f32> {
-    value
-        .trim()
-        .trim_end_matches("dB")
-        .trim_end_matches("DB")
-        .trim()
-        .parse::<f32>()
-        .ok()
-        .filter(|v| v.is_finite())
-}
-
-fn parse_r128(value: &symphonia::core::meta::RawValue) -> Option<f32> {
-    use symphonia::core::meta::RawValue;
-    let q78 = match value {
-        RawValue::SignedInt(v) => *v as f64,
-        RawValue::UnsignedInt(v) => *v as f64,
-        RawValue::Float(v) => *v,
-        RawValue::String(s) => s.trim().parse::<f64>().ok()?,
-        _ => return None,
-    };
-    let db = q78 / 256.0 + 5.0;
-    (db.is_finite() && db.abs() < 60.0).then_some(db as f32)
 }

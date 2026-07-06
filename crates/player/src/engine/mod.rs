@@ -38,23 +38,6 @@ pub enum Transition {
     Crossfade(Duration),
 }
 
-/// ReplayGain values found in the source's container metadata at probe time.
-/// Gains are decibels relative to the ReplayGain reference loudness; peaks are
-/// linear sample amplitudes (1.0 = full scale).
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct ReplayGainInfo {
-    pub track_gain_db: Option<f32>,
-    pub album_gain_db: Option<f32>,
-    pub track_peak: Option<f32>,
-    pub album_peak: Option<f32>,
-}
-
-impl ReplayGainInfo {
-    pub fn is_empty(&self) -> bool {
-        self.track_gain_db.is_none() && self.album_gain_db.is_none()
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Phase {
     #[default]
@@ -99,10 +82,6 @@ pub enum Command {
     SetVolume(f32),
     SetChannelMode(ChannelMode),
     SetEqualizer(EqualizerSettings),
-    SetReplayGain {
-        mode: config::ReplayGainMode,
-        preamp_db: f32,
-    },
     SetDeviceChangeBehavior(config::DeviceChangeBehavior),
     SetDuration(Duration),
     Subscribe(tokio::sync::mpsc::UnboundedSender<Event>),

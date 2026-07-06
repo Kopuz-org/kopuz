@@ -16,13 +16,11 @@ use config::{ChannelMode, EqualizerSettings};
 
 use crate::eq::Equalizer;
 
-/// One playback session as the callback sees it: a ring to drain, the counter
-/// that reports how much of it has actually reached the device, and the
-/// session's normalization gain (ReplayGain), applied before mixing.
+/// One playback session as the callback sees it: a ring to drain and the
+/// counter that reports how much of it has actually reached the device.
 pub(crate) struct RtSession {
     pub consumer: rtrb::Consumer<f32>,
     pub played: Arc<AtomicU64>,
-    pub gain: f32,
 }
 
 pub(crate) enum RtCmd {
@@ -37,9 +35,6 @@ pub(crate) enum RtCmd {
     DropAll,
     SetEqualizer(EqualizerSettings),
     SetChannelMode(ChannelMode),
-    /// Update the active session's normalization gain (ReplayGain mode or
-    /// pre-amp changed at runtime). A fading session keeps its old gain.
-    SetActiveGain(f32),
 }
 
 pub(crate) enum Retired {
@@ -126,7 +121,6 @@ impl RtState {
                 .map(|session| {
                     let read = read_into(&mut session.consumer, data);
                     session.played.fetch_add(read as u64, Ordering::Relaxed);
-                    apply_gain(&mut data[..read], session.gain);
                     read
                 })
                 .unwrap_or(0)
@@ -182,11 +176,6 @@ impl RtState {
                 }
                 RtCmd::SetEqualizer(settings) => self.eq.set_settings(settings),
                 RtCmd::SetChannelMode(mode) => self.channel_mode = mode,
-                RtCmd::SetActiveGain(gain) => {
-                    if let Some(active) = &mut self.active {
-                        active.gain = gain;
-                    }
-                }
             }
         }
     }
@@ -214,18 +203,13 @@ impl RtState {
                 .map(|s| {
                     let read = read_into(&mut s.consumer, active_scratch);
                     s.played.fetch_add(read as u64, Ordering::Relaxed);
-                    apply_gain(&mut active_scratch[..read], s.gain);
                     read
                 })
                 .unwrap_or(0);
             let fading_read = self
                 .fading
                 .as_mut()
-                .map(|s| {
-                    let read = read_into(&mut s.consumer, fading_scratch);
-                    apply_gain(&mut fading_scratch[..read], s.gain);
-                    read
-                })
+                .map(|s| read_into(&mut s.consumer, fading_scratch))
                 .unwrap_or(0);
 
             let read = active_read.max(fading_read);
@@ -278,14 +262,6 @@ impl RtState {
         }
 
         written
-    }
-}
-
-fn apply_gain(samples: &mut [f32], gain: f32) {
-    if gain != 1.0 {
-        for sample in samples {
-            *sample *= gain;
-        }
     }
 }
 

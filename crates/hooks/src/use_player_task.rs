@@ -652,6 +652,15 @@ pub fn use_player_task(ctrl: PlayerController) {
                         && crossfade_triggered_for_gen != Some(current_gen);
 
                     if should_crossfade && !transition_in_flight {
+                        // TEMP diagnostic (mid-song-skip after resume): capture
+                        // what convinced the arm the track was ending.
+                        tracing::warn!(
+                            engine_pos = pos.as_secs(),
+                            pos_secs,
+                            duration,
+                            remaining_secs,
+                            "crossfade arm"
+                        );
                         crossfade_triggered_for_gen = Some(current_gen);
                         {
                             let mut config_write = config.write();

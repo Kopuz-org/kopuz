@@ -165,8 +165,8 @@ use components::settings_items::{
     BackBehaviorSelector, ChannelModeSelector, DeviceChangeBehaviorSelector,
     DiscordPresencePausedSettings, DiscordPresenceSettings, EqualizerPanel, LanguageSelector,
     LastFmSettings, LibreFmSettings, MultiDirectoryPicker, MusicBrainzSettings,
-    RadioRegistryDropdown, ReplayGainModeSelector, ReplayGainPreampSlider, ServerSettings,
-    SettingItem, SettingsSection, ThemeSelector, ToggleSetting,
+    RadioRegistryDropdown, ServerSettings, SettingItem, SettingsSection, ThemeSelector,
+    ToggleSetting,
 };
 use components::settings_popups::{AddRegistryPopup, AddServerPopup, LoginPopup};
 use config::{AppConfig, ArtistPhotoSource, FetchStrategy, MusicService, OfflineQuality};
@@ -829,34 +829,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     on_change: move |behavior| {
                                         config.write().device_change_behavior = behavior;
                                         ctrl.player.peek().set_device_change_behavior(behavior);
-                                    }
-                                }
-                            }
-                        }
-                        SettingItem {
-                            title: i18n::t("replaygain").to_string(),
-                            control: rsx! {
-                                ReplayGainModeSelector {
-                                    current: config.read().replaygain_mode,
-                                    on_change: move |mode| {
-                                        config.write().replaygain_mode = mode;
-                                        let preamp_db = config.peek().replaygain_preamp_db;
-                                        ctrl.player.peek().set_replaygain(mode, preamp_db);
-                                    }
-                                }
-                            }
-                        }
-                        if config.read().replaygain_mode != config::ReplayGainMode::Off {
-                            SettingItem {
-                                title: i18n::t("replaygain_preamp").to_string(),
-                                control: rsx! {
-                                    ReplayGainPreampSlider {
-                                        value_db: config.read().replaygain_preamp_db,
-                                        on_change: move |value: f32| {
-                                            config.write().replaygain_preamp_db = value;
-                                            let mode = config.peek().replaygain_mode;
-                                            ctrl.player.peek().set_replaygain(mode, value);
-                                        }
                                     }
                                 }
                             }

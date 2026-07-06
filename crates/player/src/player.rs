@@ -203,12 +203,6 @@ impl Player {
         self.engine.send(Command::SetEqualizer(settings));
     }
 
-    /// Loudness normalization from the source's ReplayGain/R128 tags. Applies
-    /// to the current session immediately and to every session after it.
-    pub fn set_replaygain(&self, mode: config::ReplayGainMode, preamp_db: f32) {
-        self.engine.send(Command::SetReplayGain { mode, preamp_db });
-    }
-
     /// Whether playback keeps going or holds paused after migrating to a new
     /// output device.
     pub fn set_device_change_behavior(&self, behavior: config::DeviceChangeBehavior) {
