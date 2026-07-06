@@ -246,19 +246,13 @@ impl PlayerController {
     /// The engine services seeks even after a track ended (the parked decode
     /// worker re-seeks in place), so no re-open dance is needed.
     pub fn seek(&mut self, time: Duration) {
-        // During a crossfade the engine already plays the *next* track while
-        // the bar still shows the outgoing one. The scrubber targets the track
-        // the user sees, so cancel the crossfade and re-open that (current)
-        // track at the target rather than seeking the incoming session.
+        // During a crossfade the bar shows the outgoing track while the engine
+        // fades in the next one. The engine's seek cancels the fade and seeks
+        // the outgoing (visible) track in place, so drop the deferred UI and
+        // bump the generation to let a fresh crossfade arm at its real end.
         if self.pending_crossfade_ui.peek().is_some() {
-            let idx = *self.current_queue_index.peek();
-            if let Some(track) = self.get_track_at(idx) {
-                let secs = time.as_secs().min(track.duration);
-                self.set_pending_resume_for_track(&track, secs);
-                self.current_song_progress.set(secs);
-                self.play_track_no_history_with_transition(idx, false);
-                return;
-            }
+            self.clear_pending_crossfade_ui();
+            self.play_generation.with_mut(|g| *g += 1);
         }
         self.player.peek().seek(time);
         self.current_song_progress.set(time.as_secs());

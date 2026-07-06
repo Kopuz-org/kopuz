@@ -186,9 +186,10 @@ struct Actor {
 
     current: Option<Session>,
     pending: Option<Pending>,
-    /// Worker of the outgoing crossfade session; its consumer lives in the RT
-    /// callback until the fade completes or is killed.
-    fading: Option<WorkerHandle>,
+    /// The outgoing crossfade session, kept whole (not just its worker) so a
+    /// seek mid-fade can cancel the fade and resume it in place. Its consumer
+    /// lives in the RT callback until the fade completes or is killed.
+    fading: Option<Session>,
     /// Detached workers (superseded probes, stopped sessions) awaiting exit.
     /// Never joined on the command path — a worker stuck in network I/O must
     /// not stall the actor.
@@ -497,12 +498,9 @@ impl Actor {
             } = make_ring(config, gain);
             let fade_frames = (fade.as_secs_f64() * config.sample_rate as f64).round() as u64;
 
-            if let Some(old_fading) = self.fading.take() {
-                let _ = old_fading.cmd_tx.send(WorkerCmd::Stop);
-                self.graveyard.push(old_fading.join);
-            }
+            self.stop_fading();
             let outgoing = self.current.take().expect("crossfade requires a session");
-            self.fading = Some(outgoing.worker);
+            self.fading = Some(outgoing);
 
             let _ = worker.cmd_tx.send(WorkerCmd::Start {
                 producer,
@@ -531,13 +529,9 @@ impl Actor {
         } else {
             // Immediate switch: stop the outgoing sessions first.
             if let Some(current) = self.current.take() {
-                let _ = current.worker.cmd_tx.send(WorkerCmd::Stop);
-                self.graveyard.push(current.worker.join);
+                self.retire_session(current);
             }
-            if let Some(fading) = self.fading.take() {
-                let _ = fading.cmd_tx.send(WorkerCmd::Stop);
-                self.graveyard.push(fading.join);
-            }
+            self.stop_fading();
 
             if (self.sink.config() != Some(desired_config) || self.rt_tx.is_none())
                 && let Err(e) = self.open_output(source_sample_rate)
@@ -624,10 +618,35 @@ impl Actor {
         self.last_token = token;
     }
 
+    /// Stop and detach a session's worker into the graveyard.
+    fn retire_session(&mut self, session: Session) {
+        let _ = session.worker.cmd_tx.send(WorkerCmd::Stop);
+        self.graveyard.push(session.worker.join);
+    }
+
+    /// Stop the outgoing crossfade session, if any.
+    fn stop_fading(&mut self) {
+        if let Some(fading) = self.fading.take() {
+            self.retire_session(fading);
+        }
+    }
+
     fn handle_seek(&mut self, target: Duration) {
         let Some(config) = self.sink.config() else {
             return;
         };
+
+        // A seek during a crossfade targets the outgoing (visible) track: the
+        // outgoing decode worker is still alive as the fading session, so cancel
+        // the fade, drop the incoming session, and seek the outgoing one in
+        // place — no re-resolve.
+        if let Some(outgoing) = self.fading.take() {
+            if let Some(incoming) = self.current.take() {
+                self.retire_session(incoming);
+            }
+            self.current = Some(outgoing);
+        }
+
         let Some(current) = &mut self.current else {
             return;
         };
@@ -643,12 +662,6 @@ impl Actor {
         } else {
             Duration::ZERO
         };
-
-        // A seek kills an in-flight crossfade, like the old stop_fading_session.
-        if let Some(fading) = self.fading.take() {
-            let _ = fading.cmd_tx.send(WorkerCmd::Stop);
-            self.graveyard.push(fading.join);
-        }
 
         // Fresh ring: pre-seek samples die with the old one, no drain races.
         let gain = session_gain_for(
@@ -680,13 +693,9 @@ impl Actor {
     fn handle_stop(&mut self, pause_device: bool) {
         self.discard_pending();
         if let Some(current) = self.current.take() {
-            let _ = current.worker.cmd_tx.send(WorkerCmd::Stop);
-            self.graveyard.push(current.worker.join);
+            self.retire_session(current);
         }
-        if let Some(fading) = self.fading.take() {
-            let _ = fading.cmd_tx.send(WorkerCmd::Stop);
-            self.graveyard.push(fading.join);
-        }
+        self.stop_fading();
         self.send_rt(RtCmd::DropAll);
         self.paused.store(false, Ordering::Relaxed);
         if pause_device {
@@ -710,10 +719,7 @@ impl Actor {
         let position = self.status.load().position();
         let source_rate = self.current.as_ref().and_then(|c| c.source_sample_rate);
 
-        if let Some(fading) = self.fading.take() {
-            let _ = fading.cmd_tx.send(WorkerCmd::Stop);
-            self.graveyard.push(fading.join);
-        }
+        self.stop_fading();
 
         let was_playing = self.current.is_some() && !self.paused.load(Ordering::Relaxed);
 
@@ -774,10 +780,7 @@ impl Actor {
             }
         }
         if fade_completed {
-            if let Some(fading) = self.fading.take() {
-                let _ = fading.cmd_tx.send(WorkerCmd::Stop);
-                self.graveyard.push(fading.join);
-            }
+            self.stop_fading();
             if let Some(current) = &self.current {
                 self.emit(Event::TrackSwitched {
                     token: current.token,
@@ -943,8 +946,8 @@ impl Actor {
             joins.push(current.worker.join);
         }
         if let Some(fading) = self.fading.take() {
-            let _ = fading.cmd_tx.send(WorkerCmd::Stop);
-            joins.push(fading.join);
+            let _ = fading.worker.cmd_tx.send(WorkerCmd::Stop);
+            joins.push(fading.worker.join);
         }
         // Closing the sink drops the stream and with it the RT state and any
         // consumers it still owns, unblocking workers stuck on full rings.

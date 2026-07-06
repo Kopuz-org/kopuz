@@ -549,7 +549,7 @@ fn crossfade_on_idle_engine_falls_back_to_immediate() {
 }
 
 #[test]
-fn seek_during_crossfade_kills_the_fade() {
+fn seek_during_crossfade_resumes_the_outgoing_track() {
     let (sink, engine) = spawn_engine();
     let mut events = engine_subscribe(&engine);
 
@@ -567,12 +567,15 @@ fn seek_during_crossfade_kills_the_fade() {
         Transition::Crossfade(Duration::from_secs(5)),
     );
     assert!(outcome.crossfaded);
+    wait_until("status on incoming token 2", || engine.status().token == 2);
 
-    // Seek immediately: the fade must be dropped, so even after pulling far
-    // more audio than the fade length no TrackSwitched ever fires.
+    // A seek mid-crossfade targets the outgoing (visible) track: the engine
+    // promotes the outgoing session (token 1) back to active, cancels the fade,
+    // and seeks it in place — no re-load, and no TrackSwitched.
     engine.send(Command::Seek(Duration::from_secs(10)));
-    wait_until("position at seek target", || {
-        engine.status().position() >= Duration::from_secs(10)
+    wait_until("outgoing token 1 restored at the seek target", || {
+        let status = engine.status();
+        status.token == 1 && status.position() >= Duration::from_secs(10)
     });
     let mut seen = Vec::new();
     for _ in 0..80 {
@@ -584,9 +587,13 @@ fn seek_during_crossfade_kills_the_fade() {
         !seen
             .iter()
             .any(|e| matches!(e, Event::TrackSwitched { .. })),
-        "fade was killed, no TrackSwitched expected: {seen:?}"
+        "fade cancelled, no TrackSwitched expected: {seen:?}"
     );
+    assert_eq!(engine.status().token, 1);
     assert_eq!(engine.status().phase, Phase::Playing);
+    wait_until("audio after seek", || {
+        sink.pull(4096).iter().any(|s| *s != 0.0)
+    });
 
     engine.shutdown();
 }
