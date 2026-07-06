@@ -569,8 +569,10 @@ impl PlayerController {
                                 ResolvedStreamRef::pending_marker(&id),
                                 track.cover.clone().unwrap_or_default(),
                             ),
+                            // Spotify resolves async too: the source backend matches
+                            // the track to an anonymous YouTube stream.
                             MusicService::Spotify => (
-                                format!("__PENDING:{id}"),
+                                ResolvedStreamRef::pending_marker(&id),
                                 track.cover.clone().unwrap_or_default(),
                             ),
                         })
@@ -691,13 +693,6 @@ impl PlayerController {
                         let yt_format_for_blocking = yt_format;
                         let stream_url_for_blocking = stream_url.clone();
                         let yt_ua_for_blocking = yt_user_agent.clone();
-                        let spotify_token_for_blocking = cfg_signal
-                            .peek()
-                            .server
-                            .as_ref()
-                            .filter(|s| s.service == MusicService::Spotify)
-                            .and_then(|s| s.access_token.clone())
-                            .map(|packed| ::server::spotify::auth::unpack_token(&packed).0);
                         let source_res = tokio::task::spawn_blocking(move || {
                             if is_radio {
                                 let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
@@ -754,19 +749,6 @@ impl PlayerController {
                                 let cursor = std::io::Cursor::new(bytes);
                                 let (source, mut hint) = decoder::from_stream_with_len(cursor, len);
                                 hint.with_extension("m4a");
-                                Ok::<_, std::io::Error>((source, hint))
-                            } else if let Some(track_id) =
-                                stream_url_for_blocking.strip_prefix("__SP:")
-                            {
-                                let token = spotify_token_for_blocking.unwrap_or_default();
-                                let (bytes, ext) =
-                                    ::server::spotify::stream::fetch_track_audio(track_id, &token)
-                                        .map_err(std::io::Error::other)?;
-                                let len = Some(bytes.len() as u64);
-                                let cursor = std::io::Cursor::new(bytes);
-                                let (source, mut hint) =
-                                    decoder::from_stream_with_len(cursor, len);
-                                hint.with_extension(ext);
                                 Ok::<_, std::io::Error>((source, hint))
                             } else {
                                 let stream = utils::stream_buffer::StreamBuffer::with_user_agent(

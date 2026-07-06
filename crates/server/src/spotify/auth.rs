@@ -8,7 +8,7 @@
 
 use librespot_oauth::OAuthClientBuilder;
 
-use super::session::{self, CLIENT_ID};
+use super::session;
 
 /// Loopback redirect — port 5588 is the one librespot registers for the
 /// keymaster client id, so it is accepted by Spotify's consent screen.
@@ -48,7 +48,8 @@ pub fn unpack_token(packed: &str) -> (String, String) {
 }
 
 fn build_client(open_browser: bool) -> Result<librespot_oauth::OAuthClient, String> {
-    let mut b = OAuthClientBuilder::new(CLIENT_ID, REDIRECT_URI, SCOPES.to_vec());
+    let client_id = session::client_id();
+    let mut b = OAuthClientBuilder::new(&client_id, REDIRECT_URI, SCOPES.to_vec());
     if open_browser {
         b = b.open_in_browser();
     }

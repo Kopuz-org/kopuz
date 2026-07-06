@@ -1,5 +1,10 @@
 //! Download one Spotify track to an in-memory audio buffer.
 //!
+//! Currently unwired: playback goes through the anonymous YouTube match
+//! ([`super::match_yt`]) because Spotify rejects the audio-key requests this
+//! path depends on for many accounts (librespot#1649). Kept as the native
+//! full-quality path to re-enable if/when that clears.
+//!
 //! Full playback: librespot downloads the file and decrypts it with the
 //! per-file AES audio key. The key is required — Spotify's OGG Vorbis is
 //! AES-CTR encrypted, so we only accept a candidate whose key request succeeds.

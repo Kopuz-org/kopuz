@@ -23,7 +23,20 @@ use tokio::sync::Mutex;
 
 /// librespot's well-known "keymaster" desktop client id — the one its own OAuth
 /// flow uses, so the access tokens we mint are valid for the session.
-pub(crate) const CLIENT_ID: &str = "65b708073fc0480ea92a077233ca87bd";
+const KEYMASTER_CLIENT_ID: &str = "65b708073fc0480ea92a077233ca87bd";
+
+/// Client id for the OAuth flow and the AP session. Defaults to the shared
+/// keymaster id; `KOPUZ_SPOTIFY_CLIENT_ID` overrides it so users aren't stuck
+/// waiting for a rebuild if the shared id is ever blacklisted. A custom id must
+/// belong to a Spotify app with `http://127.0.0.1:5588/login` registered as a
+/// redirect URI (see `auth::REDIRECT_URI`).
+pub(crate) fn client_id() -> String {
+    std::env::var("KOPUZ_SPOTIFY_CLIENT_ID")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| KEYMASTER_CLIENT_ID.to_string())
+}
 
 /// The dedicated runtime all librespot work runs on.
 fn rt() -> &'static tokio::runtime::Runtime {
@@ -90,7 +103,7 @@ pub async fn ensure_session(access_token: &str) -> Result<Session, String> {
     }
 
     let cfg = SessionConfig {
-        client_id: CLIENT_ID.to_string(),
+        client_id: client_id(),
         ..SessionConfig::default()
     };
     let session = Session::new(cfg, None);
