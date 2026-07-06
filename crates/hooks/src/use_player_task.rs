@@ -632,6 +632,17 @@ pub fn use_player_task(ctrl: PlayerController) {
                         }
                     }
 
+                    // A transition is in flight from when a crossfade arms
+                    // (is_loading, while the next stream resolves) until its
+                    // deferred UI commits (pending_crossfade_ui). Arming or
+                    // skipping during that window double-fires: `pos` is the
+                    // incoming track's position while `duration` is still the
+                    // outgoing track's, so `remaining` is nonsense, and the
+                    // engine may still be finishing the outgoing track near its
+                    // end — which re-satisfies the arm and stacks transitions.
+                    let transition_in_flight =
+                        *ctrl.is_loading.read() || ctrl.pending_crossfade_ui.read().is_some();
+
                     let remaining_secs = duration.saturating_sub(pos_secs);
                     let should_crossfade = duration > 0
                         && pos_secs < duration
@@ -640,7 +651,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                         && remaining_secs <= config.read().crossfade_seconds as u64
                         && crossfade_triggered_for_gen != Some(current_gen);
 
-                    if should_crossfade && !*ctrl.is_loading.read() {
+                    if should_crossfade && !transition_in_flight {
                         crossfade_triggered_for_gen = Some(current_gen);
                         {
                             let mut config_write = config.write();
@@ -673,7 +684,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                             || (duration > 0 && pos.as_secs() >= duration.saturating_add(5))
                     };
 
-                    if should_skip && !*ctrl.is_loading.read() {
+                    if should_skip && !transition_in_flight {
                         if !is_radio && duration > 0 && last_progress_secs != duration {
                             last_progress_secs = duration;
                             ctrl.current_song_progress.set(duration);
