@@ -41,11 +41,16 @@ pub struct StreamBuffer {
 }
 
 impl StreamBuffer {
-    pub fn new(url: String, is_radio: bool) -> Self {
-        Self::with_user_agent(url, is_radio, None)
-    }
-
-    pub fn with_user_agent(url: String, is_radio: bool, user_agent: Option<String>) -> Self {
+    /// `runtime` is the handle the background download runs on. It's passed in
+    /// (not `Handle::current()`) because construction happens on the engine's
+    /// decode worker — a plain thread with no runtime in scope. The sync reader
+    /// side uses `blocking_lock()` and needs no runtime.
+    pub fn with_user_agent(
+        url: String,
+        is_radio: bool,
+        user_agent: Option<String>,
+        runtime: tokio::runtime::Handle,
+    ) -> Self {
         let prebuffer_size = if is_radio {
             16 * 1024
         } else {
@@ -65,12 +70,9 @@ impl StreamBuffer {
 
         let state_clone = state.clone();
 
-        // Background download task.
-        // Runs inside tokio::spawn so it integrates with the async runtime.
-        // Shared state access uses tokio::sync::Mutex::lock().await (never blocks
-        // a worker thread). The sync reader side uses blocking_lock() + polling.
-        let handle = tokio::runtime::Handle::current();
-        handle.spawn(
+        // Background download task on the app runtime; shared state via
+        // tokio::sync::Mutex::lock().await (never blocks a worker thread).
+        runtime.spawn(
             async move {
                 let ua = user_agent
                     .unwrap_or_else(|| concat!("Kopuz/", env!("CARGO_PKG_VERSION")).to_string());

@@ -628,6 +628,10 @@ impl PlayerController {
                             }
                         };
 
+                    // The factory runs on the engine's decode worker (a plain
+                    // thread with no runtime); StreamBuffer's download needs a
+                    // runtime, so hand it a handle from this async task.
+                    let rt_handle = tokio::runtime::Handle::current();
                     Box::new(move || {
                         let build = || -> std::io::Result<_> {
                             if is_radio_item {
@@ -635,6 +639,7 @@ impl PlayerController {
                                     stream_url,
                                     true,
                                     yt_user_agent,
+                                    rt_handle,
                                 );
                                 Ok(decoder::from_stream_with_hint(stream, "ogg"))
                             } else if let Some((fmt, range_safe)) = yt_format {
@@ -662,6 +667,7 @@ impl PlayerController {
                                             stream_url,
                                             false,
                                             yt_user_agent,
+                                            rt_handle,
                                         );
                                     stream.wait_for_total_size();
                                     let len = stream.known_total_size();
@@ -688,6 +694,7 @@ impl PlayerController {
                                     stream_url,
                                     false,
                                     yt_user_agent,
+                                    rt_handle,
                                 );
                                 stream.wait_for_total_size();
                                 let len = stream.known_total_size();
