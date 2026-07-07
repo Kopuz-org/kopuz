@@ -302,28 +302,13 @@ impl PlayerController {
     }
 
     pub fn has_next_track(&self) -> bool {
-        let idx = *self.current_queue_index.peek();
-        let queue_len = self.queue.peek().len();
-
-        if queue_len == 0 {
-            return false;
-        }
-
-        let loop_mode = *self.loop_mode.peek();
-        let shuffle = *self.shuffle.peek();
-
-        match loop_mode {
-            LoopMode::Track => true,
-            _ => {
-                if shuffle && queue_len > 1 {
-                    !self.shuffle_order.peek().is_empty() || loop_mode == LoopMode::Queue
-                } else if (shuffle && queue_len == 1) || idx + 1 < queue_len {
-                    true
-                } else {
-                    loop_mode == LoopMode::Queue
-                }
-            }
-        }
+        // Delegates to the same predicate the advance uses, so the crossfade
+        // arm can't fire when the advance would instead end the queue.
+        Self::has_following_track(
+            *self.current_queue_index.peek(),
+            self.queue.peek().len(),
+            *self.loop_mode.peek(),
+        )
     }
 
     pub fn play_track(&mut self, idx: usize) {

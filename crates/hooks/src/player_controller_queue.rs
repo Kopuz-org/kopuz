@@ -15,6 +15,22 @@ impl PlayerController {
         self.play_next_with_transition(true);
     }
 
+    /// Whether advancing from `idx` will land on another track to play. The
+    /// crossfade arm and the actual advance MUST agree on this: if the arm
+    /// fires when the advance would instead hit end-of-queue, playback pauses
+    /// mid-fade and the song dies ~crossfade-seconds early. Shuffle-agnostic on
+    /// purpose — `play_next_with_transition` decides end-of-queue purely from
+    /// position + loop mode, so this does too.
+    pub(crate) fn has_following_track(idx: usize, queue_len: usize, loop_mode: LoopMode) -> bool {
+        if queue_len == 0 {
+            return false;
+        }
+        match loop_mode {
+            LoopMode::Track | LoopMode::Queue => true,
+            LoopMode::None => idx + 1 < queue_len,
+        }
+    }
+
     fn play_next_with_transition(&mut self, allow_crossfade: bool) {
         let idx = *self.current_queue_index.peek();
         let queue_len = self.queue.peek().len();
@@ -30,7 +46,7 @@ impl PlayerController {
                 self.play_track_with_history(idx, allow_crossfade);
             }
             _ => {
-                if idx + 1 >= queue_len && loop_mode == LoopMode::None {
+                if !Self::has_following_track(idx, queue_len, loop_mode) {
                     // End of queue: kill any in-flight load (e.g. a crossfade
                     // that armed just before this skip) both controller- and
                     // engine-side, so it can't restart playback later, and
@@ -329,7 +345,7 @@ impl PlayerController {
 
         let can_resume = self.player.peek().can_resume();
         // TEMP diagnostic (mid-song-skip after resume).
-        tracing::warn!(
+        tracing::debug!(
             idx,
             is_radio,
             can_resume,
@@ -491,5 +507,38 @@ impl PlayerController {
 
         self.hydrate_current_track_metadata(idx, progress_secs);
         self.set_pending_resume_for_track(&track, progress_secs);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The crossfade arm gates on `has_following_track`; it must return false
+    // exactly when `play_next_with_transition` would hit end-of-queue, or the
+    // arm fires with nothing to fade into and playback dies ~crossfade-secs
+    // early. `idx` is the pointer into the shuffle permutation when shuffle is
+    // on (queue_len == shuffle_order.len()), so this stays shuffle-agnostic.
+    #[test]
+    fn has_following_track_matches_end_of_queue() {
+        use LoopMode::{None, Queue, Track};
+
+        // Empty queue: never a next.
+        assert!(!PlayerController::has_following_track(0, 0, None));
+        assert!(!PlayerController::has_following_track(0, 0, Queue));
+
+        // Last position, no loop: end of queue — the regressed case (a single
+        // shuffled track is just queue_len == 1 at idx 0).
+        assert!(!PlayerController::has_following_track(0, 1, None));
+        assert!(!PlayerController::has_following_track(4, 5, None));
+
+        // Mid-queue, no loop: a real next exists.
+        assert!(PlayerController::has_following_track(0, 5, None));
+        assert!(PlayerController::has_following_track(3, 5, None));
+
+        // Queue loop wraps; Track loop repeats — always a next.
+        assert!(PlayerController::has_following_track(0, 1, Queue));
+        assert!(PlayerController::has_following_track(4, 5, Queue));
+        assert!(PlayerController::has_following_track(4, 5, Track));
     }
 }
