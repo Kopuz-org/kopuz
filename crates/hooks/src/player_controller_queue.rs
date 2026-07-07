@@ -344,19 +344,6 @@ impl PlayerController {
             .is_some_and(|t| PlaybackItemRef::parse(&t.id.uid()).is_radio());
 
         let can_resume = self.player.peek().can_resume();
-        // TEMP diagnostic (mid-song-skip after resume).
-        tracing::debug!(
-            idx,
-            is_radio,
-            can_resume,
-            progress = *self.current_song_progress.peek(),
-            "resume: {}",
-            if is_radio || !can_resume {
-                "re-open"
-            } else {
-                "play_resume"
-            }
-        );
         if is_radio || !can_resume {
             if let Some(track) = self.get_track_at(idx) {
                 if !is_radio {
