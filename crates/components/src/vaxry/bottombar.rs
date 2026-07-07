@@ -36,13 +36,37 @@ pub fn BottombarVaxry(
         }
     });
 
+    let bar_ctrl = use_context::<PlayerController>();
     let display_progress = if *is_dragging.read() {
         *drag_progress.read()
     } else {
         *current_song_progress.read()
     };
 
-    crate::progress_sync::use_progress_sync();
+    let progress_percent = if *current_song_duration.read() > 0 {
+        (display_progress as f64 / *current_song_duration.read() as f64) * 100.0
+    } else {
+        0.0
+    };
+
+    // Glide between the once-a-second progress updates instead of stepping.
+    // Disabled while paused (freeze exactly where the user hit pause instead
+    // of drifting on for up to a second), while dragging, and when progress
+    // JUMPS (seek, track change) so those snap instead of sweeping across.
+    let prev_progress = use_hook(|| std::rc::Rc::new(std::cell::Cell::new(u64::MAX)));
+    let progress_jumped = display_progress.abs_diff(prev_progress.get()) > 2;
+    prev_progress.set(display_progress);
+    let gliding = !*is_dragging.read() && !progress_jumped && *bar_ctrl.is_playing.read();
+    let bar_glide = if gliding {
+        "transition-[width] duration-1000 ease-linear"
+    } else {
+        ""
+    };
+    let thumb_glide = if gliding {
+        "transition-[left] duration-1000 ease-linear"
+    } else {
+        ""
+    };
 
     let volume_percent = *volume.read() * 100.0;
     let mut ctrl = use_context::<PlayerController>();
@@ -210,10 +234,12 @@ pub fn BottombarVaxry(
                     div {
                         class: format!("flex-1 h-[3px] bg-white/10 rounded-full relative {}", if is_radio { "" } else { "group cursor-pointer" }),
                         div {
-                            class: "kopuz-fill absolute top-0 left-0 h-full bg-white/60 group-hover:bg-white rounded-full pointer-events-none",
+                            class: "absolute top-0 left-0 h-full bg-white/60 group-hover:bg-white rounded-full pointer-events-none {bar_glide}",
+                            style: "width: {progress_percent}%",
                         }
                         div {
-                            class: "kopuz-thumb absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 bg-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none -translate-x-1/2",
+                            class: "absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 bg-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none -translate-x-1/2 {thumb_glide}",
+                            style: "left: {progress_percent}%",
                         }
                         input {
                             r#type: "range",
@@ -233,11 +259,6 @@ pub fn BottombarVaxry(
                                 if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
                                     is_dragging.set(true);
                                     drag_progress.set(val);
-                                    crate::progress_sync::push_bar_state(
-                                        val as f64,
-                                        *current_song_duration.read() as f64,
-                                        false,
-                                    );
                                 }
                             }
                         }

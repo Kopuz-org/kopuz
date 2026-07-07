@@ -3,7 +3,6 @@
 
 pub mod navigation_controller;
 pub mod normal;
-pub mod progress_sync;
 pub mod shared;
 pub mod vaxry;
 pub use navigation_controller::{NavSnapshot, NavigationController};

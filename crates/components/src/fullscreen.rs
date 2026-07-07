@@ -23,9 +23,32 @@ fn ProgressBarControl(
         *current_song_progress.read()
     };
 
+    let progress_percent = if *current_song_duration.read() > 0 {
+        (display_progress as f64 / *current_song_duration.read() as f64) * 100.0
+    } else {
+        0.0
+    };
+
     let is_radio = *current_song_duration.read() == u64::MAX;
 
-    crate::progress_sync::use_progress_sync();
+    // Glide between the once-a-second progress updates instead of stepping.
+    // Disabled while paused (freeze exactly where the user hit pause instead
+    // of drifting on for up to a second), while dragging, and when progress
+    // JUMPS (seek, track change) so those snap instead of sweeping across.
+    let prev_progress = use_hook(|| std::rc::Rc::new(std::cell::Cell::new(u64::MAX)));
+    let progress_jumped = display_progress.abs_diff(prev_progress.get()) > 2;
+    prev_progress.set(display_progress);
+    let gliding = !*is_dragging.read() && !progress_jumped && *ctrl.is_playing.read();
+    let bar_glide = if gliding {
+        "transition-[width] duration-1000 ease-linear"
+    } else {
+        ""
+    };
+    let thumb_glide = if gliding {
+        "transition-[left] duration-1000 ease-linear"
+    } else {
+        ""
+    };
 
     rsx! {
         div {
@@ -42,12 +65,12 @@ fn ProgressBarControl(
                         style: "height: 4px; top: 8px; left: 0; right: 0;"
                     }
                     div {
-                        class: "kopuz-fill absolute rounded-full pointer-events-none",
-                        style: "height: 4px; top: 8px; left: 0; width: 0; background: linear-gradient(to right, #5a9a9a, #ffffff);"
+                        class: "absolute rounded-full pointer-events-none {bar_glide}",
+                        style: "height: 4px; top: 8px; left: 0; width: {progress_percent}%; background: linear-gradient(to right, #5a9a9a, #ffffff);"
                     }
                     div {
-                        class: "kopuz-thumb absolute bg-white rounded-full pointer-events-none",
-                        style: "width: 12px; height: 12px; top: 4px; left: 0; transform: translateX(-50%);"
+                        class: "absolute bg-white rounded-full pointer-events-none {thumb_glide}",
+                        style: "width: 12px; height: 12px; top: 4px; left: calc({progress_percent}% - 6px);"
                     }
                     input {
                         r#type: "range",
@@ -67,11 +90,6 @@ fn ProgressBarControl(
                             if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
                                 is_dragging.set(true);
                                 drag_progress.set(val);
-                                crate::progress_sync::push_bar_state(
-                                    val as f64,
-                                    *current_song_duration.read() as f64,
-                                    false,
-                                );
                             }
                         }
                     }
