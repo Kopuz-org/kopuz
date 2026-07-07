@@ -113,12 +113,9 @@ fn main() {
         let _ = app_db::DB_HANDLE.set(app_db::init_blocking());
 
         let presence: Option<Arc<Presence>> = match Presence::new("1470087339639443658") {
-            Ok(p) => {
-                tracing::info!("Discord presence connected");
-                Some(Arc::new(p))
-            }
+            Ok(p) => Some(Arc::new(p)),
             Err(e) => {
-                tracing::warn!("Failed to connect to Discord: {e}");
+                tracing::warn!("Discord presence unavailable: {e}");
                 None
             }
         };
