@@ -350,7 +350,6 @@ channel_mode_mono = モノラル
 channel_mode_left_only = 左のみ
 channel_mode_right_only = 右のみ
 channel_mode_swap_left_right = 左右を入れ替え
-now_playing_api = 再生中 API
 device_change_behavior = 出力デバイス変更時
 device_change_resume = 再生を続ける
 device_change_pause = 一時停止

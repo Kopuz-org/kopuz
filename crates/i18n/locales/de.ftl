@@ -344,7 +344,6 @@ channel_mode_mono = Mono
 channel_mode_left_only = Nur links
 channel_mode_right_only = Nur rechts
 channel_mode_swap_left_right = L/R tauschen
-now_playing_api = Now-Playing-API
 device_change_behavior = Bei Wechsel des Ausgabegeräts
 device_change_resume = Weiterspielen
 device_change_pause = Pausieren

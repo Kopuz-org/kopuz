@@ -345,7 +345,6 @@ channel_mode_mono = 󱤴 󱥯
 channel_mode_left_only = 󱥭 󱤿 󱥔
 channel_mode_right_only = 󱥭 󱥬 󱥔
 channel_mode_swap_left_right = 󱤴 󱥭
-now_playing_api = Now Playing API
 device_change_behavior = On output device change
 device_change_resume = Keep playing
 device_change_pause = Pause

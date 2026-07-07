@@ -216,24 +216,6 @@ pub fn use_player_task(ctrl: PlayerController) {
         });
     });
 
-    // Now Playing API (#466): optional localhost JSON endpoint for widgets.
-    let api_config = use_memo(move || {
-        let conf = config.read();
-        (conf.now_playing_api, conf.now_playing_api_port)
-    });
-    let mut api_task: Signal<Option<dioxus_core::Task>> = use_signal(|| None);
-    use_effect(move || {
-        let (enabled, port) = api_config();
-        if let Some(task) = api_task.take() {
-            task.cancel();
-        }
-        if enabled {
-            api_task.set(Some(spawn(async move {
-                crate::now_playing_api::serve(port).await;
-            })));
-        }
-    });
-
     let gens = crate::db_reactivity::use_generations();
     use_future(move || {
         let mut ctrl = ctrl;
@@ -297,27 +279,6 @@ pub fn use_player_task(ctrl: PlayerController) {
                 }
 
                 let is_playing = *ctrl.is_playing.read();
-
-                if config.peek().now_playing_api {
-                    let duration = *ctrl.current_song_duration.peek();
-                    crate::now_playing_api::update(crate::now_playing_api::NowPlayingSnapshot {
-                        playing: is_playing,
-                        title: ctrl.current_song_title.peek().clone(),
-                        artist: ctrl.current_song_artist.peek().clone(),
-                        album: ctrl.current_song_album.peek().clone(),
-                        duration_secs: (duration > 0 && duration != u64::MAX).then_some(duration),
-                        position_secs: ctrl.displayed_progress_secs_f64() as u64,
-                        cover: Some(ctrl.current_song_cover_url.peek().clone())
-                            .filter(|cover| !cover.is_empty()),
-                        source: Some(
-                            config
-                                .peek()
-                                .active_service()
-                                .map_or("Local", |s| s.display_name())
-                                .to_string(),
-                        ),
-                    });
-                }
 
                 {
                     let current_track = {

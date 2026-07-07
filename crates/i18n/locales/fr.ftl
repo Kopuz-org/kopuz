@@ -345,7 +345,6 @@ channel_mode_mono = Mono
 channel_mode_left_only = Gauche uniquement
 channel_mode_right_only = Droite uniquement
 channel_mode_swap_left_right = Inverser G/D
-now_playing_api = Now Playing API
 device_change_behavior = Au changement de périphérique
 device_change_resume = Continuer la lecture
 device_change_pause = Mettre en pause

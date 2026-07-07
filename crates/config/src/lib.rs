@@ -584,11 +584,6 @@ pub struct AppConfig {
     pub equalizer: EqualizerSettings,
     #[serde(default)]
     pub device_change_behavior: DeviceChangeBehavior,
-    /// Serve now-playing info as JSON on localhost for widgets/OBS overlays.
-    #[serde(default)]
-    pub now_playing_api: bool,
-    #[serde(default = "default_now_playing_api_port")]
-    pub now_playing_api_port: u16,
     #[serde(default)]
     pub ytdlp_output_dir: String,
     #[serde(default)]
@@ -688,10 +683,6 @@ fn default_crossfade_seconds() -> u8 {
     0
 }
 
-fn default_now_playing_api_port() -> u16 {
-    27636
-}
-
 fn default_language() -> String {
     "en".to_string()
 }
@@ -753,8 +744,6 @@ impl Default for AppConfig {
             channel_mode: ChannelMode::Stereo,
             equalizer: EqualizerSettings::default(),
             device_change_behavior: DeviceChangeBehavior::Resume,
-            now_playing_api: false,
-            now_playing_api_port: default_now_playing_api_port(),
             ytdlp_output_dir: String::new(),
             ytdlp_options: YtdlpOptions::default(),
             ytdlp_history: Vec::new(),

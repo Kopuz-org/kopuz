@@ -51,7 +51,6 @@ channel_mode_mono = மோனோ
 channel_mode_left_only = இடது மட்டும்
 channel_mode_right_only = வலது மட்டும்
 channel_mode_swap_left_right = இடது/வலது மாற்று
-now_playing_api = Now Playing API
 device_change_behavior = On output device change
 device_change_resume = Keep playing
 device_change_pause = Pause

@@ -345,7 +345,6 @@ channel_mode_mono = Mono
 channel_mode_left_only = Solo izquierdo
 channel_mode_right_only = Solo derecho
 channel_mode_swap_left_right = Intercambiar I/D
-now_playing_api = Now Playing API
 device_change_behavior = Al cambiar el dispositivo de salida
 device_change_resume = Seguir reproduciendo
 device_change_pause = Pausar

@@ -344,7 +344,6 @@ channel_mode_mono = Mono
 channel_mode_left_only = Sadece sol
 channel_mode_right_only = Sadece sağ
 channel_mode_swap_left_right = Sol/Sağ Değiştir
-now_playing_api = Şimdi Çalıyor API'si
 device_change_behavior = Ses aygıtı değiştiğinde
 device_change_resume = Çalmaya devam et
 device_change_pause = Duraklat

@@ -344,7 +344,6 @@ channel_mode_mono = 单声道
 channel_mode_left_only = 仅左声道
 channel_mode_right_only = 仅右声道
 channel_mode_swap_left_right = 交换左右
-now_playing_api = 正在播放 API
 device_change_behavior = 输出设备变更时
 device_change_resume = 继续播放
 device_change_pause = 暂停

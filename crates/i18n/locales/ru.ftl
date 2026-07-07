@@ -345,7 +345,6 @@ channel_mode_mono = Моно
 channel_mode_left_only = Только левый
 channel_mode_right_only = Только правый
 channel_mode_swap_left_right = Поменять Л/П
-now_playing_api = API «Сейчас играет»
 device_change_behavior = При смене устройства вывода
 device_change_resume = Продолжать воспроизведение
 device_change_pause = Пауза

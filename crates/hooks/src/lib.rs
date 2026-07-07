@@ -3,7 +3,6 @@
 
 pub mod db_reactivity;
 pub mod debug_db;
-pub mod now_playing_api;
 pub mod playback_ref;
 mod player_controller_queue;
 pub mod scrobble_scheduler;

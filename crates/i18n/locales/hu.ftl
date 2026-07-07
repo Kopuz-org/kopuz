@@ -344,7 +344,6 @@ channel_mode_mono = Monó
 channel_mode_left_only = Csak bal
 channel_mode_right_only = Csak jobb
 channel_mode_swap_left_right = B/J felcserélése
-now_playing_api = Now Playing API
 device_change_behavior = On output device change
 device_change_resume = Keep playing
 device_change_pause = Pause

@@ -51,7 +51,6 @@ channel_mode_mono = Mono
 channel_mode_left_only = Kaliwa lamang
 channel_mode_right_only = Kanan lamang
 channel_mode_swap_left_right = Ipagpalit ang L/R
-now_playing_api = Now Playing API
 device_change_behavior = On output device change
 device_change_resume = Keep playing
 device_change_pause = Pause
