@@ -37,6 +37,7 @@ const SWITCHER_CSS: &str = r#"
 .ss-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
 .ss-on{background:#3fb950}
 .ss-off{background:#e5534b}
+.ss-expired{background:#f5a623}
 .ss-load{background:#d8a23a;animation:ss-pulse 1.1s ease-in-out infinite}
 @keyframes ss-pulse{0%,100%{opacity:.4}50%{opacity:1}}
 .ss-stk{flex:1;text-align:left;min-width:0}
@@ -153,7 +154,8 @@ pub fn SourceSwitcher(
                         class: match conn() {
                             ConnStatus::Online => "ss-dot ss-on",
                             ConnStatus::Connecting => "ss-dot ss-load",
-                            _ => "ss-dot ss-off",
+                            ConnStatus::Expired => "ss-dot ss-expired",
+                            ConnStatus::Unreachable => "ss-dot ss-off",
                         },
                     }
                     i { class: "fa-solid fa-chevron-down ss-chev" }
