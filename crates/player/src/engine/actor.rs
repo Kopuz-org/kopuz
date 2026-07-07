@@ -619,6 +619,8 @@ impl Actor {
             tracing::debug!("ignoring seek on a non-seekable source");
             return;
         }
+        // Captured before the latch is cleared below; drives the resume rule.
+        let revive_from_ended = current.ended;
 
         // Keep a guard gap before the end so a seek can't land past the last
         // packet (matches the old engine's END_GUARD).
@@ -647,6 +649,16 @@ impl Actor {
             session: rt_session,
             fade_frames: None,
         });
+        // Seeking a track out of its ended state resumes playback: `Ended` is
+        // terminal and end-of-queue quiesced the device, so scrubbing back in
+        // is an intent to listen. A seek on a merely-paused track (ended ==
+        // false) never reaches here and stays paused.
+        if revive_from_ended {
+            self.paused.store(false, Ordering::Relaxed);
+            if let Err(e) = self.sink.play() {
+                tracing::warn!(error = %e, "failed to resume output stream on seek revive");
+            }
+        }
         self.publish();
     }
 

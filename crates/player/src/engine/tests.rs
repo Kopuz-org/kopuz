@@ -41,6 +41,10 @@ impl FakeSinkHandle {
         self.0.lock().unwrap().pause_calls
     }
 
+    fn play_calls(&self) -> usize {
+        self.0.lock().unwrap().play_calls
+    }
+
     fn open_calls(&self) -> usize {
         self.0.lock().unwrap().open_calls
     }
@@ -152,6 +156,16 @@ fn wav_factory(seconds: f64) -> (SourceFactory, Duration) {
     let factory: SourceFactory =
         Box::new(move || Ok(crate::decoder::from_stream(std::io::Cursor::new(bytes))));
     (factory, Duration::from_secs_f64(seconds))
+}
+
+/// A real cue-less WebM/Opus stream (matches YouTube's itag-774 structure):
+/// symphonia's Matroska demuxer can't `seek` once it has read past EOF, which
+/// is the seek-after-a-YT-track-ends repro.
+fn webm_live_factory() -> (SourceFactory, Duration) {
+    let bytes = include_bytes!("testdata/tone_live.webm").to_vec();
+    let factory: SourceFactory =
+        Box::new(move || Ok(crate::decoder::from_stream(std::io::Cursor::new(bytes))));
+    (factory, Duration::from_secs(2))
 }
 
 fn load(engine: &EngineHandle, token: u64, factory: SourceFactory, duration: Duration) {
@@ -271,6 +285,73 @@ fn eof_emits_ended_once_and_seek_revives() {
         ended_count, 2,
         "revived session may end once more: {seen:?}"
     );
+
+    engine.shutdown();
+}
+
+#[test]
+fn seek_after_eof_reprobes_webm_and_resumes() {
+    // WebM/Opus (all YouTube audio): symphonia's Matroska demuxer errors on a
+    // seek once the reader has passed EOF ("element is not an ancestor"), so
+    // the parked-worker revive must re-probe from the buffered bytes. Without
+    // that, the seek yields silence.
+    let (sink, engine) = spawn_engine();
+
+    let (factory, duration) = webm_live_factory();
+    load(&engine, 11, factory, duration);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+
+    wait_until("phase Ended", || {
+        sink.pull(4096);
+        engine.status().phase == Phase::Ended
+    });
+
+    engine.send(Command::Seek(Duration::from_millis(500)));
+    wait_until("audio after webm seek-revive", || {
+        sink.pull(4096).iter().any(|s| *s != 0.0)
+    });
+
+    engine.shutdown();
+}
+
+#[test]
+fn seek_after_end_of_queue_pause_resumes_playback() {
+    // End-of-queue: the track drains to Ended, then the controller pauses the
+    // device to stop the idle stream while keeping the parked worker alive.
+    // Scrubbing back into the track must resume playback, not sit silently
+    // paused at the seek position.
+    let (sink, engine) = spawn_engine();
+
+    let (factory, duration) = wav_factory(0.25);
+    load(&engine, 9, factory, duration);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+
+    wait_until("phase Ended", || {
+        sink.pull(4096);
+        engine.status().phase == Phase::Ended
+    });
+
+    // The end-of-queue pause (player_controller_queue.rs) quiesces the device;
+    // the `ended` latch keeps phase == Ended, so the pause only shows up as a
+    // device pause_calls bump.
+    let pauses_before = sink.pause_calls();
+    engine.send(Command::Pause);
+    wait_until("device paused at end of queue", || {
+        sink.pause_calls() > pauses_before
+    });
+    let plays_before = sink.play_calls();
+
+    engine.send(Command::Seek(Duration::from_millis(50)));
+    wait_until("phase Playing after seek-revive", || {
+        engine.status().phase == Phase::Playing
+    });
+    assert!(
+        sink.play_calls() > plays_before,
+        "seek out of a paused-ended track must resume the device"
+    );
+    wait_until("audio after revive", || {
+        sink.pull(4096).iter().any(|s| *s != 0.0)
+    });
 
     engine.shutdown();
 }

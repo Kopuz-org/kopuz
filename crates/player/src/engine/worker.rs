@@ -7,6 +7,7 @@
 //! later `Seek` resumes in place instead of stranding the session (the
 //! seek-after-end hang this refactor removes).
 
+use std::io::{Seek as _, SeekFrom};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
@@ -15,6 +16,7 @@ use std::time::Duration;
 use symphonia::core::audio::GenericAudioBufferRef;
 use symphonia::core::codecs::audio::{AudioCodecParameters, AudioDecoder, AudioDecoderOptions};
 use symphonia::core::codecs::registry::RegisterableAudioDecoder;
+use symphonia::core::formats::probe::Hint;
 use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo, Track};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
@@ -85,8 +87,18 @@ struct Output {
 enum FlowChange {
     /// A seek arrived: pre-seek output must be discarded.
     Seeked,
+    /// A seek failed post-EOF; rebuild the reader from the buffered source
+    /// then seek to this target (see `reprobe_from_buffer`).
+    Reprobe(Duration),
     /// Stop requested or the actor went away.
     Exit,
+}
+
+enum SeekOutcome {
+    Done,
+    /// `format.seek` failed because the reader is past EOF (Matroska can't seek
+    /// there); the caller must re-probe the buffered source and retry.
+    NeedsReprobe(Duration),
 }
 
 fn run<M, F>(
@@ -130,7 +142,7 @@ fn run<M, F>(
     else {
         return fail("no supported audio tracks found".to_string());
     };
-    let track_id = track.id;
+    let mut track_id = track.id;
     // YouTube Music WebM/Opus streams reach the codec layer with channels
     // empty — symphonia's matroska demuxer doesn't always propagate it, and
     // both the built-in Opus decoder and the libopus adapter then bail with
@@ -171,7 +183,16 @@ fn run<M, F>(
             start_at,
         }) => {
             if let Some(target) = start_at {
-                seek_reader(format.as_mut(), decoder.as_mut(), track_id, target);
+                let outcome = seek_reader(format.as_mut(), decoder.as_mut(), track_id, target);
+                if let SeekOutcome::NeedsReprobe(t) = outcome {
+                    match reprobe_from_buffer(format, &hint, decoder.as_mut(), t) {
+                        Ok((f, tid)) => {
+                            format = f;
+                            track_id = tid;
+                        }
+                        Err(e) => return fail(e),
+                    }
+                }
             }
             (Output { producer, written }, channels, sample_rate)
         }
@@ -180,16 +201,51 @@ fn run<M, F>(
 
     let source_sample_rate = source_sample_rate.unwrap_or(target_sample_rate);
 
+    // A post-EOF seek on a Matroska/WebM stream can't be serviced in place;
+    // rebuild the reader from the buffered bytes and carry on. Local macros so
+    // the reassignment of `format`/`track_id` and the `continue` land in the
+    // decode loop's own scope.
+    macro_rules! reprobe_or_fail {
+        ($target:expr) => {
+            match reprobe_from_buffer(format, &hint, decoder.as_mut(), $target) {
+                Ok((f, tid)) => {
+                    format = f;
+                    track_id = tid;
+                    continue;
+                }
+                Err(e) => return fail(e),
+            }
+        };
+    }
+    macro_rules! park_and_handle {
+        () => {{
+            let outcome = park_at_eof(
+                cmd_rx,
+                &mut output,
+                format.as_mut(),
+                decoder.as_mut(),
+                track_id,
+            );
+            match outcome {
+                ParkOutcome::Resume => continue,
+                ParkOutcome::Reprobe(t) => reprobe_or_fail!(t),
+                ParkOutcome::Exit => return,
+            }
+        }};
+    }
+
     loop {
-        match drain_commands(
+        let change = drain_commands(
             cmd_rx,
             &mut output,
             format.as_mut(),
             decoder.as_mut(),
             track_id,
-        ) {
+        );
+        match change {
             None => {}
             Some(FlowChange::Seeked) => continue,
+            Some(FlowChange::Reprobe(t)) => reprobe_or_fail!(t),
             Some(FlowChange::Exit) => return,
         }
 
@@ -197,31 +253,13 @@ fn run<M, F>(
             Ok(Some(p)) => p,
             Ok(None) => {
                 send(WorkerMsg::Eof { token });
-                match park_at_eof(
-                    cmd_rx,
-                    &mut output,
-                    format.as_mut(),
-                    decoder.as_mut(),
-                    track_id,
-                ) {
-                    ParkOutcome::Resume => continue,
-                    ParkOutcome::Exit => return,
-                }
+                park_and_handle!()
             }
             Err(symphonia::core::errors::Error::IoError(ref e))
                 if e.kind() == std::io::ErrorKind::UnexpectedEof =>
             {
                 send(WorkerMsg::Eof { token });
-                match park_at_eof(
-                    cmd_rx,
-                    &mut output,
-                    format.as_mut(),
-                    decoder.as_mut(),
-                    track_id,
-                ) {
-                    ParkOutcome::Resume => continue,
-                    ParkOutcome::Exit => return,
-                }
+                park_and_handle!()
             }
             Err(symphonia::core::errors::Error::ResetRequired) => {
                 decoder.reset();
@@ -230,16 +268,7 @@ fn run<M, F>(
             Err(e) => {
                 tracing::warn!(error = %e, "format error — ending track");
                 send(WorkerMsg::Eof { token });
-                match park_at_eof(
-                    cmd_rx,
-                    &mut output,
-                    format.as_mut(),
-                    decoder.as_mut(),
-                    track_id,
-                ) {
-                    ParkOutcome::Resume => continue,
-                    ParkOutcome::Exit => return,
-                }
+                park_and_handle!()
             }
         };
 
@@ -256,16 +285,7 @@ fn run<M, F>(
             Err(e) => {
                 tracing::error!(error = %e, "fatal decode error");
                 send(WorkerMsg::Eof { token });
-                match park_at_eof(
-                    cmd_rx,
-                    &mut output,
-                    format.as_mut(),
-                    decoder.as_mut(),
-                    track_id,
-                ) {
-                    ParkOutcome::Resume => continue,
-                    ParkOutcome::Exit => return,
-                }
+                park_and_handle!()
             }
         };
 
@@ -276,16 +296,18 @@ fn run<M, F>(
             target_sample_rate,
         );
 
-        match write_all(
+        let change = write_all(
             cmd_rx,
             &mut output,
             &samples,
             format.as_mut(),
             decoder.as_mut(),
             track_id,
-        ) {
+        );
+        match change {
             None => {}
             Some(FlowChange::Seeked) => continue,
+            Some(FlowChange::Reprobe(t)) => reprobe_or_fail!(t),
             Some(FlowChange::Exit) => return,
         }
     }
@@ -293,6 +315,8 @@ fn run<M, F>(
 
 enum ParkOutcome {
     Resume,
+    /// A seek failed post-EOF; the main loop must re-probe then resume.
+    Reprobe(Duration),
     Exit,
 }
 
@@ -313,8 +337,10 @@ fn park_at_eof(
                 written,
             }) => {
                 *output = Output { producer, written };
-                seek_reader(format, decoder, track_id, target);
-                return ParkOutcome::Resume;
+                return match seek_reader(format, decoder, track_id, target) {
+                    SeekOutcome::Done => ParkOutcome::Resume,
+                    SeekOutcome::NeedsReprobe(t) => ParkOutcome::Reprobe(t),
+                };
             }
             Ok(WorkerCmd::Stop) | Err(_) => return ParkOutcome::Exit,
             Ok(WorkerCmd::Start { .. }) => {
@@ -341,8 +367,10 @@ fn drain_commands(
                 written,
             }) => {
                 *output = Output { producer, written };
-                seek_reader(format, decoder, track_id, target);
-                seeked = true;
+                match seek_reader(format, decoder, track_id, target) {
+                    SeekOutcome::Done => seeked = true,
+                    SeekOutcome::NeedsReprobe(t) => return Some(FlowChange::Reprobe(t)),
+                }
             }
             Ok(WorkerCmd::Stop) => return Some(FlowChange::Exit),
             Ok(WorkerCmd::Start { .. }) => {
@@ -398,7 +426,7 @@ fn seek_reader(
     decoder: &mut dyn AudioDecoder,
     track_id: u32,
     target: Duration,
-) {
+) -> SeekOutcome {
     let time = Time::try_from_secs_f64(target.as_secs_f64()).unwrap_or_default();
     let seek_to = SeekTo::Time {
         time,
@@ -409,13 +437,56 @@ fn seek_reader(
         format.seek(SeekMode::Coarse, seek_to)
     }));
     match seek_result {
-        Ok(Ok(_)) => decoder.reset(),
-        Ok(Err(e)) => tracing::warn!(error = %e, "seek error"),
+        Ok(Ok(_)) => {
+            decoder.reset();
+            SeekOutcome::Done
+        }
+        // Matroska/WebM (all YouTube audio) can't seek once the reader has read
+        // past EOF — it has left the Segment element. Signal a re-probe from
+        // the buffered source rather than stranding the seek in silence.
+        Ok(Err(e)) => {
+            tracing::warn!(error = %e, "seek error; re-probing from buffered source");
+            SeekOutcome::NeedsReprobe(target)
+        }
         Err(_) => {
             tracing::warn!("seek panicked inside symphonia demuxer; continuing playback");
             decoder.reset();
+            SeekOutcome::Done
         }
     }
+}
+
+/// Rebuild the format reader from its own (rewound) source so it can seek
+/// again. symphonia's Matroska demuxer can't seek past EOF; re-probing the
+/// same bytes yields a reader positioned back inside the Segment. Reuses the
+/// buffered source (`StreamBuffer` keeps the downloaded bytes) — no re-download
+/// or re-resolve. Returns the fresh reader and its audio track id.
+fn reprobe_from_buffer(
+    format: Box<dyn FormatReader>,
+    hint: &Hint,
+    decoder: &mut dyn AudioDecoder,
+    target: Duration,
+) -> Result<(Box<dyn FormatReader>, u32), String> {
+    let mut mss = format.into_inner();
+    mss.seek(SeekFrom::Start(0))
+        .map_err(|e| format!("rewind for re-probe failed: {e}"))?;
+    let mut format = symphonia::default::get_probe()
+        .probe(
+            hint,
+            mss,
+            FormatOptions::default(),
+            MetadataOptions::default(),
+        )
+        .map_err(|e| format!("re-probe failed: {e}"))?;
+    let track_id = format
+        .tracks()
+        .iter()
+        .find(|t| t.codec_params.as_ref().and_then(|p| p.audio()).is_some())
+        .map(|t| t.id)
+        .ok_or_else(|| "no audio track after re-probe".to_string())?;
+    // The fresh reader is inside the Segment; this seek succeeds.
+    seek_reader(format.as_mut(), decoder, track_id, target);
+    Ok((format, track_id))
 }
 
 pub(crate) fn parse_opushead_channels(extra: &[u8]) -> Option<u8> {
