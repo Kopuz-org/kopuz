@@ -38,6 +38,13 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.9.0" date="2026-07-06">
+      <description>
+        <p>
+          Native botguard for YouTube Music, more reliable ListenBrainz scrobbling with retries, smoother scrolling with data queries moved off the UI thread, grouped settings sections, and Flatpak browser support.
+        </p>
+      </description>
+    </release>
     <release version="0.8.2" date="2026-06-30">
       <description>
         <p>

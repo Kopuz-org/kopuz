@@ -3,7 +3,7 @@ members = ["crates/*"]
 resolver = "3"
 
 [workspace.package]
-version = "0.8.2"
+version = "0.9.0"
 edition = "2024"
 rust-version = "1.95.0"
 description = "A modern, lightweight music player built with Rust and Dioxus."
@@ -97,23 +97,27 @@ hex = "0.4"
 rookie = "0.5"
 color-thief = "0.2.2"
 time = "0.3"
+# Headless JS for YouTube (desktop only). VERSION LOCK: rustypipe-botguard 0.1.2
+# pins deno_core ^0.331, so deno_core must stay on 0.331.x to share one V8 link.
+deno_core = "0.331"
+rustypipe-botguard = "0.1.2"
 
 # Workspace components
-i18n = { package = "kopuz-i18n", version = "0.8.2", path = "./crates/i18n" }
-player = { package = "kopuz-player", version = "0.8.2", path = "./crates/player" }
-reader = { package = "kopuz-reader", version = "0.8.2", path = "./crates/reader" }
-components = { package = "kopuz-components", version = "0.8.2", path = "./crates/components" }
-hooks = { package = "kopuz-hooks", version = "0.8.2", path = "./crates/hooks" }
-pages = { package = "kopuz-pages", version = "0.8.2", path = "./crates/pages" }
-utils = { package = "kopuz-utils", version = "0.8.2", path = "./crates/utils" }
-config = { package = "kopuz-config", version = "0.8.2", path = "./crates/config" }
-db = { package = "kopuz-db", version = "0.8.2", path = "./crates/db" }
-kopuz = { version = "0.8.2", path = "./crates/kopuz" }
-server = { package = "kopuz-server", version = "0.8.2", path = "./crates/server" }
-kopuz_route = { package = "kopuz-route", version = "0.8.2", path = "./crates/kopuz_route" }
-discord-presence = { package = "kopuz-discord-presence", version = "0.8.2", path = "./crates/discord-presence" }
-scrobble = { package = "kopuz-scrobble", version = "0.8.2", path = "./crates/scrobble" }
-radio = { package = "kopuz-radio", version = "0.8.2", path = "./crates/radio" }
+i18n = { package = "kopuz-i18n", version = "0.9.0", path = "./crates/i18n" }
+player = { package = "kopuz-player", version = "0.9.0", path = "./crates/player" }
+reader = { package = "kopuz-reader", version = "0.9.0", path = "./crates/reader" }
+components = { package = "kopuz-components", version = "0.9.0", path = "./crates/components" }
+hooks = { package = "kopuz-hooks", version = "0.9.0", path = "./crates/hooks" }
+pages = { package = "kopuz-pages", version = "0.9.0", path = "./crates/pages" }
+utils = { package = "kopuz-utils", version = "0.9.0", path = "./crates/utils" }
+config = { package = "kopuz-config", version = "0.9.0", path = "./crates/config" }
+db = { package = "kopuz-db", version = "0.9.0", path = "./crates/db" }
+kopuz = { version = "0.9.0", path = "./crates/kopuz" }
+server = { package = "kopuz-server", version = "0.9.0", path = "./crates/server" }
+kopuz_route = { package = "kopuz-route", version = "0.9.0", path = "./crates/kopuz_route" }
+discord-presence = { package = "kopuz-discord-presence", version = "0.9.0", path = "./crates/discord-presence" }
+scrobble = { package = "kopuz-scrobble", version = "0.9.0", path = "./crates/scrobble" }
+radio = { package = "kopuz-radio", version = "0.9.0", path = "./crates/radio" }
 
 # Steer code toward the tracing subscriber (see crates/kopuz/src/logging.rs).
 # Inherited per-crate via `[lints] workspace = true`. Build scripts (cargo:

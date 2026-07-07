@@ -375,6 +375,13 @@ pub fn use_player_task(ctrl: PlayerController) {
                             .map_or("Local", |s| s.display_name())
                     });
                 let source_changed = last_source.peek().as_deref() != discord_source_name;
+
+                // Discord may start after Kopuz or restart mid-session: retry a
+                // dropped IPC connection and restore the last activity once it's up.
+                if discord_enabled && let Some(ref p) = presence {
+                    p.tick();
+                }
+
                 let pos = ctrl.player.read().get_position();
                 let mut defer_player_progress = false;
 

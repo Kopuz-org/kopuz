@@ -1,4 +1,5 @@
 use config::AppConfig;
+use dioxus::core::Runtime;
 use dioxus::logger::tracing::Instrument;
 use dioxus::prelude::*;
 use reader::Track;
@@ -6,6 +7,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 const NOW_PLAYING_INTERVAL_SECS: u64 = 30;
+const NOW_PLAYING_MAX_IDLE_SECS: u64 = 600;
 
 #[derive(Clone, Copy)]
 pub struct ScrobbleOptions {
@@ -57,7 +59,8 @@ pub fn schedule(
         options,
     );
 
-    spawn(
+    spawn_in_scope(
+        play_generation.origin_scope(),
         async move {
             if duration_secs < 30 {
                 tracing::info!(
@@ -238,15 +241,18 @@ fn schedule_playing_now_heartbeat(
     let include_ids = options.include_musicbrainz_ids;
     let span = tracing::info_span!("scrobble.playing_now", track = track.id.uid().as_str());
 
-    spawn(
+    spawn_in_scope(
+        play_generation.origin_scope(),
         async move {
             let mut announced = false;
+            let mut idle_secs: u64 = 0;
             loop {
                 if *play_generation.read() != generation {
                     return;
                 }
 
                 if *is_playing.read() {
+                    idle_secs = 0;
                     let now_info = listen_additional_info(&track, include_ids);
                     let playing_now = scrobble::musicbrainz::make_playing_now(
                         &track.artist,
@@ -268,6 +274,11 @@ fn schedule_playing_now_heartbeat(
                             track.artist,
                             track.title
                         );
+                    }
+                } else {
+                    idle_secs += NOW_PLAYING_INTERVAL_SECS;
+                    if idle_secs >= NOW_PLAYING_MAX_IDLE_SECS {
+                        return;
                     }
                 }
 
@@ -309,6 +320,12 @@ fn listen_additional_info(
     }
 
     map
+}
+
+fn spawn_in_scope(scope: ScopeId, fut: impl std::future::Future<Output = ()> + 'static) {
+    Runtime::current().in_scope(scope, || {
+        spawn(fut);
+    });
 }
 
 async fn wait_for_playtime(

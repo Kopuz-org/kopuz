@@ -13,15 +13,9 @@
 //!
 //! ## Engine seam
 //!
-//! Actual JS execution is abstracted behind [`JsEngine`]. The end goal is to
-//! run it inside Dioxus' own resident WebView JavaScriptCore — zero extra
-//! dependencies, since the engine is already loaded to render the UI. That
-//! binding lives in the UI layer (it needs `dioxus::document::eval`) and is
-//! injected here via [`set_engine`]. Until one is registered we fall back to
-//! a system JS runtime ([`SubprocessEngine`]: deno / node / bun / qjs), so
-//! the path works headlessly, in tests, and on first run before the WebView
-//! engine is wired. If no runtime is available either, deciphering fails and
-//! the caller falls through to its existing chain — strictly additive.
+//! JS execution is behind [`JsEngine`]: desktop defaults to [`DenoCoreEngine`]
+//! (in-process `deno_core`, no WebView/external runtime); Android falls back to
+//! a system runtime ([`SubprocessEngine`]). Injectable via [`set_engine`].
 //!
 //! ## Solver scripts
 //!
@@ -38,7 +32,12 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use tokio::sync::{mpsc, oneshot};
+
+// Headless deno_core engine (post-WebView). Android keeps the WebView.
+#[cfg(not(target_os = "android"))]
+mod deno_engine;
+#[cfg(not(target_os = "android"))]
+pub use deno_engine::DenoCoreEngine;
 
 const LIB: &str = include_str!("solver/lib.min.js");
 const CORE: &str = include_str!("solver/core.min.js");
@@ -65,7 +64,20 @@ pub fn set_engine(engine: Box<dyn JsEngine>) -> Result<(), Box<dyn JsEngine>> {
 }
 
 fn engine() -> &'static dyn JsEngine {
-    ENGINE.get_or_init(|| Box::new(SubprocessEngine)).as_ref()
+    ENGINE
+        .get_or_init(|| {
+            // Desktop: headless deno_core isolate. Android has no V8, so it
+            // keeps the WebView engine (or the subprocess fallback).
+            #[cfg(not(target_os = "android"))]
+            {
+                Box::new(DenoCoreEngine::new()) as Box<dyn JsEngine>
+            }
+            #[cfg(target_os = "android")]
+            {
+                Box::new(SubprocessEngine) as Box<dyn JsEngine>
+            }
+        })
+        .as_ref()
 }
 
 /// Build the playable URL for one `adaptiveFormats[]` entry. Handles both
@@ -415,46 +427,6 @@ impl JsEngine for SubprocessEngine {
     }
 }
 
-// ---- WebView engine bridge ---------------------------------------------
-
-/// A unit of work for the UI-layer solver loop: a JS `program` to run in the
-/// resident WebView, plus a one-shot `reply` for whatever it prints.
-pub struct SolveRequest {
-    pub program: String,
-    pub reply: oneshot::Sender<Result<String, String>>,
-}
-
-/// [`JsEngine`] that forwards each program to a solver loop running in the UI
-/// layer, which executes it via `dioxus::document::eval` inside the WebView's
-/// own JavaScriptCore — the zero-external-dependency path (issue #349). Built
-/// by [`webview_channel`]; the UI registers it via [`set_engine`] and drains
-/// the returned receiver.
-pub struct ChannelEngine {
-    tx: mpsc::UnboundedSender<SolveRequest>,
-}
-
-impl JsEngine for ChannelEngine {
-    fn run<'a>(&'a self, program: String) -> BoxFuture<'a, Result<String, String>> {
-        Box::pin(async move {
-            let (reply, rx) = oneshot::channel();
-            self.tx
-                .send(SolveRequest { program, reply })
-                .map_err(|_| "webview solver loop is gone".to_string())?;
-            rx.await
-                .map_err(|_| "webview solver dropped the reply".to_string())?
-        })
-    }
-}
-
-/// Create a WebView-backed engine plus the receiver its solver loop drains.
-/// The UI calls this once at startup, `set_engine`s the returned engine, and
-/// spawns a Dioxus task that runs each `SolveRequest.program` via
-/// `document::eval` and answers on `reply`.
-pub fn webview_channel() -> (Box<dyn JsEngine>, mpsc::UnboundedReceiver<SolveRequest>) {
-    let (tx, rx) = mpsc::unbounded_channel();
-    (Box::new(ChannelEngine { tx }), rx)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -552,5 +524,54 @@ mod tests {
             .await
             .expect("range GET");
         assert_eq!(resp.status().as_u16(), 206, "deciphered URL must stream");
+    }
+
+    /// End-to-end proof through the headless [`DenoCoreEngine`]. Run alone:
+    /// `cargo test -p kopuz-server deno_decipher -- --ignored --nocapture`.
+    #[cfg(not(target_os = "android"))]
+    #[tokio::test]
+    #[ignore = "hits live YouTube; run manually and alone (registers the global engine)"]
+    async fn live_deno_decipher_streams() {
+        use super::super::{clients::WEB_REMIX, innertube};
+        super::set_engine(Box::new(super::DenoCoreEngine::new()))
+            .unwrap_or_else(|_| panic!("engine already set — run this test alone"));
+        let vid = "dQw4w9WgXcQ";
+        let player = player_js(vid).await.expect("base.js");
+        let extras = innertube::PlayerExtras {
+            signature_timestamp: Some(player.1),
+            ..Default::default()
+        };
+        let json = innertube::player(WEB_REMIX, vid, None, extras)
+            .await
+            .expect("player");
+        let fmt = json
+            .pointer("/streamingData/adaptiveFormats")
+            .and_then(|v| v.as_array())
+            .expect("formats")
+            .iter()
+            .filter(|f| f["mimeType"].as_str().unwrap_or("").starts_with("audio/"))
+            .max_by_key(|f| f["bitrate"].as_u64().unwrap_or(0))
+            .expect("audio format");
+        let url = deciphered_url(&player.0, fmt).await.expect("decipher");
+        // A second solve exercises reuse of the warm isolate.
+        let _ = deciphered_url(&player.0, fmt).await.expect("decipher 2");
+        let resp = reqwest::Client::new()
+            .get(&url)
+            .header("Range", "bytes=0-1023")
+            .send()
+            .await
+            .expect("range GET");
+        assert_eq!(
+            resp.status().as_u16(),
+            206,
+            "deno-deciphered URL must stream"
+        );
+
+        // A second isolate in-process — the scenario that segfaulted before the
+        // shared platform init. Both must coexist.
+        let pot = super::super::botguard::mint_content_pot(vid)
+            .await
+            .expect("botguard mint alongside a live decipher isolate");
+        assert!(!pot.is_empty(), "pot minted with both isolates alive");
     }
 }

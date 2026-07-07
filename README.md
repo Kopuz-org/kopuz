@@ -140,7 +140,7 @@ media source carries its own credentials and its own favorites.
 Install directly with Cargo:
 
 ```bash
-cargo install kopuz
+cargo install --locked kopuz
 ```
 
 ### NixOS / Nix
