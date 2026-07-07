@@ -55,7 +55,7 @@ pub fn snapshot(q: PersistedQueueState) -> db::QueueSnapshot {
     }
 }
 
-fn is_server_queue_track(track: &Track) -> bool {
+fn is_streamable_queue_track(track: &Track) -> bool {
     matches!(
         track
             .id
@@ -65,12 +65,12 @@ fn is_server_queue_track(track: &Track) -> bool {
             .unwrap_or_default()
             .to_ascii_lowercase()
             .as_str(),
-        "jellyfin" | "subsonic" | "custom"
+        "jellyfin" | "subsonic" | "custom" | "ytmusic" | "soundcloud"
     )
 }
 
 fn is_restorable_queue_track(track: &Track) -> bool {
-    is_server_queue_track(track) || track.id.local_path().is_some_and(|p| p.exists())
+    is_streamable_queue_track(track) || track.id.local_path().is_some_and(|p| p.exists())
 }
 
 pub fn sanitize(state: PersistedQueueState) -> Option<PersistedQueueState> {
