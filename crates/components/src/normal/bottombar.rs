@@ -36,7 +36,6 @@ pub fn BottombarNormal(
         }
     });
 
-    let bar_ctrl = use_context::<PlayerController>();
     let display_progress = if *is_dragging.read() {
         *drag_progress.read()
     } else {
@@ -47,20 +46,6 @@ pub fn BottombarNormal(
         (display_progress as f64 / *current_song_duration.read() as f64) * 100.0
     } else {
         0.0
-    };
-
-    // Glide between the once-a-second progress updates instead of stepping.
-    // Disabled while paused (freeze exactly where the user hit pause instead
-    // of drifting on for up to a second), while dragging, and when progress
-    // JUMPS (seek, track change) so those snap instead of sweeping across.
-    let prev_progress = use_hook(|| std::rc::Rc::new(std::cell::Cell::new(u64::MAX)));
-    let progress_jumped = display_progress.abs_diff(prev_progress.get()) > 2;
-    prev_progress.set(display_progress);
-    let gliding = !*is_dragging.read() && !progress_jumped && *bar_ctrl.is_playing.read();
-    let bar_glide = if gliding {
-        "transition-[width] duration-1000 ease-linear"
-    } else {
-        ""
     };
 
     let volume_percent = *volume.read() * 100.0;
@@ -231,7 +216,7 @@ pub fn BottombarNormal(
                     div {
                         class: format!("flex-1 h-1 bg-white/10 rounded-full relative {}", if is_radio { "" } else { "group cursor-pointer" }),
                         div {
-                            class: "absolute top-0 left-0 h-full bg-white group-hover:bg-green-500 rounded-full pointer-events-none {bar_glide}",
+                            class: "absolute top-0 left-0 h-full bg-white group-hover:bg-green-500 rounded-full transition-colors pointer-events-none",
                             style: "width: {progress_percent}%",
                             div { class: "absolute -right-1.5 -top-1 w-3 h-3 bg-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity" }
                         }
