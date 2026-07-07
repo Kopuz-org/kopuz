@@ -3,31 +3,6 @@
 
 pub mod cover_art;
 
-use std::sync::{Arc, OnceLock};
-
-/// A cheaply-cloneable, thread-safe handle to a `Presence` that may not be
-/// connected yet.
-///
-/// The IPC handshake blocks (up to tens of seconds when Discord is slow to ACK
-/// a rapid reconnect), so the connection is made off the startup path on a
-/// background thread and published here once ready. Consumers hold the handle
-/// and poll [`get`](PresenceHandle::get) each tick, picking up the connection
-/// whenever it lands (or never, if Discord isn't running).
-#[derive(Clone, Default)]
-pub struct PresenceHandle(Arc<OnceLock<Arc<Presence>>>);
-
-impl PresenceHandle {
-    /// The connected presence, or `None` until the background connect succeeds.
-    pub fn get(&self) -> Option<Arc<Presence>> {
-        self.0.get().cloned()
-    }
-
-    /// Publish the connected presence. Later calls are ignored (connect once).
-    pub fn set(&self, presence: Presence) {
-        let _ = self.0.set(Arc::new(presence));
-    }
-}
-
 #[cfg(not(target_os = "android"))]
 use discord_rich_presence::{
     DiscordIpc, DiscordIpcClient,

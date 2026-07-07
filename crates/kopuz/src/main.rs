@@ -9,12 +9,13 @@ use dioxus::desktop::tao::platform::macos::WindowBuilderExtMacOS;
 #[cfg(target_os = "windows")]
 use dioxus::desktop::tao::platform::windows::WindowExtWindows;
 use dioxus::prelude::*;
-use discord_presence::{Presence, PresenceHandle};
+use discord_presence::Presence;
 use kopuz_route::Route;
 use pages::server::download_manager::DownloadQueue;
 use player::player::Player;
 use queue_state::PersistedQueueState;
 use std::path::PathBuf;
+use std::sync::Arc;
 use tracing::Instrument;
 #[cfg(target_os = "windows")]
 use windows::Win32::Foundation::HWND;
@@ -87,7 +88,7 @@ fn StaticHeadAssets() -> Element {
     }
 }
 
-static PRESENCE: std::sync::OnceLock<PresenceHandle> = std::sync::OnceLock::new();
+static PRESENCE: std::sync::OnceLock<Option<Arc<Presence>>> = std::sync::OnceLock::new();
 
 fn main() {
     #[cfg(not(target_os = "android"))]
@@ -112,19 +113,18 @@ fn main() {
 
         let _ = app_db::DB_HANDLE.set(app_db::init_blocking());
 
-        // Off the startup path: the IPC handshake blocks on an untimed socket
-        // read, and Discord can take 20-30s to ACK a rapid reconnect.
-        let presence = PRESENCE.get_or_init(PresenceHandle::default).clone();
-        std::thread::Builder::new()
-            .name("discord-presence-connect".to_string())
-            .spawn(move || match Presence::new("1470087339639443658") {
-                Ok(p) => {
-                    tracing::info!("Discord presence connected");
-                    presence.set(p);
-                }
-                Err(e) => tracing::warn!("Failed to connect to Discord: {e}"),
-            })
-            .ok();
+        let presence: Option<Arc<Presence>> = match Presence::new("1470087339639443658") {
+            Ok(p) => {
+                tracing::info!("Discord presence connected");
+                Some(Arc::new(p))
+            }
+            Err(e) => {
+                tracing::warn!("Failed to connect to Discord: {e}");
+                None
+            }
+        };
+
+        PRESENCE.set(presence).ok();
 
         #[cfg(target_os = "macos")]
         {
@@ -617,8 +617,8 @@ fn App() -> Element {
         }
     });
 
-    let presence = PRESENCE.get_or_init(PresenceHandle::default).clone();
-    provide_context(presence);
+    let presence = PRESENCE.get().cloned().flatten();
+    provide_context(presence.clone());
 
     let mut station_registry = use_signal(radio::registry::StationRegistry::new);
     provide_context(station_registry);
