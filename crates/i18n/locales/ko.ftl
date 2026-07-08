@@ -457,3 +457,15 @@ add_photo = 사진 추가
 change_photo = 사진 변경
 remove_photo = 사진 제거
 metadata_edit_warning = 빈 필드는 해당 태그를 제거합니다. 파일에 직접 기록되며 되돌릴 수 없습니다.
+
+sort_by = Sort by
+sort_then = then
+sort_none = No sorting applied
+sort_add_criterion = Add criterion
+sort_remove = Remove
+sort_ascending = Ascending
+sort_descending = Descending
+sort_field_title = Title
+sort_field_artist = Artist
+sort_field_year = Year
+sort_field_genre = Genre

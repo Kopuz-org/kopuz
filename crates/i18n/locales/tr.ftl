@@ -457,3 +457,15 @@ add_photo = Fotoğraf ekle
 change_photo = Fotoğrafı değiştir
 remove_photo = Fotoğrafı kaldır
 metadata_edit_warning = Boş alanlar o etiketi siler. Doğrudan dosyaya yazılır — geri alınamaz.
+
+sort_by = Sort by
+sort_then = then
+sort_none = No sorting applied
+sort_add_criterion = Add criterion
+sort_remove = Remove
+sort_ascending = Ascending
+sort_descending = Descending
+sort_field_title = Title
+sort_field_artist = Artist
+sort_field_year = Year
+sort_field_genre = Genre

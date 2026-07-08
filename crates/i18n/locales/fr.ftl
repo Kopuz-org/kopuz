@@ -458,3 +458,15 @@ add_photo = Ajouter une photo
 change_photo = Changer la photo
 remove_photo = Supprimer la photo
 metadata_edit_warning = Les champs vides suppriment l'étiquette. Écrit directement dans le fichier — aucune annulation possible.
+
+sort_by = Sort by
+sort_then = then
+sort_none = No sorting applied
+sort_add_criterion = Add criterion
+sort_remove = Remove
+sort_ascending = Ascending
+sort_descending = Descending
+sort_field_title = Title
+sort_field_artist = Artist
+sort_field_year = Year
+sort_field_genre = Genre

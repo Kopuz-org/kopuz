@@ -6,7 +6,7 @@
 use components::dots_menu::{DotsMenu, MenuAction};
 use components::playlist_modal::PlaylistModal;
 use components::track_list_view::TrackListView;
-use config::AppConfig;
+use config::{AlbumSortField, AppConfig, LibrarySortField, SortCriterion, SortDirection};
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{
@@ -169,7 +169,7 @@ pub fn Album(
 
 #[component]
 fn AlbumGrid(
-    config: Signal<AppConfig>,
+    mut config: Signal<AppConfig>,
     mut album_id: Signal<String>,
     mut open_album_menu: Signal<Option<String>>,
     mut show_album_playlist_modal: Signal<bool>,
@@ -182,6 +182,17 @@ fn AlbumGrid(
     let is_offline = use_context::<Signal<bool>>();
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let albums_res = use_albums(source);
+
+    let album_sort = use_signal(|| config.peek().album_sort.clone());
+    use_effect(move || {
+        let curr = album_sort.read().clone();
+        if config.peek().album_sort != curr {
+            config.write().album_sort = curr;
+        }
+    });
+    let available_sort_fields = use_memo(move || {
+        reader::sort::available_album_fields(&albums_res.read().clone().unwrap_or_default())
+    });
 
     // Offline (server): only albums with downloaded tracks. Album ids come from
     // the downloaded tracks themselves. The grid dedupes by title — the detail
@@ -215,19 +226,17 @@ fn AlbumGrid(
     let albums = use_memo(move || {
         let offline = caps().downloads && *is_offline.read();
         let downloaded = downloaded_album_ids();
-        let mut albums = albums_res.read().clone().unwrap_or_default();
-        albums.sort_by(|a, b| {
-            a.title
-                .trim()
-                .to_lowercase()
-                .cmp(&b.title.trim().to_lowercase())
-        });
         let mut seen = HashSet::new();
-        albums
+        let mut albums = albums_res
+            .read()
+            .clone()
+            .unwrap_or_default()
             .into_iter()
             .filter(|a| !offline || downloaded.contains(&a.id))
             .filter(|a| seen.insert(a.title.trim().to_lowercase()))
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+        reader::sort::sort_albums(&mut albums, &album_sort.read());
+        albums
     });
 
     // Restore the grid scroll once after the albums first render; guarded so DB
@@ -245,6 +254,10 @@ fn AlbumGrid(
     });
 
     rsx! {
+        div { class: "flex-1 min-h-0 flex flex-col",
+        div { class: "flex items-center justify-end mb-4 shrink-0",
+            AlbumSortControl { criteria: album_sort, available: available_sort_fields() }
+        }
         div {
             id: "album-grid-scroll",
             class: "flex-1 min-h-0 overflow-y-auto pb-8",
@@ -378,6 +391,7 @@ fn AlbumGrid(
                     }
                 }
             }
+        }
         }
     }
 }
@@ -1026,6 +1040,156 @@ fn YtAlbumDetail(
                         show_playlist_modal.set(false);
                         playlist_track.set(None);
                     },
+                }
+            }
+        }
+    }
+}
+
+fn direction_arrow(direction: SortDirection) -> &'static str {
+    match direction {
+        SortDirection::Asc => "fa-solid fa-arrow-up-short-wide",
+        SortDirection::Desc => "fa-solid fa-arrow-down-wide-short",
+    }
+}
+
+#[component]
+fn AlbumSortControl(
+    mut criteria: Signal<Vec<SortCriterion<AlbumSortField>>>,
+    available: Vec<AlbumSortField>,
+) -> Element {
+    let mut is_open = use_signal(|| false);
+    let fields = available;
+
+    let summary = criteria.read().first().map(|c| {
+        let label = i18n::t(c.field.label_key()).to_string();
+        (label, direction_arrow(c.direction))
+    });
+
+    rsx! {
+        div { class: "relative",
+            button {
+                class: "flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg bg-white/5 border border-white/5 text-white/70 hover:text-white hover:bg-white/10 transition-all",
+                onclick: move |evt| {
+                    evt.stop_propagation();
+                    let next = !*is_open.peek();
+                    is_open.set(next);
+                },
+                i { class: "fa-solid fa-arrow-down-short-wide", style: "font-size: 11px;" }
+                match summary {
+                    Some((label, arrow)) => rsx! {
+                        span { "{i18n::t(\"sort_by\")}: {label}" }
+                        i { class: "{arrow}", style: "font-size: 10px;" }
+                    },
+                    None => rsx! {
+                        span { "{i18n::t(\"sort_by\")}" }
+                    },
+                }
+            }
+
+            if *is_open.read() {
+                div {
+                    class: "fixed inset-0 z-40",
+                    onclick: move |evt| {
+                        evt.stop_propagation();
+                        is_open.set(false);
+                    }
+                }
+
+                div {
+                    class: "absolute right-0 top-full mt-1 z-50 w-72 bg-neutral-900 border border-white/10 rounded-xl shadow-2xl p-2 space-y-1",
+                    onclick: move |evt| evt.stop_propagation(),
+
+                    if criteria.read().is_empty() {
+                        p { class: "px-2 py-2 text-xs text-white/40", "{i18n::t(\"sort_none\")}" }
+                    }
+
+                    for (idx, criterion) in criteria.read().iter().enumerate() {
+                        {
+                            let current = criterion.field;
+                            let direction = criterion.direction;
+                            let mut row_fields = fields.clone();
+                            if !row_fields.contains(&current) {
+                                row_fields.insert(0, current);
+                            }
+                            let selected_pos =
+                                row_fields.iter().position(|f| *f == current).unwrap_or(0);
+                            let onchange_fields = row_fields.clone();
+                            rsx! {
+                                div {
+                                    key: "{idx}",
+                                    class: "flex items-center gap-1.5",
+
+                                    span { class: "w-10 shrink-0 text-[10px] uppercase tracking-wider text-white/30",
+                                        if idx == 0 { "{i18n::t(\"sort_by\")}" } else { "{i18n::t(\"sort_then\")}" }
+                                    }
+
+                                    select {
+                                        class: "flex-1 min-w-0 bg-neutral-800 text-white text-xs rounded-md px-2 py-1.5 border border-white/10 focus:outline-none focus:border-white/30",
+                                        value: "{selected_pos}",
+                                        onchange: move |evt| {
+                                            if let Ok(pos) = evt.value().parse::<usize>()
+                                                && let Some(field) = onchange_fields.get(pos).copied()
+                                                && let Some(c) = criteria.write().get_mut(idx)
+                                            {
+                                                c.field = field;
+                                            }
+                                        },
+                                        for (pos, field) in row_fields.iter().enumerate() {
+                                            option {
+                                                key: "{pos}",
+                                                value: "{pos}",
+                                                selected: pos == selected_pos,
+                                                "{i18n::t(field.label_key())}"
+                                            }
+                                        }
+                                    }
+
+                                    button {
+                                        class: "shrink-0 w-7 h-7 flex items-center justify-center rounded-md bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition-colors",
+                                        title: if direction == SortDirection::Asc { "{i18n::t(\"sort_ascending\")}" } else { "{i18n::t(\"sort_descending\")}" },
+                                        onclick: move |evt| {
+                                            evt.stop_propagation();
+                                            if let Some(c) = criteria.write().get_mut(idx) {
+                                                c.direction = match c.direction {
+                                                    SortDirection::Asc => SortDirection::Desc,
+                                                    SortDirection::Desc => SortDirection::Asc,
+                                                };
+                                            }
+                                        },
+                                        i { class: "{direction_arrow(direction)}", style: "font-size: 11px;" }
+                                    }
+
+                                    button {
+                                        class: "shrink-0 w-7 h-7 flex items-center justify-center rounded-md text-white/30 hover:text-red-300 hover:bg-red-500/10 transition-colors",
+                                        title: "{i18n::t(\"sort_remove\")}",
+                                        onclick: move |evt| {
+                                            evt.stop_propagation();
+                                            let mut list = criteria.write();
+                                            if idx < list.len() {
+                                                list.remove(idx);
+                                            }
+                                        },
+                                        i { class: "fa-solid fa-xmark", style: "font-size: 11px;" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if criteria.read().len() < fields.len() {
+                        button {
+                            class: "w-full mt-1 px-2 py-1.5 text-xs rounded-md text-white/60 hover:text-white hover:bg-white/5 flex items-center gap-2 transition-colors",
+                            onclick: move |evt| {
+                                evt.stop_propagation();
+                                if let Some(first) = fields.first().copied() {
+                                    criteria.write().push(SortCriterion::new(first, SortDirection::Asc));
+                                }
+                            },
+                            i { class: "fa-solid fa-plus", style: "font-size: 10px;" }
+                            "{i18n::t(\"sort_add_criterion\")}"
+                        }
+                    }
                 }
             }
         }

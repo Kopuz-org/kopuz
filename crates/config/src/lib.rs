@@ -149,6 +149,48 @@ pub enum SortOrder {
     Album,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum SortDirection {
+    #[default]
+    Asc,
+    Desc,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AlbumSortField {
+    Title,
+    Artist,
+    Year,
+    Genre,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SortCriterion<F> {
+    pub field: F,
+    pub direction: SortDirection,
+}
+
+impl<F> SortCriterion<F> {
+    pub fn new(field: F, direction: SortDirection) -> Self {
+        Self { field, direction }
+    }
+}
+
+pub trait LibrarySortField: Copy + PartialEq + 'static {
+    fn label_key(&self) -> &'static str;
+}
+
+impl LibrarySortField for AlbumSortField {
+    fn label_key(&self) -> &'static str {
+        match self {
+            Self::Title => "sort_field_title",
+            Self::Artist => "sort_field_artist",
+            Self::Year => "sort_field_year",
+            Self::Genre => "sort_field_genre",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ArtistViewOrder {
     Tracks,
@@ -502,6 +544,8 @@ pub struct AppConfig {
     pub discord_presence_source: Option<bool>,
     #[serde(default = "default_sort_order")]
     pub sort_order: SortOrder,
+    #[serde(default = "default_album_sort")]
+    pub album_sort: Vec<SortCriterion<AlbumSortField>>,
     #[serde(default = "default_artist_view_order")]
     pub artist_view_order: ArtistViewOrder,
     #[serde(default)]
@@ -613,6 +657,13 @@ fn default_sort_order() -> SortOrder {
     SortOrder::Title
 }
 
+fn default_album_sort() -> Vec<SortCriterion<AlbumSortField>> {
+    vec![SortCriterion::new(
+        AlbumSortField::Title,
+        SortDirection::Asc,
+    )]
+}
+
 fn default_artist_view_order() -> ArtistViewOrder {
     ArtistViewOrder::Tracks
 }
@@ -689,6 +740,7 @@ impl Default for AppConfig {
             discord_presence_paused: Some(true),
             discord_presence_source: Some(true),
             sort_order: default_sort_order(),
+            album_sort: default_album_sort(),
             artist_view_order: default_artist_view_order(),
             listen_counts: HashMap::new(),
             musicbrainz_token: String::new(),

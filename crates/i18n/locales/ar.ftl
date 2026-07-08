@@ -463,3 +463,15 @@ add_photo = إضافة صورة
 change_photo = تغيير الصورة
 remove_photo = إزالة الصورة
 metadata_edit_warning = الحقول الفارغة تحذف الوسم. يُكتب مباشرة في الملف — لا يمكن التراجع.
+
+sort_by = Sort by
+sort_then = then
+sort_none = No sorting applied
+sort_add_criterion = Add criterion
+sort_remove = Remove
+sort_ascending = Ascending
+sort_descending = Descending
+sort_field_title = Title
+sort_field_artist = Artist
+sort_field_year = Year
+sort_field_genre = Genre
