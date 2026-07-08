@@ -1020,6 +1020,33 @@ pub fn use_player_controller(
     let db = use_signal(move || db_handle);
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
 
+    // Scrobbles queued while offline (issue #335): retry once on startup, in
+    // case connectivity came back between sessions.
+    use_future(move || async move {
+        let Some(queue_path) = scrobble::queue::default_queue_path() else {
+            return;
+        };
+        let creds = {
+            let cfg = config.peek();
+            scrobble::queue::Credentials {
+                lastfm: (!cfg.lastfm_api_key.is_empty() && !cfg.lastfm_api_secret.is_empty()).then(
+                    || {
+                        (
+                            cfg.lastfm_api_key.clone(),
+                            cfg.lastfm_api_secret.clone(),
+                            cfg.lastfm_session_key.clone(),
+                        )
+                    },
+                ),
+                librefm_session_key: (!cfg.librefm_session_key.is_empty())
+                    .then(|| cfg.librefm_session_key.clone()),
+                listenbrainz_token: (!cfg.musicbrainz_token.trim().is_empty())
+                    .then(|| cfg.musicbrainz_token.clone()),
+            }
+        };
+        scrobble::queue::drain(&queue_path, &creds).await;
+    });
+
     PlayerController {
         player,
         is_playing,
