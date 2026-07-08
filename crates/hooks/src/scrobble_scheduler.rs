@@ -275,7 +275,7 @@ pub fn schedule(
 
             // One success means we're online again: flush queued scrobbles.
             if scrobble_ok && let Some(qp) = &queue_path {
-                let cfg = config.read();
+                let musicbrainz_token = config.read().musicbrainz_token.clone();
                 let creds = scrobble::queue::Credentials {
                     lastfm: has_lastfm.then(|| {
                         (
@@ -285,10 +285,9 @@ pub fn schedule(
                         )
                     }),
                     librefm_session_key: has_librefm.then(|| librefm_session_key.clone()),
-                    listenbrainz_token: (!cfg.musicbrainz_token.trim().is_empty())
-                        .then(|| cfg.musicbrainz_token.clone()),
+                    listenbrainz_token: (!musicbrainz_token.trim().is_empty())
+                        .then(|| musicbrainz_token.clone()),
                 };
-                drop(cfg);
                 scrobble::queue::drain(qp, &creds).await;
             }
         }
