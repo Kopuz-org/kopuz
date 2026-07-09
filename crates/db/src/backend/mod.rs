@@ -16,7 +16,10 @@ mod dump;
 mod migrations;
 mod queries;
 mod rows;
+mod scrobble;
 mod scrobble_queue;
+
+pub use scrobble::{QueuedScrobbleRow, ScrobbleService};
 mod writes;
 
 pub struct Native {
@@ -380,7 +383,7 @@ impl Storage for Native {
         listened_at: i64,
         artist: &str,
         title: &str,
-        service: crate::Service,
+        service: crate::ScrobbleService,
     ) -> Result<(), DbError> {
         scrobble_queue::delete(&self.pool(), listened_at, artist, title, service).await
     }

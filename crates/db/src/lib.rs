@@ -13,6 +13,8 @@ use std::sync::Arc;
 
 mod backend;
 
+pub use backend::{QueuedScrobbleRow, ScrobbleService};
+
 /// What a one-shot legacy-JSON import did. `ran == false` means it was skipped
 /// (already migrated, or no legacy JSON present); the counts are then all zero.
 #[derive(Debug, Default, Clone)]
@@ -29,62 +31,6 @@ pub struct ImportReport {
 // single type-safe representation of "which source"; re-exported here since the
 // DB layer is its main consumer (`WHERE source = ?`).
 pub use config::Source;
-
-/// A scrobble destination (issue #335). Defined here because `db` owns the
-/// offline-queue table this indexes; `kopuz-scrobble` re-exports it so the
-/// Last.fm/Libre.fm/ListenBrainz backends and the queue share one enum.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Service {
-    LastFm,
-    LibreFm,
-    ListenBrainz,
-}
-
-impl Service {
-    /// Human-facing name for logs and UI.
-    pub fn label(self) -> &'static str {
-        match self {
-            Service::LastFm => "Last.fm",
-            Service::LibreFm => "Libre.fm",
-            Service::ListenBrainz => "ListenBrainz",
-        }
-    }
-
-    /// Stable lowercase tag stored in the `service` column. Keep in sync with
-    /// [`Service::from_tag`].
-    pub fn as_tag(self) -> &'static str {
-        match self {
-            Service::LastFm => "lastfm",
-            Service::LibreFm => "librefm",
-            Service::ListenBrainz => "listenbrainz",
-        }
-    }
-
-    /// Inverse of [`Service::as_tag`]; an unknown tag (a service renamed or
-    /// removed since the row was written) yields `None`.
-    pub fn from_tag(tag: &str) -> Option<Self> {
-        match tag {
-            "lastfm" => Some(Service::LastFm),
-            "librefm" => Some(Service::LibreFm),
-            "listenbrainz" => Some(Service::ListenBrainz),
-            _ => None,
-        }
-    }
-}
-
-/// One queued offline scrobble owed to a single service (issue #335). A listen
-/// owed to N services is N rows sharing `(listened_at, artist, title)`.
-/// `listen_info` is the raw ListenBrainz additional-info JSON, `None` otherwise.
-/// The retry orchestration lives in `kopuz-scrobble` — this crate only persists.
-#[derive(Clone, Debug)]
-pub struct QueuedScrobbleRow {
-    pub listened_at: i64,
-    pub artist: String,
-    pub title: String,
-    pub album: Option<String>,
-    pub service: Service,
-    pub listen_info: Option<String>,
-}
 
 /// A window into a list query (for virtual-scrolled big lists).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -475,7 +421,7 @@ pub trait Storage: ReadStore {
         listened_at: i64,
         artist: &str,
         title: &str,
-        service: Service,
+        service: ScrobbleService,
     ) -> Result<(), DbError>;
 
     /// Generic metadata-cache write (upsert of `payload` for `(cache_key, kind)`).
