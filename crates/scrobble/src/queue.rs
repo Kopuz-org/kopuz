@@ -9,6 +9,7 @@
 
 use crate::{lastfm, librefm, musicbrainz};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tokio::sync::Mutex;
 
@@ -45,6 +46,8 @@ pub struct QueuedScrobble {
     pub timestamp: i64,
     /// Services this scrobble is still owed to.
     pub pending: Vec<Service>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub listen_info: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -125,6 +128,7 @@ pub async fn enqueue(
     title: &str,
     album: Option<&str>,
     timestamp: i64,
+    listen_info: Option<serde_json::Map<String, serde_json::Value>>,
 ) {
     let _guard = QUEUE_LOCK.lock().await;
     let mut queue = ScrobbleQueue::load(path);
@@ -137,6 +141,9 @@ pub async fn enqueue(
         if !existing.pending.contains(&service) {
             existing.pending.push(service);
         }
+        if listen_info.is_some() {
+            existing.listen_info = listen_info;
+        }
     } else {
         queue.push(QueuedScrobble {
             artist: artist.to_string(),
@@ -144,6 +151,7 @@ pub async fn enqueue(
             album: album.map(|s| s.to_string()),
             timestamp,
             pending: vec![service],
+            listen_info,
         });
     }
 
@@ -274,8 +282,12 @@ async fn submit_one(service: Service, item: &QueuedScrobble, creds: &Credentials
             } else {
                 format!("Token {token}")
             };
+            let info: Option<HashMap<&str, serde_json::Value>> = item
+                .listen_info
+                .as_ref()
+                .map(|m| m.iter().map(|(k, v)| (k.as_str(), v.clone())).collect());
             let listen =
-                musicbrainz::make_listen(&item.artist, &item.title, album, None, item.timestamp);
+                musicbrainz::make_listen(&item.artist, &item.title, album, info, item.timestamp);
             musicbrainz::submit_listens(&auth, vec![listen], "import")
                 .await
                 .map(|_| ())
@@ -300,6 +312,7 @@ mod tests {
             album: None,
             timestamp: ts,
             pending,
+            listen_info: None,
         }
     }
 
@@ -355,7 +368,18 @@ mod tests {
         let path = temp_path("merge.json");
         let _ = std::fs::remove_file(&path);
 
-        enqueue(&path, Service::LastFm, "Artist", "Song", Some("Album"), 42).await;
+        enqueue(
+            &path,
+            Service::LastFm,
+            "Artist",
+            "Song",
+            Some("Album"),
+            42,
+            None,
+        )
+        .await;
+        let mut info = serde_json::Map::new();
+        info.insert("duration_ms".into(), serde_json::Value::from(180000));
         enqueue(
             &path,
             Service::ListenBrainz,
@@ -363,10 +387,20 @@ mod tests {
             "Song",
             Some("Album"),
             42,
+            Some(info.clone()),
         )
         .await;
         // Duplicate service on the same listen must not double up.
-        enqueue(&path, Service::LastFm, "Artist", "Song", Some("Album"), 42).await;
+        enqueue(
+            &path,
+            Service::LastFm,
+            "Artist",
+            "Song",
+            Some("Album"),
+            42,
+            None,
+        )
+        .await;
 
         let q = ScrobbleQueue::load(&path);
         assert_eq!(q.items.len(), 1);
@@ -374,6 +408,7 @@ mod tests {
             q.items[0].pending,
             vec![Service::LastFm, Service::ListenBrainz]
         );
+        assert_eq!(q.items[0].listen_info, Some(info));
         let _ = std::fs::remove_file(&path);
     }
 
@@ -383,7 +418,7 @@ mod tests {
         // released instead of sitting in the queue forever.
         let path = temp_path("nocreds.json");
         let _ = std::fs::remove_file(&path);
-        enqueue(&path, Service::LastFm, "Artist", "Song", None, 42).await;
+        enqueue(&path, Service::LastFm, "Artist", "Song", None, 42, None).await;
 
         drain(&path, &Credentials::default()).await;
 

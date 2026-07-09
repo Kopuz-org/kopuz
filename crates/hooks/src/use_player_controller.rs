@@ -1003,6 +1003,7 @@ pub fn use_player_controller(
     current_track_snapshot: Signal<Option<Track>>,
     volume: Signal<f32>,
     config: Signal<AppConfig>,
+    config_loaded_ok: Signal<bool>,
     db_handle: db::Db,
 ) -> PlayerController {
     let play_generation = use_signal(|| 0);
@@ -1022,10 +1023,12 @@ pub fn use_player_controller(
 
     // Scrobbles queued while offline (issue #335): retry once on startup, in
     // case connectivity came back between sessions.
-    use_future(move || async move {
-        let Some(queue_path) = scrobble::queue::default_queue_path() else {
+    let mut drained = use_signal(|| false);
+    use_effect(move || {
+        if !*config_loaded_ok.read() || *drained.peek() {
             return;
-        };
+        }
+        drained.set(true);
         let creds = {
             let cfg = config.peek();
             scrobble::queue::Credentials {
@@ -1044,7 +1047,12 @@ pub fn use_player_controller(
                     .then(|| cfg.musicbrainz_token.clone()),
             }
         };
-        scrobble::queue::drain(&queue_path, &creds).await;
+        spawn(async move {
+            let Some(queue_path) = scrobble::queue::default_queue_path() else {
+                return;
+            };
+            scrobble::queue::drain(&queue_path, &creds).await;
+        });
     });
 
     PlayerController {

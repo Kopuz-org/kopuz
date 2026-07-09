@@ -682,6 +682,7 @@ fn App() -> Element {
         current_track_snapshot,
         volume,
         config,
+        config_loaded_ok,
         db.clone(),
     );
 

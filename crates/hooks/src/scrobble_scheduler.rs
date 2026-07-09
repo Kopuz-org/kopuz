@@ -194,6 +194,7 @@ pub fn schedule(
                                 &track.title,
                                 Some(&track.album),
                                 started_at,
+                                None,
                             )
                             .await;
                         }
@@ -232,6 +233,7 @@ pub fn schedule(
                                 &track.title,
                                 Some(&track.album),
                                 started_at,
+                                None,
                             )
                             .await;
                         }
@@ -242,6 +244,10 @@ pub fn schedule(
             let token = config.read().musicbrainz_token.clone();
             if !token.trim().is_empty() {
                 let info = listen_additional_info(&track, options.include_musicbrainz_ids);
+                let queued_info: serde_json::Map<String, serde_json::Value> = info
+                    .iter()
+                    .map(|(k, v)| ((*k).to_string(), v.clone()))
+                    .collect();
                 let listen = scrobble::musicbrainz::make_listen(
                     &track.artist,
                     &track.title,
@@ -266,6 +272,7 @@ pub fn schedule(
                                 &track.title,
                                 Some(&track.album),
                                 started_at,
+                                Some(queued_info),
                             )
                             .await;
                         }
