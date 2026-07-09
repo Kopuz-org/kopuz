@@ -30,6 +30,62 @@ pub struct ImportReport {
 // DB layer is its main consumer (`WHERE source = ?`).
 pub use config::Source;
 
+/// A scrobble destination (issue #335). Defined here because `db` owns the
+/// offline-queue table this indexes; `kopuz-scrobble` re-exports it so the
+/// Last.fm/Libre.fm/ListenBrainz backends and the queue share one enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Service {
+    LastFm,
+    LibreFm,
+    ListenBrainz,
+}
+
+impl Service {
+    /// Human-facing name for logs and UI.
+    pub fn label(self) -> &'static str {
+        match self {
+            Service::LastFm => "Last.fm",
+            Service::LibreFm => "Libre.fm",
+            Service::ListenBrainz => "ListenBrainz",
+        }
+    }
+
+    /// Stable lowercase tag stored in the `service` column. Keep in sync with
+    /// [`Service::from_tag`].
+    pub fn as_tag(self) -> &'static str {
+        match self {
+            Service::LastFm => "lastfm",
+            Service::LibreFm => "librefm",
+            Service::ListenBrainz => "listenbrainz",
+        }
+    }
+
+    /// Inverse of [`Service::as_tag`]; an unknown tag (a service renamed or
+    /// removed since the row was written) yields `None`.
+    pub fn from_tag(tag: &str) -> Option<Self> {
+        match tag {
+            "lastfm" => Some(Service::LastFm),
+            "librefm" => Some(Service::LibreFm),
+            "listenbrainz" => Some(Service::ListenBrainz),
+            _ => None,
+        }
+    }
+}
+
+/// One queued offline scrobble owed to a single service (issue #335). A listen
+/// owed to N services is N rows sharing `(listened_at, artist, title)`.
+/// `listen_info` is the raw ListenBrainz additional-info JSON, `None` otherwise.
+/// The retry orchestration lives in `kopuz-scrobble` — this crate only persists.
+#[derive(Clone, Debug)]
+pub struct QueuedScrobbleRow {
+    pub listened_at: i64,
+    pub artist: String,
+    pub title: String,
+    pub album: Option<String>,
+    pub service: Service,
+    pub listen_info: Option<String>,
+}
+
 /// A window into a list query (for virtual-scrolled big lists).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Page {
@@ -253,6 +309,9 @@ pub trait ReadStore: Send + Sync {
 
     /// Pending-unlike tombstones (`dirty=2`) not yet pushed to the server.
     async fn dirty_unlikes(&self, server_id: &str) -> Result<Vec<String>, DbError>;
+
+    /// The whole offline scrobble backlog, oldest listen first (drain order).
+    async fn scrobble_queue_all(&self) -> Result<Vec<QueuedScrobbleRow>, DbError>;
 }
 
 /// The persistence API: every mutation plus admin/dev ops, layered on top of the
@@ -404,6 +463,20 @@ pub trait Storage: ReadStore {
 
     /// Persist the queue/progress snapshot to the single `queue_state` row.
     async fn save_queue(&self, snap: &QueueSnapshot) -> Result<(), DbError>;
+
+    /// Enqueue a failed scrobble (issue #335). A repeat of the same
+    /// `(listen, service)` folds into the existing row; the backlog is capped to
+    /// the newest listens, dropping the oldest first.
+    async fn scrobble_queue_push(&self, row: &QueuedScrobbleRow) -> Result<(), DbError>;
+
+    /// Drop one delivered (or permanently-failed) `(listen, service)` row.
+    async fn scrobble_queue_delete(
+        &self,
+        listened_at: i64,
+        artist: &str,
+        title: &str,
+        service: Service,
+    ) -> Result<(), DbError>;
 
     /// Generic metadata-cache write (upsert of `payload` for `(cache_key, kind)`).
     async fn meta_put(&self, cache_key: &str, kind: &str, payload: &str) -> Result<(), DbError>;

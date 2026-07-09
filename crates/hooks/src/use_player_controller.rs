@@ -595,6 +595,7 @@ impl PlayerController {
                     let mut pending_resume = self.pending_resume;
                     let cfg_signal = self.config;
                     let active_source = self.active_source;
+                    let db = self.db;
                     let mut radio_task = self.radio_task;
                     let mut current_song_title = self.current_song_title;
                     let mut current_song_artist = self.current_song_artist;
@@ -869,6 +870,7 @@ impl PlayerController {
                                         is_playing,
                                         Some(active_source),
                                         ScrobbleOptions::REMOTE_NATIVE,
+                                        db.peek().clone(),
                                     );
 
                                     let cover_url = cover_url.clone();
@@ -977,6 +979,7 @@ impl PlayerController {
                                 self.is_playing,
                                 None,
                                 ScrobbleOptions::LOCAL,
+                                self.db.peek().clone(),
                             );
                         }
                     }
@@ -1047,11 +1050,9 @@ pub fn use_player_controller(
                     .then(|| cfg.musicbrainz_token.clone()),
             }
         };
+        let db_handle = db.peek().clone();
         spawn(async move {
-            let Some(queue_path) = scrobble::queue::default_queue_path() else {
-                return;
-            };
-            scrobble::queue::drain(&queue_path, &creds).await;
+            scrobble::queue::drain(&db_handle, &creds).await;
         });
     });
 

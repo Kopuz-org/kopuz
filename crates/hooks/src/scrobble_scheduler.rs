@@ -32,6 +32,7 @@ impl ScrobbleOptions {
     };
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn schedule(
     track: Track,
     item_id: Option<String>,
@@ -41,6 +42,7 @@ pub fn schedule(
     is_playing: Signal<bool>,
     active_source: Option<Signal<::server::source::ActiveSource>>,
     options: ScrobbleOptions,
+    db: db::Db,
 ) {
     let duration_secs = track.duration;
     let threshold_secs = std::cmp::min(240, duration_secs / 2);
@@ -160,7 +162,6 @@ pub fn schedule(
             // a transient error are queued with the original listen timestamp
             // (`started_at`) and resubmitted later; one success means we're
             // online, so drain the backlog.
-            let queue_path = scrobble::queue::default_queue_path();
             let mut scrobble_ok = false;
 
             if has_lastfm {
@@ -184,11 +185,9 @@ pub fn schedule(
                     }
                     Err(error) => {
                         tracing::warn!("Last.fm scrobble failed: {}", error);
-                        if scrobble::queue::is_transient(&error)
-                            && let Some(qp) = &queue_path
-                        {
+                        if scrobble::queue::is_transient(&error) {
                             scrobble::queue::enqueue(
-                                qp,
+                                &db,
                                 scrobble::queue::Service::LastFm,
                                 &track.artist,
                                 &track.title,
@@ -223,11 +222,9 @@ pub fn schedule(
                     }
                     Err(error) => {
                         tracing::warn!("Libre.fm scrobble failed: {}", error);
-                        if scrobble::queue::is_transient(&error)
-                            && let Some(qp) = &queue_path
-                        {
+                        if scrobble::queue::is_transient(&error) {
                             scrobble::queue::enqueue(
-                                qp,
+                                &db,
                                 scrobble::queue::Service::LibreFm,
                                 &track.artist,
                                 &track.title,
@@ -262,11 +259,9 @@ pub fn schedule(
                     }
                     Err(error) => {
                         tracing::warn!("MusicBrainz scrobble failed: {}", error);
-                        if scrobble::queue::is_transient(&error)
-                            && let Some(qp) = &queue_path
-                        {
+                        if scrobble::queue::is_transient(&error) {
                             scrobble::queue::enqueue(
-                                qp,
+                                &db,
                                 scrobble::queue::Service::ListenBrainz,
                                 &track.artist,
                                 &track.title,
@@ -281,7 +276,7 @@ pub fn schedule(
             }
 
             // One success means we're online again: flush queued scrobbles.
-            if scrobble_ok && let Some(qp) = &queue_path {
+            if scrobble_ok {
                 let musicbrainz_token = config.read().musicbrainz_token.clone();
                 let creds = scrobble::queue::Credentials {
                     lastfm: has_lastfm.then(|| {
@@ -295,7 +290,7 @@ pub fn schedule(
                     listenbrainz_token: (!musicbrainz_token.trim().is_empty())
                         .then(|| musicbrainz_token.clone()),
                 };
-                scrobble::queue::drain(qp, &creds).await;
+                scrobble::queue::drain(&db, &creds).await;
             }
         }
         .instrument(span),
