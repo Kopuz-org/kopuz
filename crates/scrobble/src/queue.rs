@@ -16,7 +16,7 @@ use crate::{lastfm, librefm, musicbrainz};
 use db::{Db, QueuedScrobbleRow};
 use std::collections::HashMap;
 
-pub use db::Service;
+pub use db::ScrobbleService;
 
 /// Whether a failed request is worth retrying later: no response at all
 /// (offline, DNS, timeout) or a server-side 5xx. A 4xx means the server
@@ -43,7 +43,7 @@ pub struct Credentials {
 /// so one track failing on two services is two rows, one per service.
 pub async fn enqueue(
     db: &Db,
-    service: Service,
+    service: ScrobbleService,
     artist: &str,
     title: &str,
     album: Option<&str>,
@@ -91,7 +91,7 @@ pub async fn drain(db: &Db, creds: &Credentials) {
     }
     tracing::info!("draining scrobble queue ({} items)", rows.len());
 
-    let mut give_up: Vec<Service> = Vec::new();
+    let mut give_up: Vec<ScrobbleService> = Vec::new();
 
     for row in &rows {
         let service = row.service;
@@ -142,10 +142,14 @@ enum Outcome {
     NoCredentials,
 }
 
-async fn submit_one(service: Service, item: &QueuedScrobbleRow, creds: &Credentials) -> Outcome {
+async fn submit_one(
+    service: ScrobbleService,
+    item: &QueuedScrobbleRow,
+    creds: &Credentials,
+) -> Outcome {
     let album = item.album.as_deref();
     let result = match service {
-        Service::LastFm => {
+        ScrobbleService::LastFm => {
             let Some((key, secret, session)) = &creds.lastfm else {
                 return Outcome::NoCredentials;
             };
@@ -155,7 +159,7 @@ async fn submit_one(service: Service, item: &QueuedScrobbleRow, creds: &Credenti
                 .await
                 .map(|_| ())
         }
-        Service::LibreFm => {
+        ScrobbleService::LibreFm => {
             let Some(session) = &creds.librefm_session_key else {
                 return Outcome::NoCredentials;
             };
@@ -165,7 +169,7 @@ async fn submit_one(service: Service, item: &QueuedScrobbleRow, creds: &Credenti
                 .await
                 .map(|_| ())
         }
-        Service::ListenBrainz => {
+        ScrobbleService::ListenBrainz => {
             let Some(token) = &creds.listenbrainz_token else {
                 return Outcome::NoCredentials;
             };
@@ -234,7 +238,7 @@ mod tests {
 
         enqueue(
             &t.db,
-            Service::LastFm,
+            ScrobbleService::LastFm,
             "Artist",
             "Song",
             Some("Album"),
@@ -246,7 +250,7 @@ mod tests {
         info.insert("duration_ms".into(), serde_json::Value::from(180000));
         enqueue(
             &t.db,
-            Service::ListenBrainz,
+            ScrobbleService::ListenBrainz,
             "Artist",
             "Song",
             Some("Album"),
@@ -256,7 +260,7 @@ mod tests {
         .await;
         enqueue(
             &t.db,
-            Service::LastFm,
+            ScrobbleService::LastFm,
             "Artist",
             "Song",
             Some("Album"),
@@ -267,12 +271,12 @@ mod tests {
 
         let rows = t.db.scrobble_queue_all().await.unwrap();
         assert_eq!(rows.len(), 2);
-        let services: Vec<Service> = rows.iter().map(|r| r.service).collect();
-        assert!(services.contains(&Service::LastFm));
-        assert!(services.contains(&Service::ListenBrainz));
+        let services: Vec<ScrobbleService> = rows.iter().map(|r| r.service).collect();
+        assert!(services.contains(&ScrobbleService::LastFm));
+        assert!(services.contains(&ScrobbleService::ListenBrainz));
         let lb = rows
             .iter()
-            .find(|r| r.service == Service::ListenBrainz)
+            .find(|r| r.service == ScrobbleService::ListenBrainz)
             .unwrap();
         assert_eq!(lb.listen_info.as_deref(), Some(r#"{"duration_ms":180000}"#));
     }
@@ -280,7 +284,16 @@ mod tests {
     #[tokio::test]
     async fn drain_without_credentials_retains_queue() {
         let t = temp_db("nocreds").await;
-        enqueue(&t.db, Service::LastFm, "Artist", "Song", None, 42, None).await;
+        enqueue(
+            &t.db,
+            ScrobbleService::LastFm,
+            "Artist",
+            "Song",
+            None,
+            42,
+            None,
+        )
+        .await;
 
         drain(&t.db, &Credentials::default()).await;
 

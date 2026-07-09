@@ -188,7 +188,7 @@ pub fn schedule(
                         if scrobble::queue::is_transient(&error) {
                             scrobble::queue::enqueue(
                                 &db,
-                                scrobble::queue::Service::LastFm,
+                                scrobble::queue::ScrobbleService::LastFm,
                                 &track.artist,
                                 &track.title,
                                 Some(&track.album),
@@ -225,7 +225,7 @@ pub fn schedule(
                         if scrobble::queue::is_transient(&error) {
                             scrobble::queue::enqueue(
                                 &db,
-                                scrobble::queue::Service::LibreFm,
+                                scrobble::queue::ScrobbleService::LibreFm,
                                 &track.artist,
                                 &track.title,
                                 Some(&track.album),
@@ -262,7 +262,7 @@ pub fn schedule(
                         if scrobble::queue::is_transient(&error) {
                             scrobble::queue::enqueue(
                                 &db,
-                                scrobble::queue::Service::ListenBrainz,
+                                scrobble::queue::ScrobbleService::ListenBrainz,
                                 &track.artist,
                                 &track.title,
                                 Some(&track.album),
