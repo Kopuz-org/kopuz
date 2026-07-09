@@ -1,0 +1,8 @@
+# The release pipeline wields the AUR deploy key and publishes to users' machines.
+# Changes here require review from a release maintainer, on top of the normal
+# approving review, when merging into the protected `release` branch.
+/.github/workflows/release.yml   @UMCEKO @temidaradev
+/scripts/build-arch-tarball.sh   @UMCEKO @temidaradev
+/scripts/publish-aur.sh          @UMCEKO @temidaradev
+/scripts/check_release_version.sh @UMCEKO @temidaradev
+/packaging/aur/                  @UMCEKO @temidaradev

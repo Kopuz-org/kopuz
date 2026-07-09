@@ -1,0 +1,122 @@
+name: release
+
+# The `release` branch is the source of truth for published builds. Merging into
+# it (version bumped, gate green) cuts a release: the Linux tarball is built on
+# Arch so it links current distro sonames (fixes #512), attached to the GitHub
+# release, and pushed to the kopuz-bin AUR package. Flatpak / Windows / Nix jobs
+# hang off this same pipeline later.
+
+on:
+  push:
+    branches: [release]
+  pull_request:
+    branches: [release]
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  version-gate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.gate.outputs.version }}
+      should_build: ${{ steps.decide.outputs.should_build }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check version bump + consistency
+        id: gate
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            bash scripts/check_release_version.sh --require-bump
+          else
+            bash scripts/check_release_version.sh
+          fi
+
+      - name: Decide whether a build is needed
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ver="${{ steps.gate.outputs.version }}"
+          asset="kopuz_v${ver}_x86_64-linux.tar.gz"
+          have_asset=false
+          if gh release view "v${ver}" --json assets -q '.assets[].name' 2>/dev/null \
+               | grep -qx "$asset"; then
+            have_asset=true
+          fi
+          should_build=false
+          if [ "${{ github.event_name }}" != "pull_request" ] && [ "$have_asset" != true ]; then
+            should_build=true
+          fi
+          echo "release asset present: $have_asset -> should_build=$should_build"
+          echo "should_build=$should_build" >> "$GITHUB_OUTPUT"
+
+  build-arch-tarball:
+    needs: version-gate
+    if: needs.version-gate.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    outputs:
+      version: ${{ needs.version-gate.outputs.version }}
+    steps:
+      - name: Install git (for checkout inside container)
+        run: pacman -Sy --noconfirm --needed git
+      - uses: actions/checkout@v4
+      - name: Build Linux tarball on Arch
+        run: bash scripts/build-arch-tarball.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-tarball
+          path: dist/kopuz_v*_x86_64-linux.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: [version-gate, build-arch-tarball]
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Install tools
+        run: pacman -Syu --noconfirm --needed git github-cli openssh sudo base-devel
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-tarball
+          path: dist
+      - name: Attach tarball to the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ver="${{ needs.version-gate.outputs.version }}"
+          tarball="dist/kopuz_v${ver}_x86_64-linux.tar.gz"
+          if ! gh release view "v${ver}" >/dev/null 2>&1; then
+            gh release create "v${ver}" --target "$GITHUB_SHA" --title "v${ver}" --generate-notes
+          fi
+          gh release upload "v${ver}" "$tarball" --clobber
+      - name: Publish to AUR
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          ver="${{ needs.version-gate.outputs.version }}"
+          tarball="$PWD/dist/kopuz_v${ver}_x86_64-linux.tar.gz"
+          # makepkg refuses root: run the publish as an unprivileged builder.
+          useradd -m builder
+          echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
+          install -d -m700 -o builder -g builder /home/builder/.ssh
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > /home/builder/.ssh/id_ed25519
+          chmod 600 /home/builder/.ssh/id_ed25519
+          chown builder:builder /home/builder/.ssh/id_ed25519
+          chown -R builder:builder "$PWD"
+          sudo -u builder env \
+            VERSION="$ver" \
+            TARBALL="$tarball" \
+            PKGBUILD_TEMPLATE="$PWD/packaging/aur/PKGBUILD" \
+            GIT_SSH_COMMAND="ssh -i /home/builder/.ssh/id_ed25519 -o StrictHostKeyChecking=accept-new" \
+            bash scripts/publish-aur.sh
