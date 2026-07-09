@@ -109,8 +109,7 @@ pub async fn drain(db: &Db, creds: &Credentials) {
                 );
                 true
             }
-            Outcome::NoCredentials => true,
-            Outcome::Transient => {
+            Outcome::NoCredentials | Outcome::Transient => {
                 give_up.push(service);
                 false
             }
@@ -279,12 +278,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn drain_without_credentials_clears_queue() {
+    async fn drain_without_credentials_retains_queue() {
         let t = temp_db("nocreds").await;
         enqueue(&t.db, Service::LastFm, "Artist", "Song", None, 42, None).await;
 
         drain(&t.db, &Credentials::default()).await;
 
-        assert!(t.db.scrobble_queue_all().await.unwrap().is_empty());
+        assert_eq!(t.db.scrobble_queue_all().await.unwrap().len(), 1);
     }
 }
