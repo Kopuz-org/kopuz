@@ -84,8 +84,15 @@ jobs:
     container: archlinux:base-devel
     steps:
       - name: Install tools
-        run: pacman -Syu --noconfirm --needed git github-cli openssh sudo base-devel
+        # curl is makepkg's default download agent for fetching the release
+        # tarball during the AUR test-build; base-devel doesn't pull the CLI.
+        run: pacman -Syu --noconfirm --needed git github-cli openssh sudo base-devel curl
       - uses: actions/checkout@v4
+      # The job container runs as root while the checkout is owned by the runner
+      # user; git's dubious-ownership guard otherwise trips any git the gh CLI
+      # shells out to. GH_REPO also lets gh talk to the API without git at all.
+      - name: Trust workspace
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - uses: actions/download-artifact@v4
         with:
           name: linux-tarball
@@ -93,9 +100,11 @@ jobs:
       - name: Attach tarball to the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           ver="${{ needs.version-gate.outputs.version }}"
           tarball="dist/kopuz_v${ver}_x86_64-linux.tar.gz"
+          test -f "$tarball" || { echo "::error::tarball not at $tarball; dist:"; ls -R dist; exit 1; }
           if ! gh release view "v${ver}" >/dev/null 2>&1; then
             gh release create "v${ver}" --target "$GITHUB_SHA" --title "v${ver}" --generate-notes
           fi
@@ -115,6 +124,7 @@ jobs:
           chown builder:builder /home/builder/.ssh/id_ed25519
           chown -R builder:builder "$PWD"
           sudo -u builder env \
+            HOME=/home/builder \
             VERSION="$ver" \
             TARBALL="$tarball" \
             PKGBUILD_TEMPLATE="$PWD/packaging/aur/PKGBUILD" \
