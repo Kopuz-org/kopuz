@@ -596,13 +596,37 @@ impl PlayerController {
         // the post-load bookkeeping once the engine confirms playback.
         let mut ctrl = *self;
         let phys_idx = self.get_queue_index(idx);
-        let file_path = offline_path.or(local_path);
-        let station_id = id;
+        let station_id = id.clone();
+        let cached_item_id = id;
 
         let task = spawn(
             async move {
-                let factory: SourceFactory = if let Some(path) = file_path {
+                let factory: SourceFactory = if let Some(path) = local_path {
+                    // Local file — no network fallback exists for it.
                     Box::new(move || decoder::open_file(&path).map_err(|e| e.to_string()))
+                } else if let Some(path) = offline_path {
+                    // Cached server file: if it won't open (deleted, truncated,
+                    // permissions), fall back to the live server stream instead
+                    // of failing. The resolve runs on the decode worker via this
+                    // task's runtime handle — legal there, off the UI/actor.
+                    let source = ctrl.active_source.peek().clone();
+                    let rt_handle = tokio::runtime::Handle::current();
+                    Box::new(move || match decoder::open_file(&path) {
+                        Ok(parts) => Ok(parts),
+                        Err(e) => {
+                            tracing::warn!(error = %e, "cached file failed to open; falling back to the server stream");
+                            let info = rt_handle
+                                .block_on(source.resolve_stream(&cached_item_id))
+                                .map_err(|e| e.to_string())?;
+                            network_factory(
+                                info.url,
+                                info.format,
+                                info.user_agent,
+                                false,
+                                rt_handle.clone(),
+                            )()
+                        }
+                    })
                 } else {
                     let (stream_ref, _) = remote_ref.expect("classified as remote above");
                     let (stream_url, yt_format, yt_user_agent) =
@@ -660,77 +684,7 @@ impl PlayerController {
                     // thread with no runtime); StreamBuffer's download needs a
                     // runtime, so hand it a handle from this async task.
                     let rt_handle = tokio::runtime::Handle::current();
-                    Box::new(move || {
-                        let build = || -> std::io::Result<_> {
-                            if is_radio_item {
-                                let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
-                                    stream_url,
-                                    true,
-                                    yt_user_agent,
-                                    rt_handle,
-                                );
-                                Ok(decoder::from_stream_with_hint(stream, "ogg"))
-                            } else if let Some((fmt, range_safe)) = yt_format {
-                                if range_safe {
-                                    // YT: HTTP Range-backed source. Symphonia can
-                                    // seek freely (Matroska Cues at the end, scrub
-                                    // anywhere) and startup probes only fetch the
-                                    // ~512 KiB they need.
-                                    let range = utils::range_source::RangeStreamSource::new(
-                                        stream_url,
-                                        yt_user_agent,
-                                    )?;
-                                    let len = Some(range.total_size());
-                                    let (source, mut hint) =
-                                        decoder::from_stream_with_len(range, len);
-                                    hint.with_extension(fmt.extension());
-                                    Ok((source, hint))
-                                } else {
-                                    // No-pot fallback: googlevideo 403s deep ranges,
-                                    // and the probe reads the webm tail — stream
-                                    // sequentially instead of failing outright
-                                    // (issue #386). No scrubbing.
-                                    let stream =
-                                        utils::stream_buffer::StreamBuffer::with_user_agent(
-                                            stream_url,
-                                            false,
-                                            yt_user_agent,
-                                            rt_handle,
-                                        );
-                                    stream.wait_for_total_size();
-                                    let len = stream.known_total_size();
-                                    let (source, mut hint) =
-                                        decoder::from_stream_with_len(stream, len);
-                                    hint.with_extension(fmt.extension());
-                                    Ok((source, hint))
-                                }
-                            } else if let ResolvedStreamRef::SoundCloudHls(hls_url) =
-                                ResolvedStreamRef::parse(&stream_url)
-                            {
-                                // SoundCloud Go+ AAC: assemble the HLS playlist's
-                                // fMP4 segments into one in-memory buffer Symphonia
-                                // can decode (it has no HLS demuxer).
-                                let bytes =
-                                    utils::hls_source::assemble(hls_url, yt_user_agent.as_deref())?;
-                                let len = Some(bytes.len() as u64);
-                                let cursor = std::io::Cursor::new(bytes);
-                                let (source, mut hint) = decoder::from_stream_with_len(cursor, len);
-                                hint.with_extension("m4a");
-                                Ok((source, hint))
-                            } else {
-                                let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
-                                    stream_url,
-                                    false,
-                                    yt_user_agent,
-                                    rt_handle,
-                                );
-                                stream.wait_for_total_size();
-                                let len = stream.known_total_size();
-                                Ok(decoder::from_stream_with_len(stream, len))
-                            }
-                        };
-                        build().map_err(|e| e.to_string())
-                    })
+                    network_factory(stream_url, yt_format, yt_user_agent, is_radio_item, rt_handle)
                 };
 
                 let meta = NowPlayingMeta {
@@ -884,6 +838,82 @@ impl PlayerController {
 
         self.load_task.set(Some(task));
     }
+}
+
+/// Build a decode-worker source factory for a resolved network stream (radio,
+/// YT range/sequential, SoundCloud HLS, or a plain buffered stream). Returns a
+/// `SourceFactory` so the symphonia source/hint types stay inferred inside the
+/// boxed closure — callers (the remote path and the cached-file fallback) need
+/// not name them.
+fn network_factory(
+    stream_url: String,
+    yt_format: Option<(::server::ytmusic::player::AudioFormat, bool)>,
+    yt_user_agent: Option<String>,
+    is_radio: bool,
+    rt_handle: tokio::runtime::Handle,
+) -> SourceFactory {
+    Box::new(move || {
+        let build = || -> std::io::Result<_> {
+            if is_radio {
+                let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
+                    stream_url,
+                    true,
+                    yt_user_agent,
+                    rt_handle,
+                );
+                Ok(decoder::from_stream_with_hint(stream, "ogg"))
+            } else if let Some((fmt, range_safe)) = yt_format {
+                if range_safe {
+                    // YT: HTTP Range-backed source. Symphonia can seek freely
+                    // (Matroska Cues at the end, scrub anywhere) and startup
+                    // probes only fetch the ~512 KiB they need.
+                    let range =
+                        utils::range_source::RangeStreamSource::new(stream_url, yt_user_agent)?;
+                    let len = Some(range.total_size());
+                    let (source, mut hint) = decoder::from_stream_with_len(range, len);
+                    hint.with_extension(fmt.extension());
+                    Ok((source, hint))
+                } else {
+                    // No-pot fallback: googlevideo 403s deep ranges, and the
+                    // probe reads the webm tail — stream sequentially instead of
+                    // failing outright (issue #386). No scrubbing.
+                    let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
+                        stream_url,
+                        false,
+                        yt_user_agent,
+                        rt_handle,
+                    );
+                    stream.wait_for_total_size();
+                    let len = stream.known_total_size();
+                    let (source, mut hint) = decoder::from_stream_with_len(stream, len);
+                    hint.with_extension(fmt.extension());
+                    Ok((source, hint))
+                }
+            } else if let ResolvedStreamRef::SoundCloudHls(hls_url) =
+                ResolvedStreamRef::parse(&stream_url)
+            {
+                // SoundCloud Go+ AAC: assemble the HLS playlist's fMP4 segments
+                // into one in-memory buffer Symphonia can decode (no HLS demuxer).
+                let bytes = utils::hls_source::assemble(hls_url, yt_user_agent.as_deref())?;
+                let len = Some(bytes.len() as u64);
+                let cursor = std::io::Cursor::new(bytes);
+                let (source, mut hint) = decoder::from_stream_with_len(cursor, len);
+                hint.with_extension("m4a");
+                Ok((source, hint))
+            } else {
+                let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
+                    stream_url,
+                    false,
+                    yt_user_agent,
+                    rt_handle,
+                );
+                stream.wait_for_total_size();
+                let len = stream.known_total_size();
+                Ok(decoder::from_stream_with_len(stream, len))
+            }
+        };
+        build().map_err(|e| e.to_string())
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
