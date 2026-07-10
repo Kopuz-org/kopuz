@@ -135,12 +135,17 @@ struct Session {
     ring_epoch: u64,
 }
 
-struct Pending {
+/// Everything needed to start a probed source, independent of the reply.
+struct StartPlan {
     token: u64,
     worker: WorkerHandle,
     duration: Duration,
     transition: Transition,
     start_at: Option<Duration>,
+}
+
+struct Pending {
+    plan: StartPlan,
     reply: Option<LoadReply>,
 }
 
@@ -353,7 +358,7 @@ impl Actor {
     fn discard_pending(&mut self) {
         if let Some(old) = self.pending.take() {
             drop(old.reply);
-            self.graveyard.push(old.worker.join);
+            self.graveyard.push(old.plan.worker.join);
         }
     }
 
@@ -381,11 +386,13 @@ impl Actor {
             }
         };
         self.pending = Some(Pending {
-            token,
-            worker,
-            duration,
-            transition,
-            start_at,
+            plan: StartPlan {
+                token,
+                worker,
+                duration,
+                transition,
+                start_at,
+            },
             reply,
         });
         // Make the pending load visible in status right away, so the UI can see
@@ -400,7 +407,7 @@ impl Actor {
                 source_sample_rate,
                 seekable,
             } => {
-                if self.pending.as_ref().is_none_or(|p| p.token != token) {
+                if self.pending.as_ref().is_none_or(|p| p.plan.token != token) {
                     // Stale probe from a superseded load; its command sender is
                     // gone, so the worker exits by itself.
                     return;
@@ -417,12 +424,12 @@ impl Actor {
                 }
             }
             WorkerMsg::Failed { token, error } => {
-                if self.pending.as_ref().is_some_and(|p| p.token == token) {
+                if self.pending.as_ref().is_some_and(|p| p.plan.token == token) {
                     let pending = self.pending.take().expect("checked above");
                     if let Some(reply) = pending.reply {
                         let _ = reply.send(Err(error.clone()));
                     }
-                    self.graveyard.push(pending.worker.join);
+                    self.graveyard.push(pending.plan.worker.join);
                     self.emit(Event::Error {
                         token,
                         message: error,
@@ -436,24 +443,10 @@ impl Actor {
 
     /// A probed source is ready: decide crossfade vs immediate and start it.
     fn start_session(&mut self, pending: Pending, source_sample_rate: Option<u32>, seekable: bool) {
-        let Pending {
-            token,
-            worker,
-            duration,
-            transition,
-            start_at,
-            reply,
-        } = pending;
+        let Pending { plan, reply } = pending;
+        let token = plan.token;
 
-        match self.try_start_session(
-            token,
-            worker,
-            duration,
-            transition,
-            start_at,
-            source_sample_rate,
-            seekable,
-        ) {
+        match self.try_start_session(plan, source_sample_rate, seekable) {
             Ok(outcome) => {
                 // Publish before resolving the reply so a caller that reads
                 // status right after awaiting sees the new session.
@@ -481,17 +474,20 @@ impl Actor {
         error
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn try_start_session(
         &mut self,
-        token: u64,
-        worker: WorkerHandle,
-        duration: Duration,
-        transition: Transition,
-        start_at: Option<Duration>,
+        plan: StartPlan,
         source_sample_rate: Option<u32>,
         seekable: bool,
     ) -> Result<LoadOutcome, String> {
+        let StartPlan {
+            token,
+            worker,
+            duration,
+            transition,
+            start_at,
+        } = plan;
+
         let desired_config = match self.sink.probe_config(source_sample_rate) {
             Ok(config) => config,
             Err(e) => return Err(self.abort_start(worker, e)),
@@ -504,54 +500,30 @@ impl Actor {
         // Crossfade needs a live, audible outgoing session on the same stream
         // config. While paused we fall back to an immediate switch and stay
         // paused instead of blasting audio through the user's pause; a drained
-        // (ended) outgoing session has nothing left to fade out.
-        let fade = fade.filter(|_| {
-            self.current.as_ref().is_some_and(|c| !c.ended)
-                && !self.paused.load(Ordering::Relaxed)
+        // (ended) outgoing session has nothing left to fade out. Take the
+        // outgoing session here so the invariant ("a fade has an outgoing") is
+        // local — no expect on a separately-checked condition.
+        let outgoing = fade.filter(|_| {
+            !self.paused.load(Ordering::Relaxed)
                 && self.sink.config() == Some(desired_config)
                 && self.rt_tx.is_some()
         });
+        let outgoing = outgoing.and_then(|fade| {
+            self.current
+                .take_if(|c| !c.ended)
+                .map(|session| (fade, session))
+        });
 
-        if let Some(fade) = fade {
-            let config = desired_config;
-            let RingParts {
-                producer,
-                written,
-                played,
-                rt_session,
-            } = make_ring(config);
-            let fade_frames = (fade.as_secs_f64() * config.sample_rate as f64).round() as u64;
-
+        // Branch only on the fade decision; the ring/start/swap/install tail is
+        // shared. `config`, `fade_frames`, and `crossfaded` capture the delta.
+        let (config, fade_frames, crossfaded) = if let Some((fade, outgoing)) = outgoing {
             self.stop_fading();
-            let outgoing = self.current.take().expect("crossfade requires a session");
             self.fading = Some(outgoing);
-
-            let _ = worker.cmd_tx.send(WorkerCmd::Start {
-                producer,
-                written: written.clone(),
-                channels: config.channels,
-                sample_rate: config.sample_rate,
-                start_at,
-                epoch: 0,
-            });
-            self.send_rt(RtCmd::Swap {
-                session: rt_session,
-                fade_frames: Some(fade_frames.max(1)),
-            });
-
-            self.install_session(
-                token,
-                worker,
-                written,
-                played,
-                duration,
-                seekable,
-                source_sample_rate,
-                start_at,
-            );
-            Ok(LoadOutcome { crossfaded: true })
+            let fade_frames =
+                (fade.as_secs_f64() * desired_config.sample_rate as f64).round() as u64;
+            (desired_config, Some(fade_frames.max(1)), true)
         } else {
-            // Immediate switch: stop the outgoing sessions first.
+            // Immediate switch: retire the outgoing sessions first.
             if let Some(current) = self.current.take() {
                 self.retire_session(current);
             }
@@ -566,64 +538,39 @@ impl Actor {
                 return Err(self.abort_start(worker, "no output stream".to_string()));
             };
 
-            let RingParts {
-                producer,
-                written,
-                played,
-                rt_session,
-            } = make_ring(config);
-            let _ = worker.cmd_tx.send(WorkerCmd::Start {
-                producer,
-                written: written.clone(),
-                channels: config.channels,
-                sample_rate: config.sample_rate,
-                start_at,
-                epoch: 0,
-            });
-            self.send_rt(RtCmd::Swap {
-                session: rt_session,
-                fade_frames: None,
-            });
-
             // A load un-pauses, including the device — a paused stream would
             // play the new track silently. Exception: a crossfade that fell
             // back *because* the user is paused honors the pause instead of
             // blasting the next track through it; it starts on Resume.
-            let honor_pause = matches!(transition, Transition::Crossfade(f) if !f.is_zero())
-                && self.paused.load(Ordering::Relaxed);
+            let honor_pause = fade.is_some() && self.paused.load(Ordering::Relaxed);
             if !honor_pause {
                 self.paused.store(false, Ordering::Relaxed);
                 if let Err(e) = self.sink.play() {
                     tracing::warn!(error = %e, "failed to start output stream");
                 }
             }
+            (config, None, false)
+        };
 
-            self.install_session(
-                token,
-                worker,
-                written,
-                played,
-                duration,
-                seekable,
-                source_sample_rate,
-                start_at,
-            );
-            Ok(LoadOutcome { crossfaded: false })
-        }
-    }
+        let RingParts {
+            producer,
+            written,
+            played,
+            rt_session,
+        } = make_ring(config);
+        let _ = worker.cmd_tx.send(WorkerCmd::Start {
+            producer,
+            written: written.clone(),
+            channels: config.channels,
+            sample_rate: config.sample_rate,
+            start_at,
+            epoch: 0,
+        });
+        self.send_rt(RtCmd::Swap {
+            session: rt_session,
+            fade_frames,
+        });
 
-    #[allow(clippy::too_many_arguments)]
-    fn install_session(
-        &mut self,
-        token: u64,
-        worker: WorkerHandle,
-        written: Arc<AtomicU64>,
-        played: Arc<AtomicU64>,
-        duration: Duration,
-        seekable: bool,
-        source_sample_rate: Option<u32>,
-        start_at: Option<Duration>,
-    ) {
         self.current = Some(Session {
             token,
             worker,
@@ -638,6 +585,7 @@ impl Actor {
             ring_epoch: 0,
         });
         self.last_token = token;
+        Ok(LoadOutcome { crossfaded })
     }
 
     /// Stop a worker and detach its join handle into the graveyard. Never
@@ -918,7 +866,7 @@ impl Actor {
         let paused = self.paused.load(Ordering::Relaxed);
         let channels = config.map(|c| c.channels as u32).unwrap_or(0);
         let sample_rate = config.map(|c| c.sample_rate).unwrap_or(0);
-        let pending_token = self.pending.as_ref().map(|p| p.token);
+        let pending_token = self.pending.as_ref().map(|p| p.plan.token);
         let fading = self.fading.as_ref().map(|f| FadingStatus {
             token: f.token,
             duration: f.duration,
@@ -1035,7 +983,7 @@ impl Actor {
         // needs no explicit Stop.
         if let Some(pending) = self.pending.take() {
             drop(pending.reply);
-            self.graveyard.push(pending.worker.join);
+            self.graveyard.push(pending.plan.worker.join);
         }
         if let Some(current) = self.current.take() {
             self.retire_session(current);
