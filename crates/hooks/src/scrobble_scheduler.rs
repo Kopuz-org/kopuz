@@ -37,8 +37,8 @@ pub fn schedule(
     track: Track,
     item_id: Option<String>,
     config: Signal<AppConfig>,
-    play_generation: Signal<usize>,
-    generation: usize,
+    session_token: Signal<u64>,
+    generation: u64,
     is_playing: Signal<bool>,
     active_source: Option<Signal<::server::source::ActiveSource>>,
     options: ScrobbleOptions,
@@ -55,14 +55,14 @@ pub fn schedule(
     schedule_playing_now_heartbeat(
         &track,
         config,
-        play_generation,
+        session_token,
         generation,
         is_playing,
         options,
     );
 
     spawn_in_scope(
-        play_generation.origin_scope(),
+        session_token.origin_scope(),
         async move {
             if duration_secs < 30 {
                 tracing::info!(
@@ -135,7 +135,7 @@ pub fn schedule(
 
             let reached = wait_for_playtime(
                 Duration::from_secs(threshold_secs),
-                play_generation,
+                session_token,
                 generation,
                 is_playing,
             )
@@ -300,8 +300,8 @@ pub fn schedule(
 fn schedule_playing_now_heartbeat(
     track: &Track,
     config: Signal<AppConfig>,
-    play_generation: Signal<usize>,
-    generation: usize,
+    session_token: Signal<u64>,
+    generation: u64,
     is_playing: Signal<bool>,
     options: ScrobbleOptions,
 ) {
@@ -319,12 +319,12 @@ fn schedule_playing_now_heartbeat(
     let span = tracing::info_span!("scrobble.playing_now", track = track.id.uid().as_str());
 
     spawn_in_scope(
-        play_generation.origin_scope(),
+        session_token.origin_scope(),
         async move {
             let mut announced = false;
             let mut idle_secs: u64 = 0;
             loop {
-                if *play_generation.read() != generation {
+                if *session_token.read() != generation {
                     return;
                 }
 
@@ -407,8 +407,8 @@ fn spawn_in_scope(scope: ScopeId, fut: impl std::future::Future<Output = ()> + '
 
 async fn wait_for_playtime(
     threshold: Duration,
-    play_generation: Signal<usize>,
-    generation: usize,
+    session_token: Signal<u64>,
+    generation: u64,
     is_playing: Signal<bool>,
 ) -> bool {
     let tick = Duration::from_secs(1);
@@ -417,7 +417,7 @@ async fn wait_for_playtime(
     while played < threshold {
         tokio::time::sleep(tick).await;
 
-        if *play_generation.read() != generation {
+        if *session_token.read() != generation {
             return false;
         }
 

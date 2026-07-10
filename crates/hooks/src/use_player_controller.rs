@@ -19,6 +19,38 @@ pub enum LoopMode {
     Track,
 }
 
+/// What the UI intends to be playing, and the token that identifies it. The
+/// engine session token is minted here (monotonic) and passed through Load; the
+/// controller filters engine events by it, so a superseded or cancelled load's
+/// events fall away instead of needing three separate cancellation mechanisms.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum PlaybackIntent {
+    /// Nothing should be audible (end of queue, backend switch, failed load).
+    Stopped,
+    /// A load pipeline is in flight for `token`, targeting queue slot `idx`.
+    Loading {
+        token: u64,
+        idx: usize,
+        crossfade: bool,
+    },
+    /// The engine confirmed session `token`; the UI displays it (or, mid-fade,
+    /// its predecessor).
+    Committed { token: u64 },
+}
+
+impl PlaybackIntent {
+    pub(crate) fn token(self) -> u64 {
+        match self {
+            Self::Stopped => 0,
+            Self::Loading { token, .. } | Self::Committed { token } => token,
+        }
+    }
+
+    pub(crate) fn is_loading(self) -> bool {
+        matches!(self, Self::Loading { .. })
+    }
+}
+
 impl LoopMode {
     pub fn next(&self) -> Self {
         match self {
@@ -33,11 +65,9 @@ impl LoopMode {
 pub struct PlayerController {
     pub player: Signal<Player>,
     pub is_playing: Signal<bool>,
-    /// A track load is in flight: from the moment a transition starts until
-    /// the engine reports the source playing (or failed). Auto-advance and
-    /// crossfade arming gate on this; it is cleared only by the load task's
-    /// completion or by the flows that cancel the task (end-of-queue, backend
-    /// switch), so it cannot stick.
+    /// A track load is in flight. Written only through `set_intent`, so it
+    /// tracks the intent (`Loading` ⇒ true) and can't be left stuck by a bail
+    /// or cancel that forgets to clear it.
     pub is_loading: Signal<bool>,
     pub history: Signal<Vec<usize>>,
     pub queue: Signal<Vec<Track>>,
@@ -63,7 +93,17 @@ pub struct PlayerController {
     /// player reads this shared handle to resolve streams instead of rebuilding
     /// the source (and its HTTP client) on every play/skip.
     pub active_source: Signal<::server::source::ActiveSource>,
-    pub play_generation: Signal<usize>,
+    /// What the UI intends to be playing; the single source of `is_loading` and
+    /// the authority every cancellation site routes through.
+    pub(crate) intent: Signal<PlaybackIntent>,
+    /// Monotonic session-token allocator (0 = none).
+    pub(crate) next_token: Signal<u64>,
+    /// Mirror of the current intent's token as a plain `Signal` (not a memo) so
+    /// the scrobble scheduler can scope tasks to it via `origin_scope`.
+    pub(crate) current_token: Signal<u64>,
+    /// The session token a crossfade last armed for; cleared on a seek so a
+    /// fresh fade can arm at the outgoing track's real end.
+    pub(crate) armed_transition: Signal<Option<u64>>,
     pub(crate) pending_resume: Signal<Option<PendingResumeState>>,
     pub pending_crossfade_ui: Signal<Option<PendingCrossfadeUiState>>,
     pub radio_task: Signal<Option<dioxus_core::Task>>,
@@ -241,6 +281,33 @@ impl PlayerController {
         self.player.peek().cancel_pending_load();
     }
 
+    /// Mint the next session token.
+    pub(crate) fn allocate_token(&mut self) -> u64 {
+        let token = self.next_token.peek().wrapping_add(1);
+        self.next_token.set(token);
+        token
+    }
+
+    /// The single writer of playback intent. Keeps `is_loading` and the
+    /// `current_token` mirror in lockstep so no cancellation path can leave a
+    /// stale loading flag or token behind.
+    pub(crate) fn set_intent(&mut self, next: PlaybackIntent) {
+        self.is_loading.set(next.is_loading());
+        self.current_token.set(next.token());
+        self.intent.set(next);
+    }
+
+    /// Report a load failure for `token`, unless a newer load already
+    /// superseded it. Shared by the pipeline's two failure paths.
+    pub(crate) fn fail_load(&mut self, token: u64, error: impl std::fmt::Display) {
+        if self.intent.peek().token() != token {
+            return;
+        }
+        self.playback_error
+            .set(Some(format!("Couldn't load this track:\n{error}")));
+        self.set_intent(PlaybackIntent::Stopped);
+    }
+
     /// Seek the current track. All progress-bar / lyric scrubbers route here.
     /// The engine services seeks even after a track ended (the parked decode
     /// worker re-seeks in place), so no re-open dance is needed.
@@ -248,10 +315,10 @@ impl PlayerController {
         // During a crossfade the bar shows the outgoing track while the engine
         // fades in the next one. The engine's seek cancels the fade and seeks
         // the outgoing (visible) track in place, so drop the deferred UI and
-        // bump the generation to let a fresh crossfade arm at its real end.
+        // clear the arm so a fresh crossfade can fire at its real end.
         if self.pending_crossfade_ui.peek().is_some() {
             self.clear_pending_crossfade_ui();
-            self.play_generation.with_mut(|g| *g += 1);
+            self.armed_transition.set(None);
         }
         self.player.peek().seek(time);
         self.current_song_progress.set(time.as_secs());
@@ -343,15 +410,9 @@ impl PlayerController {
         idx: usize,
         allow_crossfade: bool,
     ) {
-        self.play_generation.with_mut(|g| *g += 1);
-        let current_gen = *self.play_generation.peek();
-        // Starting a new track clears the previous track's error banner —
-        // otherwise a 403 from a skipped YT track lingers on screen.
-        self.playback_error.set(None);
-        self.cancel_radio_task();
-        // A superseded load must never write back: cancel its task outright.
-        self.cancel_load_task();
-
+        // ── Phase 1: classify (no mutation beyond stale-cache eviction) ──
+        // Every early bail below happens here, before any state is touched, so a
+        // rejected request can't leave the loading flag or intent half-set.
         let Some(track) = self.get_track_at(idx) else {
             return;
         };
@@ -364,9 +425,6 @@ impl PlayerController {
         let outgoing_duration_secs = *self.current_song_duration.peek();
         let outgoing_progress_secs =
             (*self.current_song_progress.peek()).min(outgoing_duration_secs);
-        if !use_crossfade {
-            self.clear_pending_crossfade_ui();
-        }
         let crossfade_duration = Duration::from_secs(self.config.peek().crossfade_seconds as u64);
         let item_ref = PlaybackItemRef::parse(&path_str);
         let is_radio_item = item_ref.is_radio();
@@ -449,6 +507,23 @@ impl PlayerController {
             return;
         }
 
+        // ── Phase 2: commit to loading this track ────────────────────────
+        // Past this point state is mutated, so it only runs once the request is
+        // known playable. Cancelling the prior load is a resource optimization
+        // (the token guards correctness); the new intent sets is_loading.
+        self.playback_error.set(None);
+        self.cancel_radio_task();
+        self.cancel_load_task();
+        if !use_crossfade {
+            self.clear_pending_crossfade_ui();
+        }
+        let token = self.allocate_token();
+        self.set_intent(PlaybackIntent::Loading {
+            token,
+            idx,
+            crossfade: use_crossfade,
+        });
+
         let cover_url: String = if offline_path.is_some() {
             self.cover_url_for_track(&track)
         } else if let Some((_, cover)) = &remote_ref {
@@ -477,7 +552,6 @@ impl PlayerController {
                 self.current_song_cover_url.set(cover_url.clone());
             }
         }
-        self.is_loading.set(true);
 
         // ── the load pipeline ───────────────────────────────────────────
         // One cancellable task for every source kind: resolve the stream URL
@@ -536,9 +610,7 @@ impl PlayerController {
                                     }
                                     Err(e) => {
                                         tracing::error!(error = %e, "stream URL resolve failed");
-                                        ctrl.playback_error
-                                            .set(Some(format!("Couldn't load this track:\n{e}")));
-                                        ctrl.is_loading.set(false);
+                                        ctrl.fail_load(token, &e);
                                         return;
                                     }
                                 }
@@ -642,7 +714,7 @@ impl PlayerController {
                     .map(Duration::from_secs);
                 let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
                 ctrl.player.write().load(LoadArgs {
-                    token: current_gen as u64,
+                    token,
                     factory,
                     meta,
                     transition,
@@ -652,7 +724,8 @@ impl PlayerController {
 
                 match reply_rx.await {
                     Ok(Ok(outcome)) => {
-                        ctrl.is_loading.set(false);
+                        // The engine confirmed this session; the UI now owns it.
+                        ctrl.set_intent(PlaybackIntent::Committed { token });
                         if clear_pending_resume_on_success {
                             ctrl.pending_resume.set(None);
                         }
@@ -712,8 +785,8 @@ impl PlayerController {
                                 track.clone(),
                                 item_id,
                                 ctrl.config,
-                                ctrl.play_generation,
-                                current_gen,
+                                ctrl.current_token,
+                                token,
                                 ctrl.is_playing,
                                 source,
                                 options,
@@ -727,7 +800,7 @@ impl PlayerController {
                                 let cover_url = cover_url.clone();
                                 let track = track.clone();
                                 let mut player = ctrl.player;
-                                let play_generation = ctrl.play_generation;
+                                let current_token = ctrl.current_token;
                                 spawn(
                                     async move {
                                         if let Ok(response) = reqwest::get(&cover_url).await
@@ -739,7 +812,7 @@ impl PlayerController {
                                                 .join(format!("kopuz_cover_{}.jpg", random_id));
 
                                             if tokio::fs::write(&file_path, bytes).await.is_ok()
-                                                && *play_generation.read() == current_gen
+                                                && *current_token.read() == token
                                             {
                                                 let path_str =
                                                     file_path.to_string_lossy().to_string();
@@ -763,13 +836,12 @@ impl PlayerController {
                     }
                     Ok(Err(e)) => {
                         tracing::error!(error = %e, "playback failed");
-                        ctrl.playback_error
-                            .set(Some(format!("Couldn't load this track:\n{e}")));
-                        ctrl.is_loading.set(false);
+                        ctrl.fail_load(token, &e);
                     }
                     Err(_) => {
-                        // Cancelled engine-side (superseded or stopped) —
-                        // whichever flow did that owns the flags now.
+                        // Cancelled engine-side (superseded or stopped) — the
+                        // token no longer matches, so any stray write-back is
+                        // ignored; whichever flow cancelled owns the intent.
                     }
                 }
             }
@@ -800,7 +872,10 @@ pub fn use_player_controller(
     config_loaded_ok: Signal<bool>,
     db_handle: db::Db,
 ) -> PlayerController {
-    let play_generation = use_signal(|| 0);
+    let intent = use_signal(|| PlaybackIntent::Stopped);
+    let next_token = use_signal(|| 0u64);
+    let current_token = use_signal(|| 0u64);
+    let armed_transition = use_signal(|| None);
     let is_loading = use_signal(|| false);
     let history = use_signal(Vec::new);
     let shuffle = use_signal(|| false);
@@ -870,7 +945,10 @@ pub fn use_player_controller(
         config,
         db,
         active_source,
-        play_generation,
+        intent,
+        next_token,
+        current_token,
+        armed_transition,
         pending_resume,
         pending_crossfade_ui,
         radio_task,

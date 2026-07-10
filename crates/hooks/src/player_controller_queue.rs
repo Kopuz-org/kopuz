@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 use reader::Track;
 
 use crate::playback_ref::PlaybackItemRef;
-use crate::use_player_controller::{LoopMode, PlayerController};
+use crate::use_player_controller::{LoopMode, PlaybackIntent, PlayerController};
 
 impl PlayerController {
     pub fn play_next(&mut self) {
@@ -49,12 +49,12 @@ impl PlayerController {
                 if !Self::has_following_track(idx, queue_len, loop_mode) {
                     // End of queue: kill any in-flight load (e.g. a crossfade
                     // that armed just before this skip) both controller- and
-                    // engine-side, so it can't restart playback later, and
-                    // clear is_loading since no load task will.
+                    // engine-side, so it can't restart playback later. Stopped
+                    // intent clears is_loading; a later Loaded for a superseded
+                    // token is dropped by the pump's stale-Loaded rule.
                     self.cancel_load_task();
-                    self.play_generation.with_mut(|g| *g += 1);
                     self.clear_pending_crossfade_ui();
-                    self.is_loading.set(false);
+                    self.set_intent(PlaybackIntent::Stopped);
                     self.player.peek().pause();
                     self.is_playing.set(false);
                     return;
@@ -311,11 +311,10 @@ impl PlayerController {
         // stream open, etc.) so its eventual completion doesn't start playback
         // against the cleared queue or post a stale error banner.
         self.cancel_load_task();
-        self.play_generation.with_mut(|g| *g += 1);
+        self.set_intent(PlaybackIntent::Stopped);
         self.cancel_radio_task();
         self.player.peek().stop_for_transition();
         self.is_playing.set(false);
-        self.is_loading.set(false);
         self.queue.write().clear();
         self.history.write().clear();
         self.current_queue_index.set(0);
@@ -328,6 +327,19 @@ impl PlayerController {
         let is_radio = self
             .get_track_at(idx)
             .is_some_and(|t| PlaybackItemRef::parse(&t.id.uid()).is_radio());
+
+        // Pausing while a load is still resolving cancels it — otherwise the
+        // load task's cancelled reply would leave is_loading stuck (the
+        // radio-connect spinner leak). A non-radio track records a resume point
+        // so Play continues where the load left off.
+        if self.intent.peek().is_loading() {
+            self.cancel_load_task();
+            if !is_radio && let Some(track) = self.get_track_at(idx) {
+                let progress_secs = (*self.current_song_progress.peek()).min(track.duration);
+                self.set_pending_resume_for_track(&track, progress_secs);
+            }
+            self.set_intent(PlaybackIntent::Stopped);
+        }
 
         if is_radio {
             self.player.peek().stop_for_transition();
@@ -464,7 +476,7 @@ impl PlayerController {
         self.clear_pending_crossfade_ui();
         self.player.write().stop();
         self.is_playing.set(false);
-        self.is_loading.set(false);
+        self.set_intent(PlaybackIntent::Stopped);
         self.history.set(Vec::new());
         self.queue.set(queue);
         self.shuffle.set(shuffle_enabled);

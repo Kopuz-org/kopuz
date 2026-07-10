@@ -231,7 +231,6 @@ pub fn use_player_task(ctrl: PlayerController) {
         async move {
             let mut last_progress_secs: u64 = u64::MAX;
             let mut prev_playing = false;
-            let mut crossfade_triggered_for_gen: Option<usize> = None;
             let mut last_recent_path: Option<String> = None;
             let bg_notify = BG_NOTIFY.get_or_init(tokio::sync::Notify::new);
             // Engine events (Position once per second while playing, Ended,
@@ -513,7 +512,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                 if is_playing {
                     let duration = *ctrl.current_song_duration.read();
                     let pos_secs = pos.as_secs().min(duration);
-                    let current_gen = *ctrl.play_generation.read();
+                    let current_token = *ctrl.current_token.read();
                     if !defer_player_progress && pos_secs != last_progress_secs {
                         last_progress_secs = pos_secs;
                         ctrl.current_song_progress.set(pos_secs);
@@ -616,10 +615,10 @@ pub fn use_player_task(ctrl: PlayerController) {
                         && ctrl.should_crossfade()
                         && ctrl.has_next_track()
                         && remaining_secs <= config.read().crossfade_seconds as u64
-                        && crossfade_triggered_for_gen != Some(current_gen);
+                        && *ctrl.armed_transition.peek() != Some(current_token);
 
                     if should_crossfade && !transition_in_flight {
-                        crossfade_triggered_for_gen = Some(current_gen);
+                        ctrl.armed_transition.set(Some(current_token));
                         {
                             let mut config_write = config.write();
                             let idx = *ctrl.current_queue_index.peek();
