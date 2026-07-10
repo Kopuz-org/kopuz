@@ -126,6 +126,10 @@ struct Session {
     source_sample_rate: Option<u32>,
     eof: bool,
     ended: bool,
+    /// Ring generation, bumped on every seek. The worker echoes it on `Eof`
+    /// so an `Eof` in flight across a seek is ignored (it targets the ring the
+    /// seek already replaced) instead of ending the freshly-seeked session.
+    ring_epoch: u64,
 }
 
 struct Pending {
@@ -366,9 +370,10 @@ impl Actor {
                 let pending = self.pending.take().expect("checked above");
                 self.start_session(pending, source_sample_rate, seekable);
             }
-            WorkerMsg::Eof { token } => {
+            WorkerMsg::Eof { token, epoch } => {
                 if let Some(current) = &mut self.current
                     && current.token == token
+                    && current.ring_epoch == epoch
                 {
                     current.eof = true;
                 }
@@ -488,6 +493,7 @@ impl Actor {
                 channels: config.channels,
                 sample_rate: config.sample_rate,
                 start_at,
+                epoch: 0,
             });
             self.send_rt(RtCmd::Swap {
                 session: rt_session,
@@ -533,6 +539,7 @@ impl Actor {
                 channels: config.channels,
                 sample_rate: config.sample_rate,
                 start_at,
+                epoch: 0,
             });
             self.send_rt(RtCmd::Swap {
                 session: rt_session,
@@ -589,6 +596,7 @@ impl Actor {
             source_sample_rate,
             eof: false,
             ended: false,
+            ring_epoch: 0,
         });
         self.last_token = token;
     }
@@ -640,12 +648,16 @@ impl Actor {
             Duration::ZERO
         };
 
-        // Fresh ring: pre-seek samples die with the old one, no drain races.
+        // Fresh ring: pre-seek samples die with the old one, no drain races. Bump
+        // the ring generation first so a pre-seek Eof still in flight from the
+        // worker is dropped instead of ending the seeked session.
+        current.ring_epoch += 1;
         let ring = make_ring(config);
         let _ = current.worker.cmd_tx.send(WorkerCmd::Seek {
             target,
             producer: ring.producer,
             written: ring.written.clone(),
+            epoch: current.ring_epoch,
         });
         current.written = ring.written;
         current.played = ring.played;

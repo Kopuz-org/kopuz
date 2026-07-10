@@ -32,6 +32,8 @@ pub(crate) enum WorkerCmd {
         channels: usize,
         sample_rate: u32,
         start_at: Option<Duration>,
+        /// Ring generation this decode feeds; echoed back on `Eof`.
+        epoch: u64,
     },
     /// Re-seek and switch to a fresh ring (the old one was swapped out of the
     /// audio callback; pre-seek samples die with it).
@@ -39,6 +41,9 @@ pub(crate) enum WorkerCmd {
         target: Duration,
         producer: rtrb::Producer<f32>,
         written: Arc<AtomicU64>,
+        /// New ring generation; a stale `Eof` tagged with the old epoch is
+        /// dropped by the actor rather than ending the freshly-seeked session.
+        epoch: u64,
     },
     Stop,
 }
@@ -50,8 +55,10 @@ pub(crate) enum WorkerMsg {
         source_sample_rate: Option<u32>,
         seekable: bool,
     },
-    /// Natural end of the source. The worker stays parked and seekable.
-    Eof { token: u64 },
+    /// Natural end of the source. The worker stays parked and seekable. The
+    /// epoch identifies which ring generation ended, so an `Eof` that races a
+    /// seek can't end the new ring.
+    Eof { token: u64, epoch: u64 },
     /// Source construction / probe / codec setup failed before playback.
     Failed { token: u64, error: String },
 }
@@ -76,6 +83,8 @@ pub(crate) fn spawn(
 struct Output {
     producer: rtrb::Producer<f32>,
     written: Arc<AtomicU64>,
+    /// Ring generation, from the `Start`/`Seek` that installed this ring.
+    epoch: u64,
 }
 
 enum FlowChange {
@@ -168,6 +177,7 @@ fn run(
             channels,
             sample_rate,
             start_at,
+            epoch,
         }) => {
             if let Some(target) = start_at {
                 let outcome = seek_reader(format.as_mut(), decoder.as_mut(), track_id, target);
@@ -181,7 +191,15 @@ fn run(
                     }
                 }
             }
-            (Output { producer, written }, channels, sample_rate)
+            (
+                Output {
+                    producer,
+                    written,
+                    epoch,
+                },
+                channels,
+                sample_rate,
+            )
         }
         _ => return,
     };
@@ -239,13 +257,19 @@ fn run(
         let packet = match format.next_packet() {
             Ok(Some(p)) => p,
             Ok(None) => {
-                send(WorkerMsg::Eof { token });
+                send(WorkerMsg::Eof {
+                    token,
+                    epoch: output.epoch,
+                });
                 park_and_handle!()
             }
             Err(symphonia::core::errors::Error::IoError(ref e))
                 if e.kind() == std::io::ErrorKind::UnexpectedEof =>
             {
-                send(WorkerMsg::Eof { token });
+                send(WorkerMsg::Eof {
+                    token,
+                    epoch: output.epoch,
+                });
                 park_and_handle!()
             }
             Err(symphonia::core::errors::Error::ResetRequired) => {
@@ -254,7 +278,10 @@ fn run(
             }
             Err(e) => {
                 tracing::warn!(error = %e, "format error — ending track");
-                send(WorkerMsg::Eof { token });
+                send(WorkerMsg::Eof {
+                    token,
+                    epoch: output.epoch,
+                });
                 park_and_handle!()
             }
         };
@@ -271,7 +298,10 @@ fn run(
             }
             Err(e) => {
                 tracing::error!(error = %e, "fatal decode error");
-                send(WorkerMsg::Eof { token });
+                send(WorkerMsg::Eof {
+                    token,
+                    epoch: output.epoch,
+                });
                 park_and_handle!()
             }
         };
@@ -322,8 +352,13 @@ fn park_at_eof(
                 target,
                 producer,
                 written,
+                epoch,
             }) => {
-                *output = Output { producer, written };
+                *output = Output {
+                    producer,
+                    written,
+                    epoch,
+                };
                 return match seek_reader(format, decoder, track_id, target) {
                     SeekOutcome::Done => ParkOutcome::Resume,
                     SeekOutcome::NeedsReprobe(t) => ParkOutcome::Reprobe(t),
@@ -352,8 +387,13 @@ fn drain_commands(
                 target,
                 producer,
                 written,
+                epoch,
             }) => {
-                *output = Output { producer, written };
+                *output = Output {
+                    producer,
+                    written,
+                    epoch,
+                };
                 match seek_reader(format, decoder, track_id, target) {
                     SeekOutcome::Done => seeked = true,
                     SeekOutcome::NeedsReprobe(t) => return Some(FlowChange::Reprobe(t)),

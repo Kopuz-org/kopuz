@@ -289,6 +289,107 @@ fn eof_emits_ended_once_and_seek_revives() {
     engine.shutdown();
 }
 
+/// A `Read + Seek` WAV source whose reads block while the gate is closed, so a
+/// test can hold the decode worker at zero bytes written into a fresh ring.
+struct GatedReader {
+    inner: std::io::Cursor<Vec<u8>>,
+    gate: Arc<(Mutex<bool>, std::sync::Condvar)>,
+}
+
+impl std::io::Read for GatedReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let (lock, cvar) = &*self.gate;
+        let mut closed = lock.lock().unwrap();
+        while *closed {
+            closed = cvar.wait(closed).unwrap();
+        }
+        drop(closed);
+        self.inner.read(buf)
+    }
+}
+
+impl std::io::Seek for GatedReader {
+    fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
+        self.inner.seek(pos)
+    }
+}
+
+#[test]
+fn stale_eof_after_seek_does_not_end_session() {
+    // A worker Eof that crosses a seek carries the pre-seek ring epoch. If the
+    // actor honored it, it would re-latch `eof` on the freshly-seeked session
+    // whose new ring reads played == written == 0, and the next tick would fire
+    // a spurious Ended that auto-advances mid-track. The fix drops the stale Eof
+    // by ring epoch.
+    //
+    // Determinism: the gate holds the worker inside a blocked read once closed,
+    // so after the seek installs a fresh (empty) ring the worker cannot write to
+    // it — played == written == 0 is pinned while the stale Eof is delivered.
+    let gate = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+    let frames = 5 * TEST_CONFIG.sample_rate as usize;
+    let bytes = wav_bytes(frames, TEST_CONFIG.sample_rate, TEST_CONFIG.channels as u16);
+    let reader_gate = gate.clone();
+    let factory: SourceFactory = Box::new(move || {
+        Ok(crate::decoder::from_stream(GatedReader {
+            inner: std::io::Cursor::new(bytes),
+            gate: reader_gate,
+        }))
+    });
+
+    let (sink, engine, actor_tx) = spawn_engine_with_tx();
+    let mut events = engine_subscribe(&engine);
+    let mut seen = Vec::new();
+
+    load(&engine, 1, factory, Duration::from_secs(5));
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    wait_until("non-silent audio", || {
+        sink.pull(4096).iter().any(|s| *s != 0.0)
+    });
+
+    // Close the gate, then seek: the worker will block before it can write any
+    // post-seek audio, pinning the fresh ring at played == written == 0.
+    *gate.0.lock().unwrap() = true;
+    engine.send(Command::Seek(Duration::from_secs(1)));
+    let _ = actor_tx.send(super::actor::ActorMsg::Worker(
+        super::worker::WorkerMsg::Eof { token: 1, epoch: 0 },
+    ));
+
+    // Several ticks pass with the ring pinned empty; without the epoch guard the
+    // stale Eof would end the session here (0 >= 0). It must not.
+    std::thread::sleep(Duration::from_millis(300));
+    drain_events(&mut events, &mut seen);
+    assert!(
+        !seen.iter().any(|e| matches!(e, Event::Ended { .. })),
+        "a stale-epoch Eof must not end the seeked session: {seen:?}"
+    );
+    assert_eq!(
+        engine.status().phase,
+        Phase::Playing,
+        "session must still be playing after a dropped stale Eof"
+    );
+
+    // Reopen the gate: the seeked session resumes and ends normally at its real
+    // EOF, whose Eof carries the current epoch (1) and is honored.
+    {
+        *gate.0.lock().unwrap() = false;
+        gate.1.notify_all();
+    }
+    wait_until("phase Ended at natural EOF", || {
+        sink.pull(4096);
+        engine.status().phase == Phase::Ended
+    });
+    drain_events(&mut events, &mut seen);
+    assert_eq!(
+        seen.iter()
+            .filter(|e| matches!(e, Event::Ended { token: 1 }))
+            .count(),
+        1,
+        "exactly one Ended for the natural end: {seen:?}"
+    );
+
+    engine.shutdown();
+}
+
 #[test]
 fn seek_after_eof_reprobes_webm_and_resumes() {
     // WebM/Opus (all YouTube audio): symphonia's Matroska demuxer errors on a
