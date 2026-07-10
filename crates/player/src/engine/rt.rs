@@ -24,13 +24,15 @@ pub(crate) struct RtSession {
 }
 
 pub(crate) enum RtCmd {
-    /// Install a new active session. `fade_frames: Some(n)` demotes the current
-    /// active session to "fading" and cross-mixes over `n` frames; `None`
-    /// replaces the active session outright and also drops any fading session
-    /// (a seek kills an in-flight crossfade).
+    /// Install a new active session. `fade: Some((frames, generation))` demotes
+    /// the current active session to "fading" and cross-mixes over `frames`;
+    /// `None` replaces the active session outright and also drops any fading
+    /// session (a seek kills an in-flight crossfade). The generation is echoed
+    /// on `FadeComplete` so the actor can drop a completion that raced the
+    /// start of a newer fade.
     Swap {
         session: RtSession,
-        fade_frames: Option<u64>,
+        fade: Option<(u64, u64)>,
     },
     DropAll,
     SetEqualizer(EqualizerSettings),
@@ -41,14 +43,15 @@ pub(crate) enum Retired {
     /// The consumer is never read again — it rides the message so its ring
     /// buffer deallocates on the actor thread instead of the audio thread.
     Ring(#[allow(dead_code)] rtrb::Consumer<f32>),
-    /// The crossfade ran to completion; the actor reacts by tearing down the
-    /// fading worker and emitting `TrackSwitched`.
-    FadeComplete(#[allow(dead_code)] rtrb::Consumer<f32>),
+    /// The crossfade of this generation ran to completion; the actor reacts by
+    /// tearing down the fading worker and emitting `TrackSwitched`.
+    FadeComplete(#[allow(dead_code)] rtrb::Consumer<f32>, u64),
 }
 
 struct Fade {
     total_frames: u64,
     progress_frames: u64,
+    generation: u64,
 }
 
 /// Frames of scratch capacity; blocks larger than this are processed in chunks
@@ -141,20 +144,18 @@ impl RtState {
     fn drain_commands(&mut self) {
         while let Ok(cmd) = self.cmd_rx.try_recv() {
             match cmd {
-                RtCmd::Swap {
-                    session,
-                    fade_frames,
-                } => {
+                RtCmd::Swap { session, fade } => {
                     if let Some(old_fading) = self.fading.take() {
                         let _ = self.retire_tx.send(Retired::Ring(old_fading.consumer));
                     }
                     self.fade = None;
-                    match (fade_frames, self.active.take()) {
-                        (Some(frames), Some(outgoing)) => {
+                    match (fade, self.active.take()) {
+                        (Some((frames, generation)), Some(outgoing)) => {
                             self.fading = Some(outgoing);
                             self.fade = Some(Fade {
                                 total_frames: frames.max(1),
                                 progress_frames: 0,
+                                generation,
                             });
                         }
                         (_, old_active) => {
@@ -186,7 +187,7 @@ impl RtState {
         let channels = self.channels;
         let chunk_capacity = SCRATCH_FRAMES * channels;
         let mut written = 0;
-        let mut fade_completed = false;
+        let mut fade_completed: Option<u64> = None;
 
         while written < data.len() {
             let chunk_len = (data.len() - written).min(chunk_capacity);
@@ -256,7 +257,7 @@ impl RtState {
 
             fade.progress_frames = fade.progress_frames.saturating_add(frames as u64);
             if fade.progress_frames >= fade.total_frames {
-                fade_completed = true;
+                fade_completed = Some(fade.generation);
             }
 
             // Past-total frames mix at saturated gains (1.0 active / 0.0
@@ -267,10 +268,12 @@ impl RtState {
             }
         }
 
-        if fade_completed {
+        if let Some(generation) = fade_completed {
             self.fade = None;
             if let Some(fading) = self.fading.take() {
-                let _ = self.retire_tx.send(Retired::FadeComplete(fading.consumer));
+                let _ = self
+                    .retire_tx
+                    .send(Retired::FadeComplete(fading.consumer, generation));
             }
         }
 

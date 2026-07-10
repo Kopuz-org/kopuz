@@ -206,6 +206,13 @@ struct Actor {
     /// Ring consumers handed to the current RT (via Swap) not yet shipped back
     /// (via Retired). Zero ⇒ nothing left to reap, so the loop may park.
     rt_rings_outstanding: usize,
+    /// A device error/change arrived inside the rebuild debounce window; run
+    /// the rebuild on the next tick past it instead of dropping the signal.
+    pending_device_rebuild: bool,
+    /// Generation of the most recently started crossfade; a `FadeComplete`
+    /// carrying an older one raced the start of this fade and is ignored
+    /// (the ring epoch's analogue for fades).
+    fade_generation: u64,
     shutting_down: bool,
 }
 
@@ -238,6 +245,8 @@ impl Actor {
             last_position_emitted: None,
             last_output_rebuild: None,
             rt_rings_outstanding: 0,
+            pending_device_rebuild: false,
+            fade_generation: 0,
             shutting_down: false,
         }
     }
@@ -277,6 +286,7 @@ impl Actor {
             && self.pending.is_none()
             && self.graveyard.is_empty()
             && self.rt_rings_outstanding == 0
+            && !self.pending_device_rebuild
     }
 
     // ── message handling ────────────────────────────────────────────────
@@ -378,6 +388,8 @@ impl Actor {
                     let _ = reply.send(Err(message.clone()));
                 }
                 self.emit(Event::Error { token, message });
+                // discard_pending above may have removed a published pending.
+                self.publish();
                 return;
             }
         };
@@ -476,6 +488,9 @@ impl Actor {
                     token,
                     message: error,
                 });
+                // The pending load is gone; without this the status keeps
+                // advertising it (and a transition) forever.
+                self.publish();
             }
         }
     }
@@ -524,23 +539,26 @@ impl Actor {
 
         // Branch only on the fade decision; the ring/start/swap/install tail is
         // shared. `config`, `fade_frames`, and `crossfaded` capture the delta.
-        let (config, fade_frames, crossfaded) = if let Some((fade, config, outgoing)) = outgoing {
+        let (config, fade, crossfaded) = if let Some((fade, config, outgoing)) = outgoing {
             self.stop_fading();
             self.fading = Some(outgoing);
+            self.fade_generation += 1;
             let fade_frames = (fade.as_secs_f64() * config.sample_rate as f64).round() as u64;
-            (config, Some(fade_frames.max(1)), true)
+            (
+                config,
+                Some((fade_frames.max(1), self.fade_generation)),
+                true,
+            )
         } else {
             // Immediate switch: reopen at the source's preferred rate when it
-            // differs, after retiring the outgoing sessions.
+            // differs. Everything fallible happens BEFORE the outgoing sessions
+            // are retired, so a failed start leaves the prior track playing
+            // (matching the failed-load contract) instead of half-torn-down
+            // state under a stale status.
             let desired_config = match self.sink.probe_config(source_sample_rate) {
                 Ok(config) => config,
                 Err(e) => return Err(self.abort_start(worker, e)),
             };
-            if let Some(current) = self.current.take() {
-                self.retire_session(current);
-            }
-            self.stop_fading();
-
             if (self.sink.config() != Some(desired_config) || self.rt_tx.is_none())
                 && let Err(e) = self.open_output(source_sample_rate)
             {
@@ -549,6 +567,11 @@ impl Actor {
             let Some(config) = self.sink.config() else {
                 return Err(self.abort_start(worker, "no output stream".to_string()));
             };
+
+            if let Some(current) = self.current.take() {
+                self.retire_session(current);
+            }
+            self.stop_fading();
 
             // A load un-pauses, including the device — a paused stream would
             // play the new track silently. Exception: a crossfade that fell
@@ -580,7 +603,7 @@ impl Actor {
         });
         self.send_rt(RtCmd::Swap {
             session: rt_session,
-            fade_frames,
+            fade,
         });
 
         self.current = Some(Session {
@@ -649,11 +672,14 @@ impl Actor {
 
         // Cancel the fade and seek the outgoing (visible) worker in place — it
         // is still alive as the fading session, so no re-resolve. The incoming
-        // session is dropped.
+        // session is dropped, and last_token follows the promotion so
+        // subsequent PhaseChanged/idle events name the session that actually
+        // plays, not the retired incoming one.
         if let Some(outgoing) = self.fading.take() {
             if let Some(incoming) = self.current.take() {
                 self.retire_session(incoming);
             }
+            self.last_token = outgoing.token;
             self.current = Some(outgoing);
         }
 
@@ -697,7 +723,7 @@ impl Actor {
         let rt_session = ring.rt_session;
         self.send_rt(RtCmd::Swap {
             session: rt_session,
-            fade_frames: None,
+            fade: None,
         });
         // Seeking a track out of its ended state resumes playback: `Ended` is
         // terminal and end-of-queue quiesced the device, so scrubbing back in
@@ -730,12 +756,17 @@ impl Actor {
     /// resume the current session at its last position via the seek protocol.
     fn handle_device_error(&mut self) {
         // The dead stream's callback can emit a burst of errors; rebuild once.
+        // Coalesce rather than drop: a genuine device change arriving inside
+        // the window (the same hot-plug produces both signals) must still be
+        // honored, on the next tick, or playback stays on the wrong device.
         if self
             .last_output_rebuild
             .is_some_and(|at| at.elapsed() < Duration::from_millis(500))
         {
+            self.pending_device_rebuild = true;
             return;
         }
+        self.pending_device_rebuild = false;
         self.last_output_rebuild = Some(Instant::now());
 
         let position = self.status.load().position();
@@ -777,6 +808,13 @@ impl Actor {
                 tracing::error!(error = %e, "failed to rebuild output stream");
                 let token = self.last_token;
                 self.handle_stop(false);
+                // The stream that errored is gone; its callback will never run
+                // again, so no Retired can ever come back. Abandon the RT
+                // bookkeeping (rings died with the stream) or the outstanding
+                // count wedges the loop out of parking forever.
+                self.rt_tx = None;
+                self.retire_rx = None;
+                self.rt_rings_outstanding = 0;
                 self.emit(Event::Error {
                     token,
                     message: format!("output device lost: {e}"),
@@ -792,6 +830,13 @@ impl Actor {
         // Each step publishes if (and only if) it changed observable state, so
         // a steady Playing tick allocates nothing: position reads live off the
         // shared atomic in the last-published status.
+        if self.pending_device_rebuild
+            && self
+                .last_output_rebuild
+                .is_none_or(|at| at.elapsed() >= Duration::from_millis(500))
+        {
+            self.handle_device_error();
+        }
         self.reap_rt_retired();
         self.latch_drain_complete();
         self.emit_throttled_position();
@@ -809,7 +854,12 @@ impl Actor {
         if let Some(retire_rx) = &self.retire_rx {
             while let Ok(msg) = retire_rx.try_recv() {
                 retired += 1;
-                if matches!(msg, Retired::FadeComplete(_)) {
+                // Only the CURRENT fade's completion counts: a stale one raced
+                // the start of a newer fade, and completing on it would retire
+                // the new outgoing session at fade start.
+                if matches!(msg, Retired::FadeComplete(_, generation)
+                    if generation == self.fade_generation)
+                {
                     fade_completed = true;
                 }
             }

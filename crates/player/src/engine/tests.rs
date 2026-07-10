@@ -1082,6 +1082,33 @@ fn seek_during_crossfade_resumes_the_outgoing_track() {
         sink.pull(4096).iter().any(|s| *s != 0.0)
     });
 
+    // The promotion updated the event identity too: phase changes after the
+    // fade-cancel must name the revived session (1), not the retired incoming
+    // one (2) that was never audibly committed.
+    engine.send(Command::Pause);
+    wait_until("PhaseChanged names the revived session", || {
+        drain_events(&mut events, &mut seen);
+        seen.iter().any(|e| {
+            matches!(
+                e,
+                Event::PhaseChanged {
+                    token: 1,
+                    phase: Phase::Paused
+                }
+            )
+        })
+    });
+    assert!(
+        !seen.iter().any(|e| matches!(
+            e,
+            Event::PhaseChanged {
+                token: 2,
+                phase: Phase::Paused
+            }
+        )),
+        "no phase event for the retired incoming token: {seen:?}"
+    );
+
     engine.shutdown();
 }
 
