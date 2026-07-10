@@ -484,42 +484,42 @@ impl Actor {
             start_at,
         } = plan;
 
-        let desired_config = match self.sink.probe_config(source_sample_rate) {
-            Ok(config) => config,
-            Err(e) => return Err(self.abort_start(worker, e)),
-        };
-
         let fade = match transition {
             Transition::Crossfade(fade) if !fade.is_zero() => Some(fade),
             _ => None,
         };
-        // Crossfade needs a live, audible outgoing session on the same stream
-        // config. While paused we fall back to an immediate switch and stay
-        // paused instead of blasting audio through the user's pause; a drained
-        // (ended) outgoing session has nothing left to fade out. Take the
-        // outgoing session here so the invariant ("a fade has an outgoing") is
-        // local — no expect on a separately-checked condition.
-        let outgoing = fade.filter(|_| {
-            !self.paused.load(Ordering::Relaxed)
-                && self.sink.config() == Some(desired_config)
-                && self.rt_tx.is_some()
-        });
-        let outgoing = outgoing.and_then(|fade| {
-            self.current
-                .take_if(|c| !c.ended)
-                .map(|session| (fade, session))
-        });
+        // Crossfade needs a live, audible outgoing session and an open stream.
+        // The fade runs at the LIVE config — the incoming worker resamples to it
+        // — so a source-rate mismatch (YT mixes 48kHz Opus and 44.1kHz AAC
+        // freely) doesn't silently downgrade the fade to a hard cut. While
+        // paused we fall back to an immediate switch and stay paused instead of
+        // blasting audio through the user's pause; a drained (ended) outgoing
+        // session has nothing left to fade out. Take the outgoing session here
+        // so the invariant ("a fade has an outgoing") is local.
+        let live_config = self.sink.config();
+        let outgoing = fade
+            .filter(|_| !self.paused.load(Ordering::Relaxed) && self.rt_tx.is_some())
+            .and_then(|fade| Some((fade, live_config?)))
+            .and_then(|(fade, config)| {
+                self.current
+                    .take_if(|c| !c.ended)
+                    .map(|session| (fade, config, session))
+            });
 
         // Branch only on the fade decision; the ring/start/swap/install tail is
         // shared. `config`, `fade_frames`, and `crossfaded` capture the delta.
-        let (config, fade_frames, crossfaded) = if let Some((fade, outgoing)) = outgoing {
+        let (config, fade_frames, crossfaded) = if let Some((fade, config, outgoing)) = outgoing {
             self.stop_fading();
             self.fading = Some(outgoing);
-            let fade_frames =
-                (fade.as_secs_f64() * desired_config.sample_rate as f64).round() as u64;
-            (desired_config, Some(fade_frames.max(1)), true)
+            let fade_frames = (fade.as_secs_f64() * config.sample_rate as f64).round() as u64;
+            (config, Some(fade_frames.max(1)), true)
         } else {
-            // Immediate switch: retire the outgoing sessions first.
+            // Immediate switch: reopen at the source's preferred rate when it
+            // differs, after retiring the outgoing sessions.
+            let desired_config = match self.sink.probe_config(source_sample_rate) {
+                Ok(config) => config,
+                Err(e) => return Err(self.abort_start(worker, e)),
+            };
             if let Some(current) = self.current.take() {
                 self.retire_session(current);
             }

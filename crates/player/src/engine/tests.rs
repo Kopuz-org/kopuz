@@ -57,8 +57,13 @@ impl FakeSinkHandle {
 struct FakeSink(FakeSinkHandle);
 
 impl AudioSink for FakeSink {
-    fn probe_config(&mut self, _desired_sample_rate: Option<u32>) -> Result<SinkConfig, String> {
-        Ok(TEST_CONFIG)
+    fn probe_config(&mut self, desired_sample_rate: Option<u32>) -> Result<SinkConfig, String> {
+        // Mirror CpalSink: the probe prefers the source's rate. (open() still
+        // returns TEST_CONFIG — a device is free to not honor the request.)
+        Ok(SinkConfig {
+            channels: TEST_CONFIG.channels,
+            sample_rate: desired_sample_rate.unwrap_or(TEST_CONFIG.sample_rate),
+        })
     }
 
     fn open(
@@ -602,6 +607,59 @@ fn crossfade_mixes_and_emits_track_switched() {
     });
 
     assert_eq!(engine.status().phase, Phase::Playing);
+    engine.shutdown();
+}
+
+#[test]
+fn crossfade_across_sample_rates_still_fades() {
+    // YT mixes 48kHz Opus and 44.1kHz AAC itags freely. A crossfade between
+    // tracks of different source rates must fade at the live output config
+    // (the incoming worker resamples to it), not silently fall back to a hard
+    // cut because the probe would prefer a different device rate.
+    let (sink, engine) = spawn_engine();
+    let mut events = engine_subscribe(&engine);
+    let mut seen = Vec::new();
+
+    let (factory_a, duration_a) = wav_factory(30.0);
+    load(&engine, 1, factory_a, duration_a);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    wait_until("audio from A", || sink.pull(4096).iter().any(|s| *s != 0.0));
+
+    // Incoming track at half the device rate.
+    let frames = 30 * 22_050;
+    let bytes = wav_bytes(frames, 22_050, TEST_CONFIG.channels as u16);
+    let factory_b: SourceFactory =
+        Box::new(move || Ok(crate::decoder::from_stream(std::io::Cursor::new(bytes))));
+
+    let opens_before = sink.open_calls();
+    let outcome = load_with(
+        &engine,
+        2,
+        factory_b,
+        Duration::from_secs(30),
+        Transition::Crossfade(Duration::from_millis(500)),
+    );
+    assert!(
+        outcome.crossfaded,
+        "a source-rate mismatch must not downgrade the fade to a hard cut"
+    );
+    assert_eq!(
+        sink.open_calls(),
+        opens_before,
+        "the fade runs at the live config; no stream reopen"
+    );
+
+    wait_until("TrackSwitched to the resampled track", || {
+        sink.pull(8192);
+        drain_events(&mut events, &mut seen);
+        seen.iter()
+            .any(|e| matches!(e, Event::TrackSwitched { token: 2, .. }))
+    });
+    assert_eq!(engine.status().phase, Phase::Playing);
+    wait_until("audio from the resampled track", || {
+        sink.pull(4096).iter().any(|s| *s != 0.0)
+    });
+
     engine.shutdown();
 }
 
