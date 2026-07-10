@@ -209,7 +209,15 @@ impl RtState {
             let fading_read = self
                 .fading
                 .as_mut()
-                .map(|s| read_into(&mut s.consumer, fading_scratch))
+                .map(|s| {
+                    // Advance the outgoing counter too, so the actor can report
+                    // a live outgoing position during the fade. These counters
+                    // feed nothing else: the drain check reads only the active
+                    // session, and a seek-cancelled fade installs a fresh ring.
+                    let read = read_into(&mut s.consumer, fading_scratch);
+                    s.played.fetch_add(read as u64, Ordering::Relaxed);
+                    read
+                })
                 .unwrap_or(0);
 
             let read = active_read.max(fading_read);

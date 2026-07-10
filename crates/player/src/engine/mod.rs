@@ -73,7 +73,13 @@ pub enum Command {
     Load(LoadRequest),
     /// Drop a load that is still probing without touching the live session.
     CancelPending,
-    Seek(Duration),
+    /// Seek the visible session. `token`, when set, is the session the caller
+    /// believes is visible; the engine drops the seek if a crossfade has since
+    /// promoted a different session, so a scrub can't land on the wrong track.
+    Seek {
+        position: Duration,
+        token: Option<u64>,
+    },
     Pause,
     Resume,
     Stop {
@@ -104,14 +110,27 @@ pub enum Event {
     Ended {
         token: u64,
     },
-    /// A crossfade finished and the outgoing session was torn down.
+    /// A crossfade finished and the outgoing session was torn down. `token` is
+    /// the now-sole (incoming) session; `from_token` the retired outgoing one.
+    /// This is the authoritative signal to commit a deferred crossfade UI.
     TrackSwitched {
         token: u64,
+        from_token: u64,
     },
     Error {
         token: u64,
         message: String,
     },
+}
+
+/// The outgoing session during a crossfade. Exposed so the UI can render the
+/// track it is still showing (the outgoing one) truthfully while the incoming
+/// session's own position drives `EngineStatus::position`.
+pub struct FadingStatus {
+    pub token: u64,
+    pub duration: Duration,
+    pub(crate) base_micros: u64,
+    pub(crate) played_samples: Arc<AtomicU64>,
 }
 
 /// Lock-free snapshot published by the actor. Position is exact on demand:
@@ -122,42 +141,50 @@ pub struct EngineStatus {
     pub phase: Phase,
     pub paused: bool,
     pub duration: Duration,
+    /// A load is resolving (probe/network); its token. The current session
+    /// keeps playing until it lands.
+    pub pending_token: Option<u64>,
+    /// A crossfade is mixing out the previous session. Cleared on
+    /// `TrackSwitched` (fade completion) or when a seek cancels the fade.
+    pub fading: Option<FadingStatus>,
+    pub(crate) base_micros: u64,
+    pub(crate) played_samples: Arc<AtomicU64>,
+    pub(crate) channels: u32,
+    pub(crate) sample_rate: u32,
+}
+
+/// Position from a base offset plus the samples the RT callback has played,
+/// clamped to the track duration. Shared by the current and fading sessions.
+fn position_from(
     base_micros: u64,
-    played_samples: Arc<AtomicU64>,
+    played_samples: &AtomicU64,
     channels: u32,
     sample_rate: u32,
+    duration: Duration,
+) -> Duration {
+    let played = played_samples.load(Ordering::Relaxed);
+    let micros = if channels > 0 && sample_rate > 0 {
+        base_micros + (played * 1_000_000) / (channels as u64 * sample_rate as u64)
+    } else {
+        base_micros
+    };
+    let raw = Duration::from_micros(micros);
+    if duration > Duration::ZERO && raw > duration {
+        duration
+    } else {
+        raw
+    }
 }
 
 impl EngineStatus {
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
-        token: u64,
-        phase: Phase,
-        paused: bool,
-        duration: Duration,
-        base_micros: u64,
-        played_samples: Arc<AtomicU64>,
-        channels: u32,
-        sample_rate: u32,
-    ) -> Self {
-        Self {
-            token,
-            phase,
-            paused,
-            duration,
-            base_micros,
-            played_samples,
-            channels,
-            sample_rate,
-        }
-    }
-
     pub(crate) fn idle() -> Self {
         Self {
             token: 0,
             phase: Phase::Idle,
             paused: false,
             duration: Duration::ZERO,
+            pending_token: None,
+            fading: None,
             base_micros: 0,
             played_samples: Arc::new(AtomicU64::new(0)),
             channels: 0,
@@ -165,22 +192,36 @@ impl EngineStatus {
         }
     }
 
+    /// True while a load is resolving or a crossfade is mixing out — the single
+    /// source of truth the UI gates its transition handling on.
+    pub fn transition_in_flight(&self) -> bool {
+        self.pending_token.is_some() || self.fading.is_some()
+    }
+
     pub fn position(&self) -> Duration {
         if self.phase == Phase::Idle {
             return Duration::ZERO;
         }
-        let played = self.played_samples.load(Ordering::Relaxed);
-        let micros = if self.channels > 0 && self.sample_rate > 0 {
-            self.base_micros
-                + (played * 1_000_000) / (self.channels as u64 * self.sample_rate as u64)
-        } else {
-            self.base_micros
-        };
-        let raw = Duration::from_micros(micros);
-        if self.duration > Duration::ZERO && raw > self.duration {
-            self.duration
-        } else {
-            raw
-        }
+        position_from(
+            self.base_micros,
+            &self.played_samples,
+            self.channels,
+            self.sample_rate,
+            self.duration,
+        )
+    }
+
+    /// The outgoing session's live position during a crossfade. Uses the
+    /// current stream config — a crossfade requires an identical one by
+    /// construction (the fade only starts when the configs match).
+    pub fn fading_position(&self) -> Option<Duration> {
+        let fading = self.fading.as_ref()?;
+        Some(position_from(
+            fading.base_micros,
+            &fading.played_samples,
+            self.channels,
+            self.sample_rate,
+            fading.duration,
+        ))
     }
 }

@@ -163,7 +163,10 @@ impl Player {
             time
         };
 
-        self.engine.send(Command::Seek(time));
+        self.engine.send(Command::Seek {
+            position: time,
+            token: None,
+        });
         self.push_now_playing(time, !self.is_paused());
     }
 

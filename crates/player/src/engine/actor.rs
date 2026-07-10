@@ -14,7 +14,10 @@ use config::{ChannelMode, EqualizerSettings};
 use super::rt::{Retired, RtCmd, RtSession, RtState};
 use super::sink::{AudioSink, DataCallbackFactory, SinkConfig};
 use super::worker::{WorkerCmd, WorkerHandle, WorkerMsg};
-use super::{Command, EngineStatus, Event, LoadOutcome, LoadReply, LoadRequest, Phase, Transition};
+use super::{
+    Command, EngineStatus, Event, FadingStatus, LoadOutcome, LoadReply, LoadRequest, Phase,
+    Transition,
+};
 use crate::player::PlayerInitError;
 #[cfg(any(target_os = "android", target_os = "linux", target_os = "macos"))]
 use crate::systemint;
@@ -273,8 +276,11 @@ impl Actor {
     fn handle_command(&mut self, cmd: Command) {
         match cmd {
             Command::Load(request) => self.handle_load(request),
-            Command::CancelPending => self.discard_pending(),
-            Command::Seek(target) => self.handle_seek(target),
+            Command::CancelPending => {
+                self.discard_pending();
+                self.publish();
+            }
+            Command::Seek { position, token } => self.handle_seek(position, token),
             Command::Pause => {
                 self.paused.store(true, Ordering::Relaxed);
                 self.sink.pause();
@@ -356,6 +362,9 @@ impl Actor {
             start_at,
             reply,
         });
+        // Make the pending load visible in status right away, so the UI can see
+        // a transition is in flight without waiting for the next tick.
+        self.publish();
     }
 
     fn handle_worker(&mut self, msg: WorkerMsg) {
@@ -392,6 +401,8 @@ impl Actor {
                         token,
                         message: error,
                     });
+                    // The pending load is gone; clear it from status.
+                    self.publish();
                 }
             }
         }
@@ -623,18 +634,26 @@ impl Actor {
         }
     }
 
-    fn handle_seek(&mut self, target: Duration) {
+    fn handle_seek(&mut self, target: Duration, expect_token: Option<u64>) {
         let Some(config) = self.sink.config() else {
             return;
         };
 
         // The seek targets the visible track: during a crossfade that's the
-        // outgoing (fading) session, otherwise the current one. Decide
-        // seekability up front, before any teardown — seeking out of a
-        // non-seekable outgoing source (radio) must leave the fade running,
-        // not retire the incoming session and strand the RT mid-fade.
+        // outgoing (fading) session, otherwise the current one. Decide up front,
+        // before any teardown:
+        //   - a token that no longer matches the visible session means a
+        //     crossfade promoted a different track since the caller issued the
+        //     seek — drop it rather than scrub the wrong track;
+        //   - seeking out of a non-seekable outgoing source (radio) must leave
+        //     the fade running, not retire the incoming session and strand the
+        //     RT mid-fade.
         match self.fading.as_ref().or(self.current.as_ref()) {
             None => return,
+            Some(visible) if expect_token.is_some_and(|t| t != visible.token) => {
+                tracing::debug!("dropping seek for a superseded session");
+                return;
+            }
             Some(visible) if !visible.seekable => {
                 tracing::debug!("ignoring seek on a non-seekable source");
                 return;
@@ -740,7 +759,7 @@ impl Actor {
                 let resumable = self.current.as_ref().is_some_and(|c| c.seekable);
                 if resumable {
                     tracing::info!("output device lost; rebuilt stream and reseeking");
-                    self.handle_seek(position);
+                    self.handle_seek(position, None);
                 } else if let Some(current) = self.current.take() {
                     // Non-seekable (radio): the controller has to re-load.
                     let token = current.token;
@@ -791,9 +810,11 @@ impl Actor {
             }
         }
         if fade_completed {
+            // Capture the outgoing token before stop_fading drops the session.
+            let from_token = self.fading.as_ref().map(|f| f.token).unwrap_or(0);
             self.stop_fading();
             if let Some(token) = self.current.as_ref().map(|c| c.token) {
-                self.emit(Event::TrackSwitched { token });
+                self.emit(Event::TrackSwitched { token, from_token });
             }
         }
 
@@ -855,27 +876,41 @@ impl Actor {
     fn publish(&mut self) {
         let phase = self.phase();
         let config = self.sink.config();
+        let paused = self.paused.load(Ordering::Relaxed);
+        let channels = config.map(|c| c.channels as u32).unwrap_or(0);
+        let sample_rate = config.map(|c| c.sample_rate).unwrap_or(0);
+        let pending_token = self.pending.as_ref().map(|p| p.token);
+        let fading = self.fading.as_ref().map(|f| FadingStatus {
+            token: f.token,
+            duration: f.duration,
+            base_micros: f.base_micros,
+            played_samples: f.played.clone(),
+        });
         let status = match &self.current {
-            Some(current) => EngineStatus::new(
-                current.token,
+            Some(current) => EngineStatus {
+                token: current.token,
                 phase,
-                self.paused.load(Ordering::Relaxed),
-                current.duration,
-                current.base_micros,
-                current.played.clone(),
-                config.map(|c| c.channels as u32).unwrap_or(0),
-                config.map(|c| c.sample_rate).unwrap_or(0),
-            ),
-            None => EngineStatus::new(
-                self.last_token,
+                paused,
+                duration: current.duration,
+                pending_token,
+                fading,
+                base_micros: current.base_micros,
+                played_samples: current.played.clone(),
+                channels,
+                sample_rate,
+            },
+            None => EngineStatus {
+                token: self.last_token,
                 phase,
-                self.paused.load(Ordering::Relaxed),
-                Duration::ZERO,
-                0,
-                Arc::new(AtomicU64::new(0)),
-                0,
-                0,
-            ),
+                paused,
+                duration: Duration::ZERO,
+                pending_token,
+                fading,
+                base_micros: 0,
+                played_samples: Arc::new(AtomicU64::new(0)),
+                channels: 0,
+                sample_rate: 0,
+            },
         };
         self.status.store(Arc::new(status));
 

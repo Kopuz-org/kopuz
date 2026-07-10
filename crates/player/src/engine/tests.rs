@@ -333,7 +333,10 @@ fn eof_emits_ended_once_and_seek_revives() {
     assert_eq!(ended_count, 1, "Ended must fire exactly once: {seen:?}");
 
     // The 4aedd347 scenario: seek after natural end must revive playback.
-    engine.send(Command::Seek(Duration::from_millis(50)));
+    engine.send(Command::Seek {
+        position: Duration::from_millis(50),
+        token: None,
+    });
     wait_until("phase Playing after seek-revive", || {
         engine.status().phase == Phase::Playing
     });
@@ -419,7 +422,10 @@ fn stale_eof_after_seek_does_not_end_session() {
     // Close the gate, then seek: the worker will block before it can write any
     // post-seek audio, pinning the fresh ring at played == written == 0.
     *gate.0.lock().unwrap() = true;
-    engine.send(Command::Seek(Duration::from_secs(1)));
+    engine.send(Command::Seek {
+        position: Duration::from_secs(1),
+        token: None,
+    });
     let _ = actor_tx.send(super::actor::ActorMsg::Worker(
         super::worker::WorkerMsg::Eof { token: 1, epoch: 0 },
     ));
@@ -477,7 +483,10 @@ fn seek_after_eof_reprobes_webm_and_resumes() {
         engine.status().phase == Phase::Ended
     });
 
-    engine.send(Command::Seek(Duration::from_millis(500)));
+    engine.send(Command::Seek {
+        position: Duration::from_millis(500),
+        token: None,
+    });
     wait_until("audio after webm seek-revive", || {
         sink.pull(4096).iter().any(|s| *s != 0.0)
     });
@@ -512,7 +521,10 @@ fn seek_after_end_of_queue_pause_resumes_playback() {
     });
     let plays_before = sink.play_calls();
 
-    engine.send(Command::Seek(Duration::from_millis(50)));
+    engine.send(Command::Seek {
+        position: Duration::from_millis(50),
+        token: None,
+    });
     wait_until("phase Playing after seek-revive", || {
         engine.status().phase == Phase::Playing
     });
@@ -586,10 +598,102 @@ fn crossfade_mixes_and_emits_track_switched() {
         sink.pull(8192);
         drain_events(&mut events, &mut seen);
         seen.iter()
-            .any(|e| matches!(e, Event::TrackSwitched { token: 2 }))
+            .any(|e| matches!(e, Event::TrackSwitched { token: 2, .. }))
     });
 
     assert_eq!(engine.status().phase, Phase::Playing);
+    engine.shutdown();
+}
+
+#[test]
+fn status_reports_pending_and_fading() {
+    let (sink, engine) = spawn_engine();
+    let mut events = engine_subscribe(&engine);
+    let mut seen = Vec::new();
+
+    let (factory_a, duration_a) = wav_factory(30.0);
+    load(&engine, 1, factory_a, duration_a);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    wait_until("audio from A", || sink.pull(4096).iter().any(|s| *s != 0.0));
+
+    // ── pending ──────────────────────────────────────────────────────────
+    // A load that blocks in its factory is reported as a pending transition
+    // while the current session keeps playing.
+    let (gate_tx, gate_rx) = std::sync::mpsc::channel::<()>();
+    let frames = TEST_CONFIG.sample_rate as usize;
+    let bytes = wav_bytes(frames, TEST_CONFIG.sample_rate, TEST_CONFIG.channels as u16);
+    let slow: SourceFactory = Box::new(move || {
+        let _ = gate_rx.recv();
+        Ok(crate::decoder::from_stream(std::io::Cursor::new(bytes)))
+    });
+    engine.send(Command::Load(LoadRequest {
+        token: 2,
+        factory: slow,
+        duration: Duration::from_secs(1),
+        transition: Transition::Immediate,
+        start_at: None,
+        reply: None,
+    }));
+    wait_until("pending token 2 visible", || {
+        let s = engine.status();
+        s.pending_token == Some(2) && s.transition_in_flight()
+    });
+    assert_eq!(engine.status().token, 1, "current session still token 1");
+
+    // Release: the pending load lands and the pending flag clears.
+    let _ = gate_tx.send(());
+    wait_until("pending cleared, token 2 current", || {
+        let s = engine.status();
+        s.pending_token.is_none() && s.token == 2 && s.phase == Phase::Playing
+    });
+    assert!(!engine.status().transition_in_flight());
+    wait_until("audio from token 2", || {
+        sink.pull(4096).iter().any(|s| *s != 0.0)
+    });
+
+    // ── fading ───────────────────────────────────────────────────────────
+    let (factory_c, duration_c) = wav_factory(30.0);
+    load_with(
+        &engine,
+        3,
+        factory_c,
+        duration_c,
+        Transition::Crossfade(Duration::from_secs(2)),
+    );
+    wait_until("status switches to incoming token 3", || {
+        engine.status().token == 3
+    });
+    wait_until("fading reports outgoing token 2", || {
+        engine.status().fading.as_ref().map(|f| f.token) == Some(2)
+    });
+    assert!(engine.status().transition_in_flight());
+
+    // The outgoing position ticks while the fade mixes.
+    let fpos_before = engine.status().fading_position().unwrap_or_default();
+    wait_until("fading position advances", || {
+        sink.pull(8192);
+        engine.status().fading_position().unwrap_or_default() > fpos_before
+    });
+
+    // Fade completion carries both tokens and clears the fading state.
+    wait_until("TrackSwitched to 3 from 2", || {
+        sink.pull(8192);
+        drain_events(&mut events, &mut seen);
+        seen.iter().any(|e| {
+            matches!(
+                e,
+                Event::TrackSwitched {
+                    token: 3,
+                    from_token: 2
+                }
+            )
+        })
+    });
+    wait_until("fading cleared after switch", || {
+        engine.status().fading.is_none()
+    });
+    assert!(!engine.status().transition_in_flight());
+
     engine.shutdown();
 }
 
@@ -731,7 +835,10 @@ fn seek_moves_position_immediately_on_fresh_counters() {
     });
 
     let target = Duration::from_secs(3);
-    engine.send(Command::Seek(target));
+    engine.send(Command::Seek {
+        position: target,
+        token: None,
+    });
     wait_until("position jumps to the seek target", || {
         engine.status().position() == target
     });
@@ -824,7 +931,10 @@ fn seek_during_crossfade_resumes_the_outgoing_track() {
     // A seek mid-crossfade targets the outgoing (visible) track: the engine
     // promotes the outgoing session (token 1) back to active, cancels the fade,
     // and seeks it in place — no re-load, and no TrackSwitched.
-    engine.send(Command::Seek(Duration::from_secs(10)));
+    engine.send(Command::Seek {
+        position: Duration::from_secs(10),
+        token: None,
+    });
     wait_until("outgoing token 1 restored at the seek target", || {
         let status = engine.status();
         status.token == 1 && status.position() >= Duration::from_secs(10)
@@ -888,7 +998,10 @@ fn seek_during_crossfade_from_radio_is_ignored() {
     wait_until("status on incoming token 2", || engine.status().token == 2);
 
     // Seek mid-fade — ignored, because the visible (outgoing) source is radio.
-    engine.send(Command::Seek(Duration::from_secs(10)));
+    engine.send(Command::Seek {
+        position: Duration::from_secs(10),
+        token: None,
+    });
 
     // The fade runs to completion normally: TrackSwitched for the incoming, which
     // becomes the sole session; audio never goes silent.
@@ -933,7 +1046,10 @@ fn radio_source_ignores_seek_and_ends_at_eof() {
     });
 
     let before = engine.status().position();
-    engine.send(Command::Seek(Duration::from_secs(60)));
+    engine.send(Command::Seek {
+        position: Duration::from_secs(60),
+        token: None,
+    });
     std::thread::sleep(Duration::from_millis(300));
     assert!(
         engine.status().position() < before + Duration::from_secs(30),
