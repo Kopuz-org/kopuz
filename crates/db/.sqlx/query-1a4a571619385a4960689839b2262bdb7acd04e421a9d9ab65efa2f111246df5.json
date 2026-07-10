@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT listened_at, artist, title, album, service, listen_info FROM scrobble_queue ORDER BY listened_at ASC, id ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "listened_at",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "artist",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "title",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "album",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "service",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "listen_info",
+        "ordinal": 5,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "1a4a571619385a4960689839b2262bdb7acd04e421a9d9ab65efa2f111246df5"
+}

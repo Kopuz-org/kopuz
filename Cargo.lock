@@ -4410,6 +4410,7 @@ version = "0.9.0"
 dependencies = [
  "dioxus",
  "kopuz-config",
+ "kopuz-db",
  "md5",
  "reqwest 0.13.4",
  "serde",

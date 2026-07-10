@@ -13,6 +13,8 @@ use std::sync::Arc;
 
 mod backend;
 
+pub use backend::{QueuedScrobbleRow, ScrobbleService};
+
 /// What a one-shot legacy-JSON import did. `ran == false` means it was skipped
 /// (already migrated, or no legacy JSON present); the counts are then all zero.
 #[derive(Debug, Default, Clone)]
@@ -253,6 +255,9 @@ pub trait ReadStore: Send + Sync {
 
     /// Pending-unlike tombstones (`dirty=2`) not yet pushed to the server.
     async fn dirty_unlikes(&self, server_id: &str) -> Result<Vec<String>, DbError>;
+
+    /// The whole offline scrobble backlog, oldest listen first (drain order).
+    async fn scrobble_queue_all(&self) -> Result<Vec<QueuedScrobbleRow>, DbError>;
 }
 
 /// The persistence API: every mutation plus admin/dev ops, layered on top of the
@@ -404,6 +409,20 @@ pub trait Storage: ReadStore {
 
     /// Persist the queue/progress snapshot to the single `queue_state` row.
     async fn save_queue(&self, snap: &QueueSnapshot) -> Result<(), DbError>;
+
+    /// Enqueue a failed scrobble (issue #335). A repeat of the same
+    /// `(listen, service)` folds into the existing row; the backlog is capped to
+    /// the newest listens, dropping the oldest first.
+    async fn scrobble_queue_push(&self, row: &QueuedScrobbleRow) -> Result<(), DbError>;
+
+    /// Drop one delivered (or permanently-failed) `(listen, service)` row.
+    async fn scrobble_queue_delete(
+        &self,
+        listened_at: i64,
+        artist: &str,
+        title: &str,
+        service: ScrobbleService,
+    ) -> Result<(), DbError>;
 
     /// Generic metadata-cache write (upsert of `payload` for `(cache_key, kind)`).
     async fn meta_put(&self, cache_key: &str, kind: &str, payload: &str) -> Result<(), DbError>;

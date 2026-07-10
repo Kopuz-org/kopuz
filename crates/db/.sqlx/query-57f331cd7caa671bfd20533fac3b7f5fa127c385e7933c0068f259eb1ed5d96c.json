@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM scrobble_queue WHERE listened_at NOT IN (SELECT listened_at FROM scrobble_queue GROUP BY listened_at ORDER BY listened_at DESC LIMIT ?1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "57f331cd7caa671bfd20533fac3b7f5fa127c385e7933c0068f259eb1ed5d96c"
+}

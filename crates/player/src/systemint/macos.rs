@@ -87,18 +87,20 @@ pub enum SystemEvent {
     Prev,
 }
 
-static BACKGROUND_HANDLER: OnceLock<Arc<StdMutex<Option<Box<dyn Fn(SystemEvent) + Send + Sync>>>>> =
-    OnceLock::new();
+type BgHandler = Arc<StdMutex<Option<Box<dyn Fn(SystemEvent) + Send + Sync>>>>;
+type TokioWaker = Arc<StdMutex<Option<Box<dyn Fn() + Send + Sync>>>>;
 
-static TOKIO_WAKER: OnceLock<Arc<StdMutex<Option<Box<dyn Fn() + Send + Sync>>>>> = OnceLock::new();
+static BACKGROUND_HANDLER: OnceLock<BgHandler> = OnceLock::new();
 
-fn get_bg_handler() -> Arc<StdMutex<Option<Box<dyn Fn(SystemEvent) + Send + Sync>>>> {
+static TOKIO_WAKER: OnceLock<TokioWaker> = OnceLock::new();
+
+fn get_bg_handler() -> BgHandler {
     BACKGROUND_HANDLER
         .get_or_init(|| Arc::new(StdMutex::new(None)))
         .clone()
 }
 
-fn get_tokio_waker() -> Arc<StdMutex<Option<Box<dyn Fn() + Send + Sync>>>> {
+fn get_tokio_waker() -> TokioWaker {
     TOKIO_WAKER
         .get_or_init(|| Arc::new(StdMutex::new(None)))
         .clone()
@@ -111,10 +113,10 @@ pub fn set_tokio_waker(waker: impl Fn() + Send + Sync + 'static) {
 }
 
 fn wake_tokio() {
-    if let Ok(guard) = get_tokio_waker().lock() {
-        if let Some(ref waker) = *guard {
-            waker();
-        }
+    if let Ok(guard) = get_tokio_waker().lock()
+        && let Some(ref waker) = *guard
+    {
+        waker();
     }
 }
 
@@ -125,10 +127,10 @@ pub fn set_background_handler(handler: impl Fn(SystemEvent) + Send + Sync + 'sta
 }
 
 fn dispatch_event(event: SystemEvent) {
-    if let Ok(guard) = get_bg_handler().lock() {
-        if let Some(ref handler) = *guard {
-            handler(event);
-        }
+    if let Ok(guard) = get_bg_handler().lock()
+        && let Some(ref handler) = *guard
+    {
+        handler(event);
     }
     wake_run_loop();
 }
@@ -186,13 +188,9 @@ pub fn init() {
             let assertion_reason = NSString::from_str("Kopuz is playing audio");
             let mut assertion_id: IOPMAssertionID = 0;
             let kr = IOPMAssertionCreateWithName(
-                std::mem::transmute::<&objc2_foundation::NSString, *const std::ffi::c_void>(
-                    &*assertion_type,
-                ),
+                &*assertion_type as *const objc2_foundation::NSString as *const std::ffi::c_void,
                 255,
-                std::mem::transmute::<&objc2_foundation::NSString, *const std::ffi::c_void>(
-                    &*assertion_reason,
-                ),
+                &*assertion_reason as *const objc2_foundation::NSString as *const std::ffi::c_void,
                 &mut assertion_id,
             );
             if kr == 0 {
@@ -357,8 +355,9 @@ pub fn update_now_playing(
                     let retained: objc2::rc::Retained<MPMediaItemArtwork> =
                         objc2::rc::Retained::from_raw(artwork_raw).expect("retained artwork");
 
-                    let artwork_ref: &AnyObject =
-                        &*(std::mem::transmute::<_, *const AnyObject>(&*retained));
+                    let artwork_ref: &AnyObject = &*(&*retained
+                        as *const objc2_media_player::MPMediaItemArtwork
+                        as *const AnyObject);
                     info.setObject_forKey(
                         artwork_ref,
                         ProtocolObject::from_ref(MPMediaItemPropertyArtwork),
