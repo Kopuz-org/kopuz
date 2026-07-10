@@ -35,6 +35,7 @@ pub enum PlayerInitError {
     DefaultOutputConfig(cpal::DefaultStreamConfigError),
     BuildOutputStream(cpal::BuildStreamError),
     StartOutputStream(cpal::PlayStreamError),
+    EngineThread(std::io::Error),
 }
 
 impl std::fmt::Display for PlayerInitError {
@@ -44,6 +45,7 @@ impl std::fmt::Display for PlayerInitError {
             Self::DefaultOutputConfig(e) => write!(f, "no default output config: {e}"),
             Self::BuildOutputStream(e) => write!(f, "failed to build output stream: {e}"),
             Self::StartOutputStream(e) => write!(f, "failed to start output stream: {e}"),
+            Self::EngineThread(e) => write!(f, "failed to spawn player engine thread: {e}"),
         }
     }
 }

@@ -77,7 +77,7 @@ impl EngineHandle {
                 };
                 Actor::new(rx, actor_tx, sink, actor_status).run();
             })
-            .expect("failed to spawn player engine thread");
+            .map_err(PlayerInitError::EngineThread)?;
 
         match init_rx.recv() {
             Ok(Ok(())) => Ok(Self {
@@ -330,7 +330,17 @@ impl Actor {
             reply,
         } = request;
 
-        let worker = super::worker::spawn(token, factory, self.self_tx.clone(), ActorMsg::Worker);
+        let worker = match super::worker::spawn(token, factory, self.self_tx.clone()) {
+            Ok(worker) => worker,
+            Err(e) => {
+                let message = format!("failed to spawn decode worker: {e}");
+                if let Some(reply) = reply {
+                    let _ = reply.send(Err(message.clone()));
+                }
+                self.emit(Event::Error { token, message });
+                return;
+            }
+        };
         self.pending = Some(Pending {
             token,
             worker,

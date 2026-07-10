@@ -17,12 +17,12 @@ use symphonia::core::audio::GenericAudioBufferRef;
 use symphonia::core::codecs::audio::{AudioCodecParameters, AudioDecoder, AudioDecoderOptions};
 use symphonia::core::codecs::registry::RegisterableAudioDecoder;
 use symphonia::core::formats::probe::Hint;
-use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo, Track};
+use symphonia::core::formats::{FormatOptions, FormatReader, SeekMode, SeekTo, Track, TrackType};
 use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::units::Time;
 
-use super::SourceFactory;
+use super::{ActorMsg, SourceFactory};
 
 pub(crate) enum WorkerCmd {
     /// Begin decoding into the given ring. Sent once, after `Ready`.
@@ -61,22 +61,16 @@ pub(crate) struct WorkerHandle {
     pub join: std::thread::JoinHandle<()>,
 }
 
-pub(crate) fn spawn<M, F>(
+pub(crate) fn spawn(
     token: u64,
     factory: SourceFactory,
-    msg_tx: Sender<M>,
-    wrap: F,
-) -> WorkerHandle
-where
-    M: Send + 'static,
-    F: Fn(WorkerMsg) -> M + Send + 'static,
-{
+    msg_tx: Sender<ActorMsg>,
+) -> std::io::Result<WorkerHandle> {
     let (cmd_tx, cmd_rx) = std::sync::mpsc::channel();
     let join = std::thread::Builder::new()
         .name(format!("kopuz-decode-{token}"))
-        .spawn(move || run(token, factory, &msg_tx, &wrap, &cmd_rx))
-        .expect("failed to spawn decode worker thread");
-    WorkerHandle { cmd_tx, join }
+        .spawn(move || run(token, factory, &msg_tx, &cmd_rx))?;
+    Ok(WorkerHandle { cmd_tx, join })
 }
 
 struct Output {
@@ -101,17 +95,14 @@ enum SeekOutcome {
     NeedsReprobe(Duration),
 }
 
-fn run<M, F>(
+fn run(
     token: u64,
     factory: SourceFactory,
-    msg_tx: &Sender<M>,
-    wrap: &F,
+    msg_tx: &Sender<ActorMsg>,
     cmd_rx: &Receiver<WorkerCmd>,
-) where
-    F: Fn(WorkerMsg) -> M,
-{
+) {
     let send = |msg: WorkerMsg| {
-        let _ = msg_tx.send(wrap(msg));
+        let _ = msg_tx.send(ActorMsg::Worker(msg));
     };
     let fail = |error: String| {
         tracing::error!(token, error = %error, "decode worker failed");
@@ -135,11 +126,7 @@ fn run<M, F>(
         Err(e) => return fail(format!("symphonia probe error: {e}")),
     };
 
-    let Some(track) = format
-        .tracks()
-        .iter()
-        .find(|t| t.codec_params.as_ref().and_then(|p| p.audio()).is_some())
-    else {
+    let Some(track) = format.first_track(TrackType::Audio) else {
         return fail("no supported audio tracks found".to_string());
     };
     let mut track_id = track.id;
@@ -479,9 +466,7 @@ fn reprobe_from_buffer(
         )
         .map_err(|e| format!("re-probe failed: {e}"))?;
     let track_id = format
-        .tracks()
-        .iter()
-        .find(|t| t.codec_params.as_ref().and_then(|p| p.audio()).is_some())
+        .first_track(TrackType::Audio)
         .map(|t| t.id)
         .ok_or_else(|| "no audio track after re-probe".to_string())?;
     // The fresh reader is inside the Segment; this seek succeeds.
