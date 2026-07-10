@@ -10,7 +10,7 @@
 use std::io::{Seek as _, SeekFrom};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{Receiver, Sender, TryRecvError};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, TryRecvError};
 use std::time::Duration;
 
 use symphonia::core::audio::GenericAudioBufferRef;
@@ -365,6 +365,44 @@ fn park_at_eof(
     }
 }
 
+/// Apply one command to the decode state. `seeked` is set (not returned) so a
+/// caller draining several commands can coalesce seeks into one `Seeked`.
+fn apply_command(
+    cmd: WorkerCmd,
+    output: &mut Output,
+    format: &mut dyn FormatReader,
+    decoder: &mut dyn AudioDecoder,
+    track_id: u32,
+    seeked: &mut bool,
+) -> Option<FlowChange> {
+    match cmd {
+        WorkerCmd::Seek {
+            target,
+            producer,
+            written,
+            epoch,
+        } => {
+            *output = Output {
+                producer,
+                written,
+                epoch,
+            };
+            match seek_reader(format, decoder, track_id, target) {
+                SeekOutcome::Done => {
+                    *seeked = true;
+                    None
+                }
+                SeekOutcome::NeedsReprobe(t) => Some(FlowChange::Reprobe(t)),
+            }
+        }
+        WorkerCmd::Stop => Some(FlowChange::Exit),
+        WorkerCmd::Start { .. } => {
+            tracing::warn!("unexpected Start for an already-started decode worker");
+            None
+        }
+    }
+}
+
 /// Apply any pending commands without blocking.
 fn drain_commands(
     cmd_rx: &Receiver<WorkerCmd>,
@@ -376,25 +414,12 @@ fn drain_commands(
     let mut seeked = false;
     loop {
         match cmd_rx.try_recv() {
-            Ok(WorkerCmd::Seek {
-                target,
-                producer,
-                written,
-                epoch,
-            }) => {
-                *output = Output {
-                    producer,
-                    written,
-                    epoch,
-                };
-                match seek_reader(format, decoder, track_id, target) {
-                    SeekOutcome::Done => seeked = true,
-                    SeekOutcome::NeedsReprobe(t) => return Some(FlowChange::Reprobe(t)),
+            Ok(cmd) => {
+                if let Some(change) =
+                    apply_command(cmd, output, format, decoder, track_id, &mut seeked)
+                {
+                    return Some(change);
                 }
-            }
-            Ok(WorkerCmd::Stop) => return Some(FlowChange::Exit),
-            Ok(WorkerCmd::Start { .. }) => {
-                tracing::warn!("unexpected Start for an already-started decode worker");
             }
             Err(TryRecvError::Empty) => {
                 return if seeked {
@@ -427,7 +452,26 @@ fn write_all(
 
         let available = output.producer.slots().min(samples.len() - offset);
         if available == 0 {
-            std::thread::sleep(Duration::from_millis(5));
+            // A full ring is the decode steady state. Block on the command
+            // channel with a coarse timeout instead of spin-sleeping, so a
+            // Seek/Stop wakes the worker at once; the timeout is safe against
+            // the 1-2s ring (it can't underrun in 100ms).
+            match cmd_rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(cmd) => {
+                    let mut seeked = false;
+                    if let Some(change) =
+                        apply_command(cmd, output, format, decoder, track_id, &mut seeked)
+                    {
+                        return Some(change);
+                    }
+                    if seeked {
+                        // The rest of this pre-seek block is garbage — drop it.
+                        return Some(FlowChange::Seeked);
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => return Some(FlowChange::Exit),
+            }
             continue;
         }
         let Ok(chunk) = output.producer.write_chunk_uninit(available) else {
