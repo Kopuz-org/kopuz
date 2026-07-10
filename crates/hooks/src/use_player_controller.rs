@@ -1,5 +1,4 @@
 use config::AppConfig;
-use config::MusicService;
 use dioxus::logger::tracing::Instrument;
 use dioxus::{logger::tracing, prelude::*};
 use player::engine::{SourceFactory, Transition};
@@ -419,78 +418,21 @@ impl PlayerController {
                 .map(|s| s.url.clone())
                 .map(|stream_url| (stream_url, String::new()))
         } else if is_server_item {
-            let conf = self.config.read();
-            conf.server.as_ref().map(|server| match server.service {
-                MusicService::Jellyfin => {
-                    let cover_url = utils::jellyfin_image::resolve_track_cover(
-                        track.cover.as_deref(),
-                        &track.id.key(),
-                        &track.album_id,
-                        &server.url,
-                        server.access_token.as_deref(),
-                        800,
-                        90,
-                    )
+            // The stream itself is always resolved async in the load task (a URL
+            // for Jellyfin/Subsonic, a deciphered stream for YT/SoundCloud), so
+            // the ref is a pending marker for every server source. Only the cover
+            // is built synchronously, through the shared cover seam rather than a
+            // per-service match here. A server with no creds no longer bails
+            // silently — resolve_stream returns a real error that surfaces as a
+            // banner.
+            if self.config.read().server.is_some() {
+                let cover_url = ::server::cover::track(&self.config.read(), &track, 800)
+                    .map(|cover| cover.as_ref().to_string())
                     .unwrap_or_default();
-
-                    (ResolvedStreamRef::pending_marker(&id), cover_url)
-                }
-                MusicService::Subsonic | MusicService::Custom => {
-                    // No creds → empty stream ref so the bail below stops
-                    // loading silently, as before.
-                    if let (Some(password), Some(username)) =
-                        (&server.access_token, &server.user_id)
-                    {
-                        let subsonic_path = match track.cover.as_deref() {
-                            Some(c) => format!("{}:{}", track.id.uid(), c),
-                            None => track.id.uid(),
-                        };
-                        let cover_url = utils::subsonic_image::subsonic_image_url_from_path(
-                            &subsonic_path,
-                            &server.url,
-                            server.access_token.as_deref(),
-                            800,
-                            90,
-                        )
-                        .or_else(|| {
-                            ::server::subsonic::cover_art_url(
-                                &server.url,
-                                username,
-                                password,
-                                &id,
-                                Some(800),
-                            )
-                            .ok()
-                        })
-                        .unwrap_or_default();
-                        (ResolvedStreamRef::pending_marker(&id), cover_url)
-                    } else {
-                        (String::new(), String::new())
-                    }
-                }
-                // YT can't resolve its stream URL synchronously (the /player
-                // call is async + multi-client fallback); the cover URL is
-                // already encoded in the track's path (`ytmusic:VID:urlhex_HEX`).
-                MusicService::YtMusic => {
-                    let cover_url = utils::jellyfin_image::resolve_track_cover(
-                        track.cover.as_deref(),
-                        &track.id.key(),
-                        &track.album_id,
-                        "",
-                        None,
-                        800,
-                        90,
-                    )
-                    .unwrap_or_default();
-                    (ResolvedStreamRef::pending_marker(&id), cover_url)
-                }
-                // SoundCloud also resolves its stream async (progressive MP3 /
-                // HLS); the cover is the plain artwork URL already in `track.cover`.
-                MusicService::SoundCloud => (
-                    ResolvedStreamRef::pending_marker(&id),
-                    track.cover.clone().unwrap_or_default(),
-                ),
-            })
+                Some((ResolvedStreamRef::pending_marker(&id), cover_url))
+            } else {
+                None
+            }
         } else {
             None
         };
@@ -501,17 +443,10 @@ impl PlayerController {
             track.id.local_path().map(|p| p.to_path_buf())
         };
 
-        // Bail like the old sync path: a server item with no server configured
-        // stops silently; one without creds clears the loading flag too.
-        if offline_path.is_none() && local_path.is_none() {
-            match &remote_ref {
-                None => return,
-                Some((stream_ref, _)) if stream_ref.is_empty() => {
-                    self.is_loading.set(false);
-                    return;
-                }
-                _ => {}
-            }
+        // A server item with no server configured has nothing to resolve — stop
+        // silently, as the old sync path did.
+        if offline_path.is_none() && local_path.is_none() && remote_ref.is_none() {
+            return;
         }
 
         let cover_url: String = if offline_path.is_some() {
