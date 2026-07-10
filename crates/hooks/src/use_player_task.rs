@@ -251,16 +251,43 @@ pub fn use_player_task(ctrl: PlayerController) {
                 {
                     use player::engine::{Event, Phase};
                     match event {
-                        // The engine confirms audible state: a load's session
-                        // started, or a seek revived an ended track.
+                        // Playing/Paused confirm audible state for a session. A
+                        // phase for a token we no longer intend is stale (a
+                        // superseded/cancelled load the engine still promoted);
+                        // if it started playing, stop it — the UI intent is
+                        // authoritative, we never adopt a navigated-away track.
                         Event::PhaseChanged {
-                            phase: Phase::Playing,
-                            ..
-                        } => ctrl.is_playing.set(true),
+                            token,
+                            phase: phase @ (Phase::Playing | Phase::Paused),
+                        } => {
+                            if token == ctrl.intent.peek().token() {
+                                ctrl.is_playing.set(phase == Phase::Playing);
+                            } else if phase == Phase::Playing {
+                                ctrl.player.peek().stop_for_transition();
+                            }
+                        }
+                        // Idle means the engine holds no session — nothing is
+                        // audible (a full stop, or a device loss that dropped a
+                        // non-seekable radio stream). Ended is deliberately left
+                        // to the auto-advance check below, which needs is_playing.
                         Event::PhaseChanged {
-                            phase: Phase::Paused,
-                            ..
+                            phase: Phase::Idle, ..
                         } => ctrl.is_playing.set(false),
+                        // Loaded confirms a session started; if it's for a load
+                        // we superseded or cancelled (end-of-queue racing a
+                        // promoted load), stop it instead of adopting it.
+                        Event::Loaded { token } if token != ctrl.intent.peek().token() => {
+                            ctrl.player.peek().stop_for_transition();
+                        }
+                        // A device lost mid-playback on a live session (radio
+                        // unplug): the load reply can't report this, so surface
+                        // the banner and stop here. No auto-reconnect — Play
+                        // re-loads the station.
+                        Event::Error { token, message } if token == ctrl.intent.peek().token() => {
+                            tracing::warn!(%message, "engine reported a playback error");
+                            ctrl.fail_load(token, &message);
+                            ctrl.is_playing.set(false);
+                        }
                         _ => {}
                     }
                 }
