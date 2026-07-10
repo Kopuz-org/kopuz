@@ -99,8 +99,9 @@ impl Player {
         Self::try_new().expect("failed to initialize audio player")
     }
 
-    /// Subscribe to the engine's event stream. Intended for a single pump task;
-    /// a later subscription replaces the previous one.
+    /// Subscribe to the engine's event stream. Multiple subscribers are
+    /// supported — each receives every event; a subscriber whose receiver is
+    /// dropped is pruned on the next emit.
     pub fn subscribe(&self) -> tokio::sync::mpsc::UnboundedReceiver<Event> {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         self.engine.send(Command::Subscribe(tx));

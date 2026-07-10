@@ -167,7 +167,10 @@ struct Actor {
     self_tx: Sender<ActorMsg>,
     sink: Box<dyn AudioSink>,
     status: Arc<ArcSwap<EngineStatus>>,
-    events: Option<tokio::sync::mpsc::UnboundedSender<Event>>,
+    /// Event subscribers. Multiple consumers may subscribe (the UI pump plus,
+    /// e.g., a future MPRIS or presence hook); a sender whose receiver has been
+    /// dropped is pruned on the next emit.
+    events: Vec<tokio::sync::mpsc::UnboundedSender<Event>>,
 
     volume: Arc<AtomicU32>,
     paused: Arc<AtomicBool>,
@@ -207,7 +210,7 @@ impl Actor {
             self_tx,
             sink,
             status,
-            events: None,
+            events: Vec::new(),
             volume: Arc::new(AtomicU32::new(super::rt::volume_bits(1.0))),
             paused: Arc::new(AtomicBool::new(false)),
             eq_settings: EqualizerSettings::default(),
@@ -307,7 +310,7 @@ impl Actor {
                 }
                 self.publish();
             }
-            Command::Subscribe(tx) => self.events = Some(tx),
+            Command::Subscribe(tx) => self.events.push(tx),
             Command::Shutdown => self.shutting_down = true,
         }
     }
@@ -789,10 +792,8 @@ impl Actor {
         }
         if fade_completed {
             self.stop_fading();
-            if let Some(current) = &self.current {
-                self.emit(Event::TrackSwitched {
-                    token: current.token,
-                });
+            if let Some(token) = self.current.as_ref().map(|c| c.token) {
+                self.emit(Event::TrackSwitched { token });
             }
         }
 
@@ -818,16 +819,13 @@ impl Actor {
 
         if self.phase() == Phase::Playing {
             let position = self.status.load().position();
-            if let Some(current) = &self.current {
+            if let Some(token) = self.current.as_ref().map(|c| c.token) {
                 // Throttled to second boundaries: subscribers render seconds,
                 // and every event is a wakeup on their side.
-                let mark = (current.token, position.as_secs());
+                let mark = (token, position.as_secs());
                 if self.last_position_emitted != Some(mark) {
                     self.last_position_emitted = Some(mark);
-                    self.emit(Event::Position {
-                        token: current.token,
-                        position,
-                    });
+                    self.emit(Event::Position { token, position });
                 }
             }
             // MPRIS reads position on demand from this stored value; the old
@@ -890,12 +888,21 @@ impl Actor {
         }
     }
 
-    fn emit(&self, event: Event) {
-        let Some(events) = &self.events else {
+    fn emit(&mut self, event: Event) {
+        if self.events.is_empty() {
             return;
-        };
+        }
         let is_position = matches!(event, Event::Position { .. });
-        if events.send(event).is_ok() && !is_position {
+        let mut delivered = false;
+        // Fan out to every subscriber, pruning any whose receiver has dropped.
+        self.events.retain(|tx| match tx.send(event.clone()) {
+            Ok(()) => {
+                delivered = true;
+                true
+            }
+            Err(_) => false,
+        });
+        if delivered && !is_position {
             // Waking tokio isn't enough on platforms where the app main loop
             // itself may be parked (tao/CFRunLoop).
             #[cfg(any(target_os = "android", target_os = "macos"))]

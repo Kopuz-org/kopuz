@@ -265,6 +265,46 @@ fn resampled_source_plays_full_duration() {
 }
 
 #[test]
+fn subscribe_composes_multiple_consumers() {
+    // A second subscriber must not steal the first's stream: both receive every
+    // event, and dropping one prunes it without disturbing the other.
+    let (_sink, engine) = spawn_engine();
+    let mut a = engine_subscribe(&engine);
+    let mut b = engine_subscribe(&engine);
+
+    let (factory, duration) = wav_factory(0.25);
+    load(&engine, 1, factory, duration);
+
+    let mut seen_a = Vec::new();
+    let mut seen_b = Vec::new();
+    wait_until("both subscribers see Loaded token 1", || {
+        drain_events(&mut a, &mut seen_a);
+        drain_events(&mut b, &mut seen_b);
+        seen_a
+            .iter()
+            .any(|e| matches!(e, Event::Loaded { token: 1 }))
+            && seen_b
+                .iter()
+                .any(|e| matches!(e, Event::Loaded { token: 1 }))
+    });
+
+    // Drop one receiver; the surviving subscriber keeps receiving after the
+    // dropped sender is pruned on the next emit.
+    drop(b);
+    let (factory2, duration2) = wav_factory(0.25);
+    load(&engine, 2, factory2, duration2);
+    let mut seen_a2 = Vec::new();
+    wait_until("surviving subscriber sees Loaded token 2", || {
+        drain_events(&mut a, &mut seen_a2);
+        seen_a2
+            .iter()
+            .any(|e| matches!(e, Event::Loaded { token: 2 }))
+    });
+
+    engine.shutdown();
+}
+
+#[test]
 fn eof_emits_ended_once_and_seek_revives() {
     let (sink, engine) = spawn_engine();
     let mut events = engine_subscribe(&engine);
