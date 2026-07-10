@@ -65,10 +65,10 @@ impl LoopMode {
 pub struct PlayerController {
     pub player: Signal<Player>,
     pub is_playing: Signal<bool>,
-    /// A track load is in flight. Written only through `set_intent`, so it
-    /// tracks the intent (`Loading` ⇒ true) and can't be left stuck by a bail
-    /// or cancel that forgets to clear it.
-    pub is_loading: Signal<bool>,
+    /// A track load is in flight. Derived from the intent (plus the browse
+    /// spinner), so it is read-only and can never be left stuck by a bail or
+    /// cancel — there is no setter to forget.
+    pub is_loading: Memo<bool>,
     pub history: Signal<Vec<usize>>,
     pub queue: Signal<Vec<Track>>,
     pub shuffle: Signal<bool>,
@@ -104,6 +104,10 @@ pub struct PlayerController {
     /// The session token a crossfade last armed for; cleared on a seek so a
     /// fresh fade can arm at the outgoing track's real end.
     pub(crate) armed_transition: Signal<Option<u64>>,
+    /// A browse action (Discover tile) wants the spinner shown synchronously on
+    /// click, before any load intent exists. Folded into `is_loading`; cleared
+    /// by `set_intent` when a real transition takes over.
+    pub browse_loading: Signal<bool>,
     pub(crate) pending_resume: Signal<Option<PendingResumeState>>,
     pub pending_crossfade_ui: Signal<Option<PendingCrossfadeUiState>>,
     pub radio_task: Signal<Option<dioxus_core::Task>>,
@@ -292,7 +296,9 @@ impl PlayerController {
     /// `current_token` mirror in lockstep so no cancellation path can leave a
     /// stale loading flag or token behind.
     pub(crate) fn set_intent(&mut self, next: PlaybackIntent) {
-        self.is_loading.set(next.is_loading());
+        // A real transition supersedes any browse spinner; is_loading is derived
+        // from the intent (Loading ⇒ true) via a memo, so nothing to set here.
+        self.browse_loading.set(false);
         self.current_token.set(next.token());
         self.intent.set(next);
     }
@@ -876,7 +882,8 @@ pub fn use_player_controller(
     let next_token = use_signal(|| 0u64);
     let current_token = use_signal(|| 0u64);
     let armed_transition = use_signal(|| None);
-    let is_loading = use_signal(|| false);
+    let browse_loading = use_signal(|| false);
+    let is_loading = use_memo(move || intent.read().is_loading() || *browse_loading.read());
     let history = use_signal(Vec::new);
     let shuffle = use_signal(|| false);
     let shuffle_order = use_signal(Vec::<usize>::new);
@@ -949,6 +956,7 @@ pub fn use_player_controller(
         next_token,
         current_token,
         armed_transition,
+        browse_loading,
         pending_resume,
         pending_crossfade_ui,
         radio_task,

@@ -484,7 +484,7 @@ fn play_playlist_async(
     mut now_playing: Signal<Option<String>>,
     cache: Signal<HashMap<String, Vec<Track>>>,
 ) {
-    ctrl.is_loading.set(true);
+    ctrl.browse_loading.set(true);
     now_playing.set(Some(id.clone()));
     // Cache hit from hover-prefetch — start playback synchronously, no
     // network roundtrip needed. This is the path that makes Discover
@@ -506,7 +506,7 @@ fn play_playlist_async(
             // currently-playing track.
             let fail = |ctrl: &mut hooks::use_player_controller::PlayerController,
                         now_playing: &mut Signal<Option<String>>| {
-                ctrl.is_loading.set(false);
+                ctrl.browse_loading.set(false);
                 now_playing.set(None);
             };
             let source = ctrl.active_source.peek().clone();
@@ -859,7 +859,7 @@ fn play_song_with_mix(
     mut now_playing: Signal<Option<String>>,
     cache: Signal<HashMap<String, Vec<Track>>>,
 ) {
-    ctrl.is_loading.set(true);
+    ctrl.browse_loading.set(true);
     now_playing.set(Some(video_id.clone()));
     if let Some(mix) = cache.peek().get(&video_id).cloned()
         && !mix.is_empty()
