@@ -56,17 +56,12 @@ pub fn snapshot(q: PersistedQueueState) -> db::QueueSnapshot {
 }
 
 fn is_streamable_queue_track(track: &Track) -> bool {
-    matches!(
-        track
-            .id
-            .uid()
-            .split(':')
-            .next()
-            .unwrap_or_default()
-            .to_ascii_lowercase()
-            .as_str(),
-        "jellyfin" | "subsonic" | "custom" | "ytmusic" | "soundcloud"
-    )
+    // Defer to the same scheme parser playback uses, so the restore filter can't
+    // drift from the list of server sources (this copy had already fallen behind
+    // on ytmusic/soundcloud). Parsing is case-exact, matching playback: uid()
+    // emits lowercase scheme prefixes, so a mis-cased id that would play back as
+    // Local is correctly excluded here too.
+    hooks::playback_ref::PlaybackItemRef::parse(&track.id.uid()).is_server()
 }
 
 fn is_restorable_queue_track(track: &Track) -> bool {
@@ -181,4 +176,57 @@ pub fn build_snapshot(
         shuffle_order: shuffle_order.to_vec(),
         shuffle_enabled,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reader::TrackId;
+
+    fn track(id: TrackId) -> Track {
+        Track {
+            id,
+            cover: None,
+            album_id: String::new(),
+            title: String::new(),
+            artist: String::new(),
+            album: String::new(),
+            duration: 0,
+            khz: 0,
+            bitrate: 0,
+            track_number: None,
+            disc_number: None,
+            musicbrainz_release_id: None,
+            musicbrainz_recording_id: None,
+            musicbrainz_track_id: None,
+            playlist_item_id: None,
+            artists: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn streamable_covers_every_server_source_and_excludes_local() {
+        for service in [
+            config::MusicService::Jellyfin,
+            config::MusicService::Subsonic,
+            config::MusicService::Custom,
+            config::MusicService::YtMusic,
+            config::MusicService::SoundCloud,
+        ] {
+            let t = track(TrackId::Server {
+                service,
+                item_id: "x".into(),
+            });
+            assert!(
+                is_streamable_queue_track(&t),
+                "server source {service:?} must be streamable"
+            );
+        }
+
+        let local = track(TrackId::Local("/music/a.flac".into()));
+        assert!(
+            !is_streamable_queue_track(&local),
+            "local is not streamable"
+        );
+    }
 }
