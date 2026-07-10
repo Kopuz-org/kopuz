@@ -768,12 +768,21 @@ impl Actor {
     // ── periodic work ───────────────────────────────────────────────────
 
     fn tick(&mut self) {
-        // Status is published on change, not every tick — track whether this
-        // tick moved anything a reader cares about (phase/fading).
-        let mut dirty = false;
+        // Each step publishes if (and only if) it changed observable state, so
+        // a steady Playing tick allocates nothing: position reads live off the
+        // shared atomic in the last-published status.
+        self.reap_rt_retired();
+        self.latch_drain_complete();
+        self.emit_throttled_position();
 
-        // Resources the RT callback shipped back: drop rings here (never on the
-        // audio thread) and finish crossfades. Each Retired balances a Swap.
+        // Finished detached workers just get dropped (JoinHandle drop detaches);
+        // live ones are re-checked next tick.
+        self.graveyard.retain(|handle| !handle.is_finished());
+    }
+
+    /// Resources the RT callback shipped back: drop rings here (never on the
+    /// audio thread) and finish crossfades. Each Retired balances a Swap.
+    fn reap_rt_retired(&mut self) {
         let mut fade_completed = false;
         let mut retired = 0usize;
         if let Some(retire_rx) = &self.retire_rx {
@@ -785,18 +794,23 @@ impl Actor {
             }
         }
         self.rt_rings_outstanding = self.rt_rings_outstanding.saturating_sub(retired);
-        if fade_completed {
-            // Capture the outgoing token before stop_fading drops the session.
-            let from_token = self.fading.as_ref().map(|f| f.token).unwrap_or(0);
-            self.stop_fading();
+
+        // Emit TrackSwitched only when an outgoing session actually retired: a
+        // FadeComplete can race a seek that already cancelled the fade, and
+        // that must not fabricate a switch.
+        if fade_completed && let Some(outgoing) = self.fading.take() {
+            let from_token = outgoing.token;
+            self.retire_session(outgoing);
             if let Some(token) = self.current.as_ref().map(|c| c.token) {
                 self.emit(Event::TrackSwitched { token, from_token });
             }
-            dirty = true;
+            self.publish();
         }
+    }
 
-        // Drain-complete: the worker hit EOF and the audio callback has played
-        // everything it wrote. Exactly-once by the `ended` latch.
+    /// Drain-complete: the worker hit EOF and the audio callback has played
+    /// everything it wrote. Exactly-once by the `ended` latch.
+    fn latch_drain_complete(&mut self) {
         let ended_token = match &mut self.current {
             Some(current)
                 if current.eof
@@ -813,36 +827,28 @@ impl Actor {
             // emit() wakes the platform run loop, so the subscriber's
             // auto-advance fires without waiting for a poll tick.
             self.emit(Event::Ended { token });
-            dirty = true;
-        }
-
-        if self.phase() == Phase::Playing {
-            let position = self.status.load().position();
-            if let Some(token) = self.current.as_ref().map(|c| c.token) {
-                // Throttled to second boundaries: subscribers render seconds,
-                // and every event is a wakeup on their side.
-                let mark = (token, position.as_secs());
-                if self.last_position_emitted != Some(mark) {
-                    self.last_position_emitted = Some(mark);
-                    self.emit(Event::Position { token, position });
-                }
-            }
-            // MPRIS reads position on demand from this stored value; the old
-            // engine ran a dedicated 250ms thread for it.
-            #[cfg(target_os = "linux")]
-            systemint::update_position(position.as_secs_f64());
-        }
-
-        // Finished detached workers just get dropped (JoinHandle drop detaches);
-        // live ones are re-checked next tick.
-        self.graveyard.retain(|handle| !handle.is_finished());
-
-        // Position reads live off the shared atomic in the last-published
-        // status, so a steady Playing tick needs no republish — only phase and
-        // fade transitions (tracked above) do.
-        if dirty {
             self.publish();
         }
+    }
+
+    /// Position once per second while playing — subscribers render seconds,
+    /// and every event is a wakeup on their side.
+    fn emit_throttled_position(&mut self) {
+        if self.phase() != Phase::Playing {
+            return;
+        }
+        let position = self.status.load().position();
+        if let Some(token) = self.current.as_ref().map(|c| c.token) {
+            let mark = (token, position.as_secs());
+            if self.last_position_emitted != Some(mark) {
+                self.last_position_emitted = Some(mark);
+                self.emit(Event::Position { token, position });
+            }
+        }
+        // MPRIS reads position on demand from this stored value; the old
+        // engine ran a dedicated 250ms thread for it.
+        #[cfg(target_os = "linux")]
+        systemint::update_position(position.as_secs_f64());
     }
 
     // ── plumbing ────────────────────────────────────────────────────────
