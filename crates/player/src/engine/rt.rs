@@ -232,17 +232,22 @@ impl RtState {
             };
 
             let frames = read / channels;
+            // Advance the crossfade gain by a constant per-frame step instead of
+            // recomputing a division per frame in the RT callback. Rebase the
+            // starting gain from the integer progress counter at each chunk so
+            // float error can't accumulate across the whole fade.
+            let total = fade.total_frames.max(1) as f32;
+            let step = 1.0 / total;
+            let mut fade_in_gain = fade.progress_frames.min(fade.total_frames) as f32 / total;
             for frame_idx in 0..frames {
-                let progress = ((fade.progress_frames + frame_idx as u64).min(fade.total_frames))
-                    as f32
-                    / fade.total_frames.max(1) as f32;
-                let fade_in_gain = progress.clamp(0.0, 1.0);
-                let fade_out_gain = 1.0 - fade_in_gain;
+                let gain = fade_in_gain.min(1.0);
+                let fade_out_gain = 1.0 - gain;
                 for ch in 0..channels {
                     let index = frame_idx * channels + ch;
-                    chunk[index] = active_scratch[index] * fade_in_gain
-                        + fading_scratch[index] * fade_out_gain;
+                    chunk[index] =
+                        active_scratch[index] * gain + fading_scratch[index] * fade_out_gain;
                 }
+                fade_in_gain += step;
             }
             // A trailing partial frame (read not divisible by channels) is
             // passed through unmixed.
