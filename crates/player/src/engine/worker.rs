@@ -87,6 +87,15 @@ struct Output {
     epoch: u64,
 }
 
+/// Reused per-packet conversion buffers so steady-state decode allocates
+/// nothing. Owned by `run`; each is cleared and refilled per packet.
+#[derive(Default)]
+struct Scratch {
+    interleaved: Vec<f32>,
+    converted: Vec<f32>,
+    resampled: Vec<f32>,
+}
+
 enum FlowChange {
     /// A seek arrived: pre-seek output must be discarded.
     Seeked,
@@ -237,6 +246,7 @@ fn run(
         }};
     }
 
+    let mut scratch = Scratch::default();
     loop {
         let change = drain_commands(
             cmd_rx,
@@ -304,12 +314,17 @@ fn run(
             }
         };
 
-        let samples = audio_buf_to_f32_interleaved(&decoded, target_channels, target_sample_rate);
+        let samples = audio_buf_to_f32_interleaved(
+            &decoded,
+            target_channels,
+            target_sample_rate,
+            &mut scratch,
+        );
 
         let change = write_all(
             cmd_rx,
             &mut output,
-            &samples,
+            samples,
             format.as_mut(),
             decoder.as_mut(),
             track_id,
@@ -581,42 +596,60 @@ pub(crate) fn audio_params_for_track(track: &Track) -> Option<AudioCodecParamete
     Some(audio_params)
 }
 
-fn audio_buf_to_f32_interleaved(
+fn audio_buf_to_f32_interleaved<'a>(
     buf: &GenericAudioBufferRef,
     target_channels: usize,
     target_sample_rate: u32,
-) -> Vec<f32> {
+    scratch: &'a mut Scratch,
+) -> &'a [f32] {
     // Resample against the packet's own declared rate rather than a rate guessed
     // at probe time: some containers report channels but not sample rate up
     // front (leaving the probe value unknown), and a chained stream can change
     // rate mid-playback. Both are only knowable per decoded buffer.
     let source_sample_rate = buf.spec().rate();
-
     let src_chans = buf.num_planes().max(1);
-    let mut interleaved: Vec<f32> = Vec::with_capacity(buf.frames() * src_chans);
-    buf.copy_to_vec_interleaved(&mut interleaved);
 
-    let interleaved = if src_chans != target_channels {
-        convert_channels(&interleaved, src_chans, target_channels)
-    } else {
-        interleaved
-    };
+    scratch.interleaved.clear();
+    buf.copy_to_vec_interleaved(&mut scratch.interleaved);
 
+    let channels_converted = src_chans != target_channels;
+    if channels_converted {
+        convert_channels(
+            &scratch.interleaved,
+            src_chans,
+            target_channels,
+            &mut scratch.converted,
+        );
+    }
+
+    // Branch so each resample reads/writes distinct scratch fields directly —
+    // routing the source through a `&[f32]` variable would borrow-conflict with
+    // the `&mut resampled` output.
     if source_sample_rate != 0 && source_sample_rate != target_sample_rate {
+        let src = if channels_converted {
+            &scratch.converted
+        } else {
+            &scratch.interleaved
+        };
         resample(
-            &interleaved,
+            src,
             target_channels,
             source_sample_rate,
             target_sample_rate,
-        )
+            &mut scratch.resampled,
+        );
+        &scratch.resampled
+    } else if channels_converted {
+        &scratch.converted
     } else {
-        interleaved
+        &scratch.interleaved
     }
 }
 
-fn convert_channels(samples: &[f32], src_channels: usize, dst_channels: usize) -> Vec<f32> {
+fn convert_channels(samples: &[f32], src_channels: usize, dst_channels: usize, out: &mut Vec<f32>) {
     let frames = samples.len() / src_channels;
-    let mut out = Vec::with_capacity(frames * dst_channels);
+    out.clear();
+    out.reserve(frames * dst_channels);
 
     for frame in 0..frames {
         let src_offset = frame * src_channels;
@@ -631,20 +664,22 @@ fn convert_channels(samples: &[f32], src_channels: usize, dst_channels: usize) -
             }
         }
     }
-    out
 }
 
-fn resample(samples: &[f32], channels: usize, src_rate: u32, dst_rate: u32) -> Vec<f32> {
+fn resample(samples: &[f32], channels: usize, src_rate: u32, dst_rate: u32, out: &mut Vec<f32>) {
+    out.clear();
     if channels == 0 || src_rate == 0 || dst_rate == 0 {
-        return samples.to_vec();
+        out.extend_from_slice(samples);
+        return;
     }
     let src_frames = samples.len() / channels;
     let ratio = dst_rate as f64 / src_rate as f64;
     if ratio.is_nan() || ratio.is_infinite() {
-        return samples.to_vec();
+        out.extend_from_slice(samples);
+        return;
     }
     let dst_frames = (src_frames as f64 * ratio).ceil() as usize;
-    let mut out = Vec::with_capacity(dst_frames * channels);
+    out.reserve(dst_frames * channels);
 
     for i in 0..dst_frames {
         let src_pos = i as f64 / ratio;
@@ -665,5 +700,4 @@ fn resample(samples: &[f32], channels: usize, src_rate: u32, dst_rate: u32) -> V
             out.push(s0 + (s1 - s0) * frac as f32);
         }
     }
-    out
 }
