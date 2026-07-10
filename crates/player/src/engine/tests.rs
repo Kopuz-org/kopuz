@@ -715,6 +715,52 @@ fn stop_for_transition_goes_idle_without_pausing_device() {
     engine.shutdown();
 }
 
+#[test]
+fn idle_engine_stops_republishing_and_wakes_on_load() {
+    let (sink, engine) = spawn_engine();
+
+    let (factory, duration) = wav_factory(10.0);
+    load(&engine, 1, factory, duration);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    wait_until("audio", || sink.pull(4096).iter().any(|s| *s != 0.0));
+
+    // Steady playback: the position advances off the shared atomic, so the
+    // status is NOT republished every tick — the same Arc is handed out while
+    // the position still moves. Span several actor ticks of wall-clock time.
+    let s1 = engine.status();
+    let p1 = s1.position();
+    for _ in 0..6 {
+        sink.pull(TEST_CONFIG.sample_rate as usize * TEST_CONFIG.channels / 20);
+        std::thread::sleep(Duration::from_millis(60));
+    }
+    let s2 = engine.status();
+    assert!(
+        Arc::ptr_eq(&s1, &s2),
+        "steady playback must not republish the status every tick"
+    );
+    assert!(
+        s2.position() > p1,
+        "position still advances off the live atomic without a republish"
+    );
+
+    // Stop to a genuinely idle state, then a fresh load must wake the parked
+    // actor and play.
+    engine.send(Command::Stop {
+        pause_device: false,
+    });
+    wait_until("phase Idle", || {
+        sink.pull(4096);
+        engine.status().phase == Phase::Idle
+    });
+    let (factory2, duration2) = wav_factory(5.0);
+    load(&engine, 2, factory2, duration2);
+    wait_until("phase Playing after idle wake", || {
+        engine.status().phase == Phase::Playing
+    });
+
+    engine.shutdown();
+}
+
 fn engine_subscribe(engine: &EngineHandle) -> tokio::sync::mpsc::UnboundedReceiver<Event> {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     engine.send(Command::Subscribe(tx));

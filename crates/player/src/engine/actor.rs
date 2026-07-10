@@ -198,6 +198,11 @@ struct Actor {
     last_token: u64,
     last_position_emitted: Option<(u64, u64)>,
     last_output_rebuild: Option<Instant>,
+    /// Ring consumers handed to the current RT state (via Swap) that it has not
+    /// yet shipped back (via Retired). Zero means the RT holds nothing to reap,
+    /// so the actor can safely park until the next message. Reset on
+    /// open_output, which builds a fresh RT state with its own channels.
+    rt_rings_outstanding: usize,
     shutting_down: bool,
 }
 
@@ -229,6 +234,7 @@ impl Actor {
             last_token: 0,
             last_position_emitted: None,
             last_output_rebuild: None,
+            rt_rings_outstanding: 0,
             shutting_down: false,
         }
     }
@@ -241,15 +247,35 @@ impl Actor {
         }
 
         while !self.shutting_down {
-            match self.rx.recv_timeout(TICK) {
-                Ok(msg) => self.handle(msg),
-                Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => break,
+            if self.is_idle() {
+                // Nothing to derive on a tick (no session, no rings to reap):
+                // park until a command or worker message instead of waking at
+                // the tick rate forever.
+                match self.rx.recv() {
+                    Ok(msg) => self.handle(msg),
+                    Err(_) => break,
+                }
+            } else {
+                match self.rx.recv_timeout(TICK) {
+                    Ok(msg) => self.handle(msg),
+                    Err(RecvTimeoutError::Timeout) => {}
+                    Err(RecvTimeoutError::Disconnected) => break,
+                }
             }
             self.tick();
         }
 
         self.teardown();
+    }
+
+    /// No session, pending load, detached worker, or outstanding RT ring — the
+    /// tick has nothing to compute, so the loop can block on the next message.
+    fn is_idle(&self) -> bool {
+        self.current.is_none()
+            && self.fading.is_none()
+            && self.pending.is_none()
+            && self.graveyard.is_empty()
+            && self.rt_rings_outstanding == 0
     }
 
     // ── message handling ────────────────────────────────────────────────
@@ -798,17 +824,23 @@ impl Actor {
     // ── periodic work ───────────────────────────────────────────────────
 
     fn tick(&mut self) {
+        // Status is published on change, not every tick — track whether this
+        // tick moved anything a reader cares about (phase/fading).
+        let mut dirty = false;
+
         // Resources the RT callback shipped back: drop rings here (never on the
-        // audio thread) and finish crossfades.
+        // audio thread) and finish crossfades. Each Retired balances a Swap.
         let mut fade_completed = false;
+        let mut retired = 0usize;
         if let Some(retire_rx) = &self.retire_rx {
-            while let Ok(retired) = retire_rx.try_recv() {
-                match retired {
-                    Retired::Ring(_) => {}
-                    Retired::FadeComplete(_) => fade_completed = true,
+            while let Ok(msg) = retire_rx.try_recv() {
+                retired += 1;
+                if matches!(msg, Retired::FadeComplete(_)) {
+                    fade_completed = true;
                 }
             }
         }
+        self.rt_rings_outstanding = self.rt_rings_outstanding.saturating_sub(retired);
         if fade_completed {
             // Capture the outgoing token before stop_fading drops the session.
             let from_token = self.fading.as_ref().map(|f| f.token).unwrap_or(0);
@@ -816,6 +848,7 @@ impl Actor {
             if let Some(token) = self.current.as_ref().map(|c| c.token) {
                 self.emit(Event::TrackSwitched { token, from_token });
             }
+            dirty = true;
         }
 
         // Drain-complete: the worker hit EOF and the audio callback has played
@@ -836,6 +869,7 @@ impl Actor {
             // emit() wakes the platform run loop, so the subscriber's
             // auto-advance fires without waiting for a poll tick.
             self.emit(Event::Ended { token });
+            dirty = true;
         }
 
         if self.phase() == Phase::Playing {
@@ -859,7 +893,12 @@ impl Actor {
         // live ones are re-checked next tick.
         self.graveyard.retain(|handle| !handle.is_finished());
 
-        self.publish();
+        // Position reads live off the shared atomic in the last-published
+        // status, so a steady Playing tick needs no republish — only phase and
+        // fade transitions (tracked above) do.
+        if dirty {
+            self.publish();
+        }
     }
 
     // ── plumbing ────────────────────────────────────────────────────────
@@ -945,7 +984,13 @@ impl Actor {
         }
     }
 
-    fn send_rt(&self, cmd: RtCmd) {
+    fn send_rt(&mut self, cmd: RtCmd) {
+        // Each Swap hands the RT a new ring consumer it will later ship back as
+        // a Retired message; track the balance so the loop knows when the RT is
+        // empty and it can park.
+        if matches!(cmd, RtCmd::Swap { .. }) {
+            self.rt_rings_outstanding += 1;
+        }
         if let Some(rt_tx) = &self.rt_tx {
             let _ = rt_tx.send(cmd);
         }
@@ -978,6 +1023,9 @@ impl Actor {
         let config = self.sink.open(desired_sample_rate, make_cb)?;
         self.rt_tx = Some(rt_tx);
         self.retire_rx = Some(retire_rx);
+        // The old RT state (and any rings it still held) is dropped with the old
+        // stream; the fresh one starts owning nothing.
+        self.rt_rings_outstanding = 0;
         Ok(config)
     }
 
