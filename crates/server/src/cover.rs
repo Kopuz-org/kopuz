@@ -123,6 +123,23 @@ pub fn track(config: &AppConfig, track: &Track, max_width: u32) -> Option<CoverU
                 max_width,
                 80,
             )
+            .or_else(|| {
+                // No cover path encoded on the track → build a getCoverArt URL
+                // keyed by the track id, which needs the signed credentials.
+                let (Some(password), Some(username)) =
+                    (server.access_token.as_deref(), server.user_id.as_deref())
+                else {
+                    return None;
+                };
+                crate::subsonic::cover_art_url(
+                    &server.url,
+                    username,
+                    password,
+                    &track.id.key(),
+                    Some(max_width),
+                )
+                .ok()
+            })
         }
         MusicService::YtMusic => utils::jellyfin_image::resolve_track_cover(
             track.cover.as_deref(),
@@ -150,6 +167,60 @@ mod tests {
             server: None,
             ..Default::default()
         }
+    }
+
+    fn subsonic_track(item_id: &str, cover: Option<&str>) -> Track {
+        Track {
+            id: reader::TrackId::Server {
+                service: MusicService::Subsonic,
+                item_id: item_id.to_string(),
+            },
+            cover: cover.map(str::to_string),
+            album_id: String::new(),
+            title: String::new(),
+            artist: String::new(),
+            album: String::new(),
+            duration: 0,
+            khz: 0,
+            bitrate: 0,
+            track_number: None,
+            disc_number: None,
+            musicbrainz_release_id: None,
+            musicbrainz_recording_id: None,
+            musicbrainz_track_id: None,
+            playlist_item_id: None,
+            artists: Vec::new(),
+        }
+    }
+
+    fn subsonic_config(with_creds: bool) -> AppConfig {
+        AppConfig {
+            active_source: config::Source::Local,
+            server: Some(config::MusicServer {
+                url: "https://sub.example.com".into(),
+                service: MusicService::Subsonic,
+                access_token: with_creds.then(|| "pw".to_string()),
+                user_id: with_creds.then(|| "alice".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn subsonic_track_without_cover_path_falls_back_to_getcoverart() {
+        // `cover == "none"` is the no-embedded-cover sentinel, for which
+        // subsonic_image_url_from_path returns None; cover::track must then fall
+        // back to a signed getCoverArt URL keyed by the track id.
+        let track = subsonic_track("TR-42", Some("none"));
+        let got = super::track(&subsonic_config(true), &track, 800).expect("fallback cover url");
+        let s: &str = &got;
+        assert!(s.contains("getCoverArt"), "got: {s}");
+        assert!(s.contains("TR-42"), "keyed by the track id: {s}");
+        assert!(s.contains("alice"), "signed with the username: {s}");
+
+        // Without credentials the fallback can't sign a request → no cover.
+        assert!(super::track(&subsonic_config(false), &track, 800).is_none());
     }
 
     #[test]
