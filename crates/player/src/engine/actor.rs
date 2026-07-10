@@ -432,6 +432,22 @@ impl Actor {
                     });
                     // The pending load is gone; clear it from status.
                     self.publish();
+                } else if let Some(current) = self.current.take_if(|c| c.token == token) {
+                    // A LIVE session's worker can fail too: a post-EOF seek
+                    // whose re-probe errors sends Failed and exits. Ignoring it
+                    // left the session in a silent Playing forever — retire it
+                    // and report, so the controller can react.
+                    self.retire_session(current);
+                    self.emit(Event::Error {
+                        token,
+                        message: error,
+                    });
+                    self.publish();
+                } else if let Some(fading) = self.fading.take_if(|f| f.token == token) {
+                    // The outgoing side of a crossfade failing just ends its
+                    // fade-out early; the incoming session is unaffected.
+                    self.retire_session(fading);
+                    self.publish();
                 }
             }
         }

@@ -1268,6 +1268,41 @@ fn device_rebuild_to_new_rate_retargets_the_decode() {
 }
 
 #[test]
+fn live_worker_failure_retires_the_session_and_reports() {
+    // A started session's worker can fail after Ready — a post-EOF seek whose
+    // re-probe errors sends Failed and exits. That must retire the session and
+    // surface an Error, not leave a dead worker under a permanent silent
+    // Playing phase.
+    let (sink, engine, actor_tx) = spawn_engine_with_tx();
+    let mut events = engine_subscribe(&engine);
+    let mut seen = Vec::new();
+
+    let (factory, duration) = wav_factory(30.0);
+    load(&engine, 1, factory, duration);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    wait_until("audio", || sink.pull(4096).iter().any(|s| *s != 0.0));
+
+    let _ = actor_tx.send(super::actor::ActorMsg::Worker(
+        super::worker::WorkerMsg::Failed {
+            token: 1,
+            error: "re-probe failed".to_string(),
+        },
+    ));
+
+    wait_until("session retired to Idle", || {
+        engine.status().phase == Phase::Idle
+    });
+    drain_events(&mut events, &mut seen);
+    assert!(
+        seen.iter()
+            .any(|e| matches!(e, Event::Error { token: 1, .. })),
+        "a live-session failure must surface an Error event: {seen:?}"
+    );
+
+    engine.shutdown();
+}
+
+#[test]
 fn full_stop_pauses_the_device() {
     let (sink, engine) = spawn_engine();
     let (factory, duration) = wav_factory(5.0);
