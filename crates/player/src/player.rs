@@ -244,6 +244,11 @@ impl Player {
         self.status().fading_position()
     }
 
+    /// The engine's current session token (the last session's if idle).
+    pub fn session_token(&self) -> u64 {
+        self.status().token
+    }
+
     /// Seek a specific session; the engine ignores it if a completed crossfade
     /// has since promoted a different one.
     pub fn seek_for_session(&self, time: Duration, token: u64) {

@@ -28,10 +28,14 @@ pub(crate) enum PlaybackIntent {
     /// Nothing should be audible (end of queue, backend switch, failed load).
     Stopped,
     /// A load pipeline is in flight for `token`, targeting queue slot `idx`.
+    /// `from_token` is the session that was committed when the load started —
+    /// the one still audible during a crossfade resolve, and the one a
+    /// failed/reverted crossfade falls back to.
     Loading {
         token: u64,
         idx: usize,
         crossfade: bool,
+        from_token: u64,
     },
     /// The engine confirmed session `token`; the UI displays it (or, mid-fade,
     /// its predecessor).
@@ -266,13 +270,41 @@ impl PlayerController {
         self.player.peek().commit_now_playing();
     }
 
-    /// Undo an armed-but-uncommitted crossfade: the engine's seek/prev revives
-    /// the outgoing (visible) session, so drop the deferred UI, re-enable
+    /// Undo an armed-but-uncommitted crossfade at either stage of its life —
+    /// while its load is still resolving (no fade engine-side yet: cancel the
+    /// load outright) or while the fade is running (the engine's seek revives
+    /// the outgoing session). Either way: drop the deferred UI, re-enable
     /// arming, pop the history entry the arm pushed, and point the intent back
-    /// at the outgoing session. Returns the outgoing token if a fade was reverted.
+    /// at the outgoing session. Returns the outgoing token if anything was
+    /// reverted.
     pub(crate) fn revert_transition(&mut self) -> Option<u64> {
-        let pending = (*self.pending_crossfade_ui.peek())?;
-        self.clear_pending_crossfade_ui();
+        // Copy both stage markers out before mutating anything — peek() guards
+        // must not be held across the signal writes below.
+        let fading = (*self.pending_crossfade_ui.peek()).map(|p| p.from_token);
+        let resolving = match *self.intent.peek() {
+            PlaybackIntent::Loading {
+                crossfade: true,
+                from_token,
+                ..
+            } => Some(from_token),
+            _ => None,
+        };
+
+        let from_token = if let Some(from_token) = fading {
+            // Fade running: the engine is mixing; a subsequent tokened seek
+            // cancels it engine-side and revives the outgoing session.
+            self.clear_pending_crossfade_ui();
+            from_token
+        } else if let Some(from_token) = resolving {
+            // Load still resolving: nothing has reached the engine's mixer yet
+            // (or at most a pending probe) — cancel it and stay on the
+            // outgoing session, which never stopped playing.
+            self.cancel_load_task();
+            from_token
+        } else {
+            return None;
+        };
+
         self.armed_transition.set(None);
         let idx = *self.current_queue_index.peek();
         self.history.with_mut(|h| {
@@ -280,10 +312,8 @@ impl PlayerController {
                 h.pop();
             }
         });
-        self.set_intent(PlaybackIntent::Committed {
-            token: pending.from_token,
-        });
-        Some(pending.from_token)
+        self.set_intent(PlaybackIntent::Committed { token: from_token });
+        Some(from_token)
     }
 
     pub(crate) fn set_pending_resume_for_track(&mut self, track: &Track, progress_secs: u64) {
@@ -321,27 +351,28 @@ impl PlayerController {
     /// Report a load failure for `token`, unless a newer load already
     /// superseded it. Stay on the track the user sees — never auto-advance:
     ///  - a crossfade load that failed never stopped the outgoing track, so
-    ///    revert to it (`from_token`) and keep it playing;
+    ///    revert to it (the intent's `from_token`) and keep it playing;
     ///  - an immediate load already stopped the previous session and hydrated
     ///    the failed track's metadata, so leave it shown, paused.
-    pub(crate) fn fail_load(&mut self, token: u64, from_token: u64, error: impl std::fmt::Display) {
+    pub(crate) fn fail_load(&mut self, token: u64, error: impl std::fmt::Display) {
         let intent = *self.intent.peek();
         if intent.token() != token {
             return;
         }
         self.playback_error
             .set(Some(format!("Couldn't load this track:\n{error}")));
-        if matches!(
-            intent,
+        match intent {
             PlaybackIntent::Loading {
                 crossfade: true,
+                from_token,
                 ..
+            } => {
+                self.set_intent(PlaybackIntent::Committed { token: from_token });
             }
-        ) {
-            self.set_intent(PlaybackIntent::Committed { token: from_token });
-        } else {
-            self.set_intent(PlaybackIntent::Stopped);
-            self.is_playing.set(false);
+            _ => {
+                self.set_intent(PlaybackIntent::Stopped);
+                self.is_playing.set(false);
+            }
         }
     }
 
@@ -551,13 +582,14 @@ impl PlayerController {
             self.clear_pending_crossfade_ui();
         }
         // The session currently playing (the crossfade's outgoing track); the
-        // deferred UI reverts to it if the fade is cancelled by a seek/prev.
+        // transition reverts to it if the crossfade is cancelled or fails.
         let from_token = self.intent.peek().token();
         let token = self.allocate_token();
         self.set_intent(PlaybackIntent::Loading {
             token,
             idx,
             crossfade: use_crossfade,
+            from_token,
         });
 
         let cover_url: String = if offline_path.is_some() {
@@ -670,7 +702,7 @@ impl PlayerController {
                                     }
                                     Err(e) => {
                                         tracing::error!(error = %e, "stream URL resolve failed");
-                                        ctrl.fail_load(token, from_token, &e);
+                                        ctrl.fail_load(token, &e);
                                         return;
                                     }
                                 }
@@ -824,7 +856,7 @@ impl PlayerController {
                     }
                     Ok(Err(e)) => {
                         tracing::error!(error = %e, "playback failed");
-                        ctrl.fail_load(token, from_token, &e);
+                        ctrl.fail_load(token, &e);
                     }
                     Err(_) => {
                         // Cancelled engine-side (superseded or stopped) — the

@@ -262,7 +262,14 @@ pub fn use_player_task(ctrl: PlayerController) {
                         } => {
                             if token == ctrl.intent.peek().token() {
                                 ctrl.is_playing.set(phase == Phase::Playing);
-                            } else if phase == Phase::Playing {
+                            } else if phase == Phase::Playing
+                                && ctrl.player.peek().session_token() == token
+                            {
+                                // A session we no longer intend is audibly live
+                                // right now — stop it. If the engine has since
+                                // moved to another session (e.g. our own revert
+                                // seek already re-promoted the outgoing track),
+                                // this event is history, not a command.
                                 ctrl.player.peek().stop_for_transition();
                             }
                         }
@@ -282,8 +289,14 @@ pub fn use_player_task(ctrl: PlayerController) {
                         }
                         // Loaded confirms a session started; if it's for a load
                         // we superseded or cancelled (end-of-queue racing a
-                        // promoted load), stop it instead of adopting it.
-                        Event::Loaded { token } if token != ctrl.intent.peek().token() => {
+                        // promoted load) and it is still the engine's live
+                        // session, stop it instead of adopting it. If the
+                        // engine already moved on (a revert seek re-promoted
+                        // the outgoing track), the event is history.
+                        Event::Loaded { token }
+                            if token != ctrl.intent.peek().token()
+                                && ctrl.player.peek().session_token() == token =>
+                        {
                             ctrl.player.peek().stop_for_transition();
                         }
                         // A device lost mid-playback on a live session (radio
@@ -292,9 +305,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                         // re-loads the station.
                         Event::Error { token, message } if token == ctrl.intent.peek().token() => {
                             tracing::warn!(%message, "engine reported a playback error");
-                            // A live session lost its device: intent is Committed,
-                            // so fail_load stops it (from_token is unused here).
-                            ctrl.fail_load(token, token, &message);
+                            ctrl.fail_load(token, &message);
                             ctrl.is_playing.set(false);
                         }
                         _ => {}
