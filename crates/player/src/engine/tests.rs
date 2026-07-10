@@ -235,6 +235,36 @@ fn load_plays_and_position_advances() {
 }
 
 #[test]
+fn resampled_source_plays_full_duration() {
+    // The worker must resample from the buffer's own declared rate. With the old
+    // unwrap_or(device_rate) fallback a 22.05kHz source on a 44.1kHz device was
+    // pushed through un-resampled, so it played at half speed and the position
+    // clock reached only half the real duration.
+    let (sink, engine) = spawn_engine();
+
+    let frames = 11_025; // 0.5s at 22_050 Hz
+    let bytes = wav_bytes(frames, 22_050, TEST_CONFIG.channels as u16);
+    let factory: SourceFactory =
+        Box::new(move || Ok(crate::decoder::from_stream(std::io::Cursor::new(bytes))));
+    load(&engine, 1, factory, Duration::from_millis(500));
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+
+    // Drain to the natural end at the device rate; the position clock must reach
+    // the full ~0.5s (44.1kHz), not the ~0.25s the un-resampled path produced.
+    wait_until("phase Ended", || {
+        sink.pull(4096);
+        engine.status().phase == Phase::Ended
+    });
+    assert!(
+        engine.status().position() >= Duration::from_millis(450),
+        "resampled 22.05kHz source must play its full duration, got {:?}",
+        engine.status().position()
+    );
+
+    engine.shutdown();
+}
+
+#[test]
 fn eof_emits_ended_once_and_seek_revives() {
     let (sink, engine) = spawn_engine();
     let mut events = engine_subscribe(&engine);

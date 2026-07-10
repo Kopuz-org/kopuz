@@ -204,8 +204,6 @@ fn run(
         _ => return,
     };
 
-    let source_sample_rate = source_sample_rate.unwrap_or(target_sample_rate);
-
     // A post-EOF seek on a Matroska/WebM stream can't be serviced in place;
     // rebuild the reader from the buffered bytes and carry on. Local macros so
     // the reassignment of `format`/`track_id` and the `continue` land in the
@@ -306,12 +304,7 @@ fn run(
             }
         };
 
-        let samples = audio_buf_to_f32_interleaved(
-            &decoded,
-            target_channels,
-            source_sample_rate,
-            target_sample_rate,
-        );
+        let samples = audio_buf_to_f32_interleaved(&decoded, target_channels, target_sample_rate);
 
         let change = write_all(
             cmd_rx,
@@ -547,9 +540,14 @@ pub(crate) fn audio_params_for_track(track: &Track) -> Option<AudioCodecParamete
 fn audio_buf_to_f32_interleaved(
     buf: &GenericAudioBufferRef,
     target_channels: usize,
-    source_sample_rate: u32,
     target_sample_rate: u32,
 ) -> Vec<f32> {
+    // Resample against the packet's own declared rate rather than a rate guessed
+    // at probe time: some containers report channels but not sample rate up
+    // front (leaving the probe value unknown), and a chained stream can change
+    // rate mid-playback. Both are only knowable per decoded buffer.
+    let source_sample_rate = buf.spec().rate();
+
     let src_chans = buf.num_planes().max(1);
     let mut interleaved: Vec<f32> = Vec::with_capacity(buf.frames() * src_chans);
     buf.copy_to_vec_interleaved(&mut interleaved);
@@ -560,7 +558,7 @@ fn audio_buf_to_f32_interleaved(
         interleaved
     };
 
-    if source_sample_rate != target_sample_rate {
+    if source_sample_rate != 0 && source_sample_rate != target_sample_rate {
         resample(
             &interleaved,
             target_channels,
