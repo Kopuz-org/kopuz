@@ -292,7 +292,9 @@ pub fn use_player_task(ctrl: PlayerController) {
                         // re-loads the station.
                         Event::Error { token, message } if token == ctrl.intent.peek().token() => {
                             tracing::warn!(%message, "engine reported a playback error");
-                            ctrl.fail_load(token, &message);
+                            // A live session lost its device: intent is Committed,
+                            // so fail_load stops it (from_token is unused here).
+                            ctrl.fail_load(token, token, &message);
                             ctrl.is_playing.set(false);
                         }
                         _ => {}

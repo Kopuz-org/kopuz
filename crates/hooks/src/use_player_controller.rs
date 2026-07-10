@@ -261,6 +261,9 @@ impl PlayerController {
         self.pending_crossfade_ui.set(None);
         let pos = self.player.peek().get_position().as_secs();
         self.hydrate_current_track_metadata(pending.next_idx, pos);
+        // The incoming track is now the sole session; push its OS now-playing
+        // metadata, deferred from load for the crossfade.
+        self.player.peek().commit_now_playing();
     }
 
     /// Undo an armed-but-uncommitted crossfade: the engine's seek/prev revives
@@ -316,14 +319,30 @@ impl PlayerController {
     }
 
     /// Report a load failure for `token`, unless a newer load already
-    /// superseded it. Shared by the pipeline's two failure paths.
-    pub(crate) fn fail_load(&mut self, token: u64, error: impl std::fmt::Display) {
-        if self.intent.peek().token() != token {
+    /// superseded it. Stay on the track the user sees — never auto-advance:
+    ///  - a crossfade load that failed never stopped the outgoing track, so
+    ///    revert to it (`from_token`) and keep it playing;
+    ///  - an immediate load already stopped the previous session and hydrated
+    ///    the failed track's metadata, so leave it shown, paused.
+    pub(crate) fn fail_load(&mut self, token: u64, from_token: u64, error: impl std::fmt::Display) {
+        let intent = *self.intent.peek();
+        if intent.token() != token {
             return;
         }
         self.playback_error
             .set(Some(format!("Couldn't load this track:\n{error}")));
-        self.set_intent(PlaybackIntent::Stopped);
+        if matches!(
+            intent,
+            PlaybackIntent::Loading {
+                crossfade: true,
+                ..
+            }
+        ) {
+            self.set_intent(PlaybackIntent::Committed { token: from_token });
+        } else {
+            self.set_intent(PlaybackIntent::Stopped);
+            self.is_playing.set(false);
+        }
     }
 
     /// Seek the current track. All progress-bar / lyric scrubbers route here.
@@ -627,7 +646,7 @@ impl PlayerController {
                                     }
                                     Err(e) => {
                                         tracing::error!(error = %e, "stream URL resolve failed");
-                                        ctrl.fail_load(token, &e);
+                                        ctrl.fail_load(token, from_token, &e);
                                         return;
                                     }
                                 }
@@ -851,7 +870,7 @@ impl PlayerController {
                     }
                     Ok(Err(e)) => {
                         tracing::error!(error = %e, "playback failed");
-                        ctrl.fail_load(token, &e);
+                        ctrl.fail_load(token, from_token, &e);
                     }
                     Err(_) => {
                         // Cancelled engine-side (superseded or stopped) — the

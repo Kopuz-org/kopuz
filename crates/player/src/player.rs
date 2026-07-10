@@ -131,7 +131,20 @@ impl Player {
             reply,
         }));
         self.now_playing = Some(meta);
-        self.push_now_playing(start_at.unwrap_or(Duration::ZERO), true);
+        // Push the OS now-playing display now only for an immediate switch (the
+        // UI hydrates to the new track at the same time). A crossfade keeps
+        // showing the outgoing track until the fade completes, so its metadata
+        // is pushed then, via `commit_now_playing`.
+        if matches!(transition, Transition::Immediate) {
+            self.push_now_playing(start_at.unwrap_or(Duration::ZERO), true);
+        }
+    }
+
+    /// Push the stored now-playing metadata to the OS display. Used to commit a
+    /// crossfade's incoming track once its fade completes (its push was deferred
+    /// in `load`).
+    pub fn commit_now_playing(&self) {
+        self.update_now_playing_system();
     }
 
     /// Drop a load that is still resolving without touching live playback.
