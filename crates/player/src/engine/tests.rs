@@ -781,6 +781,68 @@ fn seek_during_crossfade_resumes_the_outgoing_track() {
 }
 
 #[test]
+fn seek_during_crossfade_from_radio_is_ignored() {
+    // Seeking out of a crossfade whose outgoing (visible) source is non-seekable
+    // (radio) must be a no-op. The old ordering retired the incoming session and
+    // only then early-returned on !seekable, stranding the RT mid-fade into a
+    // stopped ring — silence with the status wedged. The fix checks the visible
+    // session's seekability before any teardown.
+    let (sink, engine) = spawn_engine();
+    let mut events = engine_subscribe(&engine);
+
+    // Outgoing: a long non-seekable stream, like internet radio.
+    let frames = 30 * TEST_CONFIG.sample_rate as usize;
+    let bytes = wav_bytes(frames, TEST_CONFIG.sample_rate, TEST_CONFIG.channels as u16);
+    let radio: SourceFactory = Box::new(move || {
+        Ok(crate::decoder::from_stream_with_hint(
+            std::io::Cursor::new(bytes),
+            "wav",
+        ))
+    });
+    load(&engine, 1, radio, Duration::from_secs(u64::MAX / 2));
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    wait_until("audio from radio", || {
+        sink.pull(4096).iter().any(|s| *s != 0.0)
+    });
+
+    // Incoming: a seekable file, crossfaded in.
+    let (factory_b, duration_b) = wav_factory(30.0);
+    let outcome = load_with(
+        &engine,
+        2,
+        factory_b,
+        duration_b,
+        Transition::Crossfade(Duration::from_secs(5)),
+    );
+    assert!(outcome.crossfaded);
+    wait_until("status on incoming token 2", || engine.status().token == 2);
+
+    // Seek mid-fade — ignored, because the visible (outgoing) source is radio.
+    engine.send(Command::Seek(Duration::from_secs(10)));
+
+    // The fade runs to completion normally: TrackSwitched for the incoming, which
+    // becomes the sole session; audio never goes silent.
+    let mut seen = Vec::new();
+    wait_until("fade completes to token 2", || {
+        sink.pull(8192);
+        drain_events(&mut events, &mut seen);
+        seen.iter()
+            .any(|e| matches!(e, Event::TrackSwitched { token: 2, .. }))
+    });
+    assert_eq!(
+        engine.status().token,
+        2,
+        "the incoming session must survive the ignored seek"
+    );
+    assert_eq!(engine.status().phase, Phase::Playing);
+    wait_until("audio still flowing after the ignored seek", || {
+        sink.pull(4096).iter().any(|s| *s != 0.0)
+    });
+
+    engine.shutdown();
+}
+
+#[test]
 fn radio_source_ignores_seek_and_ends_at_eof() {
     let (sink, engine) = spawn_engine();
 

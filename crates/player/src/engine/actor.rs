@@ -437,8 +437,7 @@ impl Actor {
 
     /// Stop and detach a worker whose session never started.
     fn abort_start(&mut self, worker: WorkerHandle, error: String) -> String {
-        let _ = worker.cmd_tx.send(WorkerCmd::Stop);
-        self.graveyard.push(worker.join);
+        self.retire_worker(worker);
         error
     }
 
@@ -601,10 +600,17 @@ impl Actor {
         self.last_token = token;
     }
 
+    /// Stop a worker and detach its join handle into the graveyard. Never
+    /// joined on the command path — a worker stuck in network I/O must not
+    /// stall the actor.
+    fn retire_worker(&mut self, worker: WorkerHandle) {
+        let _ = worker.cmd_tx.send(WorkerCmd::Stop);
+        self.graveyard.push(worker.join);
+    }
+
     /// Stop and detach a session's worker into the graveyard.
     fn retire_session(&mut self, session: Session) {
-        let _ = session.worker.cmd_tx.send(WorkerCmd::Stop);
-        self.graveyard.push(session.worker.join);
+        self.retire_worker(session.worker);
     }
 
     /// Stop the outgoing crossfade session, if any.
@@ -619,10 +625,23 @@ impl Actor {
             return;
         };
 
-        // A seek during a crossfade targets the outgoing (visible) track: the
-        // outgoing decode worker is still alive as the fading session, so cancel
-        // the fade, drop the incoming session, and seek the outgoing one in
-        // place — no re-resolve.
+        // The seek targets the visible track: during a crossfade that's the
+        // outgoing (fading) session, otherwise the current one. Decide
+        // seekability up front, before any teardown — seeking out of a
+        // non-seekable outgoing source (radio) must leave the fade running,
+        // not retire the incoming session and strand the RT mid-fade.
+        match self.fading.as_ref().or(self.current.as_ref()) {
+            None => return,
+            Some(visible) if !visible.seekable => {
+                tracing::debug!("ignoring seek on a non-seekable source");
+                return;
+            }
+            Some(_) => {}
+        }
+
+        // Cancel the fade and seek the outgoing (visible) worker in place — it
+        // is still alive as the fading session, so no re-resolve. The incoming
+        // session is dropped.
         if let Some(outgoing) = self.fading.take() {
             if let Some(incoming) = self.current.take() {
                 self.retire_session(incoming);
@@ -633,10 +652,6 @@ impl Actor {
         let Some(current) = &mut self.current else {
             return;
         };
-        if !current.seekable {
-            tracing::debug!("ignoring seek on a non-seekable source");
-            return;
-        }
         // Captured before the latch is cleared below; drives the resume rule.
         let revive_from_ended = current.ended;
 
@@ -725,9 +740,8 @@ impl Actor {
                     self.handle_seek(position);
                 } else if let Some(current) = self.current.take() {
                     // Non-seekable (radio): the controller has to re-load.
-                    let _ = current.worker.cmd_tx.send(WorkerCmd::Stop);
                     let token = current.token;
-                    self.graveyard.push(current.worker.join);
+                    self.retire_session(current);
                     self.emit(Event::Error {
                         token,
                         message: "output device lost".to_string(),
@@ -926,18 +940,18 @@ impl Actor {
     }
 
     fn teardown(&mut self) {
-        let mut joins = Vec::new();
+        // Detach every remaining worker into the graveyard, then join the lot.
+        // A pending probe's cmd channel closes when its handle drops, so it
+        // needs no explicit Stop.
         if let Some(pending) = self.pending.take() {
             drop(pending.reply);
-            joins.push(pending.worker.join);
+            self.graveyard.push(pending.worker.join);
         }
         if let Some(current) = self.current.take() {
-            let _ = current.worker.cmd_tx.send(WorkerCmd::Stop);
-            joins.push(current.worker.join);
+            self.retire_session(current);
         }
         if let Some(fading) = self.fading.take() {
-            let _ = fading.worker.cmd_tx.send(WorkerCmd::Stop);
-            joins.push(fading.worker.join);
+            self.retire_session(fading);
         }
         // Closing the sink drops the stream and with it the RT state and any
         // consumers it still owns, unblocking workers stuck on full rings.
@@ -945,7 +959,7 @@ impl Actor {
         self.rt_tx = None;
         self.retire_rx = None;
 
-        joins.append(&mut self.graveyard);
+        let joins = std::mem::take(&mut self.graveyard);
         for join in joins {
             // A worker wedged in network I/O can't be joined without hanging
             // shutdown; detach it and let process exit clean it up.
