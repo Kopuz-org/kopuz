@@ -124,7 +124,7 @@ pub fn PlaylistsPage(
                         PlaylistDetail {
                             playlist_id: pid,
                             config,
-                            on_close: move |_| nav_ctrl.go_back(),
+                            on_close: move |_| nav_ctrl.close_playlist(),
                             is_downloading_all,
                             on_download_all: move |_| {
                                 let requests: Vec<(String, String, String)> = {
