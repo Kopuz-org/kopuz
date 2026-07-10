@@ -203,10 +203,8 @@ struct Actor {
     last_token: u64,
     last_position_emitted: Option<(u64, u64)>,
     last_output_rebuild: Option<Instant>,
-    /// Ring consumers handed to the current RT state (via Swap) that it has not
-    /// yet shipped back (via Retired). Zero means the RT holds nothing to reap,
-    /// so the actor can safely park until the next message. Reset on
-    /// open_output, which builds a fresh RT state with its own channels.
+    /// Ring consumers handed to the current RT (via Swap) not yet shipped back
+    /// (via Retired). Zero ⇒ nothing left to reap, so the loop may park.
     rt_rings_outstanding: usize,
     shutting_down: bool,
 }
@@ -253,9 +251,7 @@ impl Actor {
 
         while !self.shutting_down {
             if self.is_idle() {
-                // Nothing to derive on a tick (no session, no rings to reap):
-                // park until a command or worker message instead of waking at
-                // the tick rate forever.
+                // Nothing for a tick to derive — park instead of spinning.
                 match self.rx.recv() {
                     Ok(msg) => self.handle(msg),
                     Err(_) => break,

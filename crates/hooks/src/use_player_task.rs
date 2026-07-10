@@ -251,11 +251,6 @@ pub fn use_player_task(ctrl: PlayerController) {
                 {
                     use player::engine::{Event, Phase};
                     match event {
-                        // Playing/Paused confirm audible state for a session. A
-                        // phase for a token we no longer intend is stale (a
-                        // superseded/cancelled load the engine still promoted);
-                        // if it started playing, stop it — the UI intent is
-                        // authoritative, we never adopt a navigated-away track.
                         Event::PhaseChanged {
                             token,
                             phase: phase @ (Phase::Playing | Phase::Paused),
@@ -265,44 +260,32 @@ pub fn use_player_task(ctrl: PlayerController) {
                             } else if phase == Phase::Playing
                                 && ctrl.player.peek().session_token() == token
                             {
-                                // A session we no longer intend is audibly live
-                                // right now — stop it. If the engine has since
-                                // moved to another session (e.g. our own revert
-                                // seek already re-promoted the outgoing track),
-                                // this event is history, not a command.
+                                // A session we no longer intend is audibly live —
+                                // stop it. (Guarded on session_token so an event
+                                // outrun by our own revert seek is ignored.)
                                 ctrl.player.peek().stop_for_transition();
                             }
                         }
-                        // Idle means the engine holds no session — nothing is
-                        // audible (a full stop, or a device loss that dropped a
-                        // non-seekable radio stream). Ended is deliberately left
-                        // to the auto-advance check below, which needs is_playing.
+                        // No session — nothing audible. Ended is left to the
+                        // auto-advance check below, which needs is_playing.
                         Event::PhaseChanged {
                             phase: Phase::Idle, ..
                         } => ctrl.is_playing.set(false),
-                        // A crossfade finished: commit the deferred UI to the
-                        // incoming track exactly when the engine tore the
-                        // outgoing session down, not on a wall-clock guess.
+                        // Commit the deferred crossfade UI exactly on fade end.
                         Event::TrackSwitched { token, .. } => {
                             ctrl.commit_transition(token);
                             last_progress_secs = u64::MAX;
                         }
-                        // Loaded confirms a session started; if it's for a load
-                        // we superseded or cancelled (end-of-queue racing a
-                        // promoted load) and it is still the engine's live
-                        // session, stop it instead of adopting it. If the
-                        // engine already moved on (a revert seek re-promoted
-                        // the outgoing track), the event is history.
+                        // A promoted load we superseded/cancelled started (the
+                        // end-of-queue race): stop it. Same session_token guard.
                         Event::Loaded { token }
                             if token != ctrl.intent.peek().token()
                                 && ctrl.player.peek().session_token() == token =>
                         {
                             ctrl.player.peek().stop_for_transition();
                         }
-                        // A device lost mid-playback on a live session (radio
-                        // unplug): the load reply can't report this, so surface
-                        // the banner and stop here. No auto-reconnect — Play
-                        // re-loads the station.
+                        // Device lost on a live session (radio unplug): the load
+                        // reply can't report it. Banner + stop, no auto-reconnect.
                         Event::Error { token, message } if token == ctrl.intent.peek().token() => {
                             tracing::warn!(%message, "engine reported a playback error");
                             ctrl.fail_load(token, &message);
@@ -431,10 +414,8 @@ pub fn use_player_task(ctrl: PlayerController) {
                 let pos = ctrl.player.read().get_position();
                 let mut defer_player_progress = false;
 
-                // While a crossfade's UI is deferred, show the outgoing (fading)
-                // track's live position from the engine and hold back the
-                // incoming session's; the actual commit happens on the engine's
-                // TrackSwitched event, not a wall-clock estimate.
+                // Deferred crossfade UI: show the outgoing track's live position
+                // and hold back the incoming one until TrackSwitched commits.
                 if ctrl.pending_crossfade_ui.peek().is_some() {
                     if let Some(fading) = ctrl.player.read().fading_position() {
                         ctrl.current_song_progress.set(fading.as_secs());

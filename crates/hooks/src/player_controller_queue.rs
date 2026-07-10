@@ -47,11 +47,9 @@ impl PlayerController {
             }
             _ => {
                 if !Self::has_following_track(idx, queue_len, loop_mode) {
-                    // End of queue: kill any in-flight load (e.g. a crossfade
-                    // that armed just before this skip) both controller- and
-                    // engine-side, so it can't restart playback later. Stopped
-                    // intent clears is_loading; a later Loaded for a superseded
-                    // token is dropped by the pump's stale-Loaded rule.
+                    // End of queue: kill any in-flight load so it can't restart
+                    // playback later (the stale-Loaded rule catches a promoted
+                    // one), then pause.
                     self.cancel_load_task();
                     self.clear_pending_crossfade_ui();
                     self.set_intent(PlaybackIntent::Stopped);
@@ -76,12 +74,8 @@ impl PlayerController {
     }
 
     pub fn play_prev(&mut self) {
-        // During an armed crossfade — whether its load is still resolving or
-        // the engine is already fading in the next track — the UI still shows
-        // the outgoing one. "Previous" here means "go back to the track I
-        // see": undo the transition (revert_transition drops the deferred UI /
-        // cancels the load, re-enables arming, and pops the history entry the
-        // arm pushed) and restart the visible track cleanly.
+        // Previous during an armed crossfade means "back to the track I see":
+        // undo the transition and restart the visible (outgoing) track.
         let idx = *self.current_queue_index.peek();
         if self.revert_transition().is_some() {
             self.play_track_no_history_without_crossfade(idx);
@@ -321,14 +315,11 @@ impl PlayerController {
             .get_track_at(idx)
             .is_some_and(|t| PlaybackItemRef::parse(&t.id.uid()).is_radio());
 
-        // Pausing while a load is still resolving cancels it — otherwise the
-        // load task's cancelled reply would leave the loading intent stuck (the
-        // radio-connect spinner leak). A resolving crossfade is undone whole
-        // (revert_transition — the outgoing session stays live and pausable, so
-        // no resume point is needed); an immediate load has no session left to
-        // pause, so record where to pick the track back up. A *running* fade
-        // (committed, deferred UI set) is deliberately not reverted: pausing
-        // freezes the fade and resume continues it.
+        // Pausing mid-load cancels it, else the cancelled reply leaves the
+        // loading intent stuck (the radio-connect spinner leak). A resolving
+        // crossfade is reverted whole (its outgoing session stays pausable); an
+        // immediate load has no session left, so record a resume point. A
+        // *running* fade isn't reverted — pause freezes it, resume continues it.
         if self.intent.peek().is_loading() && self.revert_transition().is_none() {
             self.cancel_load_task();
             if !is_radio && let Some(track) = self.get_track_at(idx) {
@@ -364,11 +355,10 @@ impl PlayerController {
             return;
         }
 
-        // Resuming a live engine session adopts it as the committed intent:
-        // flows that quiesce playback while deliberately keeping the session
-        // resumable (end of queue, pause-during-load) leave the intent
-        // Stopped, and without re-adopting here the pump's stale-session rule
-        // would stop the very track this resume starts.
+        // Adopt the live engine session as the committed intent: flows that
+        // quiesce playback but keep the session resumable (end of queue,
+        // pause-during-load) leave the intent Stopped, and without re-adopting
+        // here the pump's stale-session rule would stop the track this starts.
         let engine_token = self.player.peek().session_token();
         if engine_token != 0 {
             self.set_intent(PlaybackIntent::Committed {

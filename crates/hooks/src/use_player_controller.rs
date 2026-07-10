@@ -19,27 +19,23 @@ pub enum LoopMode {
     Track,
 }
 
-/// What the UI intends to be playing, and the token that identifies it. The
-/// engine session token is minted here (monotonic) and passed through Load; the
-/// controller filters engine events by it, so a superseded or cancelled load's
-/// events fall away instead of needing three separate cancellation mechanisms.
+/// What the UI intends to be playing. The `token` is the engine session token;
+/// event consumers filter by it, which is what lets one signal replace the old
+/// three-way cancellation (task cancel + engine cancel + generation bump).
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(crate) enum PlaybackIntent {
-    /// Nothing should be audible (end of queue, backend switch, failed load).
     Stopped,
-    /// A load pipeline is in flight for `token`, targeting queue slot `idx`.
-    /// `from_token` is the session that was committed when the load started —
-    /// the one still audible during a crossfade resolve, and the one a
-    /// failed/reverted crossfade falls back to.
+    /// `from_token`: the session still playing during a crossfade resolve — a
+    /// failed or reverted crossfade falls back to it.
     Loading {
         token: u64,
         idx: usize,
         crossfade: bool,
         from_token: u64,
     },
-    /// The engine confirmed session `token`; the UI displays it (or, mid-fade,
-    /// its predecessor).
-    Committed { token: u64 },
+    Committed {
+        token: u64,
+    },
 }
 
 impl PlaybackIntent {
@@ -69,9 +65,8 @@ impl LoopMode {
 pub struct PlayerController {
     pub player: Signal<Player>,
     pub is_playing: Signal<bool>,
-    /// A track load is in flight. Derived from the intent (plus the browse
-    /// spinner), so it is read-only and can never be left stuck by a bail or
-    /// cancel — there is no setter to forget.
+    /// Derived from the intent (plus the browse spinner) — read-only, so it
+    /// can't be left stuck by a cancel path that forgets to clear it.
     pub is_loading: Memo<bool>,
     pub history: Signal<Vec<usize>>,
     pub queue: Signal<Vec<Track>>,
@@ -97,20 +92,17 @@ pub struct PlayerController {
     /// player reads this shared handle to resolve streams instead of rebuilding
     /// the source (and its HTTP client) on every play/skip.
     pub active_source: Signal<::server::source::ActiveSource>,
-    /// What the UI intends to be playing; the single source of `is_loading` and
-    /// the authority every cancellation site routes through.
     pub(crate) intent: Signal<PlaybackIntent>,
     /// Monotonic session-token allocator (0 = none).
     pub(crate) next_token: Signal<u64>,
-    /// Mirror of the current intent's token as a plain `Signal` (not a memo) so
-    /// the scrobble scheduler can scope tasks to it via `origin_scope`.
+    /// The current token as a plain `Signal` (not a memo) so the scrobble
+    /// scheduler can `origin_scope` off it.
     pub(crate) current_token: Signal<u64>,
-    /// The session token a crossfade last armed for; cleared on a seek so a
-    /// fresh fade can arm at the outgoing track's real end.
+    /// The token a crossfade last armed for; cleared on seek so a fresh fade
+    /// can arm at the outgoing track's real end.
     pub(crate) armed_transition: Signal<Option<u64>>,
-    /// A browse action (Discover tile) wants the spinner shown synchronously on
-    /// click, before any load intent exists. Folded into `is_loading`; cleared
-    /// by `set_intent` when a real transition takes over.
+    /// Discover tiles want the spinner shown synchronously on click, before any
+    /// load intent exists; folded into `is_loading`, cleared by `set_intent`.
     pub browse_loading: Signal<bool>,
     pub(crate) pending_resume: Signal<Option<PendingResumeState>>,
     pub pending_crossfade_ui: Signal<Option<PendingCrossfadeUiState>>,
@@ -133,9 +125,8 @@ pub(crate) struct PendingResumeState {
     progress_secs: u64,
 }
 
-/// A crossfade whose UI hasn't yet committed to the incoming track. The UI keeps
-/// showing the outgoing (from) session until the engine's `TrackSwitched`
-/// confirms the fade completed; a seek/prev before then reverts to `from_token`.
+/// A crossfade whose UI hasn't committed to the incoming track yet — held until
+/// the engine's `TrackSwitched`; a seek/prev before then reverts to `from_token`.
 #[derive(Clone, Copy, Debug)]
 pub struct PendingCrossfadeUiState {
     pub next_idx: usize,
@@ -180,6 +171,93 @@ impl PlayerController {
     /// Retrieves the current track
     pub fn current_track(&self) -> Option<Track> {
         self.get_track_at(*self.current_queue_index.peek())
+    }
+
+    /// Stamp a resolved stream's probed duration/bitrate (YT ships them late)
+    /// onto the queue Track and, if it's still the shown track, the live
+    /// signals — in a single `queue.write()`.
+    fn stamp_probed_stream_info(
+        &mut self,
+        phys_idx: Option<usize>,
+        idx: usize,
+        duration_secs: Option<u64>,
+        bitrate: Option<u32>,
+    ) {
+        let duration = duration_secs.filter(|s| *s > 0);
+        let kbps = bitrate.map(|bps| (bps / 1000) as u16);
+
+        if let Some(p) = phys_idx
+            && let Some(track) = self.queue.write().get_mut(p)
+        {
+            if let Some(secs) = duration {
+                track.duration = secs;
+            }
+            if let Some(k) = kbps {
+                track.bitrate = k;
+            }
+        }
+        if *self.current_queue_index.peek() == idx {
+            if let Some(secs) = duration {
+                self.current_song_duration.set(secs);
+            }
+            if let Some(k) = kbps {
+                self.current_song_bitrate.set(k);
+            }
+        }
+    }
+
+    /// Follow a radio station's live now-playing metadata into the UI signals
+    /// for as long as it plays.
+    fn start_radio_metadata(&mut self, station_id: String, stream_id: String) {
+        let Some(provider) = self.station_registry.read().create_provider(&station_id) else {
+            tracing::warn!("[radio] no metadata provider for station: {station_id}");
+            return;
+        };
+        let mut current_song_title = self.current_song_title;
+        let mut current_song_artist = self.current_song_artist;
+        let mut current_song_album = self.current_song_album;
+        let mut current_song_cover_url = self.current_song_cover_url;
+        let task = spawn(async move {
+            use radio::provider::RadioMetadataProvider;
+            let mut rx = provider.start(&stream_id);
+            while let Some(meta) = rx.recv().await {
+                current_song_title.set(meta.title.clone());
+                current_song_artist.set(meta.artist.clone());
+                current_song_album.set(meta.station.clone());
+                current_song_cover_url.set(meta.cover_url.unwrap_or_default());
+            }
+        });
+        self.radio_task.set(Some(task));
+    }
+
+    /// Download a server track's cover to a temp file and hand the OS media
+    /// controls its local path (they need a path, not a URL). No-ops if `token`
+    /// is superseded before the download finishes.
+    fn spawn_server_artwork_fetch(&self, cover_url: String, track: Track, token: u64) {
+        let mut player = self.player;
+        let current_token = self.current_token;
+        spawn(
+            async move {
+                if let Ok(response) = reqwest::get(&cover_url).await
+                    && let Ok(bytes) = response.bytes().await
+                {
+                    let file_path = std::env::temp_dir()
+                        .join(format!("kopuz_cover_{}.jpg", rand::random::<u64>()));
+                    if tokio::fs::write(&file_path, bytes).await.is_ok()
+                        && *current_token.read() == token
+                    {
+                        player.write().update_metadata(NowPlayingMeta {
+                            title: track.title,
+                            artist: track.artist,
+                            album: track.album,
+                            duration: std::time::Duration::from_secs(track.duration),
+                            artwork: Some(file_path.to_string_lossy().to_string()),
+                        });
+                    }
+                }
+            }
+            .instrument(tracing::info_span!("player.cover_fetch")),
+        );
     }
 
     fn cover_url_for_track(&self, track: &Track) -> String {
@@ -253,8 +331,8 @@ impl PlayerController {
         }));
     }
 
-    /// The engine finished a fade (`TrackSwitched`): commit the deferred UI to
-    /// the incoming track, if this switch is the one we armed.
+    /// Commit the deferred crossfade UI to the incoming track, on the engine's
+    /// `TrackSwitched` for the switch we armed.
     pub(crate) fn commit_transition(&mut self, token: u64) {
         let Some(pending) = *self.pending_crossfade_ui.peek() else {
             return;
@@ -265,21 +343,16 @@ impl PlayerController {
         self.pending_crossfade_ui.set(None);
         let pos = self.player.peek().get_position().as_secs();
         self.hydrate_current_track_metadata(pending.next_idx, pos);
-        // The incoming track is now the sole session; push its OS now-playing
-        // metadata, deferred from load for the crossfade.
+        // Push the incoming track's now-playing metadata, deferred from load.
         self.player.peek().commit_now_playing();
     }
 
-    /// Undo an armed-but-uncommitted crossfade at either stage of its life —
-    /// while its load is still resolving (no fade engine-side yet: cancel the
-    /// load outright) or while the fade is running (the engine's seek revives
-    /// the outgoing session). Either way: drop the deferred UI, re-enable
-    /// arming, pop the history entry the arm pushed, and point the intent back
-    /// at the outgoing session. Returns the outgoing token if anything was
-    /// reverted.
+    /// Undo an armed crossfade at either stage — load still resolving (cancel
+    /// it) or fade running (drop the deferred UI; the caller's tokened seek
+    /// revives the outgoing session engine-side). Pops the history entry the arm
+    /// pushed and reverts the intent to the outgoing token, returned on success.
     pub(crate) fn revert_transition(&mut self) -> Option<u64> {
-        // Copy both stage markers out before mutating anything — peek() guards
-        // must not be held across the signal writes below.
+        // Read both stage markers out before any signal write below.
         let fading = (*self.pending_crossfade_ui.peek()).map(|p| p.from_token);
         let resolving = match *self.intent.peek() {
             PlaybackIntent::Loading {
@@ -291,14 +364,9 @@ impl PlayerController {
         };
 
         let from_token = if let Some(from_token) = fading {
-            // Fade running: the engine is mixing; a subsequent tokened seek
-            // cancels it engine-side and revives the outgoing session.
             self.clear_pending_crossfade_ui();
             from_token
         } else if let Some(from_token) = resolving {
-            // Load still resolving: nothing has reached the engine's mixer yet
-            // (or at most a pending probe) — cancel it and stay on the
-            // outgoing session, which never stopped playing.
             self.cancel_load_task();
             from_token
         } else {
@@ -330,30 +398,24 @@ impl PlayerController {
         self.player.peek().cancel_pending_load();
     }
 
-    /// Mint the next session token.
     pub(crate) fn allocate_token(&mut self) -> u64 {
         let token = self.next_token.peek().wrapping_add(1);
         self.next_token.set(token);
         token
     }
 
-    /// The single writer of playback intent. Keeps `is_loading` and the
-    /// `current_token` mirror in lockstep so no cancellation path can leave a
-    /// stale loading flag or token behind.
+    /// The one writer of playback intent — keeps the `current_token` mirror and
+    /// the browse spinner in step so no cancel path leaves them stale.
     pub(crate) fn set_intent(&mut self, next: PlaybackIntent) {
-        // A real transition supersedes any browse spinner; is_loading is derived
-        // from the intent (Loading ⇒ true) via a memo, so nothing to set here.
         self.browse_loading.set(false);
         self.current_token.set(next.token());
         self.intent.set(next);
     }
 
-    /// Report a load failure for `token`, unless a newer load already
-    /// superseded it. Stay on the track the user sees — never auto-advance:
-    ///  - a crossfade load that failed never stopped the outgoing track, so
-    ///    revert to it (the intent's `from_token`) and keep it playing;
-    ///  - an immediate load already stopped the previous session and hydrated
-    ///    the failed track's metadata, so leave it shown, paused.
+    /// Banner + stay on the visible track (never auto-advance): a failed
+    /// crossfade reverts to the still-playing outgoing session; a failed
+    /// immediate load leaves its already-hydrated track shown, paused. Ignored
+    /// if a newer load already superseded `token`.
     pub(crate) fn fail_load(&mut self, token: u64, error: impl std::fmt::Display) {
         let intent = *self.intent.peek();
         if intent.token() != token {
@@ -377,14 +439,10 @@ impl PlayerController {
     }
 
     /// Seek the current track. All progress-bar / lyric scrubbers route here.
-    /// The engine services seeks even after a track ended (the parked decode
-    /// worker re-seeks in place), so no re-open dance is needed.
     pub fn seek(&mut self, time: Duration) {
-        // During a crossfade the bar shows the outgoing track while the engine
-        // fades in the next one. Seeking targets that visible track: revert the
-        // armed transition (the engine's seek cancels the fade and revives the
-        // outgoing session) and seek it by its own token so a fade that has just
-        // completed can't land the seek on the wrong track.
+        // The scrub targets the visible track. During a crossfade that's the
+        // outgoing session: revert the armed transition and seek it by its own
+        // token, so a fade that just completed can't misdirect the seek.
         if let Some(from_token) = self.revert_transition() {
             self.player.peek().seek_for_session(time, from_token);
         } else {
@@ -394,8 +452,7 @@ impl PlayerController {
     }
 
     pub fn displayed_progress_secs_f64(&self) -> f64 {
-        // During a crossfade the bar shows the outgoing (fading) track, whose
-        // live position the engine reports; otherwise the current session's.
+        // Mid-crossfade the bar shows the outgoing (fading) track's live position.
         if self.pending_crossfade_ui.peek().is_some()
             && let Some(fading) = self.player.peek().fading_position()
         {
@@ -477,9 +534,8 @@ impl PlayerController {
         idx: usize,
         allow_crossfade: bool,
     ) {
-        // ── Phase 1: classify (no mutation beyond stale-cache eviction) ──
-        // Every early bail below happens here, before any state is touched, so a
-        // rejected request can't leave the loading flag or intent half-set.
+        // ── Phase 1: classify — no mutation (bar stale-cache eviction), so
+        // every early bail below leaves no half-set loading state behind. ──
         let Some(track) = self.get_track_at(idx) else {
             return;
         };
@@ -540,13 +596,10 @@ impl PlayerController {
                 .map(|s| s.url.clone())
                 .map(|stream_url| (stream_url, String::new()))
         } else if is_server_item {
-            // The stream itself is always resolved async in the load task (a URL
-            // for Jellyfin/Subsonic, a deciphered stream for YT/SoundCloud), so
-            // the ref is a pending marker for every server source. Only the cover
-            // is built synchronously, through the shared cover seam rather than a
-            // per-service match here. A server with no creds no longer bails
-            // silently — resolve_stream returns a real error that surfaces as a
-            // banner.
+            // Every server source resolves its stream async in the load task, so
+            // the ref is a pending marker; only the cover is built now, through
+            // the cover seam. No creds no longer bails silently — resolve_stream
+            // surfaces a real error instead.
             if self.config.read().server.is_some() {
                 let cover_url = ::server::cover::track(&self.config.read(), &track, 800)
                     .map(|cover| cover.as_ref().to_string())
@@ -571,18 +624,15 @@ impl PlayerController {
             return;
         }
 
-        // ── Phase 2: commit to loading this track ────────────────────────
-        // Past this point state is mutated, so it only runs once the request is
-        // known playable. Cancelling the prior load is a resource optimization
-        // (the token guards correctness); the new intent sets is_loading.
+        // ── Phase 2: commit — mutates state, so only past every bail above ──
+        // (Cancelling the prior load is just a resource optimization; the token
+        // is what guards correctness.)
         self.playback_error.set(None);
         self.cancel_radio_task();
         self.cancel_load_task();
         if !use_crossfade {
             self.clear_pending_crossfade_ui();
         }
-        // The session currently playing (the crossfade's outgoing track); the
-        // transition reverts to it if the crossfade is cancelled or fails.
         let from_token = self.intent.peek().token();
         let token = self.allocate_token();
         self.set_intent(PlaybackIntent::Loading {
@@ -634,13 +684,11 @@ impl PlayerController {
         let task = spawn(
             async move {
                 let factory: SourceFactory = if let Some(path) = local_path {
-                    // Local file — no network fallback exists for it.
                     Box::new(move || decoder::open_file(&path).map_err(|e| e.to_string()))
                 } else if let Some(path) = offline_path {
-                    // Cached server file: if it won't open (deleted, truncated,
-                    // permissions), fall back to the live server stream instead
-                    // of failing. The resolve runs on the decode worker via this
-                    // task's runtime handle — legal there, off the UI/actor.
+                    // Cached server file: on open failure fall back to the live
+                    // stream instead of failing. The resolve blocks on this
+                    // task's runtime handle — legal on the decode worker.
                     let source = ctrl.active_source.peek().clone();
                     let rt_handle = tokio::runtime::Handle::current();
                     Box::new(move || match decoder::open_file(&path) {
@@ -665,39 +713,18 @@ impl PlayerController {
                         match ResolvedStreamRef::parse(&stream_ref) {
                             ResolvedStreamRef::Pending(item_id) => {
                                 // The one genuinely per-source op: resolve the
-                                // playable stream through the active source's
-                                // backend (a URL for Jellyfin/Subsonic, a
-                                // deciphered stream for YT).
+                                // playable stream through the active source
+                                // (a URL for Jellyfin/Subsonic, a deciphered
+                                // stream for YT).
                                 let source = ctrl.active_source.peek().clone();
                                 match source.resolve_stream(item_id).await {
                                     Ok(info) => {
-                                        // YT carries probed duration/bitrate; stamp
-                                        // them onto the queue Track + live signals.
-                                        // (This task is cancelled when a newer load
-                                        // starts, so the write-backs can't be stale.)
-                                        if let Some(secs) = info.duration_secs
-                                            && secs > 0
-                                        {
-                                            if let Some(p) = phys_idx
-                                                && let Some(t) = ctrl.queue.write().get_mut(p)
-                                            {
-                                                t.duration = secs;
-                                            }
-                                            if *ctrl.current_queue_index.peek() == idx {
-                                                ctrl.current_song_duration.set(secs);
-                                            }
-                                        }
-                                        if let Some(bps) = info.bitrate {
-                                            let kbps = (bps / 1000) as u16;
-                                            if let Some(p) = phys_idx
-                                                && let Some(t) = ctrl.queue.write().get_mut(p)
-                                            {
-                                                t.bitrate = kbps;
-                                            }
-                                            if *ctrl.current_queue_index.peek() == idx {
-                                                ctrl.current_song_bitrate.set(kbps);
-                                            }
-                                        }
+                                        ctrl.stamp_probed_stream_info(
+                                            phys_idx,
+                                            idx,
+                                            info.duration_secs,
+                                            info.bitrate,
+                                        );
                                         (info.url, info.format, info.user_agent)
                                     }
                                     Err(e) => {
@@ -712,9 +739,8 @@ impl PlayerController {
                             }
                         };
 
-                    // The factory runs on the engine's decode worker (a plain
-                    // thread with no runtime); StreamBuffer's download needs a
-                    // runtime, so hand it a handle from this async task.
+                    // The factory runs on the decode worker (no runtime), so
+                    // hand StreamBuffer's download a handle from this task.
                     let rt_handle = tokio::runtime::Handle::current();
                     network_factory(stream_url, yt_format, yt_user_agent, is_radio_item, rt_handle)
                 };
@@ -746,51 +772,23 @@ impl PlayerController {
 
                 match reply_rx.await {
                     Ok(Ok(outcome)) => {
-                        // The engine confirmed this session; the UI now owns it.
                         ctrl.set_intent(PlaybackIntent::Committed { token });
                         if clear_pending_resume_on_success {
                             ctrl.pending_resume.set(None);
                         }
                         if use_crossfade {
                             if outcome.crossfaded {
-                                // Defer the UI to the incoming track until the
-                                // engine's TrackSwitched confirms the fade ended.
+                                // Defer the UI until TrackSwitched confirms the fade.
                                 ctrl.schedule_pending_crossfade_ui(idx, token, from_token);
                             } else {
-                                // The engine fell back to an immediate switch
-                                // (config mismatch, paused, drained outgoing) —
-                                // commit the UI now instead of deferring to a
-                                // fade midpoint that will never come.
+                                // Crossfade fell back to an immediate switch —
+                                // commit now; no fade midpoint is coming.
                                 ctrl.hydrate_current_track_metadata(idx, 0);
                             }
                         }
 
                         if is_radio_item {
-                            if let Some(provider) =
-                                ctrl.station_registry.read().create_provider(&station_id)
-                            {
-                                let mut current_song_title = ctrl.current_song_title;
-                                let mut current_song_artist = ctrl.current_song_artist;
-                                let mut current_song_album = ctrl.current_song_album;
-                                let mut current_song_cover_url = ctrl.current_song_cover_url;
-                                let task = spawn(async move {
-                                    use radio::provider::RadioMetadataProvider;
-                                    let mut rx = provider.start(&stream_id);
-                                    while let Some(meta) = rx.recv().await {
-                                        current_song_title.set(meta.title.clone());
-                                        current_song_artist.set(meta.artist.clone());
-                                        current_song_album.set(meta.station.clone());
-                                        current_song_cover_url
-                                            .set(meta.cover_url.unwrap_or_default());
-                                    }
-                                });
-                                ctrl.radio_task.set(Some(task));
-                            } else {
-                                tracing::warn!(
-                                    "[radio] No metadata provider for station: {}",
-                                    station_id
-                                );
-                            }
+                            ctrl.start_radio_metadata(station_id, stream_id);
                         } else {
                             let (item_id, source, options) = if is_server_item {
                                 (
@@ -813,43 +811,11 @@ impl PlayerController {
                                 ctrl.db.peek().clone(),
                             );
 
-                            // Server tracks: download the cover to a temp file so
-                            // the OS media controls can show artwork (they need a
-                            // local path, not a URL).
                             if is_server_item && !cover_url.is_empty() {
-                                let cover_url = cover_url.clone();
-                                let track = track.clone();
-                                let mut player = ctrl.player;
-                                let current_token = ctrl.current_token;
-                                spawn(
-                                    async move {
-                                        if let Ok(response) = reqwest::get(&cover_url).await
-                                            && let Ok(bytes) = response.bytes().await
-                                        {
-                                            let temp_dir = std::env::temp_dir();
-                                            let random_id: u64 = rand::random();
-                                            let file_path = temp_dir
-                                                .join(format!("kopuz_cover_{}.jpg", random_id));
-
-                                            if tokio::fs::write(&file_path, bytes).await.is_ok()
-                                                && *current_token.read() == token
-                                            {
-                                                let path_str =
-                                                    file_path.to_string_lossy().to_string();
-                                                let new_meta = NowPlayingMeta {
-                                                    title: track.title,
-                                                    artist: track.artist,
-                                                    album: track.album,
-                                                    duration: std::time::Duration::from_secs(
-                                                        track.duration,
-                                                    ),
-                                                    artwork: Some(path_str),
-                                                };
-                                                player.write().update_metadata(new_meta);
-                                            }
-                                        }
-                                    }
-                                    .instrument(tracing::info_span!("player.cover_fetch")),
+                                ctrl.spawn_server_artwork_fetch(
+                                    cover_url.clone(),
+                                    track.clone(),
+                                    token,
                                 );
                             }
                         }
@@ -872,11 +838,9 @@ impl PlayerController {
     }
 }
 
-/// Build a decode-worker source factory for a resolved network stream (radio,
-/// YT range/sequential, SoundCloud HLS, or a plain buffered stream). Returns a
-/// `SourceFactory` so the symphonia source/hint types stay inferred inside the
-/// boxed closure — callers (the remote path and the cached-file fallback) need
-/// not name them.
+/// Factory for a resolved network stream (radio, YT range/sequential,
+/// SoundCloud HLS, or a plain buffered stream). Returns a `SourceFactory` so the
+/// symphonia types stay inferred inside the closure — hooks can't name them.
 fn network_factory(
     stream_url: String,
     yt_format: Option<(::server::ytmusic::player::AudioFormat, bool)>,
