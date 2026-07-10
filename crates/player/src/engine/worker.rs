@@ -36,11 +36,15 @@ pub(crate) enum WorkerCmd {
         epoch: u64,
     },
     /// Re-seek and switch to a fresh ring (the old one was swapped out of the
-    /// audio callback; pre-seek samples die with it).
+    /// audio callback; pre-seek samples die with it). Carries the output config
+    /// because a device rebuild can revive a session onto a stream with a
+    /// different rate/channel count — the decode must retarget with the ring.
     Seek {
         target: Duration,
         producer: rtrb::Producer<f32>,
         written: Arc<AtomicU64>,
+        channels: usize,
+        sample_rate: u32,
         /// New ring generation; a stale `Eof` tagged with the old epoch is
         /// dropped by the actor rather than ending the freshly-seeked session.
         epoch: u64,
@@ -80,10 +84,14 @@ pub(crate) fn spawn(
     Ok(WorkerHandle { cmd_tx, join })
 }
 
+/// Per-ring decode state, replaced whole on every `Start`/`Seek`: the ring
+/// halves, the output config the ring was sized for (decode converts to it),
+/// and the generation the actor filters stale `Eof`s by.
 struct Output {
     producer: rtrb::Producer<f32>,
     written: Arc<AtomicU64>,
-    /// Ring generation, from the `Start`/`Seek` that installed this ring.
+    channels: usize,
+    sample_rate: u32,
     epoch: u64,
 }
 
@@ -179,7 +187,7 @@ fn run(
 
     // Wait for the actor's decision. A superseded load simply drops our
     // command sender, which lands here as an error → exit.
-    let (mut output, target_channels, target_sample_rate) = match cmd_rx.recv() {
+    let mut output = match cmd_rx.recv() {
         Ok(WorkerCmd::Start {
             producer,
             written,
@@ -200,15 +208,13 @@ fn run(
                     }
                 }
             }
-            (
-                Output {
-                    producer,
-                    written,
-                    epoch,
-                },
+            Output {
+                producer,
+                written,
                 channels,
                 sample_rate,
-            )
+                epoch,
+            }
         }
         _ => return,
     };
@@ -316,8 +322,8 @@ fn run(
 
         let samples = audio_buf_to_f32_interleaved(
             &decoded,
-            target_channels,
-            target_sample_rate,
+            output.channels,
+            output.sample_rate,
             &mut scratch,
         );
 
@@ -360,11 +366,15 @@ fn park_at_eof(
                 target,
                 producer,
                 written,
+                channels,
+                sample_rate,
                 epoch,
             }) => {
                 *output = Output {
                     producer,
                     written,
+                    channels,
+                    sample_rate,
                     epoch,
                 };
                 return match seek_reader(format, decoder, track_id, target) {
@@ -395,11 +405,15 @@ fn apply_command(
             target,
             producer,
             written,
+            channels,
+            sample_rate,
             epoch,
         } => {
             *output = Output {
                 producer,
                 written,
+                channels,
+                sample_rate,
                 epoch,
             };
             match seek_reader(format, decoder, track_id, target) {

@@ -664,6 +664,11 @@ impl Actor {
             target,
             producer: ring.producer,
             written: ring.written.clone(),
+            // The live config rides along: a device rebuild may have changed
+            // the rate/channels since this session's Start, and the decode
+            // must retarget with the ring or play at the wrong pitch.
+            channels: config.channels,
+            sample_rate: config.sample_rate,
             epoch: current.ring_epoch,
         });
         current.written = ring.written;

@@ -9,7 +9,6 @@ const TEST_CONFIG: SinkConfig = SinkConfig {
     sample_rate: 44_100,
 };
 
-#[derive(Default)]
 struct FakeShared {
     callback: Option<DataCallback>,
     opened: Option<SinkConfig>,
@@ -17,6 +16,23 @@ struct FakeShared {
     play_calls: usize,
     pause_calls: usize,
     open_calls: usize,
+    /// What the next open() lands on — a "device" whose config tests can
+    /// switch to exercise rebuild-onto-a-different-rate paths.
+    device_config: SinkConfig,
+}
+
+impl Default for FakeShared {
+    fn default() -> Self {
+        Self {
+            callback: None,
+            opened: None,
+            playing: false,
+            play_calls: 0,
+            pause_calls: 0,
+            open_calls: 0,
+            device_config: TEST_CONFIG,
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -52,6 +68,10 @@ impl FakeSinkHandle {
     fn is_playing(&self) -> bool {
         self.0.lock().unwrap().playing
     }
+
+    fn set_device_config(&self, config: SinkConfig) {
+        self.0.lock().unwrap().device_config = config;
+    }
 }
 
 struct FakeSink(FakeSinkHandle);
@@ -71,13 +91,14 @@ impl AudioSink for FakeSink {
         _desired_sample_rate: Option<u32>,
         make_cb: DataCallbackFactory,
     ) -> Result<SinkConfig, String> {
-        let callback = make_cb(TEST_CONFIG);
+        let config = self.0.0.lock().unwrap().device_config;
+        let callback = make_cb(config);
         let mut shared = self.0.0.lock().unwrap();
         shared.callback = Some(callback);
-        shared.opened = Some(TEST_CONFIG);
+        shared.opened = Some(config);
         shared.playing = true;
         shared.open_calls += 1;
-        Ok(TEST_CONFIG)
+        Ok(config)
     }
 
     fn config(&self) -> Option<SinkConfig> {
@@ -1197,6 +1218,51 @@ fn device_error_rebuilds_stream_and_resumes_position() {
     wait_until("audio after rebuild", || {
         sink.pull(4096).iter().any(|s| *s != 0.0)
     });
+
+    engine.shutdown();
+}
+
+#[test]
+fn device_rebuild_to_new_rate_retargets_the_decode() {
+    // A device rebuild can land on a different sample rate (unplug a 44.1kHz
+    // DAC, fall back to a 22.05kHz device here). The revived session's worker
+    // must retarget its conversion to the new config — with stale targets it
+    // writes unresampled audio that plays at the wrong pitch, observable as
+    // roughly twice the samples for the remaining content.
+    let (sink, engine, actor_tx) = spawn_engine_with_tx();
+    let (factory, duration) = wav_factory(1.0);
+    load(&engine, 1, factory, duration);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    wait_until("played a quarter second", || {
+        sink.pull(2048);
+        engine.status().position() >= Duration::from_millis(250)
+    });
+    let position_before = engine.status().position();
+    let opens_before = sink.open_calls();
+
+    // The "new device" runs at half the rate.
+    sink.set_device_config(SinkConfig {
+        channels: TEST_CONFIG.channels,
+        sample_rate: TEST_CONFIG.sample_rate / 2,
+    });
+    let _ = actor_tx.send(super::actor::ActorMsg::DeviceError);
+    wait_until("stream rebuilt", || sink.open_calls() > opens_before);
+
+    // Drain the rest of the track at the new rate, counting real (non-pad)
+    // samples. Remaining ~0.75s must come out as ~0.75s * 22050 * 2 ≈ 33k
+    // samples; a stale-target worker skips resampling and produces ~66k.
+    let mut real_samples = 0usize;
+    wait_until("track drains to Ended", || {
+        real_samples += sink.pull(2048).iter().filter(|s| **s != 0.0).count();
+        engine.status().phase == Phase::Ended
+    });
+    let remaining = duration.saturating_sub(position_before).as_secs_f64();
+    let expected = remaining * (TEST_CONFIG.sample_rate / 2) as f64 * TEST_CONFIG.channels as f64;
+    assert!(
+        (real_samples as f64) < expected * 1.4,
+        "decode must resample to the rebuilt device's rate: \
+         got {real_samples} samples for ~{remaining:.2}s (expected ≈{expected:.0})"
+    );
 
     engine.shutdown();
 }
