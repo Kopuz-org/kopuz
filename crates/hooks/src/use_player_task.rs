@@ -273,6 +273,13 @@ pub fn use_player_task(ctrl: PlayerController) {
                         Event::PhaseChanged {
                             phase: Phase::Idle, ..
                         } => ctrl.is_playing.set(false),
+                        // A crossfade finished: commit the deferred UI to the
+                        // incoming track exactly when the engine tore the
+                        // outgoing session down, not on a wall-clock guess.
+                        Event::TrackSwitched { token, .. } => {
+                            ctrl.commit_transition(token);
+                            last_progress_secs = u64::MAX;
+                        }
                         // Loaded confirms a session started; if it's for a load
                         // we superseded or cancelled (end-of-queue racing a
                         // promoted load), stop it instead of adopting it.
@@ -411,21 +418,15 @@ pub fn use_player_task(ctrl: PlayerController) {
                 let pos = ctrl.player.read().get_position();
                 let mut defer_player_progress = false;
 
-                let pending_crossfade_ui = ctrl.pending_crossfade_ui.read().clone();
-                if let Some(pending) = pending_crossfade_ui {
-                    let crossfade_elapsed_secs = pos.as_secs();
-                    if crossfade_elapsed_secs >= pending.switch_after_secs {
-                        if ctrl.commit_pending_crossfade_ui(crossfade_elapsed_secs) {
-                            last_progress_secs = u64::MAX;
-                        }
-                    } else {
-                        let display_progress = pending
-                            .outgoing_progress_secs
-                            .saturating_add(crossfade_elapsed_secs)
-                            .min(pending.outgoing_duration_secs);
-                        ctrl.current_song_progress.set(display_progress);
-                        defer_player_progress = true;
+                // While a crossfade's UI is deferred, show the outgoing (fading)
+                // track's live position from the engine and hold back the
+                // incoming session's; the actual commit happens on the engine's
+                // TrackSwitched event, not a wall-clock estimate.
+                if ctrl.pending_crossfade_ui.peek().is_some() {
+                    if let Some(fading) = ctrl.player.read().fading_position() {
+                        ctrl.current_song_progress.set(fading.as_secs());
                     }
+                    defer_player_progress = true;
                 }
 
                 let jellyfin_info = {

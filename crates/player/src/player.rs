@@ -225,6 +225,22 @@ impl Player {
         self.status().position()
     }
 
+    /// The outgoing (fading) session's live position during a crossfade, if one
+    /// is in progress. Lets the UI show the track it is still displaying.
+    pub fn fading_position(&self) -> Option<Duration> {
+        self.status().fading_position()
+    }
+
+    /// Seek a specific session; the engine ignores it if a completed crossfade
+    /// has since promoted a different one.
+    pub fn seek_for_session(&self, time: Duration, token: u64) {
+        self.engine.send(Command::Seek {
+            position: time,
+            token: Some(token),
+        });
+        self.push_now_playing(time, !self.is_paused());
+    }
+
     fn status(&self) -> Arc<EngineStatus> {
         self.engine.status()
     }

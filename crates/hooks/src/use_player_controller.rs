@@ -129,12 +129,14 @@ pub(crate) struct PendingResumeState {
     progress_secs: u64,
 }
 
-#[derive(Clone, Debug)]
+/// A crossfade whose UI hasn't yet committed to the incoming track. The UI keeps
+/// showing the outgoing (from) session until the engine's `TrackSwitched`
+/// confirms the fade completed; a seek/prev before then reverts to `from_token`.
+#[derive(Clone, Copy, Debug)]
 pub struct PendingCrossfadeUiState {
     pub next_idx: usize,
-    pub switch_after_secs: u64,
-    pub outgoing_duration_secs: u64,
-    pub outgoing_progress_secs: u64,
+    pub to_token: u64,
+    pub from_token: u64,
 }
 
 impl PlayerController {
@@ -234,41 +236,51 @@ impl PlayerController {
         self.pending_crossfade_ui.set(None);
     }
 
-    fn build_pending_crossfade_ui(
-        next_idx: usize,
-        outgoing_duration_secs: u64,
-        outgoing_progress_secs: u64,
-    ) -> PendingCrossfadeUiState {
-        PendingCrossfadeUiState {
-            next_idx,
-            switch_after_secs: outgoing_duration_secs.saturating_sub(outgoing_progress_secs),
-            outgoing_duration_secs,
-            outgoing_progress_secs,
-        }
-    }
-
     pub(crate) fn schedule_pending_crossfade_ui(
         &mut self,
         next_idx: usize,
-        outgoing_duration_secs: u64,
-        outgoing_progress_secs: u64,
+        to_token: u64,
+        from_token: u64,
     ) {
-        self.pending_crossfade_ui
-            .set(Some(Self::build_pending_crossfade_ui(
-                next_idx,
-                outgoing_duration_secs,
-                outgoing_progress_secs,
-            )));
+        self.pending_crossfade_ui.set(Some(PendingCrossfadeUiState {
+            next_idx,
+            to_token,
+            from_token,
+        }));
     }
 
-    pub fn commit_pending_crossfade_ui(&mut self, next_progress_secs: u64) -> bool {
-        let Some(pending) = self.pending_crossfade_ui.read().clone() else {
-            return false;
+    /// The engine finished a fade (`TrackSwitched`): commit the deferred UI to
+    /// the incoming track, if this switch is the one we armed.
+    pub(crate) fn commit_transition(&mut self, token: u64) {
+        let Some(pending) = *self.pending_crossfade_ui.peek() else {
+            return;
         };
-
+        if pending.to_token != token {
+            return;
+        }
         self.pending_crossfade_ui.set(None);
-        self.hydrate_current_track_metadata(pending.next_idx, next_progress_secs);
-        true
+        let pos = self.player.peek().get_position().as_secs();
+        self.hydrate_current_track_metadata(pending.next_idx, pos);
+    }
+
+    /// Undo an armed-but-uncommitted crossfade: the engine's seek/prev revives
+    /// the outgoing (visible) session, so drop the deferred UI, re-enable
+    /// arming, pop the history entry the arm pushed, and point the intent back
+    /// at the outgoing session. Returns the outgoing token if a fade was reverted.
+    pub(crate) fn revert_transition(&mut self) -> Option<u64> {
+        let pending = (*self.pending_crossfade_ui.peek())?;
+        self.clear_pending_crossfade_ui();
+        self.armed_transition.set(None);
+        let idx = *self.current_queue_index.peek();
+        self.history.with_mut(|h| {
+            if h.last() == Some(&idx) {
+                h.pop();
+            }
+        });
+        self.set_intent(PlaybackIntent::Committed {
+            token: pending.from_token,
+        });
+        Some(pending.from_token)
     }
 
     pub(crate) fn set_pending_resume_for_track(&mut self, track: &Track, progress_secs: u64) {
@@ -319,28 +331,27 @@ impl PlayerController {
     /// worker re-seeks in place), so no re-open dance is needed.
     pub fn seek(&mut self, time: Duration) {
         // During a crossfade the bar shows the outgoing track while the engine
-        // fades in the next one. The engine's seek cancels the fade and seeks
-        // the outgoing (visible) track in place, so drop the deferred UI and
-        // clear the arm so a fresh crossfade can fire at its real end.
-        if self.pending_crossfade_ui.peek().is_some() {
-            self.clear_pending_crossfade_ui();
-            self.armed_transition.set(None);
+        // fades in the next one. Seeking targets that visible track: revert the
+        // armed transition (the engine's seek cancels the fade and revives the
+        // outgoing session) and seek it by its own token so a fade that has just
+        // completed can't land the seek on the wrong track.
+        if let Some(from_token) = self.revert_transition() {
+            self.player.peek().seek_for_session(time, from_token);
+        } else {
+            self.player.peek().seek(time);
         }
-        self.player.peek().seek(time);
         self.current_song_progress.set(time.as_secs());
     }
 
     pub fn displayed_progress_secs_f64(&self) -> f64 {
-        let pos = self.player.peek().get_position().as_secs_f64();
-
-        if let Some(pending) = self.pending_crossfade_ui.read().clone()
-            && pos <= pending.switch_after_secs as f64
+        // During a crossfade the bar shows the outgoing (fading) track, whose
+        // live position the engine reports; otherwise the current session's.
+        if self.pending_crossfade_ui.peek().is_some()
+            && let Some(fading) = self.player.peek().fading_position()
         {
-            return (pending.outgoing_progress_secs as f64 + pos)
-                .min(pending.outgoing_duration_secs as f64);
+            return fading.as_secs_f64();
         }
-
-        pos
+        self.player.peek().get_position().as_secs_f64()
     }
 
     /// Remap a queue index after moving one item within the queue.
@@ -428,9 +439,6 @@ impl PlayerController {
         let use_crossfade = allow_crossfade
             && self.should_crossfade()
             && restore_seek_secs.is_none_or(|secs| secs == 0);
-        let outgoing_duration_secs = *self.current_song_duration.peek();
-        let outgoing_progress_secs =
-            (*self.current_song_progress.peek()).min(outgoing_duration_secs);
         let crossfade_duration = Duration::from_secs(self.config.peek().crossfade_seconds as u64);
         let item_ref = PlaybackItemRef::parse(&path_str);
         let is_radio_item = item_ref.is_radio();
@@ -523,6 +531,9 @@ impl PlayerController {
         if !use_crossfade {
             self.clear_pending_crossfade_ui();
         }
+        // The session currently playing (the crossfade's outgoing track); the
+        // deferred UI reverts to it if the fade is cancelled by a seek/prev.
+        let from_token = self.intent.peek().token();
         let token = self.allocate_token();
         self.set_intent(PlaybackIntent::Loading {
             token,
@@ -737,11 +748,9 @@ impl PlayerController {
                         }
                         if use_crossfade {
                             if outcome.crossfaded {
-                                ctrl.schedule_pending_crossfade_ui(
-                                    idx,
-                                    outgoing_duration_secs,
-                                    outgoing_progress_secs,
-                                );
+                                // Defer the UI to the incoming track until the
+                                // engine's TrackSwitched confirms the fade ended.
+                                ctrl.schedule_pending_crossfade_ui(idx, token, from_token);
                             } else {
                                 // The engine fell back to an immediate switch
                                 // (config mismatch, paused, drained outgoing) —

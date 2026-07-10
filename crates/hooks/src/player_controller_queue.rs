@@ -83,14 +83,10 @@ impl PlayerController {
         // keeps pointing at a track that's no longer audible.
         if self.pending_crossfade_ui.peek().is_some() {
             let idx = *self.current_queue_index.peek();
-            self.clear_pending_crossfade_ui();
-            // The crossfade pushed the outgoing track onto history; restarting
-            // it un-does that transition, so drop the stale entry.
-            self.history.with_mut(|h| {
-                if h.last() == Some(&idx) {
-                    h.pop();
-                }
-            });
+            // Undo the armed transition (drops the deferred UI, re-enables
+            // arming, and pops the history entry the arm pushed), then restart
+            // the visible (outgoing) track cleanly.
+            self.revert_transition();
             self.play_track_no_history_without_crossfade(idx);
             return;
         }
