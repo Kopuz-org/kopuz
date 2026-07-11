@@ -38,8 +38,12 @@ pub trait AudioSink: Send {
 /// Out-of-band notifications from the audio backend.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SinkEvent {
-    /// The running stream errored (device unplugged, format lost).
-    StreamError,
+    /// The device is gone (unplugged, format lost) — recovery lands on
+    /// whatever device is the default now.
+    DeviceLost,
+    /// The stream stalled on a still-present device (an xrun the backend
+    /// couldn't recover in place). Rebuilding lands on the same device.
+    StreamStalled,
     /// The OS default output device changed while our stream kept playing on
     /// the old one.
     DefaultDeviceChanged,
@@ -190,8 +194,25 @@ impl AudioSink for CpalSink {
                 &stream_config,
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| data_cb(data),
                 move |err| {
+                    let event = match err {
+                        // Recovery will land on whatever device is default now;
+                        // the user's device-change behavior applies.
+                        cpal::StreamError::DeviceNotAvailable => SinkEvent::DeviceLost,
+                        // An xrun is a scheduling hiccup the backend recovers
+                        // in place (ALSA re-prepares and continues); a rebuild
+                        // would only add a bigger glitch plus a reseek. If the
+                        // in-place recovery fails, cpal reports that failure as
+                        // a separate error, which the arms below handle.
+                        cpal::StreamError::BufferUnderrun => {
+                            tracing::warn!("audio buffer underrun (recovered in place)");
+                            return;
+                        }
+                        // Same device, but the stream must be rebuilt.
+                        cpal::StreamError::StreamInvalidated
+                        | cpal::StreamError::BackendSpecific { .. } => SinkEvent::StreamStalled,
+                    };
                     tracing::error!(error = %err, "cpal stream error");
-                    on_event(SinkEvent::StreamError);
+                    on_event(event);
                 },
                 None,
             )

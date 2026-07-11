@@ -1230,7 +1230,7 @@ fn device_error_rebuilds_stream_and_resumes_position() {
     let position_before = engine.status().position();
     let opens_before = sink.open_calls();
 
-    let _ = actor_tx.send(super::actor::ActorMsg::DeviceError);
+    let _ = actor_tx.send(super::actor::ActorMsg::DeviceError { device_lost: true });
 
     wait_until("stream rebuilt", || sink.open_calls() > opens_before);
     wait_until("still playing after rebuild", || {
@@ -1272,7 +1272,7 @@ fn device_rebuild_to_new_rate_retargets_the_decode() {
         channels: TEST_CONFIG.channels,
         sample_rate: TEST_CONFIG.sample_rate / 2,
     });
-    let _ = actor_tx.send(super::actor::ActorMsg::DeviceError);
+    let _ = actor_tx.send(super::actor::ActorMsg::DeviceError { device_lost: true });
     wait_until("stream rebuilt", || sink.open_calls() > opens_before);
 
     // Drain the rest of the track at the new rate, counting real (non-pad)
@@ -1427,7 +1427,7 @@ fn device_change_pause_behavior_holds_after_migration() {
     let position_before = engine.status().position();
     let opens_before = sink.open_calls();
 
-    let _ = actor_tx.send(super::actor::ActorMsg::DeviceError);
+    let _ = actor_tx.send(super::actor::ActorMsg::DeviceError { device_lost: true });
 
     wait_until("stream rebuilt", || sink.open_calls() > opens_before);
     wait_until("held paused on the new device", || {
@@ -1445,6 +1445,48 @@ fn device_change_pause_behavior_holds_after_migration() {
         engine.status().phase == Phase::Playing
     });
     wait_until("audio after resume", || {
+        sink.pull(4096).iter().any(|s| *s != 0.0)
+    });
+
+    engine.shutdown();
+}
+
+#[test]
+fn stream_stall_rebuild_keeps_playing_under_pause_behavior() {
+    // A stall (unrecoverable xrun / invalidated stream) rebuilds onto the SAME
+    // device — the pause-on-device-change behavior is about not blasting audio
+    // out of an unexpected NEW output, so it must not apply here. This was the
+    // "randomly paused, didn't change any devices" bug.
+    let (sink, engine, actor_tx) = spawn_engine_with_tx();
+    engine.send(Command::SetDeviceChangeBehavior(
+        config::DeviceChangeBehavior::Pause,
+    ));
+
+    let (factory, duration) = wav_factory(30.0);
+    load(&engine, 1, factory, duration);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+    wait_until("played one second", || {
+        sink.pull(TEST_CONFIG.sample_rate as usize * TEST_CONFIG.channels);
+        engine.status().position() >= Duration::from_secs(1)
+    });
+    let position_before = engine.status().position();
+    let opens_before = sink.open_calls();
+
+    let _ = actor_tx.send(super::actor::ActorMsg::DeviceError { device_lost: false });
+
+    wait_until("stream rebuilt", || sink.open_calls() > opens_before);
+    wait_until("still playing after the stall rebuild", || {
+        engine.status().phase == Phase::Playing
+    });
+    assert!(
+        sink.is_playing(),
+        "same-device recovery keeps the device live"
+    );
+    assert!(
+        engine.status().position() >= position_before.saturating_sub(Duration::from_millis(500)),
+        "position survives the rebuild"
+    );
+    wait_until("audio after the rebuild", || {
         sink.pull(4096).iter().any(|s| *s != 0.0)
     });
 

@@ -37,7 +37,13 @@ const RING_BUF_SECONDS: usize = 2;
 pub(crate) enum ActorMsg {
     Cmd(Command),
     Worker(WorkerMsg),
-    DeviceError,
+    /// The output stream died and needs a rebuild. `device_lost` says whether
+    /// recovery may land on a DIFFERENT device (unplug) — only then does the
+    /// user's device-change behavior (e.g. hold paused) apply; an xrun on a
+    /// still-present device just resumes.
+    DeviceError {
+        device_lost: bool,
+    },
     /// The OS default output changed; migrate unless that would kill a live
     /// (non-seekable) stream.
     DefaultDeviceChanged,
@@ -208,7 +214,8 @@ struct Actor {
     rt_rings_outstanding: usize,
     /// A device error/change arrived inside the rebuild debounce window; run
     /// the rebuild on the next tick past it instead of dropping the signal.
-    pending_device_rebuild: bool,
+    /// Carries the strongest `device_lost` seen while deferred.
+    pending_device_rebuild: Option<bool>,
     /// Generation of the most recently started crossfade; a `FadeComplete`
     /// carrying an older one raced the start of this fade and is ignored
     /// (the ring epoch's analogue for fades).
@@ -245,7 +252,7 @@ impl Actor {
             last_position_emitted: None,
             last_output_rebuild: None,
             rt_rings_outstanding: 0,
-            pending_device_rebuild: false,
+            pending_device_rebuild: None,
             fade_generation: 0,
             shutting_down: false,
         }
@@ -286,7 +293,7 @@ impl Actor {
             && self.pending.is_none()
             && self.graveyard.is_empty()
             && self.rt_rings_outstanding == 0
-            && !self.pending_device_rebuild
+            && self.pending_device_rebuild.is_none()
     }
 
     // ── message handling ────────────────────────────────────────────────
@@ -295,7 +302,7 @@ impl Actor {
         match msg {
             ActorMsg::Cmd(cmd) => self.handle_command(cmd),
             ActorMsg::Worker(msg) => self.handle_worker(msg),
-            ActorMsg::DeviceError => self.handle_device_error(),
+            ActorMsg::DeviceError { device_lost } => self.handle_device_error(device_lost),
             ActorMsg::DefaultDeviceChanged => {
                 // Radio can't re-seek onto a rebuilt stream; playing on the old
                 // (still-working) device beats stopping.
@@ -305,7 +312,7 @@ impl Actor {
                     );
                     return;
                 }
-                self.handle_device_error();
+                self.handle_device_error(true);
             }
         }
     }
@@ -754,7 +761,7 @@ impl Actor {
 
     /// The output stream died (device unplugged, format lost). Rebuild it and
     /// resume the current session at its last position via the seek protocol.
-    fn handle_device_error(&mut self) {
+    fn handle_device_error(&mut self, device_lost: bool) {
         // The dead stream's callback can emit a burst of errors; rebuild once.
         // Coalesce rather than drop: a genuine device change arriving inside
         // the window (the same hot-plug produces both signals) must still be
@@ -763,10 +770,11 @@ impl Actor {
             .last_output_rebuild
             .is_some_and(|at| at.elapsed() < Duration::from_millis(500))
         {
-            self.pending_device_rebuild = true;
+            self.pending_device_rebuild =
+                Some(self.pending_device_rebuild.unwrap_or(false) | device_lost);
             return;
         }
-        self.pending_device_rebuild = false;
+        self.pending_device_rebuild = None;
         self.last_output_rebuild = Some(Instant::now());
 
         let position = self.status.load().position();
@@ -780,7 +788,7 @@ impl Actor {
             Ok(_) => {
                 let resumable = self.current.as_ref().is_some_and(|c| c.seekable);
                 if resumable {
-                    tracing::info!("output device lost; rebuilt stream and reseeking");
+                    tracing::info!(device_lost, "output stream rebuilt; reseeking in place");
                     self.handle_seek(position, None);
                 } else if let Some(current) = self.current.take() {
                     // Non-seekable (radio): the controller has to re-load.
@@ -788,13 +796,15 @@ impl Actor {
                     self.retire_session(current);
                     self.emit(Event::Error {
                         token,
-                        message: "output device lost".to_string(),
+                        message: "output stream lost".to_string(),
                     });
                 }
-                // The user chooses whether a device change keeps playing on the
-                // new output or holds paused there (e.g. unplugged headphones
-                // shouldn't blast the speakers).
-                if was_playing
+                // The user chooses whether a device CHANGE keeps playing on the
+                // new output or holds paused there (unplugged headphones
+                // shouldn't blast the speakers). A same-device stall recovery
+                // is not a device change — it just keeps playing.
+                if device_lost
+                    && was_playing
                     && self.device_change_behavior == config::DeviceChangeBehavior::Pause
                     && self.current.is_some()
                 {
@@ -830,12 +840,12 @@ impl Actor {
         // Each step publishes if (and only if) it changed observable state, so
         // a steady Playing tick allocates nothing: position reads live off the
         // shared atomic in the last-published status.
-        if self.pending_device_rebuild
+        if let Some(device_lost) = self.pending_device_rebuild
             && self
                 .last_output_rebuild
                 .is_none_or(|at| at.elapsed() >= Duration::from_millis(500))
         {
-            self.handle_device_error();
+            self.handle_device_error(device_lost);
         }
         self.reap_rt_retired();
         self.latch_drain_complete();

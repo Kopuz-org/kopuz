@@ -81,7 +81,8 @@ impl Player {
             let tx = tx.clone();
             CpalSink::try_new(move |event| {
                 let msg = match event {
-                    SinkEvent::StreamError => ActorMsg::DeviceError,
+                    SinkEvent::DeviceLost => ActorMsg::DeviceError { device_lost: true },
+                    SinkEvent::StreamStalled => ActorMsg::DeviceError { device_lost: false },
                     SinkEvent::DefaultDeviceChanged => ActorMsg::DefaultDeviceChanged,
                 };
                 let _ = tx.send(msg);
