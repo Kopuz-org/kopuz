@@ -214,9 +214,9 @@ impl ChannelMode {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum DeviceChangeBehavior {
     /// Keep playing on the new device at the same position.
-    #[default]
     Resume,
     /// Migrate to the new device but hold paused until the user resumes.
+    #[default]
     Pause,
 }
 
@@ -743,7 +743,7 @@ impl Default for AppConfig {
             back_behavior: BackBehavior::RewindThenPrev,
             channel_mode: ChannelMode::Stereo,
             equalizer: EqualizerSettings::default(),
-            device_change_behavior: DeviceChangeBehavior::Resume,
+            device_change_behavior: DeviceChangeBehavior::Pause,
             ytdlp_output_dir: String::new(),
             ytdlp_options: YtdlpOptions::default(),
             ytdlp_history: Vec::new(),
