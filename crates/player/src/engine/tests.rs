@@ -950,6 +950,41 @@ fn factory_error_reports_and_keeps_prior_audio() {
 }
 
 #[test]
+fn panicking_worker_fails_the_load_instead_of_hanging() {
+    // Symphonia can panic on malformed streams. A panic on the decode worker
+    // must surface as a failed load (the thread-boundary guard reports it);
+    // without the guard the pending load never resolves and the reply below
+    // blocks forever.
+    let (sink, engine) = spawn_engine();
+
+    let (factory, duration) = wav_factory(10.0);
+    load(&engine, 1, factory, duration);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+
+    let panicking: SourceFactory = Box::new(|| panic!("malformed stream"));
+    let result = try_load_with(
+        &engine,
+        2,
+        panicking,
+        Duration::from_secs(1),
+        Transition::Immediate,
+    );
+    assert!(
+        result.is_err_and(|e| e.contains("panicked")),
+        "a worker panic must resolve the load as an error"
+    );
+
+    // Prior session is untouched.
+    assert_eq!(engine.status().token, 1);
+    assert_eq!(engine.status().phase, Phase::Playing);
+    wait_until("audio from token 1", || {
+        sink.pull(4096).iter().any(|s| *s != 0.0)
+    });
+
+    engine.shutdown();
+}
+
+#[test]
 fn seek_moves_position_immediately_on_fresh_counters() {
     let (sink, engine) = spawn_engine();
     let (factory, duration) = wav_factory(10.0);

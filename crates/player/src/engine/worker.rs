@@ -80,7 +80,22 @@ pub(crate) fn spawn(
     let (cmd_tx, cmd_rx) = std::sync::mpsc::channel();
     let join = std::thread::Builder::new()
         .name(format!("kopuz-decode-{token}"))
-        .spawn(move || run(token, factory, &msg_tx, &cmd_rx))?;
+        .spawn(move || {
+            // Symphonia can panic on malformed streams (probe and demux alike).
+            // A dying thread must still report, or the load never resolves and
+            // the session hangs; the seek path additionally recovers panics in
+            // place (see seek_reader).
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                run(token, factory, &msg_tx, &cmd_rx)
+            }));
+            if outcome.is_err() {
+                tracing::error!(token, "decode worker panicked");
+                let _ = msg_tx.send(ActorMsg::Worker(WorkerMsg::Failed {
+                    token,
+                    error: "decode worker panicked".to_string(),
+                }));
+            }
+        })?;
     Ok(WorkerHandle { cmd_tx, join })
 }
 
