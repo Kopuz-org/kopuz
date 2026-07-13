@@ -32,9 +32,7 @@ pub struct NowPlayingMeta {
 #[derive(Debug)]
 pub enum PlayerInitError {
     NoOutputDevice,
-    DefaultOutputConfig(cpal::DefaultStreamConfigError),
-    BuildOutputStream(cpal::BuildStreamError),
-    StartOutputStream(cpal::PlayStreamError),
+    OutputStream(cpal::Error),
     EngineThread(std::io::Error),
 }
 
@@ -42,9 +40,7 @@ impl std::fmt::Display for PlayerInitError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NoOutputDevice => f.write_str("no output device available"),
-            Self::DefaultOutputConfig(e) => write!(f, "no default output config: {e}"),
-            Self::BuildOutputStream(e) => write!(f, "failed to build output stream: {e}"),
-            Self::StartOutputStream(e) => write!(f, "failed to start output stream: {e}"),
+            Self::OutputStream(e) => write!(f, "output stream error: {e}"),
             Self::EngineThread(e) => write!(f, "failed to spawn player engine thread: {e}"),
         }
     }

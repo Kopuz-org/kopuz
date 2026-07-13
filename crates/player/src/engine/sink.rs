@@ -112,7 +112,7 @@ impl CpalSink {
         let default_config = self
             .device
             .default_output_config()
-            .map_err(|e| PlayerInitError::DefaultOutputConfig(e).to_string())?;
+            .map_err(|e| PlayerInitError::OutputStream(e).to_string())?;
 
         let Some(desired_sample_rate) = desired_sample_rate else {
             return Ok(default_config);
@@ -191,35 +191,40 @@ impl AudioSink for CpalSink {
         let stream = self
             .device
             .build_output_stream(
-                &stream_config,
+                stream_config,
                 move |data: &mut [f32], _: &cpal::OutputCallbackInfo| data_cb(data),
-                move |err| {
-                    let event = match err {
+                move |err: cpal::Error| {
+                    let event = match err.kind() {
                         // Recovery will land on whatever device is default now;
                         // the user's device-change behavior applies.
-                        cpal::StreamError::DeviceNotAvailable => SinkEvent::DeviceLost,
+                        cpal::ErrorKind::DeviceNotAvailable => SinkEvent::DeviceLost,
                         // An xrun is a scheduling hiccup the backend recovers
                         // in place (ALSA re-prepares and continues); a rebuild
                         // would only add a bigger glitch plus a reseek. If the
                         // in-place recovery fails, cpal reports that failure as
                         // a separate error, which the arms below handle.
-                        cpal::StreamError::BufferUnderrun => {
+                        cpal::ErrorKind::Xrun => {
                             tracing::warn!("audio buffer underrun (recovered in place)");
                             return;
                         }
+                        // The backend rerouted the stream itself; it stays
+                        // active and needs no rebuild.
+                        cpal::ErrorKind::DeviceChanged => {
+                            tracing::info!("audio stream rerouted by the backend");
+                            return;
+                        }
                         // Same device, but the stream must be rebuilt.
-                        cpal::StreamError::StreamInvalidated
-                        | cpal::StreamError::BackendSpecific { .. } => SinkEvent::StreamStalled,
+                        _ => SinkEvent::StreamStalled,
                     };
                     tracing::error!(error = %err, "cpal stream error");
                     on_event(event);
                 },
                 None,
             )
-            .map_err(|e| PlayerInitError::BuildOutputStream(e).to_string())?;
+            .map_err(|e| PlayerInitError::OutputStream(e).to_string())?;
         stream
             .play()
-            .map_err(|e| PlayerInitError::StartOutputStream(e).to_string())?;
+            .map_err(|e| PlayerInitError::OutputStream(e).to_string())?;
 
         self.stream = Some(stream);
         self.config = Some(config);
