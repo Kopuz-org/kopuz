@@ -3,8 +3,47 @@
 //! break ties. Generic over the field enum via [`LibrarySortField`], so the
 //! album grid, library track list and artist album grid share one control.
 
-use config::{LibrarySortField, SortCriterion, SortDirection};
+use config::{AlbumSortField, ArtistSortField, SortCriterion, SortDirection, TrackSortField};
 use dioxus::prelude::*;
+
+/// UI label lookup for a sortable field enum. Lives here rather than in
+/// `config` because the i18n label keys are a presentation concern.
+pub trait LibrarySortField: Copy + PartialEq + 'static {
+    fn label_key(&self) -> &'static str;
+}
+
+impl LibrarySortField for AlbumSortField {
+    fn label_key(&self) -> &'static str {
+        match self {
+            Self::Title => "sort_field_title",
+            Self::Artist => "sort_field_artist",
+            Self::Year => "sort_field_year",
+            Self::Genre => "sort_field_genre",
+        }
+    }
+}
+
+impl LibrarySortField for TrackSortField {
+    fn label_key(&self) -> &'static str {
+        match self {
+            Self::Title => "sort_field_title",
+            Self::Artist => "sort_field_artist",
+            Self::Album => "sort_field_album",
+            Self::Duration => "sort_field_duration",
+            Self::DateAdded => "sort_field_date_added",
+        }
+    }
+}
+
+impl LibrarySortField for ArtistSortField {
+    fn label_key(&self) -> &'static str {
+        match self {
+            Self::Name => "sort_field_name",
+            Self::Tracks => "sort_field_tracks",
+            Self::Albums => "sort_field_albums",
+        }
+    }
+}
 
 fn direction_arrow(direction: SortDirection) -> &'static str {
     match direction {

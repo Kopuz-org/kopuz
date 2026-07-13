@@ -176,21 +176,6 @@ impl<F> SortCriterion<F> {
     }
 }
 
-pub trait LibrarySortField: Copy + PartialEq + 'static {
-    fn label_key(&self) -> &'static str;
-}
-
-impl LibrarySortField for AlbumSortField {
-    fn label_key(&self) -> &'static str {
-        match self {
-            Self::Title => "sort_field_title",
-            Self::Artist => "sort_field_artist",
-            Self::Year => "sort_field_year",
-            Self::Genre => "sort_field_genre",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum TrackSortField {
     Title,
@@ -200,18 +185,6 @@ pub enum TrackSortField {
     DateAdded,
 }
 
-impl LibrarySortField for TrackSortField {
-    fn label_key(&self) -> &'static str {
-        match self {
-            Self::Title => "sort_field_title",
-            Self::Artist => "sort_field_artist",
-            Self::Album => "sort_field_album",
-            Self::Duration => "sort_field_duration",
-            Self::DateAdded => "sort_field_date_added",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ArtistSortField {
     Name,
@@ -219,16 +192,6 @@ pub enum ArtistSortField {
     Tracks,
     /// Album count.
     Albums,
-}
-
-impl LibrarySortField for ArtistSortField {
-    fn label_key(&self) -> &'static str {
-        match self {
-            Self::Name => "sort_field_name",
-            Self::Tracks => "sort_field_tracks",
-            Self::Albums => "sort_field_albums",
-        }
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
