@@ -347,6 +347,9 @@ channel_mode_swap_left_right = L/R tauschen
 device_change_behavior = Bei Wechsel des Ausgabegeräts
 device_change_resume = Weiterspielen
 device_change_pause = Pausieren
+sample_rate_mode = Ausgabe-Abtastrate
+sample_rate_mode_system = System folgen
+sample_rate_mode_source = An Titel anpassen
 
 crossfade = Überblendung
 crossfade_off = Aus

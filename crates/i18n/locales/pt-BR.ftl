@@ -346,6 +346,9 @@ channel_mode_swap_left_right = Inverter E/D
 device_change_behavior = On output device change
 device_change_resume = Keep playing
 device_change_pause = Pause
+sample_rate_mode = Output sample rate
+sample_rate_mode_system = Follow system
+sample_rate_mode_source = Match track
 
 crossfade = Transição Contínua
 crossfade_off = Desligado

@@ -348,6 +348,9 @@ channel_mode_swap_left_right = Поменять Л/П
 device_change_behavior = При смене устройства вывода
 device_change_resume = Продолжать воспроизведение
 device_change_pause = Пауза
+sample_rate_mode = Частота дискретизации вывода
+sample_rate_mode_system = Как в системе
+sample_rate_mode_source = Как у трека
 
 crossfade = Кроссфейд
 crossfade_off = Выкл

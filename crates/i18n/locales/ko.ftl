@@ -347,6 +347,9 @@ channel_mode_swap_left_right = L/R 스왑
 device_change_behavior = On output device change
 device_change_resume = Keep playing
 device_change_pause = Pause
+sample_rate_mode = Output sample rate
+sample_rate_mode_system = Follow system
+sample_rate_mode_source = Match track
 
 crossfade = 크로스페이드
 crossfade_off = 끄기

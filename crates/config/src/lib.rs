@@ -280,6 +280,35 @@ impl DeviceChangeBehavior {
     }
 }
 
+/// Which sample rate the output stream is opened at.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum SampleRateMode {
+    /// Keep the device at its default rate and resample every source to it.
+    #[default]
+    System,
+    /// Reopen the device at each track's native rate (switches the DAC per
+    /// track when rates differ).
+    Source,
+}
+
+impl SampleRateMode {
+    pub const ALL: &'static [Self] = &[Self::System, Self::Source];
+
+    pub const fn value_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Source => "source",
+        }
+    }
+
+    pub fn from_value_str(value: &str) -> Self {
+        match value {
+            "source" => Self::Source,
+            _ => Self::System,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum EqPreset {
     #[default]
@@ -629,6 +658,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub device_change_behavior: DeviceChangeBehavior,
     #[serde(default)]
+    pub sample_rate_mode: SampleRateMode,
+    #[serde(default)]
     pub ytdlp_output_dir: String,
     #[serde(default)]
     pub ytdlp_options: YtdlpOptions,
@@ -796,6 +827,7 @@ impl Default for AppConfig {
             channel_mode: ChannelMode::Stereo,
             equalizer: EqualizerSettings::default(),
             device_change_behavior: DeviceChangeBehavior::Pause,
+            sample_rate_mode: SampleRateMode::System,
             ytdlp_output_dir: String::new(),
             ytdlp_options: YtdlpOptions::default(),
             ytdlp_history: Vec::new(),

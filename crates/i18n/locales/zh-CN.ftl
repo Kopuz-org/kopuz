@@ -347,6 +347,9 @@ channel_mode_swap_left_right = 交换左右
 device_change_behavior = 输出设备变更时
 device_change_resume = 继续播放
 device_change_pause = 暂停
+sample_rate_mode = 输出采样率
+sample_rate_mode_system = 跟随系统
+sample_rate_mode_source = 匹配曲目
 
 crossfade = 交叉淡入淡出
 crossfade_off = 关闭

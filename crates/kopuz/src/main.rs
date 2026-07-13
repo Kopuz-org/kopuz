@@ -1067,6 +1067,7 @@ fn App() -> Element {
                     player
                         .peek()
                         .set_device_change_behavior(loaded.device_change_behavior);
+                    player.peek().set_sample_rate_mode(loaded.sample_rate_mode);
                     i18n::set_locale(&loaded.language);
                 }
 

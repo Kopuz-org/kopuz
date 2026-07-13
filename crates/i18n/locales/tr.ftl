@@ -347,6 +347,9 @@ channel_mode_swap_left_right = Sol/Sağ Değiştir
 device_change_behavior = Ses aygıtı değiştiğinde
 device_change_resume = Çalmaya devam et
 device_change_pause = Duraklat
+sample_rate_mode = Çıkış örnekleme hızı
+sample_rate_mode_system = Sistemi izle
+sample_rate_mode_source = Parçaya uydur
 
 crossfade = Çapraz Geçiş
 crossfade_off = Kapalı

@@ -16,6 +16,8 @@ struct FakeShared {
     play_calls: usize,
     pause_calls: usize,
     open_calls: usize,
+    /// The `desired_sample_rate` passed to the most recent open().
+    last_open_request: Option<Option<u32>>,
     /// What the next open() lands on — a "device" whose config tests can
     /// switch to exercise rebuild-onto-a-different-rate paths.
     device_config: SinkConfig,
@@ -30,6 +32,7 @@ impl Default for FakeShared {
             play_calls: 0,
             pause_calls: 0,
             open_calls: 0,
+            last_open_request: None,
             device_config: TEST_CONFIG,
         }
     }
@@ -65,6 +68,10 @@ impl FakeSinkHandle {
         self.0.lock().unwrap().open_calls
     }
 
+    fn last_open_request(&self) -> Option<Option<u32>> {
+        self.0.lock().unwrap().last_open_request
+    }
+
     fn is_playing(&self) -> bool {
         self.0.lock().unwrap().playing
     }
@@ -88,7 +95,7 @@ impl AudioSink for FakeSink {
 
     fn open(
         &mut self,
-        _desired_sample_rate: Option<u32>,
+        desired_sample_rate: Option<u32>,
         make_cb: DataCallbackFactory,
     ) -> Result<SinkConfig, String> {
         let config = self.0.0.lock().unwrap().device_config;
@@ -98,6 +105,7 @@ impl AudioSink for FakeSink {
         shared.opened = Some(config);
         shared.playing = true;
         shared.open_calls += 1;
+        shared.last_open_request = Some(desired_sample_rate);
         Ok(config)
     }
 
@@ -681,6 +689,61 @@ fn crossfade_across_sample_rates_still_fades() {
         sink.pull(4096).iter().any(|s| *s != 0.0)
     });
 
+    engine.shutdown();
+}
+
+#[test]
+fn system_mode_keeps_device_rate_across_track_rates() {
+    // Default mode: the device stays at its rate; a track at a different
+    // native rate is resampled by the worker instead of reopening the stream
+    // (which would switch the DAC's rate and glitch the EQ chain).
+    let (sink, engine) = spawn_engine();
+
+    let (factory_a, duration_a) = wav_factory(5.0);
+    load(&engine, 1, factory_a, duration_a);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+
+    let opens_before = sink.open_calls();
+    let frames = 5 * 22_050;
+    let bytes = wav_bytes(frames, 22_050, TEST_CONFIG.channels as u16);
+    let factory_b: SourceFactory =
+        Box::new(move || Ok(crate::decoder::from_stream(std::io::Cursor::new(bytes))));
+    load(&engine, 2, factory_b, Duration::from_secs(5));
+    wait_until("status switches to token 2", || engine.status().token == 2);
+
+    assert_eq!(
+        sink.open_calls(),
+        opens_before,
+        "System mode must not reopen the stream for a source-rate change"
+    );
+    wait_until("audio from the resampled track", || {
+        sink.pull(4096).iter().any(|s| *s != 0.0)
+    });
+    engine.shutdown();
+}
+
+#[test]
+fn source_mode_reopens_at_track_rate() {
+    let (sink, engine) = spawn_engine();
+    engine.send(Command::SetSampleRateMode(config::SampleRateMode::Source));
+
+    let (factory_a, duration_a) = wav_factory(5.0);
+    load(&engine, 1, factory_a, duration_a);
+    wait_until("phase Playing", || engine.status().phase == Phase::Playing);
+
+    let opens_before = sink.open_calls();
+    let frames = 5 * 22_050;
+    let bytes = wav_bytes(frames, 22_050, TEST_CONFIG.channels as u16);
+    let factory_b: SourceFactory =
+        Box::new(move || Ok(crate::decoder::from_stream(std::io::Cursor::new(bytes))));
+    load(&engine, 2, factory_b, Duration::from_secs(5));
+    wait_until("status switches to token 2", || engine.status().token == 2);
+
+    assert!(
+        sink.open_calls() > opens_before,
+        "Source mode reopens the stream at the track's rate"
+    );
+    assert_eq!(sink.last_open_request(), Some(Some(22_050)));
     engine.shutdown();
 }
 
