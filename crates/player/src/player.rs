@@ -32,9 +32,9 @@ pub struct NowPlayingMeta {
 #[derive(Debug)]
 pub enum PlayerInitError {
     NoOutputDevice,
-    DefaultOutputConfig(cpal::DefaultStreamConfigError),
-    BuildOutputStream(cpal::BuildStreamError),
-    StartOutputStream(cpal::PlayStreamError),
+    DefaultOutputConfig(cpal::Error),
+    BuildOutputStream(cpal::Error),
+    StartOutputStream(cpal::Error),
     EngineThread(std::io::Error),
 }
 
