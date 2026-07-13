@@ -176,25 +176,35 @@ impl<F> SortCriterion<F> {
     }
 }
 
-pub trait LibrarySortField: Copy + PartialEq + 'static {
-    fn label_key(&self) -> &'static str;
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TrackSortField {
+    Title,
+    Artist,
+    Album,
+    Duration,
+    DateAdded,
 }
 
-impl LibrarySortField for AlbumSortField {
-    fn label_key(&self) -> &'static str {
-        match self {
-            Self::Title => "sort_field_title",
-            Self::Artist => "sort_field_artist",
-            Self::Year => "sort_field_year",
-            Self::Genre => "sort_field_genre",
-        }
-    }
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ArtistSortField {
+    Name,
+    /// Track count (primary-artist credits).
+    Tracks,
+    /// Album count.
+    Albums,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ArtistViewOrder {
     Tracks,
     Albums,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum AlbumViewMode {
+    #[default]
+    Grid,
+    List,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -604,6 +614,18 @@ pub struct AppConfig {
     pub sort_order: SortOrder,
     #[serde(default = "default_album_sort")]
     pub album_sort: Vec<SortCriterion<AlbumSortField>>,
+    #[serde(default = "default_library_sort")]
+    pub library_sort: Vec<SortCriterion<TrackSortField>>,
+    #[serde(default = "default_album_sort")]
+    pub artist_album_sort: Vec<SortCriterion<AlbumSortField>>,
+    #[serde(default = "default_artist_sort")]
+    pub artist_sort: Vec<SortCriterion<ArtistSortField>>,
+    #[serde(default)]
+    pub album_view_mode: AlbumViewMode,
+    #[serde(default)]
+    pub artist_album_view_mode: AlbumViewMode,
+    #[serde(default)]
+    pub artists_view_mode: AlbumViewMode,
     #[serde(default = "default_artist_view_order")]
     pub artist_view_order: ArtistViewOrder,
     #[serde(default)]
@@ -726,6 +748,20 @@ fn default_album_sort() -> Vec<SortCriterion<AlbumSortField>> {
     )]
 }
 
+fn default_library_sort() -> Vec<SortCriterion<TrackSortField>> {
+    vec![SortCriterion::new(
+        TrackSortField::Title,
+        SortDirection::Asc,
+    )]
+}
+
+fn default_artist_sort() -> Vec<SortCriterion<ArtistSortField>> {
+    vec![SortCriterion::new(
+        ArtistSortField::Name,
+        SortDirection::Asc,
+    )]
+}
+
 fn default_artist_view_order() -> ArtistViewOrder {
     ArtistViewOrder::Tracks
 }
@@ -803,6 +839,12 @@ impl Default for AppConfig {
             discord_presence_source: Some(true),
             sort_order: default_sort_order(),
             album_sort: default_album_sort(),
+            library_sort: default_library_sort(),
+            artist_album_sort: default_album_sort(),
+            artist_sort: default_artist_sort(),
+            album_view_mode: AlbumViewMode::Grid,
+            artist_album_view_mode: AlbumViewMode::Grid,
+            artists_view_mode: AlbumViewMode::Grid,
             artist_view_order: default_artist_view_order(),
             listen_counts: HashMap::new(),
             musicbrainz_token: String::new(),
