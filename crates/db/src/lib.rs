@@ -52,7 +52,7 @@ pub struct QueueSnapshot {
 }
 
 /// Sort order for a track listing — maps to an indexed `ORDER BY`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum TrackSort {
     /// Artist → album → disc → track (the natural library order).
     #[default]
@@ -64,6 +64,9 @@ pub enum TrackSort {
     DateAdded,
     /// Most-played first (`listen_counts` join), ties by title.
     PlayCount,
+    /// Stacked user criteria (library sort control): the first field decides,
+    /// the rest break ties. Empty falls back to [`TrackSort::ArtistAlbum`].
+    Fields(Vec<config::SortCriterion<config::TrackSortField>>),
 }
 
 /// What a windowed track listing selects: which source, how it's sorted, and

@@ -8,12 +8,17 @@ use components::dots_menu::{DotsMenu, MenuAction};
 use components::metadata_modal::MetadataModal;
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
-use config::{AppConfig, ArtistPhotoSource, ArtistViewOrder};
+use components::sort_control::SortControl;
+use components::view_mode_toggle::ViewModeToggle;
+use config::{
+    AlbumSortField, AlbumViewMode, AppConfig, ArtistPhotoSource, ArtistSortField, ArtistViewOrder,
+    SortDirection,
+};
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{
     use_active_source, use_albums, use_artist_images, use_artist_sample_tracks, use_artist_tracks,
-    use_tracks_by_keys,
+    use_artists, use_tracks_by_keys,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -77,6 +82,7 @@ pub fn Artist(
     let mut images_fetch_done = use_signal(|| false);
 
     let albums_res = use_albums(source);
+    let artist_counts_res = use_artists(source);
     let sample_tracks_res = use_artist_sample_tracks(source, u32::MAX);
     let artist_memo = use_memo(move || artist_name.read().clone());
     let artist_tracks_res = use_artist_tracks(source, artist_memo);
@@ -103,6 +109,38 @@ pub fn Artist(
         let curr = sort_order.read().clone();
         if config.peek().artist_view_order != curr {
             config.write().artist_view_order = curr;
+        }
+    });
+
+    let album_sort = use_signal(|| config.peek().artist_album_sort.clone());
+    use_effect(move || {
+        let curr = album_sort.read().clone();
+        if config.peek().artist_album_sort != curr {
+            config.write().artist_album_sort = curr;
+        }
+    });
+
+    let artist_sort = use_signal(|| config.peek().artist_sort.clone());
+    use_effect(move || {
+        let curr = artist_sort.read().clone();
+        if config.peek().artist_sort != curr {
+            config.write().artist_sort = curr;
+        }
+    });
+
+    let album_view_mode = use_signal(|| config.peek().artist_album_view_mode);
+    use_effect(move || {
+        let curr = *album_view_mode.read();
+        if config.peek().artist_album_view_mode != curr {
+            config.write().artist_album_view_mode = curr;
+        }
+    });
+
+    let artists_view_mode = use_signal(|| config.peek().artists_view_mode);
+    use_effect(move || {
+        let curr = *artists_view_mode.read();
+        if config.peek().artists_view_mode != curr {
+            config.write().artists_view_mode = curr;
         }
     });
 
@@ -304,7 +342,20 @@ pub fn Artist(
             HashSet::new()
         };
 
-        let mut out: Vec<(String, Option<utils::CoverUrl>)> = artist_map
+        // Per-artist counts for the count-based sort fields; keyed by the
+        // normalized name so differently-cased credits collapse into one bucket.
+        let mut track_counts: HashMap<String, u32> = HashMap::new();
+        for (name, n) in artist_counts_res.read().clone().unwrap_or_default() {
+            *track_counts.entry(normalize_artist_key(&name)).or_default() += n;
+        }
+        let mut album_counts: HashMap<String, u32> = HashMap::new();
+        for album in &albums {
+            *album_counts
+                .entry(normalize_artist_key(&album.artist))
+                .or_default() += 1;
+        }
+
+        let out: Vec<(String, Option<utils::CoverUrl>)> = artist_map
             .into_iter()
             .filter(|(_, (display, _))| !offline || downloaded.contains(&display.to_lowercase()))
             .map(|(norm, (display, album_cover))| {
@@ -335,8 +386,39 @@ pub fn Artist(
                 (display, cover)
             })
             .collect();
-        out.sort_by_key(|a| a.0.to_lowercase());
-        out
+        // Decorate with the normalized name once, sort by the stacked criteria
+        // (name always breaks remaining ties), then strip the key back off.
+        let criteria = artist_sort.read().clone();
+        let mut keyed: Vec<(String, (String, Option<utils::CoverUrl>))> = out
+            .into_iter()
+            .map(|entry| (normalize_artist_key(&entry.0), entry))
+            .collect();
+        keyed.sort_by(|(ka, _), (kb, _)| {
+            for c in &criteria {
+                let ord = match c.field {
+                    ArtistSortField::Name => ka.cmp(kb),
+                    ArtistSortField::Tracks => track_counts
+                        .get(ka)
+                        .copied()
+                        .unwrap_or(0)
+                        .cmp(&track_counts.get(kb).copied().unwrap_or(0)),
+                    ArtistSortField::Albums => album_counts
+                        .get(ka)
+                        .copied()
+                        .unwrap_or(0)
+                        .cmp(&album_counts.get(kb).copied().unwrap_or(0)),
+                };
+                let ord = match c.direction {
+                    SortDirection::Asc => ord,
+                    SortDirection::Desc => ord.reverse(),
+                };
+                if ord != std::cmp::Ordering::Equal {
+                    return ord;
+                }
+            }
+            ka.cmp(kb)
+        });
+        keyed.into_iter().map(|(_, entry)| entry).collect()
     });
 
     // Restore the grid's scroll position once, after the artist list first
@@ -431,15 +513,17 @@ pub fn Artist(
             .filter(|a| !offline || downloaded_ids.contains(&a.id))
             .cloned()
             .collect();
-        albums.sort_by(|a, b| {
-            a.title
-                .trim()
-                .to_lowercase()
-                .cmp(&b.title.trim().to_lowercase())
-        });
+        reader::sort::sort_albums(&mut albums, &album_sort.read());
         let mut seen = HashSet::new();
         albums.retain(|album| seen.insert(album.title.trim().to_lowercase()));
         albums
+    });
+
+    // Every album here shares the artist, so that field would never break a tie.
+    let album_sort_fields = use_memo(move || {
+        let mut fields = reader::sort::available_album_fields(&artist_albums.read());
+        fields.retain(|f| *f != AlbumSortField::Artist);
+        fields
     });
 
     let name = artist_name.read().clone();
@@ -464,22 +548,36 @@ pub fn Artist(
                     if !cfg!(target_os = "android") {
                         h1 { class: "text-3xl font-bold text-white mb-6 shrink-0", "{i18n::t(\"artists\")}" }
                     }
+                    div { class: "flex items-center justify-end gap-2 mb-4 shrink-0",
+                        ViewModeToggle { mode: artists_view_mode }
+                        SortControl {
+                            criteria: artist_sort,
+                            available: vec![
+                                ArtistSortField::Name,
+                                ArtistSortField::Tracks,
+                                ArtistSortField::Albums,
+                            ],
+                        }
+                    }
                     div {
                         id: "artist-grid-scroll",
                         class: "flex-1 min-h-0 overflow-y-auto pb-20",
                         onscroll: move |e| crate::scroll_persist::save("artists", e.scroll_top()),
-                        div { class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-8",
+                        div {
+                            // Same trick as the album grids: cards are static, only this
+                            // class flips, `.view-list` CSS restyles the `.vcard*` hooks.
+                            class: if *artists_view_mode.read() == AlbumViewMode::List { "view-list" } else { "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-8" },
                             for (artist , cover_url) in artists() {
                                 {
                                     let art = artist.clone();
                                     rsx! {
                                         div {
                                             key: "{artist}",
-                                            class: "group cursor-pointer flex flex-col items-center",
-                                            style: "content-visibility: auto; contain-intrinsic-size: 0 180px;",
+                                            class: "vcard group cursor-pointer flex flex-col items-center",
+                                            style: "content-visibility: auto;",
                                             onclick: move |_| artist_name.set(art.clone()),
                                             div {
-                                                class: "aspect-square w-full rounded-full bg-stone-800 mb-4 overflow-hidden relative transition-all",
+                                                class: "vcard-avatar aspect-square w-full rounded-full bg-stone-800 mb-4 overflow-hidden relative",
                                                 style: "-webkit-user-drag: none;",
                                                 ondragstart: move |evt| evt.prevent_default(),
                                                 if let Some(url) = cover_url {
@@ -497,7 +595,7 @@ pub fn Artist(
                                                     }
                                                 }
                                             }
-                                            h3 { class: "text-white font-medium truncate text-center w-full group-hover:text-indigo-400 transition-colors", "{artist}" }
+                                            h3 { class: "vcard-meta text-white font-medium truncate text-center w-full group-hover:text-indigo-400 transition-colors", "{artist}" }
                                         }
                                     }
                                 }
@@ -715,18 +813,26 @@ pub fn Artist(
                                 }
                             }
 
-                            SortOrderToggle { sort_order }
+                            div { class: "flex items-center justify-between mb-4",
+                                SortOrderToggle { sort_order }
+                                div { class: "flex items-center gap-2",
+                                    ViewModeToggle { mode: album_view_mode }
+                                    SortControl { criteria: album_sort, available: album_sort_fields() }
+                                }
+                            }
 
                             if artist_albums().is_empty() {
                                 p { class: "text-slate-500", "{i18n::t(\"no_albums_found\")}" }
                             } else {
-                                div { class: "grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-6",
+                                div {
+                                    class: if *album_view_mode.read() == AlbumViewMode::List { "view-list" } else { "grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-6" },
                                     for album in artist_albums() {
                                         {
                                             let cap = caps();
                                             let id_for_menu = album.id.clone();
                                             let id_for_navigate = album.id.clone();
                                             let is_open = open_album_menu.read().as_deref() == Some(&album.id);
+                                            // Same size in both modes so toggling never refetches covers.
                                             let cover_url = ::server::cover::from_path(&config.read(), album.cover_path.as_deref(), 320);
                                             // Whether every track of this album is downloaded (servers only).
                                             let downloaded = cap.downloads && {
@@ -762,8 +868,8 @@ pub fn Artist(
                                             rsx! {
                                                 div {
                                                     key: "{album.id}",
-                                                    class: "group relative p-4 bg-white/5 rounded-xl hover:bg-white/10 transition-colors",
-                                                    style: "content-visibility: auto; contain-intrinsic-size: 0 230px;",
+                                                    class: "vcard group relative p-4 bg-white/5 rounded-xl hover:bg-white/10 transition-colors",
+                                                    style: "content-visibility: auto;",
                                                     onclick: move |_| on_navigate.call(id_for_navigate.clone()),
                                                     oncontextmenu: {
                                                         let id = id_for_menu.clone();
@@ -772,9 +878,10 @@ pub fn Artist(
                                                             open_album_menu.set(Some(id.clone()));
                                                         }
                                                     },
-                                                    div { class: "cursor-pointer",
+                                                    div {
+                                                        class: "vcard-click cursor-pointer",
                                                         div {
-                                                            class: "aspect-square rounded-lg bg-stone-800 mb-3 overflow-hidden relative",
+                                                            class: "vcard-cover aspect-square rounded-lg bg-stone-800 mb-3 overflow-hidden relative",
                                                             style: "-webkit-user-drag: none;",
                                                             ondragstart: move |evt| evt.prevent_default(),
                                                             if let Some(url) = &cover_url {
@@ -792,11 +899,14 @@ pub fn Artist(
                                                                 }
                                                             }
                                                         }
-                                                        h3 { class: "text-white font-medium truncate", "{album.title}" }
-                                                        p { class: "text-sm text-stone-400 truncate", "{album.artist}" }
+                                                        div {
+                                                            class: "vcard-meta",
+                                                            h3 { class: "text-white font-medium truncate", "{album.title}" }
+                                                            p { class: "text-sm text-stone-400 truncate", "{album.artist}" }
+                                                        }
                                                     }
 
-                                                    div { class: "absolute bottom-3 right-3",
+                                                    div { class: "vcard-menu absolute bottom-3 right-3",
                                                         DotsMenu {
                                                             actions: menu_actions,
                                                             is_open,

@@ -8,10 +8,11 @@ use components::header::Header;
 use components::metadata_modal::MetadataModal;
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
+use components::sort_control::SortControl;
 use components::stat_card::StatCard;
 use components::track_row::TrackRow;
 use components::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
-use config::{AppConfig, UiStyle};
+use config::{AppConfig, TrackSortField, UiStyle};
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{
@@ -47,21 +48,16 @@ pub fn LibraryPage(
     let caps = use_memo(move || active_source.read().capabilities());
     let download_queue = use_context::<Signal<DownloadQueue>>();
 
-    let initial_sort_order = config.read().sort_order.clone();
-    let mut sort_order = use_signal(move || initial_sort_order);
+    let library_sort = use_signal(|| config.peek().library_sort.clone());
     let filter = use_memo(move || TrackFilter {
         source: source(),
-        sort: match *sort_order.read() {
-            config::SortOrder::Title => TrackSort::Title,
-            config::SortOrder::Artist => TrackSort::Artist,
-            config::SortOrder::Album => TrackSort::Album,
-        },
+        sort: TrackSort::Fields(library_sort.read().clone()),
         ..Default::default()
     });
     use_effect(move || {
-        let curr = sort_order.read().clone();
-        if config.peek().sort_order != curr {
-            config.write().sort_order = curr;
+        let curr = library_sort.read().clone();
+        if config.peek().library_sort != curr {
+            config.write().library_sort = curr;
         }
     });
 
@@ -548,35 +544,15 @@ pub fn LibraryPage(
                     }
                     h2 { class: "text-xl font-semibold text-white/80", "{i18n::t(\"tracks\")}" }
                 }
-                div {
-                    class: "flex space-x-1 bg-white/5 border border-white/5 p-1 rounded-lg",
-                    button {
-                        class: if *sort_order.read() == config::SortOrder::Title {
-                            "px-3 py-1 text-xs rounded-md bg-white/10 text-white font-medium transition-all"
-                        } else {
-                            "px-3 py-1 text-xs rounded-md text-white/40 hover:text-white/80 transition-all"
-                        },
-                        onclick: move |_| sort_order.set(config::SortOrder::Title),
-                        "{i18n::t(\"title\")}"
-                    }
-                    button {
-                        class: if *sort_order.read() == config::SortOrder::Artist {
-                            "px-3 py-1 text-xs rounded-md bg-white/10 text-white font-medium transition-all"
-                        } else {
-                            "px-3 py-1 text-xs rounded-md text-white/40 hover:text-white/80 transition-all"
-                        },
-                        onclick: move |_| sort_order.set(config::SortOrder::Artist),
-                        "{i18n::t(\"artist\")}"
-                    }
-                    button {
-                        class: if *sort_order.read() == config::SortOrder::Album {
-                            "px-3 py-1 text-xs rounded-md bg-white/10 text-white font-medium transition-all"
-                        } else {
-                            "px-3 py-1 text-xs rounded-md text-white/40 hover:text-white/80 transition-all"
-                        },
-                        onclick: move |_| sort_order.set(config::SortOrder::Album),
-                        "{i18n::t(\"album\")}"
-                    }
+                SortControl {
+                    criteria: library_sort,
+                    available: vec![
+                        TrackSortField::Title,
+                        TrackSortField::Artist,
+                        TrackSortField::Album,
+                        TrackSortField::Duration,
+                        TrackSortField::DateAdded,
+                    ],
                 }
             }
             Header { is_vaxry: is_vaxry, is_album: false }
