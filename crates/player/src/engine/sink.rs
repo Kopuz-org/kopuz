@@ -112,7 +112,7 @@ impl CpalSink {
         let default_config = self
             .device
             .default_output_config()
-            .map_err(|e| PlayerInitError::DefaultOutputConfig(e).to_string())?;
+            .map_err(|e| PlayerInitError::OutputStream(e).to_string())?;
 
         let Some(desired_sample_rate) = desired_sample_rate else {
             return Ok(default_config);
@@ -221,10 +221,10 @@ impl AudioSink for CpalSink {
                 },
                 None,
             )
-            .map_err(|e| PlayerInitError::BuildOutputStream(e).to_string())?;
+            .map_err(|e| PlayerInitError::OutputStream(e).to_string())?;
         stream
             .play()
-            .map_err(|e| PlayerInitError::StartOutputStream(e).to_string())?;
+            .map_err(|e| PlayerInitError::OutputStream(e).to_string())?;
 
         self.stream = Some(stream);
         self.config = Some(config);
