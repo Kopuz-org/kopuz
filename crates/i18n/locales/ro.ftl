@@ -347,9 +347,9 @@ channel_mode_swap_left_right = Inversare S/D
 device_change_behavior = On output device change
 device_change_resume = Keep playing
 device_change_pause = Pause
-sample_rate_mode = Output sample rate
-sample_rate_mode_system = Follow system
-sample_rate_mode_source = Match track
+sample_rate_mode = Rată de eșantionare la ieșire
+sample_rate_mode_system = Urmează sistemul
+sample_rate_mode_source = Potrivire cu piesa
 
 crossfade = Întrepătrundere
 crossfade_off = Oprit

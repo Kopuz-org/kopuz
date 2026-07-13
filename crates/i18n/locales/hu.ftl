@@ -347,9 +347,9 @@ channel_mode_swap_left_right = B/J felcserélése
 device_change_behavior = On output device change
 device_change_resume = Keep playing
 device_change_pause = Pause
-sample_rate_mode = Output sample rate
-sample_rate_mode_system = Follow system
-sample_rate_mode_source = Match track
+sample_rate_mode = Kimeneti mintavételi frekvencia
+sample_rate_mode_system = Rendszer követése
+sample_rate_mode_source = Igazítás a dalhoz
 
 crossfade = Áttűnés
 crossfade_off = Ki

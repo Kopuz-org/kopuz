@@ -347,9 +347,9 @@ channel_mode_swap_left_right = Поміняти Л/П
 device_change_behavior = On output device change
 device_change_resume = Keep playing
 device_change_pause = Pause
-sample_rate_mode = Output sample rate
-sample_rate_mode_system = Follow system
-sample_rate_mode_source = Match track
+sample_rate_mode = Частота дискретизації виводу
+sample_rate_mode_system = Як у системі
+sample_rate_mode_source = Як у треку
 
 crossfade = Кросфейд
 crossfade_off = Вимкнено

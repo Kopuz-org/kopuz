@@ -350,7 +350,7 @@ device_change_resume = Continuer la lecture
 device_change_pause = Mettre en pause
 sample_rate_mode = Fréquence d'échantillonnage de sortie
 sample_rate_mode_system = Suivre le système
-sample_rate_mode_source = Suivre la piste
+sample_rate_mode_source = Adapter à la piste
 
 crossfade = Fondu enchaîné
 crossfade_off = Désactivé

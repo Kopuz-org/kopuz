@@ -353,9 +353,9 @@ channel_mode_swap_left_right = تبديل اليسار/اليمين
 device_change_behavior = On output device change
 device_change_resume = Keep playing
 device_change_pause = Pause
-sample_rate_mode = Output sample rate
-sample_rate_mode_system = Follow system
-sample_rate_mode_source = Match track
+sample_rate_mode = معدل عينات الإخراج
+sample_rate_mode_system = اتباع النظام
+sample_rate_mode_source = مطابقة المقطع
 
 crossfade = تلاشي متقاطع
 crossfade_off = إيقاف

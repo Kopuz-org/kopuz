@@ -347,9 +347,9 @@ channel_mode_swap_left_right = Εναλλαγή Α/Δ
 device_change_behavior = On output device change
 device_change_resume = Keep playing
 device_change_pause = Pause
-sample_rate_mode = Output sample rate
-sample_rate_mode_system = Follow system
-sample_rate_mode_source = Match track
+sample_rate_mode = Ρυθμός δειγματοληψίας εξόδου
+sample_rate_mode_system = Ακολούθηση συστήματος
+sample_rate_mode_source = Αντιστοίχιση με το κομμάτι
 
 crossfade = Crossfade (Σταδιακή μίξη)
 crossfade_off = Ανενεργό
