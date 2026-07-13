@@ -142,8 +142,11 @@ pub fn SortControl<F: LibrarySortField + Eq + std::fmt::Debug + 'static>(
                             class: "w-full mt-1 px-2 py-1.5 text-xs rounded-md text-white/60 hover:text-white hover:bg-white/5 flex items-center gap-2 transition-colors",
                             onclick: move |evt| {
                                 evt.stop_propagation();
-                                if let Some(first) = fields.first().copied() {
-                                    criteria.write().push(SortCriterion::new(first, SortDirection::Asc));
+                                let used: Vec<F> = criteria.peek().iter().map(|c| c.field).collect();
+                                if let Some(field) =
+                                    fields.iter().copied().find(|f| !used.contains(f))
+                                {
+                                    criteria.write().push(SortCriterion::new(field, SortDirection::Asc));
                                 }
                             },
                             i { class: "fa-solid fa-plus", style: "font-size: 10px;" }

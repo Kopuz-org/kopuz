@@ -472,5 +472,5 @@ sort_field_date_added = Petsa ng pagdagdag
 sort_field_name = Pangalan
 sort_field_tracks = Mga Track
 sort_field_albums = Mga Album
-view_grid = Grid view
-view_list = List view
+view_grid = View ng grid
+view_list = View ng listahan
