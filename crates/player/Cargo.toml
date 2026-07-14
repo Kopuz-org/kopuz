@@ -40,6 +40,7 @@ objc2-media-player = { workspace = true, features = [
   "MPMediaItem",
   "MPRemoteCommandCenter",
   "MPRemoteCommand",
+  "MPRemoteCommandEvent",
 ] }
 objc2-app-kit = { workspace = true, features = ["NSImage"] }
 objc2-av-foundation = { workspace = true, features = ["AVAudioSession"] }

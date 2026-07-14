@@ -24,6 +24,7 @@ enum BgCmd {
     Toggle,
     Next,
     Prev,
+    Seek(f64),
 }
 
 static BG_CMD_TX: std::sync::OnceLock<std::sync::Mutex<std::sync::mpsc::Sender<BgCmd>>> =
@@ -119,6 +120,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                 SystemEvent::Toggle => BgCmd::Toggle,
                 SystemEvent::Next => BgCmd::Next,
                 SystemEvent::Prev => BgCmd::Prev,
+                SystemEvent::Seek(secs) => BgCmd::Seek(secs),
             };
             send_bg_cmd(cmd);
             nudge_event_loop();
@@ -297,13 +299,19 @@ pub fn use_player_task(ctrl: PlayerController) {
 
                 nudge_event_loop();
 
-                for cmd in drain_bg_cmds() {
+                let cmds = drain_bg_cmds();
+                let last_seek = cmds.iter().rposition(|c| matches!(c, BgCmd::Seek(_)));
+                for (i, cmd) in cmds.into_iter().enumerate() {
                     match cmd {
                         BgCmd::Play => ctrl.resume(),
                         BgCmd::Pause => ctrl.pause(),
                         BgCmd::Toggle => ctrl.toggle(),
                         BgCmd::Next => ctrl.play_next(),
                         BgCmd::Prev => ctrl.play_prev(),
+                        BgCmd::Seek(secs) if Some(i) == last_seek => {
+                            ctrl.seek(std::time::Duration::from_secs_f64(secs));
+                        }
+                        BgCmd::Seek(_) => {}
                     }
                 }
 
