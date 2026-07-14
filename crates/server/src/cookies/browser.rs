@@ -176,14 +176,21 @@ pub(crate) async fn find_browser_bin(browser: Browser) -> Option<String> {
 pub(crate) fn browser_command(bin: &str) -> Command {
     // On Windows `bin` is a single executable path that can contain spaces
     // (e.g. `C:\Program Files\...`), so it must not be split. Elsewhere `bin`
-    // may be a multi-token command like `flatpak run <id>`, so split on spaces.
+    // is either a single executable path — which can also contain spaces, e.g.
+    // macOS `/Applications/Google Chrome.app/Contents/MacOS/Google Chrome` —
+    // or a multi-token command like `flatpak run <id>`, so split on spaces
+    // only when the whole string isn't an existing file.
     #[cfg(windows)]
     {
         Command::new(bin)
     }
     #[cfg(not(windows))]
     {
-        let cmd: Vec<&str> = bin.split(' ').collect();
+        let cmd: Vec<&str> = if std::path::Path::new(bin).is_file() {
+            vec![bin]
+        } else {
+            bin.split(' ').collect()
+        };
         if in_flatpak() {
             let mut c = Command::new("flatpak-spawn");
             c.args(["--host", "--watch-bus"]);

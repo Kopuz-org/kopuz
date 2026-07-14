@@ -3,18 +3,18 @@
 //!
 //! Sign-in uses the **user's own registered app** (developer.tidal.com) — its
 //! client id is entered when adding the server; nothing is baked into the repo.
-//! kopuz opens the TIDAL authorize page in a **clean, isolated Chromium-family
-//! profile** (see [`signin`]), the user logs in, and TIDAL redirects to a
-//! loopback callback ([`REDIRECT_URI`]) that a short-lived local listener
-//! captures the authorization code from. The code + PKCE verifier are exchanged
-//! for tokens. No SPA, no cookie/localStorage scraping.
+//! kopuz opens the TIDAL authorize page in the **user's default browser** (see
+//! [`signin`]), the user logs in, and TIDAL redirects to a loopback callback
+//! ([`REDIRECT_URI`]) that a short-lived local listener captures the
+//! authorization code from. The code + PKCE verifier are exchanged for tokens.
+//! No SPA, no cookie/localStorage scraping.
 //!
-//! The isolated profile is required because `login.tidal.com` is fronted by
-//! DataDome: it rejects Firefox and privacy-hardened/extension-laden browsers as
-//! `UNSUPPORTED_OS` (error 11102). For the authorize page to then load instead
-//! of erroring on the OAuth side, the developer.tidal.com app **must** also have
-//! (1) [`REDIRECT_URI`] registered verbatim and (2) every scope in [`SCOPE`]
-//! enabled — TIDAL errors the authorize request otherwise.
+//! For the authorize page to load instead of erroring (a 400 renders as TIDAL
+//! error 11102, "Something went wrong"), the developer.tidal.com app **must**
+//! have (1) [`REDIRECT_URI`] registered verbatim and (2) every scope in
+//! [`SCOPE`] enabled. `login.tidal.com` is also fronted by DataDome, which can
+//! reject privacy-hardened/extension-laden browsers as `UNSUPPORTED_OS` (same
+//! 11102 error page).
 //!
 //! Access tokens are refreshed with the stored refresh token against the same
 //! client. The token set + the client id/secret are packed into the single
@@ -167,76 +167,29 @@ pub fn delete_profile(server_id: &str) -> std::io::Result<()> {
     crate::cookies::delete_profile(PROFILE_PREFIX, server_id)
 }
 
-/// Run the PKCE sign-in in a **clean, isolated Chromium-family profile** — NOT
-/// the user's default browser.
+/// Run the PKCE sign-in in the **user's default browser**: open the authorize
+/// page, then wait on the loopback listener for TIDAL's redirect carrying the
+/// authorization code.
 ///
-/// TIDAL's `login.tidal.com/authorize` page is fronted by DataDome, whose device
-/// check rejects Firefox, privacy-hardened browsers, and profiles carrying
-/// ad-block/privacy extensions as `UNSUPPORTED_OS` (error 11102) — the authorize
-/// page then shows "Something went wrong". A fresh extension-less Chromium
-/// profile passes it, so we launch one (preferring plain Chrome/Chromium/Edge
-/// over Brave, whose shields also trip DataDome) rather than `webbrowser::open`,
-/// which would hand the URL to the user's default browser.
-///
-/// A background task owns the single loopback accept; the launcher's extract
-/// closure (polled while the browser is open) reads the captured code.
-#[tracing::instrument(name = "tidal.signin", skip(client_id, client_secret, server_id), fields(browser = %browser))]
+/// If the page shows TIDAL error 11102 ("Something went wrong") instead of the
+/// login form, either the developer.tidal.com app is misconfigured (redirect
+/// URI/scopes — see [`REDIRECT_URI`] and [`SCOPE`]) or DataDome rejected the
+/// browser (`UNSUPPORTED_OS`).
+#[tracing::instrument(name = "tidal.signin", skip_all)]
 pub async fn signin(
-    browser: config::Browser,
     client_id: &str,
     client_secret: &str,
-    server_id: &str,
     timeout: std::time::Duration,
 ) -> Result<TokenGrant, String> {
-    let browser = crate::cookies::first_available_browser(browser)
-        .await
-        .ok_or(
-            "TIDAL sign-in needs Google Chrome, Chromium, or Edge installed — TIDAL's login page \
-         blocks Firefox and privacy-hardened browsers (DataDome error 11102 / UNSUPPORTED_OS)."
-                .to_string(),
-        )?;
-
     let pkce = new_pkce();
     let state = b64url(&rand::random::<[u8; 12]>());
     let listener = bind_loopback().await?;
 
-    let slot: std::sync::Arc<tokio::sync::Mutex<Option<Result<String, String>>>> =
-        std::sync::Arc::new(tokio::sync::Mutex::new(None));
-    let cap_slot = slot.clone();
-    let cap_state = state.clone();
-    tokio::spawn(async move {
-        let r = capture_redirect_code(listener, &cap_state, timeout).await;
-        *cap_slot.lock().await = Some(r);
-    });
-
     let url = authorize_url(client_id, &pkce.challenge, &state);
-    let poll_slot = slot.clone();
-    let launch = crate::cookies::launch_signin_and_extract(
-        browser,
-        server_id,
-        PROFILE_PREFIX,
-        &url,
-        timeout,
-        move |_browser, _profile| {
-            let slot = poll_slot.clone();
-            async move {
-                match &*slot.lock().await {
-                    None => Ok(None),
-                    Some(Ok(code)) => Ok(Some(code.clone())),
-                    Some(Err(e)) => Err(e.clone()),
-                }
-            }
-        },
-    )
-    .await;
+    webbrowser::open(&url)
+        .map_err(|e| format!("TIDAL sign-in: couldn't open the default browser: {e}"))?;
 
-    let code = match launch {
-        Ok(code) => code,
-        Err(launch_err) => match slot.lock().await.take() {
-            Some(Err(e)) => return Err(e),
-            _ => return Err(launch_err),
-        },
-    };
+    let code = capture_redirect_code(listener, &state, timeout).await?;
     exchange_code(client_id, client_secret, &code, &pkce.verifier).await
 }
 
@@ -300,20 +253,19 @@ async fn capture_redirect_code(
 }
 
 /// Pull the `code` from a `/callback?…` target, verifying `state` and surfacing
-/// an OAuth `error` param.
+/// an OAuth `error` param. Values are percent-decoded — a still-encoded code
+/// would get encoded a second time in the token exchange form.
 fn parse_callback(target: &str, expect_state: &str) -> Result<String, String> {
-    let query = target.split_once('?').map(|(_, q)| q).unwrap_or("");
+    let url = reqwest::Url::parse(&format!("http://localhost{target}"))
+        .map_err(|e| format!("TIDAL sign-in: unparsable callback ({e})"))?;
     let mut code = None;
     let mut state = None;
     let mut error = None;
-    for pair in query.split('&') {
-        let Some((k, v)) = pair.split_once('=') else {
-            continue;
-        };
-        match k {
-            "code" => code = Some(v.to_string()),
-            "state" => state = Some(v.to_string()),
-            "error" => error = Some(v.to_string()),
+    for (k, v) in url.query_pairs() {
+        match k.as_ref() {
+            "code" => code = Some(v.into_owned()),
+            "state" => state = Some(v.into_owned()),
+            "error" => error = Some(v.into_owned()),
             _ => {}
         }
     }
@@ -1042,6 +994,18 @@ mod tests {
         );
         assert!(parse_callback("/callback?code=ABC&state=bad", "xy").is_err());
         assert!(parse_callback("/callback?error=access_denied&state=xy", "xy").is_err());
+    }
+
+    #[test]
+    fn parse_callback_percent_decodes() {
+        assert_eq!(
+            parse_callback("/callback?code=eyJ%2Fab%3D%3D&state=xy", "xy").as_deref(),
+            Ok("eyJ/ab==")
+        );
+        assert_eq!(
+            parse_callback("/callback?error=access%20denied&state=xy", "xy"),
+            Err("TIDAL denied the sign-in: access denied".to_string())
+        );
     }
 
     #[test]

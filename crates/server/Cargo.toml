@@ -17,6 +17,7 @@ workspace = true
 
 [dependencies]
 tracing = { workspace = true }
+webbrowser = { workspace = true }
 directories = { workspace = true }
 jellyfin-sdk-rust = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }

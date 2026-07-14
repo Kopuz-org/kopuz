@@ -355,27 +355,6 @@ fn ServerServiceFields(
                 oninput: move |e| tidal_client_secret.set(e.value()),
                 onkeydown: move |e| e.stop_propagation()
             }
-            // TIDAL's login rejects Firefox / privacy-hardened browsers
-            // (DataDome → UNSUPPORTED_OS), so sign-in runs in a clean isolated
-            // Chromium-family profile regardless of your default browser.
-            p { class: "text-xs text-white/60 mt-2",
-                "Pick a Chromium-family browser for the sign-in window — it opens in an isolated profile (a fresh session; your normal browsing is untouched). Firefox is not supported by TIDAL's login."
-            }
-            select {
-                onchange: move |e| {
-                    if let Some(b) = Browser::from_id(&e.value()) {
-                        yt_browser.set(b);
-                    }
-                },
-                onkeydown: move |e| e.stop_propagation(),
-                for browser in Browser::ALL.iter().copied() {
-                    option {
-                        value: "{browser.id()}",
-                        selected: yt_browser() == browser,
-                        "{browser.label()}"
-                    }
-                }
-            }
         },
         _ => rsx! {
             input {

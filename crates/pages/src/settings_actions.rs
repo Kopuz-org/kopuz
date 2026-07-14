@@ -255,18 +255,15 @@ fn apply_tidal_login(
 /// form on first sign-in; re-logins read the stored pair (pass empty strings).
 pub fn tidal_auto_login(
     config: Signal<AppConfig>,
-    yt_browser: Signal<Browser>,
     client_id: String,
     client_secret: String,
     mut error: Signal<Option<String>>,
     mut playback_error: Signal<Option<String>>,
 ) {
-    let (browser, server_id, stored, stored_user) = {
+    let (stored, stored_user) = {
         let cfg = config.peek();
         let srv = cfg.server.as_ref();
         (
-            srv.and_then(|s| s.yt_browser).unwrap_or(*yt_browser.peek()),
-            srv.and_then(|s| s.id.clone()).unwrap_or_default(),
             srv.and_then(|s| s.access_token.as_deref())
                 .and_then(::server::tidal::unpack_creds),
             srv.and_then(|s| s.user_id.clone()),
@@ -313,14 +310,7 @@ pub fn tidal_auto_login(
             playback_error.set(Some(
                 "Complete the TIDAL sign-in in the browser window…".to_string(),
             ));
-            match ::server::tidal::signin(
-                browser,
-                &cid,
-                &csecret,
-                &server_id,
-                std::time::Duration::from_secs(300),
-            )
-            .await
+            match ::server::tidal::signin(&cid, &csecret, std::time::Duration::from_secs(300)).await
             {
                 Ok(grant) => {
                     apply_tidal_login(config, grant, stored, stored_user, cid, csecret);
@@ -428,7 +418,6 @@ pub fn add_server(
             } else if is_tidal {
                 tidal_auto_login(
                     config,
-                    yt_browser,
                     tidal_client_id.peek().clone(),
                     tidal_client_secret.peek().clone(),
                     error,
@@ -467,14 +456,9 @@ pub fn switch_server(
             MusicService::SoundCloud => {
                 soundcloud_auto_login(config, yt_browser, error, playback_error)
             }
-            MusicService::Tidal => tidal_auto_login(
-                config,
-                yt_browser,
-                String::new(),
-                String::new(),
-                error,
-                playback_error,
-            ),
+            MusicService::Tidal => {
+                tidal_auto_login(config, String::new(), String::new(), error, playback_error)
+            }
             _ => show_login.set(true),
         }
     });
