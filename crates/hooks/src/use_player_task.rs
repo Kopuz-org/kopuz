@@ -309,7 +309,9 @@ pub fn use_player_task(ctrl: PlayerController) {
                         BgCmd::Next => ctrl.play_next(),
                         BgCmd::Prev => ctrl.play_prev(),
                         BgCmd::Seek(secs) if Some(i) == last_seek => {
-                            ctrl.seek(std::time::Duration::from_secs_f64(secs));
+                            let pos = std::time::Duration::try_from_secs_f64(secs)
+                                .unwrap_or(std::time::Duration::ZERO);
+                            ctrl.seek(pos);
                         }
                         BgCmd::Seek(_) => {}
                     }
