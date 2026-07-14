@@ -287,6 +287,7 @@ fn parse_service(s: &str) -> MusicService {
         "Custom" => MusicService::Custom,
         "YtMusic" => MusicService::YtMusic,
         "SoundCloud" => MusicService::SoundCloud,
+        "Tidal" => MusicService::Tidal,
         _ => MusicService::Jellyfin,
     }
 }
@@ -298,6 +299,7 @@ fn service_str(s: MusicService) -> &'static str {
         MusicService::Custom => "Custom",
         MusicService::YtMusic => "YtMusic",
         MusicService::SoundCloud => "SoundCloud",
+        MusicService::Tidal => "Tidal",
     }
 }
 

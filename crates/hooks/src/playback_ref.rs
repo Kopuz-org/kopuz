@@ -21,11 +21,13 @@ impl<'a> PlaybackItemRef<'a> {
                 station_id: parts.next().unwrap_or_default(),
                 stream_id: parts.next().unwrap_or_default(),
             },
-            "jellyfin" | "subsonic" | "custom" | "ytmusic" | "soundcloud" => Self::Server {
-                service: scheme,
-                item_id: parts.next().unwrap_or_default(),
-                extra: parts.next(),
-            },
+            "jellyfin" | "subsonic" | "custom" | "ytmusic" | "soundcloud" | "tidal" => {
+                Self::Server {
+                    service: scheme,
+                    item_id: parts.next().unwrap_or_default(),
+                    extra: parts.next(),
+                }
+            }
             _ => Self::Local(value),
         }
     }

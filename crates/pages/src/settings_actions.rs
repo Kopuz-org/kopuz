@@ -215,6 +215,131 @@ pub fn soundcloud_auto_login(
     });
 }
 
+/// Persist a granted TIDAL token set onto the active server: tokens + country
+/// pack into `access_token`, and `user_id` carries TIDAL's numeric userId.
+/// `old` is the previously-stored creds, so a refresh grant (which omits the
+/// refresh token / user object) keeps them.
+fn apply_tidal_login(
+    mut config: Signal<AppConfig>,
+    grant: ::server::tidal::TokenGrant,
+    old: Option<::server::tidal::Creds>,
+    old_user_id: Option<String>,
+    client_id: String,
+    client_secret: String,
+) {
+    let creds = ::server::tidal::Creds {
+        access: grant.access,
+        refresh: grant
+            .refresh
+            .or_else(|| old.as_ref().map(|c| c.refresh.clone()))
+            .unwrap_or_default(),
+        country: grant.country,
+        client_id,
+        client_secret,
+    };
+    let user_id = if grant.user_id.is_empty() {
+        old_user_id.unwrap_or_default()
+    } else {
+        grant.user_id
+    };
+    if let Some(server) = config.write().server.as_mut() {
+        server.access_token = Some(::server::tidal::pack_creds(&creds));
+        server.user_id = Some(user_id);
+    }
+}
+
+/// TIDAL sign-in via Authorization Code + PKCE against the user's own registered
+/// app: refresh silently with the stored token when possible, else open the
+/// default browser on the TIDAL authorize page and capture the redirect code on
+/// a loopback listener. `client_id`/`client_secret` come from the add-server
+/// form on first sign-in; re-logins read the stored pair (pass empty strings).
+pub fn tidal_auto_login(
+    config: Signal<AppConfig>,
+    yt_browser: Signal<Browser>,
+    client_id: String,
+    client_secret: String,
+    mut error: Signal<Option<String>>,
+    mut playback_error: Signal<Option<String>>,
+) {
+    let (browser, server_id, stored, stored_user) = {
+        let cfg = config.peek();
+        let srv = cfg.server.as_ref();
+        (
+            srv.and_then(|s| s.yt_browser).unwrap_or(*yt_browser.peek()),
+            srv.and_then(|s| s.id.clone()).unwrap_or_default(),
+            srv.and_then(|s| s.access_token.as_deref())
+                .and_then(::server::tidal::unpack_creds),
+            srv.and_then(|s| s.user_id.clone()),
+        )
+    };
+    // Prefer the freshly-entered client pair; fall back to the stored one on a
+    // re-login (the add-server form is gone by then).
+    let (cid, csecret) = match &stored {
+        Some(c) if client_id.trim().is_empty() => (c.client_id.clone(), c.client_secret.clone()),
+        _ => (
+            client_id.trim().to_string(),
+            client_secret.trim().to_string(),
+        ),
+    };
+    spawn(
+        async move {
+            if cid.is_empty() {
+                report_signin_failure(
+                    error,
+                    playback_error,
+                    "TIDAL sign-in needs a client ID from your developer.tidal.com app".to_string(),
+                );
+                return;
+            }
+
+            // A stored refresh token gets a new access token without a browser.
+            if let Some(creds) = &stored
+                && !creds.refresh.is_empty()
+                && let Ok(grant) =
+                    ::server::tidal::refresh_access(&cid, &csecret, &creds.refresh).await
+            {
+                apply_tidal_login(
+                    config,
+                    grant,
+                    stored.clone(),
+                    stored_user.clone(),
+                    cid,
+                    csecret,
+                );
+                error.set(None);
+                return;
+            }
+
+            playback_error.set(Some(
+                "Complete the TIDAL sign-in in the browser window…".to_string(),
+            ));
+            match ::server::tidal::signin(
+                browser,
+                &cid,
+                &csecret,
+                &server_id,
+                std::time::Duration::from_secs(300),
+            )
+            .await
+            {
+                Ok(grant) => {
+                    apply_tidal_login(config, grant, stored, stored_user, cid, csecret);
+                    error.set(None);
+                    playback_error.set(None);
+                }
+                Err(err) => {
+                    report_signin_failure(
+                        error,
+                        playback_error,
+                        format!("TIDAL sign-in failed: {err}"),
+                    );
+                }
+            }
+        }
+        .instrument(tracing::info_span!("tidal.auto_login")),
+    );
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn add_server(
     mut config: Signal<AppConfig>,
@@ -223,6 +348,8 @@ pub fn add_server(
     mut server_service: Signal<MusicService>,
     yt_browser: Signal<Browser>,
     yt_anonymous: Signal<bool>,
+    tidal_client_id: Signal<String>,
+    tidal_client_secret: Signal<String>,
     mut error: Signal<Option<String>>,
     mut show_add_server: Signal<bool>,
     mut show_login: Signal<bool>,
@@ -231,6 +358,7 @@ pub fn add_server(
     let selected_service = server_service();
     let is_ytmusic = selected_service == MusicService::YtMusic;
     let is_soundcloud = selected_service == MusicService::SoundCloud;
+    let is_tidal = selected_service == MusicService::Tidal;
     let is_browser_signin = selected_service.uses_browser_signin();
 
     if server_name().trim().is_empty() {
@@ -238,8 +366,15 @@ pub fn add_server(
         return;
     }
 
-    if !is_browser_signin && !server_url().starts_with("http") {
+    if !is_browser_signin && !is_tidal && !server_url().starts_with("http") {
         error.set(Some(i18n::t("invalid_server_url").to_string()));
+        return;
+    }
+
+    if is_tidal && tidal_client_id().trim().is_empty() {
+        error.set(Some(
+            "TIDAL needs a client ID from your developer.tidal.com app".to_string(),
+        ));
         return;
     }
 
@@ -254,6 +389,8 @@ pub fn add_server(
                 "https://music.youtube.com".to_string()
             } else if is_soundcloud {
                 "https://soundcloud.com".to_string()
+            } else if is_tidal {
+                "https://tidal.com".to_string()
             } else {
                 url_input
             };
@@ -268,7 +405,8 @@ pub fn add_server(
             if is_anon {
                 new_server.access_token = Some(String::new());
             }
-            new_server.yt_browser = (is_browser_signin && !is_anon).then(|| *yt_browser.peek());
+            new_server.yt_browser =
+                ((is_browser_signin && !is_anon) || is_tidal).then(|| *yt_browser.peek());
 
             let saved = config::SavedServer::from_music_server(&new_server);
             {
@@ -287,6 +425,15 @@ pub fn add_server(
                 ytmusic_auto_login(config, yt_browser, error, playback_error);
             } else if is_soundcloud {
                 soundcloud_auto_login(config, yt_browser, error, playback_error);
+            } else if is_tidal {
+                tidal_auto_login(
+                    config,
+                    yt_browser,
+                    tidal_client_id.peek().clone(),
+                    tidal_client_secret.peek().clone(),
+                    error,
+                    playback_error,
+                );
             } else if !is_browser_signin {
                 show_login.set(true);
             }
@@ -320,6 +467,14 @@ pub fn switch_server(
             MusicService::SoundCloud => {
                 soundcloud_auto_login(config, yt_browser, error, playback_error)
             }
+            MusicService::Tidal => tidal_auto_login(
+                config,
+                yt_browser,
+                String::new(),
+                String::new(),
+                error,
+                playback_error,
+            ),
             _ => show_login.set(true),
         }
     });
@@ -337,6 +492,9 @@ pub fn delete_saved(mut config: Signal<AppConfig>, id: String) {
         }
         Some(MusicService::SoundCloud) => {
             let _ = ::server::soundcloud::signin::delete_profile(&id);
+        }
+        Some(MusicService::Tidal) => {
+            let _ = ::server::tidal::delete_profile(&id);
         }
         _ => {}
     }

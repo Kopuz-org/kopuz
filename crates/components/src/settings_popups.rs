@@ -11,6 +11,10 @@ pub fn AddServerPopup(
     /// YouTube Music anonymous mode — true = no sign-in, browse + play
     /// public surfaces only.
     yt_anonymous: Signal<bool>,
+    /// TIDAL public-API app credentials (the user's own developer.tidal.com
+    /// client). Secret is optional for a public PKCE client.
+    tidal_client_id: Signal<String>,
+    tidal_client_secret: Signal<String>,
     error: Signal<Option<String>>,
     on_close: EventHandler<()>,
     on_save: EventHandler<()>,
@@ -21,6 +25,7 @@ pub fn AddServerPopup(
         MusicService::Custom => "custom",
         MusicService::YtMusic => "ytmusic",
         MusicService::SoundCloud => "soundcloud",
+        MusicService::Tidal => "tidal",
     };
 
     let server_name_label = i18n::t("server_name").to_string();
@@ -56,6 +61,8 @@ pub fn AddServerPopup(
                     server_url,
                     yt_browser,
                     yt_anonymous,
+                    tidal_client_id,
+                    tidal_client_secret,
                     server_url_placeholder: server_url_placeholder.clone(),
                 }
 
@@ -66,6 +73,7 @@ pub fn AddServerPopup(
                             "custom" => MusicService::Custom,
                             "ytmusic" => MusicService::YtMusic,
                             "soundcloud" => MusicService::SoundCloud,
+                            "tidal" => MusicService::Tidal,
                             _ => MusicService::Jellyfin,
                         };
                         server_service.set(service);
@@ -95,6 +103,11 @@ pub fn AddServerPopup(
                         value: "soundcloud",
                         selected: server_service() == MusicService::SoundCloud,
                         "SoundCloud"
+                    }
+                    option {
+                        value: "tidal",
+                        selected: server_service() == MusicService::Tidal,
+                        "TIDAL"
                     }
                 }
 
@@ -237,6 +250,8 @@ fn ServerServiceFields(
     server_url: Signal<String>,
     yt_browser: Signal<Browser>,
     yt_anonymous: Signal<bool>,
+    tidal_client_id: Signal<String>,
+    tidal_client_secret: Signal<String>,
     server_url_placeholder: String,
 ) -> Element {
     match server_service() {
@@ -298,11 +313,53 @@ fn ServerServiceFields(
                 }
             }
         }
+        // SoundCloud is browser sign-in only (no URL); pick the browser for the
+        // isolated sign-in window.
         MusicService::SoundCloud => rsx! {
-            // SoundCloud is browser sign-in only (no URL); pick the browser for
-            // the isolated sign-in window.
             p { class: "text-xs text-white/60",
                 "Pick which browser kopuz should use for the SoundCloud sign-in window. It opens in an isolated profile (a fresh, separate session) — your normal browsing is untouched. Make sure the browser is installed."
+            }
+            select {
+                onchange: move |e| {
+                    if let Some(b) = Browser::from_id(&e.value()) {
+                        yt_browser.set(b);
+                    }
+                },
+                onkeydown: move |e| e.stop_propagation(),
+                for browser in Browser::ALL.iter().copied() {
+                    option {
+                        value: "{browser.id()}",
+                        selected: yt_browser() == browser,
+                        "{browser.label()}"
+                    }
+                }
+            }
+        },
+        // TIDAL uses the public API with the user's own registered app: enter
+        // its client ID (+ secret if a confidential client). After Save, the
+        // default browser opens the TIDAL login and kopuz captures the redirect.
+        MusicService::Tidal => rsx! {
+            p { class: "text-xs text-white/60",
+                "Register an app at developer.tidal.com and add the redirect URI http://localhost:8765/callback. Paste its Client ID below (Client Secret only if it's a confidential client). A paid TIDAL subscription is required for playback."
+            }
+            input {
+                placeholder: "Client ID",
+                value: "{tidal_client_id()}",
+                oninput: move |e| tidal_client_id.set(e.value()),
+                onkeydown: move |e| e.stop_propagation()
+            }
+            input {
+                r#type: "password",
+                placeholder: "Client secret (optional)",
+                value: "{tidal_client_secret()}",
+                oninput: move |e| tidal_client_secret.set(e.value()),
+                onkeydown: move |e| e.stop_propagation()
+            }
+            // TIDAL's login rejects Firefox / privacy-hardened browsers
+            // (DataDome → UNSUPPORTED_OS), so sign-in runs in a clean isolated
+            // Chromium-family profile regardless of your default browser.
+            p { class: "text-xs text-white/60 mt-2",
+                "Pick a Chromium-family browser for the sign-in window — it opens in an isolated profile (a fresh session; your normal browsing is untouched). Firefox is not supported by TIDAL's login."
             }
             select {
                 onchange: move |e| {

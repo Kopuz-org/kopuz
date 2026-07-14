@@ -198,6 +198,10 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     // Anonymous YT mode for the add-server popup. Defaults to browser sign-in on
     // every platform (Windows cookie decryption is now supported natively).
     let yt_anonymous = use_signal(|| false);
+    // TIDAL public-API app credentials for the add-server popup (the user's own
+    // developer.tidal.com client).
+    let tidal_client_id = use_signal(String::new);
+    let tidal_client_secret = use_signal(String::new);
 
     let mut username = use_signal(String::new);
     let mut password = use_signal(String::new);
@@ -234,6 +238,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             server_service,
             yt_browser,
             yt_anonymous,
+            tidal_client_id,
+            tidal_client_secret,
             error,
             show_add_server,
             show_login,
@@ -875,6 +881,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         server_service,
                         yt_browser,
                         yt_anonymous,
+                        tidal_client_id,
+                        tidal_client_secret,
                         error,
                         on_close: move |_| show_add_server.set(false),
                         on_save: handle_add_server

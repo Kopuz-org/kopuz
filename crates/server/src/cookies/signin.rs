@@ -67,6 +67,7 @@ where
     let mut cmd = browser_command(&bin);
     cmd.arg("--no-first-run")
         .arg("--no-default-browser-check")
+        .arg("--disable-blink-features=AutomationControlled")
         .arg(format!("--user-data-dir={}", profile.display()));
     // Windows: kopuz's WebView2 UI runs us inside a job object whose sandbox
     // quota (1 active process) stops a spawned Chrome from creating the nested

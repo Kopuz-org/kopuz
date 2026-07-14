@@ -63,6 +63,11 @@ impl ProviderClient {
                  instead of username/password login"
                     .to_string(),
             ),
+            MusicService::Tidal => Err(
+                "TIDAL uses the OAuth device flow; sign in when adding the server instead of \
+                 username/password login"
+                    .to_string(),
+            ),
         }
     }
 

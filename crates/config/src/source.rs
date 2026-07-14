@@ -45,6 +45,7 @@ pub enum MusicService {
     Custom,
     YtMusic,
     SoundCloud,
+    Tidal,
 }
 
 impl MusicService {
@@ -55,6 +56,7 @@ impl MusicService {
             Self::Custom => "Custom",
             Self::YtMusic => "YouTube Music",
             Self::SoundCloud => "SoundCloud",
+            Self::Tidal => "TIDAL",
         }
     }
 
@@ -62,6 +64,13 @@ impl MusicService {
     /// rather than a URL + username/password form.
     pub fn uses_browser_signin(&self) -> bool {
         matches!(self, Self::YtMusic | Self::SoundCloud)
+    }
+
+    /// Backends that sign in via the OAuth device flow — kopuz opens the
+    /// default browser on an approval page and polls for the grant. No URL,
+    /// no password form, no isolated browser profile.
+    pub fn uses_device_signin(&self) -> bool {
+        matches!(self, Self::Tidal)
     }
 }
 

@@ -29,7 +29,17 @@ md5 = { workspace = true }
 sha1 = { workspace = true }
 httpdate = { workspace = true }
 hex = { workspace = true }
-tokio = { workspace = true, features = ["fs", "process", "rt", "sync"] }
+base64 = { workspace = true }
+sha2 = { workspace = true }
+tokio = { workspace = true, features = [
+    "fs",
+    "process",
+    "rt",
+    "sync",
+    "net",
+    "io-util",
+    "time",
+] }
 reader = { workspace = true }
 db = { workspace = true }
 utils = { workspace = true }
@@ -50,7 +60,6 @@ rustypipe-botguard = { workspace = true }
 # Windows native cookie decryption (v10 DPAPI + planted v20 app-bound). Reuses
 # the project's sqlx/sqlite (NOT rusqlite — that would double-link libsqlite3).
 [target.'cfg(windows)'.dependencies]
-base64 = { workspace = true }
 aes-gcm = { workspace = true }
 sqlx = { workspace = true, features = ["runtime-tokio", "sqlite"] }
 windows-core = "0.62"

@@ -48,7 +48,7 @@ pub fn build_download_url(item_id: &str, config: &AppConfig) -> Option<(String, 
             )
             .ok()?
         }
-        MusicService::YtMusic | MusicService::SoundCloud => return None,
+        MusicService::YtMusic | MusicService::SoundCloud | MusicService::Tidal => return None,
     };
     Some((url, ext))
 }

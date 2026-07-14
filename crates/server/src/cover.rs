@@ -150,8 +150,7 @@ pub fn track(config: &AppConfig, track: &Track, max_width: u32) -> Option<CoverU
             max_width,
             80,
         ),
-        // SoundCloud stores the artwork URL directly in `cover` — no encoding.
-        MusicService::SoundCloud => track.cover.clone(),
+        MusicService::SoundCloud | MusicService::Tidal => track.cover.clone(),
     };
     utils::map_cover_url(url)
 }
