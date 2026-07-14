@@ -348,6 +348,9 @@ channel_mode_swap_left_right = Intercambiar I/D
 device_change_behavior = Al cambiar el dispositivo de salida
 device_change_resume = Seguir reproduciendo
 device_change_pause = Pausar
+sample_rate_mode = Frecuencia de muestreo de salida
+sample_rate_mode_system = Seguir al sistema
+sample_rate_mode_source = Igualar a la pista
 
 crossfade = Fundido cruzado
 crossfade_off = Apagado

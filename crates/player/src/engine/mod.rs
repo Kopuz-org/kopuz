@@ -89,6 +89,7 @@ pub enum Command {
     SetChannelMode(ChannelMode),
     SetEqualizer(EqualizerSettings),
     SetDeviceChangeBehavior(config::DeviceChangeBehavior),
+    SetSampleRateMode(config::SampleRateMode),
     SetDuration(Duration),
     Subscribe(tokio::sync::mpsc::UnboundedSender<Event>),
     Shutdown,

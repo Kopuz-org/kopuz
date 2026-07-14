@@ -347,6 +347,9 @@ channel_mode_swap_left_right = Zamień L/P
 device_change_behavior = On output device change
 device_change_resume = Keep playing
 device_change_pause = Pause
+sample_rate_mode = Częstotliwość próbkowania wyjścia
+sample_rate_mode_system = Zgodna z systemem
+sample_rate_mode_source = Dopasuj do ścieżki
 
 crossfade = Płynne przejście
 crossfade_off = Wył.

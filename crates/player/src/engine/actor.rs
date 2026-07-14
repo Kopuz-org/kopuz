@@ -191,6 +191,7 @@ struct Actor {
     eq_settings: EqualizerSettings,
     channel_mode: ChannelMode,
     device_change_behavior: config::DeviceChangeBehavior,
+    sample_rate_mode: config::SampleRateMode,
 
     rt_tx: Option<Sender<RtCmd>>,
     retire_rx: Option<Receiver<Retired>>,
@@ -241,6 +242,7 @@ impl Actor {
             eq_settings: EqualizerSettings::default(),
             channel_mode: ChannelMode::Stereo,
             device_change_behavior: config::DeviceChangeBehavior::Resume,
+            sample_rate_mode: config::SampleRateMode::System,
             rt_tx: None,
             retire_rx: None,
             current: None,
@@ -353,6 +355,11 @@ impl Actor {
             }
             Command::SetDeviceChangeBehavior(behavior) => {
                 self.device_change_behavior = behavior;
+            }
+            Command::SetSampleRateMode(mode) => {
+                // Takes effect on the next track start or stream rebuild; the
+                // live stream keeps its rate to avoid an audible glitch now.
+                self.sample_rate_mode = mode;
             }
             Command::SetDuration(duration) => {
                 if let Some(current) = &mut self.current {
@@ -558,16 +565,18 @@ impl Actor {
             )
         } else {
             // Immediate switch: reopen at the source's preferred rate when it
-            // differs. Everything fallible happens BEFORE the outgoing sessions
-            // are retired, so a failed start leaves the prior track playing
-            // (matching the failed-load contract) instead of half-torn-down
-            // state under a stale status.
-            let desired_config = match self.sink.probe_config(source_sample_rate) {
+            // differs (Source mode only; System mode keeps the device at its
+            // default rate and the worker resamples). Everything fallible
+            // happens BEFORE the outgoing sessions are retired, so a failed
+            // start leaves the prior track playing (matching the failed-load
+            // contract) instead of half-torn-down state under a stale status.
+            let desired_rate = self.desired_output_rate(source_sample_rate);
+            let desired_config = match self.sink.probe_config(desired_rate) {
                 Ok(config) => config,
                 Err(e) => return Err(self.abort_start(worker, e)),
             };
             if (self.sink.config() != Some(desired_config) || self.rt_tx.is_none())
-                && let Err(e) = self.open_output(source_sample_rate)
+                && let Err(e) = self.open_output(desired_rate)
             {
                 return Err(self.abort_start(worker, e));
             }
@@ -778,7 +787,8 @@ impl Actor {
         self.last_output_rebuild = Some(Instant::now());
 
         let position = self.status.load().position();
-        let source_rate = self.current.as_ref().and_then(|c| c.source_sample_rate);
+        let source_rate =
+            self.desired_output_rate(self.current.as_ref().and_then(|c| c.source_sample_rate));
 
         self.stop_fading();
 
@@ -1024,6 +1034,15 @@ impl Actor {
         }
         if let Some(rt_tx) = &self.rt_tx {
             let _ = rt_tx.send(cmd);
+        }
+    }
+
+    /// The rate to ask the sink for: the source's native rate in Source mode,
+    /// `None` (device default) in System mode, where the worker resamples.
+    fn desired_output_rate(&self, source_sample_rate: Option<u32>) -> Option<u32> {
+        match self.sample_rate_mode {
+            config::SampleRateMode::Source => source_sample_rate,
+            config::SampleRateMode::System => None,
         }
     }
 

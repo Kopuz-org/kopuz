@@ -225,6 +225,12 @@ impl Player {
         self.engine.send(Command::SetDeviceChangeBehavior(behavior));
     }
 
+    /// Whether the output stream follows the device's default sample rate
+    /// (resampling every source) or reopens at each track's native rate.
+    pub fn set_sample_rate_mode(&self, mode: config::SampleRateMode) {
+        self.engine.send(Command::SetSampleRateMode(mode));
+    }
+
     pub fn update_metadata(&mut self, meta: NowPlayingMeta) {
         self.engine.send(Command::SetDuration(meta.duration));
         self.now_playing = Some(meta);

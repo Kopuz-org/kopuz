@@ -165,8 +165,8 @@ use components::settings_items::{
     BackBehaviorSelector, ChannelModeSelector, DeviceChangeBehaviorSelector,
     DiscordPresencePausedSettings, DiscordPresenceSettings, EqualizerPanel, LanguageSelector,
     LastFmSettings, LibreFmSettings, MultiDirectoryPicker, MusicBrainzSettings,
-    RadioRegistryDropdown, ServerSettings, SettingItem, SettingsSection, ThemeSelector,
-    ToggleSetting,
+    RadioRegistryDropdown, SampleRateModeSelector, ServerSettings, SettingItem, SettingsSection,
+    ThemeSelector, ToggleSetting,
 };
 use components::settings_popups::{AddRegistryPopup, AddServerPopup, LoginPopup};
 use config::{AppConfig, ArtistPhotoSource, FetchStrategy, MusicService, OfflineQuality};
@@ -829,6 +829,18 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     on_change: move |behavior| {
                                         config.write().device_change_behavior = behavior;
                                         ctrl.player.peek().set_device_change_behavior(behavior);
+                                    }
+                                }
+                            }
+                        }
+                        SettingItem {
+                            title: i18n::t("sample_rate_mode").to_string(),
+                            control: rsx! {
+                                SampleRateModeSelector {
+                                    current: config.read().sample_rate_mode,
+                                    on_change: move |mode| {
+                                        config.write().sample_rate_mode = mode;
+                                        ctrl.player.peek().set_sample_rate_mode(mode);
                                     }
                                 }
                             }

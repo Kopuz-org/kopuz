@@ -347,6 +347,9 @@ channel_mode_swap_left_right = החלף ש/י
 device_change_behavior = On output device change
 device_change_resume = Keep playing
 device_change_pause = Pause
+sample_rate_mode = קצב דגימה של הפלט
+sample_rate_mode_system = לפי המערכת
+sample_rate_mode_source = לפי השיר
 
 crossfade = מעבר הדרגתי
 crossfade_off = כבוי
