@@ -21,10 +21,8 @@ pub fn toggle_favorite(track: Option<Track>) {
     if track.id.key().trim().is_empty() {
         return;
     }
-    let Some(source) = active_source() else {
-        return;
-    };
-    let gens = try_consume_context::<Generations>();
+    let source = consume_context::<Signal<ActiveSource>>().peek().clone();
+    let gens = consume_context::<Generations>();
 
     spawn(async move {
         let key = track.id.key().to_string();
@@ -54,16 +52,21 @@ pub fn set_favorite_many(tracks: Vec<Track>, on: bool) {
     if tracks.is_empty() {
         return;
     }
-    let Some(source) = active_source() else {
-        return;
-    };
-    let gens = try_consume_context::<Generations>();
+    let source = consume_context::<Signal<ActiveSource>>().peek().clone();
+    let gens = consume_context::<Generations>();
 
     spawn(async move {
-        // Optimistic: record every track locally, then show them all.
+        // Optimistic: record every track locally, then show them all. Tracks
+        // already in the target state are skipped — pushing them again is at
+        // best wasted requests, at worst a remote rejection (e.g. deleting a
+        // like that doesn't exist) that would revert a state that was correct.
         let mut recorded = Vec::new();
         for track in tracks {
-            if track.id.key().trim().is_empty() {
+            let key = track.id.key().to_string();
+            if key.trim().is_empty() {
+                continue;
+            }
+            if source.is_favorite(&key).await == on {
                 continue;
             }
             if source.record_favorite(&track, on).await.is_ok() {
@@ -92,17 +95,6 @@ pub fn set_favorite_many(tracks: Vec<Track>, on: bool) {
     });
 }
 
-/// The active source handle, or `None` (with a warn) when the context is missing.
-fn active_source() -> Option<ActiveSource> {
-    match try_consume_context::<Signal<ActiveSource>>() {
-        Some(sig) => Some(sig.peek().clone()),
-        None => {
-            tracing::warn!("favorite toggle: no ActiveSource context");
-            None
-        }
-    }
-}
-
 /// A short "the server rejected it" notice, so a reverted heart doesn't read as
 /// a broken UI. Names the service when the track has one.
 fn favorite_error(track: &Track) -> String {
@@ -112,9 +104,7 @@ fn favorite_error(track: &Track) -> String {
     }
 }
 
-fn bump_favorites(gens: Option<Generations>) {
-    if let Some(gens) = gens {
-        gens.bump(Table::Favorites);
-        gens.bump(Table::Tracks);
-    }
+fn bump_favorites(gens: Generations) {
+    gens.bump(Table::Favorites);
+    gens.bump(Table::Tracks);
 }
