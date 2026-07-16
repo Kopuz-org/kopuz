@@ -885,6 +885,7 @@ fn service_str(s: config::MusicService) -> &'static str {
         config::MusicService::Custom => "Custom",
         config::MusicService::YtMusic => "YtMusic",
         config::MusicService::SoundCloud => "SoundCloud",
+        config::MusicService::Spotify => "Spotify",
     }
 }
 

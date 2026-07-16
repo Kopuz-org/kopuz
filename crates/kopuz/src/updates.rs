@@ -108,3 +108,34 @@ pub async fn run_rotation(mut config: Signal<config::AppConfig>) {
         Err(e) => tracing::warn!(error = %e, "verify_session failed"),
     }
 }
+
+/// Refresh the active Spotify server's OAuth access token from its refresh token
+/// (access tokens expire ~hourly) and write the re-packed pair back to config.
+pub async fn run_spotify_refresh(mut config: Signal<config::AppConfig>) {
+    let (packed, client_id) = match config.peek().server.as_ref() {
+        Some(s) if s.service == config::MusicService::Spotify => {
+            (s.access_token.clone(), s.url.clone())
+        }
+        _ => return,
+    };
+    let Some(packed) = packed else { return };
+    let (_access, refresh) = server::spotify::auth::unpack_token(&packed);
+    if refresh.is_empty() || client_id.trim().is_empty() {
+        return;
+    }
+    match server::spotify::auth::refresh(refresh.clone(), client_id).await {
+        Ok(auth) => {
+            let new_refresh = if auth.refresh_token.is_empty() {
+                refresh
+            } else {
+                auth.refresh_token
+            };
+            let new_packed = server::spotify::auth::pack_token(&auth.access_token, &new_refresh);
+            if let Some(srv) = config.write().server.as_mut() {
+                srv.access_token = Some(new_packed);
+            }
+            tracing::debug!("spotify token refreshed");
+        }
+        Err(e) => tracing::warn!(error = %e, "spotify token refresh failed"),
+    }
+}

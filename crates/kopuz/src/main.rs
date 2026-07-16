@@ -849,6 +849,39 @@ fn App() -> Element {
         });
     });
 
+    // Spotify access tokens expire ~hourly; refresh from the stored refresh
+    // token on a 30-min cadence and write the re-packed pair back. Same
+    // identity-guarded pattern as the YT keepalive above so a source switch
+    // retires the old loop.
+    let mut spotify_refresh_identity = use_signal(|| None::<String>);
+    use_effect(move || {
+        if !*initial_load_done.read() {
+            return;
+        }
+        let identity: Option<String> = config.read().server.as_ref().and_then(|s| {
+            (s.service == config::MusicService::Spotify)
+                .then(|| s.user_id.clone())
+                .flatten()
+                .filter(|t| !t.is_empty())
+        });
+        if identity == *spotify_refresh_identity.peek() {
+            return;
+        }
+        spotify_refresh_identity.set(identity.clone());
+        let Some(my_identity) = identity else {
+            return;
+        };
+        spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(1800)).await;
+                if spotify_refresh_identity.peek().as_deref() != Some(my_identity.as_str()) {
+                    return;
+                }
+                updates::run_spotify_refresh(config).await;
+            }
+        });
+    });
+
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     use_effect(move || {
         let mode = config.read().titlebar_mode;

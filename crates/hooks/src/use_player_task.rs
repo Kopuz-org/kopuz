@@ -218,6 +218,141 @@ pub fn use_player_task(ctrl: PlayerController) {
         });
     });
 
+    // ── Spotify browser-host integration ────────────────────────────────
+    // Push the current access token to the host whenever it or the token rotates,
+    // so the SDK's getOAuthToken callback always gets a live token.
+    use_effect(move || {
+        let host = ctrl.spotify_host.read().clone();
+        let access = {
+            let cfg = config.read();
+            cfg.server
+                .as_ref()
+                .filter(|s| s.service == MusicService::Spotify)
+                .and_then(|s| s.access_token.clone())
+                .map(|p| server::spotify::auth::unpack_token(&p).0)
+                .filter(|t| !t.is_empty())
+        };
+        if let (Some(host), Some(access)) = (host, access) {
+            spawn(async move {
+                host.set_token(access).await;
+            });
+        }
+    });
+
+    // Mirror the UI volume onto the host while Spotify is the active source.
+    use_effect(move || {
+        let vol = *ctrl.volume.read();
+        if *ctrl.external_active.read()
+            && let Some(host) = ctrl.spotify_host.read().clone()
+        {
+            host.set_volume(vol);
+        }
+    });
+
+    // Pump the host's state/lifecycle events into the player signals. Re-subscribes
+    // whenever the host is (re)created; cancels the previous pump.
+    let mut spotify_pump = use_signal(|| None::<dioxus_core::Task>);
+    use_effect(move || {
+        let host = ctrl.spotify_host.read().clone();
+        if let Some(prev) = spotify_pump.take() {
+            prev.cancel();
+        }
+        let Some(host) = host else { return };
+        let mut rx = host.subscribe();
+        let mut ctrl = ctrl;
+        let task = spawn(async move {
+            use server::spotify::host::HostEvent;
+            use tokio::sync::broadcast::error::RecvError;
+            loop {
+                let ev = match rx.recv().await {
+                    Ok(ev) => ev,
+                    // A burst of state ticks overflowed the buffer; drop the gap and
+                    // keep pumping rather than killing the loop (which would freeze
+                    // progress and auto-advance for the rest of the session).
+                    Err(RecvError::Lagged(_)) => continue,
+                    Err(RecvError::Closed) => break,
+                };
+                match ev {
+                    HostEvent::Ready { device_id } => {
+                        ctrl.spotify_device.set(Some(device_id.clone()));
+                        // Fire the play that was waiting on the device.
+                        let pending = ctrl.spotify_pending_uri.peek().clone();
+                        if let (Some(uri), Some(access)) = (pending, ctrl.spotify_access()) {
+                            ctrl.spotify_pending_uri.set(None);
+                            let dev = device_id.clone();
+                            spawn(async move {
+                                if let Err(e) =
+                                    server::spotify::api::start_playback(&access, &dev, &[uri])
+                                        .await
+                                {
+                                    tracing::warn!(error = %e, "spotify deferred start failed");
+                                }
+                            });
+                        }
+                    }
+                    HostEvent::NotReady => {}
+                    HostEvent::State {
+                        paused,
+                        position_ms,
+                        duration_ms,
+                        ended,
+                        ..
+                    } => {
+                        if *ctrl.external_active.peek() {
+                            if ended {
+                                ctrl.play_next();
+                            } else {
+                                ctrl.is_playing.set(!paused);
+                                ctrl.current_song_progress.set(position_ms / 1000);
+                                if duration_ms > 0 {
+                                    ctrl.current_song_duration.set(duration_ms / 1000);
+                                }
+                            }
+                        }
+                    }
+                    HostEvent::Activated => {
+                        // Audio just got unblocked by the tab gesture; re-issue the
+                        // current Spotify track so a play that Chrome silently
+                        // dropped actually starts.
+                        if *ctrl.external_active.peek() {
+                            let track = ctrl.current_track();
+                            if let (Some(track), Some(access), Some(device)) = (
+                                track,
+                                ctrl.spotify_access(),
+                                ctrl.spotify_device.peek().clone(),
+                            ) && track.id.service() == Some(MusicService::Spotify)
+                            {
+                                let uri = format!("spotify:track:{}", track.id.key());
+                                spawn(async move {
+                                    let _ = server::spotify::api::start_playback(
+                                        &access,
+                                        &device,
+                                        &[uri],
+                                    )
+                                    .await;
+                                });
+                            }
+                        }
+                    }
+                    HostEvent::Error { kind, message } => {
+                        let msg = match kind.as_str() {
+                            "account" => "Spotify playback needs a Premium account.".to_string(),
+                            "auth" => {
+                                "Spotify session expired — re-sign in from Settings.".to_string()
+                            }
+                            "widevine" => "This browser can't play Spotify (no Widevine DRM). \
+                                Open the Spotify player tab in Chrome, Edge, Brave, or Firefox."
+                                .to_string(),
+                            _ => format!("Spotify player error: {message}"),
+                        };
+                        ctrl.playback_error.set(Some(msg));
+                    }
+                }
+            }
+        });
+        spotify_pump.set(Some(task));
+    });
+
     let gens = crate::db_reactivity::use_generations();
     use_future(move || {
         let mut ctrl = ctrl;
@@ -270,9 +405,11 @@ pub fn use_player_task(ctrl: PlayerController) {
                         }
                         // No session — nothing audible. Ended is left to the
                         // auto-advance check below, which needs is_playing.
+                        // Ignored while Spotify drives playback (engine is idle by
+                        // design then; the host pump owns is_playing).
                         Event::PhaseChanged {
                             phase: Phase::Idle, ..
-                        } => ctrl.is_playing.set(false),
+                        } if !*ctrl.external_active.peek() => ctrl.is_playing.set(false),
                         // Commit the deferred crossfade UI exactly on fade end.
                         Event::TrackSwitched { token, .. } => {
                             ctrl.commit_transition(token);
@@ -318,6 +455,10 @@ pub fn use_player_task(ctrl: PlayerController) {
                 }
 
                 let is_playing = *ctrl.is_playing.read();
+                // Spotify plays in the browser host: its own pump owns progress and
+                // auto-advance, so the engine-position/crossfade/skip logic below is
+                // skipped while it's active.
+                let external = *ctrl.external_active.peek();
 
                 {
                     let current_track = {
@@ -545,7 +686,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                     let duration = *ctrl.current_song_duration.read();
                     let pos_secs = pos.as_secs().min(duration);
                     let current_token = *ctrl.current_token.read();
-                    if !defer_player_progress && pos_secs != last_progress_secs {
+                    if !external && !defer_player_progress && pos_secs != last_progress_secs {
                         last_progress_secs = pos_secs;
                         ctrl.current_song_progress.set(pos_secs);
                     }
@@ -642,7 +783,8 @@ pub fn use_player_task(ctrl: PlayerController) {
                         *ctrl.is_loading.read() || ctrl.pending_crossfade_ui.read().is_some();
 
                     let remaining_secs = duration.saturating_sub(pos_secs);
-                    let should_crossfade = duration > 0
+                    let should_crossfade = !external
+                        && duration > 0
                         && pos_secs < duration
                         && ctrl.should_crossfade()
                         && ctrl.has_next_track()
@@ -675,7 +817,9 @@ pub fn use_player_task(ctrl: PlayerController) {
                     }
 
                     let is_radio = duration == u64::MAX;
-                    let should_skip = if is_radio {
+                    let should_skip = if is_radio || external {
+                        // External (Spotify) advance is driven by the host's
+                        // `ended` event, not the engine's completion state.
                         false
                     } else {
                         ctrl.player.read().is_playback_complete()

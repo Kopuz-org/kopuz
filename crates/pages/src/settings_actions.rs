@@ -215,6 +215,48 @@ pub fn soundcloud_auto_login(
     });
 }
 
+/// Spotify OAuth (Authorization-Code + PKCE) sign-in: opens the default browser
+/// at the consent screen, captures the redirect on a loopback listener, and
+/// stores the packed `<access>\n<refresh>` token + user id on the active server.
+/// Unlike YT/SoundCloud this is a real redirect flow, not cookie-scraping, so it
+/// takes no browser choice.
+pub fn spotify_auto_login(
+    mut config: Signal<AppConfig>,
+    mut error: Signal<Option<String>>,
+    playback_error: Signal<Option<String>>,
+) {
+    // The user's own Spotify app Client ID is stored in the server's `url` field
+    // (Spotify has no meaningful server URL of its own).
+    let client_id = config
+        .peek()
+        .server
+        .as_ref()
+        .map(|s| s.url.clone())
+        .unwrap_or_default();
+    spawn(async move {
+        let auth = match ::server::spotify::auth::launch_signin_and_extract(client_id).await {
+            Ok(auth) => auth,
+            Err(err) => {
+                report_signin_failure(
+                    error,
+                    playback_error,
+                    format!("Spotify sign-in failed: {err}"),
+                );
+                return;
+            }
+        };
+        let packed = ::server::spotify::auth::pack_token(&auth.access_token, &auth.refresh_token);
+        {
+            let mut cfg = config.write();
+            if let Some(server) = cfg.server.as_mut() {
+                server.access_token = Some(packed);
+                server.user_id = Some(auth.user_id);
+            }
+        }
+        error.set(None);
+    });
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn add_server(
     mut config: Signal<AppConfig>,
@@ -231,6 +273,7 @@ pub fn add_server(
     let selected_service = server_service();
     let is_ytmusic = selected_service == MusicService::YtMusic;
     let is_soundcloud = selected_service == MusicService::SoundCloud;
+    let is_spotify = selected_service == MusicService::Spotify;
     let is_browser_signin = selected_service.uses_browser_signin();
 
     if server_name().trim().is_empty() {
@@ -240,6 +283,14 @@ pub fn add_server(
 
     if !is_browser_signin && !server_url().starts_with("http") {
         error.set(Some(i18n::t("invalid_server_url").to_string()));
+        return;
+    }
+
+    // Spotify uses the URL field for the user's own app Client ID (required).
+    if is_spotify && server_url().trim().is_empty() {
+        error.set(Some(
+            "Enter your Spotify app Client ID (create one at developer.spotify.com)".to_string(),
+        ));
         return;
     }
 
@@ -254,6 +305,9 @@ pub fn add_server(
                 "https://music.youtube.com".to_string()
             } else if is_soundcloud {
                 "https://soundcloud.com".to_string()
+            } else if is_spotify {
+                // Store the Client ID as the server URL (Spotify has no server URL).
+                url_input.trim().to_string()
             } else {
                 url_input
             };
@@ -287,6 +341,8 @@ pub fn add_server(
                 ytmusic_auto_login(config, yt_browser, error, playback_error);
             } else if is_soundcloud {
                 soundcloud_auto_login(config, yt_browser, error, playback_error);
+            } else if is_spotify {
+                spotify_auto_login(config, error, playback_error);
             } else if !is_browser_signin {
                 show_login.set(true);
             }
@@ -320,6 +376,7 @@ pub fn switch_server(
             MusicService::SoundCloud => {
                 soundcloud_auto_login(config, yt_browser, error, playback_error)
             }
+            MusicService::Spotify => spotify_auto_login(config, error, playback_error),
             _ => show_login.set(true),
         }
     });

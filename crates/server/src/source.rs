@@ -36,6 +36,7 @@ mod jellyfin;
 mod local;
 mod offline;
 mod soundcloud;
+mod spotify;
 mod subsonic;
 mod types;
 mod youtube_music;
@@ -43,6 +44,7 @@ use jellyfin::JellyfinSource;
 use local::LocalSource;
 use offline::OfflineServerSource;
 use soundcloud::SoundcloudSource;
+use spotify::SpotifySource;
 use subsonic::SubsonicSource;
 pub use types::*;
 use youtube_music::YtSource;
@@ -768,6 +770,7 @@ fn remote_source(db: Db, source: Source, conn: &ServerConn) -> Box<dyn MediaSour
         }
         MusicService::YtMusic => Box::new(YtSource::new(db, source, conn)),
         MusicService::SoundCloud => Box::new(SoundcloudSource::new(db, source, conn)),
+        MusicService::Spotify => Box::new(SpotifySource::new(db, source, conn)),
     }
 }
 
