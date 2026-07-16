@@ -395,9 +395,6 @@ lastfm_first = Last.fm en premier
 musicbrainz_only = MusicBrainz uniquement
 lastfm_only = Last.fm uniquement
 remove_cover = Retirer la pochette
-artist_photo_source = Source de la photo de l'artiste
-artist_photo = Photo de l'artiste
-album_cover = Pochette d'album
 
 # Radio Page
 radio_filter_stations = Filtrer les stations…

@@ -403,9 +403,6 @@ lastfm_first = Pertama Last.fm
 musicbrainz_only = Hanya MusicBrainz
 lastfm_only = Hanya Last.fm
 remove_cover = Hapus sampul
-artist_photo_source = Sumber Foto Artis
-artist_photo = Foto Artis
-album_cover = Sampul Album
 
 # Radio Page
 radio_filter_stations = Filter stasiun…

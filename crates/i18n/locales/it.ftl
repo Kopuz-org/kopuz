@@ -396,9 +396,6 @@ lastfm_first = Last.fm per primo
 musicbrainz_only = Solo MusicBrainz
 lastfm_only = Solo Last.fm
 remove_cover = Elimina copertina
-artist_photo_source = Fonte foto dell'artista
-artist_photo = Foto dell'artista
-album_cover = Copertina dell'album
 
 # Radio Page
 radio_filter_stations = Filtra stazioni…
