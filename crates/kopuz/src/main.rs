@@ -655,8 +655,8 @@ fn App() -> Element {
     // search at render time.
     let mut selected_artist_channel_id = use_signal(|| None::<String>);
     let mut selected_artist_name = use_signal(String::new);
-    let fetched_artist_images: Signal<std::collections::HashMap<String, String>> =
-        use_signal(std::collections::HashMap::new);
+    let fetched_artist_images: Signal<::server::cover::FetchedArtistImages> =
+        use_signal(Default::default);
     let mut search_query = use_signal(String::new);
     let mut last_server_playlist_key = use_signal(|| None::<String>);
     let mut server_playlist_key_initialized = use_signal(|| false);
