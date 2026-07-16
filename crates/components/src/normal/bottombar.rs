@@ -4,7 +4,8 @@ use dioxus::prelude::*;
 use hooks::use_player_controller::{LoopMode, PlayerController};
 use player::player::Player;
 
-use crate::shared::{fmt_time, toggle_favorite};
+use crate::shared::fmt_time;
+use hooks::favorites::toggle_favorite;
 
 #[component]
 pub fn BottombarNormal(

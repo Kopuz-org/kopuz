@@ -1,7 +1,5 @@
-use ::server::source::TrackFavorite;
 use config::{AppConfig, ListenNowStyle, UiStyle};
 use dioxus::prelude::*;
-use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{
     use_active_source, use_album_tracks, use_albums, use_artist_sample_tracks, use_favorites,
     use_playlists, use_top_genre, use_tracks_by_keys,
@@ -660,9 +658,7 @@ fn ServerHeroBanner(
     let mut start_y = use_signal(|| 0.0_f64);
     let mut start_h = use_signal(|| 0_u32);
 
-    let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     // The track's own `album_id` (not the resolved `Album`, which lags behind a
     // separate albums query) — so the play button and the favorite-state heart
     // work the instant the hero track renders, not only once albums load.
@@ -817,16 +813,7 @@ fn ServerHeroBanner(
                                         } else {
                                             hero_tracks_res.read().clone().unwrap_or_default()
                                         };
-                                        let new_fav = !jelly_hero_fav;
-                                        let source = active_source.peek().clone();
-                                        spawn(async move {
-                                            for t in &tracks {
-                                                let _ = t.set_favorite(&source, new_fav).await;
-                                            }
-                                            gens.bump(Table::Favorites);
-                                            // Pending DB rows; the reconciler pushes them.
-                                            hooks::use_sync_task::nudge();
-                                        });
+                                        hooks::favorites::set_favorite_many(tracks, !jelly_hero_fav);
                                     },
                                     i { class: "{hero_heart_icon}" }
                                 }
