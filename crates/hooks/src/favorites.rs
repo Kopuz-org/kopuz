@@ -33,14 +33,22 @@ pub fn toggle_favorite(track: Option<Track>) {
             tracing::warn!(error = %e, track = %track.id.uid(), "favorite: local write failed");
             return;
         }
-        bump_favorites(gens);
+        // Favorites changed; Tracks too (record_favorite caches the track).
+        gens.bump(Table::Favorites);
+        gens.bump(Table::Tracks);
 
         // Push in the background; revert the local state if the remote rejects it.
         if let Err(e) = source.push_favorite(&key, new_fav).await {
             tracing::warn!(error = %e, track = %track.id.uid(), "favorite push rejected; reverting");
             let _ = source.record_favorite(&track, !new_fav).await;
-            bump_favorites(gens);
-            crate::toast::toast_error(&favorite_error(&track));
+            gens.bump(Table::Favorites);
+            gens.bump(Table::Tracks);
+            // Name the service so a snapped-back heart doesn't read as a broken UI.
+            let msg = match track.id.service() {
+                Some(service) => format!("Couldn't update favorite on {}", service.display_name()),
+                None => "Couldn't update favorite".to_string(),
+            };
+            crate::toast::toast_error(&msg);
         }
     });
 }
@@ -76,7 +84,9 @@ pub fn set_favorite_many(tracks: Vec<Track>, on: bool) {
         if recorded.is_empty() {
             return;
         }
-        bump_favorites(gens);
+        // Favorites changed; Tracks too (record_favorite caches the tracks).
+        gens.bump(Table::Favorites);
+        gens.bump(Table::Tracks);
 
         // Push each; revert the ones the remote rejects.
         let mut reverted = false;
@@ -89,22 +99,9 @@ pub fn set_favorite_many(tracks: Vec<Track>, on: bool) {
             }
         }
         if reverted {
-            bump_favorites(gens);
+            gens.bump(Table::Favorites);
+            gens.bump(Table::Tracks);
             crate::toast::toast_error("Couldn't update some favorites");
         }
     });
-}
-
-/// A short "the server rejected it" notice, so a reverted heart doesn't read as
-/// a broken UI. Names the service when the track has one.
-fn favorite_error(track: &Track) -> String {
-    match track.id.service() {
-        Some(service) => format!("Couldn't update favorite on {}", service.display_name()),
-        None => "Couldn't update favorite".to_string(),
-    }
-}
-
-fn bump_favorites(gens: Generations) {
-    gens.bump(Table::Favorites);
-    gens.bump(Table::Tracks);
 }
