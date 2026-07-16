@@ -66,7 +66,7 @@ impl MediaSource for YtSource {
             .map_err(SourceError::from)
     }
 
-    fn web_url(&self, track: &reader::Track) -> Option<String> {
+    async fn web_url(&self, track: &reader::Track) -> Option<String> {
         let vid = track.id.key();
         (!vid.trim().is_empty()).then(|| format!("https://music.youtube.com/watch?v={vid}"))
     }

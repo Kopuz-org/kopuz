@@ -845,11 +845,14 @@ fn YtAlbumDetail(
     let tracks_download_all = tracks.clone();
     let artist_for_nav_btn = artist_name.clone();
     // Share target: the album's YT browse link when resolved, else the first
-    // track's web url so the button still does something before the fetch lands.
-    let share_url = browse_id
+    // track's web url so the button still does something before the fetch
+    // lands. The track URL resolves at click — `web_url` is async now (some
+    // services look the page up remotely).
+    let share_browse = browse_id
         .as_ref()
-        .map(|id| format!("https://music.youtube.com/browse/{id}"))
-        .or_else(|| tracks.first().and_then(|t| active_source.peek().web_url(t)));
+        .map(|id| format!("https://music.youtube.com/browse/{id}"));
+    let share_track = tracks.first().cloned();
+    let has_share = share_browse.is_some() || share_track.is_some();
 
     rsx! {
         div { class: "w-full max-w-[1600px] mx-auto select-none flex-1 min-h-0 flex flex-col",
@@ -943,11 +946,22 @@ fn YtAlbumDetail(
                             i { class: "fa-solid fa-shuffle" }
                         }
                         // Share.
-                        if let Some(url) = share_url {
+                        if has_share {
                             button {
                                 class: "w-11 h-11 rounded-full border border-white/15 flex items-center justify-center text-slate-300 hover:text-white hover:border-white/30 transition-colors",
                                 title: "Share".to_string(),
-                                onclick: move |_| copy_album_link(url.clone()),
+                                onclick: move |_| {
+                                    if let Some(url) = share_browse.clone() {
+                                        copy_album_link(url);
+                                    } else if let Some(track) = share_track.clone() {
+                                        let source = active_source.peek().clone();
+                                        spawn(async move {
+                                            if let Some(url) = source.web_url(&track).await {
+                                                copy_album_link(url);
+                                            }
+                                        });
+                                    }
+                                },
                                 i { class: "fa-solid fa-arrow-up-from-bracket" }
                             }
                         }

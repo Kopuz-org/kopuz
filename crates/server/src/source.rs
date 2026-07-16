@@ -134,9 +134,11 @@ pub trait MediaSource: Send + Sync {
     }
 
     /// The track's canonical public web URL, when this source has shareable web
-    /// pages (e.g. a YouTube Music watch link). `None` otherwise — callers fall
-    /// back to a metadata lookup (MusicBrainz). Sync: it's a pure id→URL mapping.
-    fn web_url(&self, _track: &reader::Track) -> Option<String> {
+    /// pages. `None` otherwise — callers fall back to a metadata lookup
+    /// (MusicBrainz). Async because not every service can map an id to its
+    /// public page offline: YT is a pure id→URL format, SoundCloud resolves the
+    /// track's `permalink_url` from the API.
+    async fn web_url(&self, _track: &reader::Track) -> Option<String> {
         None
     }
 

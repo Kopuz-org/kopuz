@@ -275,6 +275,23 @@ async fn resolve_media_url(
         .ok_or_else(|| "SoundCloud returned no stream URL for this track".to_string())
 }
 
+/// A track's public soundcloud.com page URL (`permalink_url`), for sharing.
+pub(crate) async fn track_permalink(
+    track_id: &str,
+    token: Option<&str>,
+) -> Result<Option<String>, String> {
+    let http = http_client();
+    let track = match lookup_track(&http, track_id, &client_id(&http, false).await?, token).await {
+        Ok(v) => v,
+        Err(_) => lookup_track(&http, track_id, &client_id(&http, true).await?, token).await?,
+    };
+    Ok(track
+        .get("permalink_url")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string()))
+}
+
 async fn lookup_track(
     http: &reqwest::Client,
     id: &str,

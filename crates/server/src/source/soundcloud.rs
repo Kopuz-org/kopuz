@@ -85,6 +85,19 @@ impl MediaSource for SoundcloudSource {
         }
     }
 
+    async fn web_url(&self, track: &reader::Track) -> Option<String> {
+        let id = track.id.key();
+        if id.trim().is_empty() {
+            return None;
+        }
+        // The public page URL isn't derivable from the numeric id — resolve the
+        // track's `permalink_url` (works anonymously; public tracks only).
+        crate::soundcloud::track_permalink(&id, self.token.as_deref())
+            .await
+            .ok()
+            .flatten()
+    }
+
     async fn fetch_favorites(&self) -> Result<Vec<String>, SourceError> {
         let Some(token) = self.token.as_deref() else {
             return Ok(Vec::new());

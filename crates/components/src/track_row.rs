@@ -857,13 +857,16 @@ pub fn play_radio(
 }
 
 /// Copy a shareable link for a track: its source's public web URL when it has
-/// one (YT), else fall back to a MusicBrainz lookup by metadata. The provider
-/// URL knowledge lives in the source impl ([`MediaSource::web_url`]), not here.
+/// one (a YT watch link, a SoundCloud page), else fall back to a MusicBrainz
+/// lookup by metadata. The provider URL knowledge lives in the source impl
+/// ([`MediaSource::web_url`]), not here.
 pub fn share_track(track: Track, source: ::server::source::ActiveSource) {
-    if let Some(url) = source.web_url(&track) {
-        copy_to_clipboard(&url);
-        toast("Copied link");
-    } else {
-        share_to_musicbrainz(track.musicbrainz_release_id, track.artist, track.title);
-    }
+    spawn(async move {
+        if let Some(url) = source.web_url(&track).await {
+            copy_to_clipboard(&url);
+            toast("Copied link");
+        } else {
+            share_to_musicbrainz(track.musicbrainz_release_id, track.artist, track.title);
+        }
+    });
 }

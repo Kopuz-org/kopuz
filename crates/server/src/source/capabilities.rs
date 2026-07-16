@@ -28,7 +28,7 @@ where
 pub trait PlayableSource: SourceIdentity + Send + Sync {
     async fn resolve_stream(&self, item_id: &str) -> Result<StreamInfo, SourceError>;
     async fn validate(&self) -> AuthOutcome;
-    fn web_url(&self, track: &reader::Track) -> Option<String>;
+    async fn web_url(&self, track: &reader::Track) -> Option<String>;
 }
 
 #[async_trait]
@@ -44,8 +44,8 @@ where
         <T as MediaSource>::validate(self).await
     }
 
-    fn web_url(&self, track: &reader::Track) -> Option<String> {
-        <T as MediaSource>::web_url(self, track)
+    async fn web_url(&self, track: &reader::Track) -> Option<String> {
+        <T as MediaSource>::web_url(self, track).await
     }
 }
 
