@@ -719,10 +719,19 @@ fn ServerHeroBanner(
                 if let Some((_, _album_opt, entry_cover)) = hero_entry.as_ref() {
                     div { class: "absolute inset-0 overflow-hidden",
                         if let Some(url) = hero_cover.clone().or(entry_cover.clone()) {
-                            img {
-                                src: "{url}",
-                                class: "absolute inset-0 w-full h-full object-cover object-center",
-                                decoding: "async",
+                            {
+                                let src = if url.starts_with("artwork://") {
+                                    format!("{url}&hq=1")
+                                } else {
+                                    url.clone()
+                                };
+                                rsx! {
+                                    img {
+                                        src: "{src}",
+                                        class: "absolute inset-0 w-full h-full object-cover object-center",
+                                        decoding: "async",
+                                    }
+                                }
                             }
                         }
                         div { class: "absolute inset-0 bg-gradient-to-r from-black/95 via-black/60 to-black/20" }
