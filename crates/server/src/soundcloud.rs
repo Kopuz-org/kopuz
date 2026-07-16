@@ -27,10 +27,6 @@ use tokio::sync::Mutex;
 /// `client_id` query param.
 const API_V2: &str = "https://api-v2.soundcloud.com";
 
-/// The public developer API host. Unlike `api-v2` it isn't behind DataDome, so
-/// authenticated writes (like/unlike) go through here.
-const API_V1: &str = "https://api.soundcloud.com";
-
 /// The web player whose HTML/JS bundles carry the `client_id`.
 const WEB_HOST: &str = "https://soundcloud.com";
 
@@ -600,25 +596,37 @@ pub(crate) async fn get_playlist_entries(
 
 /// Like or unlike a track on the signed-in account.
 ///
-/// Routes through the public `api.soundcloud.com` like endpoint, which (unlike
-/// the web player's `api-v2` host) isn't behind DataDome bot-protection — so a
-/// plain request with the `OAuth` token works without matching a browser TLS
-/// fingerprint. `datadome` is kept only for the legacy `api-v2` fallback.
+/// The route the web player actually uses (captured from live traffic):
+/// `PUT`/`DELETE api-v2.soundcloud.com/users/{user_id}/track_likes/{track_id}`.
+/// The public `api.soundcloud.com/likes/tracks/{id}` route this used to call
+/// now rejects every request with 403. `Origin`/`Referer` match the web app —
+/// api-v2 writes are picky about looking like the player.
 pub(crate) async fn set_track_like(track_id: &str, like: bool, token: &str) -> Result<(), String> {
     let http = http_client();
+    let uid = derive_user_id(token)
+        .await
+        .ok_or("SoundCloud: couldn't resolve the signed-in user id")?;
 
-    // Public API: POST/DELETE https://api.soundcloud.com/likes/tracks/{id}. Unlike
-    // the web player's api-v2 host it isn't DataDome-gated, so the OAuth token
-    // alone authorizes the write.
-    let url = format!("{API_V1}/likes/tracks/{track_id}");
-    let req = if like {
-        http.post(&url)
-    } else {
-        http.delete(&url)
+    let send = |cid: String| {
+        let url = format!("{API_V2}/users/{uid}/track_likes/{track_id}?client_id={cid}");
+        let req = if like {
+            http.put(&url)
+        } else {
+            http.delete(&url)
+        }
+        .header("Accept", "application/json, text/javascript, */*; q=0.1")
+        .header("Origin", WEB_HOST)
+        .header("Referer", format!("{WEB_HOST}/"));
+        apply_auth(req, Some(token)).send()
+    };
+
+    match send(client_id(&http, false).await?).await {
+        Ok(r) if r.status().is_success() => return Ok(()),
+        // A stale scraped client_id also 4xxes — re-scrape once and retry,
+        // like every other endpoint here.
+        _ => {}
     }
-    .header("Accept", "application/json; charset=utf-8");
-    apply_auth(req, Some(token))
-        .send()
+    send(client_id(&http, true).await?)
         .await
         .map_err(|e| format!("SoundCloud like HTTP: {e}"))?
         .error_for_status()
