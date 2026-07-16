@@ -107,9 +107,12 @@ async fn typed_queries_smoke() {
         "album_tracks orders by disc/track"
     );
 
-    let bea = db.artist_tracks(&local, "Bea").await.unwrap();
+    let bea = db.artist_tracks(&local, "Bea", None).await.unwrap();
     assert_eq!(bea.len(), 2);
     assert!(bea.iter().all(|t| t.artist == "Bea"));
+
+    let bounded = db.artist_tracks(&local, "Bea", Some(1)).await.unwrap();
+    assert_eq!(bounded.len(), 1, "limit bounds the query SQL-side");
 
     let jazz = db.genre_tracks(&local, "Jazz").await.unwrap();
     assert_eq!(jazz.len(), 2);

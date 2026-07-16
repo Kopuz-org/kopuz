@@ -106,8 +106,9 @@ impl ReadStore for Native {
         &self,
         source: &crate::Source,
         artist: &str,
+        limit: Option<u32>,
     ) -> Result<Vec<reader::Track>, DbError> {
-        queries::artist_tracks(&self.pool(), source, artist).await
+        queries::artist_tracks(&self.pool(), source, artist, limit).await
     }
 
     async fn genre_tracks(

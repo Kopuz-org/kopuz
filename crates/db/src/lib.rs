@@ -166,11 +166,13 @@ pub trait ReadStore: Send + Sync {
         album_id: &str,
     ) -> Result<Vec<reader::Track>, DbError>;
 
-    /// One artist's tracks, album/disc/track-ordered.
+    /// One artist's tracks, album/disc/track-ordered. `limit` bounds the query
+    /// SQL-side for callers that only probe a few rows.
     async fn artist_tracks(
         &self,
         source: &Source,
         artist: &str,
+        limit: Option<u32>,
     ) -> Result<Vec<reader::Track>, DbError>;
 
     /// Tracks whose album has this genre, artist/album-ordered.
