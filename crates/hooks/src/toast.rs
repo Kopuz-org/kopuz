@@ -22,7 +22,7 @@ fn show(msg: &str, bg: &str, border: &str) {
             if (!t) {{
                 t = document.createElement('div');
                 t.id = 'kopuz-toast';
-                t.style.cssText = 'position:fixed;left:50%;bottom:88px;transform:translateX(-50%);color:#fff;padding:10px 18px;border-radius:8px;font:14px system-ui,sans-serif;z-index:99999;box-shadow:0 4px 16px rgba(0,0,0,0.4);pointer-events:none;opacity:0;transition:opacity 150ms;border:1px solid transparent;';
+                t.style.cssText = 'position:fixed;left:50%;bottom:112px;transform:translateX(-50%);color:#fff;padding:10px 18px;border-radius:8px;font:14px system-ui,sans-serif;z-index:99999;box-shadow:0 4px 16px rgba(0,0,0,0.4);pointer-events:none;opacity:0;transition:opacity 150ms;border:1px solid transparent;';
                 document.body.appendChild(t);
             }}
             t.style.background = '{bg}';
