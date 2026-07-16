@@ -139,7 +139,14 @@ pub async fn fetch_artist(channel_id: &str, cookies: &str) -> Result<YtArtist, S
         cookies,
     )
     .await?;
-    Ok(parse_artist(channel_id, &resp))
+    let artist = parse_artist(channel_id, &resp);
+    // Ghost channels exist: songs (and even the artists search, typed
+    // MUSIC_PAGE_TYPE_UNKNOWN) link them, but the browse returns an empty
+    // shell — no header, no contents. Failing beats rendering a blank page.
+    if artist.name.is_empty() && artist.sections.is_empty() {
+        return Err("YouTube Music has no page for this artist".to_string());
+    }
+    Ok(artist)
 }
 
 fn parse_artist(channel_id: &str, resp: &Value) -> YtArtist {
@@ -197,6 +204,41 @@ fn find_artist_header(resp: &Value) -> Option<&Value> {
         return Some(h);
     }
     None
+}
+
+/// The channel's square avatar — `foregroundThumbnail` on visual/user-channel
+/// headers (their `thumbnail` is the wide banner), plain `thumbnail` on the
+/// immersive artist header. Feeds the Artists grid when a name's channel was
+/// reconciled from a song instead of the artists search.
+pub async fn artist_avatar(channel_id: &str, cookies: &str) -> Result<Option<String>, String> {
+    let body = build_browse_body(Some(channel_id));
+    let resp = post(
+        &format!("{ORIGIN_YOUTUBE_MUSIC}/youtubei/v1/browse?prettyPrint=false"),
+        &body,
+        cookies,
+    )
+    .await?;
+    let Some(header) = find_artist_header(&resp) else {
+        return Ok(None);
+    };
+    for ptr in [
+        "/foregroundThumbnail/musicThumbnailRenderer/thumbnail/thumbnails",
+        "/thumbnail/musicThumbnailRenderer/thumbnail/thumbnails",
+    ] {
+        let avatar = header
+            .pointer(ptr)
+            .and_then(|v| v.as_array())
+            .and_then(|arr| {
+                arr.iter()
+                    .max_by_key(|t| t.get("width").and_then(|v| v.as_u64()).unwrap_or(0))
+            })
+            .and_then(|t| t.get("url").and_then(|u| u.as_str()))
+            .map(|s| normalize_yt_thumbnail(s.to_string()));
+        if avatar.is_some() {
+            return Ok(avatar);
+        }
+    }
+    Ok(None)
 }
 
 fn best_artist_banner(header: &Value) -> Option<String> {
