@@ -139,7 +139,7 @@ pub fn use_artist_tracks(
         );
         offload(
             async move {
-                let rows = db.artist_tracks(&s, &a).await.unwrap_or_default();
+                let rows = db.artist_tracks(&s, &a, None).await.unwrap_or_default();
                 tracing::Span::current().record("rows", rows.len());
                 rows
             }

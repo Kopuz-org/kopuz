@@ -166,11 +166,13 @@ pub trait ReadStore: Send + Sync {
         album_id: &str,
     ) -> Result<Vec<reader::Track>, DbError>;
 
-    /// One artist's tracks, album/disc/track-ordered.
+    /// One artist's tracks, album/disc/track-ordered. `limit` bounds the query
+    /// SQL-side for callers that only probe a few rows.
     async fn artist_tracks(
         &self,
         source: &Source,
         artist: &str,
+        limit: Option<u32>,
     ) -> Result<Vec<reader::Track>, DbError>;
 
     /// Tracks whose album has this genre, artist/album-ordered.
@@ -246,6 +248,10 @@ pub trait ReadStore: Send + Sync {
     /// Generic metadata-cache read (`metadata_cache` table): the `payload` for
     /// `(cache_key, kind)`, if cached.
     async fn meta_get(&self, cache_key: &str, kind: &str) -> Result<Option<String>, DbError>;
+
+    /// Metadata-cache keys of `kind` written within the last `max_age_secs` —
+    /// e.g. the fresh artist-photo misses the fetch loop must not re-search.
+    async fn meta_keys_since(&self, kind: &str, max_age_secs: i64) -> Result<Vec<String>, DbError>;
 
     /// The favorite refs (`track_key`s) for a server (`"local"` for filesystem).
     async fn favorites(&self, server_id: &str) -> Result<Vec<String>, DbError>;

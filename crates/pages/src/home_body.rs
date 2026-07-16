@@ -68,6 +68,10 @@ pub fn HomeBody(
 
     let albums_res = use_albums(source);
     let playlists_res = use_playlists();
+    // The artist-image caches the Top Artists row resolves through (read-only:
+    // home triggers no photo fetch; the Artists page's pipeline fills these).
+    let artist_images_res = hooks::use_db_queries::use_artist_images();
+    let fetched_artist_images = use_context::<Signal<::server::cover::FetchedArtistImages>>();
     let offline_keys = use_memo(move || -> Vec<String> {
         if !(caps().downloads && *is_offline.read()) {
             return Vec::new();
@@ -317,6 +321,9 @@ pub fn HomeBody(
 
     let jellyfin_artists = use_memo(move || {
         let conf = config.read();
+        let albums = albums_res.read().clone().unwrap_or_default();
+        let images = artist_images_res.read().clone().unwrap_or_default();
+        let fetched = fetched_artist_images.read();
         let tracks = if caps().downloads && *is_offline.read() {
             let mut downloaded = offline_tracks_res.read().clone().unwrap_or_default();
             downloaded.sort_by_key(|a| a.artist.to_lowercase());
@@ -331,7 +338,23 @@ pub fn HomeBody(
                 continue;
             }
             if unique_artists.insert(track.artist.clone()) {
-                let cover_url = track_cover_url(&conf, track);
+                // The same image chain the Artists grid uses: photo where one
+                // exists, the track's album cover as the Library last resort
+                // (a Remote catalog resolves photo-or-placeholder instead).
+                let norm = utils::artist::normalize_artist_key(&track.artist);
+                let album_cover = albums
+                    .iter()
+                    .find(|a| a.id == track.album_id)
+                    .and_then(|a| a.cover_path.as_deref());
+                let art = ::server::cover::ArtistArt::from_caches(
+                    &images,
+                    &fetched,
+                    &norm,
+                    &track.artist,
+                    album_cover,
+                    caps().artist_view,
+                );
+                let cover_url = ::server::cover::artist(&conf, art, 384).map(|c| c.to_string());
                 artist_list.push((track.artist.clone(), cover_url));
             }
             if artist_list.len() >= 10 {

@@ -773,6 +773,23 @@ pub async fn meta_get(
     .flatten())
 }
 
+/// Metadata-cache keys of `kind` written within the last `max_age_secs` — e.g.
+/// the fresh artist-photo negative results the fetch loop must not re-search.
+pub async fn meta_keys_since(
+    pool: &SqlitePool,
+    kind: &str,
+    max_age_secs: i64,
+) -> Result<Vec<String>, DbError> {
+    Ok(sqlx::query_scalar!(
+        "SELECT cache_key FROM metadata_cache \
+         WHERE kind = ?1 AND fetched_at >= (unixepoch() - ?2)",
+        kind,
+        max_age_secs
+    )
+    .fetch_all(pool)
+    .await?)
+}
+
 #[tracing::instrument(skip_all, fields(cache_key = %cache_key, kind = %kind))]
 pub async fn meta_put(
     pool: &SqlitePool,

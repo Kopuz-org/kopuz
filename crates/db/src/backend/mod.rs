@@ -106,8 +106,9 @@ impl ReadStore for Native {
         &self,
         source: &crate::Source,
         artist: &str,
+        limit: Option<u32>,
     ) -> Result<Vec<reader::Track>, DbError> {
-        queries::artist_tracks(&self.pool(), source, artist).await
+        queries::artist_tracks(&self.pool(), source, artist, limit).await
     }
 
     async fn genre_tracks(
@@ -211,6 +212,10 @@ impl ReadStore for Native {
 
     async fn meta_get(&self, cache_key: &str, kind: &str) -> Result<Option<String>, DbError> {
         writes::meta_get(&self.pool(), cache_key, kind).await
+    }
+
+    async fn meta_keys_since(&self, kind: &str, max_age_secs: i64) -> Result<Vec<String>, DbError> {
+        writes::meta_keys_since(&self.pool(), kind, max_age_secs).await
     }
 
     async fn scrobble_queue_all(&self) -> Result<Vec<crate::QueuedScrobbleRow>, DbError> {

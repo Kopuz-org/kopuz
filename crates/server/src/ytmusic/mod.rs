@@ -97,6 +97,22 @@ impl YouTubeMusicClient {
         search::resolve_artist_image(name, self.cookies.as_deref()).await
     }
 
+    /// The artist's channel reconciled from one of their songs' watch-queue
+    /// byline — works for user channels the Artists search can't find.
+    pub async fn artist_channel_for_video(
+        &self,
+        video_id: &str,
+        artist_name: &str,
+    ) -> Result<Option<String>, String> {
+        mix::artist_channel_for_video(video_id, artist_name, self.cookies.as_deref().unwrap_or(""))
+            .await
+    }
+
+    /// The channel's square avatar, for grid photos of song-reconciled artists.
+    pub async fn artist_avatar(&self, channel_id: &str) -> Result<Option<String>, String> {
+        discover::artist_avatar(channel_id, self.cookies.as_deref().unwrap_or("")).await
+    }
+
     /// Resolve a saved album (title + artist) back to its YT album browse id
     /// (`MPRE…`). Library YT albums carry no browse id, so the album page calls
     /// this on demand before [`fetch_album_tracks`](Self::fetch_album_tracks)

@@ -158,6 +158,24 @@ impl MediaSource for YtSource {
     }
 
     async fn resolve_artist_channel_id(&self, query: &str) -> Result<Option<String>, SourceError> {
+        // A song's watch-queue byline links its artists' channels exactly —
+        // including user channels the Artists search can't find at all — so
+        // a library artist reconciles from their own song first. The search
+        // only decides names the library doesn't hold.
+        let tracks = self
+            .db
+            .artist_tracks(&self.source, query, Some(3))
+            .await
+            .unwrap_or_default();
+        for track in tracks.iter() {
+            if let Ok(Some(cid)) = self
+                .client
+                .artist_channel_for_video(&track.id.key(), query)
+                .await
+            {
+                return Ok(Some(cid));
+            }
+        }
         self.client
             .resolve_artist_channel_id(query)
             .await
@@ -186,10 +204,32 @@ impl MediaSource for YtSource {
     }
 
     async fn fetch_artist_image(&self, name: &str) -> Result<Option<String>, SourceError> {
-        self.client
+        if let Some(url) = self
+            .client
             .resolve_artist_image(name)
             .await
-            .map_err(SourceError::from)
+            .map_err(SourceError::from)?
+        {
+            return Ok(Some(url));
+        }
+        // No artists-search entry (user channels for uploaded content) —
+        // reconcile the channel from a library song and use its avatar.
+        let tracks = self
+            .db
+            .artist_tracks(&self.source, name, Some(3))
+            .await
+            .unwrap_or_default();
+        for track in tracks.iter() {
+            if let Ok(Some(cid)) = self
+                .client
+                .artist_channel_for_video(&track.id.key(), name)
+                .await
+                && let Ok(avatar @ Some(_)) = self.client.artist_avatar(&cid).await
+            {
+                return Ok(avatar);
+            }
+        }
+        Ok(None)
     }
 
     async fn add_to_playlist(

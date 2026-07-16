@@ -406,9 +406,6 @@ lastfm_first = Ưu tiên Last.fm
 musicbrainz_only = Chỉ MusicBrainz
 lastfm_only = Chỉ Last.fm
 remove_cover = Xóa bìa
-artist_photo_source = Nguồn ảnh nghệ sĩ
-artist_photo = Ảnh nghệ sĩ
-album_cover = Bìa album
 
 # Radio Page
 radio_filter_stations = Lọc đài...

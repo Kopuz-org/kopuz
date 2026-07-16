@@ -153,17 +153,20 @@ pub async fn artist_tracks(
     pool: &SqlitePool,
     source: &Source,
     artist: &str,
+    limit: Option<u32>,
 ) -> Result<Vec<Track>, DbError> {
     // Match like the old in-memory derivation did: the primary artist column,
     // secondary credits (artists_json — featured artists get their own tiles),
     // and tracks on albums credited to the artist; all case-insensitively.
+    let limit_clause = limit.map(|n| format!(" LIMIT {n}")).unwrap_or_default();
     let sql = format!(
         "SELECT {TRACK_COLUMNS} {TRACKS_FROM} WHERE t.source = ?1 AND ( \
             t.artist = ?2 COLLATE NOCASE \
             OR EXISTS (SELECT 1 FROM json_each(t.artists_json) WHERE value = ?2 COLLATE NOCASE) \
             OR t.source_album_id IN \
                (SELECT source_album_id FROM albums WHERE source = ?1 AND artist = ?2 COLLATE NOCASE) \
-         ) ORDER BY t.album COLLATE NOCASE, t.disc_number, t.track_number, t.title COLLATE NOCASE"
+         ) ORDER BY t.album COLLATE NOCASE, t.disc_number, t.track_number, t.title COLLATE NOCASE\
+         {limit_clause}"
     );
     let rows = sqlx::query_as::<_, TrackRow>(&sql)
         .bind(source.as_str())
