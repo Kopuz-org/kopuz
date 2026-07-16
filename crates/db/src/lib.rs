@@ -249,6 +249,10 @@ pub trait ReadStore: Send + Sync {
     /// `(cache_key, kind)`, if cached.
     async fn meta_get(&self, cache_key: &str, kind: &str) -> Result<Option<String>, DbError>;
 
+    /// Metadata-cache keys of `kind` written within the last `max_age_secs` —
+    /// e.g. the fresh artist-photo misses the fetch loop must not re-search.
+    async fn meta_keys_since(&self, kind: &str, max_age_secs: i64) -> Result<Vec<String>, DbError>;
+
     /// The favorite refs (`track_key`s) for a server (`"local"` for filesystem).
     async fn favorites(&self, server_id: &str) -> Result<Vec<String>, DbError>;
 

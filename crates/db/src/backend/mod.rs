@@ -214,6 +214,10 @@ impl ReadStore for Native {
         writes::meta_get(&self.pool(), cache_key, kind).await
     }
 
+    async fn meta_keys_since(&self, kind: &str, max_age_secs: i64) -> Result<Vec<String>, DbError> {
+        writes::meta_keys_since(&self.pool(), kind, max_age_secs).await
+    }
+
     async fn scrobble_queue_all(&self) -> Result<Vec<crate::QueuedScrobbleRow>, DbError> {
         scrobble_queue::all(&self.pool()).await
     }
