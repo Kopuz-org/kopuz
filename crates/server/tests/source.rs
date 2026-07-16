@@ -7,7 +7,29 @@
 use std::path::PathBuf;
 
 use db::Source;
+use reader::{Track, TrackId};
 use server::source;
+
+fn track(id: TrackId) -> Track {
+    Track {
+        id,
+        cover: None,
+        album_id: String::new(),
+        title: String::new(),
+        artist: String::new(),
+        album: String::new(),
+        duration: 0,
+        khz: 0,
+        bitrate: 0,
+        track_number: None,
+        disc_number: None,
+        musicbrainz_release_id: None,
+        musicbrainz_recording_id: None,
+        musicbrainz_track_id: None,
+        playlist_item_id: None,
+        artists: Vec::new(),
+    }
+}
 
 fn unique_db() -> PathBuf {
     // pid + counter, not just clock: macOS's µs clock let parallel tests
@@ -78,4 +100,29 @@ async fn local_favorite_round_trips() {
 
     src.set_favorite("/music/x.flac", false).await.unwrap();
     assert!(!src.is_favorite("/music/x.flac").await);
+}
+
+#[tokio::test]
+async fn record_favorite_writes_a_clean_local_row_and_reverts() {
+    let db = db::init(&unique_db()).await.unwrap();
+    let src = source::local(db.clone());
+    let t = track(TrackId::Local("/music/x.flac".into()));
+
+    // record_favorite writes the local state as a CLEAN row (no dirty/pending) —
+    // the optimistic half of a toggle.
+    src.record_favorite(&t, true).await.unwrap();
+    assert!(
+        db.favorites("local")
+            .await
+            .unwrap()
+            .contains(&"/music/x.flac".to_string())
+    );
+    assert!(db.dirty_favorites("local").await.unwrap().is_empty());
+
+    // Calling it with the opposite `on` reverts cleanly (the revert-on-push-fail
+    // path) — no favorite, no lingering row.
+    src.record_favorite(&t, false).await.unwrap();
+    assert!(!src.is_favorite("/music/x.flac").await);
+    assert!(db.dirty_favorites("local").await.unwrap().is_empty());
+    assert!(db.dirty_unlikes("local").await.unwrap().is_empty());
 }

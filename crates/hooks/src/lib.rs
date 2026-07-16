@@ -4,10 +4,12 @@
 pub mod artist_images;
 pub mod db_reactivity;
 pub mod debug_db;
+pub mod favorites;
 pub mod playback_ref;
 mod player_controller_queue;
 pub mod scrobble_scheduler;
 pub mod source_switch;
+pub mod toast;
 pub mod use_db_queries;
 pub mod use_player_controller;
 pub mod use_player_task;
