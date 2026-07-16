@@ -90,12 +90,16 @@ pub fn FavoritesBody(
                 if nonce == 0 {
                     match sync_mode {
                         FavoritesSync::Paginated => {
-                            let stamps: Option<serde_json::Value> = read_db
-                                .meta_get("yt_sync", "timestamps")
+                            // Per-server marker written at the end of a completed
+                            // walk. It must be per-server: the old global YT stamp
+                            // suppressed OTHER paginated sources' first import
+                            // (SoundCloud stayed empty because YT had synced).
+                            let imported = read_db
+                                .meta_get("fav_import", &sid)
                                 .await
                                 .ok()
                                 .flatten()
-                                .and_then(|s| serde_json::from_str(&s).ok());
+                                .is_some();
                             // Dirty rows don't count: a locally-hearted never-pushed
                             // like must not suppress the initial import.
                             let favorites = read_db.favorites(&sid).await.unwrap_or_default().len();
@@ -104,13 +108,7 @@ pub fn FavoritesBody(
                                 .await
                                 .unwrap_or_default()
                                 .len();
-                            let already_synced = stamps
-                                .as_ref()
-                                .and_then(|v| v.get("last_yt_sync_at"))
-                                .and_then(|v| v.as_u64())
-                                .is_some()
-                                || favorites > dirty;
-                            if already_synced {
+                            if imported || favorites > dirty {
                                 return;
                             }
                         }
@@ -223,16 +221,10 @@ pub fn FavoritesBody(
                             if source.sweep_favorites(epoch).await.is_ok() {
                                 gens.bump(Table::Favorites);
                             }
-                            let mut stamps: serde_json::Value = read_db
-                                .meta_get("yt_sync", "timestamps")
-                                .await
-                                .ok()
-                                .flatten()
-                                .and_then(|s| serde_json::from_str(&s).ok())
-                                .unwrap_or_else(|| serde_json::json!({}));
-                            stamps["last_yt_sync_at"] = serde_json::json!(unix_now());
+                            // Mark THIS server's initial import done — the guard
+                            // above reads it, so it must not be a global stamp.
                             let _ = source
-                                .set_meta("yt_sync", "timestamps", &stamps.to_string())
+                                .set_meta("fav_import", &sid, &unix_now().to_string())
                                 .await;
                             gens.bump(Table::Tracks);
                             gens.bump(Table::Albums);

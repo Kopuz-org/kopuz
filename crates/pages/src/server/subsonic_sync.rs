@@ -50,6 +50,15 @@ pub async fn sync_server_library(clear_first: bool) -> Result<(), String> {
     info!("Starting server library sync…");
     let snapshot = source.fetch_library().await.map_err(|e| e.to_string())?;
 
+    // An entirely empty snapshot means the source has no library listing
+    // (SoundCloud — its "library" is the favorites walk), not that the server
+    // dropped everything. Pruning against it would wipe the rows other flows
+    // imported: that's what blanked the SoundCloud favorites page on startup.
+    if snapshot.albums.is_empty() && snapshot.tracks.is_empty() {
+        info!("Server library sync: source has no library listing, nothing to sync.");
+        return Ok(());
+    }
+
     let merged_albums: Vec<Album> = snapshot.albums.into_iter().map(merge_cover).collect();
     for chunk in merged_albums.chunks(100) {
         source
