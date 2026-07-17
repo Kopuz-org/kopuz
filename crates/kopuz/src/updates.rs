@@ -119,18 +119,11 @@ pub async fn run_spotify_refresh(mut config: Signal<config::AppConfig>) {
         _ => return,
     };
     let Some(packed) = packed else { return };
-    let (_access, refresh) = server::spotify::auth::unpack_token(&packed);
-    if refresh.is_empty() || client_id.trim().is_empty() {
+    if client_id.trim().is_empty() {
         return;
     }
-    match server::spotify::auth::refresh(refresh.clone(), client_id).await {
-        Ok(auth) => {
-            let new_refresh = if auth.refresh_token.is_empty() {
-                refresh
-            } else {
-                auth.refresh_token
-            };
-            let new_packed = server::spotify::auth::pack_token(&auth.access_token, &new_refresh);
+    match server::spotify::auth::refresh_packed(&packed, client_id).await {
+        Ok(new_packed) => {
             if let Some(srv) = config.write().server.as_mut() {
                 srv.access_token = Some(new_packed);
             }

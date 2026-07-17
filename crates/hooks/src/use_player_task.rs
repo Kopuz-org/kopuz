@@ -260,9 +260,13 @@ pub fn use_player_task(ctrl: PlayerController) {
         let Some(host) = host else { return };
         let mut rx = host.subscribe();
         let mut ctrl = ctrl;
+        let mut config = config;
         let task = spawn(async move {
             use server::spotify::host::HostEvent;
             use tokio::sync::broadcast::error::RecvError;
+            // Throttles the auth-error token refresh below, so a genuinely dead
+            // session (refresh keeps failing) still surfaces the re-sign-in banner.
+            let mut last_auth_refresh: Option<std::time::Instant> = None;
             loop {
                 let ev = match rx.recv().await {
                     Ok(ev) => ev,
@@ -345,6 +349,46 @@ pub fn use_player_task(ctrl: PlayerController) {
                         }
                     }
                     HostEvent::Error { kind, message } => {
+                        // An expired access token mid-session is recoverable:
+                        // refresh it here — the token-push effect delivers the new
+                        // one to the tab, which reconnects the SDK. Only if a
+                        // recent refresh didn't help does the banner show.
+                        if kind == "auth"
+                            && last_auth_refresh
+                                .is_none_or(|t| t.elapsed() > std::time::Duration::from_secs(60))
+                        {
+                            let creds = {
+                                let cfg = config.peek();
+                                cfg.server
+                                    .as_ref()
+                                    .filter(|s| s.service == MusicService::Spotify)
+                                    .and_then(|s| {
+                                        s.access_token.clone().map(|t| (t, s.url.clone()))
+                                    })
+                            };
+                            if let Some((packed, client_id)) = creds {
+                                last_auth_refresh = Some(std::time::Instant::now());
+                                spawn(async move {
+                                    match server::spotify::auth::refresh_packed(&packed, client_id)
+                                        .await
+                                    {
+                                        Ok(new_packed) => {
+                                            if let Some(srv) = config.write().server.as_mut() {
+                                                srv.access_token = Some(new_packed);
+                                            }
+                                            tracing::info!(
+                                                "spotify token refreshed after SDK auth error"
+                                            );
+                                        }
+                                        Err(e) => tracing::warn!(
+                                            error = %e,
+                                            "spotify auth-error token refresh failed"
+                                        ),
+                                    }
+                                });
+                                continue;
+                            }
+                        }
                         let msg = match kind.as_str() {
                             "account" => "Spotify playback needs a Premium account.".to_string(),
                             "auth" => {

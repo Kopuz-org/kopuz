@@ -347,7 +347,7 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
     let wasPlaying = false, reportedEnded = false, curId = null, nearEnd = false;
     let lastPos = -1, lastPosAt = 0, tokenCalls = 0;
     let prevPaused = true, deathRetries = 0, lastPauseCmdAt = 0, hasPlayed = false;
-    let errTimes = [], stallResumes = 0, autoplayBlocked = false;
+    let errTimes = [], stallResumes = 0, autoplayBlocked = false, isReady = false;
     const IS_FIREFOX = /firefox/i.test(navigator.userAgent);
     const LICENSE_HINT = IS_FIREFOX
       ? "Spotify playback keeps failing — Firefox has a known Spotify player bug. " +
@@ -422,8 +422,15 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
     function onCommand(d) {
       if (d.cmd !== "set_token") logLine("cmd " + d.cmd + (d.position_ms != null ? " " + d.position_ms : ""));
       if (d.cmd === "set_token") {
+        const fresh = (d.token || "") && (d.token || "") !== token;
         token = d.token || "";
         if (!player && window.Spotify) boot();
+        // A rotated token while the SDK is down (expired token killed the last
+        // connect) is the recovery path: reconnect with the fresh one.
+        else if (player && fresh && !isReady) {
+          logLine("token rotated while disconnected — reconnecting SDK");
+          player.connect().then((ok) => logLine("connect() -> " + ok));
+        }
       } else if (!player) {
         return;
       } else if (d.cmd === "pause") { lastPauseCmdAt = Date.now(); player.pause(); }
@@ -463,12 +470,13 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
         volume: 1.0,
       });
       player.addListener("ready", ({ device_id }) => {
+        isReady = true;
         send({ event: "ready", device_id });
         setStatus(autoplayBlocked ? "Click the button to enable playback."
                                   : "Ready — audio plays in this tab.");
         logLine("READY device=" + device_id);
       });
-      player.addListener("not_ready", () => { send({ event: "not_ready" }); setStatus("Device went offline."); logLine("NOT_READY"); });
+      player.addListener("not_ready", () => { isReady = false; send({ event: "not_ready" }); setStatus("Device went offline."); logLine("NOT_READY"); });
       player.addListener("initialization_error", ({ message }) => {
         send({ event: "error", kind: "widevine", message }); setStatus("Playback unavailable: " + message);
         logLine("INIT_ERROR (no Widevine?): " + message);

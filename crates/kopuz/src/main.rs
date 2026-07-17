@@ -872,6 +872,10 @@ fn App() -> Element {
             return;
         };
         spawn(async move {
+            // Refresh right away: the persisted token is usually stale after a
+            // restart (they expire ~hourly), and everything Spotify — including
+            // the browser playback host — auths with it immediately.
+            updates::run_spotify_refresh(config).await;
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(1800)).await;
                 if spotify_refresh_identity.peek().as_deref() != Some(my_identity.as_str()) {

@@ -92,6 +92,23 @@ pub async fn launch_signin_and_extract(client_id: String) -> Result<SpotifyAuth,
     })
 }
 
+/// Refresh a packed `<access>\n<refresh>` pair and return the new pack, keeping
+/// the old refresh token when Spotify doesn't rotate it. Shared by the periodic
+/// refresh loop and the on-demand recovery when the SDK reports an auth error.
+pub async fn refresh_packed(packed: &str, client_id: String) -> Result<String, String> {
+    let (_access, refresh_tok) = unpack_token(packed);
+    if refresh_tok.is_empty() {
+        return Err("no Spotify refresh token stored".to_string());
+    }
+    let auth = refresh(refresh_tok.clone(), client_id).await?;
+    let new_refresh = if auth.refresh_token.is_empty() {
+        refresh_tok
+    } else {
+        auth.refresh_token
+    };
+    Ok(pack_token(&auth.access_token, &new_refresh))
+}
+
 /// Exchange a refresh token for a fresh access token. Spotify may or may not
 /// return a new refresh token; when it doesn't, the caller keeps the old one.
 pub async fn refresh(refresh_token: String, client_id: String) -> Result<SpotifyAuth, String> {
