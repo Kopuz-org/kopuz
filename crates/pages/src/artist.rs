@@ -164,7 +164,7 @@ pub fn Artist(
     use_effect(move || {
         // YT resolves its avatars per-artist below; this server path would yield
         // nothing for it anyway.
-        if !caps().sync || caps().discover {
+        if !caps().sync || caps().albums == ::server::source::AlbumType::YtMusic {
             return;
         }
         if config.read().artist_photo_source != ArtistPhotoSource::ArtistPhoto {
@@ -200,7 +200,7 @@ pub fn Artist(
     // land so the grid fills progressively. Keyed by display name (the grid reads
     // `fetched.get(&display)`).
     use_effect(move || {
-        if !caps().discover {
+        if caps().albums != ::server::source::AlbumType::YtMusic {
             return;
         }
         if config.read().artist_photo_source != ArtistPhotoSource::ArtistPhoto {
@@ -308,7 +308,7 @@ pub fn Artist(
         // render a placeholder rather than its album cover, so the card doesn't
         // visibly swap album→photo (which read as a loading glitch). The map
         // carries a "" sentinel for "resolved, no photo" → album fallback.
-        let is_yt = caps().discover;
+        let is_yt = caps().albums == ::server::source::AlbumType::YtMusic;
         let offline = caps().downloads && *is_offline.read();
 
         // norm → (display name, first album cover-path).

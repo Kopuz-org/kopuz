@@ -262,6 +262,179 @@ pub async fn playlist_entries(access: &str, playlist_id: &str) -> Result<Vec<Tra
     Ok(out)
 }
 
+/// Every track of one album, in album order.
+pub async fn album_tracks_full(access: &str, album_id: &str) -> Result<Vec<Track>, String> {
+    album_remote(access, album_id).await.map(|a| a.tracks)
+}
+
+/// One album with header metadata and every track, for the remote album page
+/// and discover tiles. The tracks endpoint returns simplified items without an
+/// album object, so the album's own name/artwork is stamped into each before
+/// the shared [`parse_track`] mapping.
+pub async fn album_remote(
+    access: &str,
+    album_id: &str,
+) -> Result<crate::source::RemoteAlbum, String> {
+    let album = get_json(access, &format!("{API}/albums/{album_id}"), &[], "album").await?;
+    let album_summary = serde_json::json!({
+        "name": album["name"],
+        "id": album["id"],
+        "images": album["images"],
+    });
+    let stamp = |item: &Value| {
+        let mut item = item.clone();
+        item["album"] = album_summary.clone();
+        parse_track(&item)
+    };
+
+    let first: Vec<Value> = album["tracks"]["items"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let total = album["tracks"]["total"].as_u64().unwrap_or(0);
+    let mut fetched = first.len() as u64;
+    let mut out: Vec<Track> = first.iter().filter_map(stamp).collect();
+
+    while fetched < total {
+        let body = get_json(
+            access,
+            &format!("{API}/albums/{album_id}/tracks"),
+            &[("limit", PAGE.to_string()), ("offset", fetched.to_string())],
+            "album tracks",
+        )
+        .await?;
+        let items = body["items"].as_array().cloned().unwrap_or_default();
+        if items.is_empty() {
+            break;
+        }
+        fetched += items.len() as u64;
+        out.extend(items.iter().filter_map(stamp));
+    }
+    Ok(crate::source::RemoteAlbum {
+        browse_id: album_id.to_string(),
+        title: album["name"].as_str().unwrap_or_default().to_string(),
+        artist: album["artists"]
+            .as_array()
+            .and_then(|a| a.first())
+            .and_then(|a| a["name"].as_str())
+            .map(str::to_string),
+        year: album["release_date"]
+            .as_str()
+            .map(|d| d.chars().take(4).collect()),
+        thumbnail: first_image(&album["images"]),
+        audio_playlist_id: None,
+        tracks: out,
+    })
+}
+
+/// Discover-home shelves from the personalization endpoints that survived
+/// Spotify's dev-mode API cuts: top tracks (two ranges), recently played, and
+/// new releases. Shelves whose endpoint fails (e.g. a token signed in before
+/// the `user-top-read` / `user-read-recently-played` scopes were added) are
+/// skipped, so the page degrades instead of erroring.
+pub async fn discover_home(access: &str) -> Result<crate::ytmusic::discover::DiscoverHome, String> {
+    use crate::ytmusic::discover::{DiscoverHome, DiscoverItem, DiscoverShelf};
+
+    let song_shelf = |title: &str, tracks: Vec<Track>| DiscoverShelf {
+        title: title.to_string(),
+        strapline: None,
+        more_browse_id: None,
+        items: tracks
+            .into_iter()
+            .map(|t| DiscoverItem::Song(Box::new(t)))
+            .collect(),
+        is_song_list: false,
+    };
+
+    let mut shelves = Vec::new();
+
+    match get_json(
+        access,
+        &format!("{API}/me/top/tracks"),
+        &[
+            ("limit", "20".to_string()),
+            ("time_range", "short_term".to_string()),
+        ],
+        "top tracks",
+    )
+    .await
+    {
+        Ok(body) => {
+            let tracks: Vec<Track> = body["items"]
+                .as_array()
+                .map(|items| items.iter().filter_map(parse_track).collect())
+                .unwrap_or_default();
+            if !tracks.is_empty() {
+                shelves.push(song_shelf("On repeat", tracks));
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "spotify discover: top tracks unavailable"),
+    }
+
+    match get_json(
+        access,
+        &format!("{API}/me/player/recently-played"),
+        &[("limit", "50".to_string())],
+        "recently played",
+    )
+    .await
+    {
+        Ok(body) => {
+            let mut seen = std::collections::HashSet::new();
+            let tracks: Vec<Track> = body["items"]
+                .as_array()
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|i| parse_track(&i["track"]))
+                        .filter(|t| seen.insert(t.id.key().into_owned()))
+                        .take(20)
+                        .collect()
+                })
+                .unwrap_or_default();
+            if !tracks.is_empty() {
+                shelves.push(song_shelf("Jump back in", tracks));
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "spotify discover: recently played unavailable"),
+    }
+
+    match get_json(
+        access,
+        &format!("{API}/me/top/tracks"),
+        &[
+            ("limit", "20".to_string()),
+            ("time_range", "long_term".to_string()),
+        ],
+        "top tracks (all time)",
+    )
+    .await
+    {
+        Ok(body) => {
+            let tracks: Vec<Track> = body["items"]
+                .as_array()
+                .map(|items| items.iter().filter_map(parse_track).collect())
+                .unwrap_or_default();
+            if !tracks.is_empty() {
+                shelves.push(song_shelf("All-time favorites", tracks));
+            }
+        }
+        Err(e) => tracing::warn!(error = %e, "spotify discover: all-time top tracks unavailable"),
+    }
+
+    if shelves.is_empty() {
+        return Err(
+            "Spotify discover returned nothing — if you signed in before this feature, \
+             sign in again from Settings to grant the new permissions."
+                .to_string(),
+        );
+    }
+    Ok(DiscoverHome {
+        shelves,
+        continuation: None,
+    })
+}
+
 /// Saved albums with their tracks, for the library sync snapshot.
 pub async fn saved_albums(access: &str) -> Result<(Vec<reader::Album>, Vec<Track>), String> {
     let mut albums = Vec::new();
@@ -306,7 +479,8 @@ pub async fn saved_albums(access: &str) -> Result<(Vec<reader::Album>, Vec<Track
     Ok((albums, tracks))
 }
 
-/// Like / unlike a track.
+/// Like / unlike a track via the consolidated save-library-items endpoint —
+/// the old `PUT/DELETE /me/tracks` returns a bare 403 for newer apps.
 pub async fn set_saved(access: &str, track_id: &str, on: bool) -> Result<(), String> {
     let method = if on {
         reqwest::Method::PUT
@@ -317,8 +491,8 @@ pub async fn set_saved(access: &str, track_id: &str, on: bool) -> Result<(), Str
     let mut attempt = 0;
     loop {
         let resp = client()
-            .request(method.clone(), format!("{API}/me/tracks"))
-            .query(&[("ids", track_id)])
+            .request(method.clone(), format!("{API}/me/library"))
+            .query(&[("uris", format!("spotify:track:{track_id}"))])
             .bearer_auth(access)
             .send()
             .await

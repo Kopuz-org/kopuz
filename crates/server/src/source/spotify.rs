@@ -53,7 +53,7 @@ impl MediaSource for SpotifySource {
             folders: false,
             sync: true,
             downloads: false,
-            discover: false,
+            discover: true,
             radio: false,
             playlists: PlaylistOps::None,
             artist_view: ArtistView::Library,
@@ -117,6 +117,31 @@ impl MediaSource for SpotifySource {
     ) -> Result<(Vec<reader::Track>, Vec<reader::Album>), SourceError> {
         let token = self.token()?;
         crate::spotify::api::search(token, query)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    async fn fetch_album_tracks(&self, album_id: &str) -> Result<Vec<reader::Track>, SourceError> {
+        let token = self.token()?;
+        crate::spotify::api::album_tracks_full(token, album_id)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    async fn fetch_album_by_ref(
+        &self,
+        id: &str,
+    ) -> Result<Option<super::RemoteAlbum>, SourceError> {
+        let token = self.token()?;
+        crate::spotify::api::album_remote(token, id)
+            .await
+            .map(|a| (!a.tracks.is_empty()).then_some(a))
+            .map_err(SourceError::from)
+    }
+
+    async fn discover_home(&self) -> Result<crate::ytmusic::discover::DiscoverHome, SourceError> {
+        let token = self.token()?;
+        crate::spotify::api::discover_home(token)
             .await
             .map_err(SourceError::from)
     }

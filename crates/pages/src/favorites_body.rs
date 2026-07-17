@@ -634,7 +634,7 @@ pub fn FavoritesBody(
                     {
                         // Anonymous YT shows a sign-in prompt; otherwise the
                         // standard empty state with a source-appropriate hint.
-                        let yt_anon = caps().discover
+                        let yt_anon = caps().albums == ::server::source::AlbumType::YtMusic
                             && config
                                 .read()
                                 .server
