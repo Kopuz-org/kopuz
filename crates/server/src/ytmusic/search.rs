@@ -494,6 +494,7 @@ fn parse_search_row(
         // Unlinked artist text (no channel run). Fall back to the first run
         // that isn't the duration, album, or — for albumless rows — the
         // view-count tail. The leading run is the artist in every observed
+        // shape.
         artists = runs
             .iter()
             .map(|(t, _)| t.clone())

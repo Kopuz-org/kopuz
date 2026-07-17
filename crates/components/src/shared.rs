@@ -28,6 +28,9 @@ pub fn toggle_favorite(current_track: Option<reader::models::Track>) {
     spawn(async move {
         let new_fav = !track.is_favorite(&source).await;
         if new_fav {
+            // Cache the track so the favorites view (which resolves refs → the
+            // `tracks` table) can display it immediately, instead of only after
+            // the next sync upserts it. Harmless for a track already cached.
             let _ = source.upsert_tracks(std::slice::from_ref(&track)).await;
         }
         if let Err(e) = track.set_favorite(&source, new_fav).await {
@@ -37,6 +40,8 @@ pub fn toggle_favorite(current_track: Option<reader::models::Track>) {
             gens.bump(hooks::db_reactivity::Table::Favorites);
             gens.bump(hooks::db_reactivity::Table::Tracks);
         }
+        // A like on a syncing source is a pending DB row until the reconciler
+        // flushes it — nudge it. (Local has no remote to push to.)
         if source.capabilities().sync {
             hooks::use_sync_task::nudge();
         }

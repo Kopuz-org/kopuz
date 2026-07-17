@@ -792,6 +792,7 @@ fn ServerHeroBanner(
                                                 let _ = t.set_favorite(&source, new_fav).await;
                                             }
                                             gens.bump(Table::Favorites);
+                                            // Pending DB rows; the reconciler pushes them.
                                             hooks::use_sync_task::nudge();
                                         });
                                     },
