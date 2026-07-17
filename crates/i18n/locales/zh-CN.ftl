@@ -21,6 +21,7 @@ music_directory = 音乐目录
 service = 服务：{ $name }
 connected = ● 已连接
 disconnected = ● 未连接
+connecting = ● 连接中…
 reconnect = 重新连接
 remove = 移除
 add = 添加

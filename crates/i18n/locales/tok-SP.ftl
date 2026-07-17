@@ -21,6 +21,7 @@ music_directory = 󱤿󱤕
 service = 󱤿󱥌󱦝{ $name }
 connected = ● 󱤬
 disconnected = ● 󱤬󱤂
+connecting = ● 󱤥󱤬
 reconnect = 󱥄󱤬󱥝
 remove = 󱥄󱥶
 add = 󱥄󱥌

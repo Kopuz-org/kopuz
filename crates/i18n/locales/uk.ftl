@@ -21,6 +21,7 @@ music_directory = Папка з музикою
 service = Сервіс: { $name }
 connected = ● Підключено
 disconnected = ● Відключено
+connecting = ● З'єднання…
 reconnect = Перепідключити
 remove = Видалити
 add = Додати

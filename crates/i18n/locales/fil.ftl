@@ -21,6 +21,7 @@ music_directory = Direktoryo ng Musika
 service = Serbisyo: { $name }
 connected = ● Konektado
 disconnected = ● Hindi Konektado
+connecting = ● Kumukonekta…
 reconnect = Muling Kumonekta
 remove = Tanggalin
 add = Idagdag

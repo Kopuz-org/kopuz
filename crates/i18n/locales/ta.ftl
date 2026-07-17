@@ -21,6 +21,7 @@ music_directory = இசை கோப்புறை
 service = சேவை: { $name }
 connected = ● இணைக்கப்பட்டது
 disconnected = ● துண்டிக்கப்பட்டது
+connecting = ● இணைக்கிறது…
 reconnect = மீண்டும் இணை
 remove = அகற்று
 add = சேர்

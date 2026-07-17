@@ -21,6 +21,7 @@ music_directory = Direktori Musik
 service = Layanan: { $name }
 connected = ● Tersambung
 disconnected = ● Terputus
+connecting = ● Menyambungkan…
 reconnect = Sambungkan ulang
 remove = Hapus
 add = Tambahkan

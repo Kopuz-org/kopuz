@@ -21,6 +21,7 @@ music_directory = Zene mappa
 service = Szolgáltatás: { $name }
 connected = ● Csatlakoztatva
 disconnected = ● Nincs kapcsolat
+connecting = ● Csatlakozás…
 reconnect = Újracsatlakozás
 remove = Eltávolítás
 add = Hozzáadás

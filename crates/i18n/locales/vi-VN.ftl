@@ -21,6 +21,7 @@ music_directory = Thư mục nhạc
 service = Dịch vụ: { $name }
 connected = ● Đã kết nối
 disconnected = ● Đã ngắt kết nối
+connecting = ● Đang kết nối…
 reconnect = Kết nối lại
 remove = Xóa
 add = Thêm
