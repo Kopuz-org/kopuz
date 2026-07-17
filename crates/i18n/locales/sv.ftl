@@ -21,6 +21,7 @@ music_directory = Musikkatalog
 service = Tjänst: { $name }
 connected = ● Ansluten
 disconnected = ● Frånkopplad
+connecting = ● Ansluter…
 reconnect = Återanslut
 remove = Ta bort
 add = Lägg till
@@ -54,6 +55,9 @@ channel_mode_swap_left_right = Växla V/H
 device_change_behavior = Vid byte av utdataenhet
 device_change_resume = Fortsätt spela
 device_change_pause = Pausa
+sample_rate_mode = Samplingsfrekvens för utdata
+sample_rate_mode_system = Följ systemet
+sample_rate_mode_source = Matcha låten
 discord_presence = Discord-närvaro
 connectivity = Uppkoppling
 discord_presence_paused = Visa pausad status i Discord
@@ -403,9 +407,6 @@ lastfm_first = Last.fm först
 musicbrainz_only = Endast MusicBrainz
 lastfm_only = Endast Last.fm
 remove_cover = Ta bort omslag
-artist_photo_source = Källa för artistbilder
-artist_photo = Artistbild
-album_cover = Albumomslag
 
 # Radio Page
 radio_filter_stations = Filtrera stationer…
