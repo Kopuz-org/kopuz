@@ -622,6 +622,9 @@ impl PlayerController {
     }
 
     pub fn displayed_progress_secs_f64(&self) -> f64 {
+        if *self.external_active.peek() {
+            return *self.current_song_progress.peek() as f64;
+        }
         // Mid-crossfade the bar shows the outgoing (fading) track's live position.
         if self.pending_crossfade_ui.peek().is_some()
             && let Some(fading) = self.player.peek().fading_position()
