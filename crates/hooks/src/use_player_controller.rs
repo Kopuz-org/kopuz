@@ -455,7 +455,6 @@ impl PlayerController {
         }
     }
 
-
     /// The current Spotify OAuth access token, if Spotify is the active server.
     pub(crate) fn spotify_access(&self) -> Option<String> {
         let cfg = self.config.peek();
