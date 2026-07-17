@@ -71,6 +71,21 @@ fn send_bg_cmd(cmd: BgCmd) {
     }
 }
 
+/// Record one completed listen for the current track — the same accounting the
+/// engine's completion path does, used by the external (Spotify) advance paths.
+fn record_listen(mut config: Signal<AppConfig>, ctrl: &PlayerController) {
+    let idx = *ctrl.current_queue_index.peek();
+    if let Some(track) = ctrl.get_track_at(idx) {
+        let track_id = track.id.uid().to_string();
+        *config
+            .write()
+            .listen_counts
+            .entry(track_id.clone())
+            .or_insert(0) += 1;
+        bump_listen_count_db(track_id, ctrl.db.peek().clone());
+    }
+}
+
 fn drain_bg_cmds() -> Vec<BgCmd> {
     let mut cmds = Vec::new();
     if let Some(lock) = BG_CMD_RX.get()
@@ -280,9 +295,12 @@ pub fn use_player_task(ctrl: PlayerController) {
                         if st.duration_ms > 0 {
                             ctrl.current_song_duration.set(st.duration_ms / 1000);
                         }
-                        if !st.is_playing && ended_before {
+                        let at_end = st.progress_ms == 0
+                            || (st.duration_ms > 0 && st.progress_ms + 1500 >= st.duration_ms);
+                        if !st.is_playing && ended_before && at_end {
                             prev_playing = false;
                             prev_progress = 0;
+                            record_listen(config, &ctrl);
                             ctrl.play_next();
                             continue;
                         }
@@ -292,6 +310,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                     }
                     Ok(None) => {
                         if ended_before {
+                            record_listen(config, &ctrl);
                             ctrl.play_next();
                         }
                         prev_playing = false;
@@ -333,12 +352,14 @@ pub fn use_player_task(ctrl: PlayerController) {
                         if let (Some(uri), Some(access)) = (pending, ctrl.spotify_access()) {
                             ctrl.spotify_pending_uri.set(None);
                             let dev = device_id.clone();
+                            let mut error = ctrl.playback_error;
                             spawn(async move {
                                 if let Err(e) =
                                     server::spotify::api::start_playback(&access, &dev, &[uri])
                                         .await
                                 {
                                     tracing::warn!(error = %e, "spotify deferred start failed");
+                                    error.set(Some(e));
                                 }
                             });
                         }
@@ -374,6 +395,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                             && ctrl.spotify_device_override.peek().is_none()
                         {
                             if ended {
+                                record_listen(config, &ctrl);
                                 ctrl.play_next();
                             } else {
                                 ctrl.is_playing.set(!paused);
@@ -400,13 +422,18 @@ pub fn use_player_task(ctrl: PlayerController) {
                                 ctrl.spotify_device.peek().clone(),
                             ) {
                                 ctrl.spotify_pending_uri.set(None);
+                                let mut error = ctrl.playback_error;
                                 spawn(async move {
-                                    let _ = server::spotify::api::start_playback(
+                                    if let Err(e) = server::spotify::api::start_playback(
                                         &access,
                                         &device,
                                         &[uri],
                                     )
-                                    .await;
+                                    .await
+                                    {
+                                        tracing::warn!(error = %e, "spotify activation start failed");
+                                        error.set(Some(e));
+                                    }
                                 });
                             }
                         }
@@ -427,22 +454,38 @@ pub fn use_player_task(ctrl: PlayerController) {
                             };
                             if let Some((packed, client_id)) = creds {
                                 last_auth_refresh = Some(std::time::Instant::now());
+                                let mut error = ctrl.playback_error;
                                 spawn(async move {
-                                    match server::spotify::auth::refresh_packed(&packed, client_id)
-                                        .await
+                                    match server::spotify::auth::refresh_packed(
+                                        &packed,
+                                        client_id.clone(),
+                                    )
+                                    .await
                                     {
                                         Ok(new_packed) => {
-                                            if let Some(srv) = config.write().server.as_mut() {
+                                            let mut cfg = config.write();
+                                            if let Some(srv) = cfg.server.as_mut()
+                                                && srv.service == MusicService::Spotify
+                                                && srv.url == client_id
+                                                && srv.access_token.as_deref()
+                                                    == Some(packed.as_str())
+                                            {
                                                 srv.access_token = Some(new_packed);
+                                                tracing::info!(
+                                                    "spotify token refreshed after SDK auth error"
+                                                );
                                             }
-                                            tracing::info!(
-                                                "spotify token refreshed after SDK auth error"
-                                            );
                                         }
-                                        Err(e) => tracing::warn!(
-                                            error = %e,
-                                            "spotify auth-error token refresh failed"
-                                        ),
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                error = %e,
+                                                "spotify auth-error token refresh failed"
+                                            );
+                                            error.set(Some(
+                                                "Spotify session expired — re-sign in from                                                  Settings."
+                                                    .to_string(),
+                                            ));
+                                        }
                                     }
                                 });
                                 continue;

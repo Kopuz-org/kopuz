@@ -140,6 +140,9 @@ pub struct PlayerController {
     /// reported position and when it arrived. Reads interpolate elapsed time on
     /// top, so second-granular state ticks don't lag the lyric clock.
     pub(crate) spotify_progress_anchor: Signal<Option<(u64, std::time::Instant)>>,
+    /// Whether a host launch is in flight — serializes rapid first plays so
+    /// they can't spawn multiple hosts (and browser tabs).
+    pub(crate) spotify_host_starting: Signal<bool>,
     /// Whether the current track is playing through the Spotify host rather than
     /// the engine — transport methods and the progress pump branch on this.
     pub(crate) external_active: Signal<bool>,
@@ -478,23 +481,34 @@ impl PlayerController {
 
     /// Start the browser playback host if it isn't running yet (first Spotify play).
     fn ensure_spotify_host(&mut self) {
-        if self.spotify_host.peek().is_some() {
+        if self.spotify_host.peek().is_some() || *self.spotify_host_starting.peek() {
             return;
         }
         let Some(access) = self.spotify_access() else {
             return;
         };
         let browser = self.config.peek().spotify_browser.clone();
+        self.spotify_host_starting.set(true);
         let mut host_sig = self.spotify_host;
+        let mut starting = self.spotify_host_starting;
         let mut error = self.playback_error;
+        let mut external = self.external_active;
+        let mut playing = self.is_playing;
+        let mut pending = self.spotify_pending_uri;
         spawn(async move {
             match ::server::spotify::host::SpotifyHost::start(access, browser).await {
                 Ok(host) => host_sig.set(Some(host)),
                 Err(e) => {
                     tracing::warn!(error = %e, "spotify host failed to start");
                     error.set(Some(e));
+                    if *external.peek() {
+                        external.set(false);
+                        playing.set(false);
+                        pending.set(None);
+                    }
                 }
             }
+            starting.set(false);
         });
     }
 
@@ -558,11 +572,13 @@ impl PlayerController {
         if let Some(device) = self.spotify_device_override.peek().clone() {
             if let Some(access) = self.spotify_access() {
                 self.spotify_pending_uri.set(None);
+                let mut error = self.playback_error;
                 spawn(async move {
                     if let Err(e) =
                         ::server::spotify::api::start_playback(&access, &device, &[uri]).await
                     {
                         tracing::warn!(error = %e, "spotify start_playback failed");
+                        error.set(Some(e));
                     }
                 });
             }
@@ -577,11 +593,13 @@ impl PlayerController {
             (Some(access), Some(device)) => {
                 self.spotify_pending_uri.set(None);
                 let uri = uri.clone();
+                let mut error = self.playback_error;
                 spawn(async move {
                     if let Err(e) =
                         ::server::spotify::api::start_playback(&access, &device, &[uri]).await
                     {
                         tracing::warn!(error = %e, "spotify start_playback failed");
+                        error.set(Some(e));
                     }
                 });
             }
@@ -590,10 +608,13 @@ impl PlayerController {
     }
 
     /// Stop external (Spotify) playback and hand control back to the engine.
+    /// Also drops any deferred play so a later `Ready`/`Activated` event can't
+    /// start an obsolete track over whatever plays next.
     pub(crate) fn stop_external_playback(&mut self) {
         if !*self.external_active.peek() {
             return;
         }
+        self.spotify_pending_uri.set(None);
         self.spotify_transport_pause();
         self.external_active.set(false);
     }
@@ -1163,6 +1184,7 @@ pub fn use_player_controller(
     let spotify_activated = use_signal(|| false);
     let spotify_device_override = use_signal(|| None::<String>);
     let spotify_progress_anchor = use_signal(|| None::<(u64, std::time::Instant)>);
+    let spotify_host_starting = use_signal(|| false);
     let external_active = use_signal(|| false);
     let db = use_signal(move || db_handle);
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
@@ -1239,6 +1261,7 @@ pub fn use_player_controller(
         spotify_activated,
         spotify_device_override,
         spotify_progress_anchor,
+        spotify_host_starting,
         external_active,
     }
 }

@@ -122,12 +122,17 @@ pub async fn run_spotify_refresh(mut config: Signal<config::AppConfig>) {
     if client_id.trim().is_empty() {
         return;
     }
-    match server::spotify::auth::refresh_packed(&packed, client_id).await {
+    match server::spotify::auth::refresh_packed(&packed, client_id.clone()).await {
         Ok(new_packed) => {
-            if let Some(srv) = config.write().server.as_mut() {
+            let mut cfg = config.write();
+            if let Some(srv) = cfg.server.as_mut()
+                && srv.service == config::MusicService::Spotify
+                && srv.url == client_id
+                && srv.access_token.as_deref() == Some(packed.as_str())
+            {
                 srv.access_token = Some(new_packed);
+                tracing::debug!("spotify token refreshed");
             }
-            tracing::debug!("spotify token refreshed");
         }
         Err(e) => tracing::warn!(error = %e, "spotify token refresh failed"),
     }

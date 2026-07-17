@@ -855,10 +855,8 @@ fn App() -> Element {
             return;
         }
         let identity: Option<String> = config.read().server.as_ref().and_then(|s| {
-            (s.service == config::MusicService::Spotify)
-                .then(|| s.user_id.clone())
-                .flatten()
-                .filter(|t| !t.is_empty())
+            (s.service == config::MusicService::Spotify && s.access_token.is_some())
+                .then(|| s.id.clone().unwrap_or_else(|| s.url.clone()))
         });
         if identity == *spotify_refresh_identity.peek() {
             return;
@@ -1720,7 +1718,12 @@ fn App() -> Element {
                 .read()
                 .server
                 .as_ref()
-                .map(|s| s.service == config::MusicService::YtMusic)
+                .map(|s| {
+                    matches!(
+                        s.service,
+                        config::MusicService::YtMusic | config::MusicService::Spotify
+                    )
+                })
                 .unwrap_or(false)
             {
                 if let Some(msg) = ctrl.playback_error.read().clone() {

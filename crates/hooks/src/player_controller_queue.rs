@@ -302,10 +302,7 @@ impl PlayerController {
         // stream open, etc.) so its eventual completion doesn't start playback
         // against the cleared queue or post a stale error banner.
         self.cancel_load_task();
-        if *self.external_active.peek() {
-            self.spotify_transport_pause();
-        }
-        self.external_active.set(false);
+        self.stop_external_playback();
         self.set_intent(PlaybackIntent::Stopped);
         self.cancel_radio_task();
         self.player.peek().stop_for_transition();

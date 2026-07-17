@@ -84,10 +84,24 @@ impl SpotifyHost {
             token: token.clone(),
         };
 
-        tokio::spawn(accept_loop(listener, cmd_tx, event_tx, token));
-
-        let url = format!("http://127.0.0.1:{port}/");
+        let nonce = {
+            let bytes: [u8; 16] = rand::random();
+            bytes.iter().fold(String::new(), |mut s, b| {
+                use std::fmt::Write as _;
+                let _ = write!(s, "{b:02x}");
+                s
+            })
+        };
+        let url = format!("http://127.0.0.1:{port}/?k={nonce}");
         open_player_page(&url, browser.as_deref())?;
+
+        tokio::spawn(accept_loop(
+            listener,
+            cmd_tx,
+            event_tx,
+            token,
+            Arc::new(WsGate { nonce, port }),
+        ));
 
         Ok(host)
     }
@@ -354,11 +368,39 @@ fn open_player_page(url: &str, preferred: Option<&str>) -> Result<(), String> {
     )
 }
 
+/// Handshake requirements for the command WebSocket. Any local process or web
+/// page can reach the loopback port, and the socket carries the OAuth token —
+/// so upgrades must present the per-host nonce (only ever embedded in the URL
+/// the host itself opened) from a same-origin page.
+struct WsGate {
+    nonce: String,
+    port: u16,
+}
+
+impl WsGate {
+    fn authorizes(&self, path: &str, head: &str) -> bool {
+        if path != format!("/ws?k={}", self.nonce) {
+            return false;
+        }
+        let expected = [
+            format!("http://127.0.0.1:{}", self.port),
+            format!("http://localhost:{}", self.port),
+        ];
+        head.lines().any(|line| {
+            let Some((name, value)) = line.split_once(':') else {
+                return false;
+            };
+            name.trim().eq_ignore_ascii_case("origin") && expected.iter().any(|e| value.trim() == e)
+        })
+    }
+}
+
 async fn accept_loop(
     listener: tokio::net::TcpListener,
     cmd_tx: broadcast::Sender<String>,
     event_tx: broadcast::Sender<HostEvent>,
     token: Arc<Mutex<String>>,
+    gate: Arc<WsGate>,
 ) {
     loop {
         let Ok((stream, _)) = listener.accept().await else {
@@ -367,8 +409,9 @@ async fn accept_loop(
         let cmd_tx = cmd_tx.clone();
         let event_tx = event_tx.clone();
         let token = token.clone();
+        let gate = gate.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_stream(stream, cmd_tx, event_tx, token).await {
+            if let Err(e) = handle_stream(stream, cmd_tx, event_tx, token, gate).await {
                 tracing::debug!(error = %e, "spotify host connection ended");
             }
         });
@@ -380,10 +423,11 @@ async fn handle_stream(
     cmd_tx: broadcast::Sender<String>,
     event_tx: broadcast::Sender<HostEvent>,
     token: Arc<Mutex<String>>,
+    gate: Arc<WsGate>,
 ) -> Result<(), String> {
     let mut peek = [0u8; 2048];
     let n = stream.peek(&mut peek).await.map_err(|e| e.to_string())?;
-    let head = String::from_utf8_lossy(&peek[..n]);
+    let head = String::from_utf8_lossy(&peek[..n]).into_owned();
     let path = head
         .lines()
         .next()
@@ -393,6 +437,10 @@ async fn handle_stream(
     let is_ws = head.to_ascii_lowercase().contains("upgrade: websocket");
 
     if is_ws {
+        if !gate.authorizes(&path, &head) {
+            let _ = stream.shutdown().await;
+            return Err("unauthorized websocket upgrade rejected".to_string());
+        }
         let ws = tokio_tungstenite::accept_async(stream)
             .await
             .map_err(|e| e.to_string())?;
@@ -626,7 +674,7 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
 
     let wsRetries = 0;
     function connect() {
-      ws = new WebSocket("ws://" + location.host + "/ws");
+      ws = new WebSocket("ws://" + location.host + "/ws" + location.search);
       ws.onopen = () => { wsRetries = 0; };
       ws.onmessage = (m) => { let d; try { d = JSON.parse(m.data); } catch (e) { return; } onCommand(d); };
       ws.onclose = () => {

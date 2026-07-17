@@ -456,6 +456,7 @@ pub async fn saved_albums(access: &str) -> Result<(Vec<reader::Album>, Vec<Track
             let album = &item["album"];
             if let Some(a) = parse_album(album) {
                 let cover = first_image(&album["images"]);
+                let mut album_tracks = Vec::new();
                 if let Some(entries) = album["tracks"]["items"].as_array() {
                     for entry in entries {
                         if let Some(mut track) = parse_track(entry) {
@@ -464,10 +465,18 @@ pub async fn saved_albums(access: &str) -> Result<(Vec<reader::Album>, Vec<Track
                             if track.cover.is_none() {
                                 track.cover = cover.clone();
                             }
-                            tracks.push(track);
+                            album_tracks.push(track);
                         }
                     }
                 }
+                let total = album["tracks"]["total"].as_u64().unwrap_or(0);
+                if (album_tracks.len() as u64) < total
+                    && let Ok(full) = album_tracks_full(access, &a.id).await
+                    && !full.is_empty()
+                {
+                    album_tracks = full;
+                }
+                tracks.extend(album_tracks);
                 albums.push(a);
             }
         }
@@ -497,13 +506,18 @@ pub async fn set_saved(access: &str, track_id: &str, on: bool) -> Result<(), Str
             .send()
             .await
             .map_err(|e| e.to_string())?;
-        if resp.status().as_u16() == 429 && attempt < MAX_RETRIES {
+        let status = resp.status();
+        if status.as_u16() == 429 && attempt < MAX_RETRIES {
             let wait = retry_after(&resp);
             attempt += 1;
             tokio::time::sleep(std::time::Duration::from_secs(wait)).await;
             continue;
         }
-        return ok_json(resp, "set saved").await.map(|_| ());
+        if status.is_success() {
+            return Ok(());
+        }
+        let body = resp.text().await.unwrap_or_default();
+        return Err(format!("set saved failed ({status}): {body}"));
     }
 }
 

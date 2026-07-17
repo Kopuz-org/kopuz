@@ -18,7 +18,7 @@ const TOKEN_URL: &str = "https://accounts.spotify.com/api/token";
 /// `streaming` is required by the Web Playback SDK; the rest cover library reads
 /// and issuing playback on the SDK device via the Connect API.
 const SCOPES: &str = "streaming user-read-email user-read-private user-library-read \
-     user-library-modify playlist-read-private user-read-playback-state \
+     user-library-modify playlist-read-private playlist-read-collaborative user-read-playback-state \
      user-modify-playback-state user-top-read user-read-recently-played";
 
 /// Tokens (and, on initial sign-in, the account id) from a successful auth.
