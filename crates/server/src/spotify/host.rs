@@ -39,6 +39,14 @@ pub enum HostEvent {
     },
     /// The user clicked the page's enable-playback button (autoplay gesture).
     Activated,
+    /// A media-key action captured by the tab's Media Session (OS now-playing
+    /// widget / keyboard media keys target the browser, since it owns the
+    /// audio). `action` is `play`/`pause`/`next`/`prev`/`seek`; kopuz routes it
+    /// through its own queue — the SDK only ever holds one track.
+    Media {
+        action: String,
+        position_ms: Option<u64>,
+    },
     /// A player error. `kind` is one of `account`/`auth`/`widevine`/`playback`/
     /// `license` (DRM license failures — tracks dying ~10s in; the message is
     /// already user-facing).
@@ -299,6 +307,10 @@ fn emit_event(val: &Value, event_tx: &broadcast::Sender<HostEvent>) {
         },
         "not_ready" => HostEvent::NotReady,
         "activated" => HostEvent::Activated,
+        "media" => HostEvent::Media {
+            action: val["action"].as_str().unwrap_or_default().to_string(),
+            position_ms: val["position_ms"].as_u64(),
+        },
         "state" => HostEvent::State {
             paused: val["paused"].as_bool().unwrap_or(true),
             position_ms: val["position"].as_u64().unwrap_or(0),
@@ -413,6 +425,40 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
       } catch (e) { done(false, e && e.name); }
     }
 
+    // The OS now-playing widget and media keys target this tab (it owns the
+    // audio), but the SDK's own handlers only know its single loaded track —
+    // skip would do nothing. Claim the Media Session and forward every action
+    // to kopuz, whose queue actually decides what plays. Re-asserted on each
+    // track change because the SDK re-registers its own handlers.
+    function claimMediaSession(cur) {
+      if (!("mediaSession" in navigator)) return;
+      const ms = navigator.mediaSession;
+      const forward = (action, extra) => () => send(Object.assign({ event: "media", action }, extra));
+      try {
+        ms.setActionHandler("play", forward("play"));
+        ms.setActionHandler("pause", forward("pause"));
+        ms.setActionHandler("nexttrack", forward("next"));
+        ms.setActionHandler("previoustrack", forward("prev"));
+        ms.setActionHandler("seekto", (d) => {
+          if (d && d.seekTime != null) send({ event: "media", action: "seek", position_ms: Math.round(d.seekTime * 1000) });
+        });
+      } catch (e) {}
+      if (cur && typeof MediaMetadata !== "undefined") {
+        try {
+          ms.metadata = new MediaMetadata({
+            title: cur.name || "",
+            artist: (cur.artists || []).map((a) => a.name).join(", "),
+            album: (cur.album && cur.album.name) || "",
+            artwork: ((cur.album && cur.album.images) || []).map((i) => ({
+              src: i.url,
+              sizes: (i.width || 300) + "x" + (i.height || 300),
+              type: "image/jpeg",
+            })),
+          });
+        } catch (e) {}
+      }
+    }
+
     function connect() {
       ws = new WebSocket("ws://" + location.host + "/ws");
       ws.onmessage = (m) => { let d; try { d = JSON.parse(m.data); } catch (e) { return; } onCommand(d); };
@@ -471,6 +517,7 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
       });
       player.addListener("ready", ({ device_id }) => {
         isReady = true;
+        claimMediaSession(null);
         send({ event: "ready", device_id });
         setStatus(autoplayBlocked ? "Click the button to enable playback."
                                   : "Ready — audio plays in this tab.");
@@ -561,6 +608,7 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
         deathRetries = 0;
         prevPaused = paused;
         wasPlaying = !paused;
+        claimMediaSession(cur);
         lastSentKey = paused + "|" + pos + "|" + tid;
         send({ event: "state", paused, position: pos, duration: dur, track_id: tid, ended: false });
         return;

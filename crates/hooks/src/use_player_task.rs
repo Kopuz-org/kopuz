@@ -300,6 +300,28 @@ pub fn use_player_task(ctrl: PlayerController) {
                         }
                     }
                     HostEvent::NotReady => {}
+                    // OS media keys / now-playing widget actions land in the
+                    // browser tab (it owns the audio); route them through the
+                    // kopuz queue, which the SDK's single-track session can't do.
+                    HostEvent::Media {
+                        action,
+                        position_ms,
+                    } => {
+                        if *ctrl.external_active.peek() {
+                            match action.as_str() {
+                                "play" => ctrl.resume(),
+                                "pause" => ctrl.pause(),
+                                "next" => ctrl.play_next(),
+                                "prev" => ctrl.play_prev(),
+                                "seek" => {
+                                    if let Some(ms) = position_ms {
+                                        ctrl.seek(std::time::Duration::from_millis(ms));
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
                     HostEvent::State {
                         paused,
                         position_ms,
