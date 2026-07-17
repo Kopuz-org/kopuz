@@ -139,13 +139,16 @@ pub async fn me(access: &str) -> Result<(), String> {
 
 /// Search tracks (and albums) for `query`.
 pub async fn search(access: &str, query: &str) -> Result<(Vec<Track>, Vec<reader::Album>), String> {
+    // Development-mode apps (the norm here — each user registers their own) are
+    // capped at limit=10 on /search; anything higher is a 400 "Invalid limit".
+    // Library endpoints still take 50, so only search uses the small page.
     let body = get_json(
         access,
         &format!("{API}/search"),
         &[
             ("q", query.to_string()),
             ("type", "track,album".to_string()),
-            ("limit", "50".to_string()),
+            ("limit", "10".to_string()),
         ],
         "search",
     )

@@ -60,7 +60,14 @@ pub fn use_search_data(search_query: Signal<String>, config: Signal<AppConfig>) 
                 return None;
             }
             let span = tracing::info_span!("query.search", source = conf.active_source.as_str());
-            let (tracks, albums) = source.search(&query).instrument(span).await.ok()?;
+            let (tracks, albums) = source
+                .search(&query)
+                .instrument(span)
+                .await
+                // The UI shows the genre fallback on error; without a log the
+                // failure is invisible (this hid a Spotify 400 for a while).
+                .inspect_err(|e| tracing::warn!(error = %e, "search failed"))
+                .ok()?;
             let result_tracks: TrackRes = tracks
                 .iter()
                 .map(|t| (t.clone(), server::cover::track(&conf, t, 80)))
