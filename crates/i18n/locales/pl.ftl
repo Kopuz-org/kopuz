@@ -21,6 +21,7 @@ music_directory = Biblioteka Muzyki
 service = Usługa: { $name }
 connected = ● Połączono
 disconnected = ● Rozłączono
+connecting = ● Łączenie…
 reconnect = Połącz ponownie
 remove = Usuń
 add = Dodaj

@@ -21,6 +21,7 @@ music_directory = Music Directory
 service = Service: { $name }
 connected = ● Connected
 disconnected = ● Disconnected
+connecting = ● Connecting…
 reconnect = Reconnect
 remove = Remove
 add = Add

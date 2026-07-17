@@ -21,6 +21,7 @@ music_directory = Müzik Klasörü
 service = Hizmet: { $name }
 connected = ● Bağlandı
 disconnected = ● Bağlantı Kesildi
+connecting = ● Bağlanıyor…
 reconnect = Yeniden Bağlan
 remove = Kaldır
 add = Ekle

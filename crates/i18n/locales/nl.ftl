@@ -21,6 +21,7 @@ music_directory = Muziekmap
 service = Dienst: { $name }
 connected = ● Verbonden
 disconnected = ● Verbroken
+connecting = ● Verbinden…
 reconnect = Opnieuw verbinden
 remove = Verwijderen
 add = Toevoegen

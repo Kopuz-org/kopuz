@@ -21,6 +21,7 @@ music_directory = nasin kalama
 service = nasin pana: { $name }
 connected = ● lon
 disconnected = ● lon ala
+connecting = ● kama lon
 reconnect = o lon sin
 remove = o weka
 add = o namako
