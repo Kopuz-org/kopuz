@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use crate::{
-    AppConfig, ArtistPhotoSource, ArtistViewOrder, BackBehavior, Browser, ChannelMode,
-    EqualizerSettings, FetchStrategy, HomeSection, ListenNowStyle, MusicServer, MusicService,
-    PlayerBarPosition, RegistryEntry, SortOrder, TitlebarMode, UiStyle,
+    AppConfig, ArtistViewOrder, BackBehavior, Browser, ChannelMode, EqualizerSettings,
+    FetchStrategy, HomeSection, ListenNowStyle, MusicServer, MusicService, PlayerBarPosition,
+    RegistryEntry, SortOrder, TitlebarMode, UiStyle,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -50,7 +50,6 @@ pub struct LibraryConfig {
     pub music_directory: Vec<PathBuf>,
     pub sort_order: SortOrder,
     pub artist_view_order: ArtistViewOrder,
-    pub artist_photo_source: ArtistPhotoSource,
     pub auto_fetch_covers: bool,
     pub cover_fetch_strategy: FetchStrategy,
 }
@@ -123,7 +122,6 @@ impl AppConfig {
             music_directory: self.music_directory.clone(),
             sort_order: self.sort_order.clone(),
             artist_view_order: self.artist_view_order.clone(),
-            artist_photo_source: self.artist_photo_source,
             auto_fetch_covers: self.auto_fetch_covers,
             cover_fetch_strategy: self.cover_fetch_strategy,
         }

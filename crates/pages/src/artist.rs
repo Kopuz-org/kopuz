@@ -11,8 +11,7 @@ use components::selection_bar::SelectionBar;
 use components::sort_control::SortControl;
 use components::view_mode_toggle::ViewModeToggle;
 use config::{
-    AlbumSortField, AlbumViewMode, AppConfig, ArtistPhotoSource, ArtistSortField, ArtistViewOrder,
-    SortDirection,
+    AlbumSortField, AlbumViewMode, AppConfig, ArtistSortField, ArtistViewOrder, SortDirection,
 };
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
@@ -22,13 +21,9 @@ use hooks::use_db_queries::{
 };
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use tracing::Instrument;
+use utils::artist::{joined_credit_primary, normalize_artist_key};
 
 use crate::server::download_manager::{DownloadQueue, delete_downloads, queue_downloads};
-
-fn normalize_artist_key(value: &str) -> String {
-    value.trim().to_lowercase()
-}
 
 /// One album-card menu entry, tagged so dispatch survives the entry set being
 /// built dynamically from capabilities (indices shift as entries are gated in).
@@ -71,15 +66,7 @@ pub fn Artist(
 
     let is_offline = use_context::<Signal<bool>>();
     let download_queue = use_context::<Signal<DownloadQueue>>();
-    let mut fetched_artist_images =
-        use_context::<Signal<std::collections::HashMap<String, String>>>();
-    // In-flight guard for the remote artist-image fetch — page-local; the persisted
-    // `fetched_artist_images` map is what skips a refetch across navigations.
-    let mut is_fetching_images = use_signal(|| false);
-    // Records that a fetch already ran this mount. Distinguishes "fetched, found
-    // nothing" (e.g. YT yields no images) from "never fetched" — without it an
-    // empty result leaves the map empty and the effect respawns forever.
-    let mut images_fetch_done = use_signal(|| false);
+    let fetched_artist_images = use_context::<Signal<::server::cover::FetchedArtistImages>>();
 
     let albums_res = use_albums(source);
     let artist_counts_res = use_artists(source);
@@ -87,6 +74,10 @@ pub fn Artist(
     let artist_memo = use_memo(move || artist_name.read().clone());
     let artist_tracks_res = use_artist_tracks(source, artist_memo);
     let artist_images_res = use_artist_images();
+
+    // The photo-fetch pipeline (bulk for library servers, per-artist for remote
+    // catalogs) that fills `fetched_artist_images`.
+    hooks::artist_images::use_artist_photo_fetch(albums_res, sample_tracks_res, artist_images_res);
 
     // Server + offline: keys of tracks downloaded for offline, used to restrict the
     // artist/album listing to what's actually available. Empty otherwise (cheap).
@@ -158,160 +149,21 @@ pub fn Artist(
     let mut show_album_playlist_modal = use_signal(|| false);
     let mut pending_album_id_for_playlist = use_signal(|| None::<String>);
 
-    // Remote artist-image fetch (servers only): fills the in-memory cache the
-    // image resolution reads. Gated on `sync` so local never runs it; YT yields
-    // nothing. The per-service fetch lives behind the facade.
-    use_effect(move || {
-        // YT resolves its avatars per-artist below; this server path would yield
-        // nothing for it anyway.
-        if !caps().sync || caps().albums == ::server::source::AlbumType::YtMusic {
-            return;
-        }
-        if config.read().artist_photo_source != ArtistPhotoSource::ArtistPhoto {
-            return;
-        }
-        if *is_fetching_images.read()
-            || *images_fetch_done.read()
-            || !fetched_artist_images.read().is_empty()
-        {
-            return;
-        }
-        is_fetching_images.set(true);
-        let source = active_source.peek().clone();
-        spawn(
-            async move {
-                let images: std::collections::HashMap<String, String> = source
-                    .fetch_artist_images()
-                    .await
-                    .unwrap_or_default()
-                    .into_iter()
-                    .collect();
-                fetched_artist_images.set(images);
-                images_fetch_done.set(true);
-                is_fetching_images.set(false);
-            }
-            .instrument(tracing::info_span!("artist.fetch_images")),
-        );
-    });
-
-    // YT Music: the Artists grid shows real YT artist photos and nothing else.
-    // There's no bulk endpoint, so resolve each library artist's avatar from the
-    // YT "Artists" search, a few in flight at a time, writing results in as they
-    // land so the grid fills progressively. Keyed by display name (the grid reads
-    // `fetched.get(&display)`).
-    use_effect(move || {
-        if caps().albums != ::server::source::AlbumType::YtMusic {
-            return;
-        }
-        if config.read().artist_photo_source != ArtistPhotoSource::ArtistPhoto {
-            return;
-        }
-        if *images_fetch_done.read() || *is_fetching_images.read() {
-            return;
-        }
-        // Wait for the DB artist-image cache to load so we can skip artists whose
-        // photo was persisted on a previous run (otherwise we'd refetch every
-        // time the page opens).
-        let db_imgs = artist_images_res.read();
-        let Some((_, db_photos)) = db_imgs.clone() else {
-            return;
-        };
-        drop(db_imgs);
-
-        let albums = albums_res.read().clone().unwrap_or_default();
-        let sample = sample_tracks_res.read().clone().unwrap_or_default();
-        if albums.is_empty() && sample.is_empty() {
-            // Library not loaded yet — wait for a real artist set.
-            return;
-        }
-        let mut names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-        for album in &albums {
-            if !album.artist.trim().is_empty() {
-                names.insert(album.artist.clone());
-            }
-        }
-        for track in &sample {
-            for artist in &track.artists {
-                if !artist.trim().is_empty() {
-                    names.insert(artist.clone());
-                }
-            }
-        }
-        // Skip artists already resolved this session (context map) or persisted
-        // to the DB on a previous run (keyed by normalized name).
-        let already = fetched_artist_images.read();
-        let names: Vec<String> = names
-            .into_iter()
-            .filter(|n| {
-                !already.contains_key(n) && !db_photos.contains_key(&normalize_artist_key(n))
-            })
-            .collect();
-        drop(already);
-        if names.is_empty() {
-            images_fetch_done.set(true);
-            return;
-        }
-        // Mark done up front so the effect doesn't respawn as the workers write
-        // partial results back into the map.
-        is_fetching_images.set(true);
-        images_fetch_done.set(true);
-
-        let workers = 6usize;
-        let shared = std::sync::Arc::new(std::sync::Mutex::new(names.into_iter()));
-        for _ in 0..workers {
-            let source = active_source.peek().clone();
-            let shared = shared.clone();
-            spawn(
-                async move {
-                    while let Some(name) = shared.lock().ok().and_then(|mut it| it.next()) {
-                        // Always record an outcome so the grid can tell "resolved,
-                        // no photo" (→ album fallback) from "still loading"
-                        // (→ placeholder). "" is the no-photo sentinel.
-                        let url = source
-                            .fetch_artist_image(&name)
-                            .await
-                            .ok()
-                            .flatten()
-                            .unwrap_or_default();
-                        // Persist found photos to the DB (kind "server" → the
-                        // grid's `photos` map) so future opens load them instantly
-                        // instead of re-searching YT.
-                        if !url.is_empty() {
-                            let _ = source
-                                .set_artist_image(
-                                    &normalize_artist_key(&name),
-                                    "server",
-                                    Some(&url),
-                                )
-                                .await;
-                        }
-                        fetched_artist_images.write().insert(name, url);
-                    }
-                }
-                .instrument(tracing::info_span!("artist.fetch_yt_images")),
-            );
-        }
-        is_fetching_images.set(false);
-    });
-
-    // The artist grid: every artist with a resolved avatar. Avatar precedence is
-    // source-agnostic — custom photo, then (when "artist photo" is on) a fetched
-    // remote / local-DB photo, then the album cover via the source cover seam.
+    // The artist grid: one uniform, source-agnostic image chain per tile
+    // (override → photo → pending-placeholder → own album cover → placeholder),
+    // resolved by the cover seam.
     let artists = use_memo(move || -> Vec<(String, Option<utils::CoverUrl>)> {
         let albums = albums_res.read().clone().unwrap_or_default();
         let sample = sample_tracks_res.read().clone().unwrap_or_default();
-        let (overrides, photos) = artist_images_res.read().clone().unwrap_or_default();
+        let images = artist_images_res.read().clone().unwrap_or_default();
         let fetched = fetched_artist_images.read();
         let conf = config.read();
-        let use_photo = conf.artist_photo_source == ArtistPhotoSource::ArtistPhoto;
-        // YT resolves photos one artist at a time. Until an artist resolves we
-        // render a placeholder rather than its album cover, so the card doesn't
-        // visibly swap album→photo (which read as a loading glitch). The map
-        // carries a "" sentinel for "resolved, no photo" → album fallback.
-        let is_yt = caps().albums == ::server::source::AlbumType::YtMusic;
         let offline = caps().downloads && *is_offline.read();
 
-        // norm → (display name, first album cover-path).
+        // norm → (display name, album-art candidate: the artist's first album,
+        // else their track's album). Only Library tiles ever render it — on a
+        // Remote catalog the seam resolves photo-or-placeholder, so a shared
+        // track cover can't dupe across credited artists there.
         let mut artist_map: HashMap<String, (String, Option<PathBuf>)> = HashMap::new();
         for album in &albums {
             artist_map
@@ -328,6 +180,15 @@ pub fn Artist(
                     .entry(normalize_artist_key(artist))
                     .or_insert_with(|| (artist.clone(), cover.clone()));
             }
+        }
+        // Drop joined collab credits whose primary artist has their own tile.
+        let joined: Vec<String> = artist_map
+            .keys()
+            .filter(|norm| joined_credit_primary(norm).is_some_and(|p| artist_map.contains_key(p)))
+            .cloned()
+            .collect();
+        for norm in joined {
+            artist_map.remove(&norm);
         }
 
         let downloaded: HashSet<String> = if offline {
@@ -359,30 +220,15 @@ pub fn Artist(
             .into_iter()
             .filter(|(_, (display, _))| !offline || downloaded.contains(&display.to_lowercase()))
             .map(|(norm, (display, album_cover))| {
-                // YT + photos on, artist not resolved yet → placeholder (no album
-                // flash). Unless the user set a custom override / DB photo exists.
-                if is_yt
-                    && use_photo
-                    && !fetched.contains_key(&display)
-                    && !overrides.contains_key(&norm)
-                    && !photos.contains_key(&norm)
-                {
-                    return (display, None);
-                }
-                // "" sentinel = resolved with no photo → fall back to album cover.
-                let fetched_url = fetched
-                    .get(&display)
-                    .map(|u| u.as_str())
-                    .filter(|u| !u.is_empty());
-                let cover = ::server::cover::artist(
-                    &conf,
-                    overrides.get(&norm).map(|p| p.as_path()),
-                    photos.get(&norm),
-                    fetched_url,
+                let art = ::server::cover::ArtistArt::from_caches(
+                    &images,
+                    &fetched,
+                    &norm,
+                    &display,
                     album_cover.as_deref(),
-                    use_photo,
-                    320,
+                    caps().artist_view,
                 );
+                let cover = ::server::cover::artist(&conf, art, 320);
                 (display, cover)
             })
             .collect();
@@ -466,10 +312,11 @@ pub fn Artist(
             return None;
         }
         let norm = normalize_artist_key(&artist);
-        let (overrides, photos) = artist_images_res.read().clone().unwrap_or_default();
+        let images = artist_images_res.read().clone().unwrap_or_default();
         let fetched = fetched_artist_images.read();
         let conf = config.read();
-        let use_photo = conf.artist_photo_source == ArtistPhotoSource::ArtistPhoto;
+        // Own album only — the album-artist match keeps a shared collab
+        // track's cover off the header, same as the grid.
         let album_cover = albums_res
             .read()
             .clone()
@@ -477,15 +324,15 @@ pub fn Artist(
             .iter()
             .find(|a| a.artist.to_lowercase() == artist.to_lowercase())
             .and_then(|a| a.cover_path.clone());
-        ::server::cover::artist(
-            &conf,
-            overrides.get(&norm).map(|p| p.as_path()),
-            photos.get(&norm),
-            fetched.get(artist.as_str()).map(|u| u.as_str()),
+        let art = ::server::cover::ArtistArt::from_caches(
+            &images,
+            &fetched,
+            &norm,
+            &artist,
             album_cover.as_deref(),
-            use_photo,
-            512,
-        )
+            caps().artist_view,
+        );
+        ::server::cover::artist(&conf, art, 512)
     });
 
     let artist_albums = use_memo(move || {

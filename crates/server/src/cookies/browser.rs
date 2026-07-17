@@ -3,6 +3,25 @@ use std::path::PathBuf;
 use config::Browser;
 use tokio::process::Command;
 
+/// How to invoke the browser. The two shapes must not be conflated: a `Path`
+/// may contain spaces (macOS app bundles, Windows Program Files) and is never
+/// split, while a `CommandLine` is multi-token by construction (`flatpak run
+/// <id>`, `$KOPUZ_BROWSER_COMMAND`) and is split on whitespace. Guessing the
+/// shape from the string is exactly what broke spawning `/Applications/Google
+/// Chrome.app/...` (#513) and `C:\Program Files\...` before it (#435).
+#[derive(Debug, Clone)]
+pub(crate) enum BrowserBin {
+    Path(String),
+    CommandLine(String),
+}
+
+impl std::fmt::Display for BrowserBin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let (Self::Path(s) | Self::CommandLine(s)) = self;
+        f.write_str(s)
+    }
+}
+
 pub(crate) fn browser_candidates(browser: Browser) -> &'static [&'static str] {
     match browser {
         Browser::Brave => &["brave", "brave-browser"],
@@ -111,7 +130,7 @@ pub(crate) async fn check_browser_command(arg: String) -> bool {
         .unwrap_or(false)
 }
 
-pub(crate) async fn find_browser_bin(browser: Browser) -> Option<String> {
+pub(crate) async fn find_browser_bin(browser: Browser) -> Option<BrowserBin> {
     let env_key = format!(
         "KOPUZ_{}_BIN",
         browser.id().to_uppercase().replace('-', "_")
@@ -119,13 +138,13 @@ pub(crate) async fn find_browser_bin(browser: Browser) -> Option<String> {
     if let Some(v) = std::env::var_os(&env_key)
         && !v.is_empty()
     {
-        return Some(v.to_string_lossy().into_owned());
+        return Some(BrowserBin::Path(v.to_string_lossy().into_owned()));
     }
 
     if in_flatpak() {
         for cand in browser_candidates(browser) {
             if check_browser_command(format!("command -v {cand}")).await {
-                return Some(cand.to_string());
+                return Some(BrowserBin::Path(cand.to_string()));
             }
         }
     } else {
@@ -135,7 +154,7 @@ pub(crate) async fn find_browser_bin(browser: Browser) -> Option<String> {
             for dir in &dirs {
                 let p = dir.join(candidate);
                 if p.is_file() {
-                    return Some(candidate.to_string());
+                    return Some(BrowserBin::Path(candidate.to_string()));
                 }
             }
         }
@@ -146,26 +165,26 @@ pub(crate) async fn find_browser_bin(browser: Browser) -> Option<String> {
     {
         let id = v.to_string().to_owned();
         if check_browser_command(format!("flatpak info {id}")).await {
-            return Some(format!("flatpak run {id}"));
+            return Some(BrowserBin::CommandLine(format!("flatpak run {id}")));
         }
     }
 
     for cand in browser_flatpak_ids(browser) {
         if check_browser_command(format!("flatpak info {cand}")).await {
-            return Some(format!("flatpak run {cand}"));
+            return Some(BrowserBin::CommandLine(format!("flatpak run {cand}")));
         }
     }
 
     #[cfg(target_os = "macos")]
     for path in macos_app_paths(browser) {
         if std::path::Path::new(path).is_file() {
-            return Some((*path).to_string());
+            return Some(BrowserBin::Path((*path).to_string()));
         }
     }
     #[cfg(target_os = "windows")]
     for path in windows_install_paths(browser) {
         if path.is_file() {
-            return Some(path.to_string_lossy().into_owned());
+            return Some(BrowserBin::Path(path.to_string_lossy().into_owned()));
         }
     }
     None
@@ -173,26 +192,59 @@ pub(crate) async fn find_browser_bin(browser: Browser) -> Option<String> {
 
 /// Plain `Command` natively; `flatpak-spawn --host --watch-bus` when packaged,
 /// so `child.kill()`/`kill_on_drop` still tears the host browser down.
-pub(crate) fn browser_command(bin: &str) -> Command {
-    // On Windows `bin` is a single executable path that can contain spaces
-    // (e.g. `C:\Program Files\...`), so it must not be split. Elsewhere `bin`
-    // may be a multi-token command like `flatpak run <id>`, so split on spaces.
-    #[cfg(windows)]
-    {
-        Command::new(bin)
-    }
-    #[cfg(not(windows))]
-    {
-        let cmd: Vec<&str> = bin.split(' ').collect();
-        if in_flatpak() {
-            let mut c = Command::new("flatpak-spawn");
-            c.args(["--host", "--watch-bus"]);
-            c.args(cmd);
-            c
-        } else {
-            let mut c = Command::new(cmd[0]);
-            c.args(&cmd[1..]);
-            c
+pub(crate) fn browser_command(bin: &BrowserBin) -> Command {
+    let tokens: Vec<&str> = match bin {
+        BrowserBin::Path(p) => vec![p.as_str()],
+        BrowserBin::CommandLine(c) => {
+            let split: Vec<&str> = c.split_whitespace().collect();
+            if split.is_empty() {
+                vec![c.as_str()]
+            } else {
+                split
+            }
         }
+    };
+    if in_flatpak() {
+        let mut c = Command::new("flatpak-spawn");
+        c.args(["--host", "--watch-bus"]);
+        c.args(&tokens);
+        c
+    } else {
+        let mut c = Command::new(tokens[0]);
+        c.args(&tokens[1..]);
+        c
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_path_with_spaces_is_never_split() {
+        // The #513 shape: a macOS app-bundle binary. Splitting it spawned
+        // "/Applications/Google" and failed with ENOENT.
+        let bin = BrowserBin::Path(
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome".to_string(),
+        );
+        let cmd = browser_command(&bin);
+        assert_eq!(
+            cmd.as_std().get_program().to_string_lossy(),
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+        );
+        assert_eq!(cmd.as_std().get_args().count(), 0);
+    }
+
+    #[test]
+    fn a_command_line_is_split_into_tokens() {
+        let bin = BrowserBin::CommandLine("flatpak run com.google.Chrome".to_string());
+        let cmd = browser_command(&bin);
+        assert_eq!(cmd.as_std().get_program().to_string_lossy(), "flatpak");
+        let args: Vec<String> = cmd
+            .as_std()
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(args, ["run", "com.google.Chrome"]);
     }
 }

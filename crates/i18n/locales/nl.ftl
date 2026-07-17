@@ -406,9 +406,6 @@ lastfm_first = Last.fm eerst
 musicbrainz_only = Alleen MusicBrainz
 lastfm_only = Alleen Last.fm
 remove_cover = Hoes verwijderen
-artist_photo_source = Bron van artiestfoto
-artist_photo = Artiestfoto
-album_cover = Albumhoes
 
 # Radio Page
 radio_filter_stations = Stations filteren…

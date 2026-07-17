@@ -406,9 +406,6 @@ lastfm_first = Last.fm முதலில்
 musicbrainz_only = MusicBrainz மட்டும்
 lastfm_only = Last.fm மட்டும்
 remove_cover = கவரை அகற்று
-artist_photo_source = கலைஞர் புகைப்பட மூலம்
-artist_photo = கலைஞர் புகைப்படம்
-album_cover = ஆல்பம் கவர்
 
 # Radio Page
 radio_filter_stations = நிலையங்களை வடிகட்டு…

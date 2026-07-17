@@ -356,6 +356,29 @@ pub trait MediaSource: Send + Sync {
             .map_err(SourceError::from)
     }
 
+    /// Record `track`'s favorite state LOCALLY as a clean row (no dirty/pending),
+    /// without touching the remote. The optimistic half of a favorite toggle:
+    /// write this first so the UI reflects the change immediately, then
+    /// [`push_favorite`](Self::push_favorite) to the remote — and call this again
+    /// with the opposite `on` to revert if the push is rejected. An empty key is a
+    /// no-op.
+    async fn record_favorite(&self, track: &reader::Track, on: bool) -> Result<(), SourceError> {
+        let key = track.id.key();
+        if key.trim().is_empty() {
+            return Ok(());
+        }
+        // Cache the track so the favorites view can resolve the ref.
+        if on {
+            let _ = self.upsert_tracks(std::slice::from_ref(track)).await;
+        }
+        let sid = self.source().as_str();
+        self.db().set_favorite(sid, key.as_ref(), on).await?;
+        self.db()
+            .clear_favorite_dirty(sid, key.as_ref())
+            .await
+            .map_err(SourceError::from)
+    }
+
     /// Report a track as now-playing to the remote's scrobble endpoint. Default
     /// no-op — only remotes that scrobble (Subsonic) override. Best-effort: the
     /// caller ignores the result.
@@ -779,36 +802,6 @@ fn remote_source(db: Db, source: Source, conn: &ServerConn) -> Box<dyn MediaSour
 /// rotation, so call sites read the cached handle instead of rebuilding — and
 /// for a server, re-standing-up an HTTP client — on every operation.
 pub type ActiveSource = std::sync::Arc<dyn MediaSource>;
-
-/// Ergonomic, track-centric wrappers over the source's DB-backed favorite truth,
-/// so call sites read `track.is_favorite(&source).await` instead of pulling the
-/// key out by hand. Defined here (not on `reader::Track`) because the truth lives
-/// on [`MediaSource`], and `reader` can't depend on `server`.
-#[async_trait]
-pub trait TrackFavorite {
-    /// Whether this track is currently favorited for `source` (an empty key —
-    /// e.g. an unresolved track — is never a favorite).
-    async fn is_favorite(&self, source: &ActiveSource) -> bool;
-
-    /// Set this track's favorite state for `source` (an empty key is a no-op).
-    async fn set_favorite(&self, source: &ActiveSource, on: bool) -> Result<(), SourceError>;
-}
-
-#[async_trait]
-impl TrackFavorite for reader::Track {
-    async fn is_favorite(&self, source: &ActiveSource) -> bool {
-        let key = self.id.key();
-        !key.trim().is_empty() && source.is_favorite(key.as_ref()).await
-    }
-
-    async fn set_favorite(&self, source: &ActiveSource, on: bool) -> Result<(), SourceError> {
-        let key = self.id.key();
-        if key.trim().is_empty() {
-            return Ok(());
-        }
-        source.set_favorite(key.as_ref(), on).await
-    }
-}
 
 /// The configured server's [`MediaSource`], or `None` when no usable creds
 /// exist. Unlike [`active`] this ignores the active source — the reconciler

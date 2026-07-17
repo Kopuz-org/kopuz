@@ -8,6 +8,7 @@ use crate::queue_drag::{
 use config::{AppConfig, UiStyle};
 use dioxus::prelude::*;
 use hooks::PlayerController;
+use hooks::toast::toast;
 use reader::models::Track;
 use tracing::Instrument;
 
@@ -33,26 +34,6 @@ pub(crate) fn share_to_musicbrainz(release_id: Option<String>, artist: String, t
         }
         .instrument(tracing::info_span!("musicbrainz.fetch")),
     );
-}
-
-fn toast(msg: &str) {
-    let escaped = serde_json::to_string(msg).unwrap_or_else(|_| "\"\"".to_string());
-    let js = format!(
-        r#"(function(m){{
-            let t = document.getElementById('kopuz-toast');
-            if (!t) {{
-                t = document.createElement('div');
-                t.id = 'kopuz-toast';
-                t.style.cssText = 'position:fixed;left:50%;bottom:88px;transform:translateX(-50%);background:rgba(20,20,20,0.95);color:#fff;padding:10px 18px;border-radius:8px;font:14px system-ui,sans-serif;z-index:99999;box-shadow:0 4px 16px rgba(0,0,0,0.4);pointer-events:none;opacity:0;transition:opacity 150ms;border:1px solid rgba(255,255,255,0.1);';
-                document.body.appendChild(t);
-            }}
-            t.textContent = m;
-            t.style.opacity = '1';
-            clearTimeout(t._h);
-            t._h = setTimeout(() => {{ t.style.opacity = '0'; }}, 1800);
-        }})({escaped});"#
-    );
-    let _ = dioxus::document::eval(&js);
 }
 
 #[component]

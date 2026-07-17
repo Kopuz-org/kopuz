@@ -105,3 +105,38 @@ async fn upsert_then_prune() {
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }
+
+/// First coverage of the metadata-cache API: `meta_keys_since` returns keys of
+/// the requested kind written within the window, and a re-put refreshes the
+/// `fetched_at` stamp (the artist-photo-miss TTL relies on both).
+#[tokio::test]
+async fn meta_keys_since_windows_by_kind_and_age() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+
+    db.meta_put("artist a", "artist_photo_miss", "")
+        .await
+        .unwrap();
+    db.meta_put("artist b", "other_kind", "").await.unwrap();
+
+    let fresh = db
+        .meta_keys_since("artist_photo_miss", 86_400)
+        .await
+        .unwrap();
+    assert_eq!(fresh, vec!["artist a".to_string()], "same kind, in window");
+
+    // `fetched_at` can't be backdated through the public API, so expiry is
+    // simulated with a negative window: `fetched_at >= unixepoch() + 1` never
+    // matches a just-written row.
+    let expired = db.meta_keys_since("artist_photo_miss", -1).await.unwrap();
+    assert!(expired.is_empty(), "an aged-out row stops matching");
+
+    // Re-putting refreshes the stamp — the row is fresh again by upsert.
+    db.meta_put("artist a", "artist_photo_miss", "")
+        .await
+        .unwrap();
+    let fresh = db.meta_keys_since("artist_photo_miss", 1).await.unwrap();
+    assert_eq!(fresh, vec!["artist a".to_string()]);
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}

@@ -406,9 +406,6 @@ lastfm_first = Last.fm muna
 musicbrainz_only = MusicBrainz lamang
 lastfm_only = Last.fm lamang
 remove_cover = Alisin ang cover
-artist_photo_source = Source ng Larawan ng Artista
-artist_photo = Larawan ng Artista
-album_cover = Cover ng Album
 
 # Radio Page
 radio_filter_stations = Mag-filter ng mga istasyon…

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT cache_key FROM metadata_cache WHERE kind = ?1 AND fetched_at >= (unixepoch() - ?2)",
+  "describe": {
+    "columns": [
+      {
+        "name": "cache_key",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "479b2b9ff1b043d214f648433f81ca3e86e6c80491950892bcc545ce139218fd"
+}

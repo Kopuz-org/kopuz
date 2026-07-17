@@ -208,13 +208,6 @@ pub enum AlbumViewMode {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub enum ArtistPhotoSource {
-    #[default]
-    AlbumCover,
-    ArtistPhoto,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum BackBehavior {
     #[default]
     RewindThenPrev,
@@ -708,8 +701,6 @@ pub struct AppConfig {
     #[serde(default)]
     pub listen_now_style: ListenNowStyle,
     #[serde(default)]
-    pub artist_photo_source: ArtistPhotoSource,
-    #[serde(default)]
     pub auto_fetch_covers: bool,
     #[serde(default)]
     pub cover_fetch_strategy: FetchStrategy,
@@ -886,7 +877,6 @@ impl Default for AppConfig {
             hero_height: default_hero_height(),
             home_sections: default_home_sections(),
             listen_now_style: ListenNowStyle::default(),
-            artist_photo_source: ArtistPhotoSource::AlbumCover,
             auto_fetch_covers: false,
             cover_fetch_strategy: FetchStrategy::default(),
             radio_registries: default_radio_registries(),

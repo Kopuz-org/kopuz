@@ -406,9 +406,6 @@ lastfm_first = Last.fm ആദ്യം
 musicbrainz_only = MusicBrainz മാത്രം
 lastfm_only = Last.fm മാത്രം
 remove_cover = കവർ നീക്കം ചെയ്യുക
-artist_photo_source = കലാകാരന്റെ ഫോട്ടോ ഉറവിടം
-artist_photo = കലാകാരന്റെ ഫോട്ടോ
-album_cover = ആൽബം കവർ
 
 # Radio Page
 radio_filter_stations = സ്റ്റേഷനുകൾ ഫിൽട്ടർ ചെയ്യുക…
