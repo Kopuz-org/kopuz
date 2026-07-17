@@ -455,7 +455,6 @@ impl PlayerController {
         }
     }
 
-    // ── Spotify external playback (Web Playback SDK in the user's browser) ──
 
     /// The current Spotify OAuth access token, if Spotify is the active server.
     pub(crate) fn spotify_access(&self) -> Option<String> {
@@ -530,7 +529,6 @@ impl PlayerController {
 
     /// Seek the current track. All progress-bar / lyric scrubbers route here.
     pub fn seek(&mut self, time: Duration) {
-        // Spotify plays in the browser host — scrub it there.
         if *self.external_active.peek() {
             if let Some(host) = self.spotify_host.peek().clone() {
                 host.seek(time.as_millis() as u64);
@@ -650,9 +648,6 @@ impl PlayerController {
         let id = item_ref.primary_id().unwrap_or_default().to_string();
         let stream_id = item_ref.stream_id().unwrap_or_default().to_string();
 
-        // Spotify plays through the browser SDK host, not the engine. Switching
-        // away from a Spotify track stops the host first; a Spotify track is
-        // handed off here and returns before any engine work.
         let is_spotify_item = track.id.service() == Some(MusicService::Spotify);
         if !is_spotify_item {
             self.stop_external_playback();

@@ -304,7 +304,6 @@ impl PlayerController {
         // stream open, etc.) so its eventual completion doesn't start playback
         // against the cleared queue or post a stale error banner.
         self.cancel_load_task();
-        // Stop Spotify's browser host too, if it was driving playback.
         if let Some(host) = self.spotify_host.peek().clone() {
             host.pause();
         }
@@ -321,7 +320,6 @@ impl PlayerController {
     }
 
     pub fn pause(&mut self) {
-        // Spotify plays in the browser host — pause it there.
         if *self.external_active.peek() {
             if let Some(host) = self.spotify_host.peek().clone() {
                 host.pause();
@@ -357,7 +355,6 @@ impl PlayerController {
     }
 
     pub fn resume(&mut self) {
-        // Spotify plays in the browser host — resume it there.
         if *self.external_active.peek() {
             if let Some(host) = self.spotify_host.peek().clone() {
                 host.resume();

@@ -62,8 +62,6 @@ pub async fn launch_signin_and_extract(client_id: String) -> Result<SpotifyAuth,
         scope = urlencode(SCOPES),
     );
 
-    // Bind the loopback listener before opening the browser so the redirect can
-    // never race ahead of us.
     let listener = std::net::TcpListener::bind(("127.0.0.1", REDIRECT_PORT)).map_err(|e| {
         format!("couldn't bind {REDIRECT_URI} (is it registered / is the port free?): {e}")
     })?;
@@ -197,7 +195,6 @@ fn accept_code(listener: std::net::TcpListener, expected_state: &str) -> Result<
         }
         match listener.accept() {
             Ok((stream, _)) => match handle_conn(stream, expected_state) {
-                // A favicon or unrelated probe — keep waiting for /callback.
                 Ok(None) => continue,
                 other => return other.map(|o| o.unwrap_or_default()),
             },

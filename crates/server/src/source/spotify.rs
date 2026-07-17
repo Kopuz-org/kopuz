@@ -55,7 +55,6 @@ impl MediaSource for SpotifySource {
             downloads: false,
             discover: false,
             radio: false,
-            // Read-only for now (playlist mutation not wired).
             playlists: PlaylistOps::None,
             artist_view: ArtistView::Library,
             albums: AlbumType::Standard,
@@ -64,8 +63,6 @@ impl MediaSource for SpotifySource {
     }
 
     async fn resolve_stream(&self, _item_id: &str) -> Result<StreamInfo, SourceError> {
-        // Spotify audio is DRM'd and never decoded by the engine; the controller
-        // routes these tracks to the browser SDK before reaching here.
         Err(SourceError::unsupported(
             "Spotify playback (handled by the browser player)",
         ))
@@ -77,8 +74,6 @@ impl MediaSource for SpotifySource {
         };
         match crate::spotify::api::me(token).await {
             Ok(()) => AuthOutcome::Valid,
-            // Can't cleanly separate an expired token from a network blip here,
-            // so treat any failure as unreachable rather than forcing re-signin.
             Err(_) => AuthOutcome::Unreachable,
         }
     }

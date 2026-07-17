@@ -849,10 +849,6 @@ fn App() -> Element {
         });
     });
 
-    // Spotify access tokens expire ~hourly; refresh from the stored refresh
-    // token on a 30-min cadence and write the re-packed pair back. Same
-    // identity-guarded pattern as the YT keepalive above so a source switch
-    // retires the old loop.
     let mut spotify_refresh_identity = use_signal(|| None::<String>);
     use_effect(move || {
         if !*initial_load_done.read() {
@@ -872,9 +868,6 @@ fn App() -> Element {
             return;
         };
         spawn(async move {
-            // Refresh right away: the persisted token is usually stale after a
-            // restart (they expire ~hourly), and everything Spotify — including
-            // the browser playback host — auths with it immediately.
             updates::run_spotify_refresh(config).await;
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(1800)).await;

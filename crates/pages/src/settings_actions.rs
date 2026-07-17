@@ -225,8 +225,6 @@ pub fn spotify_auto_login(
     mut error: Signal<Option<String>>,
     playback_error: Signal<Option<String>>,
 ) {
-    // The user's own Spotify app Client ID is stored in the server's `url` field
-    // (Spotify has no meaningful server URL of its own).
     let client_id = config
         .peek()
         .server
@@ -286,7 +284,6 @@ pub fn add_server(
         return;
     }
 
-    // Spotify uses the URL field for the user's own app Client ID (required).
     if is_spotify && server_url().trim().is_empty() {
         error.set(Some(
             "Enter your Spotify app Client ID (create one at developer.spotify.com)".to_string(),
@@ -306,7 +303,6 @@ pub fn add_server(
             } else if is_soundcloud {
                 "https://soundcloud.com".to_string()
             } else if is_spotify {
-                // Store the Client ID as the server URL (Spotify has no server URL).
                 url_input.trim().to_string()
             } else {
                 url_input

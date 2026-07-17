@@ -171,7 +171,6 @@ fn open_player_page(url: &str) -> Result<(), String> {
     }
     #[cfg(target_os = "windows")]
     {
-        // Edge ships with Windows; its protocol handler beats an unknown default.
         let opened = std::process::Command::new("cmd")
             .args(["/C", "start", "", &format!("microsoft-edge:{url}")])
             .status()
@@ -215,8 +214,6 @@ async fn handle_stream(
     event_tx: broadcast::Sender<HostEvent>,
     token: Arc<Mutex<String>>,
 ) -> Result<(), String> {
-    // Peek the request line + headers without consuming, so a WebSocket upgrade
-    // can be handed to the tungstenite handshake untouched.
     let mut peek = [0u8; 2048];
     let n = stream.peek(&mut peek).await.map_err(|e| e.to_string())?;
     let head = String::from_utf8_lossy(&peek[..n]);
@@ -235,7 +232,6 @@ async fn handle_stream(
         run_ws(ws, cmd_tx, event_tx, token).await;
         Ok(())
     } else {
-        // Consume the request we peeked, then serve.
         let mut scratch = vec![0u8; n.max(1)];
         let _ = stream.read(&mut scratch).await;
         serve_page(&mut stream, &path).await;
@@ -266,7 +262,6 @@ async fn run_ws(
 ) {
     let (mut sink, mut source) = ws.split();
 
-    // Push the current token immediately so the SDK can boot on first connect.
     let initial = {
         let t = token.lock().await.clone();
         json!({ "cmd": "set_token", "token": t }).to_string()
@@ -275,7 +270,6 @@ async fn run_ws(
         return;
     }
 
-    // Forward outgoing command frames to the browser.
     let mut cmd_rx = cmd_tx.subscribe();
     let forward = tokio::spawn(async move {
         while let Ok(msg) = cmd_rx.recv().await {
@@ -285,7 +279,6 @@ async fn run_ws(
         }
     });
 
-    // Read player events from the browser.
     while let Some(Ok(msg)) = source.next().await {
         if let Message::Text(text) = msg
             && let Ok(val) = serde_json::from_str::<Value>(text.as_str())
@@ -375,10 +368,6 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
     };
     const send = (o) => { try { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); } catch (e) {} };
 
-    // Log failing Spotify network calls. The SDK collapses every failure —
-    // rejected DRM license, blocked CDN chunk — into a generic "Playback error",
-    // so hook fetch/XHR (before the SDK script loads, below) and name the
-    // endpoint that actually failed.
     (() => {
       const interesting = (u) => /license|widevine|scdn|spclient|spotify/i.test(u);
       const origFetch = window.fetch;
@@ -405,11 +394,6 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
       };
     })();
 
-    // Detect whether audible autoplay is allowed. If it is, report "activated"
-    // right away so kopuz can start playback without the button click; if not
-    // (Firefox's default), kopuz holds the first track until the user clicks —
-    // firing plays into an autoplay block just storms errors and can wedge the
-    // SDK's playback pipeline.
     function probeAutoplay() {
       const done = (ok, why) => {
         logLine("autoplay " + (ok ? "allowed" : "blocked" + (why ? " (" + why + ")" : "")));
@@ -425,11 +409,6 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
       } catch (e) { done(false, e && e.name); }
     }
 
-    // The OS now-playing widget and media keys target this tab (it owns the
-    // audio), but the SDK's own handlers only know its single loaded track —
-    // skip would do nothing. Claim the Media Session and forward every action
-    // to kopuz, whose queue actually decides what plays. Re-asserted on each
-    // track change because the SDK re-registers its own handlers.
     function claimMediaSession(cur) {
       if (!("mediaSession" in navigator)) return;
       const ms = navigator.mediaSession;
@@ -471,8 +450,6 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
         const fresh = (d.token || "") && (d.token || "") !== token;
         token = d.token || "";
         if (!player && window.Spotify) boot();
-        // A rotated token while the SDK is down (expired token killed the last
-        // connect) is the recovery path: reconnect with the fresh one.
         else if (player && fresh && !isReady) {
           logLine("token rotated while disconnected — reconnecting SDK");
           player.connect().then((ok) => logLine("connect() -> " + ok));
@@ -486,10 +463,6 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
       else if (d.cmd === "disconnect") { lastPauseCmdAt = Date.now(); player.disconnect(); }
     }
 
-    // The SDK boots fine in browsers whose EME isn't Widevine (e.g. Safari uses
-    // FairPlay) and then fails every license request, killing each track ~10s in
-    // with only generic playback errors. Probe for Widevine directly so that
-    // failure mode is named the moment the page loads.
     function probeWidevine() {
       const fail = (why) => {
         logLine("WIDEVINE MISSING: " + why);
@@ -539,8 +512,6 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
       player.addListener("playback_error", ({ message }) => {
         send({ event: "error", kind: "playback", message });
         logLine("PLAYBACK_ERROR: " + message);
-        // A burst of generic errors after real playback has happened is the
-        // license-failure signature (pre-play bursts are just autoplay blocks).
         const now = Date.now();
         errTimes = errTimes.filter((t) => now - t < 20000);
         errTimes.push(now);
@@ -558,12 +529,6 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
       });
       player.connect().then((ok) => logLine("connect() -> " + ok));
 
-      // The SDK only fires player_state_changed on transitions, never while a
-      // track simply plays — so poll getCurrentState() for the between-event
-      // position ticks kopuz needs (progress bar + end-of-track detection).
-      // The same poll doubles as a stall watchdog: if audio stalls (e.g. a
-      // Widevine license failure) the SDK goes silent, so if position isn't
-      // advancing while "playing", try to resume once and surface it.
       setInterval(async () => {
         if (!player) return;
         let st = null;
@@ -598,9 +563,6 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
       const cur = s.track_window && s.track_window.current_track;
       const tid = cur ? cur.id : null;
 
-      // A different track loaded (kopuz issued the next URI). A fresh load also
-      // reports paused@0, so reset per-track state and never treat it as an end,
-      // or every track change would auto-skip.
       if (tid !== curId) {
         curId = tid;
         reportedEnded = false;
@@ -614,9 +576,6 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
         return;
       }
 
-      // The SDK flipping to paused mid-track without kopuz asking is playback
-      // dying underneath us (typically a failed DRM license ~10s in). Retry once
-      // per track, then surface the diagnosis instead of stopping silently.
       if (paused && !prevPaused && pos > 0 && dur > 0 && pos < dur - 3000
           && Date.now() - lastPauseCmdAt > 4000) {
         if (deathRetries === 0) {
@@ -637,10 +596,6 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
         reportedEnded = false;
         if (pos > 2000) hasPlayed = true;
       }
-      // Latch once playback actually reaches the tail of the track. Only then can
-      // a following paused@0 be a genuine end — a mid-track network stall (which
-      // also reports paused, sometimes at 0) never crosses this line, so it can't
-      // be mistaken for the song finishing.
       if (!paused && dur > 0 && pos >= dur - 3000) nearEnd = true;
 
       let ended = false;
@@ -650,7 +605,6 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
         wasPlaying = false;
         nearEnd = false;
       }
-      // Polls repeat the same frame while paused — only forward actual changes.
       const key = paused + "|" + pos + "|" + tid;
       if (!ended && key === lastSentKey) return;
       lastSentKey = key;

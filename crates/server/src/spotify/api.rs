@@ -112,7 +112,6 @@ pub async fn start_playback(access: &str, device_id: &str, uris: &[String]) -> R
             let wait = if code == 429 {
                 retry_after(&resp)
             } else {
-                // Device warming up / transient — short growing backoff.
                 (u64::from(attempt) + 1).min(3)
             };
             attempt += 1;
@@ -139,9 +138,6 @@ pub async fn me(access: &str) -> Result<(), String> {
 
 /// Search tracks (and albums) for `query`.
 pub async fn search(access: &str, query: &str) -> Result<(Vec<Track>, Vec<reader::Album>), String> {
-    // Development-mode apps (the norm here — each user registers their own) are
-    // capped at limit=10 on /search; anything higher is a 400 "Invalid limit".
-    // Library endpoints still take 50, so only search uses the small page.
     let body = get_json(
         access,
         &format!("{API}/search"),
@@ -180,7 +176,6 @@ pub async fn saved_tracks_page(
     )
     .await?;
 
-    // Each item wraps the track under `track`.
     let tracks: Vec<Track> = body["items"]
         .as_array()
         .map(|items| {
@@ -229,14 +224,19 @@ pub async fn list_playlists(access: &str) -> Result<Vec<PlaylistSummary>, String
 }
 
 /// All tracks in a playlist, in order.
+///
+/// Newer Spotify apps get the renamed API surface: entries live at
+/// `/playlists/{id}/items` (each wrapping its track under `item`), and the old
+/// `/tracks` path returns 403 Forbidden. Older apps still serve `/tracks` with
+/// the track under `track`, so parse accepts both wrapper keys.
 pub async fn playlist_entries(access: &str, playlist_id: &str) -> Result<Vec<Track>, String> {
     let mut out = Vec::new();
     let mut offset: u32 = 0;
     loop {
         let body = get_json(
             access,
-            &format!("{API}/playlists/{playlist_id}/tracks"),
-            &[("limit", "100".to_string()), ("offset", offset.to_string())],
+            &format!("{API}/playlists/{playlist_id}/items"),
+            &[("limit", "50".to_string()), ("offset", offset.to_string())],
             "playlist entries",
         )
         .await?;
@@ -245,12 +245,17 @@ pub async fn playlist_entries(access: &str, playlist_id: &str) -> Result<Vec<Tra
             break;
         }
         for entry in &items {
-            if let Some(track) = parse_track(&entry["track"]) {
+            let wrapped = if entry["item"].is_object() {
+                &entry["item"]
+            } else {
+                &entry["track"]
+            };
+            if let Some(track) = parse_track(wrapped) {
                 out.push(track);
             }
         }
-        offset += 100;
-        if next_offset(&body, offset - 100, items.len()).is_none() {
+        offset += 50;
+        if next_offset(&body, offset - 50, items.len()).is_none() {
             break;
         }
     }
@@ -278,8 +283,6 @@ pub async fn saved_albums(access: &str) -> Result<(Vec<reader::Album>, Vec<Track
             let album = &item["album"];
             if let Some(a) = parse_album(album) {
                 let cover = first_image(&album["images"]);
-                // The album payload embeds a tracks page; each entry lacks its
-                // own `album` object, so stitch the parent album's data in.
                 if let Some(entries) = album["tracks"]["items"].as_array() {
                     for entry in entries {
                         if let Some(mut track) = parse_track(entry) {
@@ -347,7 +350,6 @@ fn next_offset(body: &Value, offset: u32, count: usize) -> Option<String> {
     match body["total"].as_u64() {
         Some(total) if (next as u64) >= total => None,
         Some(_) => Some(next.to_string()),
-        // No total (e.g. search): a short page means we're done.
         None if (count as u32) < PAGE => None,
         None => Some(next.to_string()),
     }
@@ -412,7 +414,6 @@ fn parse_album(item: &Value) -> Option<reader::Album> {
         .and_then(|a| a["name"].as_str())
         .unwrap_or_default()
         .to_string();
-    // release_date is "YYYY" or "YYYY-MM-DD".
     let year = item["release_date"]
         .as_str()
         .and_then(|d| d.get(0..4))

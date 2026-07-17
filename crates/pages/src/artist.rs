@@ -73,12 +73,7 @@ pub fn Artist(
     let download_queue = use_context::<Signal<DownloadQueue>>();
     let mut fetched_artist_images =
         use_context::<Signal<std::collections::HashMap<String, String>>>();
-    // In-flight guard for the remote artist-image fetch — page-local; the persisted
-    // `fetched_artist_images` map is what skips a refetch across navigations.
     let mut is_fetching_images = use_signal(|| false);
-    // Records that a fetch already ran this mount. Distinguishes "fetched, found
-    // nothing" (e.g. YT yields no images) from "never fetched" — without it an
-    // empty result leaves the map empty and the effect respawns forever.
     let mut images_fetch_done = use_signal(|| false);
 
     let albums_res = use_albums(source);
@@ -158,12 +153,7 @@ pub fn Artist(
     let mut show_album_playlist_modal = use_signal(|| false);
     let mut pending_album_id_for_playlist = use_signal(|| None::<String>);
 
-    // Remote artist-image fetch (servers only): fills the in-memory cache the
-    // image resolution reads. Gated on `sync` so local never runs it; YT yields
-    // nothing. The per-service fetch lives behind the facade.
     use_effect(move || {
-        // YT resolves its avatars per-artist below; this server path would yield
-        // nothing for it anyway.
         if !caps().sync || caps().discover {
             return;
         }
@@ -194,11 +184,6 @@ pub fn Artist(
         );
     });
 
-    // YT Music: the Artists grid shows real YT artist photos and nothing else.
-    // There's no bulk endpoint, so resolve each library artist's avatar from the
-    // YT "Artists" search, a few in flight at a time, writing results in as they
-    // land so the grid fills progressively. Keyed by display name (the grid reads
-    // `fetched.get(&display)`).
     use_effect(move || {
         if !caps().discover {
             return;
@@ -209,9 +194,6 @@ pub fn Artist(
         if *images_fetch_done.read() || *is_fetching_images.read() {
             return;
         }
-        // Wait for the DB artist-image cache to load so we can skip artists whose
-        // photo was persisted on a previous run (otherwise we'd refetch every
-        // time the page opens).
         let db_imgs = artist_images_res.read();
         let Some((_, db_photos)) = db_imgs.clone() else {
             return;
@@ -221,7 +203,6 @@ pub fn Artist(
         let albums = albums_res.read().clone().unwrap_or_default();
         let sample = sample_tracks_res.read().clone().unwrap_or_default();
         if albums.is_empty() && sample.is_empty() {
-            // Library not loaded yet — wait for a real artist set.
             return;
         }
         let mut names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
@@ -237,8 +218,6 @@ pub fn Artist(
                 }
             }
         }
-        // Skip artists already resolved this session (context map) or persisted
-        // to the DB on a previous run (keyed by normalized name).
         let already = fetched_artist_images.read();
         let names: Vec<String> = names
             .into_iter()
@@ -251,8 +230,6 @@ pub fn Artist(
             images_fetch_done.set(true);
             return;
         }
-        // Mark done up front so the effect doesn't respawn as the workers write
-        // partial results back into the map.
         is_fetching_images.set(true);
         images_fetch_done.set(true);
 
@@ -264,18 +241,12 @@ pub fn Artist(
             spawn(
                 async move {
                     while let Some(name) = shared.lock().ok().and_then(|mut it| it.next()) {
-                        // Always record an outcome so the grid can tell "resolved,
-                        // no photo" (→ album fallback) from "still loading"
-                        // (→ placeholder). "" is the no-photo sentinel.
                         let url = source
                             .fetch_artist_image(&name)
                             .await
                             .ok()
                             .flatten()
                             .unwrap_or_default();
-                        // Persist found photos to the DB (kind "server" → the
-                        // grid's `photos` map) so future opens load them instantly
-                        // instead of re-searching YT.
                         if !url.is_empty() {
                             let _ = source
                                 .set_artist_image(
@@ -294,9 +265,6 @@ pub fn Artist(
         is_fetching_images.set(false);
     });
 
-    // The artist grid: every artist with a resolved avatar. Avatar precedence is
-    // source-agnostic — custom photo, then (when "artist photo" is on) a fetched
-    // remote / local-DB photo, then the album cover via the source cover seam.
     let artists = use_memo(move || -> Vec<(String, Option<utils::CoverUrl>)> {
         let albums = albums_res.read().clone().unwrap_or_default();
         let sample = sample_tracks_res.read().clone().unwrap_or_default();
@@ -304,14 +272,9 @@ pub fn Artist(
         let fetched = fetched_artist_images.read();
         let conf = config.read();
         let use_photo = conf.artist_photo_source == ArtistPhotoSource::ArtistPhoto;
-        // YT resolves photos one artist at a time. Until an artist resolves we
-        // render a placeholder rather than its album cover, so the card doesn't
-        // visibly swap album→photo (which read as a loading glitch). The map
-        // carries a "" sentinel for "resolved, no photo" → album fallback.
         let is_yt = caps().discover;
         let offline = caps().downloads && *is_offline.read();
 
-        // norm → (display name, first album cover-path).
         let mut artist_map: HashMap<String, (String, Option<PathBuf>)> = HashMap::new();
         for album in &albums {
             artist_map
@@ -359,8 +322,6 @@ pub fn Artist(
             .into_iter()
             .filter(|(_, (display, _))| !offline || downloaded.contains(&display.to_lowercase()))
             .map(|(norm, (display, album_cover))| {
-                // YT + photos on, artist not resolved yet → placeholder (no album
-                // flash). Unless the user set a custom override / DB photo exists.
                 if is_yt
                     && use_photo
                     && !fetched.contains_key(&display)
@@ -369,7 +330,6 @@ pub fn Artist(
                 {
                     return (display, None);
                 }
-                // "" sentinel = resolved with no photo → fall back to album cover.
                 let fetched_url = fetched
                     .get(&display)
                     .map(|u| u.as_str())

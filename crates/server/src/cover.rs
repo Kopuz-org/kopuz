@@ -150,7 +150,6 @@ pub fn track(config: &AppConfig, track: &Track, max_width: u32) -> Option<CoverU
             max_width,
             80,
         ),
-        // SoundCloud and Spotify store the artwork URL directly in `cover`.
         MusicService::SoundCloud | MusicService::Spotify => track.cover.clone(),
     };
     utils::map_cover_url(url)

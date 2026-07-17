@@ -218,9 +218,6 @@ pub fn use_player_task(ctrl: PlayerController) {
         });
     });
 
-    // ── Spotify browser-host integration ────────────────────────────────
-    // Push the current access token to the host whenever it or the token rotates,
-    // so the SDK's getOAuthToken callback always gets a live token.
     use_effect(move || {
         let host = ctrl.spotify_host.read().clone();
         let access = {
@@ -239,7 +236,6 @@ pub fn use_player_task(ctrl: PlayerController) {
         }
     });
 
-    // Mirror the UI volume onto the host while Spotify is the active source.
     use_effect(move || {
         let vol = *ctrl.volume.read();
         if *ctrl.external_active.read()
@@ -249,8 +245,6 @@ pub fn use_player_task(ctrl: PlayerController) {
         }
     });
 
-    // Pump the host's state/lifecycle events into the player signals. Re-subscribes
-    // whenever the host is (re)created; cancels the previous pump.
     let mut spotify_pump = use_signal(|| None::<dioxus_core::Task>);
     use_effect(move || {
         let host = ctrl.spotify_host.read().clone();
@@ -264,24 +258,16 @@ pub fn use_player_task(ctrl: PlayerController) {
         let task = spawn(async move {
             use server::spotify::host::HostEvent;
             use tokio::sync::broadcast::error::RecvError;
-            // Throttles the auth-error token refresh below, so a genuinely dead
-            // session (refresh keeps failing) still surfaces the re-sign-in banner.
             let mut last_auth_refresh: Option<std::time::Instant> = None;
             loop {
                 let ev = match rx.recv().await {
                     Ok(ev) => ev,
-                    // A burst of state ticks overflowed the buffer; drop the gap and
-                    // keep pumping rather than killing the loop (which would freeze
-                    // progress and auto-advance for the rest of the session).
                     Err(RecvError::Lagged(_)) => continue,
                     Err(RecvError::Closed) => break,
                 };
                 match ev {
                     HostEvent::Ready { device_id } => {
                         ctrl.spotify_device.set(Some(device_id.clone()));
-                        // Fire the play that was waiting on the device — but only
-                        // once the tab has confirmed playback is allowed; playing
-                        // into an autoplay block storms errors and wedges the SDK.
                         if !*ctrl.spotify_activated.peek() {
                             continue;
                         }
@@ -300,9 +286,6 @@ pub fn use_player_task(ctrl: PlayerController) {
                         }
                     }
                     HostEvent::NotReady => {}
-                    // OS media keys / now-playing widget actions land in the
-                    // browser tab (it owns the audio); route them through the
-                    // kopuz queue, which the SDK's single-track session can't do.
                     HostEvent::Media {
                         action,
                         position_ms,
@@ -342,10 +325,6 @@ pub fn use_player_task(ctrl: PlayerController) {
                         }
                     }
                     HostEvent::Activated => {
-                        // Audio is now allowed (autoplay probe passed or the user
-                        // clicked the tab's button). Fire the held-back pending
-                        // play, or re-issue the current track if a play already
-                        // went out and got silently dropped by the block.
                         ctrl.spotify_activated.set(true);
                         if *ctrl.external_active.peek() {
                             let uri = ctrl.spotify_pending_uri.peek().clone().or_else(|| {
@@ -371,10 +350,6 @@ pub fn use_player_task(ctrl: PlayerController) {
                         }
                     }
                     HostEvent::Error { kind, message } => {
-                        // An expired access token mid-session is recoverable:
-                        // refresh it here — the token-push effect delivers the new
-                        // one to the tab, which reconnects the SDK. Only if a
-                        // recent refresh didn't help does the banner show.
                         if kind == "auth"
                             && last_auth_refresh
                                 .is_none_or(|t| t.elapsed() > std::time::Duration::from_secs(60))
@@ -419,7 +394,6 @@ pub fn use_player_task(ctrl: PlayerController) {
                             "widevine" => "This browser can't play Spotify (no Widevine DRM). \
                                 Open the Spotify player tab in Chrome, Edge, or Brave."
                                 .to_string(),
-                            // The page words license-failure hints for users already.
                             "license" => message,
                             _ => format!("Spotify player error: {message}"),
                         };
@@ -483,8 +457,6 @@ pub fn use_player_task(ctrl: PlayerController) {
                         }
                         // No session — nothing audible. Ended is left to the
                         // auto-advance check below, which needs is_playing.
-                        // Ignored while Spotify drives playback (engine is idle by
-                        // design then; the host pump owns is_playing).
                         Event::PhaseChanged {
                             phase: Phase::Idle, ..
                         } if !*ctrl.external_active.peek() => ctrl.is_playing.set(false),
@@ -533,9 +505,6 @@ pub fn use_player_task(ctrl: PlayerController) {
                 }
 
                 let is_playing = *ctrl.is_playing.read();
-                // Spotify plays in the browser host: its own pump owns progress and
-                // auto-advance, so the engine-position/crossfade/skip logic below is
-                // skipped while it's active.
                 let external = *ctrl.external_active.peek();
 
                 {
@@ -896,8 +865,6 @@ pub fn use_player_task(ctrl: PlayerController) {
 
                     let is_radio = duration == u64::MAX;
                     let should_skip = if is_radio || external {
-                        // External (Spotify) advance is driven by the host's
-                        // `ended` event, not the engine's completion state.
                         false
                     } else {
                         ctrl.player.read().is_playback_complete()
