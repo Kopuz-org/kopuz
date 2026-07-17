@@ -482,3 +482,5 @@ sort_field_tracks = Faixas
 sort_field_albums = Álbuns
 view_grid = Visualização em grade
 view_list = Visualização em lista
+spotify_browser = Navegador de reprodução do Spotify
+spotify_browser_auto = Automático

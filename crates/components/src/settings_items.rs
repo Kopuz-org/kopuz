@@ -1,6 +1,6 @@
 use config::{
     AppConfig, BackBehavior, ChannelMode, DeviceChangeBehavior, EqPreset,
-    EqualizerSettings as EqualizerConfig, MusicServer, SampleRateMode, SavedServer,
+    EqualizerSettings as EqualizerConfig, MusicServer, MusicService, SampleRateMode, SavedServer,
 };
 use dioxus::prelude::*;
 #[cfg(not(target_os = "android"))]
@@ -212,6 +212,12 @@ pub fn ServerSettings(
     on_delete: EventHandler<String>,
     on_switch: EventHandler<String>,
     on_login: EventHandler<()>,
+    /// `(id, label)` of installed browsers that can host Spotify playback,
+    /// shown as a picker under a Spotify server's card.
+    spotify_browsers: Vec<(String, String)>,
+    /// Persisted browser choice; `None` = automatic.
+    spotify_browser: Option<String>,
+    on_spotify_browser: EventHandler<Option<String>>,
 ) -> Element {
     let login_text = i18n::t("login");
     let delete_text = i18n::t("delete");
@@ -238,9 +244,13 @@ pub fn ServerSettings(
                             .is_some();
                     let id_switch = id.clone();
                     let id_delete = id.clone();
+                    let is_spotify = srv.service == MusicService::Spotify;
+                    let browsers = spotify_browsers.clone();
+                    let chosen = spotify_browser.clone();
                     rsx! {
                         div { key: "{srv.id}",
-                            class: "flex items-center justify-between gap-4 bg-white/5 p-2 rounded w-full",
+                            class: "flex flex-col gap-2 bg-white/5 p-2 rounded w-full",
+                            div { class: "flex items-center justify-between gap-4 w-full",
                             div { class: "min-w-0 flex-1",
                                 div { class: "flex items-center gap-2",
                                     p { class: "text-sm font-medium text-white truncate", "{srv.name}" }
@@ -279,6 +289,31 @@ pub fn ServerSettings(
                                     onclick: move |_| on_delete.call(id_delete.clone()),
                                     class: "text-red-400 hover:text-red-300 text-sm px-2 py-1 transition-colors",
                                     "{delete_text}"
+                                }
+                            }
+                            }
+                            if is_spotify {
+                                div { class: "flex items-center justify-between gap-4 border-t border-white/10 pt-2",
+                                    p { class: "text-xs text-white/60", "{i18n::t(\"spotify_browser\")}" }
+                                    select {
+                                        class: "bg-stone-800 text-white rounded px-2 py-1 text-xs border border-white/10 focus:outline-none focus:border-indigo-500",
+                                        onchange: move |evt| {
+                                            let v = evt.value();
+                                            on_spotify_browser.call((v != "auto").then_some(v));
+                                        },
+                                        option {
+                                            value: "auto",
+                                            selected: chosen.is_none(),
+                                            "{i18n::t(\"spotify_browser_auto\")}"
+                                        }
+                                        for (bid, label) in browsers.iter() {
+                                            option {
+                                                value: "{bid}",
+                                                selected: chosen.as_deref() == Some(bid.as_str()),
+                                                "{label}"
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }

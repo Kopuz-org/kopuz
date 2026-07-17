@@ -477,3 +477,5 @@ sort_field_tracks = Mga Track
 sort_field_albums = Mga Album
 view_grid = View ng grid
 view_list = View ng listahan
+spotify_browser = Spotify playback browser
+spotify_browser_auto = Automatic

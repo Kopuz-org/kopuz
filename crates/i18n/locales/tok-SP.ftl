@@ -484,3 +484,5 @@ sort_field_tracks = kalama musi
 sort_field_albums = kulupu pi kalama sama
 view_grid = lukin leko
 view_list = lukin linja
+spotify_browser = Spotify playback browser
+spotify_browser_auto = Automatic

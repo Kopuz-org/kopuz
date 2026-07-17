@@ -483,3 +483,5 @@ sort_field_tracks = Ścieżki
 sort_field_albums = Albumy
 view_grid = Widok siatki
 view_list = Widok listy
+spotify_browser = Przeglądarka odtwarzania Spotify
+spotify_browser_auto = Automatycznie

@@ -598,6 +598,10 @@ pub struct AppConfig {
     pub active_source: Source,
     #[serde(default)]
     pub source_explicitly_set: bool,
+    /// Browser id used to host Spotify playback (`chrome`/`edge`/`brave`/
+    /// `chromium`/`vivaldi`/`safari`); `None` picks the first available.
+    #[serde(default)]
+    pub spotify_browser: Option<String>,
     #[serde(default, deserialize_with = "deserialize_music_directories")]
     pub music_directory: Vec<PathBuf>,
     #[serde(default = "default_theme")]
@@ -831,6 +835,7 @@ impl Default for AppConfig {
             servers: Vec::new(),
             active_source: Source::Local,
             source_explicitly_set: false,
+            spotify_browser: None,
             music_directory: vec![music_directory],
             theme: default_theme(),
             device_id: default_device_id(),

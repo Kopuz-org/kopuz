@@ -477,3 +477,5 @@ sort_field_tracks = Nummers
 sort_field_albums = Albums
 view_grid = Rasterweergave
 view_list = Lijstweergave
+spotify_browser = Spotify-afspeelbrowser
+spotify_browser_auto = Automatisch

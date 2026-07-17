@@ -475,10 +475,11 @@ impl PlayerController {
         let Some(access) = self.spotify_access() else {
             return;
         };
+        let browser = self.config.peek().spotify_browser.clone();
         let mut host_sig = self.spotify_host;
         let mut error = self.playback_error;
         spawn(async move {
-            match ::server::spotify::host::SpotifyHost::start(access).await {
+            match ::server::spotify::host::SpotifyHost::start(access, browser).await {
                 Ok(host) => host_sig.set(Some(host)),
                 Err(e) => {
                     tracing::warn!(error = %e, "spotify host failed to start");

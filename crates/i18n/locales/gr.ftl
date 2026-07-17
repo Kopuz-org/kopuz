@@ -483,3 +483,5 @@ sort_field_tracks = Κομμάτια
 sort_field_albums = Άλμπουμ
 view_grid = Προβολή πλέγματος
 view_list = Προβολή λίστας
+spotify_browser = Spotify playback browser
+spotify_browser_auto = Automatic

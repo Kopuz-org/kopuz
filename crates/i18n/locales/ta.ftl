@@ -477,3 +477,5 @@ sort_field_tracks = தடங்கள்
 sort_field_albums = ஆல்பங்கள்
 view_grid = கட்டக் காட்சி
 view_list = பட்டியல் காட்சி
+spotify_browser = Spotify playback browser
+spotify_browser_auto = Automatic

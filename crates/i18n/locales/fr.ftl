@@ -484,3 +484,5 @@ sort_field_tracks = Pistes
 sort_field_albums = Albums
 view_grid = Vue grille
 view_list = Vue liste
+spotify_browser = Navigateur de lecture Spotify
+spotify_browser_auto = Automatique

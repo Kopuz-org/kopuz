@@ -483,3 +483,5 @@ sort_field_tracks = Треки
 sort_field_albums = Альбоми
 view_grid = Вигляд сіткою
 view_list = Вигляд списком
+spotify_browser = Браузер відтворення Spotify
+spotify_browser_auto = Автоматично

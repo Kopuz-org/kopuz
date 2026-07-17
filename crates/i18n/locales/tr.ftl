@@ -483,3 +483,5 @@ sort_field_tracks = Parçalar
 sort_field_albums = Albümler
 view_grid = Izgara görünümü
 view_list = Liste görünümü
+spotify_browser = Spotify oynatma tarayıcısı
+spotify_browser_auto = Otomatik

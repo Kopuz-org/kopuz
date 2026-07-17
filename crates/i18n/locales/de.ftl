@@ -483,3 +483,5 @@ sort_field_tracks = Titel
 sort_field_albums = Alben
 view_grid = Rasteransicht
 view_list = Listenansicht
+spotify_browser = Spotify-Wiedergabe-Browser
+spotify_browser_auto = Automatisch

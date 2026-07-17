@@ -489,3 +489,5 @@ sort_field_tracks = المقاطع
 sort_field_albums = الألبومات
 view_grid = عرض شبكي
 view_list = عرض قائمة
+spotify_browser = Spotify playback browser
+spotify_browser_auto = Automatic

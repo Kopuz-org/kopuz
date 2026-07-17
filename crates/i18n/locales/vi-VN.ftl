@@ -477,3 +477,5 @@ sort_field_tracks = Bài hát
 sort_field_albums = Album
 view_grid = Chế độ lưới
 view_list = Chế độ danh sách
+spotify_browser = Spotify playback browser
+spotify_browser_auto = Automatic

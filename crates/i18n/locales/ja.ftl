@@ -489,3 +489,5 @@ sort_field_tracks = トラック
 sort_field_albums = アルバム
 view_grid = グリッド表示
 view_list = リスト表示
+spotify_browser = Spotify再生ブラウザ
+spotify_browser_auto = 自動

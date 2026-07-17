@@ -483,3 +483,5 @@ sort_field_tracks = שירים
 sort_field_albums = אלבומים
 view_grid = תצוגת רשת
 view_list = תצוגת רשימה
+spotify_browser = Spotify playback browser
+spotify_browser_auto = Automatic

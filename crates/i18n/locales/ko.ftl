@@ -483,3 +483,5 @@ sort_field_tracks = 트랙
 sort_field_albums = 앨범
 view_grid = 격자 보기
 view_list = 목록 보기
+spotify_browser = Spotify 재생 브라우저
+spotify_browser_auto = 자동

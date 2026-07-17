@@ -477,3 +477,5 @@ sort_field_tracks = Trek
 sort_field_albums = Album
 view_grid = Tampilan kisi
 view_list = Tampilan daftar
+spotify_browser = Spotify playback browser
+spotify_browser_auto = Automatic

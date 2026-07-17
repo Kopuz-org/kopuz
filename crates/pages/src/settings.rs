@@ -176,6 +176,12 @@ use hooks::use_player_controller::PlayerController;
 #[component]
 pub fn Settings(config: Signal<AppConfig>) -> Element {
     let ctrl = use_context::<PlayerController>();
+    let spotify_browsers = use_hook(|| {
+        ::server::spotify::host::available_browsers()
+            .into_iter()
+            .map(|b| (b.id.to_string(), b.label.to_string()))
+            .collect::<Vec<_>>()
+    });
     let crossfade_label = if config.read().crossfade_seconds == 0 {
         i18n::t("crossfade_off")
     } else {
@@ -404,6 +410,11 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                             } else {
                                                 show_login.set(true);
                                             }
+                                        },
+                                        spotify_browsers: spotify_browsers.clone(),
+                                        spotify_browser: config.read().spotify_browser.clone(),
+                                        on_spotify_browser: move |v: Option<String>| {
+                                            config.write().spotify_browser = v;
                                         },
                                     }
                                 }

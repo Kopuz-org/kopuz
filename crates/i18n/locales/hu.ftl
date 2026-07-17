@@ -483,3 +483,5 @@ sort_field_tracks = Dalok
 sort_field_albums = Albumok
 view_grid = Rácsnézet
 view_list = Listanézet
+spotify_browser = Spotify playback browser
+spotify_browser_auto = Automatic

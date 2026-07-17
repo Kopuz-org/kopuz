@@ -477,3 +477,5 @@ sort_field_tracks = ട്രാക്കുകൾ
 sort_field_albums = ആൽബങ്ങൾ
 view_grid = ഗ്രിഡ് കാഴ്ച
 view_list = ലിസ്റ്റ് കാഴ്ച
+spotify_browser = Spotify playback browser
+spotify_browser_auto = Automatic

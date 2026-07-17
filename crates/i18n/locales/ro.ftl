@@ -483,3 +483,5 @@ sort_field_tracks = Piese
 sort_field_albums = Albume
 view_grid = Vizualizare grilă
 view_list = Vizualizare listă
+spotify_browser = Spotify playback browser
+spotify_browser_auto = Automatic

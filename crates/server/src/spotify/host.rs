@@ -1,9 +1,9 @@
 //! Browser-hosted Spotify playback.
 //!
-//! The Web Playback SDK needs a Widevine CDM; kopuz's embedded webview lacks one
-//! on macOS/Linux, so we can't run the SDK in-app. Instead the host runs a tiny
-//! localhost server, opens the user's own browser (which ships Widevine) at a
-//! page that boots `Spotify.Player`, and drives it over a WebSocket:
+//! The Web Playback SDK needs Widevine DRM and only behaves reliably in
+//! Chromium-family browsers, so the host runs a tiny localhost server, opens a
+//! Chromium browser at a page that boots `Spotify.Player`, and drives it over
+//! a WebSocket (the page still warns if the browser it lands in lacks DRM):
 //!
 //! - `GET /`   → serves [`PLAYER_PAGE`] (raw HTTP).
 //! - `GET /ws` → upgrades to a WebSocket.
@@ -65,8 +65,10 @@ pub struct SpotifyHost {
 }
 
 impl SpotifyHost {
-    /// Bind an ephemeral localhost port, start serving, and open the browser.
-    pub async fn start(access: String) -> Result<Self, String> {
+    /// Bind an ephemeral localhost port, start serving, and open the page in
+    /// the user's chosen browser — or the first available supported one (see
+    /// [`open_player_page`] for why never the system default).
+    pub async fn start(access: String, browser: Option<String>) -> Result<Self, String> {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
             .map_err(|e| format!("couldn't bind localhost for Spotify playback: {e}"))?;
@@ -85,7 +87,7 @@ impl SpotifyHost {
         tokio::spawn(accept_loop(listener, cmd_tx, event_tx, token));
 
         let url = format!("http://127.0.0.1:{port}/");
-        open_player_page(&url)?;
+        open_player_page(&url, browser.as_deref())?;
 
         Ok(host)
     }
@@ -127,64 +129,229 @@ impl SpotifyHost {
     }
 }
 
-/// Open the player page, preferring a Chromium-family browser. The Web Playback
-/// SDK has a long-standing Firefox bug where tracks die with generic
-/// `playback_error`s (spotify/web-playback-sdk#116), so the system default
-/// browser is only used as a last resort.
-fn open_player_page(url: &str) -> Result<(), String> {
-    if webbrowser::open_browser(webbrowser::Browser::Chrome, url).is_ok() {
-        tracing::info!("spotify player page opened in Chrome");
-        return Ok(());
-    }
-    #[cfg(target_os = "macos")]
-    for bundle in [
+/// A browser that can host the player page, offered in the settings picker.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct PlayerBrowser {
+    /// Stable id persisted in `AppConfig::spotify_browser`.
+    pub id: &'static str,
+    /// Display name for the picker.
+    pub label: &'static str,
+}
+
+#[cfg(target_os = "macos")]
+const BROWSERS: &[(PlayerBrowser, &str, &str)] = &[
+    (
+        PlayerBrowser {
+            id: "chrome",
+            label: "Google Chrome",
+        },
+        "com.google.Chrome",
+        "Google Chrome.app",
+    ),
+    (
+        PlayerBrowser {
+            id: "edge",
+            label: "Microsoft Edge",
+        },
         "com.microsoft.edgemac",
+        "Microsoft Edge.app",
+    ),
+    (
+        PlayerBrowser {
+            id: "brave",
+            label: "Brave",
+        },
         "com.brave.Browser",
+        "Brave Browser.app",
+    ),
+    (
+        PlayerBrowser {
+            id: "chromium",
+            label: "Chromium",
+        },
         "org.chromium.Chromium",
+        "Chromium.app",
+    ),
+    (
+        PlayerBrowser {
+            id: "vivaldi",
+            label: "Vivaldi",
+        },
         "com.vivaldi.Vivaldi",
-    ] {
-        let opened = std::process::Command::new("open")
-            .args(["-b", bundle, url])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if opened {
-            tracing::info!(
-                bundle,
-                "spotify player page opened in Chromium-family browser"
-            );
-            return Ok(());
-        }
+        "Vivaldi.app",
+    ),
+    (
+        PlayerBrowser {
+            id: "safari",
+            label: "Safari",
+        },
+        "com.apple.Safari",
+        "Safari.app",
+    ),
+];
+
+#[cfg(all(unix, not(target_os = "macos")))]
+const BROWSERS: &[(PlayerBrowser, &[&str])] = &[
+    (
+        PlayerBrowser {
+            id: "chrome",
+            label: "Google Chrome",
+        },
+        &["google-chrome-stable", "google-chrome"],
+    ),
+    (
+        PlayerBrowser {
+            id: "chromium",
+            label: "Chromium",
+        },
+        &["chromium", "chromium-browser"],
+    ),
+    (
+        PlayerBrowser {
+            id: "brave",
+            label: "Brave",
+        },
+        &["brave-browser", "brave"],
+    ),
+    (
+        PlayerBrowser {
+            id: "edge",
+            label: "Microsoft Edge",
+        },
+        &["microsoft-edge", "microsoft-edge-stable"],
+    ),
+    (
+        PlayerBrowser {
+            id: "vivaldi",
+            label: "Vivaldi",
+        },
+        &["vivaldi"],
+    ),
+];
+
+#[cfg(target_os = "macos")]
+fn browser_installed(app_name: &str) -> bool {
+    let candidates = [
+        format!("/Applications/{app_name}"),
+        format!("/System/Applications/{app_name}"),
+    ];
+    if candidates.iter().any(|p| std::path::Path::new(p).exists()) {
+        return true;
+    }
+    std::env::var_os("HOME").is_some_and(|home| {
+        std::path::Path::new(&home)
+            .join("Applications")
+            .join(app_name)
+            .exists()
+    })
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn command_in_path(cmd: &str) -> bool {
+    std::env::var_os("PATH")
+        .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(cmd).exists()))
+}
+
+/// The playback-capable browsers installed on this machine, in the order the
+/// automatic choice tries them.
+pub fn available_browsers() -> Vec<PlayerBrowser> {
+    #[cfg(target_os = "macos")]
+    {
+        BROWSERS
+            .iter()
+            .filter(|(_, _, app)| browser_installed(app))
+            .map(|(b, _, _)| *b)
+            .collect()
     }
     #[cfg(all(unix, not(target_os = "macos")))]
-    for cmd in [
-        "chromium",
-        "chromium-browser",
-        "brave-browser",
-        "microsoft-edge",
-        "vivaldi",
-    ] {
-        if std::process::Command::new(cmd).arg(url).spawn().is_ok() {
-            tracing::info!(cmd, "spotify player page opened in Chromium-family browser");
-            return Ok(());
-        }
+    {
+        BROWSERS
+            .iter()
+            .filter(|(_, cmds)| cmds.iter().any(|c| command_in_path(c)))
+            .map(|(b, _)| *b)
+            .collect()
     }
     #[cfg(target_os = "windows")]
     {
-        let opened = std::process::Command::new("cmd")
-            .args(["/C", "start", "", &format!("microsoft-edge:{url}")])
+        let mut out = Vec::new();
+        if webbrowser::Browser::Chrome.exists() {
+            out.push(PlayerBrowser {
+                id: "chrome",
+                label: "Google Chrome",
+            });
+        }
+        out.push(PlayerBrowser {
+            id: "edge",
+            label: "Microsoft Edge",
+        });
+        out
+    }
+}
+
+fn launch_browser(id: &str, url: &str) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        let Some((_, bundle, _)) = BROWSERS.iter().find(|(b, _, _)| b.id == id) else {
+            return false;
+        };
+        std::process::Command::new("open")
+            .args(["-b", bundle, url])
             .status()
             .map(|s| s.success())
-            .unwrap_or(false);
-        if opened {
-            tracing::info!("spotify player page opened in Edge");
+            .unwrap_or(false)
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let Some((_, cmds)) = BROWSERS.iter().find(|(b, _)| b.id == id) else {
+            return false;
+        };
+        cmds.iter()
+            .any(|cmd| std::process::Command::new(cmd).arg(url).spawn().is_ok())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        match id {
+            "chrome" => webbrowser::open_browser(webbrowser::Browser::Chrome, url).is_ok(),
+            "edge" => std::process::Command::new("cmd")
+                .args(["/C", "start", "", &format!("microsoft-edge:{url}")])
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false),
+            _ => false,
+        }
+    }
+}
+
+/// Open the player page in the user's chosen browser, or the first available
+/// one — deliberately never the system default: the SDK is only reliable in
+/// Chromium-family browsers and Safari (Firefox has a long-standing playback
+/// bug, spotify/web-playback-sdk#116, and ignores media-session metadata).
+fn open_player_page(url: &str, preferred: Option<&str>) -> Result<(), String> {
+    if let Some(id) = preferred {
+        if launch_browser(id, url) {
+            tracing::info!(browser = id, "spotify player page opened");
+            return Ok(());
+        }
+        tracing::warn!(
+            browser = id,
+            "chosen spotify browser unavailable; trying others"
+        );
+    }
+    for browser in available_browsers() {
+        if preferred == Some(browser.id) {
+            continue;
+        }
+        if launch_browser(browser.id, url) {
+            tracing::info!(browser = browser.id, "spotify player page opened");
             return Ok(());
         }
     }
-    tracing::warn!("no Chromium-family browser found; falling back to the default browser");
-    webbrowser::open(url)
-        .map(|_| ())
-        .map_err(|e| format!("couldn't open the browser for Spotify playback: {e}"))
+    Err(
+        "Spotify playback needs Chrome, Edge, Brave, Chromium, Vivaldi, or Safari — \
+         none was found. Install one (or pick a browser in Settings) and play the \
+         track again."
+            .to_string(),
+    )
 }
 
 async fn accept_loop(
@@ -294,6 +461,10 @@ fn emit_event(val: &Value, event_tx: &broadcast::Sender<HostEvent>) {
     let Some(event) = val["event"].as_str() else {
         return;
     };
+    if event == "log" {
+        tracing::info!(target: "spotify_player_page", "{}", val["line"].as_str().unwrap_or_default());
+        return;
+    }
     let out = match event {
         "ready" => HostEvent::Ready {
             device_id: val["device_id"].as_str().unwrap_or_default().to_string(),
@@ -353,6 +524,7 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
     let lastPos = -1, lastPosAt = 0, tokenCalls = 0;
     let prevPaused = true, deathRetries = 0, lastPauseCmdAt = 0, hasPlayed = false;
     let errTimes = [], stallResumes = 0, autoplayBlocked = false, isReady = false;
+    let unexpectedPauseAt = 0, lastDeathAt = 0, userActivated = false;
     const IS_FIREFOX = /firefox/i.test(navigator.userAgent);
     const LICENSE_HINT = IS_FIREFOX
       ? "Spotify playback keeps failing — Firefox has a known Spotify player bug. " +
@@ -365,6 +537,7 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
     const logLine = (t) => {
       const ts = new Date().toLocaleTimeString();
       logEl.textContent = (ts + "  " + t + "\n" + logEl.textContent).slice(0, 6000);
+      send({ event: "log", line: t });
     };
     const send = (o) => { try { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); } catch (e) {} };
 
@@ -397,6 +570,7 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
     function probeAutoplay() {
       const done = (ok, why) => {
         logLine("autoplay " + (ok ? "allowed" : "blocked" + (why ? " (" + why + ")" : "")));
+        if (userActivated) return;
         autoplayBlocked = !ok;
         if (ok) { send({ event: "activated" }); setStatus("Ready — audio plays in this tab."); }
         else { setStatus("Click the button to enable playback."); }
@@ -422,26 +596,44 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
           if (d && d.seekTime != null) send({ event: "media", action: "seek", position_ms: Math.round(d.seekTime * 1000) });
         });
       } catch (e) {}
-      if (cur && typeof MediaMetadata !== "undefined") {
-        try {
-          ms.metadata = new MediaMetadata({
-            title: cur.name || "",
-            artist: (cur.artists || []).map((a) => a.name).join(", "),
-            album: (cur.album && cur.album.name) || "",
-            artwork: ((cur.album && cur.album.images) || []).map((i) => ({
-              src: i.url,
-              sizes: (i.width || 300) + "x" + (i.height || 300),
-              type: "image/jpeg",
-            })),
-          });
-        } catch (e) {}
-      }
+      ensureMediaMetadata(cur);
     }
 
+    function ensureMediaMetadata(cur) {
+      if (!cur || !("mediaSession" in navigator) || typeof MediaMetadata === "undefined") return;
+      const ms = navigator.mediaSession;
+      const title = cur.name || "";
+      if (ms.metadata && ms.metadata.title === title) return;
+      logLine("media session metadata -> " + title);
+      try {
+        ms.metadata = new MediaMetadata({
+          title,
+          artist: (cur.artists || []).map((a) => a.name).join(", "),
+          album: (cur.album && cur.album.name) || "",
+          artwork: ((cur.album && cur.album.images) || []).map((i) => ({
+            src: i.url,
+            sizes: (i.width || 300) + "x" + (i.height || 300),
+            type: "image/jpeg",
+          })),
+        });
+      } catch (e) {}
+    }
+
+    let wsRetries = 0;
     function connect() {
       ws = new WebSocket("ws://" + location.host + "/ws");
+      ws.onopen = () => { wsRetries = 0; };
       ws.onmessage = (m) => { let d; try { d = JSON.parse(m.data); } catch (e) { return; } onCommand(d); };
-      ws.onclose = () => { setTimeout(connect, 1000); };
+      ws.onclose = () => {
+        wsRetries += 1;
+        if (wsRetries < 5) { setTimeout(connect, 1000); return; }
+        if (player) {
+          try { player.pause(); } catch (e) {}
+          try { player.disconnect(); } catch (e) {}
+        }
+        setStatus("kopuz closed — this tab can be closed.");
+        window.close();
+      };
     }
 
     function onCommand(d) {
@@ -465,16 +657,23 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
 
     function probeWidevine() {
       const fail = (why) => {
-        logLine("WIDEVINE MISSING: " + why);
+        logLine("DRM MISSING: " + why);
         setStatus(LICENSE_HINT);
-        send({ event: "error", kind: "widevine", message: "Widevine unavailable: " + why });
+        send({ event: "error", kind: "widevine", message: "DRM unavailable: " + why });
       };
       if (!navigator.requestMediaKeySystemAccess) { fail("no EME support"); return; }
-      navigator.requestMediaKeySystemAccess("com.widevine.alpha", [{
-        initDataTypes: ["cenc"],
-        audioCapabilities: [{ contentType: 'audio/mp4;codecs="mp4a.40.2"' }],
-      }]).then(() => logLine("widevine OK"))
-        .catch((e) => fail(e && e.message ? e.message : "unavailable"));
+      const audioCaps = [{ contentType: 'audio/mp4;codecs="mp4a.40.2"' }];
+      const systems = [
+        ["com.widevine.alpha", [{ initDataTypes: ["cenc"], audioCapabilities: audioCaps }]],
+        ["com.apple.fps", [{ initDataTypes: ["sinf"], audioCapabilities: audioCaps }, { initDataTypes: ["skd"], audioCapabilities: audioCaps }]],
+        ["com.apple.fps.1_0", [{ initDataTypes: ["sinf"], audioCapabilities: audioCaps }, { initDataTypes: ["skd"], audioCapabilities: audioCaps }]],
+      ];
+      (function tryNext(i) {
+        if (i >= systems.length) { fail("no Widevine or FairPlay"); return; }
+        navigator.requestMediaKeySystemAccess(systems[i][0], systems[i][1])
+          .then(() => logLine("drm OK: " + systems[i][0]))
+          .catch(() => tryNext(i + 1));
+      })(0);
     }
 
     function boot() {
@@ -552,6 +751,21 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
           if (pos !== lastPos) { lastPos = pos; lastPosAt = Date.now(); stallResumes = 0; }
         } else {
           lastPos = pos; lastPosAt = Date.now();
+          if (unexpectedPauseAt && Date.now() - unexpectedPauseAt > 3000
+              && Date.now() - lastPauseCmdAt > 4000) {
+            unexpectedPauseAt = 0;
+            lastDeathAt = Date.now();
+            if (deathRetries === 0) {
+              deathRetries = 1;
+              logLine("DIED mid-track at " + pos + "/" + dur + " — retrying resume");
+              try { await player.resume(); } catch (e) {}
+            } else {
+              deathRetries += 1;
+              logLine("DIED again at " + pos + "/" + dur);
+              setStatus(LICENSE_HINT);
+              if (deathRetries === 2) send({ event: "error", kind: "license", message: LICENSE_HINT });
+            }
+          }
         }
         handleState(st);
       }, 1000);
@@ -562,6 +776,9 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
       const paused = s.paused, pos = s.position || 0, dur = s.duration || 0;
       const cur = s.track_window && s.track_window.current_track;
       const tid = cur ? cur.id : null;
+
+      ensureMediaMetadata(cur);
+      try { if ("mediaSession" in navigator) navigator.mediaSession.playbackState = paused ? "paused" : "playing"; } catch (e) {}
 
       if (tid !== curId) {
         curId = tid;
@@ -576,17 +793,16 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
         return;
       }
 
-      if (paused && !prevPaused && pos > 0 && dur > 0 && pos < dur - 3000
-          && Date.now() - lastPauseCmdAt > 4000) {
-        if (deathRetries === 0) {
-          deathRetries = 1;
-          logLine("DIED mid-track at " + pos + "/" + dur + " — retrying resume");
-          try { player.resume().catch(() => {}); } catch (e) {}
-        } else {
-          deathRetries += 1;
-          logLine("DIED again at " + pos + "/" + dur);
-          setStatus(LICENSE_HINT);
-          if (deathRetries === 2) send({ event: "error", kind: "license", message: LICENSE_HINT });
+      if (paused) {
+        if (!prevPaused && pos > 0 && dur > 0 && pos < dur - 3000
+            && Date.now() - lastPauseCmdAt > 4000 && !unexpectedPauseAt) {
+          unexpectedPauseAt = Date.now();
+        }
+      } else {
+        unexpectedPauseAt = 0;
+        if (deathRetries > 0 && lastDeathAt && Date.now() - lastDeathAt > 30000) {
+          deathRetries = 0;
+          if (statusEl.textContent === LICENSE_HINT) setStatus("Ready — audio plays in this tab.");
         }
       }
       prevPaused = paused;
@@ -613,6 +829,7 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
 
     document.getElementById("activate").addEventListener("click", () => {
       logLine("activate clicked");
+      userActivated = true;
       autoplayBlocked = false;
       if (player && player.activateElement) { try { player.activateElement(); } catch (e) {} }
       send({ event: "activated" });
