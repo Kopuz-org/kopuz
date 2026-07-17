@@ -275,7 +275,12 @@ pub fn use_player_task(ctrl: PlayerController) {
                 match ev {
                     HostEvent::Ready { device_id } => {
                         ctrl.spotify_device.set(Some(device_id.clone()));
-                        // Fire the play that was waiting on the device.
+                        // Fire the play that was waiting on the device — but only
+                        // once the tab has confirmed playback is allowed; playing
+                        // into an autoplay block storms errors and wedges the SDK.
+                        if !*ctrl.spotify_activated.peek() {
+                            continue;
+                        }
                         let pending = ctrl.spotify_pending_uri.peek().clone();
                         if let (Some(uri), Some(access)) = (pending, ctrl.spotify_access()) {
                             ctrl.spotify_pending_uri.set(None);
@@ -311,18 +316,23 @@ pub fn use_player_task(ctrl: PlayerController) {
                         }
                     }
                     HostEvent::Activated => {
-                        // Audio just got unblocked by the tab gesture; re-issue the
-                        // current Spotify track so a play that Chrome silently
-                        // dropped actually starts.
+                        // Audio is now allowed (autoplay probe passed or the user
+                        // clicked the tab's button). Fire the held-back pending
+                        // play, or re-issue the current track if a play already
+                        // went out and got silently dropped by the block.
+                        ctrl.spotify_activated.set(true);
                         if *ctrl.external_active.peek() {
-                            let track = ctrl.current_track();
-                            if let (Some(track), Some(access), Some(device)) = (
-                                track,
+                            let uri = ctrl.spotify_pending_uri.peek().clone().or_else(|| {
+                                ctrl.current_track()
+                                    .filter(|t| t.id.service() == Some(MusicService::Spotify))
+                                    .map(|t| format!("spotify:track:{}", t.id.key()))
+                            });
+                            if let (Some(uri), Some(access), Some(device)) = (
+                                uri,
                                 ctrl.spotify_access(),
                                 ctrl.spotify_device.peek().clone(),
-                            ) && track.id.service() == Some(MusicService::Spotify)
-                            {
-                                let uri = format!("spotify:track:{}", track.id.key());
+                            ) {
+                                ctrl.spotify_pending_uri.set(None);
                                 spawn(async move {
                                     let _ = server::spotify::api::start_playback(
                                         &access,
@@ -341,8 +351,10 @@ pub fn use_player_task(ctrl: PlayerController) {
                                 "Spotify session expired — re-sign in from Settings.".to_string()
                             }
                             "widevine" => "This browser can't play Spotify (no Widevine DRM). \
-                                Open the Spotify player tab in Chrome, Edge, Brave, or Firefox."
+                                Open the Spotify player tab in Chrome, Edge, or Brave."
                                 .to_string(),
+                            // The page words license-failure hints for users already.
+                            "license" => message,
                             _ => format!("Spotify player error: {message}"),
                         };
                         ctrl.playback_error.set(Some(msg));

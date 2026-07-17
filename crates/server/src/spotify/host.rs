@@ -39,7 +39,9 @@ pub enum HostEvent {
     },
     /// The user clicked the page's enable-playback button (autoplay gesture).
     Activated,
-    /// A player error. `kind` is one of `account`/`auth`/`widevine`/`playback`.
+    /// A player error. `kind` is one of `account`/`auth`/`widevine`/`playback`/
+    /// `license` (DRM license failures — tracks dying ~10s in; the message is
+    /// already user-facing).
     Error { kind: String, message: String },
 }
 
@@ -75,8 +77,7 @@ impl SpotifyHost {
         tokio::spawn(accept_loop(listener, cmd_tx, event_tx, token));
 
         let url = format!("http://127.0.0.1:{port}/");
-        webbrowser::open(&url)
-            .map_err(|e| format!("couldn't open the browser for Spotify playback: {e}"))?;
+        open_player_page(&url)?;
 
         Ok(host)
     }
@@ -116,6 +117,67 @@ impl SpotifyHost {
         *self.token.lock().await = access.clone();
         self.send(json!({ "cmd": "set_token", "token": access }));
     }
+}
+
+/// Open the player page, preferring a Chromium-family browser. The Web Playback
+/// SDK has a long-standing Firefox bug where tracks die with generic
+/// `playback_error`s (spotify/web-playback-sdk#116), so the system default
+/// browser is only used as a last resort.
+fn open_player_page(url: &str) -> Result<(), String> {
+    if webbrowser::open_browser(webbrowser::Browser::Chrome, url).is_ok() {
+        tracing::info!("spotify player page opened in Chrome");
+        return Ok(());
+    }
+    #[cfg(target_os = "macos")]
+    for bundle in [
+        "com.microsoft.edgemac",
+        "com.brave.Browser",
+        "org.chromium.Chromium",
+        "com.vivaldi.Vivaldi",
+    ] {
+        let opened = std::process::Command::new("open")
+            .args(["-b", bundle, url])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if opened {
+            tracing::info!(
+                bundle,
+                "spotify player page opened in Chromium-family browser"
+            );
+            return Ok(());
+        }
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    for cmd in [
+        "chromium",
+        "chromium-browser",
+        "brave-browser",
+        "microsoft-edge",
+        "vivaldi",
+    ] {
+        if std::process::Command::new(cmd).arg(url).spawn().is_ok() {
+            tracing::info!(cmd, "spotify player page opened in Chromium-family browser");
+            return Ok(());
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // Edge ships with Windows; its protocol handler beats an unknown default.
+        let opened = std::process::Command::new("cmd")
+            .args(["/C", "start", "", &format!("microsoft-edge:{url}")])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if opened {
+            tracing::info!("spotify player page opened in Edge");
+            return Ok(());
+        }
+    }
+    tracing::warn!("no Chromium-family browser found; falling back to the default browser");
+    webbrowser::open(url)
+        .map(|_| ())
+        .map_err(|e| format!("couldn't open the browser for Spotify playback: {e}"))
 }
 
 async fn accept_loop(
@@ -280,11 +342,18 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
   <button id="activate">Click to enable playback</button>
   <p id="status">Loading the Spotify player…</p>
   <pre id="log"></pre>
-  <script src="https://sdk.scdn.co/spotify-player.js"></script>
   <script>
     let ws = null, token = "", player = null;
     let wasPlaying = false, reportedEnded = false, curId = null, nearEnd = false;
     let lastPos = -1, lastPosAt = 0, tokenCalls = 0;
+    let prevPaused = true, deathRetries = 0, lastPauseCmdAt = 0, hasPlayed = false;
+    let errTimes = [], stallResumes = 0, autoplayBlocked = false;
+    const IS_FIREFOX = /firefox/i.test(navigator.userAgent);
+    const LICENSE_HINT = IS_FIREFOX
+      ? "Spotify playback keeps failing — Firefox has a known Spotify player bug. " +
+        "Copy this page's address into Chrome, Edge, or Brave."
+      : "Spotify playback keeps failing in this browser (DRM/license errors). " +
+        "Try Chrome, Edge, or Brave, or another network (VPN off).";
     const statusEl = document.getElementById("status");
     const logEl = document.getElementById("log");
     const setStatus = (t) => { statusEl.textContent = t; };
@@ -293,6 +362,56 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
       logEl.textContent = (ts + "  " + t + "\n" + logEl.textContent).slice(0, 6000);
     };
     const send = (o) => { try { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); } catch (e) {} };
+
+    // Log failing Spotify network calls. The SDK collapses every failure —
+    // rejected DRM license, blocked CDN chunk — into a generic "Playback error",
+    // so hook fetch/XHR (before the SDK script loads, below) and name the
+    // endpoint that actually failed.
+    (() => {
+      const interesting = (u) => /license|widevine|scdn|spclient|spotify/i.test(u);
+      const origFetch = window.fetch;
+      window.fetch = function (input) {
+        const url = (typeof input === "string") ? input : (input && input.url) || "";
+        const p = origFetch.apply(this, arguments);
+        if (interesting(url)) {
+          p.then(
+            (r) => { if (!r.ok) logLine("NET " + r.status + " " + url.slice(0, 120)); },
+            (e) => logLine("NET FAIL " + url.slice(0, 120) + " — " + e)
+          );
+        }
+        return p;
+      };
+      const origOpen = XMLHttpRequest.prototype.open;
+      XMLHttpRequest.prototype.open = function (method, url) {
+        if (interesting(String(url))) {
+          this.addEventListener("loadend", () => {
+            if (this.status === 0 || this.status >= 400)
+              logLine("NET(xhr) " + this.status + " " + String(url).slice(0, 120));
+          });
+        }
+        return origOpen.apply(this, arguments);
+      };
+    })();
+
+    // Detect whether audible autoplay is allowed. If it is, report "activated"
+    // right away so kopuz can start playback without the button click; if not
+    // (Firefox's default), kopuz holds the first track until the user clicks —
+    // firing plays into an autoplay block just storms errors and can wedge the
+    // SDK's playback pipeline.
+    function probeAutoplay() {
+      const done = (ok, why) => {
+        logLine("autoplay " + (ok ? "allowed" : "blocked" + (why ? " (" + why + ")" : "")));
+        autoplayBlocked = !ok;
+        if (ok) { send({ event: "activated" }); setStatus("Ready — audio plays in this tab."); }
+        else { setStatus("Click the button to enable playback."); }
+      };
+      try {
+        const a = new Audio("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=");
+        const p = a.play();
+        if (!p || !p.then) { done(true); return; }
+        p.then(() => { a.pause(); done(true); }).catch((e) => done(false, e && e.name));
+      } catch (e) { done(false, e && e.name); }
+    }
 
     function connect() {
       ws = new WebSocket("ws://" + location.host + "/ws");
@@ -307,15 +426,37 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
         if (!player && window.Spotify) boot();
       } else if (!player) {
         return;
-      } else if (d.cmd === "pause") { player.pause(); }
+      } else if (d.cmd === "pause") { lastPauseCmdAt = Date.now(); player.pause(); }
       else if (d.cmd === "resume") { player.resume(); }
       else if (d.cmd === "seek") { player.seek(d.position_ms || 0); }
       else if (d.cmd === "set_volume") { player.setVolume(Math.max(0, Math.min(1, d.volume ?? 1))); }
-      else if (d.cmd === "disconnect") { player.disconnect(); }
+      else if (d.cmd === "disconnect") { lastPauseCmdAt = Date.now(); player.disconnect(); }
+    }
+
+    // The SDK boots fine in browsers whose EME isn't Widevine (e.g. Safari uses
+    // FairPlay) and then fails every license request, killing each track ~10s in
+    // with only generic playback errors. Probe for Widevine directly so that
+    // failure mode is named the moment the page loads.
+    function probeWidevine() {
+      const fail = (why) => {
+        logLine("WIDEVINE MISSING: " + why);
+        setStatus(LICENSE_HINT);
+        send({ event: "error", kind: "widevine", message: "Widevine unavailable: " + why });
+      };
+      if (!navigator.requestMediaKeySystemAccess) { fail("no EME support"); return; }
+      navigator.requestMediaKeySystemAccess("com.widevine.alpha", [{
+        initDataTypes: ["cenc"],
+        audioCapabilities: [{ contentType: 'audio/mp4;codecs="mp4a.40.2"' }],
+      }]).then(() => logLine("widevine OK"))
+        .catch((e) => fail(e && e.message ? e.message : "unavailable"));
     }
 
     function boot() {
       logLine("booting SDK (token " + (token ? "present" : "MISSING") + ")");
+      logLine("ua: " + navigator.userAgent);
+      if (IS_FIREFOX) logLine("WARNING: Firefox has a known Spotify SDK bug (web-playback-sdk#116) — if tracks fail, use Chrome/Edge/Brave");
+      probeWidevine();
+      probeAutoplay();
       player = new Spotify.Player({
         name: "kopuz",
         getOAuthToken: (cb) => { tokenCalls++; logLine("getOAuthToken #" + tokenCalls); cb(token); },
@@ -323,7 +464,8 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
       });
       player.addListener("ready", ({ device_id }) => {
         send({ event: "ready", device_id });
-        setStatus("Ready — audio plays in this tab.");
+        setStatus(autoplayBlocked ? "Click the button to enable playback."
+                                  : "Ready — audio plays in this tab.");
         logLine("READY device=" + device_id);
       });
       player.addListener("not_ready", () => { send({ event: "not_ready" }); setStatus("Device went offline."); logLine("NOT_READY"); });
@@ -342,48 +484,31 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
       player.addListener("playback_error", ({ message }) => {
         send({ event: "error", kind: "playback", message });
         logLine("PLAYBACK_ERROR: " + message);
+        // A burst of generic errors after real playback has happened is the
+        // license-failure signature (pre-play bursts are just autoplay blocks).
+        const now = Date.now();
+        errTimes = errTimes.filter((t) => now - t < 20000);
+        errTimes.push(now);
+        if (hasPlayed && errTimes.length >= 3) {
+          errTimes = [];
+          setStatus(LICENSE_HINT);
+          send({ event: "error", kind: "license", message: LICENSE_HINT });
+        }
       });
       player.addListener("player_state_changed", (s) => {
         if (!s) { logLine("state=null (device lost active session)"); return; }
-        const paused = s.paused, pos = s.position || 0, dur = s.duration || 0;
         const cur = s.track_window && s.track_window.current_track;
-        const tid = cur ? cur.id : null;
-        logLine("state paused=" + paused + " pos=" + pos + " dur=" + dur + " track=" + (cur ? cur.name : "null"));
-
-        // A different track loaded (kopuz issued the next URI). A fresh load also
-        // reports paused@0, so reset per-track state and never treat it as an end,
-        // or every track change would auto-skip.
-        if (tid !== curId) {
-          curId = tid;
-          reportedEnded = false;
-          nearEnd = false;
-          wasPlaying = !paused;
-          send({ event: "state", paused, position: pos, duration: dur, track_id: tid, ended: false });
-          return;
-        }
-
-        if (!paused) { wasPlaying = true; reportedEnded = false; }
-        // Latch once playback actually reaches the tail of the track. Only then can
-        // a following paused@0 be a genuine end — a mid-track network stall (which
-        // also reports paused, sometimes at 0) never crosses this line, so it can't
-        // be mistaken for the song finishing.
-        if (!paused && dur > 0 && pos >= dur - 3000) nearEnd = true;
-
-        let ended = false;
-        if (paused && pos === 0 && wasPlaying && nearEnd && !reportedEnded) {
-          ended = true;
-          reportedEnded = true;
-          wasPlaying = false;
-          nearEnd = false;
-        }
-        send({ event: "state", paused, position: pos, duration: dur, track_id: tid, ended });
+        logLine("state paused=" + s.paused + " pos=" + (s.position || 0) + " dur=" + (s.duration || 0) + " track=" + (cur ? cur.name : "null"));
+        handleState(s);
       });
       player.connect().then((ok) => logLine("connect() -> " + ok));
 
-      // Stall watchdog: the SDK stops firing state events when audio stalls (e.g.
-      // Widevine license failure), so poll the real state. If it silently paused
-      // mid-track, try to resume once; if position isn't advancing while "playing",
-      // surface it so the cause is visible.
+      // The SDK only fires player_state_changed on transitions, never while a
+      // track simply plays — so poll getCurrentState() for the between-event
+      // position ticks kopuz needs (progress bar + end-of-track detection).
+      // The same poll doubles as a stall watchdog: if audio stalls (e.g. a
+      // Widevine license failure) the SDK goes silent, so if position isn't
+      // advancing while "playing", try to resume once and surface it.
       setInterval(async () => {
         if (!player) return;
         let st = null;
@@ -392,19 +517,93 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
         const pos = st.position || 0, dur = st.duration || 0;
         if (!st.paused) {
           if (pos === lastPos && Date.now() - lastPosAt > 3500 && dur > 0 && pos < dur - 2000) {
-            logLine("STALL: playing but pos stuck at " + pos + "/" + dur + " — resuming");
-            try { await player.resume(); } catch (e) {}
+            if (stallResumes < 3) {
+              stallResumes += 1;
+              logLine("STALL: playing but pos stuck at " + pos + "/" + dur + " — resuming (" + stallResumes + "/3)");
+              try { await player.resume(); } catch (e) {}
+            } else if (stallResumes === 3) {
+              stallResumes += 1;
+              logLine("STALL: giving up after 3 resumes");
+              setStatus(LICENSE_HINT);
+              send({ event: "error", kind: "license", message: LICENSE_HINT });
+            }
             lastPosAt = Date.now();
           }
-          if (pos !== lastPos) { lastPos = pos; lastPosAt = Date.now(); }
+          if (pos !== lastPos) { lastPos = pos; lastPosAt = Date.now(); stallResumes = 0; }
         } else {
           lastPos = pos; lastPosAt = Date.now();
         }
-      }, 1500);
+        handleState(st);
+      }, 1000);
+    }
+
+    let lastSentKey = "";
+    function handleState(s) {
+      const paused = s.paused, pos = s.position || 0, dur = s.duration || 0;
+      const cur = s.track_window && s.track_window.current_track;
+      const tid = cur ? cur.id : null;
+
+      // A different track loaded (kopuz issued the next URI). A fresh load also
+      // reports paused@0, so reset per-track state and never treat it as an end,
+      // or every track change would auto-skip.
+      if (tid !== curId) {
+        curId = tid;
+        reportedEnded = false;
+        nearEnd = false;
+        deathRetries = 0;
+        prevPaused = paused;
+        wasPlaying = !paused;
+        lastSentKey = paused + "|" + pos + "|" + tid;
+        send({ event: "state", paused, position: pos, duration: dur, track_id: tid, ended: false });
+        return;
+      }
+
+      // The SDK flipping to paused mid-track without kopuz asking is playback
+      // dying underneath us (typically a failed DRM license ~10s in). Retry once
+      // per track, then surface the diagnosis instead of stopping silently.
+      if (paused && !prevPaused && pos > 0 && dur > 0 && pos < dur - 3000
+          && Date.now() - lastPauseCmdAt > 4000) {
+        if (deathRetries === 0) {
+          deathRetries = 1;
+          logLine("DIED mid-track at " + pos + "/" + dur + " — retrying resume");
+          try { player.resume().catch(() => {}); } catch (e) {}
+        } else {
+          deathRetries += 1;
+          logLine("DIED again at " + pos + "/" + dur);
+          setStatus(LICENSE_HINT);
+          if (deathRetries === 2) send({ event: "error", kind: "license", message: LICENSE_HINT });
+        }
+      }
+      prevPaused = paused;
+
+      if (!paused) {
+        wasPlaying = true;
+        reportedEnded = false;
+        if (pos > 2000) hasPlayed = true;
+      }
+      // Latch once playback actually reaches the tail of the track. Only then can
+      // a following paused@0 be a genuine end — a mid-track network stall (which
+      // also reports paused, sometimes at 0) never crosses this line, so it can't
+      // be mistaken for the song finishing.
+      if (!paused && dur > 0 && pos >= dur - 3000) nearEnd = true;
+
+      let ended = false;
+      if (paused && pos === 0 && wasPlaying && nearEnd && !reportedEnded) {
+        ended = true;
+        reportedEnded = true;
+        wasPlaying = false;
+        nearEnd = false;
+      }
+      // Polls repeat the same frame while paused — only forward actual changes.
+      const key = paused + "|" + pos + "|" + tid;
+      if (!ended && key === lastSentKey) return;
+      lastSentKey = key;
+      send({ event: "state", paused, position: pos, duration: dur, track_id: tid, ended });
     }
 
     document.getElementById("activate").addEventListener("click", () => {
       logLine("activate clicked");
+      autoplayBlocked = false;
       if (player && player.activateElement) { try { player.activateElement(); } catch (e) {} }
       send({ event: "activated" });
       setStatus("Playback enabled.");
@@ -413,5 +612,6 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
     window.onSpotifyWebPlaybackSDKReady = () => { if (token && !player) boot(); };
     connect();
   </script>
+  <script src="https://sdk.scdn.co/spotify-player.js"></script>
 </body>
 </html>"#;

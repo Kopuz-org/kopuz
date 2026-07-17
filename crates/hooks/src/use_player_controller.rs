@@ -127,6 +127,10 @@ pub struct PlayerController {
     pub(crate) spotify_device: Signal<Option<String>>,
     /// A Spotify track URI waiting for the device to become ready (first play).
     pub(crate) spotify_pending_uri: Signal<Option<String>>,
+    /// Whether the browser tab reported playback is allowed (autoplay probe or
+    /// the enable-playback click). Plays issued before this just storm autoplay
+    /// errors and can wedge the SDK, so the first play waits on it.
+    pub(crate) spotify_activated: Signal<bool>,
     /// Whether the current track is playing through the Spotify host rather than
     /// the engine — transport methods and the progress pump branch on this.
     pub(crate) external_active: Signal<bool>,
@@ -488,10 +492,15 @@ impl PlayerController {
 
     /// Begin playing a Spotify track id: ensure the host, then start it on the
     /// SDK device via the Web API — or stash it as pending until the device is
-    /// ready (first play, before the SDK reports in).
+    /// ready AND the tab has confirmed playback is allowed (autoplay probe /
+    /// enable-playback click). The pump fires the pending URI on those events.
     fn spotify_play(&mut self, item_id: &str) {
         let uri = format!("spotify:track:{item_id}");
         self.ensure_spotify_host();
+        if !*self.spotify_activated.peek() {
+            self.spotify_pending_uri.set(Some(uri));
+            return;
+        }
         match (self.spotify_access(), self.spotify_device.peek().clone()) {
             (Some(access), Some(device)) => {
                 self.spotify_pending_uri.set(None);
@@ -1060,6 +1069,7 @@ pub fn use_player_controller(
     let spotify_host = use_signal(|| None::<::server::spotify::host::SpotifyHost>);
     let spotify_device = use_signal(|| None::<String>);
     let spotify_pending_uri = use_signal(|| None::<String>);
+    let spotify_activated = use_signal(|| false);
     let external_active = use_signal(|| false);
     let db = use_signal(move || db_handle);
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
@@ -1133,6 +1143,7 @@ pub fn use_player_controller(
         spotify_host,
         spotify_device,
         spotify_pending_uri,
+        spotify_activated,
         external_active,
     }
 }
