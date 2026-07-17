@@ -149,6 +149,51 @@ pub enum SortOrder {
     Album,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum SortDirection {
+    #[default]
+    Asc,
+    Desc,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum AlbumSortField {
+    Title,
+    Artist,
+    Year,
+    Genre,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SortCriterion<F> {
+    pub field: F,
+    pub direction: SortDirection,
+}
+
+impl<F> SortCriterion<F> {
+    pub fn new(field: F, direction: SortDirection) -> Self {
+        Self { field, direction }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TrackSortField {
+    Title,
+    Artist,
+    Album,
+    Duration,
+    DateAdded,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ArtistSortField {
+    Name,
+    /// Track count (primary-artist credits).
+    Tracks,
+    /// Album count.
+    Albums,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ArtistViewOrder {
     Tracks,
@@ -156,10 +201,10 @@ pub enum ArtistViewOrder {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-pub enum ArtistPhotoSource {
+pub enum AlbumViewMode {
     #[default]
-    AlbumCover,
-    ArtistPhoto,
+    Grid,
+    List,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -205,6 +250,64 @@ impl ChannelMode {
             "right-only" => Self::RightOnly,
             "swap-left-right" => Self::SwapLeftRight,
             _ => Self::Stereo,
+        }
+    }
+}
+
+/// What playback does after the output device changes (unplugged headphones,
+/// OS default switched) and the engine has migrated to the new device.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum DeviceChangeBehavior {
+    /// Keep playing on the new device at the same position.
+    Resume,
+    /// Migrate to the new device but hold paused until the user resumes.
+    #[default]
+    Pause,
+}
+
+impl DeviceChangeBehavior {
+    pub const ALL: &'static [Self] = &[Self::Resume, Self::Pause];
+
+    pub const fn value_str(self) -> &'static str {
+        match self {
+            Self::Resume => "resume",
+            Self::Pause => "pause",
+        }
+    }
+
+    pub fn from_value_str(value: &str) -> Self {
+        match value {
+            "pause" => Self::Pause,
+            _ => Self::Resume,
+        }
+    }
+}
+
+/// Which sample rate the output stream is opened at.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub enum SampleRateMode {
+    /// Keep the device at its default rate and resample every source to it.
+    #[default]
+    System,
+    /// Reopen the device at each track's native rate (switches the DAC per
+    /// track when rates differ).
+    Source,
+}
+
+impl SampleRateMode {
+    pub const ALL: &'static [Self] = &[Self::System, Self::Source];
+
+    pub const fn value_str(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Source => "source",
+        }
+    }
+
+    pub fn from_value_str(value: &str) -> Self {
+        match value {
+            "source" => Self::Source,
+            _ => Self::System,
         }
     }
 }
@@ -502,6 +605,20 @@ pub struct AppConfig {
     pub discord_presence_source: Option<bool>,
     #[serde(default = "default_sort_order")]
     pub sort_order: SortOrder,
+    #[serde(default = "default_album_sort")]
+    pub album_sort: Vec<SortCriterion<AlbumSortField>>,
+    #[serde(default = "default_library_sort")]
+    pub library_sort: Vec<SortCriterion<TrackSortField>>,
+    #[serde(default = "default_album_sort")]
+    pub artist_album_sort: Vec<SortCriterion<AlbumSortField>>,
+    #[serde(default = "default_artist_sort")]
+    pub artist_sort: Vec<SortCriterion<ArtistSortField>>,
+    #[serde(default)]
+    pub album_view_mode: AlbumViewMode,
+    #[serde(default)]
+    pub artist_album_view_mode: AlbumViewMode,
+    #[serde(default)]
+    pub artists_view_mode: AlbumViewMode,
     #[serde(default = "default_artist_view_order")]
     pub artist_view_order: ArtistViewOrder,
     #[serde(default)]
@@ -554,6 +671,10 @@ pub struct AppConfig {
     #[serde(default)]
     pub equalizer: EqualizerSettings,
     #[serde(default)]
+    pub device_change_behavior: DeviceChangeBehavior,
+    #[serde(default)]
+    pub sample_rate_mode: SampleRateMode,
+    #[serde(default)]
     pub ytdlp_output_dir: String,
     #[serde(default)]
     pub ytdlp_options: YtdlpOptions,
@@ -575,8 +696,6 @@ pub struct AppConfig {
     pub home_sections: Vec<HomeSection>,
     #[serde(default)]
     pub listen_now_style: ListenNowStyle,
-    #[serde(default)]
-    pub artist_photo_source: ArtistPhotoSource,
     #[serde(default)]
     pub auto_fetch_covers: bool,
     #[serde(default)]
@@ -611,6 +730,27 @@ fn default_discord_presence_source() -> Option<bool> {
 
 fn default_sort_order() -> SortOrder {
     SortOrder::Title
+}
+
+fn default_album_sort() -> Vec<SortCriterion<AlbumSortField>> {
+    vec![SortCriterion::new(
+        AlbumSortField::Title,
+        SortDirection::Asc,
+    )]
+}
+
+fn default_library_sort() -> Vec<SortCriterion<TrackSortField>> {
+    vec![SortCriterion::new(
+        TrackSortField::Title,
+        SortDirection::Asc,
+    )]
+}
+
+fn default_artist_sort() -> Vec<SortCriterion<ArtistSortField>> {
+    vec![SortCriterion::new(
+        ArtistSortField::Name,
+        SortDirection::Asc,
+    )]
 }
 
 fn default_artist_view_order() -> ArtistViewOrder {
@@ -689,6 +829,13 @@ impl Default for AppConfig {
             discord_presence_paused: Some(true),
             discord_presence_source: Some(true),
             sort_order: default_sort_order(),
+            album_sort: default_album_sort(),
+            library_sort: default_library_sort(),
+            artist_album_sort: default_album_sort(),
+            artist_sort: default_artist_sort(),
+            album_view_mode: AlbumViewMode::Grid,
+            artist_album_view_mode: AlbumViewMode::Grid,
+            artists_view_mode: AlbumViewMode::Grid,
             artist_view_order: default_artist_view_order(),
             listen_counts: HashMap::new(),
             musicbrainz_token: String::new(),
@@ -712,6 +859,8 @@ impl Default for AppConfig {
             back_behavior: BackBehavior::RewindThenPrev,
             channel_mode: ChannelMode::Stereo,
             equalizer: EqualizerSettings::default(),
+            device_change_behavior: DeviceChangeBehavior::Pause,
+            sample_rate_mode: SampleRateMode::System,
             ytdlp_output_dir: String::new(),
             ytdlp_options: YtdlpOptions::default(),
             ytdlp_history: Vec::new(),
@@ -723,7 +872,6 @@ impl Default for AppConfig {
             hero_height: default_hero_height(),
             home_sections: default_home_sections(),
             listen_now_style: ListenNowStyle::default(),
-            artist_photo_source: ArtistPhotoSource::AlbumCover,
             auto_fetch_covers: false,
             cover_fetch_strategy: FetchStrategy::default(),
             radio_registries: default_radio_registries(),

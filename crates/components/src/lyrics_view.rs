@@ -555,8 +555,7 @@ pub fn LyricsView(
                                     onclick: {
                                         let st = line.start_time;
                                         move |_| {
-                                            ctrl.player.write().seek(std::time::Duration::from_secs_f64(st));
-                                            current_song_progress.set(st as u64);
+                                            ctrl.seek(std::time::Duration::from_secs_f64(st));
                                         }
                                     },
                                     if line.chunks.is_empty() {

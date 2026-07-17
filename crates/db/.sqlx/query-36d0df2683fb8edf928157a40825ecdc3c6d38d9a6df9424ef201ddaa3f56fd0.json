@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO scrobble_queue (listened_at, artist, title, album, service, listen_info) VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT(listened_at, artist, title, service) DO UPDATE SET album = COALESCE(excluded.album, album), listen_info = COALESCE(excluded.listen_info, listen_info)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": []
+  },
+  "hash": "36d0df2683fb8edf928157a40825ecdc3c6d38d9a6df9424ef201ddaa3f56fd0"
+}

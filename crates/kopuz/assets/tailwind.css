@@ -43,6 +43,7 @@
     --color-slate-500: oklch(55.4% 0.046 257.417);
     --color-slate-600: oklch(44.6% 0.043 257.281);
     --color-slate-700: oklch(37.2% 0.044 257.287);
+    --color-neutral-800: oklch(26.9% 0 0);
     --color-neutral-900: oklch(20.5% 0 0);
     --color-stone-400: oklch(70.9% 0.01 56.259);
     --color-stone-800: oklch(26.8% 0.007 34.298);
@@ -358,6 +359,9 @@
   }
   .left-8 {
     left: calc(var(--spacing) * 8);
+  }
+  .isolate {
+    isolation: isolate;
   }
   .z-10 {
     z-index: 10;
@@ -1017,6 +1021,13 @@
   .gap-x-10 {
     column-gap: calc(var(--spacing) * 10);
   }
+  .space-x-0\.5 {
+    :where(& > :not(:last-child)) {
+      --tw-space-x-reverse: 0;
+      margin-inline-start: calc(calc(var(--spacing) * 0.5) * var(--tw-space-x-reverse));
+      margin-inline-end: calc(calc(var(--spacing) * 0.5) * calc(1 - var(--tw-space-x-reverse)));
+    }
+  }
   .space-x-1 {
     :where(& > :not(:last-child)) {
       --tw-space-x-reverse: 0;
@@ -1327,6 +1338,9 @@
   }
   .bg-indigo-600 {
     background-color: var(--color-indigo-600);
+  }
+  .bg-neutral-800 {
+    background-color: var(--color-neutral-800);
   }
   .bg-neutral-900 {
     background-color: var(--color-neutral-900);
@@ -2171,6 +2185,10 @@
     --tw-shadow: 0 20px 25px -5px var(--tw-shadow-color, rgb(0 0 0 / 0.1)), 0 8px 10px -6px var(--tw-shadow-color, rgb(0 0 0 / 0.1));
     box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
   }
+  .ring {
+    --tw-ring-shadow: var(--tw-ring-inset,) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentcolor);
+    box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+  }
   .ring-1 {
     --tw-ring-shadow: var(--tw-ring-inset,) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentcolor);
     box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
@@ -2601,6 +2619,16 @@
         background-color: color-mix(in srgb, oklch(58.5% 0.233 277.117) 40%, transparent);
         @supports (color: color-mix(in lab, red, red)) {
           background-color: color-mix(in oklab, var(--color-indigo-500) 40%, transparent);
+        }
+      }
+    }
+  }
+  .hover\:bg-red-500\/10 {
+    &:hover {
+      @media (hover: hover) {
+        background-color: color-mix(in srgb, oklch(63.7% 0.237 25.331) 10%, transparent);
+        @supports (color: color-mix(in lab, red, red)) {
+          background-color: color-mix(in oklab, var(--color-red-500) 10%, transparent);
         }
       }
     }
@@ -3093,6 +3121,75 @@
       grid-template-columns: repeat(6, minmax(0, 1fr));
     }
   }
+}
+.slider-hit {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+.slider-hit::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 0;
+  height: 0;
+  border: none;
+}
+.slider-hit::-moz-range-thumb {
+  width: 0;
+  height: 0;
+  border: none;
+}
+.vcard {
+  contain-intrinsic-size: 0 230px;
+}
+.view-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.view-list > .vcard {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.05);
+  content-visibility: visible !important;
+  contain: none !important;
+}
+.view-list > .vcard:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.view-list .vcard-click {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1 1 0%;
+  min-width: 0;
+}
+.view-list .vcard-cover, .view-list .vcard-avatar {
+  width: 3rem;
+  height: 3rem;
+  aspect-ratio: auto;
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+.view-list .vcard-cover {
+  border-radius: 0.375rem;
+}
+.view-list .vcard-cover i, .view-list .vcard-avatar i {
+  font-size: 1.125rem;
+}
+.view-list .vcard-meta {
+  flex: 1 1 0%;
+  min-width: 0;
+  text-align: left;
+}
+.view-list .vcard-menu {
+  position: static;
+  margin-left: auto;
+  flex-shrink: 0;
 }
 @property --tw-translate-x {
   syntax: "*";

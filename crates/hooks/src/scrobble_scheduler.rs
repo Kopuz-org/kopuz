@@ -32,15 +32,17 @@ impl ScrobbleOptions {
     };
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn schedule(
     track: Track,
     item_id: Option<String>,
     config: Signal<AppConfig>,
-    play_generation: Signal<usize>,
-    generation: usize,
+    session_token: Signal<u64>,
+    generation: u64,
     is_playing: Signal<bool>,
     active_source: Option<Signal<::server::source::ActiveSource>>,
     options: ScrobbleOptions,
+    db: db::Db,
 ) {
     let duration_secs = track.duration;
     let threshold_secs = std::cmp::min(240, duration_secs / 2);
@@ -53,14 +55,14 @@ pub fn schedule(
     schedule_playing_now_heartbeat(
         &track,
         config,
-        play_generation,
+        session_token,
         generation,
         is_playing,
         options,
     );
 
     spawn_in_scope(
-        play_generation.origin_scope(),
+        session_token.origin_scope(),
         async move {
             if duration_secs < 30 {
                 tracing::info!(
@@ -133,7 +135,7 @@ pub fn schedule(
 
             let reached = wait_for_playtime(
                 Duration::from_secs(threshold_secs),
-                play_generation,
+                session_token,
                 generation,
                 is_playing,
             )
@@ -156,11 +158,18 @@ pub fn schedule(
                 }
             }
 
+            // Offline queue bookkeeping (issue #335): scrobbles that fail with
+            // a transient error are queued with the original listen timestamp
+            // (`started_at`) and resubmitted later; one success means we're
+            // online, so drain the backlog.
+            let mut scrobble_ok = false;
+
             if has_lastfm {
-                let scrobble = scrobble::lastfm::make_scrobble(
+                let scrobble = scrobble::lastfm::make_scrobble_at(
                     &track.artist,
                     &track.title,
                     Some(&track.album),
+                    started_at,
                 );
                 match scrobble::lastfm::submit_scrobble(
                     &lastfm_api_key,
@@ -171,17 +180,33 @@ pub fn schedule(
                 .await
                 {
                     Ok(_) => {
+                        scrobble_ok = true;
                         tracing::info!("Last.fm scrobbled: {} - {}", track.artist, track.title)
                     }
-                    Err(error) => tracing::warn!("Last.fm scrobble failed: {}", error),
+                    Err(error) => {
+                        tracing::warn!("Last.fm scrobble failed: {}", error);
+                        if scrobble::queue::is_transient(&error) {
+                            scrobble::queue::enqueue(
+                                &db,
+                                scrobble::queue::ScrobbleService::LastFm,
+                                &track.artist,
+                                &track.title,
+                                Some(&track.album),
+                                started_at,
+                                None,
+                            )
+                            .await;
+                        }
+                    }
                 }
             }
 
             if has_librefm {
-                let scrobble = scrobble::librefm::make_scrobble(
+                let scrobble = scrobble::librefm::make_scrobble_at(
                     &track.artist,
                     &track.title,
                     Some(&track.album),
+                    started_at,
                 );
                 match scrobble::librefm::submit_scrobble(
                     scrobble::librefm::API_KEY,
@@ -192,15 +217,34 @@ pub fn schedule(
                 .await
                 {
                     Ok(_) => {
+                        scrobble_ok = true;
                         tracing::info!("Libre.fm scrobbled: {} - {}", track.artist, track.title)
                     }
-                    Err(error) => tracing::warn!("Libre.fm scrobble failed: {}", error),
+                    Err(error) => {
+                        tracing::warn!("Libre.fm scrobble failed: {}", error);
+                        if scrobble::queue::is_transient(&error) {
+                            scrobble::queue::enqueue(
+                                &db,
+                                scrobble::queue::ScrobbleService::LibreFm,
+                                &track.artist,
+                                &track.title,
+                                Some(&track.album),
+                                started_at,
+                                None,
+                            )
+                            .await;
+                        }
+                    }
                 }
             }
 
             let token = config.read().musicbrainz_token.clone();
             if !token.trim().is_empty() {
                 let info = listen_additional_info(&track, options.include_musicbrainz_ids);
+                let queued_info: serde_json::Map<String, serde_json::Value> = info
+                    .iter()
+                    .map(|(k, v)| ((*k).to_string(), v.clone()))
+                    .collect();
                 let listen = scrobble::musicbrainz::make_listen(
                     &track.artist,
                     &track.title,
@@ -210,10 +254,43 @@ pub fn schedule(
                 );
                 match scrobble::musicbrainz::submit_listens(&token, vec![listen], "single").await {
                     Ok(_) => {
+                        scrobble_ok = true;
                         tracing::info!("MusicBrainz scrobbled: {} - {}", track.artist, track.title)
                     }
-                    Err(error) => tracing::warn!("MusicBrainz scrobble failed: {}", error),
+                    Err(error) => {
+                        tracing::warn!("MusicBrainz scrobble failed: {}", error);
+                        if scrobble::queue::is_transient(&error) {
+                            scrobble::queue::enqueue(
+                                &db,
+                                scrobble::queue::ScrobbleService::ListenBrainz,
+                                &track.artist,
+                                &track.title,
+                                Some(&track.album),
+                                started_at,
+                                Some(queued_info),
+                            )
+                            .await;
+                        }
+                    }
                 }
+            }
+
+            // One success means we're online again: flush queued scrobbles.
+            if scrobble_ok {
+                let musicbrainz_token = config.read().musicbrainz_token.clone();
+                let creds = scrobble::queue::Credentials {
+                    lastfm: has_lastfm.then(|| {
+                        (
+                            lastfm_api_key.clone(),
+                            lastfm_api_secret.clone(),
+                            lastfm_session_key.clone(),
+                        )
+                    }),
+                    librefm_session_key: has_librefm.then(|| librefm_session_key.clone()),
+                    listenbrainz_token: (!musicbrainz_token.trim().is_empty())
+                        .then(|| musicbrainz_token.clone()),
+                };
+                scrobble::queue::drain(&db, &creds).await;
             }
         }
         .instrument(span),
@@ -223,8 +300,8 @@ pub fn schedule(
 fn schedule_playing_now_heartbeat(
     track: &Track,
     config: Signal<AppConfig>,
-    play_generation: Signal<usize>,
-    generation: usize,
+    session_token: Signal<u64>,
+    generation: u64,
     is_playing: Signal<bool>,
     options: ScrobbleOptions,
 ) {
@@ -242,12 +319,12 @@ fn schedule_playing_now_heartbeat(
     let span = tracing::info_span!("scrobble.playing_now", track = track.id.uid().as_str());
 
     spawn_in_scope(
-        play_generation.origin_scope(),
+        session_token.origin_scope(),
         async move {
             let mut announced = false;
             let mut idle_secs: u64 = 0;
             loop {
-                if *play_generation.read() != generation {
+                if *session_token.read() != generation {
                     return;
                 }
 
@@ -330,8 +407,8 @@ fn spawn_in_scope(scope: ScopeId, fut: impl std::future::Future<Output = ()> + '
 
 async fn wait_for_playtime(
     threshold: Duration,
-    play_generation: Signal<usize>,
-    generation: usize,
+    session_token: Signal<u64>,
+    generation: u64,
     is_playing: Signal<bool>,
 ) -> bool {
     let tick = Duration::from_secs(1);
@@ -340,7 +417,7 @@ async fn wait_for_playtime(
     while played < threshold {
         tokio::time::sleep(tick).await;
 
-        if *play_generation.read() != generation {
+        if *session_token.read() != generation {
             return false;
         }
 

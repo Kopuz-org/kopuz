@@ -5,8 +5,10 @@
 
 use components::dots_menu::{DotsMenu, MenuAction};
 use components::playlist_modal::PlaylistModal;
+use components::sort_control::SortControl;
 use components::track_list_view::TrackListView;
-use config::AppConfig;
+use components::view_mode_toggle::ViewModeToggle;
+use config::{AlbumViewMode, AppConfig};
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{
@@ -169,7 +171,7 @@ pub fn Album(
 
 #[component]
 fn AlbumGrid(
-    config: Signal<AppConfig>,
+    mut config: Signal<AppConfig>,
     mut album_id: Signal<String>,
     mut open_album_menu: Signal<Option<String>>,
     mut show_album_playlist_modal: Signal<bool>,
@@ -182,6 +184,24 @@ fn AlbumGrid(
     let is_offline = use_context::<Signal<bool>>();
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
     let albums_res = use_albums(source);
+
+    let album_sort = use_signal(|| config.peek().album_sort.clone());
+    use_effect(move || {
+        let curr = album_sort.read().clone();
+        if config.peek().album_sort != curr {
+            config.write().album_sort = curr;
+        }
+    });
+    let view_mode = use_signal(|| config.peek().album_view_mode);
+    use_effect(move || {
+        let curr = *view_mode.read();
+        if config.peek().album_view_mode != curr {
+            config.write().album_view_mode = curr;
+        }
+    });
+    let available_sort_fields = use_memo(move || {
+        reader::sort::available_album_fields(&albums_res.read().clone().unwrap_or_default())
+    });
 
     // Offline (server): only albums with downloaded tracks. Album ids come from
     // the downloaded tracks themselves. The grid dedupes by title — the detail
@@ -215,19 +235,17 @@ fn AlbumGrid(
     let albums = use_memo(move || {
         let offline = caps().downloads && *is_offline.read();
         let downloaded = downloaded_album_ids();
-        let mut albums = albums_res.read().clone().unwrap_or_default();
-        albums.sort_by(|a, b| {
-            a.title
-                .trim()
-                .to_lowercase()
-                .cmp(&b.title.trim().to_lowercase())
-        });
         let mut seen = HashSet::new();
-        albums
+        let mut albums = albums_res
+            .read()
+            .clone()
+            .unwrap_or_default()
             .into_iter()
             .filter(|a| !offline || downloaded.contains(&a.id))
             .filter(|a| seen.insert(a.title.trim().to_lowercase()))
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+        reader::sort::sort_albums(&mut albums, &album_sort.read());
+        albums
     });
 
     // Restore the grid scroll once after the albums first render; guarded so DB
@@ -245,6 +263,11 @@ fn AlbumGrid(
     });
 
     rsx! {
+        div { class: "flex-1 min-h-0 flex flex-col",
+        div { class: "flex items-center justify-end gap-2 mb-4 shrink-0",
+            ViewModeToggle { mode: view_mode }
+            SortControl { criteria: album_sort, available: available_sort_fields() }
+        }
         div {
             id: "album-grid-scroll",
             class: "flex-1 min-h-0 overflow-y-auto pb-8",
@@ -252,7 +275,11 @@ fn AlbumGrid(
             if albums().is_empty() {
                 p { class: "text-slate-500", "{i18n::t(\"no_albums_found\")}" }
             } else {
-                div { class: "grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-6",
+                div {
+                    // Cards keep identical classes in both modes (`.vcard*` hooks are
+                    // restyled by the `.view-list` CSS), so toggling only patches this
+                    // container's class — no per-card re-render or cover refetch.
+                    class: if *view_mode.read() == AlbumViewMode::List { "view-list" } else { "grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-6" },
                     for album in albums() {
                         {
                             let cap = caps();
@@ -274,8 +301,8 @@ fn AlbumGrid(
                             rsx! {
                                 div {
                                     key: "{album.id}",
-                                    class: if is_open { "group relative z-50 p-4 bg-white/5 rounded-xl hover:bg-white/10 transition-colors" } else { "group relative p-4 bg-white/5 rounded-xl hover:bg-white/10 transition-colors" },
-                                    style: if is_open { "content-visibility: visible; contain: none; contain-intrinsic-size: 0 230px;" } else { "content-visibility: auto; contain-intrinsic-size: 0 230px;" },
+                                    class: if is_open { "vcard group relative z-50 p-4 bg-white/5 rounded-xl hover:bg-white/10 transition-colors" } else { "vcard group relative p-4 bg-white/5 rounded-xl hover:bg-white/10 transition-colors" },
+                                    style: if is_open { "content-visibility: visible; contain: none;" } else { "content-visibility: auto;" },
                                     oncontextmenu: {
                                         let id = id_for_menu.clone();
                                         move |evt| {
@@ -285,10 +312,10 @@ fn AlbumGrid(
                                     },
 
                                     div {
-                                        class: "cursor-pointer",
+                                        class: "vcard-click cursor-pointer",
                                         onclick: move |_| album_id.set(id_for_nav.clone()),
                                         div {
-                                            class: "aspect-square rounded-lg bg-stone-800 mb-3 overflow-hidden relative",
+                                            class: "vcard-cover aspect-square rounded-lg bg-stone-800 mb-3 overflow-hidden relative",
                                             style: "-webkit-user-drag: none;",
                                             ondragstart: move |evt| evt.prevent_default(),
                                             if let Some(url) = &cover_url {
@@ -299,11 +326,14 @@ fn AlbumGrid(
                                                 }
                                             }
                                         }
-                                        h3 { class: "text-white font-medium truncate", "{album.title}" }
-                                        p { class: "text-sm text-stone-400 truncate", "{album.artist}" }
+                                        div {
+                                            class: "vcard-meta",
+                                            h3 { class: "text-white font-medium truncate", "{album.title}" }
+                                            p { class: "text-sm text-stone-400 truncate", "{album.artist}" }
+                                        }
                                     }
 
-                                    div { class: "absolute bottom-3 right-3",
+                                    div { class: "vcard-menu absolute bottom-3 right-3",
                                         DotsMenu {
                                             actions,
                                             is_open,
@@ -378,6 +408,7 @@ fn AlbumGrid(
                     }
                 }
             }
+        }
         }
     }
 }

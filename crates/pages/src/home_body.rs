@@ -1,7 +1,5 @@
-use ::server::source::TrackFavorite;
 use config::{AppConfig, ListenNowStyle, UiStyle};
 use dioxus::prelude::*;
-use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{
     use_active_source, use_album_tracks, use_albums, use_artist_sample_tracks, use_favorites,
     use_playlists, use_top_genre, use_tracks_by_keys,
@@ -68,6 +66,10 @@ pub fn HomeBody(
 
     let albums_res = use_albums(source);
     let playlists_res = use_playlists();
+    // The artist-image caches the Top Artists row resolves through (read-only:
+    // home triggers no photo fetch; the Artists page's pipeline fills these).
+    let artist_images_res = hooks::use_db_queries::use_artist_images();
+    let fetched_artist_images = use_context::<Signal<::server::cover::FetchedArtistImages>>();
     let offline_keys = use_memo(move || -> Vec<String> {
         if !(caps().downloads && *is_offline.read()) {
             return Vec::new();
@@ -317,6 +319,9 @@ pub fn HomeBody(
 
     let jellyfin_artists = use_memo(move || {
         let conf = config.read();
+        let albums = albums_res.read().clone().unwrap_or_default();
+        let images = artist_images_res.read().clone().unwrap_or_default();
+        let fetched = fetched_artist_images.read();
         let tracks = if caps().downloads && *is_offline.read() {
             let mut downloaded = offline_tracks_res.read().clone().unwrap_or_default();
             downloaded.sort_by_key(|a| a.artist.to_lowercase());
@@ -331,7 +336,23 @@ pub fn HomeBody(
                 continue;
             }
             if unique_artists.insert(track.artist.clone()) {
-                let cover_url = track_cover_url(&conf, track);
+                // The same image chain the Artists grid uses: photo where one
+                // exists, the track's album cover as the Library last resort
+                // (a Remote catalog resolves photo-or-placeholder instead).
+                let norm = utils::artist::normalize_artist_key(&track.artist);
+                let album_cover = albums
+                    .iter()
+                    .find(|a| a.id == track.album_id)
+                    .and_then(|a| a.cover_path.as_deref());
+                let art = ::server::cover::ArtistArt::from_caches(
+                    &images,
+                    &fetched,
+                    &norm,
+                    &track.artist,
+                    album_cover,
+                    caps().artist_view,
+                );
+                let cover_url = ::server::cover::artist(&conf, art, 384).map(|c| c.to_string());
                 artist_list.push((track.artist.clone(), cover_url));
             }
             if artist_list.len() >= 10 {
@@ -637,9 +658,7 @@ fn ServerHeroBanner(
     let mut start_y = use_signal(|| 0.0_f64);
     let mut start_h = use_signal(|| 0_u32);
 
-    let gens = hooks::db_reactivity::use_generations();
     let source = use_active_source();
-    let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     // The track's own `album_id` (not the resolved `Album`, which lags behind a
     // separate albums query) — so the play button and the favorite-state heart
     // work the instant the hero track renders, not only once albums load.
@@ -719,10 +738,19 @@ fn ServerHeroBanner(
                 if let Some((_, _album_opt, entry_cover)) = hero_entry.as_ref() {
                     div { class: "absolute inset-0 overflow-hidden",
                         if let Some(url) = hero_cover.clone().or(entry_cover.clone()) {
-                            img {
-                                src: "{url}",
-                                class: "absolute inset-0 w-full h-full object-cover object-center",
-                                decoding: "async",
+                            {
+                                let src = if url.starts_with("artwork://") {
+                                    format!("{url}&hq=1")
+                                } else {
+                                    url.clone()
+                                };
+                                rsx! {
+                                    img {
+                                        src: "{src}",
+                                        class: "absolute inset-0 w-full h-full object-cover object-center",
+                                        decoding: "async",
+                                    }
+                                }
                             }
                         }
                         div { class: "absolute inset-0 bg-gradient-to-r from-black/95 via-black/60 to-black/20" }
@@ -785,16 +813,7 @@ fn ServerHeroBanner(
                                         } else {
                                             hero_tracks_res.read().clone().unwrap_or_default()
                                         };
-                                        let new_fav = !jelly_hero_fav;
-                                        let source = active_source.peek().clone();
-                                        spawn(async move {
-                                            for t in &tracks {
-                                                let _ = t.set_favorite(&source, new_fav).await;
-                                            }
-                                            gens.bump(Table::Favorites);
-                                            // Pending DB rows; the reconciler pushes them.
-                                            hooks::use_sync_task::nudge();
-                                        });
+                                        hooks::favorites::set_favorite_many(tracks, !jelly_hero_fav);
                                     },
                                     i { class: "{hero_heart_icon}" }
                                 }

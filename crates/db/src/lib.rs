@@ -13,6 +13,8 @@ use std::sync::Arc;
 
 mod backend;
 
+pub use backend::{QueuedScrobbleRow, ScrobbleService};
+
 /// What a one-shot legacy-JSON import did. `ran == false` means it was skipped
 /// (already migrated, or no legacy JSON present); the counts are then all zero.
 #[derive(Debug, Default, Clone)]
@@ -50,7 +52,7 @@ pub struct QueueSnapshot {
 }
 
 /// Sort order for a track listing — maps to an indexed `ORDER BY`.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum TrackSort {
     /// Artist → album → disc → track (the natural library order).
     #[default]
@@ -62,6 +64,9 @@ pub enum TrackSort {
     DateAdded,
     /// Most-played first (`listen_counts` join), ties by title.
     PlayCount,
+    /// Stacked user criteria (library sort control): the first field decides,
+    /// the rest break ties. Empty falls back to [`TrackSort::ArtistAlbum`].
+    Fields(Vec<config::SortCriterion<config::TrackSortField>>),
 }
 
 /// What a windowed track listing selects: which source, how it's sorted, and
@@ -161,11 +166,13 @@ pub trait ReadStore: Send + Sync {
         album_id: &str,
     ) -> Result<Vec<reader::Track>, DbError>;
 
-    /// One artist's tracks, album/disc/track-ordered.
+    /// One artist's tracks, album/disc/track-ordered. `limit` bounds the query
+    /// SQL-side for callers that only probe a few rows.
     async fn artist_tracks(
         &self,
         source: &Source,
         artist: &str,
+        limit: Option<u32>,
     ) -> Result<Vec<reader::Track>, DbError>;
 
     /// Tracks whose album has this genre, artist/album-ordered.
@@ -242,6 +249,10 @@ pub trait ReadStore: Send + Sync {
     /// `(cache_key, kind)`, if cached.
     async fn meta_get(&self, cache_key: &str, kind: &str) -> Result<Option<String>, DbError>;
 
+    /// Metadata-cache keys of `kind` written within the last `max_age_secs` —
+    /// e.g. the fresh artist-photo misses the fetch loop must not re-search.
+    async fn meta_keys_since(&self, kind: &str, max_age_secs: i64) -> Result<Vec<String>, DbError>;
+
     /// The favorite refs (`track_key`s) for a server (`"local"` for filesystem).
     async fn favorites(&self, server_id: &str) -> Result<Vec<String>, DbError>;
 
@@ -253,6 +264,9 @@ pub trait ReadStore: Send + Sync {
 
     /// Pending-unlike tombstones (`dirty=2`) not yet pushed to the server.
     async fn dirty_unlikes(&self, server_id: &str) -> Result<Vec<String>, DbError>;
+
+    /// The whole offline scrobble backlog, oldest listen first (drain order).
+    async fn scrobble_queue_all(&self) -> Result<Vec<QueuedScrobbleRow>, DbError>;
 }
 
 /// The persistence API: every mutation plus admin/dev ops, layered on top of the
@@ -404,6 +418,20 @@ pub trait Storage: ReadStore {
 
     /// Persist the queue/progress snapshot to the single `queue_state` row.
     async fn save_queue(&self, snap: &QueueSnapshot) -> Result<(), DbError>;
+
+    /// Enqueue a failed scrobble (issue #335). A repeat of the same
+    /// `(listen, service)` folds into the existing row; the backlog is capped to
+    /// the newest listens, dropping the oldest first.
+    async fn scrobble_queue_push(&self, row: &QueuedScrobbleRow) -> Result<(), DbError>;
+
+    /// Drop one delivered (or permanently-failed) `(listen, service)` row.
+    async fn scrobble_queue_delete(
+        &self,
+        listened_at: i64,
+        artist: &str,
+        title: &str,
+        service: ScrobbleService,
+    ) -> Result<(), DbError>;
 
     /// Generic metadata-cache write (upsert of `payload` for `(cache_key, kind)`).
     async fn meta_put(&self, cache_key: &str, kind: &str, payload: &str) -> Result<(), DbError>;

@@ -38,6 +38,13 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.10.0" date="2026-07-14">
+      <description>
+        <p>
+          Player engine rewrite for more reliable playback, multi-priority sorting across album, library, and artist views, configurable output sample rate, offline scrobbling support, and Discord presence reconnection when Discord starts late or restarts.
+        </p>
+      </description>
+    </release>
     <release version="0.9.0" date="2026-07-06">
       <description>
         <p>

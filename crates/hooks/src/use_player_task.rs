@@ -1,3 +1,5 @@
+#[cfg(target_os = "linux")]
+use crate::use_player_controller::LoopMode;
 use crate::use_player_controller::PlayerController;
 use config::AppConfig;
 use config::MusicService;
@@ -22,6 +24,7 @@ enum BgCmd {
     Toggle,
     Next,
     Prev,
+    Seek(f64),
 }
 
 static BG_CMD_TX: std::sync::OnceLock<std::sync::Mutex<std::sync::mpsc::Sender<BgCmd>>> =
@@ -44,6 +47,7 @@ fn bump_listen_count_db(track_uid: String, db: db::Db) {
     });
 }
 
+#[cfg(any(target_os = "macos", target_os = "android"))]
 fn init_bg_channel() {
     BG_CMD_TX.get_or_init(|| {
         let (tx, rx) = std::sync::mpsc::channel::<BgCmd>();
@@ -98,7 +102,6 @@ pub fn use_player_task(ctrl: PlayerController) {
 
     #[cfg(target_os = "macos")]
     use_hook(move || {
-        let mut ctrl = ctrl;
         init_bg_channel();
 
         // let the CFRunLoopTimer heartbeat poke our tokio task so it
@@ -117,35 +120,30 @@ pub fn use_player_task(ctrl: PlayerController) {
                 SystemEvent::Toggle => BgCmd::Toggle,
                 SystemEvent::Next => BgCmd::Next,
                 SystemEvent::Prev => BgCmd::Prev,
+                SystemEvent::Seek(secs) => BgCmd::Seek(secs),
             };
             send_bg_cmd(cmd);
             nudge_event_loop();
         });
-
-        ctrl.player.write().set_finish_callback(|| {
-            if let Some(notify) = BG_NOTIFY.get() {
-                notify.notify_one();
-            }
-            player::systemint::wake_run_loop();
-        });
     });
 
+    // Keep MPRIS shuffle/repeat in sync with the UI's own toggles.
     #[cfg(target_os = "linux")]
-    use_hook(move || {
-        let mut ctrl = ctrl;
-        init_bg_channel();
-        ctrl.player.write().set_finish_callback(|| {
-            if let Some(notify) = BG_NOTIFY.get() {
-                notify.notify_one();
-            }
-        });
+    use_effect(move || {
+        let shuffle = *ctrl.shuffle.read();
+        let repeat = match *ctrl.loop_mode.read() {
+            LoopMode::None => player::systemint::RepeatMode::Off,
+            LoopMode::Queue => player::systemint::RepeatMode::Playlist,
+            LoopMode::Track => player::systemint::RepeatMode::Track,
+        };
+        player::systemint::update_modes(shuffle, repeat);
     });
 
     #[cfg(target_os = "linux")]
     use_future(move || {
         let mut ctrl = ctrl;
         async move {
-            use player::systemint::{SystemEvent, poll_event};
+            use player::systemint::{RepeatMode, SystemEvent, poll_event};
             loop {
                 let mut processed = false;
                 while let Some(event) = poll_event() {
@@ -156,6 +154,15 @@ pub fn use_player_task(ctrl: PlayerController) {
                         SystemEvent::Toggle => ctrl.toggle(),
                         SystemEvent::Next => ctrl.play_next(),
                         SystemEvent::Prev => ctrl.play_prev(),
+                        SystemEvent::Seek(secs) => {
+                            ctrl.seek(std::time::Duration::from_secs_f64(secs));
+                        }
+                        SystemEvent::SetShuffle(on) => ctrl.set_shuffle(on),
+                        SystemEvent::SetRepeat(mode) => ctrl.set_loop_mode(match mode {
+                            RepeatMode::Off => LoopMode::None,
+                            RepeatMode::Playlist => LoopMode::Queue,
+                            RepeatMode::Track => LoopMode::Track,
+                        }),
                     }
                 }
                 if !processed {
@@ -180,9 +187,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                     Some(SystemEvent::Next) => ctrl.play_next(),
                     Some(SystemEvent::Prev) => ctrl.play_prev(),
                     Some(SystemEvent::Seek(secs)) => {
-                        ctrl.player
-                            .write()
-                            .seek(std::time::Duration::from_secs_f64(secs));
+                        ctrl.seek(std::time::Duration::from_secs_f64(secs));
                     }
                     None => {
                         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -194,10 +199,9 @@ pub fn use_player_task(ctrl: PlayerController) {
 
     // Android routes media-notification button taps through a JNI callback (no event
     // queue), so we register a background handler like macOS and let the shared loop
-    // drain the resulting BgCmds. Track finishing also wakes the loop for auto-advance.
+    // drain the resulting BgCmds.
     #[cfg(target_os = "android")]
     use_hook(move || {
-        let mut ctrl = ctrl;
         init_bg_channel();
 
         player::systemint::set_background_handler(move |event| {
@@ -211,13 +215,6 @@ pub fn use_player_task(ctrl: PlayerController) {
                 SystemEvent::Stop => BgCmd::Pause,
             };
             send_bg_cmd(cmd);
-        });
-
-        ctrl.player.write().set_finish_callback(|| {
-            if let Some(notify) = BG_NOTIFY.get() {
-                notify.notify_one();
-            }
-            player::systemint::wake_run_loop();
         });
     });
 
@@ -236,24 +233,87 @@ pub fn use_player_task(ctrl: PlayerController) {
         async move {
             let mut last_progress_secs: u64 = u64::MAX;
             let mut prev_playing = false;
-            let mut crossfade_triggered_for_gen: Option<usize> = None;
             let mut last_recent_path: Option<String> = None;
             let bg_notify = BG_NOTIFY.get_or_init(tokio::sync::Notify::new);
+            // Engine events (Position once per second while playing, Ended,
+            // phase changes) wake this loop; the coarse timer only covers the
+            // genuinely periodic work (Jellyfin reports, Discord, refreshes).
+            let mut engine_events = ctrl.player.peek().subscribe();
             loop {
+                let mut woke_event = None;
                 tokio::select! {
                     _ = bg_notify.notified() => {},
-                    _ = tokio::time::sleep(std::time::Duration::from_millis(250)) => {},
+                    _ = tokio::time::sleep(std::time::Duration::from_millis(1000)) => {},
+                    event = engine_events.recv() => { woke_event = event; },
+                }
+                // Drain whatever queued while we were asleep. Progress and
+                // completion are read from the live status snapshot below;
+                // only phase transitions need the events themselves.
+                while let Some(event) = woke_event.take().or_else(|| engine_events.try_recv().ok())
+                {
+                    use player::engine::{Event, Phase};
+                    match event {
+                        Event::PhaseChanged {
+                            token,
+                            phase: phase @ (Phase::Playing | Phase::Paused),
+                        } => {
+                            if token == ctrl.intent.peek().token() {
+                                ctrl.is_playing.set(phase == Phase::Playing);
+                            } else if phase == Phase::Playing
+                                && ctrl.player.peek().session_token() == token
+                            {
+                                // A session we no longer intend is audibly live —
+                                // stop it. (Guarded on session_token so an event
+                                // outrun by our own revert seek is ignored.)
+                                ctrl.player.peek().stop_for_transition();
+                            }
+                        }
+                        // No session — nothing audible. Ended is left to the
+                        // auto-advance check below, which needs is_playing.
+                        Event::PhaseChanged {
+                            phase: Phase::Idle, ..
+                        } => ctrl.is_playing.set(false),
+                        // Commit the deferred crossfade UI exactly on fade end.
+                        Event::TrackSwitched { token, .. } => {
+                            ctrl.commit_transition(token);
+                            last_progress_secs = u64::MAX;
+                        }
+                        // A promoted load we superseded/cancelled started (the
+                        // end-of-queue race): stop it. Same session_token guard.
+                        Event::Loaded { token }
+                            if token != ctrl.intent.peek().token()
+                                && ctrl.player.peek().session_token() == token =>
+                        {
+                            ctrl.player.peek().stop_for_transition();
+                        }
+                        // Device lost on a live session (radio unplug): the load
+                        // reply can't report it. Banner + stop, no auto-reconnect.
+                        Event::Error { token, message } if token == ctrl.intent.peek().token() => {
+                            tracing::warn!(%message, "engine reported a playback error");
+                            ctrl.fail_load(token, &message);
+                            ctrl.is_playing.set(false);
+                        }
+                        _ => {}
+                    }
                 }
 
                 nudge_event_loop();
 
-                for cmd in drain_bg_cmds() {
+                let cmds = drain_bg_cmds();
+                let last_seek = cmds.iter().rposition(|c| matches!(c, BgCmd::Seek(_)));
+                for (i, cmd) in cmds.into_iter().enumerate() {
                     match cmd {
                         BgCmd::Play => ctrl.resume(),
                         BgCmd::Pause => ctrl.pause(),
                         BgCmd::Toggle => ctrl.toggle(),
                         BgCmd::Next => ctrl.play_next(),
                         BgCmd::Prev => ctrl.play_prev(),
+                        BgCmd::Seek(secs) if Some(i) == last_seek => {
+                            let pos = std::time::Duration::try_from_secs_f64(secs)
+                                .unwrap_or(std::time::Duration::ZERO);
+                            ctrl.seek(pos);
+                        }
+                        BgCmd::Seek(_) => {}
                     }
                 }
 
@@ -354,24 +414,23 @@ pub fn use_player_task(ctrl: PlayerController) {
                             .map_or("Local", |s| s.display_name())
                     });
                 let source_changed = last_source.peek().as_deref() != discord_source_name;
+
+                // Discord may start after Kopuz or restart mid-session: retry a
+                // dropped IPC connection and restore the last activity once it's up.
+                if discord_enabled && let Some(ref p) = presence {
+                    p.tick();
+                }
+
                 let pos = ctrl.player.read().get_position();
                 let mut defer_player_progress = false;
 
-                let pending_crossfade_ui = ctrl.pending_crossfade_ui.read().clone();
-                if let Some(pending) = pending_crossfade_ui {
-                    let crossfade_elapsed_secs = pos.as_secs();
-                    if crossfade_elapsed_secs >= pending.switch_after_secs {
-                        if ctrl.commit_pending_crossfade_ui(crossfade_elapsed_secs) {
-                            last_progress_secs = u64::MAX;
-                        }
-                    } else {
-                        let display_progress = pending
-                            .outgoing_progress_secs
-                            .saturating_add(crossfade_elapsed_secs)
-                            .min(pending.outgoing_duration_secs);
-                        ctrl.current_song_progress.set(display_progress);
-                        defer_player_progress = true;
+                // Deferred crossfade UI: show the outgoing track's live position
+                // and hold back the incoming one until TrackSwitched commits.
+                if ctrl.pending_crossfade_ui.peek().is_some() {
+                    if let Some(fading) = ctrl.player.read().fading_position() {
+                        ctrl.current_song_progress.set(fading.as_secs());
                     }
+                    defer_player_progress = true;
                 }
 
                 let jellyfin_info = {
@@ -485,7 +544,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                 if is_playing {
                     let duration = *ctrl.current_song_duration.read();
                     let pos_secs = pos.as_secs().min(duration);
-                    let current_gen = *ctrl.play_generation.read();
+                    let current_token = *ctrl.current_token.read();
                     if !defer_player_progress && pos_secs != last_progress_secs {
                         last_progress_secs = pos_secs;
                         ctrl.current_song_progress.set(pos_secs);
@@ -571,20 +630,27 @@ pub fn use_player_task(ctrl: PlayerController) {
                         }
                     }
 
+                    // A transition is in flight from when a crossfade arms
+                    // (is_loading, while the next stream resolves) until its
+                    // deferred UI commits (pending_crossfade_ui). Arming or
+                    // skipping during that window double-fires: `pos` is the
+                    // incoming track's position while `duration` is still the
+                    // outgoing track's, so `remaining` is nonsense, and the
+                    // engine may still be finishing the outgoing track near its
+                    // end — which re-satisfies the arm and stacks transitions.
+                    let transition_in_flight =
+                        *ctrl.is_loading.read() || ctrl.pending_crossfade_ui.read().is_some();
+
                     let remaining_secs = duration.saturating_sub(pos_secs);
                     let should_crossfade = duration > 0
                         && pos_secs < duration
                         && ctrl.should_crossfade()
                         && ctrl.has_next_track()
                         && remaining_secs <= config.read().crossfade_seconds as u64
-                        && crossfade_triggered_for_gen != Some(current_gen);
+                        && *ctrl.armed_transition.peek() != Some(current_token);
 
-                    if should_crossfade
-                        && !*ctrl.is_loading.read()
-                        && !*ctrl.skip_in_progress.read()
-                    {
-                        crossfade_triggered_for_gen = Some(current_gen);
-                        ctrl.skip_in_progress.set(true);
+                    if should_crossfade && !transition_in_flight {
+                        ctrl.armed_transition.set(Some(current_token));
                         {
                             let mut config_write = config.write();
                             let idx = *ctrl.current_queue_index.peek();
@@ -616,8 +682,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                             || (duration > 0 && pos.as_secs() >= duration.saturating_add(5))
                     };
 
-                    if should_skip && !*ctrl.is_loading.read() && !*ctrl.skip_in_progress.read() {
-                        ctrl.skip_in_progress.set(true);
+                    if should_skip && !transition_in_flight {
                         if !is_radio && duration > 0 && last_progress_secs != duration {
                             last_progress_secs = duration;
                             ctrl.current_song_progress.set(duration);

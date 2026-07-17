@@ -10,10 +10,10 @@ use player::player::Player;
 
 #[component]
 fn ProgressBarControl(
-    mut player: Signal<Player>,
     current_song_duration: Signal<u64>,
     current_song_progress: Signal<u64>,
 ) -> Element {
+    let mut ctrl = use_context::<PlayerController>();
     let mut is_dragging = use_signal(|| false);
     let mut drag_progress = use_signal(|| 0u64);
 
@@ -58,12 +58,11 @@ fn ProgressBarControl(
                         min: "0",
                         max: "{*current_song_duration.read()}",
                         value: "{display_progress}",
-                        class: format!("absolute top-0 left-0 w-full h-full opacity-0 {}", if is_radio { "" } else { "cursor-pointer" }),
+                        class: format!("slider-hit absolute top-0 left-0 w-full h-full opacity-0 {}", if is_radio { "" } else { "cursor-pointer" }),
                         disabled: is_radio,
                         onchange: move |evt| {
                             if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
-                                player.write().seek(std::time::Duration::from_secs(val));
-                                current_song_progress.set(val);
+                                ctrl.seek(std::time::Duration::from_secs(val));
                                 drag_progress.set(val);
                                 is_dragging.set(false);
                             }
@@ -109,7 +108,7 @@ fn VolumeControl(
                     let dir = if dy < 0.0 { 1.0 } else { -1.0 };
                     let current = *volume.read();
                     let new_val = (current + dir * step).clamp(0.0, 1.0);
-                    player.write().set_volume(new_val);
+                    player.peek().set_volume(new_val);
                     volume.set(new_val);
                     persisted_volume.set(new_val);
                 },
@@ -131,7 +130,7 @@ fn VolumeControl(
                     max: "1",
                     step: "0.01",
                     value: "{*volume.read()}",
-                    class: "absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer",
+                    class: "slider-hit absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer",
                     onchange: move |evt| {
                         if let Ok(val) = evt.value().parse::<f32>() {
                             persisted_volume.set(val);
@@ -139,7 +138,7 @@ fn VolumeControl(
                     },
                     oninput: move |evt| {
                         if let Ok(val) = evt.value().parse::<f32>() {
-                            player.write().set_volume(val);
+                            player.peek().set_volume(val);
                             volume.set(val);
                         }
                     }
@@ -569,7 +568,7 @@ pub fn Fullscreen(
                             current_song_album,
                             current_song_bitrate,
                         }
-                        ProgressBarControl { player, current_song_duration, current_song_progress }
+                        ProgressBarControl { current_song_duration, current_song_progress }
                         PlaybackControl { is_playing }
                         VolumeControl { player, config, volume, persisted_volume }
                     }
@@ -624,7 +623,6 @@ pub fn Fullscreen(
                     }
 
                     ProgressBarControl {
-                        player,
                         current_song_duration,
                         current_song_progress,
                     }

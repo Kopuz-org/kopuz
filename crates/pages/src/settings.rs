@@ -162,19 +162,20 @@ fn ClearCacheButton() -> Element {
 }
 
 use components::settings_items::{
-    BackBehaviorSelector, ChannelModeSelector, DiscordPresencePausedSettings,
-    DiscordPresenceSettings, EqualizerPanel, LanguageSelector, LastFmSettings, LibreFmSettings,
-    MultiDirectoryPicker, MusicBrainzSettings, RadioRegistryDropdown, ServerSettings, SettingItem,
-    SettingsSection, ThemeSelector, ToggleSetting,
+    BackBehaviorSelector, ChannelModeSelector, DeviceChangeBehaviorSelector,
+    DiscordPresencePausedSettings, DiscordPresenceSettings, EqualizerPanel, LanguageSelector,
+    LastFmSettings, LibreFmSettings, MultiDirectoryPicker, MusicBrainzSettings,
+    RadioRegistryDropdown, SampleRateModeSelector, ServerSettings, SettingItem, SettingsSection,
+    ThemeSelector, ToggleSetting,
 };
 use components::settings_popups::{AddRegistryPopup, AddServerPopup, LoginPopup};
-use config::{AppConfig, ArtistPhotoSource, FetchStrategy, MusicService, OfflineQuality};
+use config::{AppConfig, FetchStrategy, MusicService, OfflineQuality};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
 #[component]
 pub fn Settings(config: Signal<AppConfig>) -> Element {
-    let mut ctrl = use_context::<PlayerController>();
+    let ctrl = use_context::<PlayerController>();
     let crossfade_label = if config.read().crossfade_seconds == 0 {
         i18n::t("crossfade_off")
     } else {
@@ -723,35 +724,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
-                        SettingItem {
-                            title: i18n::t("artist_photo_source").to_string(),
-                            control: rsx! {
-                                {
-                                    let current = config.read().artist_photo_source;
-                                    rsx! {
-                                        select {
-                                            class: "bg-stone-800 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-indigo-500",
-                                            onchange: move |evt| {
-                                                config.write().artist_photo_source = match evt.value().as_str() {
-                                                    "artist_photo" => ArtistPhotoSource::ArtistPhoto,
-                                                    _ => ArtistPhotoSource::AlbumCover,
-                                                };
-                                            },
-                                            option {
-                                                value: "album_cover",
-                                                selected: current == ArtistPhotoSource::AlbumCover,
-                                                "{i18n::t(\"album_cover\")}"
-                                            }
-                                            option {
-                                                value: "artist_photo",
-                                                selected: current == ArtistPhotoSource::ArtistPhoto,
-                                                "{i18n::t(\"artist_photo\")}"
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
                     ClearCacheButton {}
                 }
 
@@ -815,7 +787,31 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     current: config.read().channel_mode,
                                     on_change: move |mode| {
                                         config.write().channel_mode = mode;
-                                        ctrl.player.write().set_channel_mode(mode);
+                                        ctrl.player.peek().set_channel_mode(mode);
+                                    }
+                                }
+                            }
+                        }
+                        SettingItem {
+                            title: i18n::t("device_change_behavior").to_string(),
+                            control: rsx! {
+                                DeviceChangeBehaviorSelector {
+                                    current: config.read().device_change_behavior,
+                                    on_change: move |behavior| {
+                                        config.write().device_change_behavior = behavior;
+                                        ctrl.player.peek().set_device_change_behavior(behavior);
+                                    }
+                                }
+                            }
+                        }
+                        SettingItem {
+                            title: i18n::t("sample_rate_mode").to_string(),
+                            control: rsx! {
+                                SampleRateModeSelector {
+                                    current: config.read().sample_rate_mode,
+                                    on_change: move |mode| {
+                                        config.write().sample_rate_mode = mode;
+                                        ctrl.player.peek().set_sample_rate_mode(mode);
                                     }
                                 }
                             }
@@ -825,11 +821,11 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             EqualizerPanel {
                                 current: config.read().equalizer.clone(),
                                 on_preview: move |equalizer: config::EqualizerSettings| {
-                                    ctrl.player.write().set_equalizer(equalizer);
+                                    ctrl.player.peek().set_equalizer(equalizer);
                                 },
                                 on_commit: move |equalizer: config::EqualizerSettings| {
                                     config.write().equalizer = equalizer.clone();
-                                    ctrl.player.write().set_equalizer(equalizer);
+                                    ctrl.player.peek().set_equalizer(equalizer);
                                 }
                             }
                         }

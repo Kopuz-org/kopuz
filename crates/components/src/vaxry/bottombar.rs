@@ -4,7 +4,8 @@ use dioxus::prelude::*;
 use hooks::use_player_controller::{LoopMode, PlayerController};
 use player::player::Player;
 
-use crate::shared::{fmt_time, toggle_favorite};
+use crate::shared::fmt_time;
+use hooks::favorites::toggle_favorite;
 
 #[component]
 pub fn BottombarVaxry(
@@ -226,12 +227,11 @@ pub fn BottombarVaxry(
                             min: "0",
                             max: "{*current_song_duration.read()}",
                             value: "{display_progress}",
-                            class: format!("absolute top-0 left-0 w-full h-full opacity-0 z-10 {}", if is_radio { "pointer-events-none" } else { "cursor-pointer" }),
+                            class: format!("slider-hit absolute top-0 left-0 w-full h-full opacity-0 z-10 {}", if is_radio { "pointer-events-none" } else { "cursor-pointer" }),
                             disabled: is_radio,
                             onchange: move |evt| {
                                 if let Ok(val) = evt.value().parse::<f64>().map(|v| v as u64) {
-                                    player.write().seek(std::time::Duration::from_secs(val));
-                                    current_song_progress.set(val);
+                                    ctrl.seek(std::time::Duration::from_secs(val));
                                     drag_progress.set(val);
                                     is_dragging.set(false);
                                 }
@@ -266,13 +266,13 @@ pub fn BottombarVaxry(
                             let muted = *is_muted.read();
                             if muted {
                                 let vol = *volume_before_mute.read();
-                                player.write().set_volume(vol);
+                                player.peek().set_volume(vol);
                                 volume.set(vol);
                                 persisted_volume.set(vol);
                                 is_muted.set(false);
                             } else {
                                 volume_before_mute.set(*volume.read());
-                                player.write().set_volume(0.0);
+                                player.peek().set_volume(0.0);
                                 volume.set(0.0);
                                 persisted_volume.set(0.0);
                                 is_muted.set(true);
@@ -292,7 +292,7 @@ pub fn BottombarVaxry(
                             let dir = if dy < 0.0 { 1.0 } else { -1.0 };
                             let current = *volume.read();
                             let new_val = (current + dir * step).clamp(0.0, 1.0);
-                            player.write().set_volume(new_val);
+                            player.peek().set_volume(new_val);
                             volume.set(new_val);
                             persisted_volume.set(new_val);
                             is_muted.set(new_val <= f32::EPSILON);
@@ -314,7 +314,7 @@ pub fn BottombarVaxry(
                             max: "1",
                             step: "0.01",
                             value: "{*volume.read()}",
-                            class: "absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer z-10",
+                            class: "slider-hit absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer z-10",
                             onchange: move |evt| {
                                 if let Ok(val) = evt.value().parse::<f32>() {
                                     persisted_volume.set(val);
@@ -323,7 +323,7 @@ pub fn BottombarVaxry(
                             },
                             oninput: move |evt| {
                                 if let Ok(val) = evt.value().parse::<f32>() {
-                                    player.write().set_volume(val);
+                                    player.peek().set_volume(val);
                                     volume.set(val);
                                     is_muted.set(val == 0.0);
                                     if val > f32::EPSILON {

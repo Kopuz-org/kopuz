@@ -73,6 +73,13 @@ impl NavigationController {
         route.set(Route::Album);
     }
 
+    pub fn close_playlist(self) {
+        let mut restoring = self.restoring;
+        let mut playlist = self.selected_playlist_id;
+        restoring.set(true);
+        playlist.set(None);
+    }
+
     pub fn can_go_back(self) -> bool {
         !self.history.read().is_empty()
     }

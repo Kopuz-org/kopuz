@@ -13,7 +13,6 @@
 
 use db::{Page, ReadDb, Source, TrackFilter};
 use dioxus::prelude::*;
-use server::source::TrackFavorite;
 use tracing::Instrument;
 use utils::offload;
 
@@ -139,7 +138,7 @@ pub fn use_artist_tracks(
         );
         offload(
             async move {
-                let rows = db.artist_tracks(&s, &a).await.unwrap_or_default();
+                let rows = db.artist_tracks(&s, &a, None).await.unwrap_or_default();
                 tracing::Span::current().record("rows", rows.len());
                 rows
             }
@@ -397,7 +396,10 @@ pub fn use_track_is_favorite(track: Memo<Option<reader::Track>>) -> Memo<bool> {
         let track = track();
         offload(async move {
             match track {
-                Some(t) => t.is_favorite(&source).await,
+                Some(t) => {
+                    let key = t.id.key();
+                    !key.trim().is_empty() && source.is_favorite(key.as_ref()).await
+                }
                 None => false,
             }
         })

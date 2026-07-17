@@ -4,6 +4,7 @@
 
 use std::path::PathBuf;
 
+use config::{SortCriterion, SortDirection, TrackSortField};
 use db::{Page, Source, TrackFilter, TrackSort};
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Executor};
@@ -135,6 +136,40 @@ async fn windowed_queries_over_20k_tracks() {
         .await
         .unwrap();
     assert_eq!(by_artist[0].artist, "Artist 000");
+
+    let stacked = db
+        .tracks_page(
+            &TrackFilter {
+                sort: TrackSort::Fields(vec![
+                    SortCriterion::new(TrackSortField::Artist, SortDirection::Asc),
+                    SortCriterion::new(TrackSortField::Title, SortDirection::Desc),
+                ]),
+                ..local.clone()
+            },
+            Page {
+                offset: 0,
+                limit: 1,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(stacked[0].artist, "Artist 000");
+    assert_eq!(stacked[0].title, "Track 19950");
+
+    let fallback = db
+        .tracks_page(
+            &TrackFilter {
+                sort: TrackSort::Fields(Vec::new()),
+                ..local.clone()
+            },
+            Page {
+                offset: 0,
+                limit: 1,
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(fallback[0].artist, "Artist 000");
 
     // Reconstructed identity is a local path.
     assert!(matches!(page[0].id, reader::models::TrackId::Local(_)));

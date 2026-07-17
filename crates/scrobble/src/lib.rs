@@ -4,3 +4,9 @@
 pub mod lastfm;
 pub mod librefm;
 pub mod musicbrainz;
+pub mod queue;
+
+// The scrobble destination enum is defined in `kopuz-db` (which owns the
+// offline-queue table it indexes); re-exported here so the backends and queue
+// share one type.
+pub use db::ScrobbleService;

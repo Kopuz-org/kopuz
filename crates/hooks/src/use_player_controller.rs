@@ -1,8 +1,8 @@
 use config::AppConfig;
-use config::MusicService;
 use dioxus::logger::tracing::Instrument;
 use dioxus::{logger::tracing, prelude::*};
-use player::player::{NowPlayingMeta, Player};
+use player::engine::{SourceFactory, Transition};
+use player::player::{LoadArgs, NowPlayingMeta, Player};
 use reader::Track;
 use std::time::Duration;
 use utils;
@@ -19,6 +19,38 @@ pub enum LoopMode {
     Track,
 }
 
+/// What the UI intends to be playing. The `token` is the engine session token;
+/// event consumers filter by it, which is what lets one signal replace the old
+/// three-way cancellation (task cancel + engine cancel + generation bump).
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub(crate) enum PlaybackIntent {
+    Stopped,
+    /// `from_token`: the session still playing during a crossfade resolve — a
+    /// failed or reverted crossfade falls back to it.
+    Loading {
+        token: u64,
+        idx: usize,
+        crossfade: bool,
+        from_token: u64,
+    },
+    Committed {
+        token: u64,
+    },
+}
+
+impl PlaybackIntent {
+    pub(crate) fn token(self) -> u64 {
+        match self {
+            Self::Stopped => 0,
+            Self::Loading { token, .. } | Self::Committed { token } => token,
+        }
+    }
+
+    pub(crate) fn is_loading(self) -> bool {
+        matches!(self, Self::Loading { .. })
+    }
+}
+
 impl LoopMode {
     pub fn next(&self) -> Self {
         match self {
@@ -33,8 +65,9 @@ impl LoopMode {
 pub struct PlayerController {
     pub player: Signal<Player>,
     pub is_playing: Signal<bool>,
-    pub is_loading: Signal<bool>,
-    pub skip_in_progress: Signal<bool>,
+    /// Derived from the intent (plus the browse spinner) — read-only, so it
+    /// can't be left stuck by a cancel path that forgets to clear it.
+    pub is_loading: Memo<bool>,
     pub history: Signal<Vec<usize>>,
     pub queue: Signal<Vec<Track>>,
     pub shuffle: Signal<bool>,
@@ -59,10 +92,25 @@ pub struct PlayerController {
     /// player reads this shared handle to resolve streams instead of rebuilding
     /// the source (and its HTTP client) on every play/skip.
     pub active_source: Signal<::server::source::ActiveSource>,
-    pub play_generation: Signal<usize>,
+    pub(crate) intent: Signal<PlaybackIntent>,
+    /// Monotonic session-token allocator (0 = none).
+    pub(crate) next_token: Signal<u64>,
+    /// The current token as a plain `Signal` (not a memo) so the scrobble
+    /// scheduler can `origin_scope` off it.
+    pub(crate) current_token: Signal<u64>,
+    /// The token a crossfade last armed for; cleared on seek so a fresh fade
+    /// can arm at the outgoing track's real end.
+    pub(crate) armed_transition: Signal<Option<u64>>,
+    /// Discover tiles want the spinner shown synchronously on click, before any
+    /// load intent exists; folded into `is_loading`, cleared by `set_intent`.
+    pub browse_loading: Signal<bool>,
     pub(crate) pending_resume: Signal<Option<PendingResumeState>>,
     pub pending_crossfade_ui: Signal<Option<PendingCrossfadeUiState>>,
     pub radio_task: Signal<Option<dioxus_core::Task>>,
+    /// The in-flight load pipeline (resolve → source factory → engine Load).
+    /// Starting a new transition cancels the previous one, so a superseded
+    /// load can never write back stale state.
+    pub(crate) load_task: Signal<Option<dioxus_core::Task>>,
     pub station_registry: Signal<radio::registry::StationRegistry>,
     /// User-visible playback error. Set when something needs the user's
     /// attention (expired YT cookies, a failed stream resolve, …).
@@ -77,12 +125,13 @@ pub(crate) struct PendingResumeState {
     progress_secs: u64,
 }
 
-#[derive(Clone, Debug)]
+/// A crossfade whose UI hasn't committed to the incoming track yet — held until
+/// the engine's `TrackSwitched`; a seek/prev before then reverts to `from_token`.
+#[derive(Clone, Copy, Debug)]
 pub struct PendingCrossfadeUiState {
     pub next_idx: usize,
-    pub switch_after_secs: u64,
-    pub outgoing_duration_secs: u64,
-    pub outgoing_progress_secs: u64,
+    pub to_token: u64,
+    pub from_token: u64,
 }
 
 impl PlayerController {
@@ -122,6 +171,93 @@ impl PlayerController {
     /// Retrieves the current track
     pub fn current_track(&self) -> Option<Track> {
         self.get_track_at(*self.current_queue_index.peek())
+    }
+
+    /// Stamp a resolved stream's probed duration/bitrate (YT ships them late)
+    /// onto the queue Track and, if it's still the shown track, the live
+    /// signals — in a single `queue.write()`.
+    fn stamp_probed_stream_info(
+        &mut self,
+        phys_idx: Option<usize>,
+        idx: usize,
+        duration_secs: Option<u64>,
+        bitrate: Option<u32>,
+    ) {
+        let duration = duration_secs.filter(|s| *s > 0);
+        let kbps = bitrate.map(|bps| (bps / 1000) as u16);
+
+        if let Some(p) = phys_idx
+            && let Some(track) = self.queue.write().get_mut(p)
+        {
+            if let Some(secs) = duration {
+                track.duration = secs;
+            }
+            if let Some(k) = kbps {
+                track.bitrate = k;
+            }
+        }
+        if *self.current_queue_index.peek() == idx {
+            if let Some(secs) = duration {
+                self.current_song_duration.set(secs);
+            }
+            if let Some(k) = kbps {
+                self.current_song_bitrate.set(k);
+            }
+        }
+    }
+
+    /// Follow a radio station's live now-playing metadata into the UI signals
+    /// for as long as it plays.
+    fn start_radio_metadata(&mut self, station_id: String, stream_id: String) {
+        let Some(provider) = self.station_registry.read().create_provider(&station_id) else {
+            tracing::warn!("[radio] no metadata provider for station: {station_id}");
+            return;
+        };
+        let mut current_song_title = self.current_song_title;
+        let mut current_song_artist = self.current_song_artist;
+        let mut current_song_album = self.current_song_album;
+        let mut current_song_cover_url = self.current_song_cover_url;
+        let task = spawn(async move {
+            use radio::provider::RadioMetadataProvider;
+            let mut rx = provider.start(&stream_id);
+            while let Some(meta) = rx.recv().await {
+                current_song_title.set(meta.title.clone());
+                current_song_artist.set(meta.artist.clone());
+                current_song_album.set(meta.station.clone());
+                current_song_cover_url.set(meta.cover_url.unwrap_or_default());
+            }
+        });
+        self.radio_task.set(Some(task));
+    }
+
+    /// Download a server track's cover to a temp file and hand the OS media
+    /// controls its local path (they need a path, not a URL). No-ops if `token`
+    /// is superseded before the download finishes.
+    fn spawn_server_artwork_fetch(&self, cover_url: String, track: Track, token: u64) {
+        let mut player = self.player;
+        let current_token = self.current_token;
+        spawn(
+            async move {
+                if let Ok(response) = reqwest::get(&cover_url).await
+                    && let Ok(bytes) = response.bytes().await
+                {
+                    let file_path = std::env::temp_dir()
+                        .join(format!("kopuz_cover_{}.jpg", rand::random::<u64>()));
+                    if tokio::fs::write(&file_path, bytes).await.is_ok()
+                        && *current_token.read() == token
+                    {
+                        player.write().update_metadata(NowPlayingMeta {
+                            title: track.title,
+                            artist: track.artist,
+                            album: track.album,
+                            duration: std::time::Duration::from_secs(track.duration),
+                            artwork: Some(file_path.to_string_lossy().to_string()),
+                        });
+                    }
+                }
+            }
+            .instrument(tracing::info_span!("player.cover_fetch")),
+        );
     }
 
     fn cover_url_for_track(&self, track: &Track) -> String {
@@ -178,49 +314,74 @@ impl PlayerController {
         (restore_seek_secs, pending.is_some())
     }
 
-    pub(crate) fn clear_pending_resume(&mut self) {
-        self.pending_resume.set(None);
-    }
-
     pub(crate) fn clear_pending_crossfade_ui(&mut self) {
         self.pending_crossfade_ui.set(None);
-    }
-
-    fn build_pending_crossfade_ui(
-        next_idx: usize,
-        outgoing_duration_secs: u64,
-        outgoing_progress_secs: u64,
-    ) -> PendingCrossfadeUiState {
-        PendingCrossfadeUiState {
-            next_idx,
-            switch_after_secs: outgoing_duration_secs.saturating_sub(outgoing_progress_secs),
-            outgoing_duration_secs,
-            outgoing_progress_secs,
-        }
     }
 
     pub(crate) fn schedule_pending_crossfade_ui(
         &mut self,
         next_idx: usize,
-        outgoing_duration_secs: u64,
-        outgoing_progress_secs: u64,
+        to_token: u64,
+        from_token: u64,
     ) {
-        self.pending_crossfade_ui
-            .set(Some(Self::build_pending_crossfade_ui(
-                next_idx,
-                outgoing_duration_secs,
-                outgoing_progress_secs,
-            )));
+        self.pending_crossfade_ui.set(Some(PendingCrossfadeUiState {
+            next_idx,
+            to_token,
+            from_token,
+        }));
     }
 
-    pub fn commit_pending_crossfade_ui(&mut self, next_progress_secs: u64) -> bool {
-        let Some(pending) = self.pending_crossfade_ui.read().clone() else {
-            return false;
+    /// Commit the deferred crossfade UI to the incoming track, on the engine's
+    /// `TrackSwitched` for the switch we armed.
+    pub(crate) fn commit_transition(&mut self, token: u64) {
+        let Some(pending) = *self.pending_crossfade_ui.peek() else {
+            return;
+        };
+        if pending.to_token != token {
+            return;
+        }
+        self.pending_crossfade_ui.set(None);
+        let pos = self.player.peek().get_position().as_secs();
+        self.hydrate_current_track_metadata(pending.next_idx, pos);
+        // Push the incoming track's now-playing metadata, deferred from load.
+        self.player.peek().commit_now_playing();
+    }
+
+    /// Undo an armed crossfade at either stage — load still resolving (cancel
+    /// it) or fade running (drop the deferred UI; the caller's tokened seek
+    /// revives the outgoing session engine-side). Pops the history entry the arm
+    /// pushed and reverts the intent to the outgoing token, returned on success.
+    pub(crate) fn revert_transition(&mut self) -> Option<u64> {
+        // Read both stage markers out before any signal write below.
+        let fading = (*self.pending_crossfade_ui.peek()).map(|p| p.from_token);
+        let resolving = match *self.intent.peek() {
+            PlaybackIntent::Loading {
+                crossfade: true,
+                from_token,
+                ..
+            } => Some(from_token),
+            _ => None,
         };
 
-        self.pending_crossfade_ui.set(None);
-        self.hydrate_current_track_metadata(pending.next_idx, next_progress_secs);
-        true
+        let from_token = if let Some(from_token) = fading {
+            self.clear_pending_crossfade_ui();
+            from_token
+        } else if let Some(from_token) = resolving {
+            self.cancel_load_task();
+            from_token
+        } else {
+            return None;
+        };
+
+        self.armed_transition.set(None);
+        let idx = *self.current_queue_index.peek();
+        self.history.with_mut(|h| {
+            if h.last() == Some(&idx) {
+                h.pop();
+            }
+        });
+        self.set_intent(PlaybackIntent::Committed { token: from_token });
+        Some(from_token)
     }
 
     pub(crate) fn set_pending_resume_for_track(&mut self, track: &Track, progress_secs: u64) {
@@ -230,22 +391,74 @@ impl PlayerController {
         }));
     }
 
-    fn apply_restore_seek(&mut self, seek_secs: u64) {
-        self.player.write().seek(Duration::from_secs(seek_secs));
-        self.current_song_progress.set(seek_secs);
+    pub(crate) fn cancel_load_task(&mut self) {
+        if let Some(task) = self.load_task.take() {
+            task.cancel();
+        }
+        self.player.peek().cancel_pending_load();
+    }
+
+    pub(crate) fn allocate_token(&mut self) -> u64 {
+        let token = self.next_token.peek().wrapping_add(1);
+        self.next_token.set(token);
+        token
+    }
+
+    /// The one writer of playback intent — keeps the `current_token` mirror and
+    /// the browse spinner in step so no cancel path leaves them stale.
+    pub(crate) fn set_intent(&mut self, next: PlaybackIntent) {
+        self.browse_loading.set(false);
+        self.current_token.set(next.token());
+        self.intent.set(next);
+    }
+
+    /// Banner + stay on the visible track (never auto-advance): a failed
+    /// crossfade reverts to the still-playing outgoing session; a failed
+    /// immediate load leaves its already-hydrated track shown, paused. Ignored
+    /// if a newer load already superseded `token`.
+    pub(crate) fn fail_load(&mut self, token: u64, error: impl std::fmt::Display) {
+        let intent = *self.intent.peek();
+        if intent.token() != token {
+            return;
+        }
+        self.playback_error
+            .set(Some(format!("Couldn't load this track:\n{error}")));
+        match intent {
+            PlaybackIntent::Loading {
+                crossfade: true,
+                from_token,
+                ..
+            } => {
+                self.set_intent(PlaybackIntent::Committed { token: from_token });
+            }
+            _ => {
+                self.set_intent(PlaybackIntent::Stopped);
+                self.is_playing.set(false);
+            }
+        }
+    }
+
+    /// Seek the current track. All progress-bar / lyric scrubbers route here.
+    pub fn seek(&mut self, time: Duration) {
+        // The scrub targets the visible track. During a crossfade that's the
+        // outgoing session: revert the armed transition and seek it by its own
+        // token, so a fade that just completed can't misdirect the seek.
+        if let Some(from_token) = self.revert_transition() {
+            self.player.peek().seek_for_session(time, from_token);
+        } else {
+            self.player.peek().seek(time);
+        }
+        self.current_song_progress.set(time.as_secs());
     }
 
     pub fn displayed_progress_secs_f64(&self) -> f64 {
-        let pos = self.player.peek().get_position().as_secs_f64();
-
-        if let Some(pending) = self.pending_crossfade_ui.read().clone()
-            && pos <= pending.switch_after_secs as f64
+        // Mid-crossfade the bar shows the outgoing (fading) track's live position.
+        if self.pending_crossfade_ui.peek().is_some()
+            && let Some(fading) = self.player.peek().fading_position()
         {
-            return (pending.outgoing_progress_secs as f64 + pos)
-                .min(pending.outgoing_duration_secs as f64);
+            return fading.as_secs_f64();
         }
-
-        pos
+        self.player.peek().get_position().as_secs_f64()
     }
 
     /// Remap a queue index after moving one item within the queue.
@@ -279,28 +492,13 @@ impl PlayerController {
     }
 
     pub fn has_next_track(&self) -> bool {
-        let idx = *self.current_queue_index.peek();
-        let queue_len = self.queue.peek().len();
-
-        if queue_len == 0 {
-            return false;
-        }
-
-        let loop_mode = *self.loop_mode.peek();
-        let shuffle = *self.shuffle.peek();
-
-        match loop_mode {
-            LoopMode::Track => true,
-            _ => {
-                if shuffle && queue_len > 1 {
-                    !self.shuffle_order.peek().is_empty() || loop_mode == LoopMode::Queue
-                } else if (shuffle && queue_len == 1) || idx + 1 < queue_len {
-                    true
-                } else {
-                    loop_mode == LoopMode::Queue
-                }
-            }
-        }
+        // Delegates to the same predicate the advance uses, so the crossfade
+        // arm can't fire when the advance would instead end the queue.
+        Self::has_following_track(
+            *self.current_queue_index.peek(),
+            self.queue.peek().len(),
+            *self.loop_mode.peek(),
+        )
     }
 
     pub fn play_track(&mut self, idx: usize) {
@@ -336,654 +534,382 @@ impl PlayerController {
         idx: usize,
         allow_crossfade: bool,
     ) {
-        self.play_generation.with_mut(|g| *g += 1);
-        let current_gen = *self.play_generation.peek();
-        // Starting a new track clears the previous track's error banner —
-        // otherwise a 403 from a skipped YT track lingers on screen.
-        self.playback_error.set(None);
-        self.cancel_radio_task();
+        // ── Phase 1: classify — no mutation (bar stale-cache eviction), so
+        // every early bail below leaves no half-set loading state behind. ──
+        let Some(track) = self.get_track_at(idx) else {
+            return;
+        };
 
-        if let Some(track) = self.get_track_at(idx) {
-            let path_str = track.id.uid().to_string();
-            let (restore_seek_secs, clear_pending_resume_on_success) =
-                self.pending_resume_seek(&track);
-            let use_crossfade = allow_crossfade
-                && self.should_crossfade()
-                && restore_seek_secs.is_none_or(|secs| secs == 0);
-            let outgoing_duration_secs = *self.current_song_duration.peek();
-            let outgoing_progress_secs =
-                (*self.current_song_progress.peek()).min(outgoing_duration_secs);
-            if !use_crossfade {
-                self.clear_pending_crossfade_ui();
-            }
-            let crossfade_duration =
-                Duration::from_secs(self.config.peek().crossfade_seconds as u64);
-            let item_ref = PlaybackItemRef::parse(&path_str);
-            let is_radio_item = item_ref.is_radio();
-            let is_server_item = item_ref.is_server();
+        let path_str = track.id.uid().to_string();
+        let (restore_seek_secs, clear_pending_resume_on_success) = self.pending_resume_seek(&track);
+        let use_crossfade = allow_crossfade
+            && self.should_crossfade()
+            && restore_seek_secs.is_none_or(|secs| secs == 0);
+        let crossfade_duration = Duration::from_secs(self.config.peek().crossfade_seconds as u64);
+        let item_ref = PlaybackItemRef::parse(&path_str);
+        let is_radio_item = item_ref.is_radio();
+        let is_server_item = item_ref.is_server();
+        let id = item_ref.primary_id().unwrap_or_default().to_string();
+        let stream_id = item_ref.stream_id().unwrap_or_default().to_string();
 
-            if is_server_item || is_radio_item {
-                let id = item_ref.primary_id().unwrap_or_default().to_string();
-                let stream_id = item_ref.stream_id().unwrap_or_default().to_string();
+        // ── classify the source ─────────────────────────────────────────
 
-                // Check offline cache first
-                {
-                    let offline_path = if is_server_item {
-                        let raw = self
-                            .config
-                            .read()
-                            .offline_tracks
-                            .get(&id)
-                            .map(std::path::PathBuf::from)
-                            .filter(|p| p.exists());
-                        // Evict stale entries saved with the wrong ".audio"/".bin" fallback
-                        if let Some(ref p) = raw {
-                            let bad_ext = matches!(
-                                p.extension().and_then(|e| e.to_str()),
-                                Some("audio") | Some("bin")
-                            );
-                            if bad_ext {
-                                let _ = std::fs::remove_file(p);
-                                self.config.write().offline_tracks.remove(&id);
-                                None
-                            } else {
-                                raw
-                            }
-                        } else {
-                            raw
-                        }
-                    } else {
-                        None
-                    };
-                    if let Some(local_path) = offline_path
-                        && let Ok((source, hint)) = decoder::open_file(&local_path)
-                    {
-                        if !use_crossfade {
-                            self.current_queue_index.set(idx);
-                            self.player.write().stop_for_transition();
-                            self.is_playing.set(false);
-                        }
-
-                        let cover_url = self.cover_url_for_track(&track);
-                        if !use_crossfade {
-                            self.hydrate_current_track_metadata(idx, 0);
-                            self.current_song_cover_url.set(cover_url.clone());
-                        }
-                        self.is_loading.set(true);
-
-                        let mut player = self.player;
-                        let mut is_playing = self.is_playing;
-                        let mut is_loading = self.is_loading;
-                        let mut skip_in_progress = self.skip_in_progress;
-                        let play_generation = self.play_generation;
-                        let volume = self.volume;
-                        let mut current_song_progress = self.current_song_progress;
-                        let mut pending_crossfade_ui = self.pending_crossfade_ui;
-                        let mut pending_resume = self.pending_resume;
-                        let cfg_signal = self.config;
-
-                        spawn(async move {
-                            if *play_generation.read() == current_gen {
-                                let meta = NowPlayingMeta {
-                                    title: track.title.clone(),
-                                    artist: track.artist.clone(),
-                                    album: track.album.clone(),
-                                    duration: std::time::Duration::from_secs(track.duration),
-                                    artwork: Some(cover_url),
-                                };
-                                let result = if use_crossfade {
-                                    player.write().crossfade_to(
-                                        source,
-                                        meta,
-                                        hint,
-                                        crossfade_duration,
-                                    )
-                                } else {
-                                    player.write().play(source, meta, hint)
-                                };
-                                if let Err(e) = result {
-                                    tracing::error!(error = %e, "offline playback failed");
-                                    is_loading.set(false);
-                                    skip_in_progress.set(false);
-                                    return;
-                                }
-                                player.write().set_volume(*volume.peek());
-                                if let Some(seek_secs) = restore_seek_secs
-                                    && seek_secs > 0
-                                {
-                                    player.write().seek(Duration::from_secs(seek_secs));
-                                }
-                                if use_crossfade {
-                                    pending_crossfade_ui.set(Some(
-                                        PlayerController::build_pending_crossfade_ui(
-                                            idx,
-                                            outgoing_duration_secs,
-                                            outgoing_progress_secs,
-                                        ),
-                                    ));
-                                } else {
-                                    current_song_progress.set(0);
-                                }
-                                is_playing.set(true);
-                                is_loading.set(false);
-                                skip_in_progress.set(false);
-
-                                if clear_pending_resume_on_success {
-                                    pending_resume.set(None);
-                                }
-                                let _ = cfg_signal;
-                            }
-                        });
-                        return;
-                    }
-                }
-
-                if let Some((stream_url, cover_url)) = {
-                    if is_radio_item {
-                        self.station_registry
-                            .read()
-                            .get(&id)
-                            .and_then(|s| s.streams.iter().find(|str| str.id == stream_id))
-                            .map(|s| s.url.clone())
-                            .map(|stream_url| (stream_url, String::new()))
-                    } else {
-                        let conf = self.config.read();
-                        conf.server.as_ref().map(|server| match server.service {
-                            MusicService::Jellyfin => {
-                                // Stream resolves in the spawn below via the source
-                                // backend; only the cover is built synchronously so
-                                // artwork shows immediately on click.
-                                let cover_url = utils::jellyfin_image::resolve_track_cover(
-                                    track.cover.as_deref(),
-                                    &track.id.key(),
-                                    &track.album_id,
-                                    &server.url,
-                                    server.access_token.as_deref(),
-                                    800,
-                                    90,
-                                )
-                                .unwrap_or_default();
-
-                                (ResolvedStreamRef::pending_marker(&id), cover_url)
-                            }
-                            MusicService::Subsonic | MusicService::Custom => {
-                                // Stream resolves in the spawn below; build only the
-                                // cover here. No creds → empty stream so the sync bail
-                                // below stops loading silently, as before.
-                                if let (Some(password), Some(username)) =
-                                    (&server.access_token, &server.user_id)
-                                {
-                                    let subsonic_path = match track.cover.as_deref() {
-                                        Some(c) => format!("{}:{}", track.id.uid(), c),
-                                        None => track.id.uid(),
-                                    };
-                                    let cover_url =
-                                        utils::subsonic_image::subsonic_image_url_from_path(
-                                            &subsonic_path,
-                                            &server.url,
-                                            server.access_token.as_deref(),
-                                            800,
-                                            90,
-                                        )
-                                        .or_else(|| {
-                                            ::server::subsonic::cover_art_url(
-                                                &server.url,
-                                                username,
-                                                password,
-                                                &id,
-                                                Some(800),
-                                            )
-                                            .ok()
-                                        })
-                                        .unwrap_or_default();
-                                    (ResolvedStreamRef::pending_marker(&id), cover_url)
-                                } else {
-                                    (String::new(), String::new())
-                                }
-                            }
-                            // YT can't resolve its stream URL synchronously (the
-                            // /player call is async + multi-client fallback). Tag
-                            // the URL with a sentinel that the async spawn below
-                            // recognises and replaces with the real URL. The
-                            // cover URL, however, is already encoded in the
-                            // track's path (`ytmusic:VID:urlhex_HEX`) so we
-                            // can produce it synchronously here so the
-                            // bottombar shows artwork immediately on click.
-                            MusicService::YtMusic => {
-                                let cover_url = utils::jellyfin_image::resolve_track_cover(
-                                    track.cover.as_deref(),
-                                    &track.id.key(),
-                                    &track.album_id,
-                                    "",
-                                    None,
-                                    800,
-                                    90,
-                                )
-                                .unwrap_or_default();
-                                (ResolvedStreamRef::pending_marker(&id), cover_url)
-                            }
-                            // SoundCloud also resolves its stream async (progressive
-                            // MP3 / HLS) via the source; the cover is the plain
-                            // artwork URL already in `track.cover`.
-                            MusicService::SoundCloud => (
-                                ResolvedStreamRef::pending_marker(&id),
-                                track.cover.clone().unwrap_or_default(),
-                            ),
-                        })
-                    }
-                } {
-                    if stream_url.is_empty() {
-                        self.is_loading.set(false);
-                        self.skip_in_progress.set(false);
-                        return;
-                    }
-
-                    if !use_crossfade {
-                        self.player.write().stop_for_transition();
-                        self.is_playing.set(false);
-                    }
-
-                    let mut player = self.player;
-                    let mut is_playing = self.is_playing;
-                    let mut is_loading = self.is_loading;
-                    let mut skip_in_progress = self.skip_in_progress;
-                    let mut playback_error = self.playback_error;
-                    let play_generation = self.play_generation;
-                    let volume = self.volume;
-                    let mut current_song_progress = self.current_song_progress;
-                    let mut pending_crossfade_ui = self.pending_crossfade_ui;
-                    let mut pending_resume = self.pending_resume;
-                    let cfg_signal = self.config;
-                    let active_source = self.active_source;
-                    let mut radio_task = self.radio_task;
-                    let mut current_song_title = self.current_song_title;
-                    let mut current_song_artist = self.current_song_artist;
-                    let mut current_song_album = self.current_song_album;
-                    let mut current_song_cover_url = self.current_song_cover_url;
-                    let station_registry = self.station_registry;
-                    let mut queue_for_yt = self.queue;
-                    let current_queue_index_for_yt = self.current_queue_index;
-                    let mut current_song_duration_for_yt = self.current_song_duration;
-                    let mut current_song_bitrate_for_yt = self.current_song_bitrate;
-                    // Physical queue slot for the metadata write-backs below — the
-                    // resolve closure's `get_mut` indexes the raw Vec, so the
-                    // display/shuffle `idx` would hit the wrong track in shuffle.
-                    let phys_idx = self.get_queue_index(idx);
-
-                    if !use_crossfade {
-                        self.hydrate_current_track_metadata(idx, 0);
-                        self.current_song_cover_url.set(cover_url.clone());
-                    }
-
-                    self.is_loading.set(true);
-
-                    let is_radio = PlaybackItemRef::parse(&track.id.uid()).is_radio();
-
-                    spawn(async move {
-                        let (stream_url, yt_format, yt_user_agent) =
-                            match ResolvedStreamRef::parse(&stream_url) {
-                                ResolvedStreamRef::Pending(item_id) => {
-                                    // The one genuinely per-source op: resolve the playable
-                                    // stream through the active source's backend (a URL for
-                                    // Jellyfin/Subsonic, a deciphered stream for YT).
-                                    let source = active_source.peek().clone();
-                                    match source.resolve_stream(item_id).await {
-                                        Ok(info) => {
-                                            // Stale-resolve guard: don't stamp duration / mutate
-                                            // queue if the user clicked another track while we
-                                            // were awaiting the resolve. (YT carries probed
-                                            // duration/bitrate; other sources leave them None.)
-                                            if *play_generation.read() == current_gen
-                                                && let Some(secs) = info.duration_secs
-                                                && secs > 0
-                                            {
-                                                if let Some(p) = phys_idx
-                                                    && let Some(t) = queue_for_yt.write().get_mut(p)
-                                                {
-                                                    t.duration = secs;
-                                                }
-                                                if *current_queue_index_for_yt.peek() == idx {
-                                                    current_song_duration_for_yt.set(secs);
-                                                }
-                                            }
-                                            // Surface the resolved bitrate (kbps) for the debug
-                                            // readout; write it back onto the queue Track too (YT
-                                            // tracks carry no bitrate metadata) so a re-hydrate
-                                            // doesn't reset it.
-                                            if *play_generation.read() == current_gen
-                                                && let Some(bps) = info.bitrate
-                                            {
-                                                let kbps = (bps / 1000) as u16;
-                                                if let Some(p) = phys_idx
-                                                    && let Some(t) = queue_for_yt.write().get_mut(p)
-                                                {
-                                                    t.bitrate = kbps;
-                                                }
-                                                if *current_queue_index_for_yt.peek() == idx {
-                                                    current_song_bitrate_for_yt.set(kbps);
-                                                }
-                                            }
-                                            (info.url, info.format, info.user_agent)
-                                        }
-                                        Err(e) => {
-                                            // Same guard: a stale error must NOT post a banner
-                                            // for or clear is_loading on the user's new track.
-                                            if *play_generation.read() != current_gen {
-                                                return;
-                                            }
-                                            tracing::error!(error = %e, "stream URL resolve failed");
-                                            playback_error.set(Some(format!(
-                                                "Couldn't load this track:\n{e}"
-                                            )));
-                                            is_loading.set(false);
-                                            skip_in_progress.set(false);
-                                            return;
-                                        }
-                                    }
-                                }
-                                ResolvedStreamRef::SoundCloudHls(_)
-                                | ResolvedStreamRef::Direct(_) => (stream_url, None, None),
-                            };
-                        let yt_format_for_blocking = yt_format;
-                        let stream_url_for_blocking = stream_url.clone();
-                        let yt_ua_for_blocking = yt_user_agent.clone();
-                        let source_res = tokio::task::spawn_blocking(move || {
-                            if is_radio {
-                                let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
-                                    stream_url_for_blocking,
-                                    true,
-                                    yt_ua_for_blocking,
-                                );
-                                let (source, hint) = decoder::from_stream_with_hint(stream, "ogg");
-                                Ok::<_, std::io::Error>((source, hint))
-                            } else if let Some((fmt, range_safe)) = yt_format_for_blocking {
-                                if range_safe {
-                                    // YT: HTTP Range-backed source. Symphonia
-                                    // can seek freely (Matroska Cues at the
-                                    // end, scrub anywhere) and startup probes
-                                    // only fetch the ~512 KiB they need.
-                                    let range = utils::range_source::RangeStreamSource::new(
-                                        stream_url_for_blocking,
-                                        yt_ua_for_blocking,
-                                    )?;
-                                    let len = Some(range.total_size());
-                                    let (source, mut hint) =
-                                        decoder::from_stream_with_len(range, len);
-                                    hint.with_extension(fmt.extension());
-                                    Ok::<_, std::io::Error>((source, hint))
-                                } else {
-                                    // No-pot fallback: googlevideo 403s deep
-                                    // ranges, and the probe reads the webm tail
-                                    // — stream sequentially instead of failing
-                                    // outright (issue #386). No scrubbing.
-                                    let stream =
-                                        utils::stream_buffer::StreamBuffer::with_user_agent(
-                                            stream_url_for_blocking,
-                                            false,
-                                            yt_ua_for_blocking,
-                                        );
-                                    stream.wait_for_total_size();
-                                    let len = stream.known_total_size();
-                                    let (source, mut hint) =
-                                        decoder::from_stream_with_len(stream, len);
-                                    hint.with_extension(fmt.extension());
-                                    Ok::<_, std::io::Error>((source, hint))
-                                }
-                            } else if let ResolvedStreamRef::SoundCloudHls(hls_url) =
-                                ResolvedStreamRef::parse(&stream_url_for_blocking)
-                            {
-                                // SoundCloud Go+ AAC: assemble the HLS playlist's
-                                // fMP4 segments into one in-memory buffer Symphonia
-                                // can decode (it has no HLS demuxer).
-                                let bytes = utils::hls_source::assemble(
-                                    hls_url,
-                                    yt_ua_for_blocking.as_deref(),
-                                )?;
-                                let len = Some(bytes.len() as u64);
-                                let cursor = std::io::Cursor::new(bytes);
-                                let (source, mut hint) = decoder::from_stream_with_len(cursor, len);
-                                hint.with_extension("m4a");
-                                Ok::<_, std::io::Error>((source, hint))
-                            } else {
-                                let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
-                                    stream_url_for_blocking,
-                                    false,
-                                    yt_ua_for_blocking,
-                                );
-                                stream.wait_for_total_size();
-                                let len = stream.known_total_size();
-                                let (source, hint) = decoder::from_stream_with_len(stream, len);
-                                Ok::<_, std::io::Error>((source, hint))
-                            }
-                        })
-                        .await;
-
-                        if let Err(_) | Ok(Err(_)) = &source_res {
-                            if *play_generation.read() == current_gen {
-                                let msg = match &source_res {
-                                    Ok(Err(e)) => format!("Couldn't load this track:\n{e}"),
-                                    _ => "Playback failed unexpectedly".to_string(),
-                                };
-                                playback_error.set(Some(msg));
-                                is_loading.set(false);
-                                skip_in_progress.set(false);
-                            }
-                            return;
-                        }
-
-                        if let Ok(Ok((source, hint))) = source_res {
-                            if *play_generation.read() == current_gen {
-                                let meta = NowPlayingMeta {
-                                    title: track.title.clone(),
-                                    artist: track.artist.clone(),
-                                    album: track.album.clone(),
-                                    duration: std::time::Duration::from_secs(track.duration),
-                                    artwork: Some(cover_url.clone()),
-                                };
-
-                                let result = if use_crossfade {
-                                    player.write().crossfade_to(
-                                        source,
-                                        meta,
-                                        hint,
-                                        crossfade_duration,
-                                    )
-                                } else {
-                                    player.write().play(source, meta, hint)
-                                };
-                                if let Err(e) = result {
-                                    tracing::error!(error = %e, "playback failed");
-                                    is_loading.set(false);
-                                    skip_in_progress.set(false);
-                                    return;
-                                }
-                                player.write().set_volume(*volume.peek());
-                                if let Some(seek_secs) = restore_seek_secs
-                                    && seek_secs > 0
-                                {
-                                    player.write().seek(Duration::from_secs(seek_secs));
-                                    current_song_progress.set(seek_secs);
-                                }
-                                if use_crossfade {
-                                    pending_crossfade_ui.set(Some(
-                                        PlayerController::build_pending_crossfade_ui(
-                                            idx,
-                                            outgoing_duration_secs,
-                                            outgoing_progress_secs,
-                                        ),
-                                    ));
-                                } else {
-                                    current_song_progress.set(0);
-                                }
-                                if clear_pending_resume_on_success {
-                                    pending_resume.set(None);
-                                }
-                                is_loading.set(false);
-                                is_playing.set(true);
-                                skip_in_progress.set(false);
-
-                                let item_uid = track.id.uid();
-                                let item_ref = PlaybackItemRef::parse(&item_uid);
-                                let is_radio_item = item_ref.is_radio();
-                                let station_id =
-                                    item_ref.primary_id().unwrap_or_default().to_string();
-                                let stream_id =
-                                    item_ref.stream_id().unwrap_or_default().to_string();
-
-                                if let Some(task) = radio_task.take() {
-                                    task.cancel();
-                                }
-
-                                if is_radio_item {
-                                    if let Some(provider) =
-                                        station_registry.read().create_provider(&station_id)
-                                    {
-                                        let task = spawn(async move {
-                                            use radio::provider::RadioMetadataProvider;
-                                            let mut rx = provider.start(&stream_id);
-                                            while let Some(meta) = rx.recv().await {
-                                                current_song_title.set(meta.title.clone());
-                                                current_song_artist.set(meta.artist.clone());
-                                                current_song_album.set(meta.station.clone());
-                                                current_song_cover_url
-                                                    .set(meta.cover_url.unwrap_or_default());
-                                            }
-                                        });
-
-                                        radio_task.set(Some(task));
-                                    } else {
-                                        tracing::warn!(
-                                            "[radio] No metadata provider for station: {}",
-                                            station_id
-                                        );
-                                    }
-                                }
-                                // Don't scrobble if the track is a radio item
-                                if !is_radio_item {
-                                    scrobble_scheduler::schedule(
-                                        track.clone(),
-                                        Some(id.clone()),
-                                        cfg_signal,
-                                        play_generation,
-                                        current_gen,
-                                        is_playing,
-                                        Some(active_source),
-                                        ScrobbleOptions::REMOTE_NATIVE,
-                                    );
-
-                                    let cover_url = cover_url.clone();
-                                    let track = track.clone();
-                                    let mut player = player;
-                                    let play_generation = play_generation;
-
-                                    spawn(async move {
-                                        if let Ok(response) = reqwest::get(&cover_url).await
-                                            && let Ok(bytes) = response.bytes().await
-                                        {
-                                            let temp_dir = std::env::temp_dir();
-                                            let random_id: u64 = rand::random();
-                                            let file_path = temp_dir
-                                                .join(format!("kopuz_cover_{}.jpg", random_id));
-
-                                            if tokio::fs::write(&file_path, bytes).await.is_ok()
-                                                && *play_generation.read() == current_gen
-                                            {
-                                                let path_str =
-                                                    file_path.to_string_lossy().to_string();
-                                                let new_meta = NowPlayingMeta {
-                                                    title: track.title,
-                                                    artist: track.artist,
-                                                    album: track.album,
-                                                    duration: std::time::Duration::from_secs(
-                                                        track.duration,
-                                                    ),
-                                                    artwork: Some(path_str),
-                                                };
-                                                player.write().update_metadata(new_meta);
-                                            }
-                                        }
-                                    }.instrument(tracing::info_span!("player.cover_fetch")));
-                                }
-                            }
-                        } else {
-                            is_loading.set(false);
-                            skip_in_progress.set(false);
-                        }
-                    }.instrument(tracing::info_span!("player.resolve_stream", idx)));
+        // Offline cache first (server items only).
+        let offline_path: Option<std::path::PathBuf> = if is_server_item {
+            let raw = self
+                .config
+                .read()
+                .offline_tracks
+                .get(&id)
+                .map(std::path::PathBuf::from)
+                .filter(|p| p.exists());
+            // Evict stale entries saved with the wrong ".audio"/".bin" fallback
+            if let Some(ref p) = raw {
+                let bad_ext = matches!(
+                    p.extension().and_then(|e| e.to_str()),
+                    Some("audio") | Some("bin")
+                );
+                if bad_ext {
+                    let _ = std::fs::remove_file(p);
+                    self.config.write().offline_tracks.remove(&id);
+                    None
+                } else {
+                    raw
                 }
             } else {
-                if !use_crossfade {
-                    self.current_queue_index.set(idx);
-                }
-                if let Some(track_path) = track.id.local_path()
-                    && let Ok((source, hint)) = decoder::open_file(track_path)
-                {
-                    {
-                        // For a local track `track.cover` is its album-art file
-                        // path (projected from the album by the DB read layer).
-                        let artwork = track.cover.clone();
+                raw
+            }
+        } else {
+            None
+        };
 
-                        let meta = NowPlayingMeta {
-                            title: track.title.clone(),
-                            artist: track.artist.clone(),
-                            album: track.album.clone(),
-                            duration: std::time::Duration::from_secs(track.duration),
-                            artwork,
+        // Remote stream reference + synchronous cover URL for server/radio
+        // items that aren't cached offline. Streams resolve in the load task;
+        // only the cover is built here so artwork shows immediately on click.
+        let remote_ref: Option<(String, String)> = if offline_path.is_some() {
+            None
+        } else if is_radio_item {
+            self.station_registry
+                .read()
+                .get(&id)
+                .and_then(|s| s.streams.iter().find(|str| str.id == stream_id))
+                .map(|s| s.url.clone())
+                .map(|stream_url| (stream_url, String::new()))
+        } else if is_server_item {
+            // Every server source resolves its stream async in the load task, so
+            // the ref is a pending marker; only the cover is built now, through
+            // the cover seam. No creds no longer bails silently — resolve_stream
+            // surfaces a real error instead.
+            if self.config.read().server.is_some() {
+                let cover_url = ::server::cover::track(&self.config.read(), &track, 800)
+                    .map(|cover| cover.as_ref().to_string())
+                    .unwrap_or_default();
+                Some((ResolvedStreamRef::pending_marker(&id), cover_url))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        let local_path: Option<std::path::PathBuf> = if is_server_item || is_radio_item {
+            None
+        } else {
+            track.id.local_path().map(|p| p.to_path_buf())
+        };
+
+        // A server item with no server configured has nothing to resolve — stop
+        // silently, as the old sync path did.
+        if offline_path.is_none() && local_path.is_none() && remote_ref.is_none() {
+            return;
+        }
+
+        // ── Phase 2: commit — mutates state, so only past every bail above ──
+        // (Cancelling the prior load is just a resource optimization; the token
+        // is what guards correctness.)
+        self.playback_error.set(None);
+        self.cancel_radio_task();
+        self.cancel_load_task();
+        if !use_crossfade {
+            self.clear_pending_crossfade_ui();
+        }
+        let from_token = self.intent.peek().token();
+        let token = self.allocate_token();
+        self.set_intent(PlaybackIntent::Loading {
+            token,
+            idx,
+            crossfade: use_crossfade,
+            from_token,
+        });
+
+        let cover_url: String = if offline_path.is_some() {
+            self.cover_url_for_track(&track)
+        } else if let Some((_, cover)) = &remote_ref {
+            cover.clone()
+        } else {
+            String::new()
+        };
+        let artwork = if is_server_item || is_radio_item {
+            Some(cover_url.clone())
+        } else {
+            // For a local track `track.cover` is its album-art file path
+            // (projected from the album by the DB read layer).
+            track.cover.clone()
+        };
+
+        // ── UI transition ───────────────────────────────────────────────
+        if !use_crossfade {
+            if is_server_item || is_radio_item {
+                // Deliberate UX: silence while a (possibly slow) load resolves.
+                // Pure local files switch seamlessly inside the engine instead.
+                self.player.peek().stop_for_transition();
+                self.is_playing.set(false);
+            }
+            self.hydrate_current_track_metadata(idx, restore_seek_secs.unwrap_or(0));
+            if is_server_item || is_radio_item {
+                self.current_song_cover_url.set(cover_url.clone());
+            }
+        }
+
+        // ── the load pipeline ───────────────────────────────────────────
+        // One cancellable task for every source kind: resolve the stream URL
+        // if needed, hand the engine a source factory (executed on its decode
+        // worker thread, so network buffering never blocks the UI), then apply
+        // the post-load bookkeeping once the engine confirms playback.
+        let mut ctrl = *self;
+        let phys_idx = self.get_queue_index(idx);
+        let station_id = id.clone();
+        let cached_item_id = id;
+
+        let task = spawn(
+            async move {
+                let factory: SourceFactory = if let Some(path) = local_path {
+                    Box::new(move || decoder::open_file(&path).map_err(|e| e.to_string()))
+                } else if let Some(path) = offline_path {
+                    // Cached server file: on open failure fall back to the live
+                    // stream instead of failing. The resolve blocks on this
+                    // task's runtime handle — legal on the decode worker.
+                    let source = ctrl.active_source.peek().clone();
+                    let rt_handle = tokio::runtime::Handle::current();
+                    Box::new(move || match decoder::open_file(&path) {
+                        Ok(parts) => Ok(parts),
+                        Err(e) => {
+                            tracing::warn!(error = %e, "cached file failed to open; falling back to the server stream");
+                            let info = rt_handle
+                                .block_on(source.resolve_stream(&cached_item_id))
+                                .map_err(|e| e.to_string())?;
+                            network_factory(
+                                info.url,
+                                info.format,
+                                info.user_agent,
+                                false,
+                                rt_handle.clone(),
+                            )()
+                        }
+                    })
+                } else {
+                    let (stream_ref, _) = remote_ref.expect("classified as remote above");
+                    let (stream_url, yt_format, yt_user_agent) =
+                        match ResolvedStreamRef::parse(&stream_ref) {
+                            ResolvedStreamRef::Pending(item_id) => {
+                                // The one genuinely per-source op: resolve the
+                                // playable stream through the active source
+                                // (a URL for Jellyfin/Subsonic, a deciphered
+                                // stream for YT).
+                                let source = ctrl.active_source.peek().clone();
+                                match source.resolve_stream(item_id).await {
+                                    Ok(info) => {
+                                        ctrl.stamp_probed_stream_info(
+                                            phys_idx,
+                                            idx,
+                                            info.duration_secs,
+                                            info.bitrate,
+                                        );
+                                        (info.url, info.format, info.user_agent)
+                                    }
+                                    Err(e) => {
+                                        tracing::error!(error = %e, "stream URL resolve failed");
+                                        ctrl.fail_load(token, &e);
+                                        return;
+                                    }
+                                }
+                            }
+                            ResolvedStreamRef::SoundCloudHls(_) | ResolvedStreamRef::Direct(_) => {
+                                (stream_ref, None, None)
+                            }
                         };
 
-                        let result = if use_crossfade {
-                            self.player
-                                .write()
-                                .crossfade_to(source, meta, hint, crossfade_duration)
-                        } else {
-                            self.player.write().play(source, meta, hint)
-                        };
-                        if let Err(e) = result {
-                            tracing::error!(error = %e, "playback failed");
-                            self.skip_in_progress.set(false);
-                            return;
-                        }
-                        self.player.write().set_volume(*self.volume.peek());
+                    // The factory runs on the decode worker (no runtime), so
+                    // hand StreamBuffer's download a handle from this task.
+                    let rt_handle = tokio::runtime::Handle::current();
+                    network_factory(stream_url, yt_format, yt_user_agent, is_radio_item, rt_handle)
+                };
 
-                        self.skip_in_progress.set(false);
+                let meta = NowPlayingMeta {
+                    title: track.title.clone(),
+                    artist: track.artist.clone(),
+                    album: track.album.clone(),
+                    duration: std::time::Duration::from_secs(track.duration),
+                    artwork,
+                };
+                let transition = if use_crossfade {
+                    Transition::Crossfade(crossfade_duration)
+                } else {
+                    Transition::Immediate
+                };
+                let start_at = restore_seek_secs
+                    .filter(|secs| *secs > 0)
+                    .map(Duration::from_secs);
+                let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+                ctrl.player.write().load(LoadArgs {
+                    token,
+                    factory,
+                    meta,
+                    transition,
+                    start_at,
+                    reply: Some(reply_tx),
+                });
 
-                        if !use_crossfade {
-                            self.hydrate_current_track_metadata(idx, 0);
-                        } else {
-                            self.schedule_pending_crossfade_ui(
-                                idx,
-                                outgoing_duration_secs,
-                                outgoing_progress_secs,
-                            );
-                        }
-
-                        self.is_playing.set(true);
-
-                        if let Some(seek_secs) = restore_seek_secs
-                            && seek_secs > 0
-                        {
-                            self.apply_restore_seek(seek_secs);
-                        }
+                match reply_rx.await {
+                    Ok(Ok(outcome)) => {
+                        ctrl.set_intent(PlaybackIntent::Committed { token });
                         if clear_pending_resume_on_success {
-                            self.clear_pending_resume();
+                            ctrl.pending_resume.set(None);
                         }
-                        if !is_radio_item {
+                        if use_crossfade {
+                            if outcome.crossfaded {
+                                // Defer the UI until TrackSwitched confirms the fade.
+                                ctrl.schedule_pending_crossfade_ui(idx, token, from_token);
+                            } else {
+                                // Crossfade fell back to an immediate switch —
+                                // commit now; no fade midpoint is coming.
+                                ctrl.hydrate_current_track_metadata(idx, 0);
+                            }
+                        }
+
+                        if is_radio_item {
+                            ctrl.start_radio_metadata(station_id, stream_id);
+                        } else {
+                            let (item_id, source, options) = if is_server_item {
+                                (
+                                    Some(station_id.clone()),
+                                    Some(ctrl.active_source),
+                                    ScrobbleOptions::REMOTE_NATIVE,
+                                )
+                            } else {
+                                (None, None, ScrobbleOptions::LOCAL)
+                            };
                             scrobble_scheduler::schedule(
                                 track.clone(),
-                                None,
-                                self.config,
-                                self.play_generation,
-                                current_gen,
-                                self.is_playing,
-                                None,
-                                ScrobbleOptions::LOCAL,
+                                item_id,
+                                ctrl.config,
+                                ctrl.current_token,
+                                token,
+                                ctrl.is_playing,
+                                source,
+                                options,
+                                ctrl.db.peek().clone(),
                             );
+
+                            if is_server_item && !cover_url.is_empty() {
+                                ctrl.spawn_server_artwork_fetch(
+                                    cover_url.clone(),
+                                    track.clone(),
+                                    token,
+                                );
+                            }
                         }
+                    }
+                    Ok(Err(e)) => {
+                        tracing::error!(error = %e, "playback failed");
+                        ctrl.fail_load(token, &e);
+                    }
+                    Err(_) => {
+                        // Cancelled engine-side (superseded or stopped) — the
+                        // token no longer matches, so any stray write-back is
+                        // ignored; whichever flow cancelled owns the intent.
                     }
                 }
             }
-        }
+            .instrument(tracing::info_span!("player.load_pipeline", idx)),
+        );
+
+        self.load_task.set(Some(task));
     }
+}
+
+/// Factory for a resolved network stream (radio, YT range/sequential,
+/// SoundCloud HLS, or a plain buffered stream). Returns a `SourceFactory` so the
+/// symphonia types stay inferred inside the closure — hooks can't name them.
+fn network_factory(
+    stream_url: String,
+    yt_format: Option<(::server::ytmusic::player::AudioFormat, bool)>,
+    yt_user_agent: Option<String>,
+    is_radio: bool,
+    rt_handle: tokio::runtime::Handle,
+) -> SourceFactory {
+    Box::new(move || {
+        let build = || -> std::io::Result<_> {
+            if is_radio {
+                let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
+                    stream_url,
+                    true,
+                    yt_user_agent,
+                    rt_handle,
+                );
+                Ok(decoder::from_stream_with_hint(stream, "ogg"))
+            } else if let Some((fmt, range_safe)) = yt_format {
+                if range_safe {
+                    // YT: HTTP Range-backed source. Symphonia can seek freely
+                    // (Matroska Cues at the end, scrub anywhere) and startup
+                    // probes only fetch the ~512 KiB they need.
+                    let range =
+                        utils::range_source::RangeStreamSource::new(stream_url, yt_user_agent)?;
+                    let len = Some(range.total_size());
+                    let (source, mut hint) = decoder::from_stream_with_len(range, len);
+                    hint.with_extension(fmt.extension());
+                    Ok((source, hint))
+                } else {
+                    // No-pot fallback: googlevideo 403s deep ranges, and the
+                    // probe reads the webm tail — stream sequentially instead of
+                    // failing outright (issue #386). No scrubbing.
+                    let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
+                        stream_url,
+                        false,
+                        yt_user_agent,
+                        rt_handle,
+                    );
+                    stream.wait_for_total_size();
+                    let len = stream.known_total_size();
+                    let (source, mut hint) = decoder::from_stream_with_len(stream, len);
+                    hint.with_extension(fmt.extension());
+                    Ok((source, hint))
+                }
+            } else if let ResolvedStreamRef::SoundCloudHls(hls_url) =
+                ResolvedStreamRef::parse(&stream_url)
+            {
+                // SoundCloud Go+ AAC: assemble the HLS playlist's fMP4 segments
+                // into one in-memory buffer Symphonia can decode (no HLS demuxer).
+                let bytes = utils::hls_source::assemble(hls_url, yt_user_agent.as_deref())?;
+                let len = Some(bytes.len() as u64);
+                let cursor = std::io::Cursor::new(bytes);
+                let (source, mut hint) = decoder::from_stream_with_len(cursor, len);
+                hint.with_extension("m4a");
+                Ok((source, hint))
+            } else {
+                let stream = utils::stream_buffer::StreamBuffer::with_user_agent(
+                    stream_url,
+                    false,
+                    yt_user_agent,
+                    rt_handle,
+                );
+                stream.wait_for_total_size();
+                let len = stream.known_total_size();
+                Ok(decoder::from_stream_with_len(stream, len))
+            }
+        };
+        build().map_err(|e| e.to_string())
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1003,11 +929,15 @@ pub fn use_player_controller(
     current_track_snapshot: Signal<Option<Track>>,
     volume: Signal<f32>,
     config: Signal<AppConfig>,
+    config_loaded_ok: Signal<bool>,
     db_handle: db::Db,
 ) -> PlayerController {
-    let play_generation = use_signal(|| 0);
-    let is_loading = use_signal(|| false);
-    let skip_in_progress = use_signal(|| false);
+    let intent = use_signal(|| PlaybackIntent::Stopped);
+    let next_token = use_signal(|| 0u64);
+    let current_token = use_signal(|| 0u64);
+    let armed_transition = use_signal(|| None);
+    let browse_loading = use_signal(|| false);
+    let is_loading = use_memo(move || intent.read().is_loading() || *browse_loading.read());
     let history = use_signal(Vec::new);
     let shuffle = use_signal(|| false);
     let shuffle_order = use_signal(Vec::<usize>::new);
@@ -1015,16 +945,48 @@ pub fn use_player_controller(
     let pending_resume = use_signal(|| None::<PendingResumeState>);
     let pending_crossfade_ui = use_signal(|| None::<PendingCrossfadeUiState>);
     let radio_task = use_signal(|| None::<dioxus_core::Task>);
+    let load_task = use_signal(|| None::<dioxus_core::Task>);
     let station_registry = use_context::<Signal<radio::registry::StationRegistry>>();
     let playback_error = use_signal(|| None::<String>);
     let db = use_signal(move || db_handle);
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
 
+    // Scrobbles queued while offline (issue #335): retry once on startup, in
+    // case connectivity came back between sessions.
+    let mut drained = use_signal(|| false);
+    use_effect(move || {
+        if !*config_loaded_ok.read() || *drained.peek() {
+            return;
+        }
+        drained.set(true);
+        let creds = {
+            let cfg = config.peek();
+            scrobble::queue::Credentials {
+                lastfm: (!cfg.lastfm_api_key.is_empty() && !cfg.lastfm_api_secret.is_empty()).then(
+                    || {
+                        (
+                            cfg.lastfm_api_key.clone(),
+                            cfg.lastfm_api_secret.clone(),
+                            cfg.lastfm_session_key.clone(),
+                        )
+                    },
+                ),
+                librefm_session_key: (!cfg.librefm_session_key.is_empty())
+                    .then(|| cfg.librefm_session_key.clone()),
+                listenbrainz_token: (!cfg.musicbrainz_token.trim().is_empty())
+                    .then(|| cfg.musicbrainz_token.clone()),
+            }
+        };
+        let db_handle = db.peek().clone();
+        spawn(async move {
+            scrobble::queue::drain(&db_handle, &creds).await;
+        });
+    });
+
     PlayerController {
         player,
         is_playing,
         is_loading,
-        skip_in_progress,
         history,
         queue,
         shuffle,
@@ -1044,10 +1006,15 @@ pub fn use_player_controller(
         config,
         db,
         active_source,
-        play_generation,
+        intent,
+        next_token,
+        current_token,
+        armed_transition,
+        browse_loading,
         pending_resume,
         pending_crossfade_ui,
         radio_task,
+        load_task,
         station_registry,
         playback_error,
     }

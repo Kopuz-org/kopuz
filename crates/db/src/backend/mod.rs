@@ -16,6 +16,10 @@ mod dump;
 mod migrations;
 mod queries;
 mod rows;
+mod scrobble;
+mod scrobble_queue;
+
+pub use scrobble::{QueuedScrobbleRow, ScrobbleService};
 mod writes;
 
 pub struct Native {
@@ -102,8 +106,9 @@ impl ReadStore for Native {
         &self,
         source: &crate::Source,
         artist: &str,
+        limit: Option<u32>,
     ) -> Result<Vec<reader::Track>, DbError> {
-        queries::artist_tracks(&self.pool(), source, artist).await
+        queries::artist_tracks(&self.pool(), source, artist, limit).await
     }
 
     async fn genre_tracks(
@@ -207,6 +212,14 @@ impl ReadStore for Native {
 
     async fn meta_get(&self, cache_key: &str, kind: &str) -> Result<Option<String>, DbError> {
         writes::meta_get(&self.pool(), cache_key, kind).await
+    }
+
+    async fn meta_keys_since(&self, kind: &str, max_age_secs: i64) -> Result<Vec<String>, DbError> {
+        writes::meta_keys_since(&self.pool(), kind, max_age_secs).await
+    }
+
+    async fn scrobble_queue_all(&self) -> Result<Vec<crate::QueuedScrobbleRow>, DbError> {
+        scrobble_queue::all(&self.pool()).await
     }
 }
 
@@ -364,6 +377,20 @@ impl Storage for Native {
 
     async fn save_queue(&self, snap: &crate::QueueSnapshot) -> Result<(), DbError> {
         writes::save_queue(&self.pool(), snap).await
+    }
+
+    async fn scrobble_queue_push(&self, row: &crate::QueuedScrobbleRow) -> Result<(), DbError> {
+        scrobble_queue::push(&self.pool(), row).await
+    }
+
+    async fn scrobble_queue_delete(
+        &self,
+        listened_at: i64,
+        artist: &str,
+        title: &str,
+        service: crate::ScrobbleService,
+    ) -> Result<(), DbError> {
+        scrobble_queue::delete(&self.pool(), listened_at, artist, title, service).await
     }
 
     async fn upsert_tracks(

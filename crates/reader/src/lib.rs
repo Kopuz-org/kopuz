@@ -5,6 +5,7 @@ pub mod cover_fetcher;
 pub mod metadata;
 pub mod models;
 pub mod scanner;
+pub mod sort;
 pub mod utils;
 
 pub use metadata::{read, read_cover, write_tags};

@@ -22,9 +22,9 @@ use objc2_foundation::{
     NSCopying, NSDictionary, NSMutableDictionary, NSNumber, NSProcessInfo, NSString,
 };
 use objc2_media_player::{
-    MPMediaItemArtwork, MPMediaItemPropertyAlbumTitle, MPMediaItemPropertyArtist,
-    MPMediaItemPropertyArtwork, MPMediaItemPropertyPlaybackDuration, MPMediaItemPropertyTitle,
-    MPNowPlayingInfoCenter, MPNowPlayingInfoPropertyElapsedPlaybackTime,
+    MPChangePlaybackPositionCommandEvent, MPMediaItemArtwork, MPMediaItemPropertyAlbumTitle,
+    MPMediaItemPropertyArtist, MPMediaItemPropertyArtwork, MPMediaItemPropertyPlaybackDuration,
+    MPMediaItemPropertyTitle, MPNowPlayingInfoCenter, MPNowPlayingInfoPropertyElapsedPlaybackTime,
     MPNowPlayingInfoPropertyPlaybackRate, MPRemoteCommandCenter, MPRemoteCommandEvent,
     MPRemoteCommandHandlerStatus,
 };
@@ -85,20 +85,23 @@ pub enum SystemEvent {
     Toggle,
     Next,
     Prev,
+    Seek(f64),
 }
 
-static BACKGROUND_HANDLER: OnceLock<Arc<StdMutex<Option<Box<dyn Fn(SystemEvent) + Send + Sync>>>>> =
-    OnceLock::new();
+type BgHandler = Arc<StdMutex<Option<Box<dyn Fn(SystemEvent) + Send + Sync>>>>;
+type TokioWaker = Arc<StdMutex<Option<Box<dyn Fn() + Send + Sync>>>>;
 
-static TOKIO_WAKER: OnceLock<Arc<StdMutex<Option<Box<dyn Fn() + Send + Sync>>>>> = OnceLock::new();
+static BACKGROUND_HANDLER: OnceLock<BgHandler> = OnceLock::new();
 
-fn get_bg_handler() -> Arc<StdMutex<Option<Box<dyn Fn(SystemEvent) + Send + Sync>>>> {
+static TOKIO_WAKER: OnceLock<TokioWaker> = OnceLock::new();
+
+fn get_bg_handler() -> BgHandler {
     BACKGROUND_HANDLER
         .get_or_init(|| Arc::new(StdMutex::new(None)))
         .clone()
 }
 
-fn get_tokio_waker() -> Arc<StdMutex<Option<Box<dyn Fn() + Send + Sync>>>> {
+fn get_tokio_waker() -> TokioWaker {
     TOKIO_WAKER
         .get_or_init(|| Arc::new(StdMutex::new(None)))
         .clone()
@@ -111,10 +114,10 @@ pub fn set_tokio_waker(waker: impl Fn() + Send + Sync + 'static) {
 }
 
 fn wake_tokio() {
-    if let Ok(guard) = get_tokio_waker().lock() {
-        if let Some(ref waker) = *guard {
-            waker();
-        }
+    if let Ok(guard) = get_tokio_waker().lock()
+        && let Some(ref waker) = *guard
+    {
+        waker();
     }
 }
 
@@ -125,10 +128,10 @@ pub fn set_background_handler(handler: impl Fn(SystemEvent) + Send + Sync + 'sta
 }
 
 fn dispatch_event(event: SystemEvent) {
-    if let Ok(guard) = get_bg_handler().lock() {
-        if let Some(ref handler) = *guard {
-            handler(event);
-        }
+    if let Ok(guard) = get_bg_handler().lock()
+        && let Some(ref handler) = *guard
+    {
+        handler(event);
     }
     wake_run_loop();
 }
@@ -186,13 +189,9 @@ pub fn init() {
             let assertion_reason = NSString::from_str("Kopuz is playing audio");
             let mut assertion_id: IOPMAssertionID = 0;
             let kr = IOPMAssertionCreateWithName(
-                std::mem::transmute::<&objc2_foundation::NSString, *const std::ffi::c_void>(
-                    &*assertion_type,
-                ),
+                &*assertion_type as *const objc2_foundation::NSString as *const std::ffi::c_void,
                 255,
-                std::mem::transmute::<&objc2_foundation::NSString, *const std::ffi::c_void>(
-                    &*assertion_reason,
-                ),
+                &*assertion_reason as *const objc2_foundation::NSString as *const std::ffi::c_void,
                 &mut assertion_id,
             );
             if kr == 0 {
@@ -252,6 +251,23 @@ pub fn init() {
                     MPRemoteCommandHandlerStatus::Success
                 }));
 
+            center
+                .changePlaybackPositionCommand()
+                .addTargetWithHandler(&RcBlock::new(
+                    move |event: NonNull<MPRemoteCommandEvent>| {
+                        match event
+                            .as_ref()
+                            .downcast_ref::<MPChangePlaybackPositionCommandEvent>()
+                        {
+                            Some(event) => {
+                                dispatch_event(SystemEvent::Seek(event.positionTime()));
+                                MPRemoteCommandHandlerStatus::Success
+                            }
+                            None => MPRemoteCommandHandlerStatus::CommandFailed,
+                        }
+                    },
+                ));
+
             let fire_date = CFAbsoluteTimeGetCurrent();
             let timer = CFRunLoopTimerCreate(
                 std::ptr::null(),
@@ -279,6 +295,51 @@ pub fn init() {
     });
 }
 
+/// Cached `MPMediaItemArtwork` keyed by source path. Building one decodes the
+/// whole image file, far too slow to repeat on every position push (scrubbing
+/// floods them); a cache hit is just a retain.
+struct ArtworkCache {
+    path: String,
+    artwork: objc2::rc::Retained<MPMediaItemArtwork>,
+}
+
+// SAFETY: MPMediaItemArtwork is a MediaPlayer framework object documented as
+// thread-safe (it is designed to be handed to MPNowPlayingInfoCenter from any
+// thread), and the cache only clones retains out of it under the mutex.
+unsafe impl Send for ArtworkCache {}
+
+static ARTWORK_CACHE: StdMutex<Option<ArtworkCache>> = StdMutex::new(None);
+
+fn artwork_for_path(path: &str) -> Option<objc2::rc::Retained<MPMediaItemArtwork>> {
+    let mut cache = ARTWORK_CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(c) = cache.as_ref()
+        && c.path == path
+    {
+        return Some(c.artwork.clone());
+    }
+
+    // SAFETY:
+    // - initWithContentsOfFile returns nil for unreadable files, mapped to
+    //   None by objc2.
+    // - initWithImage: follows the alloc-init convention (+1 retain), so
+    //   Retained::from_raw takes ownership without over-releasing; the null
+    //   check guards a failed init.
+    let artwork = unsafe {
+        let ns_path = NSString::from_str(path);
+        let image = NSImage::initWithContentsOfFile(NSImage::alloc(), &ns_path)?;
+        use objc2::msg_send;
+        let artwork_alloc = MPMediaItemArtwork::alloc();
+        let artwork_ptr: *mut MPMediaItemArtwork = std::mem::transmute(artwork_alloc);
+        let artwork_raw: *mut MPMediaItemArtwork = msg_send![artwork_ptr, initWithImage: &*image];
+        objc2::rc::Retained::from_raw(artwork_raw)?
+    };
+    *cache = Some(ArtworkCache {
+        path: path.to_string(),
+        artwork: artwork.clone(),
+    });
+    Some(artwork)
+}
+
 pub fn update_now_playing(
     title: &str,
     artist: &str,
@@ -301,12 +362,6 @@ pub fn update_now_playing(
     // - transmute from NSMutableDictionary to NSDictionary is safe because
     //   NSMutableDictionary is a subclass of NSDictionary; the upcast is
     //   valid in Objective-C and matches what the framework expects.
-    // - Retained::from_raw on the artwork pointer is safe because the
-    //   pointer was just returned by initWithImage: which follows the
-    //   "alloc-init" convention (returns +1 retain count), and from_raw
-    //   takes ownership without over-releasing.
-    // - The artwork pointer null-check ensures we only convert valid
-    //   pointers to Retained.
     unsafe {
         let center = MPNowPlayingInfoCenter::defaultCenter();
 
@@ -344,27 +399,13 @@ pub fn update_now_playing(
             ProtocolObject::from_ref(MPNowPlayingInfoPropertyPlaybackRate),
         );
 
-        if let Some(path) = artwork_path {
-            let ns_path = NSString::from_str(path);
-            if let Some(image) = NSImage::initWithContentsOfFile(NSImage::alloc(), &ns_path) {
-                use objc2::msg_send;
-                let artwork_alloc = MPMediaItemArtwork::alloc();
-                let artwork_ptr: *mut MPMediaItemArtwork = std::mem::transmute(artwork_alloc);
-                let artwork_raw: *mut MPMediaItemArtwork =
-                    msg_send![artwork_ptr, initWithImage: &*image];
-
-                if !artwork_raw.is_null() {
-                    let retained: objc2::rc::Retained<MPMediaItemArtwork> =
-                        objc2::rc::Retained::from_raw(artwork_raw).expect("retained artwork");
-
-                    let artwork_ref: &AnyObject =
-                        &*(std::mem::transmute::<_, *const AnyObject>(&*retained));
-                    info.setObject_forKey(
-                        artwork_ref,
-                        ProtocolObject::from_ref(MPMediaItemPropertyArtwork),
-                    );
-                }
-            }
+        if let Some(retained) = artwork_path.and_then(artwork_for_path) {
+            let artwork_ref: &AnyObject =
+                &*(&*retained as *const objc2_media_player::MPMediaItemArtwork as *const AnyObject);
+            info.setObject_forKey(
+                artwork_ref,
+                ProtocolObject::from_ref(MPMediaItemPropertyArtwork),
+            );
         }
 
         center.setNowPlayingInfo(Some(std::mem::transmute::<

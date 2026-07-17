@@ -5,7 +5,9 @@ use std::time::{Duration, Instant};
 use config::Browser;
 use tokio::process::Child;
 
-use super::browser::{browser_candidates, browser_command, find_browser_bin, in_flatpak};
+use super::browser::{
+    BrowserBin, browser_candidates, browser_command, find_browser_bin, in_flatpak,
+};
 use super::profile::profile_dir;
 
 /// Wipe the `<prefix>-<server_id>` profile, launch `browser` at `signin_url`,
@@ -46,7 +48,7 @@ where
         && !v.trim().is_empty()
     {
         tracing::info!("$KOPUZ_BROWSER_COMMAND used to override browser command");
-        v.to_string().to_owned()
+        BrowserBin::CommandLine(v)
     } else {
         let error = if in_flatpak() {
             format!(
@@ -102,7 +104,7 @@ where
 struct SigninWait<'a> {
     browser: Browser,
     profile: &'a Path,
-    bin: &'a str,
+    bin: &'a BrowserBin,
     timeout: Duration,
 }
 
@@ -149,7 +151,7 @@ where
                 .map(|_| " — note: the browser exited early (likely detached UI); close all browser windows and try again")
                 .unwrap_or_default();
             tracing::warn!(
-                bin = w.bin,
+                bin = %w.bin,
                 timeout_s = w.timeout.as_secs(),
                 exited_early = child_exited_at.is_some(),
                 "sign-in timed out"
@@ -162,13 +164,13 @@ where
         if child_exited_at.is_none()
             && let Ok(Some(status)) = child.try_wait()
         {
-            tracing::debug!(bin = w.bin, %status, "browser exited — still polling cookies");
+            tracing::debug!(bin = %w.bin, %status, "browser exited — still polling cookies");
             child_exited_at = Some(Instant::now());
         }
         match extract(w.browser, w.profile.to_path_buf()).await {
             Ok(Some(value)) => {
                 tracing::info!(
-                    bin = w.bin,
+                    bin = %w.bin,
                     elapsed_ms = started.elapsed().as_millis(),
                     "sign-in detected"
                 );
@@ -212,7 +214,7 @@ where
                 .map(|e| format!("; last extract error: {e}"))
                 .unwrap_or_default();
             tracing::warn!(
-                bin = w.bin,
+                bin = %w.bin,
                 timeout_s = w.timeout.as_secs(),
                 saw_browser,
                 "sign-in timed out"
@@ -232,7 +234,7 @@ where
         match extract(w.browser, w.profile.to_path_buf()).await {
             Ok(Some(value)) => {
                 tracing::info!(
-                    bin = w.bin,
+                    bin = %w.bin,
                     elapsed_ms = started.elapsed().as_millis(),
                     "sign-in detected after browser close"
                 );

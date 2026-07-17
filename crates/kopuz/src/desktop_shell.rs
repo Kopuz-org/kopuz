@@ -24,7 +24,7 @@ pub fn tray_backend_available() -> bool {
     ];
     CANDIDATES
         .iter()
-        .any(|name| unsafe { libloading::Library::new(name) }.is_ok())
+        .any(|name| unsafe { libloading::Library::new(*name) }.is_ok())
 }
 
 #[cfg(all(not(target_os = "android"), not(target_os = "linux")))]

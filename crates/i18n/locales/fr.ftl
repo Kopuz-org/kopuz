@@ -345,6 +345,12 @@ channel_mode_mono = Mono
 channel_mode_left_only = Gauche uniquement
 channel_mode_right_only = Droite uniquement
 channel_mode_swap_left_right = Inverser G/D
+device_change_behavior = Au changement de périphérique
+device_change_resume = Continuer la lecture
+device_change_pause = Mettre en pause
+sample_rate_mode = Fréquence d'échantillonnage de sortie
+sample_rate_mode_system = Suivre le système
+sample_rate_mode_source = Adapter à la piste
 
 crossfade = Fondu enchaîné
 crossfade_off = Désactivé
@@ -392,9 +398,6 @@ lastfm_first = Last.fm en premier
 musicbrainz_only = MusicBrainz uniquement
 lastfm_only = Last.fm uniquement
 remove_cover = Retirer la pochette
-artist_photo_source = Source de la photo de l'artiste
-artist_photo = Photo de l'artiste
-album_cover = Pochette d'album
 
 # Radio Page
 radio_filter_stations = Filtrer les stations…
@@ -458,3 +461,23 @@ add_photo = Ajouter une photo
 change_photo = Changer la photo
 remove_photo = Supprimer la photo
 metadata_edit_warning = Les champs vides suppriment l'étiquette. Écrit directement dans le fichier — aucune annulation possible.
+
+sort_by = Trier par
+sort_then = puis
+sort_none = Aucun tri
+sort_add_criterion = Ajouter un critère
+sort_remove = Enlever
+sort_ascending = Croissant
+sort_descending = Décroissant
+sort_field_title = Titre
+sort_field_artist = Artiste
+sort_field_year = Année
+sort_field_genre = Genre
+sort_field_album = Album
+sort_field_duration = Durée
+sort_field_date_added = Date d'ajout
+sort_field_name = Nom
+sort_field_tracks = Pistes
+sort_field_albums = Albums
+view_grid = Vue grille
+view_list = Vue liste

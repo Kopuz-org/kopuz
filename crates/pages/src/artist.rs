@@ -8,22 +8,22 @@ use components::dots_menu::{DotsMenu, MenuAction};
 use components::metadata_modal::MetadataModal;
 use components::playlist_modal::PlaylistModal;
 use components::selection_bar::SelectionBar;
-use config::{AppConfig, ArtistPhotoSource, ArtistViewOrder};
+use components::sort_control::SortControl;
+use components::view_mode_toggle::ViewModeToggle;
+use config::{
+    AlbumSortField, AlbumViewMode, AppConfig, ArtistSortField, ArtistViewOrder, SortDirection,
+};
 use dioxus::prelude::*;
 use hooks::db_reactivity::Table;
 use hooks::use_db_queries::{
     use_active_source, use_albums, use_artist_images, use_artist_sample_tracks, use_artist_tracks,
-    use_tracks_by_keys,
+    use_artists, use_tracks_by_keys,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use tracing::Instrument;
+use utils::artist::{joined_credit_primary, normalize_artist_key};
 
 use crate::server::download_manager::{DownloadQueue, delete_downloads, queue_downloads};
-
-fn normalize_artist_key(value: &str) -> String {
-    value.trim().to_lowercase()
-}
 
 /// One album-card menu entry, tagged so dispatch survives the entry set being
 /// built dynamically from capabilities (indices shift as entries are gated in).
@@ -66,21 +66,18 @@ pub fn Artist(
 
     let is_offline = use_context::<Signal<bool>>();
     let download_queue = use_context::<Signal<DownloadQueue>>();
-    let mut fetched_artist_images =
-        use_context::<Signal<std::collections::HashMap<String, String>>>();
-    // In-flight guard for the remote artist-image fetch — page-local; the persisted
-    // `fetched_artist_images` map is what skips a refetch across navigations.
-    let mut is_fetching_images = use_signal(|| false);
-    // Records that a fetch already ran this mount. Distinguishes "fetched, found
-    // nothing" (e.g. YT yields no images) from "never fetched" — without it an
-    // empty result leaves the map empty and the effect respawns forever.
-    let mut images_fetch_done = use_signal(|| false);
+    let fetched_artist_images = use_context::<Signal<::server::cover::FetchedArtistImages>>();
 
     let albums_res = use_albums(source);
+    let artist_counts_res = use_artists(source);
     let sample_tracks_res = use_artist_sample_tracks(source, u32::MAX);
     let artist_memo = use_memo(move || artist_name.read().clone());
     let artist_tracks_res = use_artist_tracks(source, artist_memo);
     let artist_images_res = use_artist_images();
+
+    // The photo-fetch pipeline (bulk for library servers, per-artist for remote
+    // catalogs) that fills `fetched_artist_images`.
+    hooks::artist_images::use_artist_photo_fetch(albums_res, sample_tracks_res, artist_images_res);
 
     // Server + offline: keys of tracks downloaded for offline, used to restrict the
     // artist/album listing to what's actually available. Empty otherwise (cheap).
@@ -106,6 +103,38 @@ pub fn Artist(
         }
     });
 
+    let album_sort = use_signal(|| config.peek().artist_album_sort.clone());
+    use_effect(move || {
+        let curr = album_sort.read().clone();
+        if config.peek().artist_album_sort != curr {
+            config.write().artist_album_sort = curr;
+        }
+    });
+
+    let artist_sort = use_signal(|| config.peek().artist_sort.clone());
+    use_effect(move || {
+        let curr = artist_sort.read().clone();
+        if config.peek().artist_sort != curr {
+            config.write().artist_sort = curr;
+        }
+    });
+
+    let album_view_mode = use_signal(|| config.peek().artist_album_view_mode);
+    use_effect(move || {
+        let curr = *album_view_mode.read();
+        if config.peek().artist_album_view_mode != curr {
+            config.write().artist_album_view_mode = curr;
+        }
+    });
+
+    let artists_view_mode = use_signal(|| config.peek().artists_view_mode);
+    use_effect(move || {
+        let curr = *artists_view_mode.read();
+        if config.peek().artists_view_mode != curr {
+            config.write().artists_view_mode = curr;
+        }
+    });
+
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
 
     let mut show_playlist_modal = use_signal(|| false);
@@ -120,160 +149,21 @@ pub fn Artist(
     let mut show_album_playlist_modal = use_signal(|| false);
     let mut pending_album_id_for_playlist = use_signal(|| None::<String>);
 
-    // Remote artist-image fetch (servers only): fills the in-memory cache the
-    // image resolution reads. Gated on `sync` so local never runs it; YT yields
-    // nothing. The per-service fetch lives behind the facade.
-    use_effect(move || {
-        // YT resolves its avatars per-artist below; this server path would yield
-        // nothing for it anyway.
-        if !caps().sync || caps().discover {
-            return;
-        }
-        if config.read().artist_photo_source != ArtistPhotoSource::ArtistPhoto {
-            return;
-        }
-        if *is_fetching_images.read()
-            || *images_fetch_done.read()
-            || !fetched_artist_images.read().is_empty()
-        {
-            return;
-        }
-        is_fetching_images.set(true);
-        let source = active_source.peek().clone();
-        spawn(
-            async move {
-                let images: std::collections::HashMap<String, String> = source
-                    .fetch_artist_images()
-                    .await
-                    .unwrap_or_default()
-                    .into_iter()
-                    .collect();
-                fetched_artist_images.set(images);
-                images_fetch_done.set(true);
-                is_fetching_images.set(false);
-            }
-            .instrument(tracing::info_span!("artist.fetch_images")),
-        );
-    });
-
-    // YT Music: the Artists grid shows real YT artist photos and nothing else.
-    // There's no bulk endpoint, so resolve each library artist's avatar from the
-    // YT "Artists" search, a few in flight at a time, writing results in as they
-    // land so the grid fills progressively. Keyed by display name (the grid reads
-    // `fetched.get(&display)`).
-    use_effect(move || {
-        if !caps().discover {
-            return;
-        }
-        if config.read().artist_photo_source != ArtistPhotoSource::ArtistPhoto {
-            return;
-        }
-        if *images_fetch_done.read() || *is_fetching_images.read() {
-            return;
-        }
-        // Wait for the DB artist-image cache to load so we can skip artists whose
-        // photo was persisted on a previous run (otherwise we'd refetch every
-        // time the page opens).
-        let db_imgs = artist_images_res.read();
-        let Some((_, db_photos)) = db_imgs.clone() else {
-            return;
-        };
-        drop(db_imgs);
-
-        let albums = albums_res.read().clone().unwrap_or_default();
-        let sample = sample_tracks_res.read().clone().unwrap_or_default();
-        if albums.is_empty() && sample.is_empty() {
-            // Library not loaded yet — wait for a real artist set.
-            return;
-        }
-        let mut names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-        for album in &albums {
-            if !album.artist.trim().is_empty() {
-                names.insert(album.artist.clone());
-            }
-        }
-        for track in &sample {
-            for artist in &track.artists {
-                if !artist.trim().is_empty() {
-                    names.insert(artist.clone());
-                }
-            }
-        }
-        // Skip artists already resolved this session (context map) or persisted
-        // to the DB on a previous run (keyed by normalized name).
-        let already = fetched_artist_images.read();
-        let names: Vec<String> = names
-            .into_iter()
-            .filter(|n| {
-                !already.contains_key(n) && !db_photos.contains_key(&normalize_artist_key(n))
-            })
-            .collect();
-        drop(already);
-        if names.is_empty() {
-            images_fetch_done.set(true);
-            return;
-        }
-        // Mark done up front so the effect doesn't respawn as the workers write
-        // partial results back into the map.
-        is_fetching_images.set(true);
-        images_fetch_done.set(true);
-
-        let workers = 6usize;
-        let shared = std::sync::Arc::new(std::sync::Mutex::new(names.into_iter()));
-        for _ in 0..workers {
-            let source = active_source.peek().clone();
-            let shared = shared.clone();
-            spawn(
-                async move {
-                    while let Some(name) = shared.lock().ok().and_then(|mut it| it.next()) {
-                        // Always record an outcome so the grid can tell "resolved,
-                        // no photo" (→ album fallback) from "still loading"
-                        // (→ placeholder). "" is the no-photo sentinel.
-                        let url = source
-                            .fetch_artist_image(&name)
-                            .await
-                            .ok()
-                            .flatten()
-                            .unwrap_or_default();
-                        // Persist found photos to the DB (kind "server" → the
-                        // grid's `photos` map) so future opens load them instantly
-                        // instead of re-searching YT.
-                        if !url.is_empty() {
-                            let _ = source
-                                .set_artist_image(
-                                    &normalize_artist_key(&name),
-                                    "server",
-                                    Some(&url),
-                                )
-                                .await;
-                        }
-                        fetched_artist_images.write().insert(name, url);
-                    }
-                }
-                .instrument(tracing::info_span!("artist.fetch_yt_images")),
-            );
-        }
-        is_fetching_images.set(false);
-    });
-
-    // The artist grid: every artist with a resolved avatar. Avatar precedence is
-    // source-agnostic — custom photo, then (when "artist photo" is on) a fetched
-    // remote / local-DB photo, then the album cover via the source cover seam.
+    // The artist grid: one uniform, source-agnostic image chain per tile
+    // (override → photo → pending-placeholder → own album cover → placeholder),
+    // resolved by the cover seam.
     let artists = use_memo(move || -> Vec<(String, Option<utils::CoverUrl>)> {
         let albums = albums_res.read().clone().unwrap_or_default();
         let sample = sample_tracks_res.read().clone().unwrap_or_default();
-        let (overrides, photos) = artist_images_res.read().clone().unwrap_or_default();
+        let images = artist_images_res.read().clone().unwrap_or_default();
         let fetched = fetched_artist_images.read();
         let conf = config.read();
-        let use_photo = conf.artist_photo_source == ArtistPhotoSource::ArtistPhoto;
-        // YT resolves photos one artist at a time. Until an artist resolves we
-        // render a placeholder rather than its album cover, so the card doesn't
-        // visibly swap album→photo (which read as a loading glitch). The map
-        // carries a "" sentinel for "resolved, no photo" → album fallback.
-        let is_yt = caps().discover;
         let offline = caps().downloads && *is_offline.read();
 
-        // norm → (display name, first album cover-path).
+        // norm → (display name, album-art candidate: the artist's first album,
+        // else their track's album). Only Library tiles ever render it — on a
+        // Remote catalog the seam resolves photo-or-placeholder, so a shared
+        // track cover can't dupe across credited artists there.
         let mut artist_map: HashMap<String, (String, Option<PathBuf>)> = HashMap::new();
         for album in &albums {
             artist_map
@@ -291,6 +181,15 @@ pub fn Artist(
                     .or_insert_with(|| (artist.clone(), cover.clone()));
             }
         }
+        // Drop joined collab credits whose primary artist has their own tile.
+        let joined: Vec<String> = artist_map
+            .keys()
+            .filter(|norm| joined_credit_primary(norm).is_some_and(|p| artist_map.contains_key(p)))
+            .cloned()
+            .collect();
+        for norm in joined {
+            artist_map.remove(&norm);
+        }
 
         let downloaded: HashSet<String> = if offline {
             offline_tracks_res
@@ -304,39 +203,68 @@ pub fn Artist(
             HashSet::new()
         };
 
-        let mut out: Vec<(String, Option<utils::CoverUrl>)> = artist_map
+        // Per-artist counts for the count-based sort fields; keyed by the
+        // normalized name so differently-cased credits collapse into one bucket.
+        let mut track_counts: HashMap<String, u32> = HashMap::new();
+        for (name, n) in artist_counts_res.read().clone().unwrap_or_default() {
+            *track_counts.entry(normalize_artist_key(&name)).or_default() += n;
+        }
+        let mut album_counts: HashMap<String, u32> = HashMap::new();
+        for album in &albums {
+            *album_counts
+                .entry(normalize_artist_key(&album.artist))
+                .or_default() += 1;
+        }
+
+        let out: Vec<(String, Option<utils::CoverUrl>)> = artist_map
             .into_iter()
             .filter(|(_, (display, _))| !offline || downloaded.contains(&display.to_lowercase()))
             .map(|(norm, (display, album_cover))| {
-                // YT + photos on, artist not resolved yet → placeholder (no album
-                // flash). Unless the user set a custom override / DB photo exists.
-                if is_yt
-                    && use_photo
-                    && !fetched.contains_key(&display)
-                    && !overrides.contains_key(&norm)
-                    && !photos.contains_key(&norm)
-                {
-                    return (display, None);
-                }
-                // "" sentinel = resolved with no photo → fall back to album cover.
-                let fetched_url = fetched
-                    .get(&display)
-                    .map(|u| u.as_str())
-                    .filter(|u| !u.is_empty());
-                let cover = ::server::cover::artist(
-                    &conf,
-                    overrides.get(&norm).map(|p| p.as_path()),
-                    photos.get(&norm),
-                    fetched_url,
+                let art = ::server::cover::ArtistArt::from_caches(
+                    &images,
+                    &fetched,
+                    &norm,
+                    &display,
                     album_cover.as_deref(),
-                    use_photo,
-                    320,
+                    caps().artist_view,
                 );
+                let cover = ::server::cover::artist(&conf, art, 320);
                 (display, cover)
             })
             .collect();
-        out.sort_by_key(|a| a.0.to_lowercase());
-        out
+        // Decorate with the normalized name once, sort by the stacked criteria
+        // (name always breaks remaining ties), then strip the key back off.
+        let criteria = artist_sort.read().clone();
+        let mut keyed: Vec<(String, (String, Option<utils::CoverUrl>))> = out
+            .into_iter()
+            .map(|entry| (normalize_artist_key(&entry.0), entry))
+            .collect();
+        keyed.sort_by(|(ka, _), (kb, _)| {
+            for c in &criteria {
+                let ord = match c.field {
+                    ArtistSortField::Name => ka.cmp(kb),
+                    ArtistSortField::Tracks => track_counts
+                        .get(ka)
+                        .copied()
+                        .unwrap_or(0)
+                        .cmp(&track_counts.get(kb).copied().unwrap_or(0)),
+                    ArtistSortField::Albums => album_counts
+                        .get(ka)
+                        .copied()
+                        .unwrap_or(0)
+                        .cmp(&album_counts.get(kb).copied().unwrap_or(0)),
+                };
+                let ord = match c.direction {
+                    SortDirection::Asc => ord,
+                    SortDirection::Desc => ord.reverse(),
+                };
+                if ord != std::cmp::Ordering::Equal {
+                    return ord;
+                }
+            }
+            ka.cmp(kb)
+        });
+        keyed.into_iter().map(|(_, entry)| entry).collect()
     });
 
     // Restore the grid's scroll position once, after the artist list first
@@ -384,10 +312,11 @@ pub fn Artist(
             return None;
         }
         let norm = normalize_artist_key(&artist);
-        let (overrides, photos) = artist_images_res.read().clone().unwrap_or_default();
+        let images = artist_images_res.read().clone().unwrap_or_default();
         let fetched = fetched_artist_images.read();
         let conf = config.read();
-        let use_photo = conf.artist_photo_source == ArtistPhotoSource::ArtistPhoto;
+        // Own album only — the album-artist match keeps a shared collab
+        // track's cover off the header, same as the grid.
         let album_cover = albums_res
             .read()
             .clone()
@@ -395,15 +324,15 @@ pub fn Artist(
             .iter()
             .find(|a| a.artist.to_lowercase() == artist.to_lowercase())
             .and_then(|a| a.cover_path.clone());
-        ::server::cover::artist(
-            &conf,
-            overrides.get(&norm).map(|p| p.as_path()),
-            photos.get(&norm),
-            fetched.get(artist.as_str()).map(|u| u.as_str()),
+        let art = ::server::cover::ArtistArt::from_caches(
+            &images,
+            &fetched,
+            &norm,
+            &artist,
             album_cover.as_deref(),
-            use_photo,
-            512,
-        )
+            caps().artist_view,
+        );
+        ::server::cover::artist(&conf, art, 512)
     });
 
     let artist_albums = use_memo(move || {
@@ -431,15 +360,17 @@ pub fn Artist(
             .filter(|a| !offline || downloaded_ids.contains(&a.id))
             .cloned()
             .collect();
-        albums.sort_by(|a, b| {
-            a.title
-                .trim()
-                .to_lowercase()
-                .cmp(&b.title.trim().to_lowercase())
-        });
+        reader::sort::sort_albums(&mut albums, &album_sort.read());
         let mut seen = HashSet::new();
         albums.retain(|album| seen.insert(album.title.trim().to_lowercase()));
         albums
+    });
+
+    // Every album here shares the artist, so that field would never break a tie.
+    let album_sort_fields = use_memo(move || {
+        let mut fields = reader::sort::available_album_fields(&artist_albums.read());
+        fields.retain(|f| *f != AlbumSortField::Artist);
+        fields
     });
 
     let name = artist_name.read().clone();
@@ -464,22 +395,36 @@ pub fn Artist(
                     if !cfg!(target_os = "android") {
                         h1 { class: "text-3xl font-bold text-white mb-6 shrink-0", "{i18n::t(\"artists\")}" }
                     }
+                    div { class: "flex items-center justify-end gap-2 mb-4 shrink-0",
+                        ViewModeToggle { mode: artists_view_mode }
+                        SortControl {
+                            criteria: artist_sort,
+                            available: vec![
+                                ArtistSortField::Name,
+                                ArtistSortField::Tracks,
+                                ArtistSortField::Albums,
+                            ],
+                        }
+                    }
                     div {
                         id: "artist-grid-scroll",
                         class: "flex-1 min-h-0 overflow-y-auto pb-20",
                         onscroll: move |e| crate::scroll_persist::save("artists", e.scroll_top()),
-                        div { class: "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-8",
+                        div {
+                            // Same trick as the album grids: cards are static, only this
+                            // class flips, `.view-list` CSS restyles the `.vcard*` hooks.
+                            class: if *artists_view_mode.read() == AlbumViewMode::List { "view-list" } else { "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-8" },
                             for (artist , cover_url) in artists() {
                                 {
                                     let art = artist.clone();
                                     rsx! {
                                         div {
                                             key: "{artist}",
-                                            class: "group cursor-pointer flex flex-col items-center",
-                                            style: "content-visibility: auto; contain-intrinsic-size: 0 180px;",
+                                            class: "vcard group cursor-pointer flex flex-col items-center",
+                                            style: "content-visibility: auto;",
                                             onclick: move |_| artist_name.set(art.clone()),
                                             div {
-                                                class: "aspect-square w-full rounded-full bg-stone-800 mb-4 overflow-hidden relative transition-all",
+                                                class: "vcard-avatar aspect-square w-full rounded-full bg-stone-800 mb-4 overflow-hidden relative",
                                                 style: "-webkit-user-drag: none;",
                                                 ondragstart: move |evt| evt.prevent_default(),
                                                 if let Some(url) = cover_url {
@@ -497,7 +442,7 @@ pub fn Artist(
                                                     }
                                                 }
                                             }
-                                            h3 { class: "text-white font-medium truncate text-center w-full group-hover:text-indigo-400 transition-colors", "{artist}" }
+                                            h3 { class: "vcard-meta text-white font-medium truncate text-center w-full group-hover:text-indigo-400 transition-colors", "{artist}" }
                                         }
                                     }
                                 }
@@ -715,18 +660,26 @@ pub fn Artist(
                                 }
                             }
 
-                            SortOrderToggle { sort_order }
+                            div { class: "flex items-center justify-between mb-4",
+                                SortOrderToggle { sort_order }
+                                div { class: "flex items-center gap-2",
+                                    ViewModeToggle { mode: album_view_mode }
+                                    SortControl { criteria: album_sort, available: album_sort_fields() }
+                                }
+                            }
 
                             if artist_albums().is_empty() {
                                 p { class: "text-slate-500", "{i18n::t(\"no_albums_found\")}" }
                             } else {
-                                div { class: "grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-6",
+                                div {
+                                    class: if *album_view_mode.read() == AlbumViewMode::List { "view-list" } else { "grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-6" },
                                     for album in artist_albums() {
                                         {
                                             let cap = caps();
                                             let id_for_menu = album.id.clone();
                                             let id_for_navigate = album.id.clone();
                                             let is_open = open_album_menu.read().as_deref() == Some(&album.id);
+                                            // Same size in both modes so toggling never refetches covers.
                                             let cover_url = ::server::cover::from_path(&config.read(), album.cover_path.as_deref(), 320);
                                             // Whether every track of this album is downloaded (servers only).
                                             let downloaded = cap.downloads && {
@@ -762,8 +715,8 @@ pub fn Artist(
                                             rsx! {
                                                 div {
                                                     key: "{album.id}",
-                                                    class: "group relative p-4 bg-white/5 rounded-xl hover:bg-white/10 transition-colors",
-                                                    style: "content-visibility: auto; contain-intrinsic-size: 0 230px;",
+                                                    class: "vcard group relative p-4 bg-white/5 rounded-xl hover:bg-white/10 transition-colors",
+                                                    style: "content-visibility: auto;",
                                                     onclick: move |_| on_navigate.call(id_for_navigate.clone()),
                                                     oncontextmenu: {
                                                         let id = id_for_menu.clone();
@@ -772,9 +725,10 @@ pub fn Artist(
                                                             open_album_menu.set(Some(id.clone()));
                                                         }
                                                     },
-                                                    div { class: "cursor-pointer",
+                                                    div {
+                                                        class: "vcard-click cursor-pointer",
                                                         div {
-                                                            class: "aspect-square rounded-lg bg-stone-800 mb-3 overflow-hidden relative",
+                                                            class: "vcard-cover aspect-square rounded-lg bg-stone-800 mb-3 overflow-hidden relative",
                                                             style: "-webkit-user-drag: none;",
                                                             ondragstart: move |evt| evt.prevent_default(),
                                                             if let Some(url) = &cover_url {
@@ -792,11 +746,14 @@ pub fn Artist(
                                                                 }
                                                             }
                                                         }
-                                                        h3 { class: "text-white font-medium truncate", "{album.title}" }
-                                                        p { class: "text-sm text-stone-400 truncate", "{album.artist}" }
+                                                        div {
+                                                            class: "vcard-meta",
+                                                            h3 { class: "text-white font-medium truncate", "{album.title}" }
+                                                            p { class: "text-sm text-stone-400 truncate", "{album.artist}" }
+                                                        }
                                                     }
 
-                                                    div { class: "absolute bottom-3 right-3",
+                                                    div { class: "vcard-menu absolute bottom-3 right-3",
                                                         DotsMenu {
                                                             actions: menu_actions,
                                                             is_open,

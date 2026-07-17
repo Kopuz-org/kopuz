@@ -9,3 +9,87 @@
 @source "./crates/utils/**/*.rs";
 @source "./crates/config/**/*.rs";
 @source "./crates/kopuz_route/**/*.rs";
+/* Invisible range inputs overlaid on custom seek/volume tracks. The native
+   thumb (~17px) makes the browser inset its click-to-value mapping by half a
+   thumb on each side, so clicks land offset from the cursor. A zero-width
+   thumb makes the mapping match the pointer exactly. */
+.slider-hit {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+}
+.slider-hit::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 0;
+  height: 0;
+  border: none;
+}
+.slider-hit::-moz-range-thumb {
+  width: 0;
+  height: 0;
+  border: none;
+}
+
+/* Grid ⇄ list album/artist view. Cards carry identical markup and classes in
+   both modes; only the container class flips (grid utilities ⇄ .view-list), so
+   toggling patches a single DOM node and never re-fetches or re-lays-out card
+   internals per-card. These rules restyle the grid card into a compact row. */
+.vcard {
+  contain-intrinsic-size: 0 230px;
+}
+.view-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.view-list > .vcard {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.05);
+  /* Cards carry `content-visibility: auto` inline for the grid, but WebKit then
+     reveals list rows only as they're scrolled after a mode switch. Rows are
+     cheap — force-render them all; !important is needed to beat the inline
+     style without making card attributes mode-dependent again. */
+  content-visibility: visible !important;
+  contain: none !important;
+}
+.view-list > .vcard:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+.view-list .vcard-click {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex: 1 1 0%;
+  min-width: 0;
+}
+.view-list .vcard-cover,
+.view-list .vcard-avatar {
+  width: 3rem;
+  height: 3rem;
+  aspect-ratio: auto;
+  margin-bottom: 0;
+  flex-shrink: 0;
+}
+.view-list .vcard-cover {
+  border-radius: 0.375rem;
+}
+.view-list .vcard-cover i,
+.view-list .vcard-avatar i {
+  font-size: 1.125rem;
+}
+.view-list .vcard-meta {
+  flex: 1 1 0%;
+  min-width: 0;
+  text-align: left;
+}
+.view-list .vcard-menu {
+  position: static;
+  margin-left: auto;
+  flex-shrink: 0;
+}

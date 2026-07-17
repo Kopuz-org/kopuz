@@ -113,12 +113,9 @@ fn main() {
         let _ = app_db::DB_HANDLE.set(app_db::init_blocking());
 
         let presence: Option<Arc<Presence>> = match Presence::new("1470087339639443658") {
-            Ok(p) => {
-                tracing::info!("Discord presence connected");
-                Some(Arc::new(p))
-            }
+            Ok(p) => Some(Arc::new(p)),
             Err(e) => {
-                tracing::warn!("Failed to connect to Discord: {e}");
+                tracing::warn!("Discord presence unavailable: {e}");
                 None
             }
         };
@@ -429,7 +426,7 @@ fn App() -> Element {
     let mut last_scan_key = use_signal(|| None::<String>);
     let mut scan_current_file = use_signal(|| Option::<String>::None);
     let current_playing = use_signal(|| 0);
-    let mut player = use_signal(Player::new);
+    let player = use_signal(Player::new);
     let current_song_cover_url = use_signal(String::new);
     let current_song_title = use_signal(String::new);
     let current_song_artist = use_signal(String::new);
@@ -658,8 +655,8 @@ fn App() -> Element {
     // search at render time.
     let mut selected_artist_channel_id = use_signal(|| None::<String>);
     let mut selected_artist_name = use_signal(String::new);
-    let fetched_artist_images: Signal<std::collections::HashMap<String, String>> =
-        use_signal(std::collections::HashMap::new);
+    let fetched_artist_images: Signal<::server::cover::FetchedArtistImages> =
+        use_signal(Default::default);
     let mut search_query = use_signal(String::new);
     let mut last_server_playlist_key = use_signal(|| None::<String>);
     let mut server_playlist_key_initialized = use_signal(|| false);
@@ -685,6 +682,7 @@ fn App() -> Element {
         current_track_snapshot,
         volume,
         config,
+        config_loaded_ok,
         db.clone(),
     );
 
@@ -1063,9 +1061,13 @@ fn App() -> Element {
                     configured_music_dirs.set(loaded.music_directory.clone());
                     volume.set(loaded.volume);
                     persisted_volume.set(loaded.volume);
-                    player.write().set_volume(loaded.volume);
-                    player.write().set_channel_mode(loaded.channel_mode);
-                    player.write().set_equalizer(loaded.equalizer.clone());
+                    player.peek().set_volume(loaded.volume);
+                    player.peek().set_channel_mode(loaded.channel_mode);
+                    player.peek().set_equalizer(loaded.equalizer.clone());
+                    player
+                        .peek()
+                        .set_device_change_behavior(loaded.device_change_behavior);
+                    player.peek().set_sample_rate_mode(loaded.sample_rate_mode);
                     i18n::set_locale(&loaded.language);
                 }
 
