@@ -772,13 +772,25 @@ impl PlayerController {
             self.cancel_load_task();
             self.clear_pending_crossfade_ui();
             self.player.peek().stop_for_transition();
-            self.set_intent(PlaybackIntent::Stopped);
+            let token = self.allocate_token();
+            self.set_intent(PlaybackIntent::Committed { token });
             self.external_active.set(true);
             self.spotify_progress_anchor
                 .set(Some((0, std::time::Instant::now())));
             self.hydrate_current_track_metadata(idx, 0);
             self.is_playing.set(true);
             self.spotify_play(&id);
+            scrobble_scheduler::schedule(
+                track.clone(),
+                Some(id.clone()),
+                self.config,
+                self.current_token,
+                token,
+                self.is_playing,
+                Some(self.active_source),
+                ScrobbleOptions::REMOTE_NATIVE,
+                self.db.peek().clone(),
+            );
             return;
         }
 
