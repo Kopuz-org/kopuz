@@ -599,12 +599,17 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
       ensureMediaMetadata(cur);
     }
 
+    let lastCur = null, lastMetaTitle = null;
     function ensureMediaMetadata(cur) {
+      if (cur) lastCur = cur;
+      cur = cur || lastCur;
       if (!cur || !("mediaSession" in navigator) || typeof MediaMetadata === "undefined") return;
       const ms = navigator.mediaSession;
       const title = cur.name || "";
-      if (ms.metadata && ms.metadata.title === title) return;
-      logLine("media session metadata -> " + title);
+      if (title !== lastMetaTitle) {
+        lastMetaTitle = title;
+        logLine("media session metadata -> " + title);
+      }
       try {
         ms.metadata = new MediaMetadata({
           title,
@@ -732,7 +737,7 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
         if (!player) return;
         let st = null;
         try { st = await player.getCurrentState(); } catch (e) {}
-        if (!st) { return; }
+        if (!st) { ensureMediaMetadata(null); return; }
         const pos = st.position || 0, dur = st.duration || 0;
         if (!st.paused) {
           if (pos === lastPos && Date.now() - lastPosAt > 3500 && dur > 0 && pos < dur - 2000) {
