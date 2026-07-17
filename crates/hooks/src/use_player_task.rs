@@ -274,6 +274,8 @@ pub fn use_player_task(ctrl: PlayerController) {
                 match server::spotify::api::player_state(&access).await {
                     Ok(Some(st)) => {
                         ctrl.is_playing.set(st.is_playing);
+                        ctrl.spotify_progress_anchor
+                            .set(Some((st.progress_ms, std::time::Instant::now())));
                         ctrl.current_song_progress.set(st.progress_ms / 1000);
                         if st.duration_ms > 0 {
                             ctrl.current_song_duration.set(st.duration_ms / 1000);
@@ -375,6 +377,8 @@ pub fn use_player_task(ctrl: PlayerController) {
                                 ctrl.play_next();
                             } else {
                                 ctrl.is_playing.set(!paused);
+                                ctrl.spotify_progress_anchor
+                                    .set(Some((position_ms, std::time::Instant::now())));
                                 ctrl.current_song_progress.set(position_ms / 1000);
                                 if duration_ms > 0 {
                                     ctrl.current_song_duration.set(duration_ms / 1000);

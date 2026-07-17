@@ -136,6 +136,10 @@ pub struct PlayerController {
     /// device (`None`). While set, transport goes through the Web API and a
     /// poll loop owns progress/auto-advance.
     pub spotify_device_override: Signal<Option<String>>,
+    /// Millisecond-precision progress anchor for external playback: the last
+    /// reported position and when it arrived. Reads interpolate elapsed time on
+    /// top, so second-granular state ticks don't lag the lyric clock.
+    pub(crate) spotify_progress_anchor: Signal<Option<(u64, std::time::Instant)>>,
     /// Whether the current track is playing through the Spotify host rather than
     /// the engine — transport methods and the progress pump branch on this.
     pub(crate) external_active: Signal<bool>,
@@ -607,6 +611,8 @@ impl PlayerController {
             } else if let Some(host) = self.spotify_host.peek().clone() {
                 host.seek(time.as_millis() as u64);
             }
+            self.spotify_progress_anchor
+                .set(Some((time.as_millis() as u64, std::time::Instant::now())));
             self.current_song_progress.set(time.as_secs());
             return;
         }
@@ -623,6 +629,17 @@ impl PlayerController {
 
     pub fn displayed_progress_secs_f64(&self) -> f64 {
         if *self.external_active.peek() {
+            if let Some((ms, at)) = *self.spotify_progress_anchor.peek() {
+                let mut pos = ms as f64 / 1000.0;
+                if *self.is_playing.peek() {
+                    pos += at.elapsed().as_secs_f64();
+                }
+                let dur = *self.current_song_duration.peek();
+                if dur > 0 {
+                    pos = pos.min(dur as f64);
+                }
+                return pos;
+            }
             return *self.current_song_progress.peek() as f64;
         }
         // Mid-crossfade the bar shows the outgoing (fading) track's live position.
@@ -736,6 +753,8 @@ impl PlayerController {
             self.player.peek().stop_for_transition();
             self.set_intent(PlaybackIntent::Stopped);
             self.external_active.set(true);
+            self.spotify_progress_anchor
+                .set(Some((0, std::time::Instant::now())));
             self.hydrate_current_track_metadata(idx, 0);
             self.is_playing.set(true);
             self.spotify_play(&id);
@@ -1143,6 +1162,7 @@ pub fn use_player_controller(
     let spotify_pending_uri = use_signal(|| None::<String>);
     let spotify_activated = use_signal(|| false);
     let spotify_device_override = use_signal(|| None::<String>);
+    let spotify_progress_anchor = use_signal(|| None::<(u64, std::time::Instant)>);
     let external_active = use_signal(|| false);
     let db = use_signal(move || db_handle);
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
@@ -1218,6 +1238,7 @@ pub fn use_player_controller(
         spotify_pending_uri,
         spotify_activated,
         spotify_device_override,
+        spotify_progress_anchor,
         external_active,
     }
 }
