@@ -485,3 +485,5 @@ view_grid = 网格视图
 view_list = 列表视图
 spotify_browser = Spotify 播放浏览器
 spotify_browser_auto = 自动
+spotify_play_on = 播放设备
+spotify_this_app = kopuz（此应用）

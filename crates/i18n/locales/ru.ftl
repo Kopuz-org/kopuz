@@ -486,3 +486,5 @@ view_grid = Вид сеткой
 view_list = Вид списком
 spotify_browser = Браузер воспроизведения Spotify
 spotify_browser_auto = Автоматически
+spotify_play_on = Воспроизвести на
+spotify_this_app = kopuz (это приложение)

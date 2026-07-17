@@ -326,6 +326,7 @@ pub fn BottombarNormal(
                     onclick: move |_| { let c = *is_rightbar_open.read(); is_rightbar_open.set(!c); },
                     i { class: "fa-solid fa-list text-xs" }
                 }
+                crate::spotify_devices::SpotifyDevicesButton {}
                 button {
                     class: "text-slate-400 hover:text-white",
                     title: i18n::t("share_musicbrainz").to_string(),

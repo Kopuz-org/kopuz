@@ -485,3 +485,5 @@ view_grid = Rasteransicht
 view_list = Listenansicht
 spotify_browser = Spotify-Wiedergabe-Browser
 spotify_browser_auto = Automatisch
+spotify_play_on = Abspielen auf
+spotify_this_app = kopuz (diese App)

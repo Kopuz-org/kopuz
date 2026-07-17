@@ -338,6 +338,7 @@ pub fn BottombarVaxry(
                     onclick: move |_| { let c = *is_rightbar_open.read(); is_rightbar_open.set(!c); },
                     i { class: "fa-solid fa-list text-[10px]" }
                 }
+                crate::spotify_devices::SpotifyDevicesButton { compact: true }
                 button {
                     class: "w-7 h-7 flex items-center justify-center text-slate-500 hover:text-white transition-colors",
                     title: i18n::t("share_musicbrainz").to_string(),

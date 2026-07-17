@@ -54,9 +54,7 @@ impl PlayerController {
                     self.clear_pending_crossfade_ui();
                     self.set_intent(PlaybackIntent::Stopped);
                     if *self.external_active.peek() {
-                        if let Some(host) = self.spotify_host.peek().clone() {
-                            host.pause();
-                        }
+                        self.spotify_transport_pause();
                     } else {
                         self.player.peek().pause();
                     }
@@ -304,8 +302,8 @@ impl PlayerController {
         // stream open, etc.) so its eventual completion doesn't start playback
         // against the cleared queue or post a stale error banner.
         self.cancel_load_task();
-        if let Some(host) = self.spotify_host.peek().clone() {
-            host.pause();
+        if *self.external_active.peek() {
+            self.spotify_transport_pause();
         }
         self.external_active.set(false);
         self.set_intent(PlaybackIntent::Stopped);
@@ -321,9 +319,7 @@ impl PlayerController {
 
     pub fn pause(&mut self) {
         if *self.external_active.peek() {
-            if let Some(host) = self.spotify_host.peek().clone() {
-                host.pause();
-            }
+            self.spotify_transport_pause();
             self.is_playing.set(false);
             return;
         }
@@ -356,9 +352,7 @@ impl PlayerController {
 
     pub fn resume(&mut self) {
         if *self.external_active.peek() {
-            if let Some(host) = self.spotify_host.peek().clone() {
-                host.resume();
-            }
+            self.spotify_transport_resume();
             self.is_playing.set(true);
             return;
         }

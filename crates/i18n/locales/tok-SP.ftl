@@ -486,3 +486,5 @@ view_grid = lukin leko
 view_list = lukin linja
 spotify_browser = Spotify playback browser
 spotify_browser_auto = Automatic
+spotify_play_on = Play on
+spotify_this_app = kopuz (this app)

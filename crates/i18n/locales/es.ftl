@@ -486,3 +486,5 @@ view_grid = Vista de cuadrícula
 view_list = Vista de lista
 spotify_browser = Navegador de reproducción de Spotify
 spotify_browser_auto = Automático
+spotify_play_on = Reproducir en
+spotify_this_app = kopuz (esta aplicación)

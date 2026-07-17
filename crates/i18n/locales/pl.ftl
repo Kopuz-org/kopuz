@@ -485,3 +485,5 @@ view_grid = Widok siatki
 view_list = Widok listy
 spotify_browser = Przeglądarka odtwarzania Spotify
 spotify_browser_auto = Automatycznie
+spotify_play_on = Odtwarzaj na
+spotify_this_app = kopuz (ta aplikacja)

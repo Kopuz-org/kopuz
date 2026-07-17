@@ -491,3 +491,5 @@ view_grid = عرض شبكي
 view_list = عرض قائمة
 spotify_browser = Spotify playback browser
 spotify_browser_auto = Automatic
+spotify_play_on = Play on
+spotify_this_app = kopuz (this app)

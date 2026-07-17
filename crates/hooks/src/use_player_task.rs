@@ -238,10 +238,66 @@ pub fn use_player_task(ctrl: PlayerController) {
 
     use_effect(move || {
         let vol = *ctrl.volume.read();
-        if *ctrl.external_active.read()
-            && let Some(host) = ctrl.spotify_host.read().clone()
-        {
+        if !*ctrl.external_active.read() {
+            return;
+        }
+        if ctrl.spotify_device_override.read().is_some() {
+            if let Some(access) = ctrl.spotify_access() {
+                let percent = (vol.clamp(0.0, 1.0) * 100.0).round() as u8;
+                spawn(async move {
+                    let _ = server::spotify::api::player_volume(&access, percent).await;
+                });
+            }
+        } else if let Some(host) = ctrl.spotify_host.read().clone() {
             host.set_volume(vol);
+        }
+    });
+
+    use_future(move || {
+        let mut ctrl = ctrl;
+        async move {
+            let mut prev_playing = false;
+            let mut prev_progress: u64 = 0;
+            let mut prev_duration: u64 = 0;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                if !*ctrl.external_active.peek() || ctrl.spotify_device_override.peek().is_none() {
+                    prev_playing = false;
+                    prev_progress = 0;
+                    continue;
+                }
+                let Some(access) = ctrl.spotify_access() else {
+                    continue;
+                };
+                let ended_before =
+                    prev_playing && prev_duration > 0 && prev_progress + 5000 >= prev_duration;
+                match server::spotify::api::player_state(&access).await {
+                    Ok(Some(st)) => {
+                        ctrl.is_playing.set(st.is_playing);
+                        ctrl.current_song_progress.set(st.progress_ms / 1000);
+                        if st.duration_ms > 0 {
+                            ctrl.current_song_duration.set(st.duration_ms / 1000);
+                        }
+                        if !st.is_playing && ended_before {
+                            prev_playing = false;
+                            prev_progress = 0;
+                            ctrl.play_next();
+                            continue;
+                        }
+                        prev_playing = st.is_playing;
+                        prev_progress = st.progress_ms;
+                        prev_duration = st.duration_ms;
+                    }
+                    Ok(None) => {
+                        if ended_before {
+                            ctrl.play_next();
+                        }
+                        prev_playing = false;
+                        prev_progress = 0;
+                    }
+                    Err(_) => {}
+                }
+            }
         }
     });
 
@@ -312,7 +368,9 @@ pub fn use_player_task(ctrl: PlayerController) {
                         ended,
                         ..
                     } => {
-                        if *ctrl.external_active.peek() {
+                        if *ctrl.external_active.peek()
+                            && ctrl.spotify_device_override.peek().is_none()
+                        {
                             if ended {
                                 ctrl.play_next();
                             } else {

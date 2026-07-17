@@ -486,3 +486,5 @@ view_grid = Vue grille
 view_list = Vue liste
 spotify_browser = Navigateur de lecture Spotify
 spotify_browser_auto = Automatique
+spotify_play_on = Lire sur
+spotify_this_app = kopuz (cette application)

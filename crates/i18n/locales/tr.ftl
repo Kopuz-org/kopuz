@@ -485,3 +485,5 @@ view_grid = Izgara görünümü
 view_list = Liste görünümü
 spotify_browser = Spotify oynatma tarayıcısı
 spotify_browser_auto = Otomatik
+spotify_play_on = Şurada çal
+spotify_this_app = kopuz (bu uygulama)

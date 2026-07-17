@@ -507,6 +507,107 @@ pub async fn set_saved(access: &str, track_id: &str, on: bool) -> Result<(), Str
     }
 }
 
+/// A Spotify Connect device from `/me/player/devices`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectDevice {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+    pub is_active: bool,
+}
+
+/// The account's currently available Connect devices.
+pub async fn devices(access: &str) -> Result<Vec<ConnectDevice>, String> {
+    let body = get_json(access, &format!("{API}/me/player/devices"), &[], "devices").await?;
+    Ok(body["devices"]
+        .as_array()
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|d| {
+                    Some(ConnectDevice {
+                        id: d["id"].as_str().filter(|s| !s.is_empty())?.to_string(),
+                        name: d["name"].as_str().unwrap_or_default().to_string(),
+                        kind: d["type"].as_str().unwrap_or_default().to_string(),
+                        is_active: d["is_active"].as_bool().unwrap_or(false),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+/// Move the live playback session to another Connect device.
+pub async fn transfer_playback(access: &str, device_id: &str, play: bool) -> Result<(), String> {
+    let resp = client()
+        .put(format!("{API}/me/player"))
+        .bearer_auth(access)
+        .json(&serde_json::json!({ "device_ids": [device_id], "play": play }))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    ok_json(resp, "transfer playback").await.map(|_| ())
+}
+
+async fn player_put(access: &str, path: &str, query: &[(&str, String)]) -> Result<(), String> {
+    let resp = client()
+        .put(format!("{API}/me/player/{path}"))
+        .query(query)
+        .header(reqwest::header::CONTENT_LENGTH, 0)
+        .bearer_auth(access)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    ok_json(resp, path).await.map(|_| ())
+}
+
+/// Web-API transport for playback on a foreign Connect device (the in-app SDK
+/// device is driven over the host WebSocket instead).
+pub async fn player_pause(access: &str) -> Result<(), String> {
+    player_put(access, "pause", &[]).await
+}
+
+pub async fn player_resume(access: &str) -> Result<(), String> {
+    player_put(access, "play", &[]).await
+}
+
+pub async fn player_seek(access: &str, position_ms: u64) -> Result<(), String> {
+    player_put(access, "seek", &[("position_ms", position_ms.to_string())]).await
+}
+
+pub async fn player_volume(access: &str, percent: u8) -> Result<(), String> {
+    player_put(
+        access,
+        "volume",
+        &[("volume_percent", percent.min(100).to_string())],
+    )
+    .await
+}
+
+/// A playback-state snapshot for polling a foreign Connect device; `None`
+/// when nothing is playing anywhere on the account.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayerState {
+    pub is_playing: bool,
+    pub progress_ms: u64,
+    pub duration_ms: u64,
+    pub track_id: Option<String>,
+    pub device_id: Option<String>,
+}
+
+pub async fn player_state(access: &str) -> Result<Option<PlayerState>, String> {
+    let body = get_json(access, &format!("{API}/me/player"), &[], "player state").await?;
+    if body.is_null() {
+        return Ok(None);
+    }
+    Ok(Some(PlayerState {
+        is_playing: body["is_playing"].as_bool().unwrap_or(false),
+        progress_ms: body["progress_ms"].as_u64().unwrap_or(0),
+        duration_ms: body["item"]["duration_ms"].as_u64().unwrap_or(0),
+        track_id: body["item"]["id"].as_str().map(str::to_string),
+        device_id: body["device"]["id"].as_str().map(str::to_string),
+    }))
+}
+
 /// Metadata for a Spotify playlist.
 pub struct PlaylistSummary {
     pub id: String,

@@ -479,3 +479,5 @@ view_grid = Chế độ lưới
 view_list = Chế độ danh sách
 spotify_browser = Spotify playback browser
 spotify_browser_auto = Automatic
+spotify_play_on = Play on
+spotify_this_app = kopuz (this app)

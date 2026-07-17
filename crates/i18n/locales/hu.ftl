@@ -485,3 +485,5 @@ view_grid = Rácsnézet
 view_list = Listanézet
 spotify_browser = Spotify playback browser
 spotify_browser_auto = Automatic
+spotify_play_on = Play on
+spotify_this_app = kopuz (this app)

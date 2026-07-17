@@ -485,3 +485,5 @@ view_grid = 격자 보기
 view_list = 목록 보기
 spotify_browser = Spotify 재생 브라우저
 spotify_browser_auto = 자동
+spotify_play_on = 재생 위치
+spotify_this_app = kopuz (이 앱)

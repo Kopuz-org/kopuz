@@ -491,3 +491,5 @@ view_grid = グリッド表示
 view_list = リスト表示
 spotify_browser = Spotify再生ブラウザ
 spotify_browser_auto = 自動
+spotify_play_on = 再生デバイス
+spotify_this_app = kopuz（このアプリ）
