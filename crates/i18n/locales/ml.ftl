@@ -411,7 +411,7 @@ remove_cover = കവർ നീക്കം ചെയ്യുക
 # Radio Page
 radio_filter_stations = സ്റ്റേഷനുകൾ ഫിൽട്ടർ ചെയ്യുക…
 radio_search_stations = സ്റ്റേഷനുകൾ തിരയുക…
-radio_your_stations = നിങ്ങളുടെ സ്റ്റേഷനുകൾ
+radio_selected = തിരഞ്ഞെടുത്തവ
 radio_top_stations = ജനപ്രിയ സ്റ്റേഷനുകൾ
 radio_search_results = തിരയൽ ഫലങ്ങൾ
 radio_powered_by = radio-browser.info പിന്തുണയോടെ

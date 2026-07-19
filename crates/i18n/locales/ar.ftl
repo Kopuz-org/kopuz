@@ -408,7 +408,7 @@ remove_cover = إزالة الغلاف
 # Radio Page
 radio_filter_stations = تصفية المحطات…
 radio_search_stations = البحث عن المحطات…
-radio_your_stations = محطاتك
+radio_selected = المختارة
 radio_top_stations = المحطات الشائعة
 radio_search_results = نتائج البحث
 radio_powered_by = مدعوم من radio-browser.info

@@ -402,7 +402,7 @@ remove_cover = Видалити обкладинку
 # Radio Page
 radio_filter_stations = Фільтр станцій…
 radio_search_stations = Пошук станцій…
-radio_your_stations = Ваші станції
+radio_selected = Вибрані
 radio_top_stations = Популярні станції
 radio_search_results = Результати пошуку
 radio_powered_by = На основі radio-browser.info

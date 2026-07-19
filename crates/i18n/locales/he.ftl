@@ -402,7 +402,7 @@ remove_cover = הסר עטיפה
 # Radio Page
 radio_filter_stations = סנן תחנות…
 radio_search_stations = חפש תחנות…
-radio_your_stations = התחנות שלך
+radio_selected = נבחרות
 radio_top_stations = תחנות פופולריות
 radio_search_results = תוצאות חיפוש
 radio_powered_by = מופעל על ידי radio-browser.info

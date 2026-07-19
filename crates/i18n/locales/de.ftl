@@ -402,7 +402,7 @@ remove_cover = Cover entfernen
 # Radio Page
 radio_filter_stations = Sender filtern…
 radio_search_stations = Sender suchen…
-radio_your_stations = Deine Sender
+radio_selected = Ausgewählt
 radio_top_stations = Beliebte Sender
 radio_search_results = Suchergebnisse
 radio_powered_by = Bereitgestellt von radio-browser.info

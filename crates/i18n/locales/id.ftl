@@ -411,7 +411,7 @@ remove_cover = Hapus sampul
 # Radio Page
 radio_filter_stations = Filter stasiun…
 radio_search_stations = Cari stasiun…
-radio_your_stations = Stasiun Anda
+radio_selected = Pilihan
 radio_top_stations = Stasiun populer
 radio_search_results = Hasil pencarian
 radio_powered_by = Didukung oleh radio-browser.info

@@ -36,9 +36,10 @@ pub fn Radio(props: RadioProps) -> Element {
 
     let registry_sig = use_context::<Signal<radio::registry::StationRegistry>>();
     // can panic, will check again later.
+    // Curated registries only; runtime radio-browser inserts excluded.
     let stations: Vec<radio::manifest::StationManifest> = registry_sig
         .read()
-        .all_stations()
+        .registry_stations()
         .into_iter()
         .cloned()
         .collect();
@@ -189,7 +190,7 @@ pub fn Radio(props: RadioProps) -> Element {
                 h2 {
                     class: if is_vaxry { "text-[10px] font-bold mb-2" } else { "text-sm font-bold mb-3 uppercase tracking-wider" },
                     style: if is_vaxry { "color: rgba(255,255,255,0.35);" } else { "color: var(--color-slate-400);" },
-                    "{i18n::t(\"radio_your_stations\")}"
+                    "{i18n::t(\"radio_selected\")}"
                 }
             }
 

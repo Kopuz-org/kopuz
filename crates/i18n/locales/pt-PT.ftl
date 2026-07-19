@@ -401,7 +401,7 @@ remove_cover = Remover capa
 # Radio Page
 radio_filter_stations = Filtrar estações…
 radio_search_stations = Procurar estações…
-radio_your_stations = As suas estações
+radio_selected = Seleção
 radio_top_stations = Estações populares
 radio_search_results = Resultados da pesquisa
 radio_powered_by = Com tecnologia de radio-browser.info

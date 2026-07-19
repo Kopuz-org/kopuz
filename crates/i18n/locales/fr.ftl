@@ -403,7 +403,7 @@ remove_cover = Retirer la pochette
 # Radio Page
 radio_filter_stations = Filtrer les stations…
 radio_search_stations = Rechercher des stations…
-radio_your_stations = Vos stations
+radio_selected = Sélection
 radio_top_stations = Stations populaires
 radio_search_results = Résultats de recherche
 radio_powered_by = Propulsé par radio-browser.info

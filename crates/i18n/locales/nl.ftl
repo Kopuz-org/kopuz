@@ -411,7 +411,7 @@ remove_cover = Hoes verwijderen
 # Radio Page
 radio_filter_stations = Stations filteren…
 radio_search_stations = Zenders zoeken…
-radio_your_stations = Uw zenders
+radio_selected = Geselecteerd
 radio_top_stations = Populaire zenders
 radio_search_results = Zoekresultaten
 radio_powered_by = Mogelijk gemaakt door radio-browser.info

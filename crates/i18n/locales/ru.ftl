@@ -403,7 +403,7 @@ remove_cover = Удалить обложку
 # Radio Page
 radio_filter_stations = Фильтр станций…
 radio_search_stations = Поиск станций…
-radio_your_stations = Ваши станции
+radio_selected = Подборка
 radio_top_stations = Популярные станции
 radio_search_results = Результаты поиска
 radio_powered_by = На основе radio-browser.info

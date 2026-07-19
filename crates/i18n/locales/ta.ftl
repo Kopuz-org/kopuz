@@ -411,7 +411,7 @@ remove_cover = கவரை அகற்று
 # Radio Page
 radio_filter_stations = நிலையங்களை வடிகட்டு…
 radio_search_stations = நிலையங்களைத் தேடு…
-radio_your_stations = உங்கள் நிலையங்கள்
+radio_selected = தேர்ந்தெடுக்கப்பட்டவை
 radio_top_stations = பிரபலமான நிலையங்கள்
 radio_search_results = தேடல் முடிவுகள்
 radio_powered_by = radio-browser.info மூலம் இயங்குகிறது

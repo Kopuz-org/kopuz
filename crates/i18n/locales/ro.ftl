@@ -402,7 +402,7 @@ remove_cover = Elimină coperta
 # Radio Page
 radio_filter_stations = Filtrează stațiile…
 radio_search_stations = Caută stații…
-radio_your_stations = Stațiile tale
+radio_selected = Selectate
 radio_top_stations = Stații populare
 radio_search_results = Rezultatele căutării
 radio_powered_by = Susținut de radio-browser.info

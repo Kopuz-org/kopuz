@@ -19,6 +19,8 @@ pub struct RegistryStationRef {
 #[derive(Debug, Default)]
 pub struct StationRegistry {
     stations: HashMap<String, StationManifest>,
+    /// Runtime inserts; kept out of the curated listing.
+    runtime_ids: std::collections::HashSet<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -146,9 +148,7 @@ async fn fetch_content(
 
 impl StationRegistry {
     pub fn new() -> Self {
-        Self {
-            stations: HashMap::new(),
-        }
+        Self::default()
     }
 
     pub async fn import_registry(&mut self, url_or_path: &str) -> Result<(), RegistryError> {
@@ -229,11 +229,23 @@ impl StationRegistry {
 
     /// Insert a built manifest; bypassing registry JSON validation.
     pub fn insert_manifest(&mut self, manifest: StationManifest) {
+        self.runtime_ids.insert(manifest.id.clone());
         self.stations.insert(manifest.id.clone(), manifest);
     }
 
     pub fn all_stations(&self) -> Vec<&StationManifest> {
         let mut vec: Vec<_> = self.stations.values().collect();
+        vec.sort_by(|a, b| a.name.cmp(&b.name));
+        vec
+    }
+
+    /// Stations from imported JSON registries, without runtime inserts.
+    pub fn registry_stations(&self) -> Vec<&StationManifest> {
+        let mut vec: Vec<_> = self
+            .stations
+            .values()
+            .filter(|m| !self.runtime_ids.contains(&m.id))
+            .collect();
         vec.sort_by(|a, b| a.name.cmp(&b.name));
         vec
     }
@@ -296,6 +308,25 @@ mod tests {
 
         assert_eq!(registry.stations.len(), 1);
         assert!(registry.get("test_station").is_some());
+    }
+
+    #[test]
+    fn runtime_inserts_stay_out_of_registry_listing() {
+        let manifest_json = r#"{
+            "schema_version": "1.0",
+            "id": "browser-uuid",
+            "name": "Browser Station",
+            "description": "d",
+            "streams": [{ "id": "main", "name": "Live", "url": "https://example.com/s" }]
+        }"#;
+        let manifest: StationManifest = serde_json::from_str(manifest_json).unwrap();
+
+        let mut registry = StationRegistry::new();
+        registry.insert_manifest(manifest);
+
+        assert!(registry.get("browser-uuid").is_some());
+        assert_eq!(registry.all_stations().len(), 1);
+        assert!(registry.registry_stations().is_empty());
     }
 
     #[test]

@@ -402,7 +402,7 @@ remove_cover = Kapağı kaldır
 # Radio Page
 radio_filter_stations = İstasyonları filtrele…
 radio_search_stations = İstasyon ara…
-radio_your_stations = İstasyonların
+radio_selected = Seçilenler
 radio_top_stations = Popüler istasyonlar
 radio_search_results = Arama sonuçları
 radio_powered_by = radio-browser.info tarafından desteklenmektedir

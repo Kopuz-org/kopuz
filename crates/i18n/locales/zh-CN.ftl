@@ -402,7 +402,7 @@ remove_cover = 移除封面
 # Radio Page
 radio_filter_stations = 过滤电台…
 radio_search_stations = 搜索电台…
-radio_your_stations = 你的电台
+radio_selected = 精选
 radio_top_stations = 热门电台
 radio_search_results = 搜索结果
 radio_powered_by = 由 radio-browser.info 提供支持

@@ -402,7 +402,7 @@ remove_cover = Αφαίρεση εξωφύλλου
 # Radio Page
 radio_filter_stations = Φιλτράρισμα σταθμών…
 radio_search_stations = Αναζήτηση σταθμών…
-radio_your_stations = Οι σταθμοί σας
+radio_selected = Επιλεγμένα
 radio_top_stations = Δημοφιλείς σταθμοί
 radio_search_results = Αποτελέσματα αναζήτησης
 radio_powered_by = Με την υποστήριξη του radio-browser.info

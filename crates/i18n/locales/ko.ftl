@@ -402,7 +402,7 @@ remove_cover = 커버 제거
 # Radio Page
 radio_filter_stations = 스테이션 필터링…
 radio_search_stations = 스테이션 검색…
-radio_your_stations = 내 스테이션
+radio_selected = 선택됨
 radio_top_stations = 인기 스테이션
 radio_search_results = 검색 결과
 radio_powered_by = radio-browser.info 제공

@@ -402,7 +402,7 @@ remove_cover = Borító eltávolítása
 # Radio Page
 radio_filter_stations = Állomások szűrése…
 radio_search_stations = Állomások keresése…
-radio_your_stations = Saját állomások
+radio_selected = Kiválasztott
 radio_top_stations = Népszerű állomások
 radio_search_results = Keresési találatok
 radio_powered_by = A radio-browser.info támogatásával

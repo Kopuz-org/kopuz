@@ -411,7 +411,7 @@ remove_cover = Alisin ang cover
 # Radio Page
 radio_filter_stations = Mag-filter ng mga istasyon…
 radio_search_stations = Maghanap ng mga istasyon…
-radio_your_stations = Mga istasyon mo
+radio_selected = Mga pinili
 radio_top_stations = Mga sikat na istasyon
 radio_search_results = Mga resulta ng paghahanap
 radio_powered_by = Pinapagana ng radio-browser.info

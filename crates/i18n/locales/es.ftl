@@ -403,7 +403,7 @@ remove_cover = Eliminar portada
 # Radio Page
 radio_filter_stations = Filtrar estaciones…
 radio_search_stations = Buscar estaciones…
-radio_your_stations = Tus estaciones
+radio_selected = Selección
 radio_top_stations = Estaciones populares
 radio_search_results = Resultados de búsqueda
 radio_powered_by = Con tecnología de radio-browser.info

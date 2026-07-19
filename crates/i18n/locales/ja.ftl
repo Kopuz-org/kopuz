@@ -408,7 +408,7 @@ remove_cover = カバーを削除
 # Radio Page
 radio_filter_stations = ステーションをフィルタリング…
 radio_search_stations = ステーションを検索…
-radio_your_stations = あなたのステーション
+radio_selected = セレクション
 radio_top_stations = 人気のステーション
 radio_search_results = 検索結果
 radio_powered_by = radio-browser.info 提供

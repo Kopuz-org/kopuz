@@ -222,7 +222,7 @@ impl PlayerController {
             tracing::warn!("[radio] no metadata provider for station: {station_id}");
             return;
         };
-        // Station artwork fallback for song updates without a cover.
+        // Station artwork / name fallbacks for song updates without their own.
         let station_cover: Option<String> =
             self.station_registry
                 .read()
@@ -231,6 +231,12 @@ impl PlayerController {
                     Some(radio::manifest::MetadataSourceDef::Static(s)) => s.cover_url.clone(),
                     _ => None,
                 });
+        let station_name: Option<String> = self
+            .station_registry
+            .read()
+            .get(&station_id)
+            .map(|m| m.name.clone())
+            .filter(|n| !n.trim().is_empty());
         let mut current_song_title = self.current_song_title;
         let mut current_song_artist = self.current_song_artist;
         let mut current_song_album = self.current_song_album;
@@ -259,7 +265,8 @@ impl PlayerController {
                     }
                     let (artist, title) = utils::icy::split_artist_title(&meta.title);
                     icy_song_title.set(title);
-                    if let Some(artist) = artist {
+                    // No artist in title: show station.
+                    if let Some(artist) = artist.or_else(|| station_name.clone()) {
                         icy_song_artist.set(artist);
                     }
                     let cover = meta
@@ -638,10 +645,19 @@ impl PlayerController {
             let registry = self.station_registry.read();
             let station = registry.get(&id);
             use_icy = station.is_some_and(|s| !s.has_live_metadata());
+            // Static cover/favicon so artwork shows from the first frame.
+            let cover = station
+                .and_then(|s| match &s.metadata {
+                    Some(radio::manifest::MetadataSourceDef::Static(st)) => {
+                        st.resolve(&stream_id).2.map(str::to_string)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_default();
             station
                 .and_then(|s| s.streams.iter().find(|str| str.id == stream_id))
                 .map(|s| s.url.clone())
-                .map(|stream_url| (stream_url, String::new()))
+                .map(|stream_url| (stream_url, cover))
         } else if is_server_item {
             // Every server source resolves its stream async in the load task, so
             // the ref is a pending marker; only the cover is built now, through

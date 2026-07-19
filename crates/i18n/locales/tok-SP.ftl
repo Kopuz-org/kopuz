@@ -403,7 +403,7 @@ remove_cover = Remove cover
 # Radio Page
 radio_filter_stations = o lukin e ilo kalama…
 radio_search_stations = o alasa e ilo kalama…
-radio_your_stations = ilo kalama sina
+radio_selected = ijo pi wile sina
 radio_top_stations = ilo kalama pi jan mute
 radio_search_results = ijo alasa
 radio_powered_by = ni li tan ilo radio-browser.info
