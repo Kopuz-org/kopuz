@@ -27,6 +27,29 @@ fn play_browser_station(
     ctrl.play_radio(&station_id, browser::BROWSER_STREAM_ID);
 }
 
+/// Pin or unpin a browser station from the Selected list, persisted in config.
+fn toggle_pin_station(
+    config: &mut Signal<config::AppConfig>,
+    registry: &mut Signal<radio::registry::StationRegistry>,
+    station: &BrowserStation,
+) {
+    let manifest = browser::to_manifest(station);
+    let id = manifest.id.clone();
+    if registry.read().is_registry_station(&id) {
+        registry.write().unpin_station(&id);
+        config.write().pinned_stations.retain(|json| {
+            serde_json::from_str::<radio::manifest::StationManifest>(json)
+                .map(|m| m.id != id)
+                .unwrap_or(false)
+        });
+    } else {
+        if let Ok(json) = serde_json::to_string(&manifest) {
+            config.write().pinned_stations.push(json);
+        }
+        registry.write().pin_manifest(manifest);
+    }
+}
+
 #[component]
 pub fn Radio(props: RadioProps) -> Element {
     let _ = &props;
@@ -554,6 +577,28 @@ pub fn Radio(props: RadioProps) -> Element {
 
                                         div { class: "flex items-center gap-2 justify-end min-w-0",
                                             button {
+                                                class: if registry_sig.read().is_registry_station(&st.stationuuid) {
+                                                    "inline-flex items-center justify-center w-8 h-8 rounded-full transition-all"
+                                                } else {
+                                                    "inline-flex items-center justify-center w-8 h-8 rounded-full transition-all opacity-0 group-hover:opacity-100"
+                                                },
+                                                style: "background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.5);",
+                                                onclick: {
+                                                    let st = st.clone();
+                                                    let mut registry_sig = registry_sig;
+                                                    let mut config = config;
+                                                    move |evt: MouseEvent| {
+                                                        evt.stop_propagation();
+                                                        toggle_pin_station(&mut config, &mut registry_sig, &st);
+                                                    }
+                                                },
+                                                if registry_sig.read().is_registry_station(&st.stationuuid) {
+                                                    i { class: "fa-solid fa-check text-xs" }
+                                                } else {
+                                                    i { class: "fa-solid fa-plus text-xs" }
+                                                }
+                                            }
+                                            button {
                                                 class: "inline-flex items-center justify-center w-8 h-8 rounded-full transition-all opacity-0 group-hover:opacity-100",
                                                 style: "background: color-mix(in oklab, var(--color-indigo-500) 20%, transparent); color: var(--color-indigo-400);",
                                                 onclick: {
@@ -621,6 +666,25 @@ pub fn Radio(props: RadioProps) -> Element {
                                                     style: "color: var(--color-indigo-400);",
                                                     i { class: "fa-solid fa-play text-xs" }
                                                     "{i18n::t(\"radio_play\")}"
+                                                }
+                                            }
+
+                                            button {
+                                                class: "inline-flex items-center justify-center w-8 h-8 rounded-full transition-all shrink-0 hover:opacity-80",
+                                                style: "background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.5);",
+                                                onclick: {
+                                                    let st = st.clone();
+                                                    let mut registry_sig = registry_sig;
+                                                    let mut config = config;
+                                                    move |evt: MouseEvent| {
+                                                        evt.stop_propagation();
+                                                        toggle_pin_station(&mut config, &mut registry_sig, &st);
+                                                    }
+                                                },
+                                                if registry_sig.read().is_registry_station(&st.stationuuid) {
+                                                    i { class: "fa-solid fa-check text-xs" }
+                                                } else {
+                                                    i { class: "fa-solid fa-plus text-xs" }
                                                 }
                                             }
                                         }

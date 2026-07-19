@@ -233,6 +233,24 @@ impl StationRegistry {
         self.stations.insert(manifest.id.clone(), manifest);
     }
 
+    /// Insert a manifest as a curated station (shown in the Selected list).
+    pub fn pin_manifest(&mut self, manifest: StationManifest) {
+        self.runtime_ids.remove(&manifest.id);
+        self.stations.insert(manifest.id.clone(), manifest);
+    }
+
+    /// Demote a pinned station back to a runtime insert; stays playable.
+    pub fn unpin_station(&mut self, id: &str) {
+        if self.stations.contains_key(id) {
+            self.runtime_ids.insert(id.to_string());
+        }
+    }
+
+    /// True when the station shows in the curated (Selected) list.
+    pub fn is_registry_station(&self, id: &str) -> bool {
+        self.stations.contains_key(id) && !self.runtime_ids.contains(id)
+    }
+
     pub fn all_stations(&self) -> Vec<&StationManifest> {
         let mut vec: Vec<_> = self.stations.values().collect();
         vec.sort_by(|a, b| a.name.cmp(&b.name));
@@ -327,6 +345,17 @@ mod tests {
         assert!(registry.get("browser-uuid").is_some());
         assert_eq!(registry.all_stations().len(), 1);
         assert!(registry.registry_stations().is_empty());
+        assert!(!registry.is_registry_station("browser-uuid"));
+
+        let manifest = registry.get("browser-uuid").unwrap().clone();
+        registry.pin_manifest(manifest);
+        assert!(registry.is_registry_station("browser-uuid"));
+        assert_eq!(registry.registry_stations().len(), 1);
+
+        registry.unpin_station("browser-uuid");
+        assert!(!registry.is_registry_station("browser-uuid"));
+        assert!(registry.registry_stations().is_empty());
+        assert!(registry.get("browser-uuid").is_some());
     }
 
     #[test]

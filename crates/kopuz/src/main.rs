@@ -610,7 +610,10 @@ fn App() -> Element {
             .filter(|r| r.enabled)
             .map(|r| r.url.clone())
             .collect();
+        let pinned_stations: Vec<String> = config.read().pinned_stations.clone();
 
+        // Key on paths only: pin toggles update the live registry directly,
+        // a rebuild would re-fetch every registry.
         let key = registry_paths.join(",");
         if *last_radio_registry_key.peek() == Some(key.clone()) {
             return;
@@ -629,6 +632,13 @@ fn App() -> Element {
                             Err(e) => {
                                 tracing::warn!("Failed to import registry from {}: {}", path, e)
                             }
+                        }
+                    }
+
+                    for json in pinned_stations {
+                        match serde_json::from_str(&json) {
+                            Ok(manifest) => new_registry.pin_manifest(manifest),
+                            Err(e) => tracing::warn!("Failed to parse pinned station: {}", e),
                         }
                     }
                     (new_registry, import_count)
