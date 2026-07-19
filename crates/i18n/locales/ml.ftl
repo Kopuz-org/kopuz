@@ -410,6 +410,13 @@ remove_cover = കവർ നീക്കം ചെയ്യുക
 
 # Radio Page
 radio_filter_stations = സ്റ്റേഷനുകൾ ഫിൽട്ടർ ചെയ്യുക…
+radio_search_stations = സ്റ്റേഷനുകൾ തിരയുക…
+radio_your_stations = നിങ്ങളുടെ സ്റ്റേഷനുകൾ
+radio_top_stations = ജനപ്രിയ സ്റ്റേഷനുകൾ
+radio_search_results = തിരയൽ ഫലങ്ങൾ
+radio_powered_by = radio-browser.info പിന്തുണയോടെ
+radio_loading_stations = സ്റ്റേഷനുകൾ ലോഡ് ചെയ്യുന്നു…
+radio_search_failed = radio-browser.info-ലേക്ക് ബന്ധപ്പെടാനായില്ല
 radio_subtitle = തത്സമയ ഇന്റർനെറ്റ് റേഡിയോ സ്ട്രീമുകൾ ട്യൂൺ ചെയ്യുക
 radio_no_stations_match = നിങ്ങളുടെ തിരയലുമായി പൊരുത്തപ്പെടുന്ന സ്റ്റേഷനുകളൊന്നുമില്ല
 radio_station_col = സ്റ്റേഷൻ

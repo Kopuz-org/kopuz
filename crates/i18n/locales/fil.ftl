@@ -410,6 +410,13 @@ remove_cover = Alisin ang cover
 
 # Radio Page
 radio_filter_stations = Mag-filter ng mga istasyon…
+radio_search_stations = Maghanap ng mga istasyon…
+radio_your_stations = Mga istasyon mo
+radio_top_stations = Mga sikat na istasyon
+radio_search_results = Mga resulta ng paghahanap
+radio_powered_by = Pinapagana ng radio-browser.info
+radio_loading_stations = Nilo-load ang mga istasyon…
+radio_search_failed = Hindi maabot ang radio-browser.info
 radio_subtitle = Makinig sa live na internet radio streams
 radio_no_stations_match = Walang istasyong tumugma sa iyong paghahanap
 radio_station_col = Istasyon

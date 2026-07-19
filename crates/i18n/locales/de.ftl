@@ -401,6 +401,13 @@ remove_cover = Cover entfernen
 
 # Radio Page
 radio_filter_stations = Sender filtern…
+radio_search_stations = Sender suchen…
+radio_your_stations = Deine Sender
+radio_top_stations = Beliebte Sender
+radio_search_results = Suchergebnisse
+radio_powered_by = Bereitgestellt von radio-browser.info
+radio_loading_stations = Sender werden geladen…
+radio_search_failed = radio-browser.info nicht erreichbar
 radio_subtitle = Hören Sie Live-Internetradio-Streams
 radio_no_stations_match = Keine Sender entsprechen Ihrer Suche
 radio_station_col = Sender

@@ -401,6 +401,13 @@ remove_cover = הסר עטיפה
 
 # Radio Page
 radio_filter_stations = סנן תחנות…
+radio_search_stations = חפש תחנות…
+radio_your_stations = התחנות שלך
+radio_top_stations = תחנות פופולריות
+radio_search_results = תוצאות חיפוש
+radio_powered_by = מופעל על ידי radio-browser.info
+radio_loading_stations = טוען תחנות…
+radio_search_failed = לא ניתן להתחבר אל radio-browser.info
 radio_subtitle = האזן לתחנות רדיו חיות באינטרנט
 radio_no_stations_match = אין תחנות התואמות לחיפוש שלך
 radio_station_col = תחנה

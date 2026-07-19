@@ -410,6 +410,13 @@ remove_cover = Xóa bìa
 
 # Radio Page
 radio_filter_stations = Lọc đài...
+radio_search_stations = Tìm đài...
+radio_your_stations = Đài của bạn
+radio_top_stations = Đài phổ biến
+radio_search_results = Kết quả tìm kiếm
+radio_powered_by = Được cung cấp bởi radio-browser.info
+radio_loading_stations = Đang tải đài...
+radio_search_failed = Không thể kết nối tới radio-browser.info
 radio_subtitle = Nghe các luồng radio internet trực tiếp
 radio_no_stations_match = Không có đài nào khớp với tìm kiếm
 radio_station_col = Đài

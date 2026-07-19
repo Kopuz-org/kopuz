@@ -401,6 +401,13 @@ remove_cover = Видалити обкладинку
 
 # Radio Page
 radio_filter_stations = Фільтр станцій…
+radio_search_stations = Пошук станцій…
+radio_your_stations = Ваші станції
+radio_top_stations = Популярні станції
+radio_search_results = Результати пошуку
+radio_powered_by = На основі radio-browser.info
+radio_loading_stations = Завантаження станцій…
+radio_search_failed = Не вдалося зв'язатися з radio-browser.info
 radio_subtitle = Слухайте прямі трансляції інтернет-радіо
 radio_no_stations_match = Немає станцій, що відповідають вашому запиту
 radio_station_col = Станція

@@ -402,6 +402,13 @@ remove_cover = Eliminar portada
 
 # Radio Page
 radio_filter_stations = Filtrar estaciones…
+radio_search_stations = Buscar estaciones…
+radio_your_stations = Tus estaciones
+radio_top_stations = Estaciones populares
+radio_search_results = Resultados de búsqueda
+radio_powered_by = Con tecnología de radio-browser.info
+radio_loading_stations = Cargando estaciones…
+radio_search_failed = No se pudo conectar con radio-browser.info
 radio_subtitle = Sintoniza transmisiones de radio por internet en vivo
 radio_no_stations_match = Ninguna estación coincide con tu búsqueda
 radio_station_col = Estación

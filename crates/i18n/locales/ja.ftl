@@ -407,6 +407,13 @@ remove_cover = カバーを削除
 
 # Radio Page
 radio_filter_stations = ステーションをフィルタリング…
+radio_search_stations = ステーションを検索…
+radio_your_stations = あなたのステーション
+radio_top_stations = 人気のステーション
+radio_search_results = 検索結果
+radio_powered_by = radio-browser.info 提供
+radio_loading_stations = ステーションを読み込み中…
+radio_search_failed = radio-browser.info に接続できませんでした
 radio_subtitle = ライブインターネットラジオストリームを聴く
 radio_no_stations_match = 検索に一致するステーションはありません
 radio_station_col = ステーション

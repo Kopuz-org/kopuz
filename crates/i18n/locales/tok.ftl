@@ -401,6 +401,13 @@ remove_cover = o weka e sitelen
 
 # Radio Page
 radio_filter_stations = o lukin e ilo kalama…
+radio_search_stations = o alasa e ilo kalama…
+radio_your_stations = ilo kalama sina
+radio_top_stations = ilo kalama pi jan mute
+radio_search_results = ijo alasa
+radio_powered_by = ni li tan ilo radio-browser.info
+radio_loading_stations = ilo kalama li kama…
+radio_search_failed = mi ken ala toki tawa ilo radio-browser.info
 radio_subtitle = o kute e ilo kalama linja
 radio_no_stations_match = ilo kalama ala li sama wile sina
 radio_station_col = ilo kalama

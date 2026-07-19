@@ -401,6 +401,13 @@ remove_cover = 移除封面
 
 # Radio Page
 radio_filter_stations = 过滤电台…
+radio_search_stations = 搜索电台…
+radio_your_stations = 你的电台
+radio_top_stations = 热门电台
+radio_search_results = 搜索结果
+radio_powered_by = 由 radio-browser.info 提供支持
+radio_loading_stations = 正在加载电台…
+radio_search_failed = 无法连接 radio-browser.info
 radio_subtitle = 收听实时网络电台流
 radio_no_stations_match = 没有与您的搜索匹配的电台
 radio_station_col = 电台

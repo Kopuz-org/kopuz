@@ -410,6 +410,13 @@ remove_cover = Hapus sampul
 
 # Radio Page
 radio_filter_stations = Filter stasiun…
+radio_search_stations = Cari stasiun…
+radio_your_stations = Stasiun Anda
+radio_top_stations = Stasiun populer
+radio_search_results = Hasil pencarian
+radio_powered_by = Didukung oleh radio-browser.info
+radio_loading_stations = Memuat stasiun…
+radio_search_failed = Tidak dapat menghubungi radio-browser.info
 radio_subtitle = Tune in ke live internet radio streams
 radio_no_stations_match = Tidak ada stasiun yang sesuai dengan pencarian anda
 radio_station_col = Stasiun

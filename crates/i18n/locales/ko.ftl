@@ -401,6 +401,13 @@ remove_cover = 커버 제거
 
 # Radio Page
 radio_filter_stations = 스테이션 필터링…
+radio_search_stations = 스테이션 검색…
+radio_your_stations = 내 스테이션
+radio_top_stations = 인기 스테이션
+radio_search_results = 검색 결과
+radio_powered_by = radio-browser.info 제공
+radio_loading_stations = 스테이션 불러오는 중…
+radio_search_failed = radio-browser.info에 연결할 수 없습니다
 radio_subtitle = 실시간 인터넷 라디오 스트림 듣기
 radio_no_stations_match = 검색과 일치하는 스테이션이 없습니다
 radio_station_col = 스테이션
