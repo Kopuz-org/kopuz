@@ -84,6 +84,12 @@ pub fn Radio(props: RadioProps) -> Element {
     let has_custom = !filtered.is_empty();
     let searching = !query.is_empty();
 
+    // Resource keeps its stale value while refetching,
+    // track pending separately for the search spinner.
+    let browser_loading = matches!(
+        *browser_res.state().read(),
+        UseResourceState::Pending | UseResourceState::Paused
+    );
     let browser_state = browser_res.read();
 
     rsx! {
@@ -449,8 +455,8 @@ pub fn Radio(props: RadioProps) -> Element {
                 }
             }
 
-            match &*browser_state {
-                None => rsx! {
+            match (browser_loading, &*browser_state) {
+                (true, _) | (false, None) => rsx! {
                     div { class: "flex items-center justify-center py-16 gap-3",
                         i {
                             class: "fa-solid fa-circle-notch fa-spin",
@@ -463,7 +469,7 @@ pub fn Radio(props: RadioProps) -> Element {
                         }
                     }
                 },
-                Some(Err(e)) => rsx! {
+                (_, Some(Err(e))) => rsx! {
                     div { class: "flex flex-col items-center justify-center py-16 gap-3",
                         i {
                             class: "fa-solid fa-tower-broadcast text-4xl",
@@ -481,7 +487,7 @@ pub fn Radio(props: RadioProps) -> Element {
                         }
                     }
                 },
-                Some(Ok(results)) if results.is_empty() => rsx! {
+                (_, Some(Ok(results))) if results.is_empty() => rsx! {
                     div { class: "flex flex-col items-center justify-center py-16 gap-3",
                         i {
                             class: "fa-solid fa-radio text-4xl",
@@ -494,7 +500,7 @@ pub fn Radio(props: RadioProps) -> Element {
                         }
                     }
                 },
-                Some(Ok(results)) => {
+                (_, Some(Ok(results))) => {
                     if is_vaxry {
                         rsx! {
                             div { class: "flex flex-col",
