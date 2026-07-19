@@ -410,6 +410,13 @@ remove_cover = Remove cover
 
 # Radio Page
 radio_filter_stations = Filter stations…
+radio_search_stations = Search stations…
+radio_your_stations = Your stations
+radio_top_stations = Popular stations
+radio_search_results = Search results
+radio_powered_by = Powered by radio-browser.info
+radio_loading_stations = Loading stations…
+radio_search_failed = Couldn't reach radio-browser.info
 radio_subtitle = Tune in to live internet radio streams
 radio_no_stations_match = No stations match your search
 radio_station_col = Station

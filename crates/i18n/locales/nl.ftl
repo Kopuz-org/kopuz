@@ -410,6 +410,13 @@ remove_cover = Hoes verwijderen
 
 # Radio Page
 radio_filter_stations = Stations filteren…
+radio_search_stations = Zenders zoeken…
+radio_your_stations = Uw zenders
+radio_top_stations = Populaire zenders
+radio_search_results = Zoekresultaten
+radio_powered_by = Mogelijk gemaakt door radio-browser.info
+radio_loading_stations = Zenders laden…
+radio_search_failed = Kan radio-browser.info niet bereiken
 radio_subtitle = Luister naar live-internetradiostreams
 radio_no_stations_match = Geen stations komen overeen met je zoekopdracht
 radio_station_col = Station
