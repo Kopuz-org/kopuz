@@ -19,10 +19,6 @@ pub enum FetchStrategy {
     LastFmOnly,
 }
 
-// Maybe host on the website?
-pub const DEFAULT_REGISTRY_URL: &str =
-    "https://raw.githubusercontent.com/Kopuz-org/kopuz/refs/heads/master/radio-registry/index.json";
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RegistryEntry {
     pub url: String,
@@ -32,12 +28,10 @@ pub struct RegistryEntry {
     pub is_default: bool,
 }
 
+/// Station discovery is backed by radio-browser.info,
+/// registries are user-added extras only.
 pub fn default_radio_registries() -> Vec<RegistryEntry> {
-    vec![RegistryEntry {
-        url: DEFAULT_REGISTRY_URL.to_string(),
-        enabled: true,
-        is_default: true,
-    }]
+    Vec::new()
 }
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct YtdlpOptions {
@@ -956,17 +950,8 @@ impl AppConfig {
     }
 
     pub fn migrate_registry_paths(&mut self) {
-        // Ensure the default registry entry is always present
-        if !self.radio_registries.iter().any(|r| r.is_default) {
-            self.radio_registries.insert(
-                0,
-                RegistryEntry {
-                    url: DEFAULT_REGISTRY_URL.to_string(),
-                    enabled: true,
-                    is_default: true,
-                },
-            );
-        }
+        // strip the auto-inserted entry from configs that still carry it.
+        self.radio_registries.retain(|r| !r.is_default);
     }
 }
 

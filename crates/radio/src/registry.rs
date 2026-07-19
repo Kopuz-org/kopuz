@@ -227,6 +227,11 @@ impl StationRegistry {
         Ok(())
     }
 
+    /// Insert a built manifest; bypassing registry JSON validation.
+    pub fn insert_manifest(&mut self, manifest: StationManifest) {
+        self.stations.insert(manifest.id.clone(), manifest);
+    }
+
     pub fn all_stations(&self) -> Vec<&StationManifest> {
         let mut vec: Vec<_> = self.stations.values().collect();
         vec.sort_by(|a, b| a.name.cmp(&b.name));
