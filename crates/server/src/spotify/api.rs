@@ -130,7 +130,7 @@ pub async fn start_playback(access: &str, device_id: &str, uris: &[String]) -> R
 }
 
 /// Lightweight auth probe used by `validate`.
-pub async fn me(access: &str) -> Result<(), String> {
+pub(crate) async fn me(access: &str) -> Result<(), String> {
     get_json(access, &format!("{API}/me"), &[], "me")
         .await
         .map(|_| ())

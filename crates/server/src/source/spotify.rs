@@ -74,6 +74,7 @@ impl MediaSource for SpotifySource {
         };
         match crate::spotify::api::me(token).await {
             Ok(()) => AuthOutcome::Valid,
+            Err(e) if e.contains("401") || e.contains("403") => AuthOutcome::Expired,
             Err(_) => AuthOutcome::Unreachable,
         }
     }

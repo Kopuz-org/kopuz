@@ -86,9 +86,6 @@ fn record_listen(mut config: Signal<AppConfig>, ctrl: &PlayerController) {
     }
 }
 
-/// Platforms whose OS media widget Kopuz drives directly. Matches the set the
-/// local `Player` pushes to; for remote Spotify playback the engine is stopped,
-/// so the poll loop feeds these the now-playing metadata itself.
 /// The now-playing fields the OS media widget needs, cloned out of the Dioxus
 /// signals by the caller so this seam stays UI-framework-free.
 struct OsTrack<'a> {
@@ -101,6 +98,9 @@ struct OsTrack<'a> {
     artwork: Option<&'a str>,
 }
 
+/// Platforms whose OS media widget Kopuz drives directly. Matches the set the
+/// local `Player` pushes to; for remote Spotify playback the engine is stopped,
+/// so the poll loop feeds these the now-playing metadata itself.
 #[cfg(any(
     target_os = "macos",
     target_os = "linux",
@@ -621,7 +621,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                                                 "spotify auth-error token refresh failed"
                                             );
                                             error.set(Some(
-                                                "Spotify session expired — re-sign in from                                                  Settings."
+                                                "Spotify session expired — re-sign in from Settings."
                                                     .to_string(),
                                             ));
                                         }
