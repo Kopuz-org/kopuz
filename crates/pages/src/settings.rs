@@ -415,6 +415,10 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                         on_spotify_browser: move |v: Option<String>| {
                                             config.write().spotify_browser = v;
                                         },
+                                        spotify_prefer_active_device: config.read().spotify_prefer_active_device,
+                                        on_spotify_prefer_active_device: move |v: bool| {
+                                            config.write().spotify_prefer_active_device = v;
+                                        },
                                     }
                                 }
                             }

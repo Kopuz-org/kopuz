@@ -215,6 +215,10 @@ pub fn ServerSettings(
     /// Persisted browser choice; `None` = automatic.
     spotify_browser: Option<String>,
     on_spotify_browser: EventHandler<Option<String>>,
+    /// When another Connect device is already playing, adopt it (`true`) rather
+    /// than starting on this app's in-app device.
+    spotify_prefer_active_device: bool,
+    on_spotify_prefer_active_device: EventHandler<bool>,
 ) -> Element {
     let login_text = i18n::t("login");
     let delete_text = i18n::t("delete");
@@ -236,6 +240,7 @@ pub fn ServerSettings(
                     let is_spotify = srv.service == MusicService::Spotify;
                     let browsers = spotify_browsers.clone();
                     let chosen = spotify_browser.clone();
+                    let prefer_active = spotify_prefer_active_device;
                     rsx! {
                         div { key: "{srv.id}",
                             class: "flex flex-col gap-2 bg-white/5 p-2 rounded w-full",
@@ -307,6 +312,25 @@ pub fn ServerSettings(
                                                 selected: chosen.as_deref() == Some(bid.as_str()),
                                                 "{label}"
                                             }
+                                        }
+                                    }
+                                }
+                                div { class: "flex items-center justify-between gap-4 border-t border-white/10 pt-2",
+                                    p { class: "text-xs text-white/60", "{i18n::t(\"spotify_connect_device\")}" }
+                                    select {
+                                        class: "bg-stone-800 text-white rounded px-2 py-1 text-xs border border-white/10 focus:outline-none focus:border-indigo-500",
+                                        onchange: move |evt| {
+                                            on_spotify_prefer_active_device.call(evt.value() == "other");
+                                        },
+                                        option {
+                                            value: "other",
+                                            selected: prefer_active,
+                                            "{i18n::t(\"spotify_connect_device_other\")}"
+                                        }
+                                        option {
+                                            value: "this",
+                                            selected: !prefer_active,
+                                            "{i18n::t(\"spotify_connect_device_this\")}"
                                         }
                                     }
                                 }

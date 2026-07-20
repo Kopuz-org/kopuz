@@ -146,10 +146,23 @@ pub fn SpotifyDevicesPanel(
         let Some(access) = ctrl.spotify_access_token() else {
             return;
         };
+        let sdk_device = ctrl.spotify_device.peek().clone();
+        let mut ctrl = ctrl;
         spawn(async move {
-            if let Ok(list) = ::server::spotify::api::devices(&access).await {
-                devices.set(list);
+            let list = match ::server::spotify::api::devices(&access).await {
+                Ok(list) => list,
+                Err(e) => {
+                    tracing::warn!(error = %e, "spotify device list refresh failed");
+                    return;
+                }
+            };
+            if let Some(active) = list
+                .iter()
+                .find(|d| d.is_active && Some(&d.id) != sdk_device.as_ref())
+            {
+                ctrl.spotify_adopt_external(active.id.clone());
             }
+            devices.set(list);
         });
     });
 

@@ -595,6 +595,11 @@ pub struct AppConfig {
     /// `chromium`/`vivaldi`/`safari`); `None` picks the first available.
     #[serde(default)]
     pub spotify_browser: Option<String>,
+    /// When Spotify is active and another Connect device is already playing,
+    /// adopt that device on connect (`true`, default) instead of starting
+    /// playback on this app's in-app device.
+    #[serde(default = "default_true")]
+    pub spotify_prefer_active_device: bool,
     #[serde(default, deserialize_with = "deserialize_music_directories")]
     pub music_directory: Vec<PathBuf>,
     #[serde(default = "default_theme")]
@@ -827,6 +832,7 @@ impl Default for AppConfig {
             active_source: Source::Local,
             source_explicitly_set: false,
             spotify_browser: None,
+            spotify_prefer_active_device: true,
             music_directory: vec![music_directory],
             theme: default_theme(),
             device_id: default_device_id(),

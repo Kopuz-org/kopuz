@@ -279,6 +279,17 @@ pub fn use_player_task(ctrl: PlayerController) {
                 if !*ctrl.external_active.peek() || ctrl.spotify_device_override.peek().is_none() {
                     prev_playing = false;
                     prev_progress = 0;
+                    let discover = !*ctrl.spotify_device_chosen.peek()
+                        && ctrl.spotify_device_override.peek().is_none();
+                    let access = discover.then(|| ctrl.spotify_access()).flatten();
+                    if let Some(access) = access
+                        && let Ok(Some(st)) = server::spotify::api::player_state(&access).await
+                        && st.is_playing
+                        && let Some(dev) = st.device_id
+                        && Some(&dev) != ctrl.spotify_device.peek().as_ref()
+                    {
+                        ctrl.spotify_adopt_external(dev);
+                    }
                     continue;
                 }
                 let Some(access) = ctrl.spotify_access() else {

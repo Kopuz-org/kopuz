@@ -146,6 +146,10 @@ pub struct PlayerController {
     /// Whether the current track is playing through the Spotify host rather than
     /// the engine — transport methods and the progress pump branch on this.
     pub(crate) external_active: Signal<bool>,
+    /// Set once the user explicitly picks a playback target from the device
+    /// panel (including "this app"). Suppresses automatic adoption of an
+    /// externally active Connect device so it can't override a deliberate choice.
+    pub(crate) spotify_device_chosen: Signal<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -520,6 +524,7 @@ impl PlayerController {
     /// Route Spotify playback to a Connect device (`None` = the in-app SDK
     /// device), transferring the live session over when one is active.
     pub fn spotify_select_device(&mut self, device_id: Option<String>) {
+        self.spotify_device_chosen.set(true);
         self.spotify_device_override.set(device_id.clone());
         if !*self.external_active.peek() {
             return;
@@ -537,6 +542,23 @@ impl PlayerController {
                 tracing::warn!(error = %e, "spotify device transfer failed");
             }
         });
+    }
+
+    /// Adopt a Connect device that is already playing on its own — e.g. the user
+    /// started it from the Spotify app, possibly before this app launched.
+    /// Routes transport to it and flips `external_active` so the player-state
+    /// poller begins syncing progress and play/pause state, without transferring
+    /// or restarting the live session. No-op when the feature is disabled, a
+    /// target is already active, or the user has made an explicit choice.
+    pub fn spotify_adopt_external(&mut self, device_id: String) {
+        if *self.spotify_device_chosen.peek()
+            || self.spotify_device_override.peek().is_some()
+            || !self.config.peek().spotify_prefer_active_device
+        {
+            return;
+        }
+        self.spotify_device_override.set(Some(device_id));
+        self.external_active.set(true);
     }
 
     pub(crate) fn spotify_transport_pause(&mut self) {
@@ -1198,6 +1220,7 @@ pub fn use_player_controller(
     let spotify_progress_anchor = use_signal(|| None::<(u64, std::time::Instant)>);
     let spotify_host_starting = use_signal(|| false);
     let external_active = use_signal(|| false);
+    let spotify_device_chosen = use_signal(|| false);
     let db = use_signal(move || db_handle);
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
 
@@ -1275,5 +1298,6 @@ pub fn use_player_controller(
         spotify_progress_anchor,
         spotify_host_starting,
         external_active,
+        spotify_device_chosen,
     }
 }
