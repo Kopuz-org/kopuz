@@ -33,16 +33,19 @@ pub(crate) async fn read_cookies(
     let cookies = tokio::task::spawn_blocking(move || -> Result<Vec<Cookie>, String> {
         // rookie's built-in table has no `helium` entry and `get_browser_config`
         // unwraps on a miss, so build Helium's config by hand. As an
-        // ungoogled-chromium fork its `Safe Storage` secret is keyed by the
-        // "Helium" product name (login Keychain on macOS, "Helium Safe Storage"
-        // libsecret label on Linux) — not Chromium's.
+        // ungoogled-chromium fork Helium only rebrands its `Safe Storage` secret
+        // on macOS ("Helium Safe Storage" in the login Keychain). Its Linux
+        // build keeps the upstream os_crypt product name, so cookies are keyed
+        // by the "Chromium Safe Storage" libsecret label (application attribute
+        // "chromium") — using "helium" there finds no key, so the v11 cookies
+        // never decrypt and sign-in polls forever.
         let helium_config;
         let config = match browser {
             Browser::Helium => {
                 helium_config = rookie::config::Browser {
                     paths: Vec::new(),
                     channels: None,
-                    unix_crypt_name: Some("helium".to_string()),
+                    unix_crypt_name: Some("chromium".to_string()),
                     osx_key_service: Some("Helium Safe Storage".to_string()),
                     osx_key_user: Some("Helium".to_string()),
                 };
