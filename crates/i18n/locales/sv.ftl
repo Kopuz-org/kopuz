@@ -475,3 +475,7 @@ sort_field_tracks = Låtar
 sort_field_albums = Album
 view_grid = Rutnätsvy
 view_list = Listvy
+spotify_browser = Spotify-uppspelningswebbläsare
+spotify_browser_auto = Automatiskt
+spotify_play_on = Spela på
+spotify_this_app = kopuz (den här appen)
