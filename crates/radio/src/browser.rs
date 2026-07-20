@@ -82,9 +82,14 @@ fn http_client() -> Result<reqwest::Client, BrowserError> {
 
 /// A mirror answering this cheap endpoint with a 2xx is considered healthy.
 async fn is_healthy(client: &reqwest::Client, base: &str) -> bool {
-    match client.get(format!("{base}/json/stats")).send().await {
-        Ok(resp) => resp.status().is_success(),
-        Err(_) => false,
+    match tokio::time::timeout(
+        Duration::from_secs(3),
+        client.get(format!("{base}/json/stats")).send(),
+    )
+    .await
+    {
+        Ok(Ok(resp)) => resp.status().is_success(),
+        _ => false,
     }
 }
 

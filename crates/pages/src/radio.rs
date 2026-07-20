@@ -40,7 +40,7 @@ fn toggle_pin_station(
         config.write().pinned_stations.retain(|json| {
             serde_json::from_str::<radio::manifest::StationManifest>(json)
                 .map(|m| m.id != id)
-                .unwrap_or(false)
+                .unwrap_or(true)
         });
     } else {
         if let Ok(json) = serde_json::to_string(&manifest) {
