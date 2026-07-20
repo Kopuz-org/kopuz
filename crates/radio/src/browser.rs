@@ -52,6 +52,9 @@ pub struct BrowserStation {
     pub language: String,
     #[serde(default)]
     pub codec: String,
+    /// 1 when the station streams HLS.
+    #[serde(default)]
+    pub hls: u8,
     #[serde(default)]
     pub bitrate: u32,
     #[serde(default)]
@@ -156,13 +159,23 @@ fn invalidate_base() {
     }
 }
 
+/// True when the station streams HLS, which the decoder can't play.
+/// Isn't worth bothering with too.
+pub fn is_hls(station: &BrowserStation) -> bool {
+    station.hls != 0
+        || station.codec.eq_ignore_ascii_case("hls")
+        || [&station.url_resolved, &station.url]
+            .iter()
+            .any(|u| u.split(['?', '#']).next().unwrap_or("").ends_with(".m3u8"))
+}
+
 async fn fetch_stations_from(
     base: &str,
     path: &str,
     query: &[(&str, &str)],
 ) -> Result<Vec<BrowserStation>, BrowserError> {
     let client = http_client()?;
-    client
+    let mut stations: Vec<BrowserStation> = client
         .get(format!("{base}{path}"))
         .query(query)
         .send()
@@ -171,7 +184,15 @@ async fn fetch_stations_from(
         .map_err(|e| BrowserError::Network(e.to_string()))?
         .json()
         .await
-        .map_err(|e| BrowserError::Network(e.to_string()))
+        .map_err(|e| BrowserError::Network(e.to_string()))?;
+
+    // HLS stations would only fail at play time; drop them up front.
+    let before = stations.len();
+    stations.retain(|s| !is_hls(s));
+    if stations.len() < before {
+        tracing::debug!(dropped = before - stations.len(), "filtered HLS stations");
+    }
+    Ok(stations)
 }
 
 async fn fetch_stations(
@@ -371,6 +392,27 @@ mod tests {
         };
         assert_eq!(meta.cover_url, None);
         assert_eq!(meta.artist, "Live Radio");
+    }
+
+    #[test]
+    fn detects_hls_stations() {
+        assert!(!is_hls(&sample_station()));
+
+        let mut st = sample_station();
+        st.hls = 1;
+        assert!(is_hls(&st));
+
+        let mut st = sample_station();
+        st.codec = "HLS".to_string();
+        assert!(is_hls(&st));
+
+        let mut st = sample_station();
+        st.url_resolved = "https://stream.example.org/live/master.m3u8?token=x".to_string();
+        assert!(is_hls(&st));
+
+        let mut st = sample_station();
+        st.url_resolved = "https://stream.example.org/live.m3u".to_string();
+        assert!(!is_hls(&st));
     }
 
     #[test]
