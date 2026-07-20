@@ -1,6 +1,7 @@
 use components::{
     bottombar::Bottombar, compact_player::CompactPlayer, download_overlay::DownloadOverlay,
-    fullscreen::Fullscreen, rightbar::Rightbar, sidebar::Sidebar, titlebar::Titlebar,
+    fullscreen::Fullscreen, rightbar::Rightbar, sidebar::Sidebar,
+    spotify_devices::SpotifyDevicesPanel, titlebar::Titlebar,
 };
 #[cfg(not(target_os = "android"))]
 use dioxus::desktop::tao::dpi::LogicalSize;
@@ -444,6 +445,7 @@ fn App() -> Element {
     let mut is_fullscreen = use_signal(|| false);
     let mut compact_mode = use_signal(|| false);
     let is_rightbar_open = use_signal(|| false);
+    let is_devices_open = use_signal(|| false);
     let rightbar_width = use_signal(|| 320usize);
     let mut palette = use_signal(|| Option::<Vec<utils::color::Color>>::None);
     // Config is the one remaining whole-value save: persisting a default that
@@ -1841,6 +1843,7 @@ fn App() -> Element {
                     volume: volume,
                     persisted_volume: persisted_volume,
                     is_rightbar_open: is_rightbar_open,
+                    is_devices_open: is_devices_open,
                 }
             }
             div {
@@ -2162,6 +2165,10 @@ fn App() -> Element {
                     current_song_artist: current_song_artist,
                     current_song_album: current_song_album,
                 }
+                SpotifyDevicesPanel {
+                    is_devices_open: is_devices_open,
+                    is_rightbar_open: is_rightbar_open,
+                }
             }
             Fullscreen {
                 player: player,
@@ -2198,6 +2205,7 @@ fn App() -> Element {
                     volume: volume,
                     persisted_volume: persisted_volume,
                     is_rightbar_open: is_rightbar_open,
+                    is_devices_open: is_devices_open,
                 }
             }
         }

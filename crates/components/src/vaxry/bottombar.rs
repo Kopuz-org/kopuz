@@ -23,6 +23,7 @@ pub fn BottombarVaxry(
     mut volume: Signal<f32>,
     mut persisted_volume: Signal<f32>,
     mut is_rightbar_open: Signal<bool>,
+    is_devices_open: Signal<bool>,
 ) -> Element {
     let mut is_dragging = use_signal(|| false);
     let mut drag_progress = use_signal(|| 0u64);
@@ -339,7 +340,11 @@ pub fn BottombarVaxry(
                     onclick: move |_| { let c = *is_rightbar_open.read(); is_rightbar_open.set(!c); },
                     i { class: "fa-solid fa-list text-[10px]" }
                 }
-                crate::spotify_devices::SpotifyDevicesButton { compact: true }
+                crate::spotify_devices::SpotifyDevicesButton {
+                    compact: true,
+                    is_rightbar_open,
+                    is_devices_open,
+                }
                 button {
                     class: "w-7 h-7 flex items-center justify-center text-slate-500 hover:text-white transition-colors",
                     title: i18n::t("share_musicbrainz").to_string(),

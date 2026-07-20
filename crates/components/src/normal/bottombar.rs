@@ -23,6 +23,7 @@ pub fn BottombarNormal(
     mut volume: Signal<f32>,
     mut persisted_volume: Signal<f32>,
     mut is_rightbar_open: Signal<bool>,
+    is_devices_open: Signal<bool>,
 ) -> Element {
     let mut is_dragging = use_signal(|| false);
     let mut drag_progress = use_signal(|| 0u64);
@@ -327,7 +328,10 @@ pub fn BottombarNormal(
                     onclick: move |_| { let c = *is_rightbar_open.read(); is_rightbar_open.set(!c); },
                     i { class: "fa-solid fa-list text-xs" }
                 }
-                crate::spotify_devices::SpotifyDevicesButton {}
+                crate::spotify_devices::SpotifyDevicesButton {
+                    is_rightbar_open,
+                    is_devices_open,
+                }
                 button {
                     class: "text-slate-400 hover:text-white",
                     title: i18n::t("share_musicbrainz").to_string(),
