@@ -21,6 +21,7 @@ music_directory = സംഗീത ഫോൾഡർ
 service = സേവനം: { $name }
 connected = ● ബന്ധിപ്പിച്ചു
 disconnected = ● വിച്ഛേദിച്ചു
+connecting = ● ബന്ധിപ്പിക്കുന്നു…
 reconnect = വീണ്ടും ബന്ധിപ്പിക്കുക
 remove = നീക്കം ചെയ്യുക
 add = ചേർക്കുക

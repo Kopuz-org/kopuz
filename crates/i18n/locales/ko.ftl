@@ -21,6 +21,7 @@ music_directory = 음악 폴더
 service = 서비스: { $name }
 connected = ● 연결됨
 disconnected = ● 연결 끊김
+connecting = ● 연결 중…
 reconnect = 다시 연결
 remove = 제거
 add = 추가

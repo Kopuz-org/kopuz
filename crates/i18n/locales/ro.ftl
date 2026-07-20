@@ -21,6 +21,7 @@ music_directory = Folder Muzică
 service = Serviciu: { $name }
 connected = ● Conectat
 disconnected = ● Deconectat
+connecting = ● Se conectează…
 reconnect = Reconectare
 remove = Elimină
 add = Adaugă

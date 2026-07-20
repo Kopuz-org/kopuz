@@ -1,6 +1,6 @@
 use config::{
     AppConfig, BackBehavior, ChannelMode, DeviceChangeBehavior, EqPreset,
-    EqualizerSettings as EqualizerConfig, MusicServer, MusicService, SampleRateMode, SavedServer,
+    EqualizerSettings as EqualizerConfig, MusicService, SampleRateMode, SavedServer,
 };
 use dioxus::prelude::*;
 #[cfg(not(target_os = "android"))]
@@ -201,11 +201,8 @@ fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -
 
 #[component]
 pub fn ServerSettings(
-    active: Option<MusicServer>,
     /// The active source's server id (`None` ⇒ Local) — the authoritative "which
-    /// server is active", reactive to the sidebar source switcher too. The
-    /// `active` snapshot (`config.server`) is only updated by the Settings switch
-    /// path, so keying the badge off it alone misses a switch made from the sidebar.
+    /// server is active", reactive to the sidebar source switcher too.
     active_source_id: Option<String>,
     servers: Vec<SavedServer>,
     on_add: EventHandler<()>,
@@ -223,6 +220,7 @@ pub fn ServerSettings(
     let delete_text = i18n::t("delete");
     let switch_text = i18n::t("switch_to_server");
     let active_text = i18n::t("active_server");
+    let conn = hooks::source_switch::use_connection_status();
 
     rsx! {
         div { class: "flex flex-col gap-2 w-full",
@@ -233,15 +231,6 @@ pub fn ServerSettings(
                 {
                     let id = srv.id.clone();
                     let is_active = active_source_id.as_deref() == Some(srv.id.as_str());
-                    // "Connected" only when the active server snapshot is actually
-                    // this server (and carries a token) — after a sidebar switch the
-                    // snapshot can lag, so don't claim a stale connection.
-                    let connected = is_active
-                        && active
-                            .as_ref()
-                            .filter(|s| s.id.as_deref() == Some(srv.id.as_str()))
-                            .and_then(|s| s.access_token.clone())
-                            .is_some();
                     let id_switch = id.clone();
                     let id_delete = id.clone();
                     let is_spotify = srv.service == MusicService::Spotify;
@@ -263,17 +252,23 @@ pub fn ServerSettings(
                                 p { class: "text-xs text-white/60", "{i18n::t_with(\"service\", &[(\"name\", srv.service.display_name().to_string())])}" }
                                 p { class: "text-xs text-white/60 truncate", "{srv.url}" }
                                 if is_active {
-                                    if connected {
-                                        p { class: "text-xs text-green-400 mt-1", "{i18n::t(\"connected\")}" }
-                                    } else {
-                                        div { class: "flex items-center gap-2 mt-1",
-                                            p { class: "text-xs text-red-400", "{i18n::t(\"disconnected\")}" }
-                                            button {
-                                                onclick: move |_| on_login.call(()),
-                                                class: "text-xs bg-white/10 hover:bg-white/20 px-2 py-0.5 rounded text-white transition-colors",
-                                                "{login_text}"
+                                    match conn() {
+                                        hooks::source_switch::ConnStatus::Online => rsx! {
+                                            p { class: "text-xs mt-1", style: "color:#3fb950", "{i18n::t(\"connected\")}" }
+                                        },
+                                        hooks::source_switch::ConnStatus::Connecting => rsx! {
+                                            p { class: "text-xs mt-1", style: "color:#d8a23a", "{i18n::t(\"connecting\")}" }
+                                        },
+                                        hooks::source_switch::ConnStatus::Offline => rsx! {
+                                            div { class: "flex items-center gap-2 mt-1",
+                                                p { class: "text-xs", style: "color:#e5534b", "{i18n::t(\"disconnected\")}" }
+                                                button {
+                                                    onclick: move |_| on_login.call(()),
+                                                    class: "text-xs bg-white/10 hover:bg-white/20 px-2 py-0.5 rounded text-white transition-colors",
+                                                    "{login_text}"
+                                                }
                                             }
-                                        }
+                                        },
                                     }
                                 }
                             }

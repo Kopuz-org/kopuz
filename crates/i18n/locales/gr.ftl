@@ -21,6 +21,7 @@ music_directory = Φάκελος Μουσικής
 service = Υπηρεσία: { $name }
 connected = ● Συνδεδεμένο
 disconnected = ● Αποσυνδεδεμένο
+connecting = ● Σύνδεση…
 reconnect = Επανασύνδεση
 remove = Αφαίρεση
 add = Προσθήκη

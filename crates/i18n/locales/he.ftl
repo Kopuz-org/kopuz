@@ -21,6 +21,7 @@ music_directory = תיקיית מוזיקה
 service = שירות: { $name }
 connected = ● מחובר
 disconnected = ● מנותק
+connecting = ● מתחבר…
 reconnect = חיבור מחדש
 remove = הסרה
 add = הוספה

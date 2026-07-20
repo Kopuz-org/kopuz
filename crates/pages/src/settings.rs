@@ -388,7 +388,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 title: i18n::t("media_servers").to_string(),
                                 control: rsx! {
                                     ServerSettings {
-                                        active: config.read().server.clone(),
                                         active_source_id: config
                                             .read()
                                             .active_source
