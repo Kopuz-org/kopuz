@@ -86,6 +86,78 @@ fn record_listen(mut config: Signal<AppConfig>, ctrl: &PlayerController) {
     }
 }
 
+/// Platforms whose OS media widget Kopuz drives directly. Matches the set the
+/// local `Player` pushes to; for remote Spotify playback the engine is stopped,
+/// so the poll loop feeds these the now-playing metadata itself.
+/// The now-playing fields the OS media widget needs, cloned out of the Dioxus
+/// signals by the caller so this seam stays UI-framework-free.
+struct OsTrack<'a> {
+    title: &'a str,
+    artist: &'a str,
+    album: &'a str,
+    duration_secs: u64,
+    position_secs: u64,
+    playing: bool,
+    artwork: Option<&'a str>,
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "android"
+))]
+mod os_now_playing {
+    use super::OsTrack;
+
+    /// The OS media widget wants a local file, not a URL. Cache `cover_url` to a
+    /// temp file keyed by the (base62, filename-safe) Spotify track id, so the
+    /// same track reuses the file and the macOS artwork cache stays warm.
+    /// Returns `None` on empty url or any IO/network failure — a missing cover
+    /// just shows the widget's generic glyph.
+    pub(super) async fn cache_artwork(track_id: &str, cover_url: &str) -> Option<String> {
+        if cover_url.is_empty() {
+            return None;
+        }
+        let path = std::env::temp_dir().join(format!("kopuz_remote_cover_{track_id}.jpg"));
+        if !path.exists() {
+            let bytes = reqwest::get(cover_url).await.ok()?.bytes().await.ok()?;
+            tokio::fs::write(&path, bytes).await.ok()?;
+        }
+        Some(path.to_string_lossy().into_owned())
+    }
+
+    /// Push an external (Spotify Connect) track to the OS media widget. The local
+    /// engine is stopped for remote playback, so nothing else feeds it.
+    pub(super) fn push(track: OsTrack<'_>) {
+        player::systemint::update_now_playing(
+            track.title,
+            track.artist,
+            track.album,
+            track.duration_secs as f64,
+            track.position_secs as f64,
+            track.playing,
+            track.artwork,
+        );
+    }
+}
+
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "android"
+)))]
+mod os_now_playing {
+    use super::OsTrack;
+
+    pub(super) async fn cache_artwork(_track_id: &str, _cover_url: &str) -> Option<String> {
+        None
+    }
+
+    pub(super) fn push(_track: OsTrack<'_>) {}
+}
+
 fn drain_bg_cmds() -> Vec<BgCmd> {
     let mut cmds = Vec::new();
     if let Some(lock) = BG_CMD_RX.get()
@@ -274,11 +346,15 @@ pub fn use_player_task(ctrl: PlayerController) {
             let mut prev_playing = false;
             let mut prev_progress: u64 = 0;
             let mut prev_duration: u64 = 0;
+            let mut prev_track_id: Option<String> = None;
+            let mut os_artwork: Option<String> = None;
             loop {
                 tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
                 if !*ctrl.external_active.peek() || ctrl.spotify_device_override.peek().is_none() {
                     prev_playing = false;
                     prev_progress = 0;
+                    prev_track_id = None;
+                    os_artwork = None;
                     let discover = !*ctrl.spotify_device_chosen.peek()
                         && ctrl.spotify_device_override.peek().is_none();
                     let access = discover.then(|| ctrl.spotify_access()).flatten();
@@ -289,6 +365,36 @@ pub fn use_player_task(ctrl: PlayerController) {
                         && Some(&dev) != ctrl.spotify_device.peek().as_ref()
                     {
                         ctrl.spotify_adopt_external(dev);
+                        // Adoption flips `external_active`; reflect the live track
+                        // now rather than waiting a poll, so a cold start lands on
+                        // what's actually playing instead of the restored last song.
+                        if *ctrl.external_active.peek() {
+                            let progress = st.progress_ms / 1000;
+                            if let Some(track) = st.track.clone() {
+                                ctrl.hydrate_external_track_metadata(track, progress);
+                            }
+                            ctrl.is_playing.set(st.is_playing);
+                            ctrl.spotify_progress_anchor
+                                .set(Some((st.progress_ms, std::time::Instant::now())));
+                            let cover = ctrl.current_song_cover_url.peek().clone();
+                            os_artwork = match st.track_id.as_deref() {
+                                Some(id) => os_now_playing::cache_artwork(id, &cover).await,
+                                None => None,
+                            };
+                            os_now_playing::push(OsTrack {
+                                title: &ctrl.current_song_title.peek(),
+                                artist: &ctrl.current_song_artist.peek(),
+                                album: &ctrl.current_song_album.peek(),
+                                duration_secs: *ctrl.current_song_duration.peek(),
+                                position_secs: progress,
+                                playing: st.is_playing,
+                                artwork: os_artwork.as_deref(),
+                            });
+                            prev_track_id = st.track_id;
+                            prev_playing = st.is_playing;
+                            prev_progress = st.progress_ms;
+                            prev_duration = st.duration_ms;
+                        }
                     }
                     continue;
                 }
@@ -299,6 +405,17 @@ pub fn use_player_task(ctrl: PlayerController) {
                     prev_playing && prev_duration > 0 && prev_progress + 5000 >= prev_duration;
                 match server::spotify::api::player_state(&access).await {
                     Ok(Some(st)) => {
+                        if st.track_id != prev_track_id {
+                            if let Some(track) = st.track.clone() {
+                                ctrl.hydrate_external_track_metadata(track, st.progress_ms / 1000);
+                            }
+                            let cover = ctrl.current_song_cover_url.peek().clone();
+                            os_artwork = match st.track_id.as_deref() {
+                                Some(id) => os_now_playing::cache_artwork(id, &cover).await,
+                                None => None,
+                            };
+                            prev_track_id = st.track_id.clone();
+                        }
                         ctrl.is_playing.set(st.is_playing);
                         ctrl.spotify_progress_anchor
                             .set(Some((st.progress_ms, std::time::Instant::now())));
@@ -306,6 +423,15 @@ pub fn use_player_task(ctrl: PlayerController) {
                         if st.duration_ms > 0 {
                             ctrl.current_song_duration.set(st.duration_ms / 1000);
                         }
+                        os_now_playing::push(OsTrack {
+                            title: &ctrl.current_song_title.peek(),
+                            artist: &ctrl.current_song_artist.peek(),
+                            album: &ctrl.current_song_album.peek(),
+                            duration_secs: *ctrl.current_song_duration.peek(),
+                            position_secs: st.progress_ms / 1000,
+                            playing: st.is_playing,
+                            artwork: os_artwork.as_deref(),
+                        });
                         let at_end = st.progress_ms == 0
                             || (st.duration_ms > 0 && st.progress_ms + 1500 >= st.duration_ms);
                         if !st.is_playing && ended_before && at_end {
@@ -326,6 +452,8 @@ pub fn use_player_task(ctrl: PlayerController) {
                         }
                         prev_playing = false;
                         prev_progress = 0;
+                        prev_track_id = None;
+                        os_artwork = None;
                     }
                     Err(_) => {}
                 }

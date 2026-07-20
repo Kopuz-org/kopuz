@@ -334,6 +334,24 @@ impl PlayerController {
         }
     }
 
+    /// Hydrate the now-playing display signals from a track we don't own in the
+    /// queue — a Spotify Connect session started elsewhere, or one whose track
+    /// advanced remotely. Leaves `current_queue_index` untouched, since the
+    /// track has no position in our queue.
+    pub(crate) fn hydrate_external_track_metadata(&mut self, track: Track, progress_secs: u64) {
+        let progress_secs = progress_secs.min(track.duration);
+        self.current_song_title.set(track.title.clone());
+        self.current_song_artist.set(track.artist.clone());
+        self.current_song_album.set(track.album.clone());
+        self.current_song_khz.set(track.khz);
+        self.current_song_bitrate.set(track.bitrate);
+        self.current_song_duration.set(track.duration);
+        self.current_song_progress.set(progress_secs);
+        self.current_song_cover_url
+            .set(self.cover_url_for_track(&track));
+        self.current_track_snapshot.set(Some(track));
+    }
+
     fn pending_resume_seek(&self, track: &Track) -> (Option<u64>, bool) {
         let pending = self.pending_resume.read().clone();
         let restore_seek_secs = pending.as_ref().and_then(|pending| {

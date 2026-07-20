@@ -598,28 +598,38 @@ pub async fn player_volume(access: &str, percent: u8) -> Result<(), String> {
 }
 
 /// A playback-state snapshot for polling a foreign Connect device; `None`
-/// when nothing is playing anywhere on the account.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// when nothing is playing anywhere on the account. `track` carries the full
+/// now-playing item so the UI can hydrate title/artist/cover for a session it
+/// didn't start itself (adopted device, or a track changed remotely).
+#[derive(Debug, Clone, PartialEq)]
 pub struct PlayerState {
     pub is_playing: bool,
     pub progress_ms: u64,
     pub duration_ms: u64,
     pub track_id: Option<String>,
+    pub track: Option<Track>,
     pub device_id: Option<String>,
 }
 
 pub async fn player_state(access: &str) -> Result<Option<PlayerState>, String> {
     let body = get_json(access, &format!("{API}/me/player"), &[], "player state").await?;
+    Ok(parse_player_state(&body))
+}
+
+/// Map a `/me/player` response body into a `PlayerState`. `None` for a null body
+/// (nothing playing anywhere on the account).
+fn parse_player_state(body: &Value) -> Option<PlayerState> {
     if body.is_null() {
-        return Ok(None);
+        return None;
     }
-    Ok(Some(PlayerState {
+    Some(PlayerState {
         is_playing: body["is_playing"].as_bool().unwrap_or(false),
         progress_ms: body["progress_ms"].as_u64().unwrap_or(0),
         duration_ms: body["item"]["duration_ms"].as_u64().unwrap_or(0),
         track_id: body["item"]["id"].as_str().map(str::to_string),
+        track: parse_track(&body["item"]),
         device_id: body["device"]["id"].as_str().map(str::to_string),
-    }))
+    })
 }
 
 /// Metadata for a Spotify playlist.
@@ -753,6 +763,36 @@ mod tests {
     fn parse_track_rejects_null() {
         assert!(parse_track(&Value::Null).is_none());
         assert!(parse_track(&serde_json::json!({"name": "no id"})).is_none());
+    }
+
+    #[test]
+    fn player_state_carries_full_track_for_remote_sync() {
+        let body = serde_json::json!({
+            "is_playing": true,
+            "progress_ms": 61_000,
+            "device": {"id": "dev-other-pc"},
+            "item": {
+                "id": "trk9",
+                "name": "The Headphones Ever",
+                "duration_ms": 665_000,
+                "artists": [{"name": "DankPods"}],
+                "album": {"id": "alb9", "name": "Album", "images": [{"url": "https://i/x"}]}
+            }
+        });
+        let st = parse_player_state(&body).expect("state");
+        assert!(st.is_playing);
+        assert_eq!(st.progress_ms, 61_000);
+        assert_eq!(st.duration_ms, 665_000);
+        assert_eq!(st.track_id.as_deref(), Some("trk9"));
+        assert_eq!(st.device_id.as_deref(), Some("dev-other-pc"));
+        let track = st.track.expect("track hydrated from /me/player item");
+        assert_eq!(track.title, "The Headphones Ever");
+        assert_eq!(track.artist, "DankPods");
+    }
+
+    #[test]
+    fn player_state_none_when_idle() {
+        assert!(parse_player_state(&Value::Null).is_none());
     }
 
     #[test]
