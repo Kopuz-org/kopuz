@@ -1,7 +1,6 @@
 use config::AppConfig;
 use dioxus::{document::eval, prelude::*};
 use hooks::PlayerController;
-use std::fmt;
 
 const FULLSCREEN_LYRIC_CLASS: &str = "text-white/40 text-2xl font-semibold transition-colors duration-300 hover:text-white/60 cursor-pointer whitespace-pre-wrap";
 const FULLSCREEN_ACTIVE_LYRIC_CLASS: &str =
@@ -35,20 +34,7 @@ const FULLSCREEN_ACTIVE_OPPOSITE_LYRIC_CLASS: &str = "text-white text-2xl italic
 const RIGHTBAR_OPPOSITE_LYRIC_CLASS: &str = "text-white/40 text-lg italic font-semibold transition-colors duration-300 hover:text-white/60 cursor-pointer whitespace-pre-wrap text-right w-full";
 const RIGHTBAR_ACTIVE_OPPOSITE_LYRIC_CLASS: &str = "text-white text-lg italic font-semibold transition-colors duration-300 whitespace-pre-wrap text-right w-full";
 const LYRIC_SEAMLESS_GAP_SECONDS: f64 = 3.0;
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum LayoutMode {
-    Rightbar,
-    Fullscreen,
-}
-
-impl fmt::Display for LayoutMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            LayoutMode::Rightbar => write!(f, "rightbar"),
-            LayoutMode::Fullscreen => write!(f, "fullscreen"),
-        }
-    }
-}
+pub use crate::shared::LayoutMode;
 
 fn lyric_line_class(
     layout: LayoutMode,

@@ -1,6 +1,7 @@
-use super::controls::{PlaybackControl, ProgressBarControl, VolumeControl};
+use super::controls::{ProgressBarControl, VolumeControl};
 use super::metadata::TrackMetadata;
 use super::tabs::Tabs;
+use crate::player_controls::{TransportButtons, TransportVariant};
 use crate::titlebar::Titlebar;
 use config::AppConfig;
 use dioxus::prelude::*;
@@ -78,9 +79,7 @@ pub(crate) fn FullscreenDesktop(
                             current_song_progress,
                         }
 
-                        PlaybackControl {
-                            is_playing
-                        }
+                        TransportButtons { is_playing, variant: TransportVariant::Fullscreen }
 
                         VolumeControl { player, config, volume, persisted_volume }
                     }

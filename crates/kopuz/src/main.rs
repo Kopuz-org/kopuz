@@ -559,15 +559,16 @@ fn App() -> Element {
     });
 
     use_effect(move || {
-        let _ = dioxus::document::eval(
-            r#"document.addEventListener('error',function(e){
+        let _ = dioxus::document::eval(&format!(
+            r#"document.addEventListener('error',function(e){{
                 var t=e.target;
-                if(t.tagName==='IMG'&&!t.dataset.fallback&&t.src){
+                if(t.tagName==='IMG'&&!t.dataset.fallback&&t.src){{
                     t.dataset.fallback='1';
-                    t.src='data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27400%27 height=%27400%27 viewBox=%270 0 400 400%27%3E%3Crect width=%27400%27 height=%27400%27 fill=%27%231e1b2e%27/%3E%3Ccircle cx=%27200%27 cy=%27180%27 r=%2770%27 fill=%27none%27 stroke=%27%233d3466%27 stroke-width=%276%27/%3E%3Cpath d=%27M155 280 Q200 240 245 280%27 fill=%27none%27 stroke=%27%233d3466%27 stroke-width=%276%27 stroke-linecap=%27round%27/%3E%3C/svg%3E';
-                }
-            },true);"#,
-        );
+                    t.src='{}';
+                }}
+            }},true);"#,
+            utils::DEFAULT_COVER_SVG.replace('\'', "%27"),
+        ));
     });
 
     use_effect(move || {

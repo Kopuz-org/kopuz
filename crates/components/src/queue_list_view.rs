@@ -3,7 +3,6 @@ use dioxus::document::eval;
 use dioxus::prelude::*;
 use hooks::PlayerController;
 use serde_json::Value;
-use std::fmt;
 
 use crate::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 
@@ -16,20 +15,7 @@ use crate::queue_drag::{
 };
 use crate::reorder_buttons::ReorderButtons;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum LayoutMode {
-    Rightbar,
-    Fullscreen,
-}
-
-impl fmt::Display for LayoutMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            LayoutMode::Rightbar => write!(f, "rightbar"),
-            LayoutMode::Fullscreen => write!(f, "fullscreen"),
-        }
-    }
-}
+pub use crate::shared::LayoutMode;
 
 #[component]
 pub fn QueueRow(
@@ -97,9 +83,15 @@ pub fn QueueRow(
             if config.read().show_row_images {
                 div {
                     class: "rounded-md overflow-hidden flex-shrink-0 shadow-sm",
-                    style: match layout {
-                        LayoutMode::Fullscreen => "width: 48px; height: 48px; background: url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27400%27 height=%27400%27 viewBox=%270 0 400 400%27%3E%3Crect width=%27400%27 height=%27400%27 fill=%27%231e1b2e%27/%3E%3Ccircle cx=%27200%27 cy=%27180%27 r=%2770%27 fill=%27none%27 stroke=%27%233d3466%27 stroke-width=%276%27/%3E%3Cpath d=%27M155 280 Q200 240 245 280%27 fill=%27none%27 stroke=%27%233d3466%27 stroke-width=%276%27 stroke-linecap=%27round%27/%3E%3C/svg%3E') center/cover no-repeat, rgba(255,255,255,0.05);",
-                        LayoutMode::Rightbar => "width: 40px; height: 40px; background: url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27400%27 height=%27400%27 viewBox=%270 0 400 400%27%3E%3Crect width=%27400%27 height=%27400%27 fill=%27%231e1b2e%27/%3E%3Ccircle cx=%27200%27 cy=%27180%27 r=%2770%27 fill=%27none%27 stroke=%27%233d3466%27 stroke-width=%276%27/%3E%3Cpath d=%27M155 280 Q200 240 245 280%27 fill=%27none%27 stroke=%27%233d3466%27 stroke-width=%276%27 stroke-linecap=%27round%27/%3E%3C/svg%3E') center/cover no-repeat, rgba(255,255,255,0.05);",
+                    style: {
+                        let size = match layout {
+                            LayoutMode::Fullscreen => 48,
+                            LayoutMode::Rightbar => 40,
+                        };
+                        format!(
+                            "width: {size}px; height: {size}px; background: url('{}') center/cover no-repeat, rgba(255,255,255,0.05);",
+                            utils::DEFAULT_COVER_SVG
+                        )
                     },
 
                     if let Some(ref url) = cover_url {
