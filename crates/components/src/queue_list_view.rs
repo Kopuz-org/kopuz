@@ -283,58 +283,33 @@ pub fn QueueListView(
     use_drop(move || {
         let _cleanup = eval(&format!(
             r#"
-                if (window.__{layout}_scrollIntoView) delete window.__{layout}_scrollIntoView;
-                if (window.__{layout}_updateActiveQueueItem) delete window.__{layout}_updateActiveQueueItem;
+                for (const key of ['queueJump', 'updateActiveQueueItem'])
+                    delete window[`__{layout}_${{key}}`];
             "#,
         ));
     });
 
+    let mut auto_sync = use_signal(|| true);
+
     use_hook(move || {
-        let scroll_block = match layout {
-            LayoutMode::Fullscreen => "start",
-            LayoutMode::Rightbar => "end",
-        };
-
-        // Fullscreen behaviot: Scroll into view on next queue item when it becomes active only
-        // when the current is in view.
-        // Rightbar behavior:  Scrolls into view on next queue item when it becomes active only
-        // when the current is in view, while the next is not.
-        let scroll_when = match layout {
-            LayoutMode::Fullscreen => "currentIsInView",
-            LayoutMode::Rightbar => "currentIsInView && !nextIsInView",
-        };
-
-        let _scroll_func = eval(&format!(
+        // The queue is virtualized, so the playing row usually isn't in the
+        // DOM — jumping goes through scrollTop math on the row index instead
+        // of scrollIntoView. Far jumps snap instantly; near ones glide.
+        let _jump_func = eval(&format!(
             r#"
-                let isFirst = true;
-                let latestItem;
-
-                window.__{layout}_scrollIntoView = (nextItem) =>  {{
-                    if (latestItem && nextItem) {{
+                window.__{layout}_queueJump = (index) => {{
+                    const attempt = (tries) => {{
                         const container = document.getElementById('{queue_list_id}');
-                        const containerRect = container.getBoundingClientRect();
-
-                        const currentRect = latestItem.getBoundingClientRect();
-                        const currentIsInView = currentRect.top >= containerRect.top && currentRect.bottom <= containerRect.bottom;
-
-                        const nextRect = nextItem.getBoundingClientRect();
-                        const nextIsInView = nextRect.top >= containerRect.top && nextRect.bottom <= containerRect.bottom;
-
-                        if ({scroll_when}) {{
-                            nextItem.scrollIntoView({{ behavior: 'smooth', block: '{scroll_block}' }});
+                        if (!container) {{
+                            if (tries > 0) requestAnimationFrame(() => attempt(tries - 1));
+                            return;
                         }}
-
-                        latestItem = nextItem;
-
-                    }} else if (isFirst && nextItem) {{
-                        nextItem.scrollIntoView({{ behavior: 'smooth', block: '{scroll_block}' }});
-                        latestItem = nextItem;
-                        isFirst = false;
-
-                    }} else if (latestItem && !nextItem) {{
-                        latestItem.scrollIntoView({{ behavior: 'smooth', block: '{scroll_block}' }});
-                    }}
-                }}
+                        const target = Math.max(0, index * {item_height} - container.clientHeight * 0.35);
+                        const behavior = Math.abs(container.scrollTop - target) > 3000 ? 'auto' : 'smooth';
+                        container.scrollTo({{ top: target, behavior }});
+                    }};
+                    attempt(10);
+                }};
             "#,
         ));
 
@@ -361,7 +336,6 @@ pub fn QueueListView(
                             if (icon) {{ icon.className = "fa-solid fa-volume-high text-xs"; }}
                         }}
 
-                        window.__{layout}_scrollIntoView(nextQueueItem);
                         currentQueueItem = nextQueueItem;
                     }}
                 }}
@@ -369,11 +343,43 @@ pub fn QueueListView(
         ));
     });
 
+    // Hand scroll control back to the user the moment they scroll the queue
+    // themselves; the sync button re-arms auto-follow. Watching input events
+    // (wheel / touch / scrollbar grab) instead of `scroll` keeps our own
+    // smooth jumps — whose end time the browser doesn't expose — from
+    // disarming auto-follow.
+    use_future(move || async move {
+        let mut listener = eval(&format!(
+            r#"
+                const attach = () => {{
+                    const container = document.getElementById('{queue_list_id}');
+                    if (!container) {{ requestAnimationFrame(attach); return; }}
+                    const disarm = () => dioxus.send('user_scroll');
+                    container.addEventListener('wheel', disarm, {{ passive: true }});
+                    container.addEventListener('touchmove', disarm, {{ passive: true }});
+                    container.addEventListener('mousedown', (event) => {{
+                        if (event.target === container) disarm();
+                    }});
+                }};
+                attach();
+            "#
+        ));
+
+        while let Ok(val) = listener.recv::<Value>().await {
+            if val.as_str() == Some("user_scroll") {
+                auto_sync.set(false);
+            }
+        }
+    });
+
     use_effect(move || {
         let current_index = *current_queue_index.read();
         let _update = eval(&format!(
             "if (window.__{layout}_updateActiveQueueItem) window.__{layout}_updateActiveQueueItem({current_index});"
         ));
+        if *auto_sync.read() {
+            let _jump = eval(&format!("window.__{layout}_queueJump?.({current_index});"));
+        }
     });
 
     let cover_max_width = match layout {
@@ -568,6 +574,7 @@ pub fn QueueListView(
         if items.is_empty() {
             div { class: "text-white/30 text-center py-10 text-sm", "{i18n::t(\"no_more_songs\")}" }
         } else {
+            div { class: "relative flex flex-col flex-1 min-h-0",
             QueueSummary {
                 key: "{layout}",
                 queue_count,
@@ -830,6 +837,25 @@ pub fn QueueListView(
                         }
                     }
                 }
+            }
+
+            if !auto_sync() {
+                button {
+                    class: "absolute bottom-4 right-4 z-10 flex items-center justify-center w-9 h-9 rounded-full bg-black/40 hover:bg-black/60 backdrop-blur text-white/90 shadow-lg ring-1 ring-white/10 transition-colors",
+                    onclick: move |_| auto_sync.set(true),
+                    svg {
+                        class: "w-5 h-5",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        path { d: "M21 12a9 9 0 1 1-2.64-6.36" }
+                        polyline { points: "21 3 21 9 15 9" }
+                    }
+                }
+            }
             }
         }
     }
