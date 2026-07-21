@@ -675,6 +675,10 @@ pub struct AppConfig {
     /// the player bar act as the multimedia controller instead.
     #[serde(default)]
     pub fullscreen_use_player_bar: bool,
+    /// Fullscreen: the Up Next / Lyrics side panel is collapsed. Toggled from
+    /// the fullscreen UI itself, remembered across sessions.
+    #[serde(default)]
+    pub fullscreen_tabs_collapsed: bool,
     /// Use the current track's cover as the app background, overriding the
     /// active theme's background (including the album-art gradient).
     #[serde(default)]
@@ -906,6 +910,7 @@ impl Default for AppConfig {
             language: default_language(),
             reduce_animations: false,
             fullscreen_use_player_bar: false,
+            fullscreen_tabs_collapsed: false,
             cover_art_background: false,
             cover_art_darkening: default_cover_art_darkening(),
             cover_art_blur: 0,

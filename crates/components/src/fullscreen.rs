@@ -33,7 +33,7 @@ fn ProgressBarControl(
 
     rsx! {
         div {
-            class: "w-full mb-6",
+            class: "w-full mb-4",
             div {
                 class: "flex items-center gap-3",
                 span { class: "text-xs text-white/70 font-mono", style: "width: 50px; text-align: left;", "{fmt_time(display_progress)}" }
@@ -153,7 +153,7 @@ fn PlaybackControl(mut is_playing: Signal<bool>) -> Element {
 
     rsx! {
         div {
-            class: "flex items-center justify-between w-full mb-8",
+            class: "flex items-center justify-between w-full mb-5",
             button {
                 class: format!("{} transition-all active:scale-95 relative flex-shrink-0", if *ctrl.shuffle.read() { "text-white" } else { "text-white/70 hover:text-white" }),
                 onclick: move |_| ctrl.toggle_shuffle(),
@@ -227,7 +227,7 @@ fn TrackMetadata(
 
     rsx! {
         div {
-            class: "flex-1 min-h-0 w-full flex items-center justify-center mb-8",
+            class: "flex-1 min-h-0 w-full flex items-center justify-center mb-6",
             {
                 let cover = current_song_cover_url.read();
                 if cover.is_empty() {
@@ -292,7 +292,7 @@ fn TrackMetadata(
         }
 
         div {
-            class: "flex items-center gap-4 text-xs text-white/50 mb-6 w-full",
+            class: "flex items-center gap-4 text-xs text-white/60 mb-4 w-full",
             if current_song_bitrate() > 0 {
                 span { style: "font-size: 10px;", "{current_song_bitrate} kbps" }
             }
@@ -302,20 +302,17 @@ fn TrackMetadata(
 
 #[component]
 fn Tabs(
-    config: Signal<AppConfig>,
+    mut config: Signal<AppConfig>,
     items: Vec<reader::Track>,
     current_queue_index: Signal<usize>,
     lyrics: Signal<Option<Option<utils::lyrics::Lyrics>>>,
     current_song_progress: Signal<u64>,
-    player: Signal<Player>,
-    volume: Signal<f32>,
-    persisted_volume: Signal<f32>,
 ) -> Element {
     let mut active_tab = use_signal(|| 0usize);
 
     rsx! {
         div {
-            class: "flex-1 flex flex-col h-full min-w-0",
+            class: "flex-1 flex flex-col h-full min-w-0 bg-black/30 backdrop-blur-sm border-l border-white/5",
 
             div {
                 class: "flex items-center gap-1 px-6 pt-4 pb-2 border-b border-white/10",
@@ -339,10 +336,12 @@ fn Tabs(
                     "{i18n::t(\"lyrics\")}"
                 }
 
-                div {
-                    class: "ml-auto flex items-center",
-                    style: "width: 160px;",
-                    VolumeControl { player, config, volume, persisted_volume }
+                button {
+                    class: "ml-auto w-8 h-8 flex items-center justify-center text-white/40 hover:text-white transition-colors",
+                    "aria-label": i18n::t("hide_side_panel").to_string(),
+                    title: i18n::t("hide_side_panel").to_string(),
+                    onclick: move |_| config.write().fullscreen_tabs_collapsed = true,
+                    i { class: "fa-solid fa-chevron-right text-sm" }
                 }
             }
 
@@ -388,7 +387,7 @@ pub fn Fullscreen(
     }
 
     let ctrl = use_context::<PlayerController>();
-    let config = use_context::<Signal<AppConfig>>();
+    let mut config = use_context::<Signal<AppConfig>>();
 
     let use_player_bar = !cfg!(target_os = "android") && config.read().fullscreen_use_player_bar;
 
@@ -613,6 +612,8 @@ pub fn Fullscreen(
         };
     }
 
+    let tabs_collapsed = config.read().fullscreen_tabs_collapsed;
+
     rsx! {
         div {
             class: "fixed inset-0 z-50 flex flex-col text-white select-none",
@@ -637,8 +638,8 @@ pub fn Fullscreen(
                 },
 
                 div {
-                    class: "flex flex-col items-center justify-center p-8 lg:p-12 relative flex-shrink-0 overflow-hidden min-h-0",
-                    style: "width: 50%;",
+                    class: "flex flex-col items-center justify-center p-6 lg:p-10 relative flex-shrink-0 overflow-hidden min-h-0",
+                    style: if tabs_collapsed { "width: 100%;" } else { "width: 50%;" },
 
                     button {
                         class: "absolute top-8 left-8 text-white/30 hover:text-white transition-colors z-10",
@@ -664,18 +665,29 @@ pub fn Fullscreen(
                         PlaybackControl {
                             is_playing
                         }
+
+                        VolumeControl { player, config, volume, persisted_volume }
                     }
                 }
 
-                Tabs {
-                    config,
-                    items,
-                    current_queue_index,
-                    lyrics,
-                    current_song_progress,
-                    player,
-                    volume,
-                    persisted_volume,
+                if !tabs_collapsed {
+                    Tabs {
+                        config,
+                        items,
+                        current_queue_index,
+                        lyrics,
+                        current_song_progress,
+                    }
+                }
+            }
+
+            if tabs_collapsed {
+                button {
+                    class: "absolute right-4 top-1/2 -translate-y-1/2 z-10 w-9 h-9 rounded-full bg-black/40 hover:bg-black/60 backdrop-blur text-white/70 hover:text-white flex items-center justify-center shadow-lg ring-1 ring-white/10 transition-colors",
+                    "aria-label": i18n::t("show_side_panel").to_string(),
+                    title: i18n::t("show_side_panel").to_string(),
+                    onclick: move |_| config.write().fullscreen_tabs_collapsed = false,
+                    i { class: "fa-solid fa-chevron-left text-sm" }
                 }
             }
         }

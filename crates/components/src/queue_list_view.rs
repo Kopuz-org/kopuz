@@ -125,10 +125,10 @@ pub fn QueueRow(
                 div {
                     class: match layout {
                         LayoutMode::Fullscreen => {
-                            "text-sm text-white/50 truncate group-hover:text-white/70"
+                            "text-sm text-white/65 truncate group-hover:text-white/80"
                         }
                         LayoutMode::Rightbar => {
-                            "text-xs text-white/50 truncate group-hover:text-white/70"
+                            "text-xs text-white/65 truncate group-hover:text-white/80"
                         }
                     },
                     "{track.artist}"
@@ -180,8 +180,9 @@ pub fn QueueSummary(
     };
 
     let queue_summary = format!(
-        "{} • {}",
-        i18n::t_with("showcase_song_count", &[("count", queue_count.to_string())]),
+        "{}/{} • {}",
+        *current_queue_index.read() + 1,
+        queue_count,
         format_queue_duration(queue_duration)
     );
 
@@ -196,14 +197,15 @@ pub fn QueueSummary(
                 }
             },
 
-            span { class: "text-white/45", "{queue_summary}" }
-
             button {
-                class: "text-white/60 cursor-pointer",
+                class: "text-white/60 hover:text-white/85 cursor-pointer transition-colors",
+                "aria-label": i18n::t("jump_to_current_song").to_string(),
+                title: i18n::t("jump_to_current_song").to_string(),
                 onclick: move |_| {
-                    eval(&format!("window.__{layout}_scrollIntoView(null)"));
+                    let idx = *current_queue_index.peek();
+                    eval(&format!("window.__{layout}_queueJump?.({idx})"));
                 },
-                "{*current_queue_index.read() + 1}/{queue_count}"
+                "{queue_summary}"
             }
         }
     }
