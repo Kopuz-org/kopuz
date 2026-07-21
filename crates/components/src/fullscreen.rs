@@ -33,7 +33,8 @@ fn ProgressBarControl(
 
     rsx! {
         div {
-            class: "w-full mb-4",
+            class: "w-full mb-3",
+            style: "max-width: 640px;",
             div {
                 class: "flex items-center gap-3",
                 span { class: "text-xs text-white/70 font-mono", style: "width: 50px; text-align: left;", "{fmt_time(display_progress)}" }
@@ -92,7 +93,7 @@ fn VolumeControl(
     rsx! {
         div {
             class: "flex items-center gap-5 w-full",
-            style: "max-width: 520px;",
+            style: "max-width: 640px;",
             i { class: "fa-solid fa-volume-low text-white/40" }
             div {
                 class: "flex-1 cursor-pointer relative",
@@ -153,7 +154,8 @@ fn PlaybackControl(mut is_playing: Signal<bool>) -> Element {
 
     rsx! {
         div {
-            class: "flex items-center justify-between w-full mb-5",
+            class: "flex items-center justify-between w-full mb-3",
+            style: "max-width: 640px;",
             button {
                 class: format!("{} transition-all active:scale-95 relative flex-shrink-0", if *ctrl.shuffle.read() { "text-white" } else { "text-white/70 hover:text-white" }),
                 onclick: move |_| ctrl.toggle_shuffle(),
@@ -256,8 +258,9 @@ fn TrackMetadata(
         }
 
         div {
-            class: "flex flex-col items-start w-full mb-2",
-            h1 { class: "text-3xl font-bold text-white mb-2 line-clamp-2 w-full", "{current_song_title}" }
+            class: "flex flex-col items-start w-full mb-1",
+            style: "max-width: 640px;",
+            h1 { class: "text-3xl font-bold text-white mb-1 line-clamp-2 w-full", "{current_song_title}" }
             div {
                 class: "flex flex-wrap items-center gap-x-2 gap-y-1 w-full",
                 button {
@@ -292,7 +295,8 @@ fn TrackMetadata(
         }
 
         div {
-            class: "flex items-center gap-4 text-xs text-white/60 mb-4 w-full",
+            class: "flex items-center gap-4 text-xs text-white/60 mb-3 w-full",
+            style: "max-width: 640px;",
             if current_song_bitrate() > 0 {
                 span { style: "font-size: 10px;", "{current_song_bitrate} kbps" }
             }
