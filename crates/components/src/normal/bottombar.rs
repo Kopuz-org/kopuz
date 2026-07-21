@@ -123,11 +123,12 @@ pub fn BottombarNormal(
     } else {
         ""
     };
-    let bg_class = if config.read().cover_art_background {
-        "bg-black/40"
-    } else {
-        "bg-black/60"
-    };
+    let bg_class =
+        if config.read().cover_art_background || !config.read().custom_background_path.is_empty() {
+            "bg-black/40"
+        } else {
+            "bg-black/60"
+        };
 
     let is_radio = *current_song_duration.read() == u64::MAX;
 

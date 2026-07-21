@@ -1621,7 +1621,10 @@ fn App() -> Element {
 
     let background_style = use_memo(move || {
         let conf = config.read();
-        if conf.theme == "album-art" && !conf.cover_art_background {
+        if conf.theme == "album-art"
+            && !conf.cover_art_background
+            && conf.custom_background_path.is_empty()
+        {
             utils::color::get_background_style(palette.read().as_deref())
         } else {
             "background-color: var(--color-black); background-image: none;".to_string()
@@ -1629,12 +1632,16 @@ fn App() -> Element {
     });
 
     let cover_background = use_memo(move || {
-        if config.read().cover_art_background {
-            let url = current_song_cover_url.read().clone();
-            (!url.is_empty()).then_some(url)
-        } else {
-            None
+        let conf = config.read();
+        if !conf.custom_background_path.is_empty() {
+            let path = std::path::PathBuf::from(&conf.custom_background_path);
+            return utils::format_artwork_url(Some(&path)).map(|url| url.as_ref().to_string());
         }
+        if conf.cover_art_background {
+            let url = current_song_cover_url.read().clone();
+            return (!url.is_empty()).then_some(url);
+        }
+        None
     });
 
     let reduce_animations = use_memo(move || config.read().reduce_animations);

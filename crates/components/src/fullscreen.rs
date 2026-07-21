@@ -496,7 +496,10 @@ pub fn Fullscreen(
 
     let background_style = use_memo(move || {
         let conf = config.read();
-        if conf.theme == "album-art" && !conf.cover_art_background {
+        if conf.theme == "album-art"
+            && !conf.cover_art_background
+            && conf.custom_background_path.is_empty()
+        {
             utils::color::get_background_style(palette.read().as_deref())
         } else {
             "background-color: var(--color-black); background-image: none;".to_string()
@@ -504,12 +507,16 @@ pub fn Fullscreen(
     });
 
     let cover_background = use_memo(move || {
-        if config.read().cover_art_background {
-            let url = current_song_cover_url.read().clone();
-            (!url.is_empty()).then_some(url)
-        } else {
-            None
+        let conf = config.read();
+        if !conf.custom_background_path.is_empty() {
+            let path = std::path::PathBuf::from(&conf.custom_background_path);
+            return utils::format_artwork_url(Some(&path)).map(|url| url.as_ref().to_string());
         }
+        if conf.cover_art_background {
+            let url = current_song_cover_url.read().clone();
+            return (!url.is_empty()).then_some(url);
+        }
+        None
     });
 
     let items = {
@@ -620,7 +627,14 @@ pub fn Fullscreen(
             }
 
             div {
-                class: if use_player_bar { "flex flex-1 overflow-hidden pb-24" } else { "flex flex-1 overflow-hidden" },
+                class: if use_player_bar {
+                    match config.read().player_bar_position {
+                        config::PlayerBarPosition::Top => "flex flex-1 overflow-hidden pt-24",
+                        config::PlayerBarPosition::Bottom => "flex flex-1 overflow-hidden pb-24",
+                    }
+                } else {
+                    "flex flex-1 overflow-hidden"
+                },
 
                 div {
                     class: "flex flex-col items-center justify-center p-8 lg:p-12 relative flex-shrink-0 overflow-hidden min-h-0",

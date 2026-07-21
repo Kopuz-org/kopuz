@@ -51,18 +51,23 @@ pub fn QuickSearch(
         },
     );
 
-    let play_selected = use_callback(move |_: ()| {
+    let play_index = use_callback(move |index: usize| {
         let (track, fallback) = {
             let list = cached.peek();
-            let sel = (*selected.peek()).min(list.len().saturating_sub(1));
             (
-                list.get(sel).map(|(t, _)| t.clone()),
+                list.get(index).map(|(t, _)| t.clone()),
                 list.iter().map(|(t, _)| t.clone()).collect::<Vec<_>>(),
             )
         };
         if let Some(track) = track {
             play_track.call((track, fallback));
         }
+    });
+
+    let play_selected = use_callback(move |_: ()| {
+        let len = cached.peek().len();
+        let sel = (*selected.peek()).min(len.saturating_sub(1));
+        play_index.call(sel);
     });
 
     use_effect(move || {
@@ -103,6 +108,7 @@ pub fn QuickSearch(
                         oninput: move |evt| {
                             selected.set(0);
                             pending_play.set(false);
+                            results_ready.set(false);
                             let value = evt.value();
                             input_text.set(value.clone());
                             let debounce_gen = debounce_gen.clone();
@@ -115,11 +121,16 @@ pub fn QuickSearch(
                             });
                         },
                         onkeydown: move |evt| {
+                            let mods = evt.modifiers();
+                            if (mods.meta() || mods.ctrl())
+                                && matches!(&evt.key(), Key::Character(s) if s.eq_ignore_ascii_case("k"))
+                            {
+                                return;
+                            }
                             match evt.key() {
                                 Key::Escape => show.set(false),
                                 Key::Enter => {
-                                    let has_results = !cached.peek().is_empty();
-                                    if has_results {
+                                    if *results_ready.peek() && !cached.peek().is_empty() {
                                         play_selected.call(());
                                     } else {
                                         let text = input_text.peek().clone();
@@ -155,9 +166,6 @@ pub fn QuickSearch(
                         class: "py-2 max-h-96 overflow-y-auto",
                         for (i, (track, cover_url)) in top.iter().enumerate() {
                             {
-                                let track_click = track.clone();
-                                let fallback: Vec<reader::Track> =
-                                    cached.read().iter().map(|(t, _)| t.clone()).collect();
                                 rsx! {
                                     div {
                                         key: "{track.id.uid()}",
@@ -167,7 +175,7 @@ pub fn QuickSearch(
                                             "flex items-center gap-3 px-4 py-2 hover:bg-white/5 cursor-pointer"
                                         },
                                         onmouseenter: move |_| selected.set(i),
-                                        onclick: move |_| play_track.call((track_click.clone(), fallback.clone())),
+                                        onclick: move |_| play_index.call(i),
                                         if config.read().show_row_images {
                                             div {
                                                 class: "w-9 h-9 bg-white/5 rounded overflow-hidden shrink-0 flex items-center justify-center",

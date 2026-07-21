@@ -842,6 +842,8 @@ pub fn QueueListView(
             if !auto_sync() {
                 button {
                     class: "absolute bottom-4 right-4 z-10 flex items-center justify-center w-9 h-9 rounded-full bg-black/40 hover:bg-black/60 backdrop-blur text-white/90 shadow-lg ring-1 ring-white/10 transition-colors",
+                    "aria-label": i18n::t("jump_to_current_song").to_string(),
+                    title: i18n::t("jump_to_current_song").to_string(),
                     onclick: move |_| auto_sync.set(true),
                     svg {
                         class: "w-5 h-5",

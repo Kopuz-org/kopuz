@@ -685,6 +685,11 @@ pub struct AppConfig {
     /// Blur radius of the cover art background, in pixels (0 = sharp).
     #[serde(default)]
     pub cover_art_blur: u8,
+    /// Absolute path to a user-chosen image used as the app background,
+    /// overriding both the theme background and the cover art background.
+    /// Empty = unset. Shares the darkening/blur treatment with cover art.
+    #[serde(default)]
+    pub custom_background_path: String,
     /// Opt-in chrome/Perfetto performance trace. Read at startup (the
     /// subscriber is built once), so a change needs a restart. Adds runtime
     /// overhead — surfaced with a warning in settings.
@@ -904,6 +909,7 @@ impl Default for AppConfig {
             cover_art_background: false,
             cover_art_darkening: default_cover_art_darkening(),
             cover_art_blur: 0,
+            custom_background_path: String::new(),
             tracing_enabled: false,
             auto_check_updates: default_auto_check_updates(),
             minimize_to_tray: false,
