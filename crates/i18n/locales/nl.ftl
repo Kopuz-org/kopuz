@@ -422,7 +422,6 @@ radio_no_stations_match = Geen stations komen overeen met je zoekopdracht
 radio_station_col = Station
 radio_description_col = Beschrijving
 radio_streams_col = Streams
-radio_play = Afspelen
 radio_listen_moe_desc = Anime- en Koreaanse popmuziek, 24/7.
 radio_j1_desc = Actuele hits en klassiekers uit Japan.
 radio_doujinstyle_desc = Doujin-muziek, soundtracks van videogames en meer.

@@ -413,7 +413,6 @@ radio_no_stations_match = Aramanızla eşleşen istasyon yok
 radio_station_col = İstasyon
 radio_description_col = Açıklama
 radio_streams_col = Yayınlar
-radio_play = Oynat
 radio_listen_moe_desc = Anime ve Kore pop müziği, 7/24.
 radio_j1_desc = Japonya'dan güncel liste başı şarkılar ve klasikler.
 radio_doujinstyle_desc = Doujin müziği, video oyunu müzikleri ve daha fazlası.

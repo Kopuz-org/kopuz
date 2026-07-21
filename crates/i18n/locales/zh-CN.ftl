@@ -413,7 +413,6 @@ radio_no_stations_match = 没有与您的搜索匹配的电台
 radio_station_col = 电台
 radio_description_col = 描述
 radio_streams_col = 流
-radio_play = 播放
 radio_listen_moe_desc = 动漫和韩国流行音乐，24/7。
 radio_j1_desc = 来自日本的当前热门歌曲和经典歌曲。
 radio_doujinstyle_desc = 同人音乐，视频游戏原声带等。

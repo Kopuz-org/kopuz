@@ -422,7 +422,6 @@ radio_no_stations_match = Inga stationer matchar din sökning
 radio_station_col = Station
 radio_description_col = Beskrivning
 radio_streams_col = Strömmar
-radio_play = Spela
 radio_listen_moe_desc = Anime- och koreansk popmusik, dygnet runt.
 radio_j1_desc = Aktuella topplåtar och klassiska låtar från Japan.
 radio_doujinstyle_desc = Doujin-musik, soundtrack från TV-spel och mer.

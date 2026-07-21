@@ -413,7 +413,6 @@ radio_no_stations_match = Немає станцій, що відповідают
 radio_station_col = Станція
 radio_description_col = Опис
 radio_streams_col = Потоки
-radio_play = Грати
 radio_listen_moe_desc = Аніме та корейська поп-музика, 24/7.
 radio_j1_desc = Сучасні хіти та класичні пісні з Японії.
 radio_doujinstyle_desc = Додзін-музика, саундтреки до відеоігор та інше.

@@ -422,7 +422,6 @@ radio_no_stations_match = Không có đài nào khớp với tìm kiếm
 radio_station_col = Đài
 radio_description_col = Mô tả
 radio_streams_col = Luồng
-radio_play = Phát
 radio_listen_moe_desc = Nhạc anime và K-pop, 24/7.
 radio_j1_desc = Các bản hit hiện tại và bài hát kinh điển từ Nhật Bản.
 radio_doujinstyle_desc = Nhạc doujin, nhạc game và hơn thế nữa.

@@ -413,7 +413,6 @@ radio_no_stations_match = Nincs a keresésnek megfelelő állomás
 radio_station_col = Állomás
 radio_description_col = Leírás
 radio_streams_col = Folyamok
-radio_play = Lejátszás
 radio_listen_moe_desc = Anime és koreai popzene, 24/7.
 radio_j1_desc = Aktuális slágerek és klasszikus dalok Japánból.
 radio_doujinstyle_desc = Doujin zene, videojátékok zenéi és még sok más.

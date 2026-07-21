@@ -413,7 +413,6 @@ radio_no_stations_match = 검색과 일치하는 스테이션이 없습니다
 radio_station_col = 스테이션
 radio_description_col = 설명
 radio_streams_col = 스트림
-radio_play = 재생
 radio_listen_moe_desc = 애니메이션 및 한국 팝 음악, 24/7.
 radio_j1_desc = 일본의 최신 차트 히트곡 및 클래식 노래.
 radio_doujinstyle_desc = 동인 음악, 비디오 게임 사운드트랙 등.

@@ -413,7 +413,6 @@ radio_no_stations_match = אין תחנות התואמות לחיפוש שלך
 radio_station_col = תחנה
 radio_description_col = תיאור
 radio_streams_col = זרמים
-radio_play = נגן
 radio_listen_moe_desc = מוזיקת אנימה ופופ קוריאני, 24/7.
 radio_j1_desc = להיטי מצעדים שירים קלאסיים מיפן.
 radio_doujinstyle_desc = מוזיקת דוג'ין, פסקולים של משחקי וידאו ועוד.

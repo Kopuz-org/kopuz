@@ -413,7 +413,6 @@ radio_no_stations_match = ilo kalama ala li sama wile sina
 radio_station_col = ilo kalama
 radio_description_col = sona
 radio_streams_col = linja kalama
-radio_play = o kalama
 radio_listen_moe_desc = kalama musi pi ma Nijon en ma Kanto.
 radio_j1_desc = kalama musi suli pi ma Nijon.
 radio_doujinstyle_desc = kalama musi pi musi sitelen.

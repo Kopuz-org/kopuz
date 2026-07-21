@@ -422,7 +422,6 @@ radio_no_stations_match = Walang istasyong tumugma sa iyong paghahanap
 radio_station_col = Istasyon
 radio_description_col = Deskripsyon
 radio_streams_col = Mga Stream
-radio_play = I-play
 radio_listen_moe_desc = Musikang anime at K-pop, 24/7.
 radio_j1_desc = Kasalukuyang chart hits at mga klasikong kanta mula sa Japan.
 radio_doujinstyle_desc = Doujin music, soundtrack ng video game, at marami pa.

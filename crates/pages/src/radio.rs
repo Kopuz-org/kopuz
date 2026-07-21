@@ -399,12 +399,12 @@ pub fn Radio(props: RadioProps) -> Element {
                 } else {
                     // Normal
                     if has_custom {
-                        div { class: "grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8",
+                        div { class: "grid grid-cols-1 lg:grid-cols-2 gap-3 mb-8",
                             for station in filtered.iter() {
                                 div {
                                     key: "{station.id}",
-                                    class: "group relative rounded-lg overflow-hidden border transition-all duration-300 cursor-pointer hover:border-white/15",
-                                    style: "border-color: rgba(255,255,255,0.06); background: rgba(255,255,255,0.03);",
+                                    class: "group flex items-start gap-4 p-4 rounded-lg border transition-colors cursor-pointer hover:bg-white/[0.02]",
+                                    style: "border-color: rgba(255,255,255,0.08);",
                                     onclick: {
                                         let station_id = station.id.clone();
                                         let stream_id = station.streams.first().map(|s| s.id.clone()).unwrap_or_default();
@@ -413,65 +413,50 @@ pub fn Radio(props: RadioProps) -> Element {
                                         }
                                     },
 
-                                    div { class: "p-5 flex items-start gap-4",
-                                        div {
-                                            class: "w-12 h-12 rounded-xl flex items-center justify-center shrink-0 transition-transform group-hover:scale-105",
-                                            style: "background: color-mix(in oklab, var(--color-indigo-500) 15%, transparent);",
-                                            i {
-                                                class: "{station.icon} text-xl",
-                                                style: "color: var(--color-indigo-400);",
+                                    div {
+                                        class: "w-11 h-11 rounded-md flex items-center justify-center shrink-0",
+                                        style: "background: rgba(255,255,255,0.05);",
+                                        i {
+                                            class: "{station.icon} text-lg",
+                                            style: "color: var(--color-slate-300);",
+                                        }
+                                    }
+
+                                    div { class: "flex-1 min-w-0",
+                                        h2 {
+                                            class: "text-base font-semibold text-white truncate",
+                                            "{i18n::t(&station.name)}"
+                                        }
+                                        p {
+                                            class: "text-xs mt-0.5 leading-relaxed line-clamp-2",
+                                            style: "color: var(--color-slate-400);",
+                                            "{i18n::t(&station.description)}"
+                                        }
+
+                                        if !station.tags.is_empty() {
+                                            p {
+                                                class: "text-xs mt-2 truncate",
+                                                style: "color: var(--color-slate-500);",
+                                                {station.tags.iter().take(4).cloned().collect::<Vec<_>>().join(" · ")}
                                             }
                                         }
 
-                                        div { class: "flex-1 min-w-0",
-                                            h2 {
-                                                class: "text-lg font-bold text-white mb-0.5 truncate",
-                                                "{i18n::t(&station.name)}"
-                                            }
-                                            p {
-                                                class: "text-xs mb-3 leading-relaxed",
-                                                style: "color: var(--color-slate-400);",
-                                                "{i18n::t(&station.description)}"
-                                            }
-
-                                            if !station.tags.is_empty() {
-                                                div { class: "flex flex-wrap items-center gap-1.5 mb-3",
-                                                    for tag in station.tags.iter().take(4) {
-                                                        span {
-                                                            class: "px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 whitespace-nowrap",
-    style: "background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent); border: 1px solid color-mix(in oklab, var(--color-indigo-500) 25%, transparent); color: var(--color-indigo-400);",
-                                                            i { class: "fa-solid fa-music text-xs" }
-                                                            "{tag}"
-                                                        }
+                                        if station.streams.len() > 1 {
+                                            div { class: "flex flex-wrap items-center gap-2 mt-2.5",
+                                                for stream in &station.streams {
+                                                    button {
+                                                        class: "px-3 py-1 rounded-md text-xs font-medium border transition-colors hover:bg-white/5 hover:text-white",
+                                                        style: "color: var(--color-slate-300); border-color: rgba(255,255,255,0.12);",
+                                                        onclick: {
+                                                            let station_id = station.id.clone();
+                                                            let stream_id = stream.id.clone();
+                                                            move |evt: MouseEvent| {
+                                                                evt.stop_propagation();
+                                                                ctrl.play_radio(&station_id, &stream_id);
+                                                            }
+                                                        },
+                                                        "{i18n::t(&stream.name)}"
                                                     }
-                                                }
-                                            }
-
-                                            if station.streams.len() > 1 {
-                                                div { class: "flex flex-wrap items-center gap-2",
-                                                    for stream in &station.streams {
-                                                        button {
-                                                            class: "px-3 py-1.5 rounded-lg text-xs font-medium transition-all duration-200 flex items-center gap-1.5 hover:scale-[1.02] active:scale-95 whitespace-nowrap",
-                                                            style: "background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent); border: 1px solid color-mix(in oklab, var(--color-indigo-500) 25%, transparent); color: var(--color-indigo-400);",
-                                                            onclick: {
-                                                                let station_id = station.id.clone();
-                                                                let stream_id = stream.id.clone();
-                                                                move |evt: MouseEvent| {
-                                                                    evt.stop_propagation();
-                                                                    ctrl.play_radio(&station_id, &stream_id);
-                                                                }
-                                                            },
-                                                            i { class: "{stream.icon.as_deref().unwrap_or(\"fa-solid fa-play\")} text-xs" }
-                                                            "{i18n::t(&stream.name)}"
-                                                        }
-                                                    }
-                                                }
-                                            } else {
-                                                div {
-                                                    class: "flex items-center gap-2 text-sm font-medium",
-                                                    style: "color: var(--color-indigo-400);",
-                                                    i { class: "fa-solid fa-play text-xs" }
-                                                    "{i18n::t(\"radio_play\")}"
                                                 }
                                             }
                                         }
@@ -648,12 +633,12 @@ pub fn Radio(props: RadioProps) -> Element {
                             }
                         } else {
                             rsx! {
-                                div { class: "grid grid-cols-1 lg:grid-cols-2 gap-4",
+                                div { class: "grid grid-cols-1 lg:grid-cols-2 gap-3",
                                     for st in results.iter() {
                                         div {
                                             key: "{st.stationuuid}",
-                                            class: "group relative rounded-lg overflow-hidden border transition-all duration-300 cursor-pointer hover:border-white/15",
-                                            style: "border-color: rgba(255,255,255,0.06); background: rgba(255,255,255,0.03);",
+                                            class: "group flex items-start gap-4 p-4 rounded-lg border transition-colors cursor-pointer hover:bg-white/[0.02]",
+                                            style: "border-color: rgba(255,255,255,0.08);",
                                             onclick: {
                                                 let st = st.clone();
                                                 let mut registry_sig = registry_sig;
@@ -662,72 +647,59 @@ pub fn Radio(props: RadioProps) -> Element {
                                                 }
                                             },
 
-                                            div { class: "p-5 flex items-start gap-4",
-                                                if st.favicon.starts_with("https://") {
-                                                    img {
-                                                        src: "{st.favicon}",
-                                                        class: "w-12 h-12 rounded-xl object-cover shrink-0 transition-transform group-hover:scale-105",
-                                                        style: "background: rgba(255,255,255,0.05);",
-                                                        decoding: "async", loading: "lazy",
-                                                    }
-                                                } else {
-                                                    div {
-                                                        class: "w-12 h-12 rounded-xl flex items-center justify-center shrink-0 transition-transform group-hover:scale-105",
-                                                        style: "background: color-mix(in oklab, var(--color-indigo-500) 15%, transparent);",
-                                                        i {
-                                                            class: "fa-solid fa-radio text-xl",
-                                                            style: "color: var(--color-indigo-400);",
-                                                        }
+                                            if st.favicon.starts_with("https://") {
+                                                img {
+                                                    src: "{st.favicon}",
+                                                    class: "w-11 h-11 rounded-md object-cover shrink-0",
+                                                    style: "background: rgba(255,255,255,0.05);",
+                                                    decoding: "async", loading: "lazy",
+                                                }
+                                            } else {
+                                                div {
+                                                    class: "w-11 h-11 rounded-md flex items-center justify-center shrink-0",
+                                                    style: "background: rgba(255,255,255,0.05);",
+                                                    i {
+                                                        class: "fa-solid fa-radio text-lg",
+                                                        style: "color: var(--color-slate-300);",
                                                     }
                                                 }
+                                            }
 
-                                                div { class: "flex-1 min-w-0",
-                                                    h2 {
-                                                        class: "text-lg font-bold text-white mb-0.5 truncate",
-                                                        "{st.name.trim()}"
-                                                    }
+                                            div { class: "flex-1 min-w-0",
+                                                h2 {
+                                                    class: "text-base font-semibold text-white truncate",
+                                                    "{st.name.trim()}"
+                                                }
+                                                p {
+                                                    class: "text-xs mt-0.5 leading-relaxed truncate",
+                                                    style: "color: var(--color-slate-400);",
+                                                    "{browser::station_detail(st)}"
+                                                }
+                                                if st.tags.split(',').any(|t| !t.trim().is_empty()) {
                                                     p {
-                                                        class: "text-xs mb-3 leading-relaxed truncate",
-                                                        style: "color: var(--color-slate-400);",
-                                                        "{browser::station_detail(st)}"
-                                                    }
-                                                    if st.tags.split(',').any(|t| !t.trim().is_empty()) {
-                                                        div { class: "flex flex-wrap items-center gap-1.5 mb-3",
-                                                            for tag in st.tags.split(',').map(str::trim).filter(|t| !t.is_empty()).take(4) {
-                                                                span {
-                                                                    class: "px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 whitespace-nowrap",
-    style: "background: color-mix(in oklab, var(--color-indigo-500) 12%, transparent); border: 1px solid color-mix(in oklab, var(--color-indigo-500) 25%, transparent); color: var(--color-indigo-400);",
-                                                                    i { class: "fa-solid fa-music text-xs" }
-                                                                    "{tag}"
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                    div {
-                                                        class: "flex items-center gap-2 text-sm font-medium",
-                                                        style: "color: var(--color-indigo-400);",
-                                                        i { class: "fa-solid fa-play text-xs" }
-                                                        "{i18n::t(\"radio_play\")}"
+                                                        class: "text-xs mt-2 truncate",
+                                                        style: "color: var(--color-slate-500);",
+                                                        {st.tags.split(',').map(str::trim).filter(|t| !t.is_empty()).take(4).collect::<Vec<_>>().join(" · ")}
                                                     }
                                                 }
+                                            }
 
-                                                button {
-                                                    class: "inline-flex items-center justify-center w-8 h-8 rounded-full transition-all shrink-0 hover:opacity-80",
-                                                    style: "background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.5);",
-                                                    onclick: {
-                                                        let st = st.clone();
-                                                        let mut registry_sig = registry_sig;
-                                                        let mut config = config;
-                                                        move |evt: MouseEvent| {
-                                                            evt.stop_propagation();
-                                                            toggle_pin_station(&mut config, &mut registry_sig, &st);
-                                                        }
-                                                    },
-                                                    if registry_sig.read().is_registry_station(&st.stationuuid) {
-                                                        i { class: "fa-solid fa-check text-xs" }
-                                                    } else {
-                                                        i { class: "fa-solid fa-plus text-xs" }
+                                            button {
+                                                class: "inline-flex items-center justify-center w-8 h-8 rounded-full transition-colors shrink-0 hover:bg-white/10",
+                                                style: "color: var(--color-slate-400);",
+                                                onclick: {
+                                                    let st = st.clone();
+                                                    let mut registry_sig = registry_sig;
+                                                    let mut config = config;
+                                                    move |evt: MouseEvent| {
+                                                        evt.stop_propagation();
+                                                        toggle_pin_station(&mut config, &mut registry_sig, &st);
                                                     }
+                                                },
+                                                if registry_sig.read().is_registry_station(&st.stationuuid) {
+                                                    i { class: "fa-solid fa-check text-xs" }
+                                                } else {
+                                                    i { class: "fa-solid fa-plus text-xs" }
                                                 }
                                             }
                                         }

@@ -422,7 +422,6 @@ radio_no_stations_match = Tidak ada stasiun yang sesuai dengan pencarian anda
 radio_station_col = Stasiun
 radio_description_col = Deskripsi
 radio_streams_col = Stream
-radio_play = Putar
 radio_listen_moe_desc = Anime and Musik pop Korea, 24/7.
 radio_j1_desc = Hits tangga lagu saat ini dan lagu klasik dari Jepang.
 radio_doujinstyle_desc = Doujin music, video game soundtracks, dan masih banyak lagi.

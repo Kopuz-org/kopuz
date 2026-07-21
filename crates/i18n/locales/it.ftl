@@ -415,7 +415,6 @@ radio_no_stations_match = Nessuna stazione radio conforme alle tue ricerche
 radio_station_col = Stazione
 radio_description_col = Descrizione
 radio_streams_col = Trasmissioni
-radio_play = Riproduci
 radio_listen_moe_desc = Musica pop coreana e anime, 24/7.
 radio_j1_desc = Successi attuali e canzoni classiche del Giappone.
 radio_doujinstyle_desc = Musica doujin, colonne sonore di videogiochi e altro.

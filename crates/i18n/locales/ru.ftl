@@ -414,7 +414,6 @@ radio_no_stations_match = Нет станций, соответствующих 
 radio_station_col = Станция
 radio_description_col = Описание
 radio_streams_col = Потоки
-radio_play = Играть
 radio_listen_moe_desc = Аниме и корейская поп-музыка, 24/7.
 radio_j1_desc = Современные хиты и классические песни из Японии.
 radio_doujinstyle_desc = Додзин-музыка, саундтреки к видеоиграм и многое другое.

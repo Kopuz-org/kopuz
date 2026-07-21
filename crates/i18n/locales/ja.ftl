@@ -419,7 +419,6 @@ radio_no_stations_match = 検索に一致するステーションはありませ
 radio_station_col = ステーション
 radio_description_col = 説明
 radio_streams_col = ストリーム
-radio_play = 再生
 radio_listen_moe_desc = アニメとK-Pop音楽を24時間年中無休で。
 radio_j1_desc = 日本の最新チャートヒットと名曲。
 radio_doujinstyle_desc = 同人音楽、ビデオゲームのサウンドトラックなど。

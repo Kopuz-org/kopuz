@@ -413,7 +413,6 @@ radio_no_stations_match = Niciun post nu corespunde căutării tale
 radio_station_col = Post
 radio_description_col = Descriere
 radio_streams_col = Fluxuri
-radio_play = Redare
 radio_listen_moe_desc = Muzică anime și k-pop, 24/7.
 radio_j1_desc = Hituri actuale și melodii clasice din Japonia.
 radio_doujinstyle_desc = Muzică doujin, coloane sonore de jocuri video și altele.

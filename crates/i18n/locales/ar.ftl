@@ -419,7 +419,6 @@ radio_no_stations_match = لا توجد محطات تطابق بحثك
 radio_station_col = محطة
 radio_description_col = الوصف
 radio_streams_col = البث
-radio_play = تشغيل
 radio_listen_moe_desc = موسيقى الأنمي والبوب الكوري، 24/7.
 radio_j1_desc = أحدث الأغاني الناجحة والأغاني الكلاسيكية من اليابان.
 radio_doujinstyle_desc = موسيقى الدوجين، الموسيقى التصويرية لألعاب الفيديو، والمزيد.
