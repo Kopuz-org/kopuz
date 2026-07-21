@@ -410,6 +410,13 @@ remove_cover = கவரை அகற்று
 
 # Radio Page
 radio_filter_stations = நிலையங்களை வடிகட்டு…
+radio_search_stations = நிலையங்களைத் தேடு…
+radio_selected = தேர்ந்தெடுக்கப்பட்டவை
+radio_top_stations = பிரபலமான நிலையங்கள்
+radio_search_results = தேடல் முடிவுகள்
+radio_powered_by = radio-browser.info மூலம் இயங்குகிறது
+radio_loading_stations = நிலையங்கள் ஏற்றப்படுகின்றன…
+radio_search_failed = radio-browser.info-ஐ அணுக முடியவில்லை
 radio_subtitle = நேரடி இணைய வானொலி ஸ்ட்ரீம்களைக் கேள்
 radio_no_stations_match = உங்கள் தேடலுடன் பொருந்தும் நிலையங்கள் இல்லை
 radio_station_col = நிலையம்

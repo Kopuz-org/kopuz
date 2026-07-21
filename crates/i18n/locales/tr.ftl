@@ -401,6 +401,13 @@ remove_cover = Kapağı kaldır
 
 # Radio Page
 radio_filter_stations = İstasyonları filtrele…
+radio_search_stations = İstasyon ara…
+radio_selected = Seçilenler
+radio_top_stations = Popüler istasyonlar
+radio_search_results = Arama sonuçları
+radio_powered_by = radio-browser.info tarafından desteklenmektedir
+radio_loading_stations = İstasyonlar yükleniyor…
+radio_search_failed = radio-browser.info'ya ulaşılamadı
 radio_subtitle = Canlı internet radyo yayınlarını dinleyin
 radio_no_stations_match = Aramanızla eşleşen istasyon yok
 radio_station_col = İstasyon

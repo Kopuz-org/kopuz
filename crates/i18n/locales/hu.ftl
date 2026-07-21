@@ -401,6 +401,13 @@ remove_cover = Borító eltávolítása
 
 # Radio Page
 radio_filter_stations = Állomások szűrése…
+radio_search_stations = Állomások keresése…
+radio_selected = Kiválasztott
+radio_top_stations = Népszerű állomások
+radio_search_results = Keresési találatok
+radio_powered_by = A radio-browser.info támogatásával
+radio_loading_stations = Állomások betöltése…
+radio_search_failed = A radio-browser.info nem érhető el
 radio_subtitle = Hallgass élő internetes rádióállomásokat
 radio_no_stations_match = Nincs a keresésnek megfelelő állomás
 radio_station_col = Állomás

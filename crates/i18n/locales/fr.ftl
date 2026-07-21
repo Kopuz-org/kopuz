@@ -402,6 +402,13 @@ remove_cover = Retirer la pochette
 
 # Radio Page
 radio_filter_stations = Filtrer les stations…
+radio_search_stations = Rechercher des stations…
+radio_selected = Sélection
+radio_top_stations = Stations populaires
+radio_search_results = Résultats de recherche
+radio_powered_by = Propulsé par radio-browser.info
+radio_loading_stations = Chargement des stations… 
+radio_search_failed = Impossible de joindre radio-browser.info!
 radio_subtitle = Écoutez des stations de radio Internet en direct
 radio_no_stations_match = Aucune station ne correspond à votre recherche
 radio_station_col = Station

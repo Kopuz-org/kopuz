@@ -400,6 +400,13 @@ remove_cover = Remover capa
 
 # Radio Page
 radio_filter_stations = Filtrar estações…
+radio_search_stations = Procurar estações…
+radio_selected = Seleção
+radio_top_stations = Estações populares
+radio_search_results = Resultados da pesquisa
+radio_powered_by = Com tecnologia de radio-browser.info
+radio_loading_stations = A carregar estações…
+radio_search_failed = Não foi possível contactar o radio-browser.info
 radio_subtitle = Sintoniza estações de rádio na internet em direto
 radio_no_stations_match = Nenhuma estação corresponde à tua pesquisa
 radio_station_col = Estação

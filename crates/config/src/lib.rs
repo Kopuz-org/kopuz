@@ -19,10 +19,6 @@ pub enum FetchStrategy {
     LastFmOnly,
 }
 
-// Maybe host on the website?
-pub const DEFAULT_REGISTRY_URL: &str =
-    "https://raw.githubusercontent.com/Kopuz-org/kopuz/refs/heads/master/radio-registry/index.json";
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RegistryEntry {
     pub url: String,
@@ -31,6 +27,9 @@ pub struct RegistryEntry {
     #[serde(default)]
     pub is_default: bool,
 }
+
+pub const DEFAULT_REGISTRY_URL: &str =
+    "https://raw.githubusercontent.com/Kopuz-org/kopuz/refs/heads/master/radio-registry/index.json";
 
 pub fn default_radio_registries() -> Vec<RegistryEntry> {
     vec![RegistryEntry {
@@ -702,6 +701,9 @@ pub struct AppConfig {
     pub cover_fetch_strategy: FetchStrategy,
     #[serde(default = "default_radio_registries")]
     pub radio_registries: Vec<RegistryEntry>,
+    /// Station manifests (JSON) pinned from the radio browser.
+    #[serde(default)]
+    pub pinned_stations: Vec<String>,
     #[serde(default)]
     pub prefer_local_lyrics: bool,
     #[serde(default)]
@@ -875,6 +877,7 @@ impl Default for AppConfig {
             auto_fetch_covers: false,
             cover_fetch_strategy: FetchStrategy::default(),
             radio_registries: default_radio_registries(),
+            pinned_stations: Vec::new(),
             prefer_local_lyrics: false,
             enable_musixmatch_lyrics: false,
         }

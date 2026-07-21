@@ -45,10 +45,14 @@ impl StreamBuffer {
     /// (not `Handle::current()`) because construction happens on the engine's
     /// decode worker — a plain thread with no runtime in scope. The sync reader
     /// side uses `blocking_lock()` and needs no runtime.
+    ///
+    /// `icy_tx`: when set, ICY metadata is requested, stripped from the
+    /// audio, and published on the channel.
     pub fn with_user_agent(
         url: String,
         is_radio: bool,
         user_agent: Option<String>,
+        icy_tx: Option<tokio::sync::watch::Sender<crate::icy::IcyMeta>>,
         runtime: tokio::runtime::Handle,
     ) -> Self {
         let prebuffer_size = if is_radio {
@@ -82,7 +86,49 @@ impl StreamBuffer {
                     .build()
                     .unwrap_or_else(|_| reqwest::Client::new());
 
-                match client.get(&url).send().await {
+                // Radio directories often hand out a playlist (.pls/.m3u par example)
+                // instead of the stream; follow it to its first entry.
+                let mut url = url;
+                let mut hops = 0u8;
+                let result = loop {
+                    if hops > 3 {
+                        break Err("too many playlist redirects".to_string());
+                    }
+                    hops += 1;
+                    let mut request = client.get(&url);
+                    if icy_tx.is_some() {
+                        request = request.header("Icy-MetaData", "1");
+                    }
+                    match request.send().await {
+                        Ok(response) if response.status().is_success() => {
+                            let content_type = response
+                                .headers()
+                                .get("content-type")
+                                .and_then(|v| v.to_str().ok());
+                            if !crate::playlist::is_playlist(content_type, response.url().path()) {
+                                break Ok(response);
+                            }
+                            match response.text().await.ok().as_deref().and_then(|text| {
+                                crate::playlist::first_stream_url(text)
+                                    // Playlist 2 playlist is HLS or a loop;
+                                    // not decodable, so stop here.
+                                    .filter(|next| !crate::playlist::is_playlist(None, next))
+                            }) {
+                                Some(next) => {
+                                    tracing::debug!(from = %url, to = %next, "resolved playlist to stream URL");
+                                    url = next;
+                                }
+                                None => {
+                                    break Err("playlist has no playable stream URL".to_string());
+                                }
+                            }
+                        }
+                        Ok(response) => break Err(format!("HTTP {}", response.status())),
+                        Err(e) => break Err(e.to_string()),
+                    }
+                };
+
+                match result {
                     Ok(mut response) => {
                         tracing::trace!(
                             status = %response.status(),
@@ -93,16 +139,6 @@ impl StreamBuffer {
                                 .and_then(|v| v.to_str().ok()),
                             "stream buffer HTTP response",
                         );
-                        if !response.status().is_success() {
-                            let (lock, notify) = &*state_clone;
-                            let mut state = lock.lock().await;
-                            state.error = Some(format!("HTTP {}", response.status()));
-                            state.done = true;
-                            state.prebuffer_ready = true;
-                            notify.notify_waiters();
-                            return;
-                        }
-
                         let total_size = response.content_length();
                         {
                             let (lock, notify) = &*state_clone;
@@ -111,13 +147,39 @@ impl StreamBuffer {
                             notify.notify_waiters();
                         }
 
+                        // De-interleave only if the server honours the
+                        // Icy-MetaData request.
+                        let mut icy = icy_tx.and_then(|tx| {
+                            let metaint = response
+                                .headers()
+                                .get("icy-metaint")
+                                .and_then(|v| v.to_str().ok())
+                                .and_then(|v| v.trim().parse::<usize>().ok())
+                                .filter(|m| *m > 0)?;
+                            tracing::debug!(metaint, "ICY metadata enabled for radio stream");
+                            Some((crate::icy::IcyDeinterleaver::new(metaint), tx))
+                        });
+
                         let mut total_buffered = 0usize;
+                        let mut audio_scratch = Vec::new();
 
                         while let Ok(Some(chunk)) = response.chunk().await {
                             if Arc::strong_count(&state_clone) == 1 {
                                 break;
                             }
-                            let chunk_len = chunk.len();
+
+                            let data: &[u8] = match icy.as_mut() {
+                                Some((parser, tx)) => {
+                                    audio_scratch.clear();
+                                    audio_scratch.reserve(chunk.len());
+                                    if let Some(meta) = parser.push(&chunk, &mut audio_scratch) {
+                                        tx.send_replace(meta);
+                                    }
+                                    &audio_scratch
+                                }
+                                None => &chunk,
+                            };
+                            let chunk_len = data.len();
 
                             if total_buffered + chunk_len > MAX_BUFFER_SIZE {
                                 let (lock, notify) = &*state_clone;
@@ -132,7 +194,7 @@ impl StreamBuffer {
                             {
                                 let (lock, notify) = &*state_clone;
                                 let mut state = lock.lock().await;
-                                state.buffer.extend_from_slice(&chunk);
+                                state.buffer.extend_from_slice(data);
                                 total_buffered += chunk_len;
 
                                 if !state.prebuffer_ready {

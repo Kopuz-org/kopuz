@@ -401,6 +401,13 @@ remove_cover = Elimină coperta
 
 # Radio Page
 radio_filter_stations = Filtrează stațiile…
+radio_search_stations = Caută stații…
+radio_selected = Selectate
+radio_top_stations = Stații populare
+radio_search_results = Rezultatele căutării
+radio_powered_by = Susținut de radio-browser.info
+radio_loading_stations = Se încarcă stațiile…
+radio_search_failed = Nu s-a putut contacta radio-browser.info
 radio_subtitle = Ascultă posturi de radio online live
 radio_no_stations_match = Niciun post nu corespunde căutării tale
 radio_station_col = Post

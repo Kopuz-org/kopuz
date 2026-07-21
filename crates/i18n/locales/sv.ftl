@@ -410,6 +410,13 @@ remove_cover = Ta bort omslag
 
 # Radio Page
 radio_filter_stations = Filtrera stationer…
+radio_search_stations = Sök stationer…
+radio_selected = Utvalda
+radio_top_stations = Populära stationer
+radio_search_results = Sökresultat
+radio_powered_by = Drivs av radio-browser.info
+radio_loading_stations = Läser in stationer…
+radio_search_failed = Kunde inte nå radio-browser.info
 radio_subtitle = Lyssna på direktsända internetradioströmmar
 radio_no_stations_match = Inga stationer matchar din sökning
 radio_station_col = Station
