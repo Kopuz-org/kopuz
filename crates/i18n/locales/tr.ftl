@@ -48,6 +48,7 @@ connectivity = Bağlantı
 discord_presence_paused = Discord durumu duraklatıldığında göster
 discord_presence_source = Medya kaynağını Discord durumunda göster
 reduce_animations = Animasyonları Azalt
+fullscreen_use_player_bar = Tam ekranda oynatıcı çubuğunu kontrol olarak kullan
 show_source_toggle = Sidebar'da Kaynağı Göster
 titlebar_mode = Başlık çubuğu
 titlebar_custom = Özel (uygulama tarafından çizilen)

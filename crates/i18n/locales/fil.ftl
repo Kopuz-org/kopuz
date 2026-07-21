@@ -63,6 +63,7 @@ connectivity = Koneksyon
 discord_presence_paused = Ipakita ang Naka-pause na Discord status
 discord_presence_source = Ipakita ang media source sa Discord status
 reduce_animations = Bawasan ang mga Animation
+fullscreen_use_player_bar = Gamitin ang player bar bilang mga kontrol sa fullscreen
 auto_check_updates = Awtomatikong Pag-check ng mga Update
 minimize_to_tray = I-minimize sa system tray
 show_source_toggle = Ipakita ang Source Toggle

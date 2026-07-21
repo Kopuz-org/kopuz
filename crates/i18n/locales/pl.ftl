@@ -48,6 +48,7 @@ connectivity = Łączność
 discord_presence_paused = Pokaż wstrzymany status Discord
 discord_presence_source = Pokaż źródło multimediów w statusie Discord
 reduce_animations = Ogranicz Animacje
+fullscreen_use_player_bar = Użyj paska odtwarzacza jako sterowania na pełnym ekranie
 show_source_toggle = Pokaż Przełącznik Źródła
 titlebar_mode = Pasek tytułu
 titlebar_custom = Niestandardowy (rysowany przez aplikację)

@@ -63,6 +63,7 @@ connectivity = Connectivity
 discord_presence_paused = Show paused Discord status
 discord_presence_source = Show media source in Discord status
 reduce_animations = Reduce Animations
+fullscreen_use_player_bar = Use player bar as fullscreen controls
 auto_check_updates = Auto Check Updates
 minimize_to_tray = Minimize to system tray
 show_source_toggle = Show Source Toggle

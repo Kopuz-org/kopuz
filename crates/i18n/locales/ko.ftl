@@ -48,6 +48,7 @@ connectivity = 연결
 discord_presence_paused = 일시정지한 Discord 상태 표시
 discord_presence_source = Discord 상태에 미디어 소스 표시
 reduce_animations = 애니메이션 줄이기
+fullscreen_use_player_bar = 전체 화면에서 플레이어 바를 컨트롤로 사용
 show_source_toggle = 소스 전환 표시
 titlebar_mode = 제목 표시줄
 titlebar_custom = 사용자 정의 (앱이 그린)

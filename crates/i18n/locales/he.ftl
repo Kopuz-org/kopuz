@@ -48,6 +48,7 @@ connectivity = קישוריות
 discord_presence_paused = הצגת סטטוס Discord במצב מושהה
 discord_presence_source = הצגת מקור המדיה בסטטוס Discord
 reduce_animations = הפחתת אנימציות
+fullscreen_use_player_bar = שימוש בסרגל הנגן כפקדים במסך מלא
 show_source_toggle = הצגת מקור
 titlebar_mode = סרגל כותרת
 titlebar_custom = מותאם אישית (מצויר על ידי האפליקציה)

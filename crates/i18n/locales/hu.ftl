@@ -48,6 +48,7 @@ connectivity = Kapcsolódás
 discord_presence_paused = Szüneteltetett Discord állapot megjelenítése
 discord_presence_source = Médiaforrás megjelenítése a Discord állapotban
 reduce_animations = Animációk csökkentése
+fullscreen_use_player_bar = Lejátszósáv használata teljes képernyős vezérlőként
 show_source_toggle = Forrás kapcsoló megjelenítése
 titlebar_mode = Címsor
 titlebar_custom = Egyéni (alkalmazás által rajzolt)

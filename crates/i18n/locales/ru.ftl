@@ -48,6 +48,7 @@ connectivity = Подключения
 discord_presence_paused = Показать статус Discord на паузе
 discord_presence_source = Показывать источник медиа в статусе Discord
 reduce_animations = Уменьшение анимаций
+fullscreen_use_player_bar = Использовать панель плеера как управление в полноэкранном режиме
 show_source_toggle = Показать переключатель источника
 titlebar_mode = Строка заголовка
 titlebar_custom = Пользовательский (рисует приложение)

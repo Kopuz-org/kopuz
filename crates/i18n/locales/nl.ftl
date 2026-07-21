@@ -63,6 +63,7 @@ connectivity = Connectiviteit
 discord_presence_paused = Gepauzeerde Discord-status tonen
 discord_presence_source = Mediabron tonen in Discord-status
 reduce_animations = Animaties verminderen
+fullscreen_use_player_bar = Spelerbalk gebruiken als volledigscherm-bediening
 auto_check_updates = Automatisch op updates controleren
 minimize_to_tray = Naar systeemvak minimaliseren
 show_source_toggle = Bronschakelaar tonen

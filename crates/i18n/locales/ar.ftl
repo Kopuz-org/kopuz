@@ -48,6 +48,7 @@ connectivity = الاتصال
 discord_presence_paused = إظهار حالة Discord عند الإيقاف المؤقت
 discord_presence_source = إظهار مصدر الوسائط في حالة Discord
 reduce_animations = تقليل الرسوم المتحركة
+fullscreen_use_player_bar = استخدام شريط المشغّل كعناصر تحكم في وضع ملء الشاشة
 show_source_toggle = إظهار إختيار تبديل المصدر
 titlebar_mode = شريط العنوان
 titlebar_custom = مخصص (يرسمه التطبيق)

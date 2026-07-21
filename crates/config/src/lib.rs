@@ -671,6 +671,10 @@ pub struct AppConfig {
     pub language: String,
     #[serde(default)]
     pub reduce_animations: bool,
+    /// When enabled, fullscreen mode hides its own transport controls and lets
+    /// the player bar act as the multimedia controller instead.
+    #[serde(default)]
+    pub fullscreen_use_player_bar: bool,
     /// Opt-in chrome/Perfetto performance trace. Read at startup (the
     /// subscriber is built once), so a change needs a restart. Adds runtime
     /// overhead — surfaced with a warning in settings.
@@ -880,6 +884,7 @@ impl Default for AppConfig {
             librefm_session_key: String::new(),
             language: default_language(),
             reduce_animations: false,
+            fullscreen_use_player_bar: false,
             tracing_enabled: false,
             auto_check_updates: default_auto_check_updates(),
             minimize_to_tray: false,

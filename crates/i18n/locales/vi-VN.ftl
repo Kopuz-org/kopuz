@@ -63,6 +63,7 @@ connectivity = Kết nối
 discord_presence_paused = Hiển thị trạng thái Discord khi tạm dừng
 discord_presence_source = Hiển thị nguồn phát trong trạng thái Discord
 reduce_animations = Giảm hiệu ứng động
+fullscreen_use_player_bar = Dùng thanh trình phát làm điều khiển toàn màn hình
 auto_check_updates = Tự động kiểm tra cập nhật
 minimize_to_tray = Thu nhỏ vào khay hệ thống
 show_source_toggle = Hiển thị nút chuyển nguồn

@@ -63,6 +63,7 @@ connectivity = இணைப்புத்தன்மை
 discord_presence_paused = இடைநிறுத்தப்பட்ட Discord நிலையைக் காட்டு
 discord_presence_source = Discord நிலையில் மீடியா மூலத்தைக் காட்டு
 reduce_animations = அனிமேஷன்களைக் குறை
+fullscreen_use_player_bar = Use player bar as fullscreen controls
 auto_check_updates = புதுப்பிப்புகளைத் தானாகச் சரிபார்
 minimize_to_tray = கணினி தட்டுக்குச் சிறிதாக்கு
 show_source_toggle = மூல மாற்றியைக் காட்டு

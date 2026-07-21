@@ -34,7 +34,6 @@ fn ProgressBarControl(
     rsx! {
         div {
             class: "w-full mb-6",
-            style: "max-width: 520px;",
             div {
                 class: "flex items-center gap-3",
                 span { class: "text-xs text-white/70 font-mono", style: "width: 50px; text-align: left;", "{fmt_time(display_progress)}" }
@@ -155,7 +154,6 @@ fn PlaybackControl(mut is_playing: Signal<bool>) -> Element {
     rsx! {
         div {
             class: "flex items-center justify-between w-full mb-8",
-            style: "max-width: 520px;",
             button {
                 class: format!("{} transition-all active:scale-95 relative flex-shrink-0", if *ctrl.shuffle.read() { "text-white" } else { "text-white/70 hover:text-white" }),
                 onclick: move |_| ctrl.toggle_shuffle(),
@@ -229,14 +227,14 @@ fn TrackMetadata(
 
     rsx! {
         div {
-            class: "rounded-lg overflow-hidden mb-8",
-            style: "width: 100%; max-width: 520px; aspect-ratio: 1/1; box-shadow: 0 25px 60px -15px rgba(0,0,0,0.55);",
+            class: "flex-1 min-h-0 w-full flex items-center justify-center mb-8",
             {
                 let cover = current_song_cover_url.read();
                 if cover.is_empty() {
                     rsx! {
                         div {
-                            class: "w-full h-full flex items-center justify-center bg-black/30",
+                            class: "rounded-lg overflow-hidden h-full flex items-center justify-center bg-black/30",
+                            style: "max-width: 100%; aspect-ratio: 1/1; box-shadow: 0 25px 60px -15px rgba(0,0,0,0.55);",
                             i { class: "fa-solid fa-music text-5xl text-white/20" }
                         }
                     }
@@ -249,7 +247,8 @@ fn TrackMetadata(
                     rsx! {
                         img {
                             src: "{src}",
-                            class: "w-full h-full object-contain"
+                            class: "rounded-lg",
+                            style: "max-width: 100%; max-height: 100%; width: auto; height: auto; box-shadow: 0 25px 60px -15px rgba(0,0,0,0.55);",
                         }
                     }
                 }
@@ -258,7 +257,6 @@ fn TrackMetadata(
 
         div {
             class: "flex flex-col items-start w-full mb-2",
-            style: "max-width: 520px;",
             h1 { class: "text-3xl font-bold text-white mb-2 line-clamp-2 w-full", "{current_song_title}" }
             div {
                 class: "flex flex-wrap items-center gap-x-2 gap-y-1 w-full",
@@ -295,7 +293,6 @@ fn TrackMetadata(
 
         div {
             class: "flex items-center gap-4 text-xs text-white/50 mb-6 w-full",
-            style: "max-width: 520px;",
             if current_song_bitrate() > 0 {
                 span { style: "font-size: 10px;", "{current_song_bitrate} kbps" }
             }
@@ -392,6 +389,8 @@ pub fn Fullscreen(
 
     let ctrl = use_context::<PlayerController>();
     let config = use_context::<Signal<AppConfig>>();
+
+    let use_player_bar = !cfg!(target_os = "android") && config.read().fullscreen_use_player_bar;
 
     let mut lyrics: Signal<Option<Option<utils::lyrics::Lyrics>>> = use_signal(|| None);
     let mut fetch_gen: Signal<u32> = use_signal(|| 0);
@@ -603,11 +602,11 @@ pub fn Fullscreen(
             }
 
             div {
-                class: "flex flex-1 overflow-hidden",
+                class: if use_player_bar { "flex flex-1 overflow-hidden pb-24" } else { "flex flex-1 overflow-hidden" },
 
                 div {
-                    class: "flex flex-col items-center justify-center p-8 lg:p-12 relative flex-shrink-0 overflow-hidden",
-                    style: "width: 50%; max-width: 600px;",
+                    class: "flex flex-col items-center justify-center p-8 lg:p-12 relative flex-shrink-0 overflow-hidden min-h-0",
+                    style: "width: 50%;",
 
                     button {
                         class: "absolute top-8 left-8 text-white/30 hover:text-white transition-colors z-10",
@@ -624,13 +623,15 @@ pub fn Fullscreen(
                         current_song_bitrate,
                     }
 
-                    ProgressBarControl {
-                        current_song_duration,
-                        current_song_progress,
-                    }
+                    if !use_player_bar {
+                        ProgressBarControl {
+                            current_song_duration,
+                            current_song_progress,
+                        }
 
-                    PlaybackControl {
-                        is_playing
+                        PlaybackControl {
+                            is_playing
+                        }
                     }
                 }
 

@@ -48,6 +48,7 @@ connectivity = 连接
 discord_presence_paused = 显示暂停时的 Discord 状态
 discord_presence_source = 在 Discord 状态中显示媒体来源
 reduce_animations = 减少动画
+fullscreen_use_player_bar = 在全屏模式下使用播放栏作为控制
 show_source_toggle = 显示来源切换
 titlebar_mode = 标题栏
 titlebar_custom = 自定义（应用绘制）

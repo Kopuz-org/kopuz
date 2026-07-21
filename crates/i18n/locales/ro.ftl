@@ -48,6 +48,7 @@ connectivity = Conectivitate
 discord_presence_paused = Afișează statusul Discord în pauză
 discord_presence_source = Afișează sursa media în statusul Discord
 reduce_animations = Reducere Animații
+fullscreen_use_player_bar = Folosește bara de redare drept comenzi pe ecran complet
 show_source_toggle = Comutator Sursă
 titlebar_mode = Bară de titlu
 titlebar_custom = Personalizat (desenat de aplicație)

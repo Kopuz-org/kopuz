@@ -48,6 +48,7 @@ connectivity = 󱥩󱤬󱥭
 discord_presence_paused = 󱥄󱤮󱤉 󱤬󱥍󱤎󱦐󱥛 󱥫
 discord_presence_source = 󱥄󱤮󱤉 󱤎 󱤬 󱤬󱥍󱤎󱦐󱥛󱦜󱤜󱦝󱦑
 reduce_animations = 󱥄󱤨󱤉󱥩
+fullscreen_use_player_bar = Use player bar as fullscreen controls
 show_source_toggle = 󱥄󱤮󱤉󱤎󱤆
 titlebar_mode = 󱤤󱤎
 titlebar_custom = 󱤤󱥎󱤎

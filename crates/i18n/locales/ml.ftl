@@ -63,6 +63,7 @@ connectivity = കണക്റ്റിവിറ്റി
 discord_presence_paused = നിർത്തിയ Discord നില കാണിക്കുക
 discord_presence_source = Discord നിലയിൽ മീഡിയ ഉറവിടം കാണിക്കുക
 reduce_animations = ആനിമേഷനുകൾ കുറയ്ക്കുക
+fullscreen_use_player_bar = Use player bar as fullscreen controls
 auto_check_updates = അപ്‌ഡേറ്റുകൾ സ്വയം പരിശോധിക്കുക
 minimize_to_tray = സിസ്റ്റം ട്രേയിലേക്ക് ചെറുതാക്കുക
 show_source_toggle = ഉറവിട ടോഗിൾ കാണിക്കുക

@@ -48,6 +48,7 @@ connectivity = 接続
 discord_presence_paused = 一時停止中のDiscordステータスを表示
 discord_presence_source = Discordステータスにメディアソースを表示
 reduce_animations = アニメーションを減らす
+fullscreen_use_player_bar = 全画面表示でプレーヤーバーを操作に使う
 show_source_toggle = ソース切替を表示
 titlebar_mode = タイトルバー
 titlebar_custom = カスタム（アプリ描画）

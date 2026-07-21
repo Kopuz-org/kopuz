@@ -417,6 +417,17 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+                        if cfg!(not(target_os = "android")) {
+                            SettingItem {
+                                title: i18n::t("fullscreen_use_player_bar").to_string(),
+                                control: rsx! {
+                                    ToggleSetting {
+                                        enabled: config.read().fullscreen_use_player_bar,
+                                        on_change: move |val| config.write().fullscreen_use_player_bar = val,
+                                    }
+                                }
+                            }
+                        }
                         SettingItem {
                             title: i18n::t("auto_check_updates").to_string(),
                             control: rsx! {

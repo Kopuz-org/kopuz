@@ -63,6 +63,7 @@ connectivity = Uppkoppling
 discord_presence_paused = Visa pausad status i Discord
 discord_presence_source = Visa mediekälla i Discord-status
 reduce_animations = Minska animationer
+fullscreen_use_player_bar = Använd spelarfältet som helskärmskontroller
 auto_check_updates = Sök automatiskt efter uppdateringar
 minimize_to_tray = Minimera till systemfältet
 show_source_toggle = Visa växling för källa

@@ -117,46 +117,55 @@ pub fn BottombarNormal(
         PlayerBarPosition::Top => "border-b border-white/5",
     };
 
+    let bar_as_fullscreen = *is_fullscreen.read() && config.read().fullscreen_use_player_bar;
+    let lift_class = if bar_as_fullscreen {
+        "relative z-[60]"
+    } else {
+        ""
+    };
+
     let is_radio = *current_song_duration.read() == u64::MAX;
 
     rsx! {
         div {
-            class: "h-24 bg-black/60 {border_class} px-4 flex items-center justify-between select-text shrink-0",
+            class: "h-24 bg-black/60 {border_class} {lift_class} px-4 flex items-center justify-between select-text shrink-0",
 
             div {
                 class: "flex items-center gap-4 w-1/4",
-                div {
-                    class: "w-14 h-14 bg-white/5 rounded-md flex-shrink-0 overflow-hidden",
-                    if current_song_cover_url.read().is_empty() {
-                        div {
-                            class: "w-full h-full flex items-center justify-center",
-                            style: "font-size: 1.5em;",
-                            i { class: "fa-solid fa-music text-white/20" }
+                if !bar_as_fullscreen {
+                    div {
+                        class: "w-14 h-14 bg-white/5 rounded-md flex-shrink-0 overflow-hidden",
+                        if current_song_cover_url.read().is_empty() {
+                            div {
+                                class: "w-full h-full flex items-center justify-center",
+                                style: "font-size: 1.5em;",
+                                i { class: "fa-solid fa-music text-white/20" }
+                            }
+                        } else {
+                            img { src: "{current_song_cover_url}", class: "w-full h-full object-cover" }
                         }
-                    } else {
-                        img { src: "{current_song_cover_url}", class: "w-full h-full object-cover" }
                     }
-                }
-                div {
-                    class: "flex flex-col min-w-0",
-                    span {
-                        class: "text-sm font-bold text-white/90 truncate hover:underline cursor-pointer",
-                        onclick: move |_| {
-                            let album_id = current_track_snapshot
-                                .as_ref()
-                                .map(|track| track.album_id.clone())
-                                .unwrap_or_default();
-                            nav_ctrl.navigate_to_album(album_id);
-                        },
-                        "{current_song_title}"
-                    }
-                    span {
-                        class: "text-xs text-slate-400 truncate hover:text-white/70 hover:underline cursor-pointer",
-                        onclick: move |_| {
-                            let artist = current_song_artist.read().clone();
-                            nav_ctrl.navigate_to_artist(artist);
-                        },
-                        "{current_song_artist}"
+                    div {
+                        class: "flex flex-col min-w-0",
+                        span {
+                            class: "text-sm font-bold text-white/90 truncate hover:underline cursor-pointer",
+                            onclick: move |_| {
+                                let album_id = current_track_snapshot
+                                    .as_ref()
+                                    .map(|track| track.album_id.clone())
+                                    .unwrap_or_default();
+                                nav_ctrl.navigate_to_album(album_id);
+                            },
+                            "{current_song_title}"
+                        }
+                        span {
+                            class: "text-xs text-slate-400 truncate hover:text-white/70 hover:underline cursor-pointer",
+                            onclick: move |_| {
+                                let artist = current_song_artist.read().clone();
+                                nav_ctrl.navigate_to_artist(artist);
+                            },
+                            "{current_song_artist}"
+                        }
                     }
                 }
                 button {
@@ -346,10 +355,12 @@ pub fn BottombarNormal(
                         i { class: "fa-solid fa-compress text-xs" }
                     }
                 }
-                button {
-                    class: "text-slate-400 hover:text-white",
-                    onclick: move |_| is_fullscreen.set(true),
-                    i { class: "fa-solid fa-up-right-and-down-left-from-center text-xs" }
+                if !bar_as_fullscreen {
+                    button {
+                        class: "text-slate-400 hover:text-white",
+                        onclick: move |_| is_fullscreen.set(true),
+                        i { class: "fa-solid fa-up-right-and-down-left-from-center text-xs" }
+                    }
                 }
             }
         }

@@ -122,11 +122,18 @@ pub fn BottombarVaxry(
         PlayerBarPosition::Top => "border-b border-white/5",
     };
 
+    let bar_as_fullscreen = *is_fullscreen.read() && config.read().fullscreen_use_player_bar;
+    let lift_class = if bar_as_fullscreen {
+        "relative z-[60]"
+    } else {
+        ""
+    };
+
     let is_radio = *current_song_duration.read() == u64::MAX;
 
     rsx! {
         div {
-            class: "h-16 bg-black/70 backdrop-blur-xl {border_class} px-4 flex items-center gap-3 select-none shrink-0",
+            class: "h-16 bg-black/70 backdrop-blur-xl {border_class} {lift_class} px-4 flex items-center gap-3 select-none shrink-0",
 
             div {
                 class: "flex items-center gap-2 shrink-0",
@@ -175,38 +182,42 @@ pub fn BottombarVaxry(
 
             div { class: "w-px h-5 bg-white/10 shrink-0" }
 
-            div {
-                class: "w-11 h-11 rounded overflow-hidden bg-white/5 shrink-0 flex items-center justify-center",
-                if current_song_cover_url.read().is_empty() {
-                    i { class: "fa-solid fa-music text-white/20 text-xs" }
-                } else {
-                    img { src: "{current_song_cover_url}", class: "w-full h-full object-cover" }
+            if !bar_as_fullscreen {
+                div {
+                    class: "w-11 h-11 rounded overflow-hidden bg-white/5 shrink-0 flex items-center justify-center",
+                    if current_song_cover_url.read().is_empty() {
+                        i { class: "fa-solid fa-music text-white/20 text-xs" }
+                    } else {
+                        img { src: "{current_song_cover_url}", class: "w-full h-full object-cover" }
+                    }
                 }
             }
 
             div {
                 class: "flex flex-col flex-1 min-w-0 justify-center gap-0.5",
-                div {
-                    class: "flex items-baseline gap-1.5 min-w-0",
-                    span {
-                        class: "text-xs font-semibold text-white/90 truncate hover:underline cursor-pointer shrink-0 max-w-[40%]",
-                        onclick: move |_| {
-                            let album_id = current_track_snapshot
-                                .as_ref()
-                                .map(|track| track.album_id.clone())
-                                .unwrap_or_default();
-                            nav_ctrl.navigate_to_album(album_id);
-                        },
-                        "{current_song_title}"
-                    }
-                    span { class: "text-white/20 text-[10px] shrink-0", "—" }
-                    span {
-                        class: "text-[11px] text-slate-400 truncate min-w-0 cursor-pointer hover:underline hover:text-slate-300",
-                        onclick: move |_| {
-                            let artist = current_song_artist.read().clone();
-                            nav_ctrl.navigate_to_artist(artist);
-                        },
-                        "{current_song_artist}"
+                if !bar_as_fullscreen {
+                    div {
+                        class: "flex items-baseline gap-1.5 min-w-0",
+                        span {
+                            class: "text-xs font-semibold text-white/90 truncate hover:underline cursor-pointer shrink-0 max-w-[40%]",
+                            onclick: move |_| {
+                                let album_id = current_track_snapshot
+                                    .as_ref()
+                                    .map(|track| track.album_id.clone())
+                                    .unwrap_or_default();
+                                nav_ctrl.navigate_to_album(album_id);
+                            },
+                            "{current_song_title}"
+                        }
+                        span { class: "text-white/20 text-[10px] shrink-0", "—" }
+                        span {
+                            class: "text-[11px] text-slate-400 truncate min-w-0 cursor-pointer hover:underline hover:text-slate-300",
+                            onclick: move |_| {
+                                let artist = current_song_artist.read().clone();
+                                nav_ctrl.navigate_to_artist(artist);
+                            },
+                            "{current_song_artist}"
+                        }
                     }
                 }
                 div {
@@ -358,10 +369,12 @@ pub fn BottombarVaxry(
                         i { class: "fa-solid fa-compress text-[10px]" }
                     }
                 }
-                button {
-                    class: "w-7 h-7 flex items-center justify-center text-slate-500 hover:text-white transition-colors",
-                    onclick: move |_| is_fullscreen.set(true),
-                    i { class: "fa-solid fa-up-right-and-down-left-from-center text-[10px]" }
+                if !bar_as_fullscreen {
+                    button {
+                        class: "w-7 h-7 flex items-center justify-center text-slate-500 hover:text-white transition-colors",
+                        onclick: move |_| is_fullscreen.set(true),
+                        i { class: "fa-solid fa-up-right-and-down-left-from-center text-[10px]" }
+                    }
                 }
             }
         }

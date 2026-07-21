@@ -63,6 +63,7 @@ connectivity = Konektivitas
 discord_presence_paused = Tampilkan status Discord saat dijeda
 discord_presence_source = Tampilkan sumber media di status Discord
 reduce_animations = Kurangi Animasi
+fullscreen_use_player_bar = Gunakan bilah pemutar sebagai kontrol layar penuh
 auto_check_updates = Otomatis Memeriksa Pembaruan
 minimize_to_tray = Minimalkan ke baki sistem
 show_source_toggle = Tampilkan Tombol Sumber

@@ -48,6 +48,7 @@ connectivity = Συνδεσιμότητα
 discord_presence_paused = Εμφάνιση κατάστασης Discord σε παύση
 discord_presence_source = Εμφάνιση πηγής πολυμέσων στην κατάσταση Discord
 reduce_animations = Μείωση κινήσεων
+fullscreen_use_player_bar = Χρήση της μπάρας αναπαραγωγής ως χειριστήρια πλήρους οθόνης
 show_source_toggle = Εμφάνιση διακόπτη πηγής
 titlebar_mode = Γραμμή τίτλου
 titlebar_custom = Προσαρμοσμένο (σχεδιαζόμενο από την εφαρμογή)

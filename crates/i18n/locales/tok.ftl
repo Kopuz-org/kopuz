@@ -48,6 +48,7 @@ connectivity = tawa lon ma
 discord_presence_paused = o lukin e lon pi ilo Siko lon tenpo awen
 discord_presence_source = o lukin e ilo pi kalama lon lon pi ilo Siko
 reduce_animations = o lili e tawa
+fullscreen_use_player_bar = Use player bar as fullscreen controls
 show_source_toggle = o lukin e ilo ante
 titlebar_mode = lawa ilo
 titlebar_custom = lawa pi ilo
