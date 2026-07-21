@@ -283,7 +283,9 @@ pub fn QueueListView(
 
     // Clear functions when the component is dropped
     use_drop(move || {
-        let _cleanup = eval(&format!("delete window.__{layout}_queueJump;"));
+        let _cleanup = eval(&format!(
+            "window.__{layout}_queueScrollDispose?.(); delete window.__{layout}_queueScrollDispose; delete window.__{layout}_queueJump;"
+        ));
     });
 
     let mut auto_sync = use_signal(|| true);
@@ -319,15 +321,26 @@ pub fn QueueListView(
     use_future(move || async move {
         let mut listener = eval(&format!(
             r#"
+                window.__{layout}_queueScrollDispose?.();
+                let disposed = false;
+                window.__{layout}_queueScrollDispose = () => {{ disposed = true; }};
                 const attach = () => {{
+                    if (disposed) return;
                     const container = document.getElementById('{queue_list_id}');
                     if (!container) {{ requestAnimationFrame(attach); return; }}
                     const disarm = () => dioxus.send('user_scroll');
+                    const scrollbarDown = (event) => {{
+                        if (event.target === container) disarm();
+                    }};
                     container.addEventListener('wheel', disarm, {{ passive: true }});
                     container.addEventListener('touchmove', disarm, {{ passive: true }});
-                    container.addEventListener('mousedown', (event) => {{
-                        if (event.target === container) disarm();
-                    }});
+                    container.addEventListener('mousedown', scrollbarDown);
+                    window.__{layout}_queueScrollDispose = () => {{
+                        disposed = true;
+                        container.removeEventListener('wheel', disarm);
+                        container.removeEventListener('touchmove', disarm);
+                        container.removeEventListener('mousedown', scrollbarDown);
+                    }};
                 }};
                 attach();
             "#

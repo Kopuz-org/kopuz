@@ -453,6 +453,7 @@ fn App() -> Element {
     // empty DB still counts). Library/playlists/favorites have no such flag
     // anymore — they're targeted per-row writes, never full-replace.
     let mut config_loaded_ok = use_signal(|| false);
+    let mut queue_loaded_ok = use_signal(|| false);
 
     let mut pending_queue_state_snapshot = use_signal(|| None::<PersistedQueueState>);
     let mut pending_queue_state_revision = use_signal(|| 0u64);
@@ -480,15 +481,16 @@ fn App() -> Element {
                 let db = db.clone();
                 // None = the queue is empty (a cleared queue must persist as
                 // empty, not resurrect) — but only once the saved queue has
-                // actually been restored, else a quit during startup would
-                // wipe it.
-                let queue_snap = (*initial_load_done.peek()).then(|| {
-                    pending_queue_state_snapshot
-                        .peek()
-                        .clone()
-                        .map(queue_state::snapshot)
-                        .unwrap_or_default()
-                });
+                // actually been restored, else a quit during startup (or a
+                // failed load) would wipe it.
+                let queue_snap =
+                    (*initial_load_done.peek() && *queue_loaded_ok.peek()).then(|| {
+                        pending_queue_state_snapshot
+                            .peek()
+                            .clone()
+                            .map(queue_state::snapshot)
+                            .unwrap_or_default()
+                    });
                 // Library/playlists/favorites need no flush — every mutation
                 // already committed as a targeted write when it happened.
                 let cfg = (*config_loaded_ok.peek()).then(|| {
@@ -986,7 +988,7 @@ fn App() -> Element {
     }
 
     use_effect(move || {
-        if !*initial_load_done.read() {
+        if !*initial_load_done.read() || !*queue_loaded_ok.read() {
             return;
         }
 
@@ -1072,11 +1074,20 @@ fn App() -> Element {
                         None
                     }
                 };
-                let queue_loaded = db
+                let queue_loaded = match db
                     .load_queue()
                     .instrument(tracing::info_span!("startup.load_queue"))
                     .await
-                    .ok();
+                {
+                    Ok(snap) => {
+                        queue_loaded_ok.set(true);
+                        Some(snap)
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "failed to load queue from db — queue saves disabled this session");
+                        None
+                    }
+                };
 
                 let cfg_loaded = cfg_loaded.unwrap_or_default();
                 {
