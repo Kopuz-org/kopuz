@@ -53,6 +53,7 @@ cover_art_background = カバーアートを背景に表示
 cover_art_darkening = カバーアートの暗さ
 cover_art_blur = カバーアートのぼかし
 show_source_toggle = ソース切替を表示
+show_row_images = 行に画像を表示
 titlebar_mode = タイトルバー
 titlebar_custom = カスタム（アプリ描画）
 titlebar_system = システム装飾

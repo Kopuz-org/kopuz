@@ -53,6 +53,7 @@ cover_art_background = Portada como fondo
 cover_art_darkening = Oscurecimiento de la portada
 cover_art_blur = Desenfoque de la portada
 show_source_toggle = Mostrar interruptor de fuente
+show_row_images = Mostrar imágenes en las filas
 titlebar_mode = Barra de título
 titlebar_custom = Personalizado (dibujado por la app)
 titlebar_system = Decoraciones del sistema

@@ -53,6 +53,7 @@ cover_art_background = 커버 아트를 배경으로
 cover_art_darkening = 커버 아트 어둡게
 cover_art_blur = 커버 아트 흐림
 show_source_toggle = 소스 전환 표시
+show_row_images = 행 이미지 표시
 titlebar_mode = 제목 표시줄
 titlebar_custom = 사용자 정의 (앱이 그린)
 titlebar_system = 시스템 장식

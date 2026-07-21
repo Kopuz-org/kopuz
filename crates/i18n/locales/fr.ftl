@@ -53,6 +53,7 @@ cover_art_background = Pochette en arrière-plan
 cover_art_darkening = Assombrissement de la pochette
 cover_art_blur = Flou de la pochette
 show_source_toggle = Afficheur De Source Toggle
+show_row_images = Afficher les images des lignes
 titlebar_mode = Barre de titre
 titlebar_custom = Personnalisé (dessiné par l'app)
 titlebar_system = Décorations système

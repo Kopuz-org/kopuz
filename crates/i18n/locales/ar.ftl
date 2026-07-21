@@ -53,6 +53,7 @@ cover_art_background = غلاف الألبوم كخلفية
 cover_art_darkening = تعتيم غلاف الألبوم
 cover_art_blur = تمويه غلاف الألبوم
 show_source_toggle = إظهار إختيار تبديل المصدر
+show_row_images = إظهار صور الصفوف
 titlebar_mode = شريط العنوان
 titlebar_custom = مخصص (يرسمه التطبيق)
 titlebar_system = زخارف النظام

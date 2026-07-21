@@ -53,6 +53,7 @@ cover_art_background = Cover als Hintergrund
 cover_art_darkening = Cover-Abdunklung
 cover_art_blur = Cover-Unschärfe
 show_source_toggle = Quellenumschalter anzeigen
+show_row_images = Zeilenbilder anzeigen
 titlebar_mode = Titelleiste
 titlebar_custom = Benutzerdefiniert (App-gezeichnet)
 titlebar_system = Systemdekorationen

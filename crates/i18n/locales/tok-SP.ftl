@@ -53,6 +53,7 @@ cover_art_background = Cover Art Background
 cover_art_darkening = Cover Art Darkening
 cover_art_blur = Cover Art Blur
 show_source_toggle = 󱥄󱤮󱤉󱤎󱤆
+show_row_images = Show Row Images
 titlebar_mode = 󱤤󱤎
 titlebar_custom = 󱤤󱥎󱤎
 titlebar_system = 󱤤󱥎󱤎󱥛

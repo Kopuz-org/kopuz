@@ -53,6 +53,7 @@ cover_art_background = Coperta ca fundal
 cover_art_darkening = Întunecarea copertei
 cover_art_blur = Estomparea copertei
 show_source_toggle = Comutator Sursă
+show_row_images = Afișează imaginile din rânduri
 titlebar_mode = Bară de titlu
 titlebar_custom = Personalizat (desenat de aplicație)
 titlebar_system = Decorații sistem

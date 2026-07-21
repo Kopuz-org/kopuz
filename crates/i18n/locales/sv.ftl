@@ -70,6 +70,7 @@ cover_art_blur = Omslagsoskärpa
 auto_check_updates = Sök automatiskt efter uppdateringar
 minimize_to_tray = Minimera till systemfältet
 show_source_toggle = Visa växling för källa
+show_row_images = Visa radbilder
 titlebar_mode = Titelfält
 titlebar_custom = Anpassad (appens egen)
 titlebar_system = Systemets fönsterdekorationer

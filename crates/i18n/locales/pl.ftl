@@ -53,6 +53,7 @@ cover_art_background = Okładka jako tło
 cover_art_darkening = Przyciemnienie okładki
 cover_art_blur = Rozmycie okładki
 show_source_toggle = Pokaż Przełącznik Źródła
+show_row_images = Pokaż obrazy w wierszach
 titlebar_mode = Pasek tytułu
 titlebar_custom = Niestandardowy (rysowany przez aplikację)
 titlebar_system = Dekoracje systemowe

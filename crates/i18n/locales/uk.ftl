@@ -53,6 +53,7 @@ cover_art_background = Обкладинка як тло
 cover_art_darkening = Затемнення обкладинки
 cover_art_blur = Розмиття обкладинки
 show_source_toggle = Показати перемикач джерела
+show_row_images = Показувати зображення в рядках
 titlebar_mode = Рядок заголовка
 titlebar_custom = Власний (малює застосунок)
 titlebar_system = Системні прикраси

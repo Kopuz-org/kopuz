@@ -698,6 +698,8 @@ pub struct AppConfig {
     pub minimize_to_tray: bool,
     #[serde(default = "default_show_source_toggle")]
     pub show_source_toggle: bool,
+    #[serde(default = "default_true")]
+    pub show_row_images: bool,
     #[serde(default = "default_sidebar_order")]
     pub sidebar_order: Vec<String>,
     #[serde(default = "default_volume")]
@@ -906,6 +908,7 @@ impl Default for AppConfig {
             auto_check_updates: default_auto_check_updates(),
             minimize_to_tray: false,
             show_source_toggle: default_show_source_toggle(),
+            show_row_images: true,
             sidebar_order: default_sidebar_order(),
             volume: default_volume(),
             volume_scroll_step: default_volume_scroll_step(),

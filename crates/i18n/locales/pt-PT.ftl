@@ -53,6 +53,7 @@ cover_art_background = Capa como fundo
 cover_art_darkening = Escurecimento da capa
 cover_art_blur = Desfocagem da capa
 show_source_toggle = Mostrar alternador de fonte
+show_row_images = Mostrar imagens nas linhas
 titlebar_mode = Barra de título
 titlebar_custom = Personalizada (desenhada pela aplicação)
 titlebar_system = Decorações do sistema

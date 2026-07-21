@@ -70,6 +70,7 @@ cover_art_blur = Hoes vervagen
 auto_check_updates = Automatisch op updates controleren
 minimize_to_tray = Naar systeemvak minimaliseren
 show_source_toggle = Bronschakelaar tonen
+show_row_images = Rijafbeeldingen tonen
 titlebar_mode = Titelbalk
 titlebar_custom = Aangepast (door app getekend)
 titlebar_system = Systeemdecoraties

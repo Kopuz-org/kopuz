@@ -70,6 +70,7 @@ cover_art_blur = Sfocatura della copertina
 auto_check_updates = Cerca aggiornamenti in automatico
 minimize_to_tray = Riduci a icona nella barra di sistema
 show_source_toggle = Mostra il selettore della sorgente
+show_row_images = Mostra immagini nelle righe
 titlebar_mode = Barra del titolo
 titlebar_custom = Personalizzata (disegnata dall'app)
 titlebar_system = Decorazioni di sistema

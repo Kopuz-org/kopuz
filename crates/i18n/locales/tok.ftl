@@ -53,6 +53,7 @@ cover_art_background = Cover Art Background
 cover_art_darkening = Cover Art Darkening
 cover_art_blur = Cover Art Blur
 show_source_toggle = o lukin e ilo ante
+show_row_images = Show Row Images
 titlebar_mode = lawa ilo
 titlebar_custom = lawa pi ilo
 titlebar_system = lawa pi ilo sewi

@@ -70,6 +70,7 @@ cover_art_blur = Cover Art Blur
 auto_check_updates = അപ്‌ഡേറ്റുകൾ സ്വയം പരിശോധിക്കുക
 minimize_to_tray = സിസ്റ്റം ട്രേയിലേക്ക് ചെറുതാക്കുക
 show_source_toggle = ഉറവിട ടോഗിൾ കാണിക്കുക
+show_row_images = Show Row Images
 titlebar_mode = ടൈറ്റിൽബാർ
 titlebar_custom = ഇഷ്ടാനുസൃതം (ആപ്പ് വരച്ചത്)
 titlebar_system = സിസ്റ്റം അലങ്കാരങ്ങൾ

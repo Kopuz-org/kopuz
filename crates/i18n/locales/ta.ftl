@@ -70,6 +70,7 @@ cover_art_blur = Cover Art Blur
 auto_check_updates = புதுப்பிப்புகளைத் தானாகச் சரிபார்
 minimize_to_tray = கணினி தட்டுக்குச் சிறிதாக்கு
 show_source_toggle = மூல மாற்றியைக் காட்டு
+show_row_images = Show Row Images
 titlebar_mode = தலைப்புப்பட்டை
 titlebar_custom = தனிப்பயன் (ஆப் வரைந்தது)
 titlebar_system = கணினி அலங்காரங்கள்

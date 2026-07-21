@@ -519,6 +519,15 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+                        SettingItem {
+                            title: i18n::t("show_row_images").to_string(),
+                            control: rsx! {
+                                ToggleSetting {
+                                    enabled: config.read().show_row_images,
+                                    on_change: move |val| config.write().show_row_images = val,
+                                }
+                            }
+                        }
                         if cfg!(any(target_os = "linux", target_os = "windows")) {
                             SettingItem {
                                 title: i18n::t("titlebar_mode").to_string(),

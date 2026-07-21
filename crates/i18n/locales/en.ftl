@@ -70,6 +70,7 @@ cover_art_blur = Cover Art Blur
 auto_check_updates = Auto Check Updates
 minimize_to_tray = Minimize to system tray
 show_source_toggle = Show Source Toggle
+show_row_images = Show Row Images
 titlebar_mode = Titlebar
 titlebar_custom = Custom (app-drawn)
 titlebar_system = System decorations

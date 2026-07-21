@@ -53,6 +53,7 @@ cover_art_background = עטיפת האלבום כרקע
 cover_art_darkening = החשכת עטיפת האלבום
 cover_art_blur = טשטוש עטיפת האלבום
 show_source_toggle = הצגת מקור
+show_row_images = הצגת תמונות בשורות
 titlebar_mode = סרגל כותרת
 titlebar_custom = מותאם אישית (מצויר על ידי האפליקציה)
 titlebar_system = עיצובי מערכת

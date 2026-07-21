@@ -53,6 +53,7 @@ cover_art_background = Borító háttérként
 cover_art_darkening = Borító sötétítése
 cover_art_blur = Borító elmosása
 show_source_toggle = Forrás kapcsoló megjelenítése
+show_row_images = Sorképek megjelenítése
 titlebar_mode = Címsor
 titlebar_custom = Egyéni (alkalmazás által rajzolt)
 titlebar_system = Rendszerdekorációk

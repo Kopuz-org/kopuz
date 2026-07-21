@@ -70,6 +70,7 @@ cover_art_blur = Keburaman sampul
 auto_check_updates = Otomatis Memeriksa Pembaruan
 minimize_to_tray = Minimalkan ke baki sistem
 show_source_toggle = Tampilkan Tombol Sumber
+show_row_images = Tampilkan gambar baris
 titlebar_mode = Bilah Judul
 titlebar_custom = Kustom (app-drawn)
 titlebar_system = Dekorasi Sistem

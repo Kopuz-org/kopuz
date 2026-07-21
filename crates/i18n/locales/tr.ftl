@@ -53,6 +53,7 @@ cover_art_background = Kapak Resmini Arka Plan Yap
 cover_art_darkening = Kapak Resmi Karartma
 cover_art_blur = Kapak Resmi Bulanıklığı
 show_source_toggle = Sidebar'da Kaynağı Göster
+show_row_images = Satır Görsellerini Göster
 titlebar_mode = Başlık çubuğu
 titlebar_custom = Özel (uygulama tarafından çizilen)
 titlebar_system = Sistem süslemeleri

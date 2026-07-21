@@ -53,6 +53,7 @@ cover_art_background = 封面作为背景
 cover_art_darkening = 封面变暗程度
 cover_art_blur = 封面模糊程度
 show_source_toggle = 显示来源切换
+show_row_images = 显示行图片
 titlebar_mode = 标题栏
 titlebar_custom = 自定义（应用绘制）
 titlebar_system = 系统装饰

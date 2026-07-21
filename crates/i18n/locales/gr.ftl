@@ -53,6 +53,7 @@ cover_art_background = Εξώφυλλο ως φόντο
 cover_art_darkening = Σκοτείνιασμα εξωφύλλου
 cover_art_blur = Θόλωση εξωφύλλου
 show_source_toggle = Εμφάνιση διακόπτη πηγής
+show_row_images = Εμφάνιση εικόνων στις σειρές
 titlebar_mode = Γραμμή τίτλου
 titlebar_custom = Προσαρμοσμένο (σχεδιαζόμενο από την εφαρμογή)
 titlebar_system = Διακοσμήσεις συστήματος

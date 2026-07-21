@@ -70,6 +70,7 @@ cover_art_blur = Pag-blur ng cover art
 auto_check_updates = Awtomatikong Pag-check ng mga Update
 minimize_to_tray = I-minimize sa system tray
 show_source_toggle = Ipakita ang Source Toggle
+show_row_images = Ipakita ang mga larawan sa row
 titlebar_mode = Titlebar
 titlebar_custom = Custom (iginuhit ng app)
 titlebar_system = Mga dekorasyon ng system

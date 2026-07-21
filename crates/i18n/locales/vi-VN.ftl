@@ -70,6 +70,7 @@ cover_art_blur = Làm mờ ảnh bìa
 auto_check_updates = Tự động kiểm tra cập nhật
 minimize_to_tray = Thu nhỏ vào khay hệ thống
 show_source_toggle = Hiển thị nút chuyển nguồn
+show_row_images = Hiện ảnh trong hàng
 titlebar_mode = Thanh tiêu đề
 titlebar_custom = Tùy chỉnh (ứng dụng tự vẽ)
 titlebar_system = Trang trí hệ thống
