@@ -141,6 +141,7 @@ heart_track_to_add_server = Eklemek ve sunucunuza senkronize etmek için çalark
 
 # Search & Placeholders
 search_placeholder = Sanatçı, albüm veya parça ara...
+quick_search_placeholder = Aramak için yazın, çalmak için Enter…
 no_results_found = "{ $query }" için sonuç bulunamadı
 listenbrainz_token_placeholder = ListenBrainz token'ınızı girin
 lastfm_api_key_placeholder = Last.fm API anahtarınızı girin

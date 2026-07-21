@@ -137,6 +137,7 @@ heart_track_to_add_server = Ajoutez ce morceau aux favoris pendant la lecture po
 
 # Search & Placeholders
 search_placeholder = Chercher Des Artistes , albums ou tracks..
+quick_search_placeholder = Tapez pour rechercher, Entrée pour lire…
 no_results_found = Aucun Résultat pour "{ $query }"
 listenbrainz_token_placeholder = Entrez vous token ListenBrainz 
 lastfm_api_key_placeholder = Entrez votre clé API Last.fm

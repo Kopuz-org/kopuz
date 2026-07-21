@@ -142,6 +142,7 @@ heart_track_to_add_server = Dale corazón a una pista mientras se reproduce para
 
 # Search & Placeholders
 search_placeholder = Buscar artistas, álbumes o pistas...
+quick_search_placeholder = Escribe para buscar, Enter para reproducir…
 no_results_found = No se encontraron resultados para "{ $query }"
 listenbrainz_token_placeholder = Introduce tu token de ListenBrainz
 lastfm_api_key_placeholder = Ingresa tu clave API de Last.fm

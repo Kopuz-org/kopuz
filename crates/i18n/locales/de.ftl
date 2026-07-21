@@ -141,6 +141,7 @@ heart_track_to_add_server = Markiere einen Titel mit „Gefällt mir“, um ihn 
 
 # Search & Placeholders
 search_placeholder = Suche nach Künstlern, Alben oder Titeln...
+quick_search_placeholder = Tippen zum Suchen, Enter zum Abspielen…
 no_results_found = Keine Ergebnisse für „{ $query }“ gefunden
 listenbrainz_token_placeholder = Gib deinen ListenBrainz-Token ein
 lastfm_api_key_placeholder = Gib deinen Last.fm-API-Schlüssel ein

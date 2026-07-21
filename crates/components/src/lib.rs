@@ -26,6 +26,8 @@ pub mod playlist_modal;
 pub mod playlist_popups;
 pub mod queue_drag;
 pub mod queue_list_view;
+pub mod quick_search;
+pub use quick_search::QuickSearch;
 pub mod reorder_buttons;
 pub mod rightbar;
 pub mod search_bar;

@@ -218,6 +218,7 @@ heart_track_to_add_server = Tekan tombol suka pada lagu yang diputar untuk menam
 
 # Search & Placeholders
 search_placeholder = Cari untuk artis, album atau trek...
+quick_search_placeholder = Ketik untuk mencari, Enter untuk memutar…
 no_results_found = Tidak ada hasil yang ditemukan untuk "{ $query }"
 listenbrainz_token_placeholder = Masukkan token ListenBrainz anda
 lastfm_api_key_placeholder = Masukkan Last.fm API Key anda

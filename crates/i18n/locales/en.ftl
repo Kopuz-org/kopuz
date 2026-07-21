@@ -218,6 +218,7 @@ heart_track_to_add_server = Heart a track while it's playing to add it here and 
 
 # Search & Placeholders
 search_placeholder = Search for artists, albums or tracks...
+quick_search_placeholder = Type to search, Enter to play…
 no_results_found = No results found for "{ $query }"
 listenbrainz_token_placeholder = Enter your ListenBrainz token
 lastfm_api_key_placeholder = Enter your Last.fm API Key

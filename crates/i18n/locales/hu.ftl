@@ -141,6 +141,7 @@ heart_track_to_add_server = Kedveld a dalt lejátszás közben, hogy itt megjele
 
 # Search & Placeholders
 search_placeholder = Keress előadókra, albumokra vagy dalokra...
+quick_search_placeholder = Írjon a kereséshez, Enter a lejátszáshoz…
 no_results_found = Nincs találat a következőre: "{ $query }"
 listenbrainz_token_placeholder = Add meg a ListenBrainz tokent
 lastfm_api_key_placeholder = Add meg a Last.fm API-kulcsodat

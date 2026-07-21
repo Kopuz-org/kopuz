@@ -141,6 +141,7 @@ heart_track_to_add_server = Adaugă o piesă la favorite în timp ce este redat�
 
 # Search & Placeholders
 search_placeholder = Caută artiști, albume sau piese...
+quick_search_placeholder = Tastați pentru a căuta, Enter pentru redare…
 no_results_found = Niciun rezultat pentru "{ $query }"
 listenbrainz_token_placeholder = Introdu token-ul ListenBrainz
 lastfm_api_key_placeholder = Introdu cheia API Last.fm

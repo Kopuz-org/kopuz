@@ -141,6 +141,7 @@ heart_track_to_add_server = Уподобайте трек поки він гра
 
 # Search & Placeholders
 search_placeholder = Шукайте виконавців, альбоми та пісні...
+quick_search_placeholder = Введіть для пошуку, Enter для відтворення…
 no_results_found = Нічого не знайдено по запиту "{ $query }"
 listenbrainz_token_placeholder = Введіть свій ключ (токен) від ListenBrainz
 lastfm_api_key_placeholder = Введіть ключ API Last.fm

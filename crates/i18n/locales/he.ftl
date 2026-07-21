@@ -141,6 +141,7 @@ heart_track_to_add_server = סמנו שיר בלב בזמן שהוא מתנגן 
 
 # Search & Placeholders
 search_placeholder = חיפוש אמנים, אלבומים או שירים...
+quick_search_placeholder = הקלידו לחיפוש, Enter לניגון…
 no_results_found = לא נמצאו תוצאות עבור "{ $query }"
 listenbrainz_token_placeholder = הזנת טוקן ListenBrainz
 lastfm_api_key_placeholder = הזן את מפתח ה-API של Last.fm

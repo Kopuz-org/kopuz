@@ -1,5 +1,5 @@
 use components::{
-    CoverArtBackground, bottombar::Bottombar, compact_player::CompactPlayer,
+    CoverArtBackground, QuickSearch, bottombar::Bottombar, compact_player::CompactPlayer,
     download_overlay::DownloadOverlay, fullscreen::Fullscreen, rightbar::Rightbar,
     sidebar::Sidebar, titlebar::Titlebar,
 };
@@ -1640,6 +1640,15 @@ fn App() -> Element {
     let reduce_animations = use_memo(move || config.read().reduce_animations);
     let active_source = use_memo(move || config.read().active_source.clone());
     let switch_source = hooks::source_switch::use_switch_source();
+    let mut show_quick_search = use_signal(|| false);
+    let quick_search_source = hooks::use_db_queries::use_active_source();
+    use_effect(move || {
+        if !*show_quick_search.read() {
+            let _ = dioxus::document::eval(
+                "const el = document.getElementById('app-root'); if (el) el.focus();",
+            );
+        }
+    });
 
     rsx! {
         // we use this component here to prevent re-diffing to prevent warns in console
@@ -1647,6 +1656,7 @@ fn App() -> Element {
         WindowsToolbarIconAssets {}
 
         div {
+            id: "app-root",
             class: "relative z-0 flex flex-col h-screen text-white select-none overflow-x-hidden {theme_class}",
             style: "{background_style}",
             dir: "{dir}",
@@ -1668,6 +1678,12 @@ fn App() -> Element {
                 {
                     let c = *compact_mode.read();
                     compact_mode.set(!c);
+                    evt.prevent_default();
+                } else if (mods.meta() || mods.ctrl())
+                    && matches!(&key, Key::Character(s) if s.eq_ignore_ascii_case("k"))
+                {
+                    let c = *show_quick_search.read();
+                    show_quick_search.set(!c);
                     evt.prevent_default();
                 } else if key == Key::Character(" ".into()) {
                     ctrl.toggle();
@@ -2173,6 +2189,38 @@ fn App() -> Element {
             }
             DownloadOverlay { queue: download_queue }
             CompactPlayer {}
+            if *show_quick_search.read() {
+                QuickSearch {
+                    show: show_quick_search,
+                    on_play: move |(track, fallback): (reader::Track, Vec<reader::Track>)| {
+                        let read_db = consume_context::<hooks::ReadDb>();
+                        let filter = hooks::TrackFilter {
+                            source: quick_search_source(),
+                            sort: hooks::TrackSort::Fields(config.peek().library_sort.clone()),
+                            ..Default::default()
+                        };
+                        spawn(async move {
+                            let all = read_db
+                                .tracks_page(
+                                    &filter,
+                                    hooks::Page {
+                                        offset: 0,
+                                        limit: u32::MAX,
+                                    },
+                                )
+                                .await
+                                .unwrap_or_default();
+                            if let Some(idx) = all.iter().position(|t| t.id == track.id) {
+                                queue.set(all);
+                                ctrl.play_track(idx);
+                            } else if let Some(idx) = fallback.iter().position(|t| t.id == track.id) {
+                                queue.set(fallback);
+                                ctrl.play_track(idx);
+                            }
+                        });
+                    },
+                }
+            }
             if config.read().player_bar_position == config::PlayerBarPosition::Bottom {
                 Bottombar {
                     config,

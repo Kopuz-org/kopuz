@@ -218,6 +218,7 @@ heart_track_to_add_server = Markera en låt som favorit medan den spelas för at
 
 # Search & Placeholders
 search_placeholder = Sök efter artister, album eller låtar...
+quick_search_placeholder = Skriv för att söka, Enter för att spela…
 no_results_found = Inga resultat hittades för "{ $query }"
 listenbrainz_token_placeholder = Ange din ListenBrainz-token
 lastfm_api_key_placeholder = Ange din Last.fm API-nyckel

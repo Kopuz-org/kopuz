@@ -141,6 +141,7 @@ heart_track_to_add_server = Polub utwór podczas odtwarzania, aby dodać go tuta
 
 # Search & Placeholders
 search_placeholder = Wyszukaj wykonawców, albumy lub utwory...
+quick_search_placeholder = Wpisz, aby wyszukać, Enter, aby odtworzyć…
 no_results_found = Nie znaleziono wyników dla "{ $query }"
 listenbrainz_token_placeholder = Wpisz token ListenBrainz
 lastfm_api_key_placeholder = Wprowadź swój klucz API Last.fm

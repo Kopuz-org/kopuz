@@ -218,6 +218,7 @@ heart_track_to_add_server = Geef een nummer een hartje terwijl het speelt om het
 
 # Search & Placeholders
 search_placeholder = Zoek naar artiesten, albums of nummers...
+quick_search_placeholder = Typ om te zoeken, Enter om af te spelen…
 no_results_found = Geen resultaten gevonden voor "{ $query }"
 listenbrainz_token_placeholder = Voer je ListenBrainz-token in
 lastfm_api_key_placeholder = Voer je Last.fm-API-sleutel in
