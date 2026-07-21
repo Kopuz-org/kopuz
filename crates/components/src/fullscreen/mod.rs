@@ -1,6 +1,5 @@
 mod android;
 mod background;
-mod controls;
 mod desktop;
 mod lyrics;
 mod metadata;

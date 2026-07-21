@@ -1,11 +1,10 @@
 use crate::NavigationController;
-use crate::player_controls::{TransportButtons, TransportVariant, use_seek_drag, use_volume_mute};
+use crate::player_controls::{ControlsVariant, SeekSlider, TransportButtons, VolumeSlider};
 use config::PlayerBarPosition;
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 use player::player::Player;
 
-use crate::shared::fmt_time;
 use hooks::favorites::toggle_favorite;
 
 #[component]
@@ -25,18 +24,6 @@ pub fn BottombarVaxry(
     mut persisted_volume: Signal<f32>,
     mut is_rightbar_open: Signal<bool>,
 ) -> Element {
-    let seek = use_seek_drag(current_song_duration, current_song_progress);
-    let vol = use_volume_mute(player, config, volume, persisted_volume);
-    let display_progress = seek.display_progress;
-    let progress_percent = seek.progress_percent;
-    let seek_commit = seek.on_commit;
-    let seek_input = seek.on_input;
-    let volume_percent = vol.volume_percent;
-    let is_muted = vol.is_muted;
-    let toggle_mute = vol.toggle_mute;
-    let volume_wheel = vol.on_wheel;
-    let volume_commit = vol.on_commit;
-    let volume_input = vol.on_input;
     let mut ctrl = use_context::<PlayerController>();
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let nav_ctrl = use_context::<NavigationController>();
@@ -122,15 +109,13 @@ pub fn BottombarVaxry(
             "bg-black/70 backdrop-blur-xl"
         };
 
-    let is_radio = *current_song_duration.read() == u64::MAX;
-
     rsx! {
         div {
             class: "h-16 {bg_class} {border_class} {lift_class} px-4 flex items-center gap-3 select-none shrink-0",
 
             div {
                 class: "shrink-0",
-                TransportButtons { is_playing, variant: TransportVariant::Bar }
+                TransportButtons { is_playing, variant: ControlsVariant::Bar }
             }
 
             div { class: "w-px h-5 bg-white/10 shrink-0" }
@@ -173,32 +158,7 @@ pub fn BottombarVaxry(
                         }
                     }
                 }
-                div {
-                    class: "flex items-center gap-1.5 w-full",
-                    span { class: "text-[9px] text-slate-600 font-mono shrink-0 w-7 text-right", "{fmt_time(display_progress)}" }
-                    div {
-                        class: format!("flex-1 h-[3px] bg-white/10 rounded-full relative {}", if is_radio { "" } else { "group cursor-pointer" }),
-                        div {
-                            class: "absolute top-0 left-0 h-full bg-white/90 rounded-full pointer-events-none",
-                            style: "width: {progress_percent}%",
-                        }
-                        div {
-                            class: "absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 bg-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none -translate-x-1/2",
-                            style: "left: {progress_percent}%",
-                        }
-                        input {
-                            r#type: "range",
-                            min: "0",
-                            max: "{*current_song_duration.read()}",
-                            value: "{display_progress}",
-                            class: format!("slider-hit absolute top-0 left-0 w-full h-full opacity-0 z-10 {}", if is_radio { "pointer-events-none" } else { "cursor-pointer" }),
-                            disabled: is_radio,
-                            onchange: move |evt| seek_commit.call(evt),
-                            oninput: move |evt| seek_input.call(evt),
-                        }
-                    }
-                    span { class: "text-[9px] text-slate-600 font-mono shrink-0 w-7", "{fmt_time(*current_song_duration.read())}" }
-                }
+                SeekSlider { current_song_duration, current_song_progress, variant: ControlsVariant::Bar }
             }
 
             div { class: "w-px h-5 bg-white/10 shrink-0" }
@@ -211,36 +171,7 @@ pub fn BottombarVaxry(
                     onclick: move |_| toggle_favorite(ctrl.current_track_snapshot.read().clone()),
                     i { class: "{heart_icon} text-xs" }
                 }
-                div {
-                    class: "flex items-center gap-1.5",
-                    button {
-                        class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
-                        onclick: move |_| toggle_mute.call(()),
-                        i { class: if is_muted { "fa-solid fa-volume-xmark text-[10px]" } else { "fa-solid fa-volume-high text-[10px]" } }
-                    }
-                    div {
-                        class: "w-20 h-[3px] bg-white/10 rounded-full group/vol cursor-pointer relative",
-                        onwheel: move |evt| volume_wheel.call(evt),
-                        div {
-                            class: "absolute top-0 left-0 h-full bg-white/90 rounded-full pointer-events-none",
-                            style: "width: {volume_percent}%",
-                        }
-                        div {
-                            class: "absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 bg-white rounded-full opacity-0 group-hover/vol:opacity-100 transition-opacity pointer-events-none -translate-x-1/2",
-                            style: "left: {volume_percent}%",
-                        }
-                        input {
-                            r#type: "range",
-                            min: "0",
-                            max: "1",
-                            step: "0.01",
-                            value: "{*volume.read()}",
-                            class: "slider-hit absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer z-10",
-                            onchange: move |evt| volume_commit.call(evt),
-                            oninput: move |evt| volume_input.call(evt),
-                        }
-                    }
-                }
+                VolumeSlider { player, config, volume, persisted_volume, variant: ControlsVariant::Bar }
                 button {
                     class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
                     onclick: move |_| { let c = *is_rightbar_open.read(); is_rightbar_open.set(!c); },

@@ -1,7 +1,6 @@
-use super::controls::{ProgressBarControl, VolumeControl};
 use super::metadata::TrackMetadata;
 use crate::lyrics_view::LyricsView;
-use crate::player_controls::{TransportButtons, TransportVariant};
+use crate::player_controls::{ControlsVariant, SeekSlider, TransportButtons, VolumeSlider};
 use crate::queue_list_view::QueueListView;
 use config::AppConfig;
 use dioxus::prelude::*;
@@ -82,9 +81,9 @@ pub(crate) fn FullscreenAndroid(
                         current_song_album,
                         current_song_bitrate,
                     }
-                    ProgressBarControl { current_song_duration, current_song_progress }
-                    TransportButtons { is_playing, variant: TransportVariant::Fullscreen }
-                    VolumeControl { player, config, volume, persisted_volume }
+                    SeekSlider { current_song_duration, current_song_progress, variant: ControlsVariant::Fullscreen }
+                    TransportButtons { is_playing, variant: ControlsVariant::Fullscreen }
+                    VolumeSlider { player, config, volume, persisted_volume, variant: ControlsVariant::Fullscreen }
                 }
             } else if tab == 1 {
                 QueueListView {
