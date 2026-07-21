@@ -39,18 +39,22 @@ fn ProgressBarControl(
                 class: "flex items-center gap-3",
                 span { class: "text-xs text-white/70 font-mono", style: "width: 50px; text-align: left;", "{fmt_time(display_progress)}" }
                 div {
-                    class: format!("flex-1 {} relative", if is_radio { "" } else { "cursor-pointer" }),
+                    class: format!("flex-1 {} relative group", if is_radio { "" } else { "cursor-pointer" }),
                     style: "height: 20px;",
                     div {
                         class: "absolute bg-white/20 rounded-full",
                         style: "height: 4px; top: 8px; left: 0; right: 0;"
                     }
                     div {
-                        class: "absolute rounded-full pointer-events-none",
-                        style: "height: 4px; top: 8px; left: 0; width: {progress_percent}%; background: linear-gradient(to right, #5a9a9a, #ffffff);"
+                        class: "absolute rounded-full pointer-events-none bg-white/90",
+                        style: "height: 4px; top: 8px; left: 0; width: {progress_percent}%;"
                     }
                     div {
-                        class: "absolute bg-white rounded-full pointer-events-none",
+                        class: if cfg!(target_os = "android") {
+                            "absolute bg-white rounded-full pointer-events-none"
+                        } else {
+                            "absolute bg-white rounded-full pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"
+                        },
                         style: "width: 12px; height: 12px; top: 4px; left: calc({progress_percent}% - 6px);"
                     }
                     input {
@@ -96,7 +100,7 @@ fn VolumeControl(
             style: "max-width: 640px;",
             i { class: "fa-solid fa-volume-low text-white/40" }
             div {
-                class: "flex-1 cursor-pointer relative",
+                class: "flex-1 cursor-pointer relative group",
                 style: "height: 20px;",
                 onwheel: move |evt| {
                     evt.stop_propagation();
@@ -117,11 +121,15 @@ fn VolumeControl(
                     style: "height: 4px; top: 8px; left: 0; right: 0;"
                 }
                 div {
-                    class: "absolute bg-white rounded-full pointer-events-none",
+                    class: "absolute bg-white/90 rounded-full pointer-events-none",
                     style: "height: 4px; top: 8px; left: 0; width: {volume_percent}%;"
                 }
                 div {
-                    class: "absolute bg-white rounded-full pointer-events-none",
+                    class: if cfg!(target_os = "android") {
+                        "absolute bg-white rounded-full pointer-events-none"
+                    } else {
+                        "absolute bg-white rounded-full pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity"
+                    },
                     style: "width: 12px; height: 12px; top: 4px; left: calc({volume_percent}% - 6px);"
                 }
                 input {
@@ -157,29 +165,30 @@ fn PlaybackControl(mut is_playing: Signal<bool>) -> Element {
             class: "flex items-center justify-between w-full mb-3",
             style: "max-width: 640px;",
             button {
-                class: format!("{} transition-all active:scale-95 relative flex-shrink-0", if *ctrl.shuffle.read() { "text-white" } else { "text-white/70 hover:text-white" }),
+                class: "w-11 h-11 rounded-full flex items-center justify-center transition-colors active:scale-95 relative flex-shrink-0 hover:bg-white/10",
+                style: if *ctrl.shuffle.read() { "color: var(--color-indigo-500);" } else { "color: rgba(255,255,255,0.6);" },
                 onclick: move |_| ctrl.toggle_shuffle(),
                 title: if *ctrl.shuffle.read() { i18n::t("shuffle_on").to_string() } else { i18n::t("shuffle_off").to_string() },
                 i { class: "fa-solid fa-shuffle text-lg" }
             }
             div {
-                class: "flex items-center gap-8",
+                class: "flex items-center gap-4",
                 button {
-                    class: "text-white hover:text-white/80 transition-colors flex-shrink-0",
+                    class: "w-14 h-14 rounded-full flex items-center justify-center text-white/90 hover:text-white hover:bg-white/10 transition-colors active:scale-95 flex-shrink-0",
                     onclick: move |_| {
                         ctrl.play_prev();
                     },
                     i { class: "fa-solid fa-backward-step text-3xl" }
                 }
                 button {
-                    class: "w-20 h-20 bg-white text-black hover:bg-white/90 rounded-full flex items-center justify-center transition-all flex-shrink-0 shadow-lg hover:scale-105 active:scale-95",
+                    class: "w-16 h-16 rounded-full flex items-center justify-center text-white hover:bg-white/10 transition-colors active:scale-95 flex-shrink-0",
                     onclick: move |_| {
                         ctrl.toggle();
                     },
-                    i { class: if *is_playing.read() { "fa-solid fa-pause text-3xl" } else { "fa-solid fa-play text-3xl ml-1" } }
+                    i { class: if *is_playing.read() { "fa-solid fa-pause text-4xl" } else { "fa-solid fa-play text-4xl ml-1" } }
                 }
                 button {
-                    class: "text-white hover:text-white/80 transition-colors flex-shrink-0",
+                    class: "w-14 h-14 rounded-full flex items-center justify-center text-white/90 hover:text-white hover:bg-white/10 transition-colors active:scale-95 flex-shrink-0",
                     onclick: move |_| {
                         ctrl.play_next();
                     },
@@ -187,13 +196,11 @@ fn PlaybackControl(mut is_playing: Signal<bool>) -> Element {
                 }
             }
             button {
-                class: format!("{} transition-all active:scale-95 relative flex-shrink-0",
-                    match *ctrl.loop_mode.read() {
-                        LoopMode::None => "text-white/70 hover:text-white",
-                        LoopMode::Queue => "text-white",
-                        LoopMode::Track => "text-white",
-                    }
-                ),
+                class: "w-11 h-11 rounded-full flex items-center justify-center transition-colors active:scale-95 relative flex-shrink-0 hover:bg-white/10",
+                style: match *ctrl.loop_mode.read() {
+                    LoopMode::None => "color: rgba(255,255,255,0.6);",
+                    _ => "color: var(--color-indigo-500);",
+                },
                 onclick: move |_| ctrl.toggle_loop(),
                 title: match *ctrl.loop_mode.read() {
                     LoopMode::None => i18n::t("repeat_off").to_string(),
@@ -203,7 +210,7 @@ fn PlaybackControl(mut is_playing: Signal<bool>) -> Element {
                 i { class: "fa-solid fa-repeat text-lg" }
                 match *ctrl.loop_mode.read() {
                      LoopMode::Track => rsx! {
-                         span { class: "absolute -bottom-2.5 left-1/2 -translate-x-1/2 text-[10px] font-bold text-white leading-none", "1" }
+                         span { class: "absolute bottom-1 left-1/2 -translate-x-1/2 text-[10px] font-bold leading-none", "1" }
                      },
                      _ => rsx! {
                          div {}
@@ -235,7 +242,7 @@ fn TrackMetadata(
                 if cover.is_empty() {
                     rsx! {
                         div {
-                            class: "rounded-lg overflow-hidden h-full flex items-center justify-center bg-black/30",
+                            class: "rounded-xl overflow-hidden h-full flex items-center justify-center bg-black/30",
                             style: "max-width: 100%; aspect-ratio: 1/1; box-shadow: 0 25px 60px -15px rgba(0,0,0,0.55);",
                             i { class: "fa-solid fa-music text-5xl text-white/20" }
                         }
@@ -249,7 +256,7 @@ fn TrackMetadata(
                     rsx! {
                         img {
                             src: "{src}",
-                            class: "rounded-lg",
+                            class: "rounded-xl",
                             style: "max-width: 100%; max-height: 100%; width: auto; height: auto; box-shadow: 0 25px 60px -15px rgba(0,0,0,0.55);",
                         }
                     }
@@ -260,7 +267,7 @@ fn TrackMetadata(
         div {
             class: "flex flex-col items-start w-full mb-1",
             style: "max-width: 640px;",
-            h1 { class: "text-3xl font-bold text-white mb-1 line-clamp-2 w-full", "{current_song_title}" }
+            h1 { class: "text-[28px] font-semibold tracking-tight text-white mb-1 line-clamp-2 w-full", "{current_song_title}" }
             div {
                 class: "flex flex-wrap items-center gap-x-2 gap-y-1 w-full",
                 button {
@@ -316,28 +323,31 @@ fn Tabs(
 
     rsx! {
         div {
-            class: "flex-1 flex flex-col h-full min-w-0 bg-black/30 backdrop-blur-sm border-l border-white/5",
+            class: "flex-1 flex flex-col h-full min-w-0 bg-black/45 border-l border-white/5",
 
             div {
-                class: "flex items-center gap-1 px-6 pt-4 pb-2 border-b border-white/10",
-                button {
-                    class: if *active_tab.read() == 0 {
-                        "px-4 py-2 text-xs font-medium tracking-wider text-white border-b-2 border-white"
-                    } else {
-                        "px-4 py-2 text-xs font-medium tracking-wider text-white/40 hover:text-white/70 transition-colors"
-                    },
-                    onclick: move |_| active_tab.set(0),
-                    "{i18n::t(\"up_next\")}"
-                }
+                class: "flex items-center px-6 pt-4 pb-2",
+                div {
+                    class: "flex items-center gap-1 p-1 rounded-lg bg-white/10",
+                    button {
+                        class: if *active_tab.read() == 0 {
+                            "px-4 py-1.5 text-xs font-medium rounded-md bg-white/20 text-white transition-colors"
+                        } else {
+                            "px-4 py-1.5 text-xs font-medium rounded-md text-white/50 hover:text-white/80 transition-colors"
+                        },
+                        onclick: move |_| active_tab.set(0),
+                        "{i18n::t(\"up_next\")}"
+                    }
 
-                button {
-                    class: if *active_tab.read() == 1 {
-                        "px-4 py-2 text-xs font-medium tracking-wider text-white border-b-2 border-white"
-                    } else {
-                        "px-4 py-2 text-xs font-medium tracking-wider text-white/40 hover:text-white/70 transition-colors"
-                    },
-                    onclick: move |_| active_tab.set(1),
-                    "{i18n::t(\"lyrics\")}"
+                    button {
+                        class: if *active_tab.read() == 1 {
+                            "px-4 py-1.5 text-xs font-medium rounded-md bg-white/20 text-white transition-colors"
+                        } else {
+                            "px-4 py-1.5 text-xs font-medium rounded-md text-white/50 hover:text-white/80 transition-colors"
+                        },
+                        onclick: move |_| active_tab.set(1),
+                        "{i18n::t(\"lyrics\")}"
+                    }
                 }
 
                 button {
@@ -642,7 +652,7 @@ pub fn Fullscreen(
                 },
 
                 div {
-                    class: "flex flex-col items-center justify-center p-6 lg:p-10 relative flex-shrink-0 overflow-hidden min-h-0",
+                    class: "flex flex-col items-center justify-center p-6 pt-16 lg:p-10 lg:pt-16 relative flex-shrink-0 overflow-hidden min-h-0",
                     style: if tabs_collapsed { "width: 100%;" } else { "width: 50%;" },
 
                     button {

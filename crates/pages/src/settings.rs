@@ -272,7 +272,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     rsx! {
         div { class: if cfg!(target_os = "android") { "px-4 pt-2 pb-28 w-full" } else { "p-8 w-full" },
             if !cfg!(target_os = "android") {
-                h1 { class: "text-3xl font-bold text-white mb-6", "{i18n::t(\"settings\")}" }
+                h1 { class: "text-3xl font-semibold tracking-tight text-white mb-6", "{i18n::t(\"settings\")}" }
             }
 
             div { class: "space-y-12",
@@ -575,7 +575,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                         let current_mode = config.read().titlebar_mode;
                                         rsx! {
                                             select {
-                                                class: "bg-stone-800 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-indigo-500",
+                                                class: "bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-white/25",
                                                 onchange: move |evt| {
                                                     config.write().titlebar_mode = match evt.value().as_str() {
                                                         "system" => config::TitlebarMode::System,
@@ -611,7 +611,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     let current_style = config.read().ui_style;
                                     rsx! {
                                         select {
-                                            class: "bg-stone-800 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-indigo-500",
+                                            class: "bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-white/25",
                                             onchange: move |evt| {
                                                 config.write().ui_style = match evt.value().as_str() {
                                                     "vaxry" => config::UiStyle::Vaxry,
@@ -640,7 +640,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     let current_position = config.read().player_bar_position;
                                     rsx! {
                                         select {
-                                            class: "bg-stone-800 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-indigo-500",
+                                            class: "bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-white/25",
                                             onchange: move |evt| {
                                                 config.write().player_bar_position = match evt.value().as_str() {
                                                     "top" => config::PlayerBarPosition::Top,
@@ -757,7 +757,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 title: i18n::t("download_quality").to_string(),
                                 control: rsx! {
                                     select {
-                                        class: "bg-stone-800 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-indigo-500",
+                                        class: "bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-white/25",
                                         onchange: move |evt| {
                                             config.write().offline_quality = OfflineQuality::from_value_str(&evt.value());
                                         },
@@ -810,7 +810,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     let current = config.read().cover_fetch_strategy;
                                     rsx! {
                                         select {
-                                            class: "bg-stone-800 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-indigo-500",
+                                            class: "bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-white/25",
                                             onchange: move |evt| {
                                                 config.write().cover_fetch_strategy = match evt.value().as_str() {
                                                     "lastfm_first" => FetchStrategy::LastFmFirst,

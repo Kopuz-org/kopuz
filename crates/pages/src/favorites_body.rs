@@ -609,7 +609,7 @@ pub fn FavoritesBody(
                                 }
                             }
                             button {
-                                class: "px-3 py-1 rounded bg-white/5 hover:bg-white/10 text-white/80 transition-colors disabled:opacity-50",
+                                class: "px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 transition-colors disabled:opacity-50",
                                 disabled: syncing,
                                 onclick: move |_| {
                                     let next = *refresh_nonce.peek() + 1;

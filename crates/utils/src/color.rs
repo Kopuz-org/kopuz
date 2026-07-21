@@ -47,6 +47,11 @@ pub async fn get_palette_from_url(url: &str) -> Option<Vec<Color>> {
         .decode()
         .ok()?;
 
+    let img = if img.width() > 400 || img.height() > 400 {
+        img.thumbnail(400, 400)
+    } else {
+        img
+    };
     let rgb = img.to_rgb8();
     let pixels = rgb.as_raw();
 

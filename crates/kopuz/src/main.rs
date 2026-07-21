@@ -573,7 +573,12 @@ fn App() -> Element {
         if !url.is_empty() {
             spawn(
                 async move {
-                    if let Some(colors) = utils::color::get_palette_from_url(&url).await {
+                    let colors =
+                        utils::offload(
+                            async move { utils::color::get_palette_from_url(&url).await },
+                        )
+                        .await;
+                    if let Some(colors) = colors {
                         palette.set(Some(colors));
                     }
                 }
@@ -1053,7 +1058,11 @@ fn App() -> Element {
                 // on success: its save is the one remaining whole-value write,
                 // and persisting a default born of a read failure would wipe
                 // real settings/servers.
-                let cfg_loaded = match db.load_config().await {
+                let cfg_loaded = match db
+                    .load_config()
+                    .instrument(tracing::info_span!("startup.load_config"))
+                    .await
+                {
                     Ok(c) => {
                         config_loaded_ok.set(true);
                         c
@@ -1063,10 +1072,15 @@ fn App() -> Element {
                         None
                     }
                 };
-                let queue_loaded = db.load_queue().await.ok();
+                let queue_loaded = db
+                    .load_queue()
+                    .instrument(tracing::info_span!("startup.load_queue"))
+                    .await
+                    .ok();
 
                 let cfg_loaded = cfg_loaded.unwrap_or_default();
                 {
+                    let _apply = tracing::info_span!("startup.apply_config").entered();
                     let loaded = cfg_loaded;
                     config.set(loaded.clone());
                     configured_music_dirs.set(loaded.music_directory.clone());
@@ -1086,23 +1100,31 @@ fn App() -> Element {
                 // startup. An unselected source stays Local (the config default);
                 // the user picks a server explicitly via the sidebar.
 
-                if let Some(snap) = queue_loaded
-                    && let Some(queue_state) = queue_state::sanitize(PersistedQueueState {
-                        version: snap.version,
-                        queue: snap.queue,
-                        current_queue_index: snap.current_queue_index,
-                        progress_secs: snap.progress_secs,
-                        shuffle_order: snap.shuffle_order,
-                        shuffle_enabled: snap.shuffle_enabled,
+                let queue_state = utils::offload(async move {
+                    queue_loaded.and_then(|snap| {
+                        queue_state::sanitize(PersistedQueueState {
+                            version: snap.version,
+                            queue: snap.queue,
+                            current_queue_index: snap.current_queue_index,
+                            progress_secs: snap.progress_secs,
+                            shuffle_order: snap.shuffle_order,
+                            shuffle_enabled: snap.shuffle_enabled,
+                        })
                     })
+                })
+                .instrument(tracing::info_span!("startup.sanitize_queue"))
+                .await;
                 {
-                    ctrl.restore_queue_state(
-                        queue_state.queue,
-                        queue_state.current_queue_index,
-                        queue_state.progress_secs,
-                        queue_state.shuffle_order,
-                        queue_state.shuffle_enabled,
-                    );
+                    let _restore = tracing::info_span!("startup.restore_queue").entered();
+                    if let Some(queue_state) = queue_state {
+                        ctrl.restore_queue_state(
+                            queue_state.queue,
+                            queue_state.current_queue_index,
+                            queue_state.progress_secs,
+                            queue_state.shuffle_order,
+                            queue_state.shuffle_enabled,
+                        );
+                    }
                 }
 
                 initial_load_done.set(true);

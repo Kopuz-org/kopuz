@@ -463,13 +463,13 @@ pub fn LibraryPage(
                             class: "text-[10px] font-bold mb-0.5 text-white/35",
                             "{i18n::t(\"library\")}"
                         }
-                        h1 { class: "text-2xl font-bold text-white", "{i18n::t(\"your_library\")}" }
+                        h1 { class: "text-2xl font-semibold tracking-tight text-white", "{i18n::t(\"your_library\")}" }
                     }
                 } else {
-                    h1 { class: "text-3xl font-bold text-white", "{i18n::t(\"your_library\")}" }
+                    h1 { class: "text-3xl font-semibold tracking-tight text-white", "{i18n::t(\"your_library\")}" }
                 }
                 button {
-                    class: "text-white/60 hover:text-white transition-colors p-2 rounded-full hover:bg-white/10",
+                    class: "w-9 h-9 flex items-center justify-center text-white/60 hover:text-white rounded-full hover:bg-white/10 transition-colors active:scale-95",
                     title: if caps().scan_folders { i18n::t("rescan_library").to_string() } else { i18n::t("refresh_music_library").to_string() },
                     onclick: move |_| {
                         if caps().scan_folders {

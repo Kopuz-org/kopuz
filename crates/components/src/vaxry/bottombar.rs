@@ -144,35 +144,33 @@ pub fn BottombarVaxry(
             div {
                 class: "flex items-center gap-2 shrink-0",
                 button {
-                    class: format!("w-7 h-7 flex items-center justify-center transition-all active:scale-90 {}",
-                        if *ctrl.shuffle.read() { "text-white" } else { "text-slate-500 hover:text-white" }
-                    ),
+                    class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
+                    style: if *ctrl.shuffle.read() { "color: var(--color-indigo-500);" } else { "" },
                     title: if *ctrl.shuffle.read() { i18n::t("shuffle_on").to_string() } else { i18n::t("shuffle_off").to_string() },
                     onclick: move |_| ctrl.toggle_shuffle(),
                     i { class: "fa-solid fa-shuffle text-[11px]" }
                 }
                 button {
-                    class: "w-7 h-7 flex items-center justify-center text-slate-400 hover:text-white transition-all active:scale-90",
+                    class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
                     onclick: move |_| ctrl.play_prev(),
                     i { class: "fa-solid fa-backward-step text-sm" }
                 }
                 button {
-                    class: "w-8 h-8 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-all active:scale-95",
+                    class: "w-9 h-9 rounded-full flex items-center justify-center text-white hover:bg-white/10 transition-colors active:scale-95",
                     onclick: move |_| ctrl.toggle(),
                     i { class: if *is_playing.read() { "fa-solid fa-pause text-xs" } else { "fa-solid fa-play text-xs ml-0.5" } }
                 }
                 button {
-                    class: "w-7 h-7 flex items-center justify-center text-slate-400 hover:text-white transition-all active:scale-90",
+                    class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
                     onclick: move |_| ctrl.play_next(),
                     i { class: "fa-solid fa-forward-step text-sm" }
                 }
                 button {
-                    class: format!("w-7 h-7 flex items-center justify-center transition-all active:scale-90 relative {}",
-                        match *ctrl.loop_mode.read() {
-                            LoopMode::None => "text-slate-500 hover:text-white",
-                            _ => "text-white",
-                        }
-                    ),
+                    class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10 transition-colors active:scale-95 relative",
+                    style: match *ctrl.loop_mode.read() {
+                        LoopMode::None => "",
+                        _ => "color: var(--color-indigo-500);",
+                    },
                     title: match *ctrl.loop_mode.read() {
                         LoopMode::None => i18n::t("repeat_off").to_string(),
                         LoopMode::Queue => i18n::t("repeat_queue").to_string(),
@@ -181,7 +179,7 @@ pub fn BottombarVaxry(
                     onclick: move |_| ctrl.toggle_loop(),
                     i { class: "fa-solid fa-repeat text-[11px]" }
                     if let LoopMode::Track = *ctrl.loop_mode.read() {
-                        span { class: "absolute -bottom-1.5 left-1/2 -translate-x-1/2 text-[8px] font-bold leading-none", "1" }
+                        span { class: "absolute bottom-0.5 left-1/2 -translate-x-1/2 text-[8px] font-bold leading-none", "1" }
                     }
                 }
             }
@@ -232,7 +230,7 @@ pub fn BottombarVaxry(
                     div {
                         class: format!("flex-1 h-[3px] bg-white/10 rounded-full relative {}", if is_radio { "" } else { "group cursor-pointer" }),
                         div {
-                            class: "absolute top-0 left-0 h-full bg-white/60 group-hover:bg-white rounded-full transition-colors pointer-events-none",
+                            class: "absolute top-0 left-0 h-full bg-white/90 rounded-full pointer-events-none",
                             style: "width: {progress_percent}%",
                         }
                         div {
@@ -270,7 +268,7 @@ pub fn BottombarVaxry(
             div {
                 class: "flex items-center gap-2 shrink-0",
                 button {
-                    class: "{heart_class} w-7 h-7 flex items-center justify-center",
+                    class: "{heart_class} w-9 h-9 rounded-full flex items-center justify-center hover:bg-white/10 active:scale-95",
                     title: if is_favorite { i18n::t("remove_from_favorites").to_string() } else { i18n::t("add_to_favorites").to_string() },
                     onclick: move |_| toggle_favorite(ctrl.current_track_snapshot.read().clone()),
                     i { class: "{heart_icon} text-xs" }
@@ -278,7 +276,7 @@ pub fn BottombarVaxry(
                 div {
                     class: "flex items-center gap-1.5",
                     button {
-                        class: "w-6 h-6 flex items-center justify-center text-slate-500 hover:text-white transition-colors",
+                        class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
                         onclick: move |_| {
                             let muted = *is_muted.read();
                             if muted {
@@ -318,7 +316,7 @@ pub fn BottombarVaxry(
                             }
                         },
                         div {
-                            class: "absolute top-0 left-0 h-full bg-white/60 group-hover/vol:bg-white rounded-full transition-colors pointer-events-none",
+                            class: "absolute top-0 left-0 h-full bg-white/90 rounded-full pointer-events-none",
                             style: "width: {volume_percent}%",
                         }
                         div {
@@ -352,12 +350,12 @@ pub fn BottombarVaxry(
                     }
                 }
                 button {
-                    class: "w-7 h-7 flex items-center justify-center text-slate-500 hover:text-white transition-colors",
+                    class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
                     onclick: move |_| { let c = *is_rightbar_open.read(); is_rightbar_open.set(!c); },
                     i { class: "fa-solid fa-list text-[10px]" }
                 }
                 button {
-                    class: "w-7 h-7 flex items-center justify-center text-slate-500 hover:text-white transition-colors",
+                    class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
                     title: i18n::t("share_musicbrainz").to_string(),
                     onclick: move |_| {
                         if let Some(t) = ctrl.current_track_snapshot.read().clone() {
@@ -369,7 +367,7 @@ pub fn BottombarVaxry(
                 }
                 if cfg!(not(target_os = "android")) {
                     button {
-                        class: "w-7 h-7 flex items-center justify-center text-slate-500 hover:text-white transition-colors",
+                        class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
                         title: i18n::t("mini_player").to_string(),
                         onclick: move |_| { let c = *compact_mode.read(); compact_mode.set(!c); },
                         i { class: "fa-solid fa-compress text-[10px]" }
@@ -377,7 +375,7 @@ pub fn BottombarVaxry(
                 }
                 if !bar_as_fullscreen {
                     button {
-                        class: "w-7 h-7 flex items-center justify-center text-slate-500 hover:text-white transition-colors",
+                        class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
                         onclick: move |_| is_fullscreen.set(true),
                         i { class: "fa-solid fa-up-right-and-down-left-from-center text-[10px]" }
                     }

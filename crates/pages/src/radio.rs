@@ -135,7 +135,7 @@ pub fn Radio(props: RadioProps) -> Element {
                                 "{i18n::t(\"discover\")}"
                             }
                             h1 {
-                                class: "text-2xl font-bold text-white",
+                                class: "text-2xl font-semibold tracking-tight text-white",
                                 "{i18n::t(\"radio\")}"
                             }
                         }
@@ -176,7 +176,7 @@ pub fn Radio(props: RadioProps) -> Element {
                                     class: "fa-solid fa-radio text-2xl",
                                     style: "color: var(--color-indigo-400);",
                                 }
-                                h1 { class: "text-3xl font-bold text-white",
+                                h1 { class: "text-3xl font-semibold tracking-tight text-white",
                                     "{i18n::t(\"radio\")}"
                                 }
                             }
@@ -194,7 +194,7 @@ pub fn Radio(props: RadioProps) -> Element {
                             input {
                                 r#type: "text",
                                 placeholder: "{i18n::t(\"radio_search_stations\")}",
-                                class: "w-full bg-white/5 border border-white/10 rounded-full py-2.5 pl-12 pr-4 text-sm text-white focus:outline-none focus:border-white/20 transition-colors",
+                                class: "w-full bg-white/10 border border-white/10 rounded-full py-2.5 pl-12 pr-4 text-sm text-white focus:outline-none focus:border-white/25 transition-colors",
                                 oninput: {
                                     let debounce_gen = debounce_gen.clone();
                                     move |evt| {
@@ -403,7 +403,7 @@ pub fn Radio(props: RadioProps) -> Element {
                             for station in filtered.iter() {
                                 div {
                                     key: "{station.id}",
-                                    class: "group flex items-start gap-4 p-4 rounded-lg border transition-colors cursor-pointer hover:bg-white/[0.02]",
+                                    class: "group flex items-start gap-4 p-4 rounded-xl border transition-colors cursor-pointer hover:bg-white/10",
                                     style: "border-color: rgba(255,255,255,0.08);",
                                     onclick: {
                                         let station_id = station.id.clone();
@@ -445,8 +445,8 @@ pub fn Radio(props: RadioProps) -> Element {
                                             div { class: "flex flex-wrap items-center gap-2 mt-2.5",
                                                 for stream in &station.streams {
                                                     button {
-                                                        class: "px-3 py-1 rounded-md text-xs font-medium border transition-colors hover:bg-white/5 hover:text-white",
-                                                        style: "color: var(--color-slate-300); border-color: rgba(255,255,255,0.12);",
+                                                        class: "px-3 py-1 rounded-lg text-xs font-medium bg-white/10 hover:bg-white/20 transition-colors hover:text-white",
+                                                        style: "color: var(--color-slate-300);",
                                                         onclick: {
                                                             let station_id = station.id.clone();
                                                             let stream_id = stream.id.clone();
@@ -637,7 +637,7 @@ pub fn Radio(props: RadioProps) -> Element {
                                     for st in results.iter() {
                                         div {
                                             key: "{st.stationuuid}",
-                                            class: "group flex items-start gap-4 p-4 rounded-lg border transition-colors cursor-pointer hover:bg-white/[0.02]",
+                                            class: "group flex items-start gap-4 p-4 rounded-xl border transition-colors cursor-pointer hover:bg-white/10",
                                             style: "border-color: rgba(255,255,255,0.08);",
                                             onclick: {
                                                 let st = st.clone();
@@ -685,7 +685,7 @@ pub fn Radio(props: RadioProps) -> Element {
                                             }
 
                                             button {
-                                                class: "inline-flex items-center justify-center w-8 h-8 rounded-full transition-colors shrink-0 hover:bg-white/10",
+                                                class: "inline-flex items-center justify-center w-9 h-9 rounded-full transition-colors shrink-0 hover:bg-white/10 active:scale-95",
                                                 style: "color: var(--color-slate-400);",
                                                 onclick: {
                                                     let st = st.clone();

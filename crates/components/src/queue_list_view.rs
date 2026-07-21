@@ -51,9 +51,9 @@ pub fn QueueRow(
     let base_class = match layout {
         LayoutMode::Fullscreen => {
             if is_reorder_source {
-                "flex items-center gap-4 px-4 py-3 bg-white/10 cursor-grabbing rounded transition-colors group opacity-70"
+                "flex items-center gap-4 px-4 py-2 bg-white/10 cursor-grabbing rounded-lg transition-colors group opacity-70"
             } else {
-                "flex items-center gap-4 px-4 py-3 hover:bg-white/5 cursor-grab active:cursor-grabbing rounded transition-colors group"
+                "flex items-center gap-4 px-4 py-2 hover:bg-white/5 cursor-grab active:cursor-grabbing rounded-lg transition-colors group"
             }
         }
         LayoutMode::Rightbar => rightbar_queue_row_class(is_reorder_source),
@@ -76,7 +76,7 @@ pub fn QueueRow(
             style: match layout {
                 LayoutMode::Fullscreen => "",
                 LayoutMode::Rightbar => {
-                    "content-visibility: auto; contain-intrinsic-size: 0 56px;"
+                    "content-visibility: auto; contain-intrinsic-size: 0 52px;"
                 }
             },
             onmousedown: move |evt| on_row_mouse_down.call(evt),
@@ -283,12 +283,7 @@ pub fn QueueListView(
 
     // Clear functions when the component is dropped
     use_drop(move || {
-        let _cleanup = eval(&format!(
-            r#"
-                for (const key of ['queueJump', 'updateActiveQueueItem'])
-                    delete window[`__{layout}_${{key}}`];
-            "#,
-        ));
+        let _cleanup = eval(&format!("delete window.__{layout}_queueJump;"));
     });
 
     let mut auto_sync = use_signal(|| true);
@@ -312,35 +307,6 @@ pub fn QueueListView(
                     }};
                     attempt(10);
                 }};
-            "#,
-        ));
-
-        // Highlight next queue item when it becomes active and dehighlight the current one
-        let _update_func = eval(&format!(
-            r#"
-                let currentQueueItem;
-                window.__{layout}_updateActiveQueueItem = (nextIndex) => {{
-                    const nextQueueItem = document.getElementById(`{layout}__queue-item-${{nextIndex}}`);
-
-                    if (currentQueueItem != nextQueueItem) {{
-
-                        if (currentQueueItem) {{
-                            currentQueueItem.classList.remove("{layout}__active-queue-item");
-
-                            const icon = currentQueueItem.querySelector("i");
-                            if (icon) {{ icon.className = "fa-solid fa-play text-xs text-white/60"; }}
-                        }}
-
-                        if (nextQueueItem) {{
-                            nextQueueItem.classList.add("{layout}__active-queue-item");
-
-                            const icon = nextQueueItem.querySelector("i");
-                            if (icon) {{ icon.className = "fa-solid fa-volume-high text-xs"; }}
-                        }}
-
-                        currentQueueItem = nextQueueItem;
-                    }}
-                }}
             "#,
         ));
     });
@@ -376,9 +342,6 @@ pub fn QueueListView(
 
     use_effect(move || {
         let current_index = *current_queue_index.read();
-        let _update = eval(&format!(
-            "if (window.__{layout}_updateActiveQueueItem) window.__{layout}_updateActiveQueueItem({current_index});"
-        ));
         if *auto_sync.read() {
             let _jump = eval(&format!("window.__{layout}_queueJump?.({current_index});"));
         }

@@ -101,9 +101,9 @@ pub fn BottombarNormal(
     let current_track_snapshot = ctrl.current_track_snapshot.read().clone();
     let is_favorite = is_fav();
     let heart_class = if is_favorite {
-        "ml-2 text-red-400 hover:text-red-300 transition-colors"
+        "ml-2 w-9 h-9 rounded-full flex items-center justify-center text-red-400 hover:text-red-300 hover:bg-white/10 transition-colors active:scale-95"
     } else {
-        "ml-2 text-slate-400 hover:text-red-400 transition-colors"
+        "ml-2 w-9 h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-red-400 hover:bg-white/10 transition-colors active:scale-95"
     };
     let heart_icon = if is_favorite {
         "fa-solid fa-heart"
@@ -187,33 +187,33 @@ pub fn BottombarNormal(
                 div {
                     class: "flex items-center gap-6",
                     button {
-                        class: format!("{} transition-all active:scale-95 relative", if *ctrl.shuffle.read() { "text-white" } else { "text-slate-400 hover:text-white" }),
+                        class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95 relative",
+                        style: if *ctrl.shuffle.read() { "color: var(--color-indigo-500);" } else { "" },
                         title: if *ctrl.shuffle.read() { i18n::t("shuffle_on").to_string() } else { i18n::t("shuffle_off").to_string() },
                         onclick: move |_| ctrl.toggle_shuffle(),
                         i { class: "fa-solid fa-shuffle text-sm" }
                     }
                     button {
-                        class: "text-slate-400 hover:text-white transition-all active:scale-90",
+                        class: "w-10 h-10 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
                         onclick: move |_| ctrl.play_prev(),
                         i { class: "fa-solid fa-backward-step text-xl" }
                     }
                     button {
-                        class: "w-10 h-10 bg-white rounded-full flex items-center justify-center text-black hover:scale-105 active:scale-95 transition-all",
+                        class: "w-10 h-10 rounded-full flex items-center justify-center text-white hover:bg-white/10 transition-colors active:scale-95",
                         onclick: move |_| ctrl.toggle(),
                         i { class: if *is_playing.read() { "fa-solid fa-pause text-lg" } else { "fa-solid fa-play text-lg ml-0.5" } }
                     }
                     button {
-                        class: "text-slate-400 hover:text-white transition-all active:scale-90",
+                        class: "w-10 h-10 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
                         onclick: move |_| ctrl.play_next(),
                         i { class: "fa-solid fa-forward-step text-xl" }
                     }
                     button {
-                        class: format!("{} transition-all active:scale-95 relative",
-                            match *ctrl.loop_mode.read() {
-                                LoopMode::None => "text-slate-400 hover:text-white",
-                                _ => "text-white",
-                            }
-                        ),
+                        class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95 relative",
+                        style: match *ctrl.loop_mode.read() {
+                            LoopMode::None => "",
+                            _ => "color: var(--color-indigo-500);",
+                        },
                         title: match *ctrl.loop_mode.read() {
                             LoopMode::None => i18n::t("repeat_off").to_string(),
                             LoopMode::Queue => i18n::t("repeat_queue").to_string(),
@@ -222,7 +222,7 @@ pub fn BottombarNormal(
                         onclick: move |_| ctrl.toggle_loop(),
                         i { class: "fa-solid fa-repeat text-sm" }
                         if let LoopMode::Track = *ctrl.loop_mode.read() {
-                            span { class: "absolute -bottom-2.5 left-1/2 -translate-x-1/2 text-[9px] font-bold text-white leading-none", "1" }
+                            span { class: "absolute bottom-0.5 left-1/2 -translate-x-1/2 text-[9px] font-bold leading-none", "1" }
                         }
                     }
                 }
@@ -232,7 +232,7 @@ pub fn BottombarNormal(
                     div {
                         class: format!("flex-1 h-1 bg-white/10 rounded-full relative {}", if is_radio { "" } else { "group cursor-pointer" }),
                         div {
-                            class: "absolute top-0 left-0 h-full bg-white group-hover:bg-green-500 rounded-full transition-colors pointer-events-none",
+                            class: "absolute top-0 left-0 h-full bg-white/90 rounded-full pointer-events-none",
                             style: "width: {progress_percent}%",
                             div { class: "absolute -right-1.5 -top-1 w-3 h-3 bg-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity" }
                         }
@@ -267,7 +267,7 @@ pub fn BottombarNormal(
                 div {
                     class: "flex items-center gap-2 group",
                     button {
-                        class: "text-slate-400 hover:text-white transition-colors",
+                        class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
                         onclick: move |_| {
                             let muted = *is_muted.read();
                             if muted {
@@ -307,7 +307,7 @@ pub fn BottombarNormal(
                             }
                         },
                         div {
-                            class: "absolute top-0 left-0 h-full bg-white group-hover/vol:bg-green-500 rounded-full transition-colors pointer-events-none",
+                            class: "absolute top-0 left-0 h-full bg-white/90 rounded-full pointer-events-none",
                             style: "width: {volume_percent}%",
                             div { class: "absolute -right-1.5 -top-1 w-3 h-3 bg-white rounded-full opacity-0 group-hover/vol:opacity-100 transition-opacity" }
                         }
@@ -338,12 +338,12 @@ pub fn BottombarNormal(
                     }
                 }
                 button {
-                    class: "text-slate-400 hover:text-white",
+                    class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
                     onclick: move |_| { let c = *is_rightbar_open.read(); is_rightbar_open.set(!c); },
                     i { class: "fa-solid fa-list text-xs" }
                 }
                 button {
-                    class: "text-slate-400 hover:text-white",
+                    class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
                     title: i18n::t("share_musicbrainz").to_string(),
                     onclick: move |_| {
                         if let Some(t) = ctrl.current_track_snapshot.read().clone() {
@@ -355,7 +355,7 @@ pub fn BottombarNormal(
                 }
                 if cfg!(not(target_os = "android")) {
                     button {
-                        class: "text-slate-400 hover:text-white",
+                        class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
                         title: i18n::t("mini_player").to_string(),
                         onclick: move |_| { let c = *compact_mode.read(); compact_mode.set(!c); },
                         i { class: "fa-solid fa-compress text-xs" }
@@ -363,7 +363,7 @@ pub fn BottombarNormal(
                 }
                 if !bar_as_fullscreen {
                     button {
-                        class: "text-slate-400 hover:text-white",
+                        class: "w-9 h-9 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
                         onclick: move |_| is_fullscreen.set(true),
                         i { class: "fa-solid fa-up-right-and-down-left-from-center text-xs" }
                     }

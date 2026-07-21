@@ -49,7 +49,7 @@ pub fn PlaylistModal(props: PlaylistModalProps) -> Element {
             div {
                 class: "bg-neutral-900 rounded-xl border border-white/10 w-full max-w-md p-6",
                 onclick: move |e| e.stop_propagation(),
-                h2 { class: "text-xl font-bold text-white mb-4",
+                h2 { class: "text-xl font-semibold tracking-tight text-white mb-4",
                     "{add_to_playlist_text}"
                 }
 
@@ -72,14 +72,14 @@ pub fn PlaylistModal(props: PlaylistModalProps) -> Element {
                     div { class: "flex gap-2",
                         input {
                             r#type: "text",
-                            class: "flex-1 bg-white/5 border border-white/10 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-white/20",
+                            class: "flex-1 bg-white/10 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-white/25",
                             placeholder: "{playlist_name_input}",
                             value: "{new_playlist_name}",
                             oninput: move |e| new_playlist_name.set(e.value()),
                             onkeydown: move |e| e.stop_propagation()
                         }
                         button {
-                            class: "bg-white text-black px-4 py-2 rounded text-sm font-medium hover:bg-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
+                            class: "bg-white text-black px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed",
                             disabled: new_playlist_name.read().is_empty(),
                             onclick: move |_| {
                                 let name = new_playlist_name.read().clone();
