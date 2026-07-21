@@ -128,12 +128,17 @@ pub fn BottombarVaxry(
     } else {
         ""
     };
+    let bg_class = if config.read().cover_art_background {
+        "bg-black/40"
+    } else {
+        "bg-black/70 backdrop-blur-xl"
+    };
 
     let is_radio = *current_song_duration.read() == u64::MAX;
 
     rsx! {
         div {
-            class: "h-16 bg-black/70 backdrop-blur-xl {border_class} {lift_class} px-4 flex items-center gap-3 select-none shrink-0",
+            class: "h-16 {bg_class} {border_class} {lift_class} px-4 flex items-center gap-3 select-none shrink-0",
 
             div {
                 class: "flex items-center gap-2 shrink-0",

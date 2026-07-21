@@ -123,12 +123,17 @@ pub fn BottombarNormal(
     } else {
         ""
     };
+    let bg_class = if config.read().cover_art_background {
+        "bg-black/40"
+    } else {
+        "bg-black/60"
+    };
 
     let is_radio = *current_song_duration.read() == u64::MAX;
 
     rsx! {
         div {
-            class: "h-24 bg-black/60 {border_class} {lift_class} px-4 flex items-center justify-between select-text shrink-0",
+            class: "h-24 {bg_class} {border_class} {lift_class} px-4 flex items-center justify-between select-text shrink-0",
 
             div {
                 class: "flex items-center gap-4 w-1/4",
