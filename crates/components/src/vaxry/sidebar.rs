@@ -154,7 +154,7 @@ pub fn SidebarVaxry(props: SidebarProps) -> Element {
         } else {
             "position: fixed; left: 0; top: 0; z-index: 100; height: 100%; width: 280px; background: rgba(10,10,10,0.97);".to_string()
         }
-    } else if config.read().theme == "album-art" {
+    } else if config.read().theme == "album-art" || config.read().cover_art_background {
         format!("width: {current_width}px; background: rgba(0, 0, 0, 0.4);")
     } else {
         // Theme-following surface (not a fixed black overlay) so the Vaxry chrome

@@ -304,6 +304,68 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         }
 
                         SettingItem {
+                            title: i18n::t("cover_art_background").to_string(),
+                            control: rsx! {
+                                ToggleSetting {
+                                    enabled: config.read().cover_art_background,
+                                    on_change: move |val| config.write().cover_art_background = val,
+                                }
+                            }
+                        }
+                        if config.read().cover_art_background {
+                                SettingItem {
+                                    title: i18n::t("cover_art_darkening").to_string(),
+                                    control: rsx! {
+                                        div { class: "flex items-center gap-3 min-w-[220px]",
+                                            input {
+                                                r#type: "range",
+                                                min: "0",
+                                                max: "95",
+                                                step: "5",
+                                                value: format!("{}", config.read().cover_art_darkening),
+                                                class: "w-40",
+                                                style: "accent-color: var(--color-indigo-500);",
+                                                oninput: move |evt| {
+                                                    if let Ok(value) = evt.value().parse::<u8>() {
+                                                        config.write().cover_art_darkening = value.min(95);
+                                                    }
+                                                }
+                                            }
+                                            span {
+                                                class: "text-xs font-mono text-white/80 w-16 text-right",
+                                                "{config.read().cover_art_darkening}%"
+                                            }
+                                        }
+                                    }
+                                }
+                                SettingItem {
+                                    title: i18n::t("cover_art_blur").to_string(),
+                                    control: rsx! {
+                                        div { class: "flex items-center gap-3 min-w-[220px]",
+                                            input {
+                                                r#type: "range",
+                                                min: "0",
+                                                max: "100",
+                                                step: "5",
+                                                value: format!("{}", config.read().cover_art_blur),
+                                                class: "w-40",
+                                                style: "accent-color: var(--color-indigo-500);",
+                                                oninput: move |evt| {
+                                                    if let Ok(value) = evt.value().parse::<u8>() {
+                                                        config.write().cover_art_blur = value.min(100);
+                                                    }
+                                                }
+                                            }
+                                            span {
+                                                class: "text-xs font-mono text-white/80 w-16 text-right",
+                                                "{config.read().cover_art_blur}px"
+                                            }
+                                        }
+                                    }
+                                }
+                        }
+
+                        SettingItem {
                             title: i18n::t("music_directory").to_string(),
                                 control: rsx! {
                                 MultiDirectoryPicker {

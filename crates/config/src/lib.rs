@@ -675,6 +675,16 @@ pub struct AppConfig {
     /// the player bar act as the multimedia controller instead.
     #[serde(default)]
     pub fullscreen_use_player_bar: bool,
+    /// Use the current track's cover as the app background, overriding the
+    /// active theme's background (including the album-art gradient).
+    #[serde(default)]
+    pub cover_art_background: bool,
+    /// How strongly the cover art background is darkened, in percent (0-95).
+    #[serde(default = "default_cover_art_darkening")]
+    pub cover_art_darkening: u8,
+    /// Blur radius of the cover art background, in pixels (0 = sharp).
+    #[serde(default)]
+    pub cover_art_blur: u8,
     /// Opt-in chrome/Perfetto performance trace. Read at startup (the
     /// subscriber is built once), so a change needs a restart. Adds runtime
     /// overhead — surfaced with a warning in settings.
@@ -802,6 +812,10 @@ fn default_auto_check_updates() -> bool {
     true
 }
 
+fn default_cover_art_darkening() -> u8 {
+    60
+}
+
 pub fn default_sidebar_order() -> Vec<String> {
     vec![
         "home".to_string(),
@@ -885,6 +899,9 @@ impl Default for AppConfig {
             language: default_language(),
             reduce_animations: false,
             fullscreen_use_player_bar: false,
+            cover_art_background: false,
+            cover_art_darkening: default_cover_art_darkening(),
+            cover_art_blur: 0,
             tracing_enabled: false,
             auto_check_updates: default_auto_check_updates(),
             minimize_to_tray: false,

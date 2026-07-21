@@ -495,10 +495,20 @@ pub fn Fullscreen(
     });
 
     let background_style = use_memo(move || {
-        if config.read().theme == "album-art" {
+        let conf = config.read();
+        if conf.theme == "album-art" && !conf.cover_art_background {
             utils::color::get_background_style(palette.read().as_deref())
         } else {
             "background-color: var(--color-black); background-image: none;".to_string()
+        }
+    });
+
+    let cover_background = use_memo(move || {
+        if config.read().cover_art_background {
+            let url = current_song_cover_url.read().clone();
+            (!url.is_empty()).then_some(url)
+        } else {
+            None
         }
     });
 
@@ -542,6 +552,10 @@ pub fn Fullscreen(
             div {
                 class: "fixed inset-0 z-50 flex flex-col text-white select-none",
                 style: "{background_style.read()}",
+
+                if let Some(cover) = cover_background() {
+                    crate::CoverArtBackground { cover }
+                }
 
                 div {
                     class: "flex items-center gap-2 px-3 pt-[env(safe-area-inset-top)] pb-1 shrink-0",
@@ -596,6 +610,10 @@ pub fn Fullscreen(
         div {
             class: "fixed inset-0 z-50 flex flex-col text-white select-none",
             style: "{background_style.read()}",
+
+            if let Some(cover) = cover_background() {
+                crate::CoverArtBackground { cover }
+            }
 
             if cfg!(any(target_os = "linux", target_os = "windows")) {
                 div { dir: "ltr", Titlebar {} }

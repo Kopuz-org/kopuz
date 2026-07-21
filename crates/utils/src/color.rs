@@ -60,11 +60,15 @@ pub async fn get_palette_from_url(url: &str) -> Option<Vec<Color>> {
     )
 }
 
+pub fn luminance(c: &Color) -> f32 {
+    0.2126 * c.r as f32 + 0.7152 * c.g as f32 + 0.0722 * c.b as f32
+}
+
 /// Caps a palette color's luminance so light text stays readable on the
 /// gradient built from it; dark colors pass through unchanged.
 fn dim_for_text_contrast(c: &Color) -> Color {
     const MAX_LUMINANCE: f32 = 90.0;
-    let luminance = 0.2126 * c.r as f32 + 0.7152 * c.g as f32 + 0.0722 * c.b as f32;
+    let luminance = luminance(c);
     if luminance <= MAX_LUMINANCE {
         return c.clone();
     }

@@ -1,6 +1,7 @@
 use components::{
-    bottombar::Bottombar, compact_player::CompactPlayer, download_overlay::DownloadOverlay,
-    fullscreen::Fullscreen, rightbar::Rightbar, sidebar::Sidebar, titlebar::Titlebar,
+    CoverArtBackground, bottombar::Bottombar, compact_player::CompactPlayer,
+    download_overlay::DownloadOverlay, fullscreen::Fullscreen, rightbar::Rightbar,
+    sidebar::Sidebar, titlebar::Titlebar,
 };
 #[cfg(not(target_os = "android"))]
 use dioxus::desktop::tao::dpi::LogicalSize;
@@ -1619,10 +1620,20 @@ fn App() -> Element {
     let update_banner_state = update_banner.read().clone();
 
     let background_style = use_memo(move || {
-        if config.read().theme == "album-art" {
+        let conf = config.read();
+        if conf.theme == "album-art" && !conf.cover_art_background {
             utils::color::get_background_style(palette.read().as_deref())
         } else {
             "background-color: var(--color-black); background-image: none;".to_string()
+        }
+    });
+
+    let cover_background = use_memo(move || {
+        if config.read().cover_art_background {
+            let url = current_song_cover_url.read().clone();
+            (!url.is_empty()).then_some(url)
+        } else {
+            None
         }
     });
 
@@ -1636,7 +1647,7 @@ fn App() -> Element {
         WindowsToolbarIconAssets {}
 
         div {
-            class: "flex flex-col h-screen text-white select-none overflow-x-hidden {theme_class}",
+            class: "relative z-0 flex flex-col h-screen text-white select-none overflow-x-hidden {theme_class}",
             style: "{background_style}",
             dir: "{dir}",
             "data-platform": if cfg!(target_os = "android") { "android" } else { "desktop" },
@@ -1663,6 +1674,9 @@ fn App() -> Element {
                     evt.prevent_default();
                 }
             },
+            if let Some(cover) = cover_background() {
+                CoverArtBackground { cover }
+            }
             if cfg!(any(target_os = "linux", target_os = "windows")) {
                 div { dir: "ltr", Titlebar {} }
             }

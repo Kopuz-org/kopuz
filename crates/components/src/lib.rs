@@ -12,6 +12,8 @@ pub mod bottombar;
 pub mod compact_player;
 pub use compact_player::{CompactMode, CompactPlayer};
 pub mod constants;
+pub mod cover_background;
+pub use cover_background::CoverArtBackground;
 pub mod dots_menu;
 pub mod download_overlay;
 pub mod folder_picker;
