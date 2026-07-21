@@ -34,6 +34,7 @@ pub(crate) fn browser_candidates(browser: Browser) -> &'static [&'static str] {
             "microsoft-edge-dev",
         ],
         Browser::Vivaldi => &["vivaldi", "vivaldi-stable"],
+        Browser::Helium => &["helium-browser", "helium"],
     }
 }
 
@@ -44,6 +45,8 @@ pub(crate) fn browser_flatpak_ids(browser: Browser) -> &'static [&'static str] {
         Browser::Chromium => &["org.chromium.Chromium"],
         Browser::Edge => &["com.microsoft.Edge"],
         Browser::Vivaldi => &["com.vivaldi.Vivaldi"],
+        // Helium ships .deb/AppImage/tarball upstream, no flatpak.
+        Browser::Helium => &[],
     }
 }
 
@@ -55,6 +58,7 @@ fn macos_app_paths(browser: Browser) -> &'static [&'static str] {
         Browser::Chromium => &["/Applications/Chromium.app/Contents/MacOS/Chromium"],
         Browser::Edge => &["/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"],
         Browser::Vivaldi => &["/Applications/Vivaldi.app/Contents/MacOS/Vivaldi"],
+        Browser::Helium => &["/Applications/Helium.app/Contents/MacOS/Helium"],
     }
 }
 
@@ -95,6 +99,11 @@ fn windows_install_paths(browser: Browser) -> Vec<PathBuf> {
             add(&pf, r"Vivaldi\Application\vivaldi.exe");
             add(&pf86, r"Vivaldi\Application\vivaldi.exe");
             add(&local, r"Vivaldi\Application\vivaldi.exe");
+        }
+        Browser::Helium => {
+            add(&pf, r"imput\Helium\Application\chrome.exe");
+            add(&pf86, r"imput\Helium\Application\chrome.exe");
+            add(&local, r"imput\Helium\Application\chrome.exe");
         }
     }
     out
