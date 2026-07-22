@@ -17,13 +17,16 @@ pub enum ConnStatus {
     Connecting,
     /// Verified and reachable.
     Online,
-    /// Unreachable, or auth expired/invalid.
-    Offline,
+    /// Credentials are missing or rejected; the user needs to sign in again.
+    Expired,
+    /// The remote source could not be reached (network/server).
+    Unreachable,
 }
 
 /// Connection status of the active source: Local is always Online (no auth); a
 /// server runs `validate()` on each switch — `Connecting` until it resolves to
-/// `Online` (valid) or `Offline` (expired/unreachable).
+/// `Online` (valid), `Expired` (auth missing/rejected), or `Unreachable`
+/// (network/server).
 pub fn use_connection_status() -> Memo<ConnStatus> {
     let active_source = use_context::<Signal<ActiveSource>>();
     let config = use_context::<Signal<AppConfig>>();
@@ -39,13 +42,21 @@ pub fn use_connection_status() -> Memo<ConnStatus> {
         status.set(ConnStatus::Connecting);
         spawn(async move {
             let outcome = utils::offload(async move { src.validate().await }).await;
-            status.set(match outcome {
-                AuthOutcome::Valid => ConnStatus::Online,
-                AuthOutcome::Expired | AuthOutcome::Unreachable => ConnStatus::Offline,
-            });
+            status.set(status_for(outcome));
         });
     });
     use_memo(move || *status.read())
+}
+
+/// Map a credential-validation outcome to the switcher's connection status.
+/// `Expired` (missing/rejected creds) and `Unreachable` (network/server) are
+/// kept distinct so the UI can prompt sign-in only when re-auth would help.
+fn status_for(outcome: AuthOutcome) -> ConnStatus {
+    match outcome {
+        AuthOutcome::Valid => ConnStatus::Online,
+        AuthOutcome::Expired => ConnStatus::Expired,
+        AuthOutcome::Unreachable => ConnStatus::Unreachable,
+    }
 }
 
 /// Apply a source switch. For a server it loads the stored creds from the DB (so
@@ -111,5 +122,20 @@ pub fn use_switch_source() -> impl Fn(Source) + Clone {
         spawn(async move {
             apply_source_switch(config, db, source).await;
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_auth_outcomes_to_connection_statuses() {
+        assert_eq!(status_for(AuthOutcome::Valid), ConnStatus::Online);
+        assert_eq!(status_for(AuthOutcome::Expired), ConnStatus::Expired);
+        assert_eq!(
+            status_for(AuthOutcome::Unreachable),
+            ConnStatus::Unreachable
+        );
     }
 }
