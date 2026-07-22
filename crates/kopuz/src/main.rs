@@ -57,6 +57,46 @@ const TOOLBAR_ICONS: Asset = asset!("../assets/toolbar_icons", AssetOptions::fol
 const STORE_SAVE_SETTLE_MS: u64 = 600;
 const STORE_SAVE_COOLDOWN_MS: u64 = 2500;
 
+/// Build the `@font-face` + `body`/`#app-root` override CSS for a user-picked
+/// font file, inlining its bytes as a `data:` URI so no custom protocol handler
+/// is needed. Returns `None` when the path is empty, unreadable, or an
+/// unsupported extension — callers treat that as "no custom font".
+fn build_custom_font_css(path: &str) -> Option<String> {
+    use base64::Engine;
+    if path.is_empty() {
+        return None;
+    }
+    let ext = std::path::Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let (mime, format) = match ext.as_str() {
+        "woff2" => ("font/woff2", "woff2"),
+        "woff" => ("font/woff", "woff"),
+        "otf" => ("font/otf", "opentype"),
+        "ttf" => ("font/ttf", "truetype"),
+        _ => return None,
+    };
+    // Cap the file size before reading: the bytes end up base64-inlined in the
+    // DOM, so an oversized (or wrongly-picked) file would bloat the document.
+    const MAX_FONT_BYTES: u64 = 32 * 1024 * 1024;
+    let len = std::fs::metadata(path).ok()?.len();
+    if len > MAX_FONT_BYTES {
+        tracing::warn!("[custom-font] ignoring {path}: {len} bytes exceeds {MAX_FONT_BYTES} limit");
+        return None;
+    }
+    let bytes = std::fs::read(path).ok()?;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+    Some(format!(
+        "@font-face {{ font-family: \"kopuz-custom-font\"; \
+         src: url(data:{mime};base64,{b64}) format(\"{format}\"); \
+         font-display: swap; }}\n\
+         body, #app-root {{ font-family: \"kopuz-custom-font\", \"JetBrains Mono\", \
+         \"Segoe UI\", Tahoma, Geneva, Verdana, sans-serif, \"nasin-nanpa\"; }}"
+    ))
+}
+
 #[cfg(target_os = "windows")]
 #[component]
 fn WindowsToolbarIconAssets() -> Element {
@@ -1640,6 +1680,30 @@ fn App() -> Element {
         ));
     });
 
+    // Inject a user-picked UI font reactively, mirroring the custom-themes path
+    // above: read the file, inline it as a data: URI, and swap the <style>'s text.
+    let custom_font_path = use_memo(move || config.read().custom_font_path.clone());
+    use_effect(move || {
+        let path = custom_font_path.read().clone();
+        spawn(async move {
+            // Read + base64-encode on a blocking worker so a large font never
+            // stalls the render thread this effect runs on.
+            let css = tokio::task::spawn_blocking(move || {
+                build_custom_font_css(&path).unwrap_or_default()
+            })
+            .await
+            .unwrap_or_default();
+            let css_json = serde_json::to_string(&css).unwrap_or_else(|_| "\"\"".to_string());
+            let _ = dioxus::document::eval(&format!(
+                r#"(function(){{
+                    let el = document.getElementById('custom-font-style');
+                    if (!el) {{ el = document.createElement('style'); el.id = 'custom-font-style'; document.head.appendChild(el); }}
+                    el.textContent = {css_json};
+                }})()"#
+            ));
+        });
+    });
+
     let theme_class = use_memo(move || {
         if config.read().theme == "album-art" {
             "theme-default".to_string()
@@ -1968,7 +2032,7 @@ fn App() -> Element {
                                     div { class: "flex-1 flex justify-center pr-10",
                                         h2 {
                                             class: "text-[13px] font-black tracking-[0.2em] text-white/90 uppercase",
-                                            style: "font-family: 'JetBrains Mono', monospace;",
+                                            style: "font-family: 'kopuz-custom-font', 'JetBrains Mono', monospace;",
                                             "{page_title}"
                                         }
                                     }
