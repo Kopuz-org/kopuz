@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use config::{AppConfig, MusicServer, MusicService, SavedServer};
+use config::{AppConfig, MusicServer, MusicService, SavedLocalSource, SavedServer, Source};
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, SqliteConnection};
 
@@ -117,6 +117,29 @@ async fn config_round_trips_with_creds_in_servers_table() {
     assert_eq!(n, 1, "srv-a removed, srv-b kept");
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn named_local_source_round_trips_as_active() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    let local = SavedLocalSource {
+        id: "local:test-library".into(),
+        name: "Work music".into(),
+        directories: vec![PathBuf::from("/music/work")],
+    };
+    let cfg = AppConfig {
+        active_source: Source::LocalLibrary(local.id.clone()),
+        local_sources: vec![local.clone()],
+        ..Default::default()
+    };
+
+    db.save_config(&cfg).await.unwrap();
+    let loaded = db.load_config().await.unwrap().expect("config present");
+
+    assert_eq!(loaded.active_source, Source::LocalLibrary(local.id.clone()));
+    assert_eq!(loaded.local_sources, vec![local]);
+    assert!(loaded.server.is_none());
 }
 
 async fn open(db_path: &std::path::Path) -> SqliteConnection {

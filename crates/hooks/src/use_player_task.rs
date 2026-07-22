@@ -38,7 +38,7 @@ static BG_NOTIFY: std::sync::OnceLock<tokio::sync::Notify> = std::sync::OnceLock
 /// durable side (no whole-config rewrite on the play hot path).
 fn bump_listen_count_db(track_uid: String, db: db::Db) {
     spawn(async move {
-        if let Err(e) = ::server::source::local(db)
+        if let Err(e) = ::server::source::local(db, config::Source::Local)
             .bump_listen_count(&track_uid)
             .await
         {

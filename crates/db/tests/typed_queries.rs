@@ -82,9 +82,12 @@ async fn seed(db_path: &std::path::Path) {
     batch.push_str(
         "INSERT INTO tracks (rowid_pk, source, track_key, service, source_album_id, title, artist, album, artists_json) \
          VALUES (100, 'srv-1', 'vid1', 'YtMusic', 'al-yt', 'Server Song', 'Cyn', 'Yt Album', '[]');\n\
+         INSERT INTO tracks (rowid_pk, source, track_key, source_album_id, title, artist, album, artists_json) \
+         VALUES (101, 'local:test', '/music/jazz/b_1.flac', 'al-separate', 'Separate Song', 'Dee', 'Separate Album', '[]');\n\
          INSERT INTO albums (source, source_album_id, title, artist, genre) VALUES \
            ('local', 'al-rock', 'Rock One', 'Axel', 'Rock'), \
            ('local', 'al-jazz', 'Jazz One', 'Bea', 'Jazz'), \
+           ('local:test', 'al-separate', 'Separate Album', 'Dee', 'Other'), \
            ('srv-1', 'al-yt', 'Yt Album', 'Cyn', 'Pop');\n\
          INSERT INTO listen_counts (track_key, count) VALUES \
            ('/music/rock/a1.flac', 3), ('/music/jazz/b_1.flac', 10), ('ytmusic:vid1', 7);\n",
@@ -119,9 +122,21 @@ async fn typed_queries_smoke() {
     assert!(jazz.iter().all(|t| t.album == "Jazz One"));
 
     // Prefix with an underscore in a filename must not act as a wildcard.
-    let folder = db.folder_tracks("/music/jazz/").await.unwrap();
+    let folder = db
+        .folder_tracks(&Source::Local, "/music/jazz/")
+        .await
+        .unwrap();
     assert_eq!(folder.len(), 2);
-    let none = db.folder_tracks("/music/ja_z/").await.unwrap();
+    let separate = db
+        .folder_tracks(&Source::LocalLibrary("local:test".into()), "/music/jazz/")
+        .await
+        .unwrap();
+    assert_eq!(separate.len(), 1);
+    assert_eq!(separate[0].title, "Separate Song");
+    let none = db
+        .folder_tracks(&Source::Local, "/music/ja_z/")
+        .await
+        .unwrap();
     assert!(none.is_empty(), "LIKE metachars are escaped");
 
     let samples = db.artist_sample_tracks(&local, 10).await.unwrap();

@@ -172,13 +172,13 @@ pub async fn save_config(pool: &SqlitePool, cfg: &AppConfig) -> Result<(), DbErr
         obj.remove("server");
         obj.remove("servers");
         obj.remove("listen_counts");
-        // The resolved/generated active id is authoritative — persist it as the
-        // typed `active_source` (`{"Server": id}` or `"Local"`).
+        // Preserve local-library selections; only a server snapshot may need
+        // its generated/resolved id stamped into the typed source.
         obj.insert(
             "active_source".into(),
             match &active_id {
                 Some(id) => serde_json::json!({ "Server": id }),
-                None => serde_json::json!("Local"),
+                None => serde_json::to_value(&cfg.active_source)?,
             },
         );
     }

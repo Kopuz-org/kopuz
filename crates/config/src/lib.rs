@@ -7,7 +7,9 @@ use std::path::PathBuf;
 
 mod source;
 mod views;
-pub use source::{Browser, JellyfinServer, MusicServer, MusicService, SavedServer, Source};
+pub use source::{
+    Browser, JellyfinServer, MusicServer, MusicService, SavedLocalSource, SavedServer, Source,
+};
 pub use views::{IntegrationConfig, LibraryConfig, PlaybackConfig, ServerAuth, UiConfig};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -609,14 +611,12 @@ pub struct AppConfig {
     pub server: Option<MusicServer>,
     #[serde(default)]
     pub servers: Vec<SavedServer>,
-    /// Id of the active server (`servers.id`), or `None` for local. The DB-backed
-    /// source of truth for "which server is active"; `server`/`servers` above are
-    /// hydrated from the `servers` table around it. (`server` stays for now so the
-    /// ~90 existing `config.server` readers keep working — they migrate to id-based
-    /// resolution with the auth-gate work.)
-    /// The active source: `Local` or `Server(id)`. Single source of truth for
-    /// "which source/server is active" — `server`/`servers` above are hydrated
-    /// from the `servers` table around it.
+    /// Named, isolated filesystem libraries. The legacy `music_directory`
+    /// remains the built-in Local source for backwards compatibility.
+    #[serde(default)]
+    pub local_sources: Vec<SavedLocalSource>,
+    /// The active source: built-in Local, a named local library, or Server(id).
+    /// `server` is hydrated only for the active remote source.
     #[serde(default)]
     pub active_source: Source,
     #[serde(default)]
@@ -887,6 +887,7 @@ impl Default for AppConfig {
         Self {
             server: None,
             servers: Vec::new(),
+            local_sources: Vec::new(),
             active_source: Source::Local,
             source_explicitly_set: false,
             music_directory: vec![music_directory],
@@ -1017,6 +1018,23 @@ impl AppConfig {
         }
     }
 
+    pub fn add_local_source(&mut self, source: SavedLocalSource) {
+        if !self.local_sources.iter().any(|saved| saved.id == source.id) {
+            self.local_sources.push(source);
+        }
+    }
+
+    pub fn remove_local_source(&mut self, id: &str) {
+        self.local_sources.retain(|source| source.id != id);
+        if self.active_source.local_library_id() == Some(id) {
+            self.clear_active_server();
+        }
+    }
+
+    pub fn find_local_source(&self, id: &str) -> Option<&SavedLocalSource> {
+        self.local_sources.iter().find(|source| source.id == id)
+    }
+
     pub fn find_saved_server(&self, id: &str) -> Option<&SavedServer> {
         self.servers.iter().find(|s| s.id == id)
     }
@@ -1049,6 +1067,13 @@ impl AppConfig {
 impl AppConfig {
     pub fn clear_active_server(&mut self) {
         self.active_source = Source::Local;
+        self.server = None;
+        self.source_explicitly_set = true;
+    }
+
+    pub fn set_active_local_source(&mut self, source: Source) {
+        debug_assert!(source.is_local());
+        self.active_source = source;
         self.server = None;
         self.source_explicitly_set = true;
     }

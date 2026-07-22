@@ -24,7 +24,7 @@ use crate::{DbError, Page, Source, TrackFilter, TrackSort};
 /// their own `t.cover_path` and fall back to the album via `album_id` at resolve
 /// time (`server::cover::track`), where the encoding is understood.
 const TRACK_COLUMNS: &str = "t.source, t.track_key, t.service, \
-    COALESCE(t.cover_path, CASE WHEN t.source = 'local' THEN a.cover_path END) AS cover_path, \
+    COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS cover_path, \
     t.source_album_id, t.title, \
     t.artist, t.album, t.duration, t.khz, t.bitrate, t.track_number, t.disc_number, \
     t.mb_release_id, t.mb_recording_id, t.mb_track_id, t.playlist_item_id, t.artists_json";
@@ -38,7 +38,7 @@ const TRACKS_FROM: &str = "FROM tracks t LEFT JOIN albums a \
 
 /// SQL for a track row's listen-count key: the local path, or the lowercase
 /// legacy `service:item_id` uid the `listen_counts` table is keyed by.
-const UID_EXPR: &str = "(CASE WHEN t.source = 'local' THEN t.track_key ELSE \
+const UID_EXPR: &str = "(CASE WHEN t.service IS NULL THEN t.track_key ELSE \
     (CASE t.service WHEN 'YtMusic' THEN 'ytmusic' WHEN 'Subsonic' THEN 'subsonic' \
      WHEN 'Custom' THEN 'custom' ELSE 'jellyfin' END) || ':' || t.track_key END)";
 
@@ -201,15 +201,20 @@ fn escape_like(s: &str) -> String {
         .replace('_', "\\_")
 }
 
-pub async fn folder_tracks(pool: &SqlitePool, prefix: &str) -> Result<Vec<Track>, DbError> {
+pub async fn folder_tracks(
+    pool: &SqlitePool,
+    source: &Source,
+    prefix: &str,
+) -> Result<Vec<Track>, DbError> {
     // Local track_key IS the path. Escape LIKE metachars so a folder named
     // "100%" doesn't widen the match.
     let escaped = escape_like(prefix);
     let sql = format!(
-        "SELECT {TRACK_COLUMNS} {TRACKS_FROM} WHERE t.source = 'local' \
-         AND t.track_key LIKE ?1 ESCAPE '\\' ORDER BY t.track_key"
+        "SELECT {TRACK_COLUMNS} {TRACKS_FROM} WHERE t.source = ?1 \
+         AND t.track_key LIKE ?2 ESCAPE '\\' ORDER BY t.track_key"
     );
     let rows = sqlx::query_as::<_, TrackRow>(&sql)
+        .bind(source.as_str())
         .bind(format!("{escaped}%"))
         .fetch_all(pool)
         .await?;

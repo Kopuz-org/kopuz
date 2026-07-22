@@ -119,8 +119,12 @@ impl ReadStore for Native {
         queries::genre_tracks(&self.pool(), source, genre).await
     }
 
-    async fn folder_tracks(&self, prefix: &str) -> Result<Vec<reader::Track>, DbError> {
-        queries::folder_tracks(&self.pool(), prefix).await
+    async fn folder_tracks(
+        &self,
+        source: &crate::Source,
+        prefix: &str,
+    ) -> Result<Vec<reader::Track>, DbError> {
+        queries::folder_tracks(&self.pool(), source, prefix).await
     }
 
     async fn recently_played(

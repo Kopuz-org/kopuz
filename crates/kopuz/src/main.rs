@@ -57,6 +57,17 @@ const TOOLBAR_ICONS: Asset = asset!("../assets/toolbar_icons", AssetOptions::fol
 const STORE_SAVE_SETTLE_MS: u64 = 600;
 const STORE_SAVE_COOLDOWN_MS: u64 = 2500;
 
+fn configured_local_sources(config: &config::AppConfig) -> Vec<(config::Source, Vec<PathBuf>)> {
+    std::iter::once((config::Source::Local, config.music_directory.clone()))
+        .chain(config.local_sources.iter().map(|source| {
+            (
+                config::Source::LocalLibrary(source.id.clone()),
+                source.directories.clone(),
+            )
+        }))
+        .collect()
+}
+
 /// Build the `@font-face` + `body`/`#app-root` override CSS for a user-picked
 /// font file, inlining its bytes as a `data:` URI so no custom protocol handler
 /// is needed. Returns `None` when the path is empty, unreadable, or an
@@ -479,7 +490,7 @@ fn App() -> Element {
     let current_track_snapshot = use_signal(|| None::<reader::Track>);
     let mut volume = use_signal(|| 1.0f32);
     let mut persisted_volume = use_signal(|| 1.0f32);
-    let mut configured_music_dirs = use_signal(|| config.peek().music_directory.clone());
+    let mut configured_local_libraries = use_signal(|| configured_local_sources(&config.peek()));
 
     let is_playing = use_signal(|| false);
     let mut is_fullscreen = use_signal(|| false);
@@ -633,9 +644,9 @@ fn App() -> Element {
     });
 
     use_effect(move || {
-        let next_dirs = config.read().music_directory.clone();
-        if *configured_music_dirs.peek() != next_dirs {
-            configured_music_dirs.set(next_dirs);
+        let next_sources = configured_local_sources(&config.read());
+        if *configured_local_libraries.peek() != next_sources {
+            configured_local_libraries.set(next_sources);
         }
     });
 
@@ -1135,7 +1146,7 @@ fn App() -> Element {
                     let _apply = tracing::info_span!("startup.apply_config").entered();
                     let loaded = cfg_loaded;
                     config.set(loaded.clone());
-                    configured_music_dirs.set(loaded.music_directory.clone());
+                    configured_local_libraries.set(configured_local_sources(&loaded));
                     volume.set(loaded.volume);
                     persisted_volume.set(loaded.volume);
                     player.peek().set_volume(loaded.volume);
@@ -1197,7 +1208,7 @@ fn App() -> Element {
         if !*initial_load_done.read() || !*config_loaded_ok.read() {
             return;
         }
-        let configured_dirs = configured_music_dirs.read().clone();
+        let configured_sources = configured_local_libraries.read().clone();
         let trigger = *trigger_rescan.read();
         let fetch_covers = config.peek().auto_fetch_covers;
         let fetch_strategy = config.peek().cover_fetch_strategy;
@@ -1208,9 +1219,12 @@ fn App() -> Element {
 
         let scan_key = format!(
             "{}|{}",
-            configured_dirs
+            configured_sources
                 .iter()
-                .map(|d| d.to_string_lossy())
+                .flat_map(|(source, dirs)| {
+                    std::iter::once(source.as_str().to_string())
+                        .chain(dirs.iter().map(|dir| dir.to_string_lossy().into_owned()))
+                })
                 .collect::<Vec<_>>()
                 .join(","),
             trigger,
@@ -1233,7 +1247,7 @@ fn App() -> Element {
         spawn(async move {
             let db = db_scan;
             let gens = gens_scan;
-            let configured_dirs = configured_dirs;
+            for (source, configured_dirs) in configured_sources {
             let scannable_dirs: Vec<PathBuf> = configured_dirs
                 .iter()
                 .filter(|d| d.exists())
@@ -1252,7 +1266,7 @@ fn App() -> Element {
                 if !prefix.ends_with(std::path::MAIN_SEPARATOR) {
                     prefix.push(std::path::MAIN_SEPARATOR);
                 }
-                let found = match db.folder_tracks(&prefix).await {
+                let found = match db.folder_tracks(&source, &prefix).await {
                     Ok(t) => t,
                     Err(e) => {
                         tracing::error!(error = %e, root = %prefix, "rescan: seed query failed — aborting scan");
@@ -1265,7 +1279,7 @@ fn App() -> Element {
                     }
                 }
             }
-            let seed_albums = match db.albums(&db::Source::Local).await {
+            let seed_albums = match db.albums(&source).await {
                 Ok(a) => a,
                 Err(e) => {
                     tracing::error!(error = %e, "rescan: album seed failed — aborting scan");
@@ -1332,10 +1346,10 @@ fn App() -> Element {
                     return;
                 }
                 for chunk in current_lib.tracks.chunks(100) {
-                    let _ = db.upsert_tracks(&db::Source::Local, chunk).await;
+                    let _ = db.upsert_tracks(&source, chunk).await;
                     gens.bump_coalesced(hooks::db_reactivity::Table::Tracks);
                 }
-                let _ = db.upsert_albums(&db::Source::Local, &current_lib.albums).await;
+                let _ = db.upsert_albums(&source, &current_lib.albums).await;
                 let keep_keys: Vec<String> = current_lib
                     .tracks
                     .iter()
@@ -1348,7 +1362,7 @@ fn App() -> Element {
                     return;
                 }
                 let _ = db
-                    .prune_source(&db::Source::Local, &keep_keys, &keep_albums)
+                    .prune_source(&source, &keep_keys, &keep_albums)
                     .await;
                 for (artist, img) in &current_lib.local_artist_images {
                     let p = img.to_string_lossy().into_owned();
@@ -1377,6 +1391,8 @@ fn App() -> Element {
                     // missing set, so they can't be overwritten).
                     let lib_for_fetch = current_lib;
                     let db = db.clone();
+                    let source = source.clone();
+                    let lastfm_key = lastfm_key.clone();
                     spawn(async move {
                         let fetcher = reader::cover_fetcher::CoverFetcher::new(
                             cover_cache(),
@@ -1411,7 +1427,7 @@ fn App() -> Element {
                             };
                             let p = cover.to_string_lossy().into_owned();
                             if db
-                                .update_album_cover(&db::Source::Local, &album.id, Some(&p), false)
+                                .update_album_cover(&source, &album.id, Some(&p), false)
                                 .await
                                 .is_ok()
                             {
@@ -1428,9 +1444,10 @@ fn App() -> Element {
                 }
             } else {
                 // No music directories configured: the local library is empty.
-                let _ = db.prune_source(&db::Source::Local, &[], &[]).await;
+                let _ = db.prune_source(&source, &[], &[]).await;
                 gens.bump(hooks::db_reactivity::Table::Tracks);
                 gens.bump(hooks::db_reactivity::Table::Albums);
+            }
             }
         }.instrument(tracing::info_span!("library.rescan")));
     });
@@ -1454,53 +1471,66 @@ fn App() -> Element {
         }
         cover_reextract_in_flight.set(true);
         let cover_cache_dir = cover_cache();
+        let local_sources: Vec<config::Source> = configured_local_libraries
+            .peek()
+            .iter()
+            .map(|(source, _)| source.clone())
+            .collect();
         spawn(
             async move {
-                let albums = match db.albums(&db::Source::Local).await {
-                    Ok(a) => a,
-                    Err(e) => {
-                        tracing::error!(error = %e, "cover re-extract: album query failed");
-                        return;
-                    }
-                };
                 let mut changed = 0u32;
-                for album in &albums {
-                    // Manual covers are user-set; a present file needs nothing.
-                    if album.manual_cover || album.cover_path.as_ref().is_some_and(|p| p.exists()) {
-                        continue;
-                    }
-                    let tracks = match db.album_tracks(&db::Source::Local, &album.id).await {
-                        Ok(t) => t,
-                        Err(_) => continue,
-                    };
-                    let mut new_cover: Option<std::path::PathBuf> = None;
-                    for track in &tracks {
-                        let Some(path) = track.id.local_path() else {
+                for source in local_sources {
+                    let albums = match db.albums(&source).await {
+                        Ok(a) => a,
+                        Err(e) => {
+                            tracing::error!(error = %e, "cover re-extract: album query failed");
                             continue;
+                        }
+                    };
+                    for album in &albums {
+                        // Manual covers are user-set; a present file needs nothing.
+                        if album.manual_cover
+                            || album.cover_path.as_ref().is_some_and(|p| p.exists())
+                        {
+                            continue;
+                        }
+                        let tracks = match db.album_tracks(&source, &album.id).await {
+                            Ok(t) => t,
+                            Err(_) => continue,
                         };
-                        // Embedded art first, then a folder image beside the track.
-                        if let Some((data, _mime)) = reader::read_cover(path)
-                            && let Ok(saved) =
-                                reader::utils::save_cover(&album.id, &data, None, &cover_cache_dir)
-                        {
-                            new_cover = Some(saved);
-                            break;
+                        let mut new_cover: Option<std::path::PathBuf> = None;
+                        for track in &tracks {
+                            let Some(path) = track.id.local_path() else {
+                                continue;
+                            };
+                            // Embedded art first, then a folder image beside the track.
+                            if let Some((data, _mime)) = reader::read_cover(path)
+                                && let Ok(saved) = reader::utils::save_cover(
+                                    &album.id,
+                                    &data,
+                                    None,
+                                    &cover_cache_dir,
+                                )
+                            {
+                                new_cover = Some(saved);
+                                break;
+                            }
+                            if let Some(folder) =
+                                path.parent().and_then(reader::utils::find_folder_cover)
+                            {
+                                new_cover = Some(folder);
+                                break;
+                            }
                         }
-                        if let Some(folder) =
-                            path.parent().and_then(reader::utils::find_folder_cover)
-                        {
-                            new_cover = Some(folder);
-                            break;
-                        }
-                    }
-                    if let Some(cover) = new_cover {
-                        let p = cover.to_string_lossy().into_owned();
-                        if db
-                            .update_album_cover(&db::Source::Local, &album.id, Some(&p), false)
-                            .await
-                            .is_ok()
-                        {
-                            changed += 1;
+                        if let Some(cover) = new_cover {
+                            let p = cover.to_string_lossy().into_owned();
+                            if db
+                                .update_album_cover(&source, &album.id, Some(&p), false)
+                                .await
+                                .is_ok()
+                            {
+                                changed += 1;
+                            }
                         }
                     }
                 }
@@ -1807,7 +1837,7 @@ fn App() -> Element {
                 div { dir: "ltr", Titlebar {} }
             }
 
-            if active_source == config::Source::Local {
+            if active_source().is_local() {
                 if let Some(file) = scan_current_file.read().clone() {
                     div {
                         class: "flex-shrink-0",

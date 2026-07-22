@@ -164,11 +164,13 @@ fn ClearCacheButton() -> Element {
 use components::settings_items::{
     BackBehaviorSelector, ChannelModeSelector, DeviceChangeBehaviorSelector,
     DiscordPresencePausedSettings, DiscordPresenceSettings, EqualizerPanel, LanguageSelector,
-    LastFmSettings, LibreFmSettings, MultiDirectoryPicker, MusicBrainzSettings,
+    LastFmSettings, LibreFmSettings, LocalSourceSettings, MusicBrainzSettings,
     RadioRegistryDropdown, SampleRateModeSelector, ServerSettings, SettingItem, SettingsSection,
     ThemeSelector, ToggleSetting,
 };
-use components::settings_popups::{AddRegistryPopup, AddServerPopup, LoginPopup};
+use components::settings_popups::{
+    AddLocalSourcePopup, AddRegistryPopup, AddServerPopup, LoginPopup,
+};
 use config::{AppConfig, FetchStrategy, MusicService, OfflineQuality};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
@@ -182,7 +184,12 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         format!("{}s", config.read().crossfade_seconds)
     };
     let mut show_add_server = use_signal(|| false);
+    let mut show_add_local_source = use_signal(|| false);
     let mut show_login = use_signal(|| false);
+
+    let mut local_source_name = use_signal(String::new);
+    let mut local_source_directories = use_signal(Vec::<std::path::PathBuf>::new);
+    let mut local_source_error = use_signal(|| Option::<String>::None);
 
     let server_name = use_signal(String::new);
     let server_url = use_signal(String::new);
@@ -242,6 +249,13 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     };
 
     let db_for_switch = use_context::<hooks::ReadDb>();
+    let db_for_local_switch = db_for_switch.clone();
+    let handle_switch_local = move |source: config::Source| {
+        let db = db_for_local_switch.clone();
+        spawn(async move {
+            hooks::source_switch::apply_source_switch(config, db, source).await;
+        });
+    };
     let handle_switch_server = move |id: String| {
         crate::settings_actions::switch_server(
             config,
@@ -442,22 +456,51 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         }
 
                         SettingItem {
-                            title: i18n::t("music_directory").to_string(),
-                                control: rsx! {
-                                MultiDirectoryPicker {
-                                    current_paths: config.read().music_directory.clone(),
-                                    on_add: move |path| {
-                                        let mut config = config.write();
-                                        if !config.music_directory.contains(&path) {
-                                            config.music_directory.push(path);
+                            title: i18n::t("local_libraries").to_string(),
+                            control: rsx! {
+                                LocalSourceSettings {
+                                    active_source: config.read().active_source.clone(),
+                                    default_directories: config.read().music_directory.clone(),
+                                    sources: config.read().local_sources.clone(),
+                                    on_add: move |_| show_add_local_source.set(true),
+                                    on_delete: move |id: String| config.write().remove_local_source(&id),
+                                    on_switch: handle_switch_local,
+                                    on_add_folder: move |(source, path): (config::Source, std::path::PathBuf)| {
+                                        let mut cfg = config.write();
+                                        match source {
+                                            config::Source::Local => {
+                                                if !cfg.music_directory.contains(&path) {
+                                                    cfg.music_directory.push(path);
+                                                }
+                                            }
+                                            config::Source::LocalLibrary(id) => {
+                                                if let Some(local) = cfg.local_sources.iter_mut().find(|local| local.id == id)
+                                                    && !local.directories.contains(&path)
+                                                {
+                                                    local.directories.push(path);
+                                                }
+                                            }
+                                            config::Source::Server(_) => {}
                                         }
                                     },
-                                    on_remove: move |index| {
-                                        let mut config = config.write();
-                                        if index < config.music_directory.len() {
-                                            config.music_directory.remove(index);
+                                    on_remove_folder: move |(source, index): (config::Source, usize)| {
+                                        let mut cfg = config.write();
+                                        match source {
+                                            config::Source::Local => {
+                                                if index < cfg.music_directory.len() {
+                                                    cfg.music_directory.remove(index);
+                                                }
+                                            }
+                                            config::Source::LocalLibrary(id) => {
+                                                if let Some(local) = cfg.local_sources.iter_mut().find(|local| local.id == id)
+                                                    && index < local.directories.len()
+                                                {
+                                                    local.directories.remove(index);
+                                                }
+                                            }
+                                            config::Source::Server(_) => {}
                                         }
-                                    }
+                                    },
                                 }
                             }
                         }
@@ -1006,6 +1049,43 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         error,
                         on_close: move |_| show_add_server.set(false),
                         on_save: handle_add_server
+                    }
+                }
+
+                if show_add_local_source() {
+                    AddLocalSourcePopup {
+                        name: local_source_name,
+                        directories: local_source_directories,
+                        error: local_source_error,
+                        on_close: move |_| {
+                            show_add_local_source.set(false);
+                            local_source_name.set(String::new());
+                            local_source_directories.set(Vec::new());
+                            local_source_error.set(None);
+                        },
+                        on_save: move |_| {
+                            let name = local_source_name().trim().to_string();
+                            if name.is_empty() {
+                                local_source_error.set(Some(i18n::t("local_library_name_required").to_string()));
+                                return;
+                            }
+                            let directories = local_source_directories();
+                            if directories.is_empty() {
+                                local_source_error.set(Some(i18n::t("local_library_folder_required").to_string()));
+                                return;
+                            }
+                            let source = config::SavedLocalSource::new(name, directories);
+                            let active = config::Source::LocalLibrary(source.id.clone());
+                            {
+                                let mut cfg = config.write();
+                                cfg.add_local_source(source);
+                                cfg.set_active_local_source(active);
+                            }
+                            show_add_local_source.set(false);
+                            local_source_name.set(String::new());
+                            local_source_directories.set(Vec::new());
+                            local_source_error.set(None);
+                        },
                     }
                 }
 

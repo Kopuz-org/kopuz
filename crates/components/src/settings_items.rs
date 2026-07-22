@@ -1,6 +1,6 @@
 use config::{
     AppConfig, BackBehavior, ChannelMode, DeviceChangeBehavior, EqPreset,
-    EqualizerSettings as EqualizerConfig, SampleRateMode, SavedServer,
+    EqualizerSettings as EqualizerConfig, SampleRateMode, SavedLocalSource, SavedServer,
 };
 use dioxus::prelude::*;
 #[cfg(not(target_os = "android"))]
@@ -146,6 +146,97 @@ pub fn MultiDirectoryPicker(
                 }
             }
             AddFolderButton { on_add, add_text }
+        }
+    }
+}
+
+#[component]
+pub fn LocalSourceSettings(
+    active_source: config::Source,
+    default_directories: Vec<std::path::PathBuf>,
+    sources: Vec<SavedLocalSource>,
+    on_add: EventHandler<()>,
+    on_delete: EventHandler<String>,
+    on_switch: EventHandler<config::Source>,
+    on_add_folder: EventHandler<(config::Source, std::path::PathBuf)>,
+    on_remove_folder: EventHandler<(config::Source, usize)>,
+) -> Element {
+    let default_active = active_source == config::Source::Local;
+    rsx! {
+        div { class: "flex flex-col gap-3 w-full",
+            div { class: "bg-white/5 p-3 rounded w-full space-y-2",
+                div { class: "flex items-center justify-between gap-3",
+                    div { class: "min-w-0 flex items-center gap-2",
+                        p { class: "text-sm font-medium text-white truncate", "{i18n::t(\"local\")}" }
+                        if default_active {
+                            span { class: "text-[10px] px-2 py-0.5 rounded bg-indigo-500/30 text-indigo-200",
+                                "{i18n::t(\"active_local_library\")}"
+                            }
+                        }
+                    }
+                    if !default_active {
+                        button {
+                            onclick: move |_| on_switch.call(config::Source::Local),
+                            class: "text-xs bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-white transition-colors",
+                            "{i18n::t(\"switch_to_local_library\")}"
+                        }
+                    }
+                }
+                MultiDirectoryPicker {
+                    current_paths: default_directories,
+                    on_add: move |path| on_add_folder.call((config::Source::Local, path)),
+                    on_remove: move |index| on_remove_folder.call((config::Source::Local, index)),
+                }
+            }
+            for source in sources.iter().cloned() {
+                {
+                    let id = source.id.clone();
+                    let id_delete = id.clone();
+                    let source_key = config::Source::LocalLibrary(id.clone());
+                    let switch_key = source_key.clone();
+                    let add_folder_key = source_key.clone();
+                    let remove_folder_key = source_key.clone();
+                    let is_active = active_source.local_library_id() == Some(source.id.as_str());
+                    rsx! {
+                        div { key: "{source.id}", class: "bg-white/5 p-3 rounded w-full space-y-2",
+                            div { class: "flex items-center justify-between gap-3",
+                                div { class: "min-w-0 flex items-center gap-2",
+                                    p { class: "text-sm font-medium text-white truncate", "{source.name}" }
+                                    if is_active {
+                                        span { class: "text-[10px] px-2 py-0.5 rounded bg-indigo-500/30 text-indigo-200",
+                                            "{i18n::t(\"active_local_library\")}"
+                                        }
+                                    }
+                                }
+                                div { class: "flex items-center gap-2 shrink-0",
+                                    if !is_active {
+                                        button {
+                                            onclick: move |_| on_switch.call(switch_key.clone()),
+                                            class: "text-xs bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-white transition-colors",
+                                            "{i18n::t(\"switch_to_local_library\")}"
+                                        }
+                                    }
+                                    button {
+                                        onclick: move |_| on_delete.call(id_delete.clone()),
+                                        class: "text-red-400 hover:text-red-300 text-sm px-2 py-1 transition-colors",
+                                        "{i18n::t(\"delete\")}"
+                                    }
+                                }
+                            }
+                            MultiDirectoryPicker {
+                                current_paths: source.directories.clone(),
+                                on_add: move |path| on_add_folder.call((add_folder_key.clone(), path)),
+                                on_remove: move |index| on_remove_folder.call((remove_folder_key.clone(), index)),
+                            }
+                        }
+                    }
+                }
+            }
+            button {
+                onclick: move |_| on_add.call(()),
+                class: "bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start",
+                "{i18n::t(\"add_local_library\")}"
+            }
         }
     }
 }

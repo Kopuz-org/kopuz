@@ -280,7 +280,11 @@ pub fn PlaylistsPage(
                             let read_db = consume_context::<hooks::ReadDb>();
                             let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                             spawn(async move {
-                                let tracks = read_db.folder_tracks(&prefix).await.unwrap_or_default();
+                                let source_key = local.source().clone();
+                                let tracks = read_db
+                                    .folder_tracks(&source_key, &prefix)
+                                    .await
+                                    .unwrap_or_default();
                                 let refs: Vec<String> = tracks
                                     .iter()
                                     .map(|track| track.id.key().into_owned())
