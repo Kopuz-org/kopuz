@@ -133,6 +133,11 @@ async fn typed_queries_smoke() {
         .unwrap();
     assert_eq!(separate.len(), 1);
     assert_eq!(separate[0].title, "Separate Song");
+    assert_eq!(
+        separate[0].id.local_path(),
+        Some(std::path::Path::new("/music/jazz/b_1.flac")),
+        "named local sources must reconstruct filesystem track ids",
+    );
     let none = db
         .folder_tracks(&Source::Local, "/music/ja_z/")
         .await

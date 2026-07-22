@@ -8,7 +8,6 @@ use reader::models::{Album, Track, TrackId};
 
 #[derive(sqlx::FromRow)]
 pub struct TrackRow {
-    pub source: String,
     pub track_key: String,
     pub service: Option<String>,
     pub cover_path: Option<String>,
@@ -30,13 +29,12 @@ pub struct TrackRow {
 
 impl From<TrackRow> for Track {
     fn from(r: TrackRow) -> Self {
-        let id = if r.source == "local" {
-            TrackId::Local(PathBuf::from(&r.track_key))
-        } else {
-            TrackId::Server {
-                service: parse_service(r.service.as_deref().unwrap_or("Jellyfin")),
+        let id = match r.service.as_deref() {
+            None => TrackId::Local(PathBuf::from(&r.track_key)),
+            Some(service) => TrackId::Server {
+                service: parse_service(service),
                 item_id: r.track_key,
-            }
+            },
         };
         Track {
             id,

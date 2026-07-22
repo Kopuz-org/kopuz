@@ -23,7 +23,7 @@ use crate::{DbError, Page, Source, TrackFilter, TrackSort};
 /// resolver would misread as the *track's* own image tag — so server rows keep
 /// their own `t.cover_path` and fall back to the album via `album_id` at resolve
 /// time (`server::cover::track`), where the encoding is understood.
-const TRACK_COLUMNS: &str = "t.source, t.track_key, t.service, \
+const TRACK_COLUMNS: &str = "t.track_key, t.service, \
     COALESCE(t.cover_path, CASE WHEN t.service IS NULL THEN a.cover_path END) AS cover_path, \
     t.source_album_id, t.title, \
     t.artist, t.album, t.duration, t.khz, t.bitrate, t.track_number, t.disc_number, \
