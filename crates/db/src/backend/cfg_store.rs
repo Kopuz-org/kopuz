@@ -218,7 +218,12 @@ pub async fn load_server(pool: &SqlitePool, id: &str) -> Result<Option<MusicServ
 }
 
 /// Increment one track's play count (1-row upsert — no whole-blob rewrite).
-pub async fn bump_listen_count(pool: &SqlitePool, key: &str) -> Result<(), DbError> {
+pub async fn bump_listen_count(
+    pool: &SqlitePool,
+    source: &Source,
+    track_uid: &str,
+) -> Result<(), DbError> {
+    let key = source.listen_count_key(track_uid);
     sqlx::query!(
         "INSERT INTO listen_counts (track_key, count) VALUES (?1, 1) \
          ON CONFLICT(track_key) DO UPDATE SET count = count + 1",

@@ -36,12 +36,9 @@ static BG_NOTIFY: std::sync::OnceLock<tokio::sync::Notify> = std::sync::OnceLock
 /// Persist a play-count increment as a single-row upsert. The in-memory
 /// `config.listen_counts` is bumped by the caller for live views; this is the
 /// durable side (no whole-config rewrite on the play hot path).
-fn bump_listen_count_db(track_uid: String, db: db::Db) {
+fn bump_listen_count_db(track_uid: String, source: ::server::source::ActiveSource) {
     spawn(async move {
-        if let Err(e) = ::server::source::local(db, config::Source::Local)
-            .bump_listen_count(&track_uid)
-            .await
-        {
+        if let Err(e) = source.bump_listen_count(&track_uid).await {
             tracing::warn!(error = %e, "listen count persist failed");
         }
     });
@@ -659,12 +656,11 @@ pub fn use_player_task(ctrl: PlayerController) {
                             let idx = *ctrl.current_queue_index.peek();
                             if let Some(track) = ctrl.get_track_at(idx) {
                                 let track_id = track.id.uid().to_string();
-                                *config_write
-                                    .listen_counts
-                                    .entry(track_id.clone())
-                                    .or_insert(0) += 1;
+                                let source = ctrl.active_source.peek().clone();
+                                let count_key = source.source().listen_count_key(&track_id);
+                                *config_write.listen_counts.entry(count_key).or_insert(0) += 1;
                                 drop(config_write);
-                                bump_listen_count_db(track_id, ctrl.db.peek().clone());
+                                bump_listen_count_db(track_id, source);
                             }
                         }
                         ctrl.play_next_with_crossfade();
@@ -696,12 +692,11 @@ pub fn use_player_task(ctrl: PlayerController) {
                             let idx = *ctrl.current_queue_index.peek();
                             if let Some(track) = ctrl.get_track_at(idx) {
                                 let track_id = track.id.uid().to_string();
-                                *config_write
-                                    .listen_counts
-                                    .entry(track_id.clone())
-                                    .or_insert(0) += 1;
+                                let source = ctrl.active_source.peek().clone();
+                                let count_key = source.source().listen_count_key(&track_id);
+                                *config_write.listen_counts.entry(count_key).or_insert(0) += 1;
                                 drop(config_write);
-                                bump_listen_count_db(track_id, ctrl.db.peek().clone());
+                                bump_listen_count_db(track_id, source);
                             }
                         }
                         ctrl.play_next();

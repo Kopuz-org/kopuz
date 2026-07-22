@@ -367,8 +367,12 @@ impl Storage for Native {
         writes::set_playlist_folder(&self.pool(), playlist_ref, folder_id).await
     }
 
-    async fn bump_listen_count(&self, track_uid: &str) -> Result<(), DbError> {
-        cfg_store::bump_listen_count(&self.pool(), track_uid).await
+    async fn bump_listen_count(
+        &self,
+        source: &crate::Source,
+        track_uid: &str,
+    ) -> Result<(), DbError> {
+        cfg_store::bump_listen_count(&self.pool(), source, track_uid).await
     }
 
     async fn push_recent(&self, source: &crate::Source, track_key: &str) -> Result<(), DbError> {

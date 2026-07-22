@@ -51,6 +51,16 @@ impl Source {
             Source::Local | Source::Server(_) => None,
         }
     }
+
+    /// Key used by the play-count cache. Legacy Local and server sources keep
+    /// their existing uid keys; named local libraries add their source id so
+    /// the same filesystem path can have independent counts in each library.
+    pub fn listen_count_key(&self, track_uid: &str) -> String {
+        match self {
+            Source::LocalLibrary(id) => format!("{id}|{track_uid}"),
+            Source::Local | Source::Server(_) => track_uid.to_owned(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

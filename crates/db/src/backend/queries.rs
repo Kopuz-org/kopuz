@@ -36,9 +36,11 @@ const TRACK_COLUMNS: &str = "t.track_key, t.service, \
 const TRACKS_FROM: &str = "FROM tracks t LEFT JOIN albums a \
     ON a.source = t.source AND a.source_album_id = t.source_album_id";
 
-/// SQL for a track row's listen-count key: the local path, or the lowercase
-/// legacy `service:item_id` uid the `listen_counts` table is keyed by.
-const UID_EXPR: &str = "(CASE WHEN t.service IS NULL THEN t.track_key ELSE \
+/// SQL for a track row's listen-count key: built-in Local keeps the legacy
+/// path key, named local sources prefix it with their source id, and servers
+/// keep the lowercase legacy `service:item_id` uid.
+const UID_EXPR: &str = "(CASE WHEN t.service IS NULL THEN \
+    (CASE WHEN t.source = 'local' THEN t.track_key ELSE t.source || '|' || t.track_key END) ELSE \
     (CASE t.service WHEN 'YtMusic' THEN 'ytmusic' WHEN 'Subsonic' THEN 'subsonic' \
      WHEN 'Custom' THEN 'custom' ELSE 'jellyfin' END) || ':' || t.track_key END)";
 
