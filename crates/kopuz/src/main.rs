@@ -78,6 +78,14 @@ fn build_custom_font_css(path: &str) -> Option<String> {
         "ttf" => ("font/ttf", "truetype"),
         _ => return None,
     };
+    // Cap the file size before reading: the bytes end up base64-inlined in the
+    // DOM, so an oversized (or wrongly-picked) file would bloat the document.
+    const MAX_FONT_BYTES: u64 = 32 * 1024 * 1024;
+    let len = std::fs::metadata(path).ok()?.len();
+    if len > MAX_FONT_BYTES {
+        tracing::warn!("[custom-font] ignoring {path}: {len} bytes exceeds {MAX_FONT_BYTES} limit");
+        return None;
+    }
     let bytes = std::fs::read(path).ok()?;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
     Some(format!(
@@ -1677,15 +1685,23 @@ fn App() -> Element {
     let custom_font_path = use_memo(move || config.read().custom_font_path.clone());
     use_effect(move || {
         let path = custom_font_path.read().clone();
-        let css = build_custom_font_css(&path).unwrap_or_default();
-        let css_json = serde_json::to_string(&css).unwrap_or_else(|_| "\"\"".to_string());
-        let _ = dioxus::document::eval(&format!(
-            r#"(function(){{
-                let el = document.getElementById('custom-font-style');
-                if (!el) {{ el = document.createElement('style'); el.id = 'custom-font-style'; document.head.appendChild(el); }}
-                el.textContent = {css_json};
-            }})()"#
-        ));
+        spawn(async move {
+            // Read + base64-encode on a blocking worker so a large font never
+            // stalls the render thread this effect runs on.
+            let css = tokio::task::spawn_blocking(move || {
+                build_custom_font_css(&path).unwrap_or_default()
+            })
+            .await
+            .unwrap_or_default();
+            let css_json = serde_json::to_string(&css).unwrap_or_else(|_| "\"\"".to_string());
+            let _ = dioxus::document::eval(&format!(
+                r#"(function(){{
+                    let el = document.getElementById('custom-font-style');
+                    if (!el) {{ el = document.createElement('style'); el.id = 'custom-font-style'; document.head.appendChild(el); }}
+                    el.textContent = {css_json};
+                }})()"#
+            ));
+        });
     });
 
     let theme_class = use_memo(move || {
@@ -2016,7 +2032,7 @@ fn App() -> Element {
                                     div { class: "flex-1 flex justify-center pr-10",
                                         h2 {
                                             class: "text-[13px] font-black tracking-[0.2em] text-white/90 uppercase",
-                                            style: "font-family: 'JetBrains Mono', monospace;",
+                                            style: "font-family: 'kopuz-custom-font', 'JetBrains Mono', monospace;",
                                             "{page_title}"
                                         }
                                     }
