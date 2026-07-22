@@ -17,7 +17,6 @@ discover = גלה
 logs = יומנים
 activity = פעילות
 general = כללי
-music_directory = תיקיית מוזיקה
 local_libraries = ספריות מקומיות
 active_local_library = פעילה
 switch_to_local_library = החלפה

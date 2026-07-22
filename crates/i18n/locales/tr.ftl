@@ -17,7 +17,6 @@ discover = Keşfet
 logs = Günlükler
 activity = Aktivite
 general = Genel
-music_directory = Müzik Klasörü
 local_libraries = Yerel Kitaplıklar
 active_local_library = Etkin
 switch_to_local_library = Geçiş Yap

@@ -17,7 +17,6 @@ discover = Ontdekken
 logs = Logboeken
 activity = Activiteit
 general = Algemeen
-music_directory = Muziekmap
 local_libraries = Lokale bibliotheken
 active_local_library = Actief
 switch_to_local_library = Wisselen

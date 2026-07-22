@@ -17,7 +17,6 @@ discover = Ανακάλυψη
 logs = Καταγραφές
 activity = Δραστηριότητες
 general = Γενικά
-music_directory = Φάκελος Μουσικής
 local_libraries = Τοπικές βιβλιοθήκες
 active_local_library = Ενεργή
 switch_to_local_library = Εναλλαγή

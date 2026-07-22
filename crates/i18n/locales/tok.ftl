@@ -17,7 +17,6 @@ discover = lukin sin
 logs = sitelen sona
 activity = pali
 general = ale
-music_directory = nasin kalama
 local_libraries = kulupu kalama lon ilo
 active_local_library = pali
 switch_to_local_library = ante

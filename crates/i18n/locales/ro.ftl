@@ -17,7 +17,6 @@ discover = Descoperă
 logs = Jurnale
 activity = Activitate
 general = General
-music_directory = Folder Muzică
 local_libraries = Biblioteci locale
 active_local_library = Activă
 switch_to_local_library = Comută

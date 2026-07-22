@@ -17,7 +17,6 @@ discover = Khám phá
 logs = Nhật ký
 activity = Hoạt động
 general = Chung
-music_directory = Thư mục nhạc
 local_libraries = Thư viện cục bộ
 active_local_library = Đang hoạt động
 switch_to_local_library = Chuyển

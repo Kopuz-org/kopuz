@@ -17,7 +17,6 @@ discover = اكتشف
 logs = السجلات
 activity = النشاط
 general = عام
-music_directory = مجلد الموسيقى
 local_libraries = المكتبات المحلية
 active_local_library = نشطة
 switch_to_local_library = تبديل

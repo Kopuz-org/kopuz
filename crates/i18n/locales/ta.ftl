@@ -17,7 +17,6 @@ discover = கண்டறி
 logs = பதிவுகள்
 activity = செயல்பாடு
 general = பொது
-music_directory = இசை கோப்புறை
 local_libraries = உள்ளூர் நூலகங்கள்
 active_local_library = செயலில்
 switch_to_local_library = மாறு

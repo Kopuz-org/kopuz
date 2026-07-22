@@ -17,7 +17,6 @@ discover = Обзор
 logs = Журналы
 activity = Активность
 general = Общие
-music_directory = Папка с музыкой
 local_libraries = Локальные медиатеки
 active_local_library = Активна
 switch_to_local_library = Переключить

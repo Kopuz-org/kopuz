@@ -17,7 +17,6 @@ discover = Esplora
 logs = Log
 activity = Attività
 general = Generale
-music_directory = Cartella della musica
 local_libraries = Librerie locali
 active_local_library = Attiva
 switch_to_local_library = Passa

@@ -1031,10 +1031,6 @@ impl AppConfig {
         }
     }
 
-    pub fn find_local_source(&self, id: &str) -> Option<&SavedLocalSource> {
-        self.local_sources.iter().find(|source| source.id == id)
-    }
-
     pub fn find_saved_server(&self, id: &str) -> Option<&SavedServer> {
         self.servers.iter().find(|s| s.id == id)
     }

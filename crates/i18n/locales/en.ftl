@@ -17,7 +17,6 @@ discover = Discover
 logs = Logs
 activity = Activity
 general = General
-music_directory = Music Directory
 local_libraries = Local Libraries
 active_local_library = Active
 switch_to_local_library = Switch

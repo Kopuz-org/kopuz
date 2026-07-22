@@ -17,7 +17,6 @@ discover = Felfedezés
 logs = Naplók
 activity = Tevékenység
 general = Általános
-music_directory = Zene mappa
 local_libraries = Helyi könyvtárak
 active_local_library = Aktív
 switch_to_local_library = Váltás

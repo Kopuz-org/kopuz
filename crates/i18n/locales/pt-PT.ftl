@@ -17,7 +17,6 @@ discover = Descobrir
 logs = Registos
 activity = Atividade
 general = Geral
-music_directory = Diretório de músicas
 local_libraries = Bibliotecas locais
 active_local_library = Ativa
 switch_to_local_library = Mudar

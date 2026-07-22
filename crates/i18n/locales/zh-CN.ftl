@@ -17,7 +17,6 @@ discover = 发现
 logs = 日志
 activity = 活动
 general = 通用
-music_directory = 音乐目录
 local_libraries = 本地音乐库
 active_local_library = 当前使用
 switch_to_local_library = 切换

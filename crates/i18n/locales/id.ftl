@@ -17,7 +17,6 @@ discover = Jelajahi
 logs = Log
 activity = Aktivitas
 general = Umum
-music_directory = Direktori Musik
 local_libraries = Pustaka Lokal
 active_local_library = Aktif
 switch_to_local_library = Beralih

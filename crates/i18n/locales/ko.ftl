@@ -17,7 +17,6 @@ discover = 발견
 logs = 로그
 activity = 활동
 general = 일반
-music_directory = 음악 폴더
 local_libraries = 로컬 라이브러리
 active_local_library = 활성
 switch_to_local_library = 전환

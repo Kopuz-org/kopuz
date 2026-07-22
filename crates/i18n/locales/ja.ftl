@@ -17,7 +17,6 @@ discover = 見つける
 logs = ログ
 activity = アクティビティ
 general = 一般
-music_directory = 音楽フォルダ
 local_libraries = ローカルライブラリ
 active_local_library = 使用中
 switch_to_local_library = 切り替え

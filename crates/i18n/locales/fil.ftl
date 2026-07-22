@@ -17,7 +17,6 @@ discover = Tuklasin
 logs = Mga Log
 activity = Aktibidad
 general = Pangkalahatan
-music_directory = Direktoryo ng Musika
 local_libraries = Mga Lokal na Library
 active_local_library = Aktibo
 switch_to_local_library = Lumipat

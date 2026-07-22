@@ -17,7 +17,6 @@ discover = Upptäck
 logs = Loggar
 activity = Aktivitet
 general = Allmänt
-music_directory = Musikkatalog
 local_libraries = Lokala bibliotek
 active_local_library = Aktivt
 switch_to_local_library = Växla

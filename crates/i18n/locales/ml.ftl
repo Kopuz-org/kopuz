@@ -17,7 +17,6 @@ discover = കണ്ടെത്തുക
 logs = ലോഗുകൾ
 activity = പ്രവർത്തനം
 general = പൊതുവായവ
-music_directory = സംഗീത ഫോൾഡർ
 local_libraries = ലോക്കൽ ലൈബ്രറികൾ
 active_local_library = സജീവം
 switch_to_local_library = മാറുക
