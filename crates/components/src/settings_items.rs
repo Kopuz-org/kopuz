@@ -1,6 +1,6 @@
 use config::{
     AppConfig, BackBehavior, ChannelMode, DeviceChangeBehavior, EqPreset,
-    EqualizerSettings as EqualizerConfig, MusicServer, SampleRateMode, SavedServer,
+    EqualizerSettings as EqualizerConfig, SampleRateMode, SavedServer,
 };
 use dioxus::prelude::*;
 #[cfg(not(target_os = "android"))]
@@ -201,11 +201,8 @@ fn AddFolderButton(on_add: EventHandler<std::path::PathBuf>, add_text: String) -
 
 #[component]
 pub fn ServerSettings(
-    active: Option<MusicServer>,
     /// The active source's server id (`None` ⇒ Local) — the authoritative "which
-    /// server is active", reactive to the sidebar source switcher too. The
-    /// `active` snapshot (`config.server`) is only updated by the Settings switch
-    /// path, so keying the badge off it alone misses a switch made from the sidebar.
+    /// server is active", reactive to the sidebar source switcher too.
     active_source_id: Option<String>,
     servers: Vec<SavedServer>,
     on_add: EventHandler<()>,
@@ -217,6 +214,7 @@ pub fn ServerSettings(
     let delete_text = i18n::t("delete");
     let switch_text = i18n::t("switch_to_server");
     let active_text = i18n::t("active_server");
+    let conn = hooks::source_switch::use_connection_status();
 
     rsx! {
         div { class: "flex flex-col gap-2 w-full",
@@ -227,15 +225,6 @@ pub fn ServerSettings(
                 {
                     let id = srv.id.clone();
                     let is_active = active_source_id.as_deref() == Some(srv.id.as_str());
-                    // "Connected" only when the active server snapshot is actually
-                    // this server (and carries a token) — after a sidebar switch the
-                    // snapshot can lag, so don't claim a stale connection.
-                    let connected = is_active
-                        && active
-                            .as_ref()
-                            .filter(|s| s.id.as_deref() == Some(srv.id.as_str()))
-                            .and_then(|s| s.access_token.clone())
-                            .is_some();
                     let id_switch = id.clone();
                     let id_delete = id.clone();
                     rsx! {
@@ -253,17 +242,23 @@ pub fn ServerSettings(
                                 p { class: "text-xs text-white/60", "{i18n::t_with(\"service\", &[(\"name\", srv.service.display_name().to_string())])}" }
                                 p { class: "text-xs text-white/60 truncate", "{srv.url}" }
                                 if is_active {
-                                    if connected {
-                                        p { class: "text-xs text-green-400 mt-1", "{i18n::t(\"connected\")}" }
-                                    } else {
-                                        div { class: "flex items-center gap-2 mt-1",
-                                            p { class: "text-xs text-red-400", "{i18n::t(\"disconnected\")}" }
-                                            button {
-                                                onclick: move |_| on_login.call(()),
-                                                class: "text-xs bg-white/10 hover:bg-white/20 px-2 py-0.5 rounded text-white transition-colors",
-                                                "{login_text}"
+                                    match conn() {
+                                        hooks::source_switch::ConnStatus::Online => rsx! {
+                                            p { class: "text-xs mt-1", style: "color:#3fb950", "{i18n::t(\"connected\")}" }
+                                        },
+                                        hooks::source_switch::ConnStatus::Connecting => rsx! {
+                                            p { class: "text-xs mt-1", style: "color:#d8a23a", "{i18n::t(\"connecting\")}" }
+                                        },
+                                        hooks::source_switch::ConnStatus::Offline => rsx! {
+                                            div { class: "flex items-center gap-2 mt-1",
+                                                p { class: "text-xs", style: "color:#e5534b", "{i18n::t(\"disconnected\")}" }
+                                                button {
+                                                    onclick: move |_| on_login.call(()),
+                                                    class: "text-xs bg-white/10 hover:bg-white/20 px-2 py-0.5 rounded text-white transition-colors",
+                                                    "{login_text}"
+                                                }
                                             }
-                                        }
+                                        },
                                     }
                                 }
                             }
@@ -600,9 +595,9 @@ pub fn LibreFmSettings(session_key: String, on_session_key_save: EventHandler<St
 
 const EQ_MIN_DB: f64 = -12.0;
 const EQ_MAX_DB: f64 = 12.0;
-const EQ_GRAPH_WIDTH: f64 = 760.0;
+const EQ_GRAPH_WIDTH: f64 = 1100.0;
 const EQ_GRAPH_HEIGHT: f64 = 280.0;
-const EQ_GRAPH_PAD_X: f64 = 36.0;
+const EQ_GRAPH_PAD_X: f64 = 40.0;
 const EQ_GRAPH_PAD_TOP: f64 = 22.0;
 const EQ_GRAPH_PAD_BOTTOM: f64 = 42.0;
 
@@ -661,7 +656,7 @@ fn eq_apply_drag(base: &EqualizerConfig, index: usize, y: f64) -> EqualizerConfi
     eq_apply_band_gain(base, index, eq_y_to_gain(y))
 }
 
-fn eq_interpolate_bands(from: [f32; 5], to: [f32; 5], progress: f32) -> [f32; 5] {
+fn eq_interpolate_bands(from: [f32; 10], to: [f32; 10], progress: f32) -> [f32; 10] {
     std::array::from_fn(|index| from[index] + (to[index] - from[index]) * progress)
 }
 
@@ -688,7 +683,10 @@ pub fn EqualizerPanel(
     on_preview: EventHandler<EqualizerConfig>,
     on_commit: EventHandler<EqualizerConfig>,
 ) -> Element {
-    const BAND_LABELS: [&str; 5] = ["60 Hz", "250 Hz", "1 kHz", "4 kHz", "12 kHz"];
+    const BAND_LABELS: [&str; 10] = [
+        "32 Hz", "64 Hz", "125 Hz", "250 Hz", "500 Hz", "1 kHz", "2 kHz", "4 kHz", "8 kHz",
+        "16 kHz",
+    ];
 
     let config = use_context::<Signal<AppConfig>>();
     let mut draft = use_signal(|| current.clone());
@@ -911,8 +909,8 @@ pub fn EqualizerPanel(
                 style: "background: color-mix(in oklab, var(--color-neutral-900) 78%, transparent); border-color: color-mix(in oklab, var(--color-white) 8%, transparent);",
                 svg {
                     class: "{graph_class}",
-                    style: "width: 760px; height: 280px; min-width: 760px;",
-                    view_box: "0 0 760 280",
+                    style: "width: 1100px; height: 280px; min-width: 1100px;",
+                    view_box: "0 0 1100 280",
                     onmousedown: move |evt: MouseEvent| {
                         let point = evt.element_coordinates();
                         let index = eq_nearest_band(point.x, BAND_LABELS.len());

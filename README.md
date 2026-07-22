@@ -91,7 +91,11 @@ media source carries its own credentials and its own favorites.
   music.
 - **File-Type Badges**: Local tracks show a small format badge (MP3, FLAC, WAV,
   etc.) in track rows so you can see the source format at a glance.
-- **Search**: Search across artists, albums, and tracks with real-time results.
+- **Search**: Search across artists, albums, and tracks with real-time results,
+  plus a **quick search** overlay you can pop open from anywhere to jump
+  straight to what you're looking for.
+- **Custom UI Fonts**: Bring your own font for the interface and make Kopuz look
+  the way you want.
 - **Listening Logs**: Tracks play counts locally so you can see what you
   actually listen to most.
 - **Scrobbling**: Scrobble to ListenBrainz. For Jellyfin users,
@@ -99,9 +103,9 @@ media source carries its own credentials and its own favorites.
 - **Language Support**: UI available in Arabic, Brazilian Portuguese, Dutch,
   English, European Portuguese, Filipino, French, German, Greek, Hebrew,
   Hungarian, Indonesian, Italian, Japanese, Korean, Malayalam, Polish, Romanian,
-  Russian, Simplified Chinese, Spanish, Tamil, Toki Pona, Turkish, Ukrainian,
-  Vietnamese, and Sitelen Pona with a streamlined experience for adding new
-  languages.
+  Russian, Simplified Chinese, Spanish, Swedish, Tamil, Toki Pona, Turkish,
+  Ukrainian, Vietnamese, and Sitelen Pona with a streamlined experience for
+  adding new languages.
 - **High Performance**: Heavy background processing and an optimized library
   scanner ensure the app opens instantly, runs smoothly, and skips previously
   indexed files quickly.
@@ -111,7 +115,7 @@ media source carries its own credentials and its own favorites.
   properly as you browse different views and pages.
 - **Reduce Animations**: Accessibility setting to tone down motion effects if
   you prefer a calmer UI.
-- **Equalizer**: Built-in 5-band equalizer with presets and custom settings to
+- **Equalizer**: Built-in 10-band equalizer with presets and custom settings to
   fine-tune your sound.
 - **Crossfade**: Blend track transitions for smoother automatic playback between
   songs on native desktop builds. Browser playback currently uses normal track
@@ -380,8 +384,8 @@ The setup dialog offers two methods:
   **isolated browser profile** (a fresh, separate session; your normal browsing
   is never touched), waits for you to log in, and extracts the session cookies.
   Pick which installed Chromium-family browser to use (Chrome, Chromium, Brave,
-  Edge, or Vivaldi). This unlocks your **library, Liked Music, playlists, and
-  followed artists**.
+  Edge, Vivaldi, or Helium). This unlocks your **library, Liked Music,
+  playlists, and followed artists**.
 
 - **Continue without signing in (anonymous)** - no sign-in, no cookies. You can
   **browse, search, open artist/album/playlist pages, start mix radio, and play
@@ -405,7 +409,7 @@ There's no URL or password to type. Kopuz opens `soundcloud.com/signin` in an
 **isolated browser profile** (a fresh, separate session; your normal browsing is
 never touched), waits for you to log in, and pulls the session's `oauth_token`.
 Pick which installed Chromium-family browser to use (Chrome, Chromium, Brave,
-Edge, or Vivaldi).
+Edge, Vivaldi, or Helium).
 
 Once signed in you get search, track playback (progressive MP3 plus Go+ AAC/HLS
 streams), your **Liked tracks** as favorites, read-only access to your

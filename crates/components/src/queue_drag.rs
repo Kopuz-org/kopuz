@@ -527,8 +527,8 @@ pub fn update_rightbar_end_drop_target(
 
 pub fn rightbar_queue_row_class(is_reorder_source: bool) -> &'static str {
     if is_reorder_source {
-        "flex items-center gap-3 px-2 py-2 bg-white/10 cursor-grabbing rounded-lg transition-colors group opacity-70"
+        "flex items-center gap-3 px-2 py-1.5 bg-white/10 cursor-grabbing rounded-lg transition-colors group opacity-70"
     } else {
-        "flex items-center gap-3 px-2 py-2 hover:bg-white/5 cursor-grab active:cursor-grabbing rounded-lg transition-colors group"
+        "flex items-center gap-3 px-2 py-1.5 hover:bg-white/5 cursor-grab active:cursor-grabbing rounded-lg transition-colors group"
     }
 }

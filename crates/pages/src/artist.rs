@@ -393,7 +393,7 @@ pub fn Artist(
             if name.is_empty() {
                 div { class: "flex-1 min-h-0 flex flex-col",
                     if !cfg!(target_os = "android") {
-                        h1 { class: "text-3xl font-bold text-white mb-6 shrink-0", "{i18n::t(\"artists\")}" }
+                        h1 { class: "text-3xl font-semibold tracking-tight text-white mb-6 shrink-0", "{i18n::t(\"artists\")}" }
                     }
                     div { class: "flex items-center justify-end gap-2 mb-4 shrink-0",
                         ViewModeToggle { mode: artists_view_mode }

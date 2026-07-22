@@ -38,6 +38,13 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.11.0" date="2026-07-22">
+      <description>
+        <p>
+          A 10-band equalizer, a quick search overlay, custom UI fonts, a reworked fullscreen view with cover art backgrounds, an expanded radio experience with radio-browser.info search and ICY now-playing metadata, Helium browser support for sign-in, a Swedish locale, and media server reachability checks.
+        </p>
+      </description>
+    </release>
     <release version="0.10.0" date="2026-07-14">
       <description>
         <p>
