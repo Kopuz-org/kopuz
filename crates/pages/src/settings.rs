@@ -349,6 +349,43 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+                        if cfg!(not(target_os = "android")) {
+                            SettingItem {
+                                title: i18n::t("custom_font").to_string(),
+                                control: rsx! {
+                                    div { class: "flex items-center gap-2",
+                                        if !config.read().custom_font_path.is_empty() {
+                                            span {
+                                                class: "text-xs text-white/50 font-mono max-w-[220px] truncate",
+                                                "{config.read().custom_font_path}"
+                                            }
+                                            button {
+                                                class: "px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-red-300 text-sm transition-colors",
+                                                onclick: move |_| config.write().custom_font_path = String::new(),
+                                                "{i18n::t(\"remove\")}"
+                                            }
+                                        }
+                                        button {
+                                            class: "px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors",
+                                            onclick: move |_| {
+                                                #[cfg(not(target_os = "android"))]
+                                                spawn(async move {
+                                                    if let Some(file) = rfd::AsyncFileDialog::new()
+                                                        .add_filter("Fonts", &["ttf", "otf", "woff", "woff2"])
+                                                        .pick_file()
+                                                        .await
+                                                    {
+                                                        config.write().custom_font_path =
+                                                            file.path().display().to_string();
+                                                    }
+                                                });
+                                            },
+                                            "{i18n::t(\"choose_font\")}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
                         if config.read().cover_art_background
                             || !config.read().custom_background_path.is_empty()
                         {

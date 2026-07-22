@@ -694,6 +694,11 @@ pub struct AppConfig {
     /// Empty = unset. Shares the darkening/blur treatment with cover art.
     #[serde(default)]
     pub custom_background_path: String,
+    /// Absolute path to a user-chosen font file (ttf/otf/woff/woff2) applied
+    /// as the app's UI font, overriding the default JetBrains Mono stack.
+    /// Empty = unset.
+    #[serde(default)]
+    pub custom_font_path: String,
     /// Opt-in chrome/Perfetto performance trace. Read at startup (the
     /// subscriber is built once), so a change needs a restart. Adds runtime
     /// overhead — surfaced with a warning in settings.
@@ -915,6 +920,7 @@ impl Default for AppConfig {
             cover_art_darkening: default_cover_art_darkening(),
             cover_art_blur: 0,
             custom_background_path: String::new(),
+            custom_font_path: String::new(),
             tracing_enabled: false,
             auto_check_updates: default_auto_check_updates(),
             minimize_to_tray: false,
