@@ -497,6 +497,46 @@ select:disabled {
     width: min(14rem, calc(100vw - 2rem));
 }
 
+.settings-section {
+    border: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 11%, transparent);
+    background: color-mix(in srgb, var(--color-black, #000000) 78%, transparent);
+    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.24);
+    -webkit-backdrop-filter: blur(16px) saturate(90%);
+    backdrop-filter: blur(16px) saturate(90%);
+}
+
+.settings-section-header {
+    background: color-mix(in srgb, var(--color-black, #000000) 58%, transparent);
+    transition: background-color 140ms ease;
+}
+
+.settings-section-header:hover {
+    background: color-mix(in srgb, var(--color-white, #ffffff) 7%, transparent);
+}
+
+.settings-section-body > .settings-row:nth-child(even) {
+    background: color-mix(in srgb, var(--color-white, #ffffff) 2.5%, transparent);
+}
+
+.settings-row {
+    min-height: 3.25rem;
+    transition: background-color 120ms ease;
+}
+
+.settings-row:hover {
+    background: color-mix(in srgb, var(--color-white, #ffffff) 5%, transparent) !important;
+}
+
+.settings-subsection-label {
+    padding: 0.65rem 1.25rem 0.45rem;
+    background: color-mix(in srgb, var(--color-black, #000000) 32%, transparent);
+    color: color-mix(in srgb, var(--color-white, #ffffff) 48%, transparent);
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
 .app-select-trigger {
     display: flex;
     min-height: 2.25rem;

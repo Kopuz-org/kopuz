@@ -12,8 +12,8 @@ use tracing::Instrument;
 #[component]
 pub fn SettingItem(title: String, control: Element) -> Element {
     rsx! {
-        div { class: "flex items-center justify-between gap-4 py-3",
-            p { class: "text-sm text-white font-medium", "{title}" }
+        div { class: "settings-row flex items-center justify-between gap-5 px-5 py-2.5",
+            p { class: "min-w-0 text-sm text-white/90 font-medium", "{title}" }
             {control}
         }
     }
@@ -21,14 +21,23 @@ pub fn SettingItem(title: String, control: Element) -> Element {
 
 #[component]
 pub fn SettingsSection(title: String, children: Element) -> Element {
+    let mut expanded = use_signal(|| true);
+
     rsx! {
-        section { class: "rounded-xl border border-white/10 bg-white/[0.02]",
-            div { class: "px-5 py-3 rounded-t-xl border-b border-white/10 bg-white/[0.03]",
-                h2 { class: "text-xs font-semibold uppercase tracking-wider text-white/60",
+        section { class: "settings-section rounded-xl overflow-visible",
+            button {
+                r#type: "button",
+                class: "settings-section-header w-full flex items-center justify-between gap-3 px-5 py-3 rounded-t-xl text-left",
+                aria_expanded: expanded(),
+                onclick: move |_| expanded.toggle(),
+                h2 { class: "text-xs font-semibold uppercase tracking-wider text-white/65",
                     "{title}"
                 }
+                i { class: if expanded() { "fa-solid fa-chevron-up text-[10px] text-white/40" } else { "fa-solid fa-chevron-down text-[10px] text-white/40" } }
             }
-            div { class: "px-5 py-1 divide-y divide-white/[0.06]", {children} }
+            if expanded() {
+                div { class: "settings-section-body divide-y divide-white/[0.07]", {children} }
+            }
         }
     }
 }
@@ -850,10 +859,10 @@ pub fn EqualizerPanel(
     };
 
     rsx! {
-        div { class: "flex flex-col gap-4 w-full",
-            div { class: "flex flex-wrap items-center gap-3",
+        div { class: "flex flex-col gap-4 min-w-0 w-full",
+            div { class: "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[12rem_15rem_minmax(16rem,1fr)] items-stretch gap-3",
                 div {
-                    class: "bg-white/5 p-1 rounded-xl flex relative h-10 items-center border border-white/5 w-48",
+                    class: "bg-white/5 p-1 rounded-xl flex relative min-h-10 items-center border border-white/5 w-full",
                     div {
                         class: "absolute h-8 bg-white/10 rounded-lg transition-all duration-300 ease-out",
                         style: "{slider_style}"
@@ -882,10 +891,10 @@ pub fn EqualizerPanel(
                     }
                 }
 
-                div { class: "flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2",
+                div { class: "flex min-w-0 items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2",
                     span { class: "text-xs text-slate-400", "{i18n::t(\"eq_preset\")}" }
                     select {
-                        class: "bg-transparent text-sm text-white focus:outline-none",
+                        class: "min-w-0 flex-1 bg-transparent text-sm text-white focus:outline-none",
                         value: "{draft.read().preset.as_storage()}",
                         onchange: move |evt| {
                             let mut next = draft.peek().clone();
@@ -934,7 +943,7 @@ pub fn EqualizerPanel(
                     }
                 }
 
-                div { class: "flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2 min-w-[220px] flex-1",
+                div { class: "flex min-w-0 items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2 md:col-span-2 xl:col-span-1",
                     div { class: "min-w-0",
                         p { class: "text-xs text-slate-400", "{i18n::t(\"eq_preamp\")}" }
                         p { class: "text-[11px] text-slate-500", "{i18n::t(\"eq_preamp_desc\")}" }
@@ -975,7 +984,7 @@ pub fn EqualizerPanel(
                 style: "background: color-mix(in oklab, var(--color-neutral-900) 78%, transparent); border-color: color-mix(in oklab, var(--color-white) 8%, transparent);",
                 svg {
                     class: "{graph_class}",
-                    style: "width: 1100px; height: 280px; min-width: 1100px;",
+                    style: "width: 100%; height: auto; min-width: 680px; aspect-ratio: 1100 / 280;",
                     view_box: "0 0 1100 280",
                     onmousedown: move |evt: MouseEvent| {
                         let point = evt.element_coordinates();
@@ -1338,17 +1347,18 @@ pub fn RadioRegistryDropdown(
 ) -> Element {
     let mut expanded = use_signal(|| false);
     let is_open = expanded();
-    let chevron = if is_open { "▾" } else { "▸" };
     let add_text = i18n::t("add");
     let delete_text = i18n::t("delete");
     let default_registry = i18n::t("radio_default_registry");
     rsx! {
-        div { class: "flex flex-col w-full",
+        div { class: "settings-row flex flex-col w-full px-5",
             button {
-                class: "flex items-center justify-between w-full py-2 cursor-pointer group",
+                r#type: "button",
+                class: "flex min-h-[3.25rem] items-center justify-between gap-4 w-full cursor-pointer group text-left",
+                aria_expanded: is_open,
                 onclick: move |_| expanded.set(!is_open),
                 div { class: "flex items-center gap-2",
-                    span { class: "text-white font-medium", "{i18n::t(\"radio\")}" }
+                    span { class: "text-sm text-white/90 font-medium", "{i18n::t(\"radio\")}" }
                     span {
                         class: "text-xs text-slate-500",
                         {
@@ -1358,14 +1368,11 @@ pub fn RadioRegistryDropdown(
                         }
                     }
                 }
-                span {
-                    class: "text-white/60 group-hover:text-white transition-colors text-sm",
-                    "{chevron}"
-                }
+                i { class: if is_open { "fa-solid fa-chevron-up text-[10px] text-white/40" } else { "fa-solid fa-chevron-down text-[10px] text-white/40" } }
             }
             // Expandable panel
             if is_open {
-                div { class: "flex flex-col gap-2 pl-2 pb-2 border-l border-white/5 ml-1",
+                div { class: "flex flex-col gap-2 pb-3",
                     if registries.is_empty() {
                         p { class: "text-xs text-slate-500 italic py-1", "{i18n::t(\"radio_registries_empty\")}" }
                     }
