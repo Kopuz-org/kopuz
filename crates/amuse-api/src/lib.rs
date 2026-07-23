@@ -76,7 +76,7 @@ impl AmuseApi {
         }
     }
 
-    fn query() -> Json<Self> {
+    async fn query() -> Json<Self> {
         Json(now_playing().lock().unwrap().clone())
     }
 
@@ -85,7 +85,7 @@ impl AmuseApi {
     }
 
     fn create_routes() -> Router {
-        let now_playing = Router::new().route("/", get(Self::query()));
+        let now_playing = Router::new().route("/", get(Self::query));
 
         Router::new()
             .route("/", get(Self::root))
@@ -108,7 +108,7 @@ impl AmuseApi {
         cover_url: Option<&str>,
         source_url: Option<&str>,
     ) {
-        *now_playing().lock().unwrap() = AmuseApi {
+        *now_playing().lock().unwrap() = Self {
             player: Player {
                 hasSong: false,
                 isPaused: false,
