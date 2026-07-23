@@ -7,7 +7,10 @@ use dioxus::prelude::*;
 use rfd::AsyncFileDialog;
 use scrobble::lastfm;
 use scrobble::librefm;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tracing::Instrument;
+
+static APP_SELECT_ID: AtomicUsize = AtomicUsize::new(0);
 
 #[component]
 pub fn SettingItem(title: String, control: Element) -> Element {
@@ -50,20 +53,134 @@ pub fn AppSelect(
     #[props(default)] class: String,
 ) -> Element {
     let mut open = use_signal(|| false);
+    let instance_id = use_hook(|| APP_SELECT_ID.fetch_add(1, Ordering::Relaxed));
+    let trigger_id = format!("app-select-trigger-{instance_id}");
+    let menu_id = format!("app-select-menu-{instance_id}");
+    let selected_index = options
+        .iter()
+        .position(|(option_value, _)| option_value == &value)
+        .unwrap_or(0);
+    let mut active_index = use_signal(|| selected_index);
+    let mut typeahead = use_signal(String::new);
+    let mut typeahead_at = use_signal(std::time::Instant::now);
+    use_effect(move || {
+        if open() {
+            let index = active_index();
+            document::eval(&format!(
+                "document.getElementById('app-select-option-{instance_id}-{index}')?.scrollIntoView({{block:'nearest'}})"
+            ));
+        }
+    });
     let selected_label = options
         .iter()
         .find(|(option_value, _)| option_value == &value)
         .map(|(_, label)| label.as_str())
         .unwrap_or(value.as_str());
     let open_class = if open() { "z-[70]" } else { "z-0" };
+    let active_option_id = format!("app-select-option-{instance_id}-{}", active_index());
+    let keyboard_options = options.clone();
+    let keyboard_trigger_id = trigger_id.clone();
 
     rsx! {
         div { class: "app-select relative {open_class} {class}",
             button {
+                id: "{trigger_id}",
                 r#type: "button",
+                role: "combobox",
                 class: "app-select-trigger relative z-[1] w-full",
+                aria_haspopup: "listbox",
                 aria_expanded: open(),
-                onclick: move |_| open.toggle(),
+                aria_controls: "{menu_id}",
+                aria_activedescendant: if open() { Some(active_option_id.as_str()) } else { None },
+                onclick: move |_| {
+                    if !open() {
+                        active_index.set(selected_index);
+                    }
+                    open.toggle();
+                },
+                onkeydown: move |event| {
+                    let option_count = keyboard_options.len();
+                    if option_count == 0 {
+                        return;
+                    }
+
+                    let move_active = |next: usize, mut active_index: Signal<usize>| {
+                        active_index.set(next);
+                    };
+
+                    match event.key() {
+                        Key::Escape if open() => {
+                            event.prevent_default();
+                            open.set(false);
+                        }
+                        Key::Tab if open() => open.set(false),
+                        Key::ArrowDown => {
+                            event.prevent_default();
+                            if open() {
+                                move_active((active_index() + 1) % option_count, active_index);
+                            } else {
+                                active_index.set(selected_index);
+                                open.set(true);
+                            }
+                        }
+                        Key::ArrowUp => {
+                            event.prevent_default();
+                            if open() {
+                                move_active((active_index() + option_count - 1) % option_count, active_index);
+                            } else {
+                                active_index.set(selected_index);
+                                open.set(true);
+                            }
+                        }
+                        Key::Enter => {
+                            event.prevent_default();
+                            if open() {
+                                if let Some((option_value, _)) = keyboard_options.get(active_index()) {
+                                    on_change.call(option_value.clone());
+                                }
+                                open.set(false);
+                            } else {
+                                active_index.set(selected_index);
+                                open.set(true);
+                            }
+                        }
+                        Key::Character(character) if character == " " => {
+                            event.prevent_default();
+                            if open() {
+                                if let Some((option_value, _)) = keyboard_options.get(active_index()) {
+                                    on_change.call(option_value.clone());
+                                }
+                                open.set(false);
+                            } else {
+                                active_index.set(selected_index);
+                                open.set(true);
+                            }
+                        }
+                        Key::Character(character) if !character.chars().any(char::is_control) => {
+                            let now = std::time::Instant::now();
+                            let mut query = if now.duration_since(*typeahead_at.peek())
+                                > std::time::Duration::from_millis(700)
+                            {
+                                String::new()
+                            } else {
+                                typeahead.peek().clone()
+                            };
+                            query.push_str(&character.to_lowercase());
+                            typeahead.set(query.clone());
+                            typeahead_at.set(now);
+                            if let Some(index) = keyboard_options.iter().position(|(_, label)| {
+                                label.to_lowercase().starts_with(&query)
+                            }) {
+                                event.prevent_default();
+                                move_active(index, active_index);
+                                if !open() {
+                                    open.set(true);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                },
                 span { class: "truncate", "{selected_label}" }
                 svg {
                     class: if open() { "app-select-chevron rotate-180" } else { "app-select-chevron" },
@@ -83,26 +200,45 @@ pub fn AppSelect(
                     r#type: "button",
                     class: "fixed inset-0 z-0 cursor-default",
                     aria_label: "Close menu",
-                    onclick: move |_| open.set(false),
+                    onclick: move |_| {
+                        open.set(false);
+                        document::eval(&format!("document.getElementById('{keyboard_trigger_id}')?.focus()"));
+                    },
                     onwheel: move |event| {
                         event.prevent_default();
                         event.stop_propagation();
                     },
                 }
                 div {
+                    id: "{menu_id}",
+                    role: "listbox",
+                    aria_labelledby: "{trigger_id}",
                     class: "app-select-menu",
                     onwheel: move |event| event.stop_propagation(),
-                    for (option_value, label) in &options {
+                    for (index, (option_value, label)) in options.iter().enumerate() {
                         {
                             let option_value = option_value.clone();
+                            let option_trigger_id = trigger_id.clone();
                             let is_selected = option_value == value;
+                            let is_active = index == active_index();
+                            let option_class = match (is_selected, is_active) {
+                                (true, true) => "app-select-option app-select-option-selected app-select-option-active",
+                                (true, false) => "app-select-option app-select-option-selected",
+                                (false, true) => "app-select-option app-select-option-active",
+                                (false, false) => "app-select-option",
+                            };
                             rsx! {
                                 button {
+                                    id: "app-select-option-{instance_id}-{index}",
                                     r#type: "button",
-                                    class: if is_selected { "app-select-option app-select-option-selected" } else { "app-select-option" },
+                                    role: "option",
+                                    tabindex: "-1",
+                                    aria_selected: is_selected,
+                                    class: "{option_class}",
                                     onclick: move |_| {
                                         on_change.call(option_value.clone());
                                         open.set(false);
+                                        document::eval(&format!("document.getElementById('{option_trigger_id}')?.focus()"));
                                     },
                                     span { class: "min-w-0 whitespace-normal", "{label}" }
                                     if is_selected {
@@ -857,6 +993,10 @@ pub fn EqualizerPanel(
         "stroke: color-mix(in oklab, var(--color-indigo-500) 52%, var(--color-slate-400)); transition: stroke 180ms ease-out;"
             .to_string()
     };
+    let preset_options = EqPreset::all()
+        .into_iter()
+        .map(|preset| (preset.as_storage().to_string(), eq_preset_label(preset)))
+        .collect();
 
     rsx! {
         div { class: "flex flex-col gap-4 min-w-0 w-full",
@@ -893,12 +1033,13 @@ pub fn EqualizerPanel(
 
                 div { class: "flex min-w-0 items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2",
                     span { class: "text-xs text-slate-400", "{i18n::t(\"eq_preset\")}" }
-                    select {
-                        class: "min-w-0 flex-1 bg-transparent text-sm text-white focus:outline-none",
-                        value: "{draft.read().preset.as_storage()}",
-                        onchange: move |evt| {
+                    AppSelect {
+                        class: "min-w-0 flex-1",
+                        value: draft.read().preset.as_storage().to_string(),
+                        options: preset_options,
+                        on_change: move |value: String| {
                             let mut next = draft.peek().clone();
-                            let preset = EqPreset::from_storage(&evt.value());
+                            let preset = EqPreset::from_storage(&value);
                             let previous_bands = *displayed_bands.peek();
                             next.preset = preset;
                             if let Some(default_preamp_db) = preset.default_preamp_db() {
@@ -933,13 +1074,6 @@ pub fn EqualizerPanel(
                             on_preview.call(next.clone());
                             on_commit.call(next);
                         },
-                        for preset in EqPreset::all() {
-                            option {
-                                value: "{preset.as_storage()}",
-                                selected: preset == draft.read().preset,
-                                "{eq_preset_label(preset)}"
-                            }
-                        }
                     }
                 }
 
