@@ -1,3 +1,4 @@
+use amuse_api::AmuseApi;
 use components::{
     bottombar::Bottombar, compact_player::CompactPlayer, download_overlay::DownloadOverlay,
     fullscreen::Fullscreen, rightbar::Rightbar, sidebar::Sidebar, titlebar::Titlebar,
@@ -121,6 +122,8 @@ fn main() {
         };
 
         PRESENCE.set(presence).ok();
+
+        AmuseApi::new();
 
         #[cfg(target_os = "macos")]
         {
