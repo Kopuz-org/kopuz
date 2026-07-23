@@ -1,7 +1,7 @@
 use components::{
     CoverArtBackground, QuickSearch, bottombar::Bottombar, compact_player::CompactPlayer,
     download_overlay::DownloadOverlay, fullscreen::Fullscreen, rightbar::Rightbar,
-    sidebar::Sidebar, titlebar::Titlebar,
+    sidebar::Sidebar, spotify_devices::SpotifyDevicesPanel, titlebar::Titlebar,
 };
 #[cfg(not(target_os = "android"))]
 use dioxus::desktop::tao::dpi::LogicalSize;
@@ -485,6 +485,7 @@ fn App() -> Element {
     let mut is_fullscreen = use_signal(|| false);
     let mut compact_mode = use_signal(|| false);
     let is_rightbar_open = use_signal(|| false);
+    let is_devices_open = use_signal(|| false);
     let rightbar_width = use_signal(|| 320usize);
     let mut palette = use_signal(|| Option::<Vec<utils::color::Color>>::None);
     // Config is the one remaining whole-value save: persisting a default that
@@ -904,6 +905,34 @@ fn App() -> Element {
                     return;
                 }
                 updates::run_rotation(config).await;
+            }
+        });
+    });
+
+    let mut spotify_refresh_identity = use_signal(|| None::<String>);
+    use_effect(move || {
+        if !*initial_load_done.read() {
+            return;
+        }
+        let identity: Option<String> = config.read().server.as_ref().and_then(|s| {
+            (s.service == config::MusicService::Spotify && s.access_token.is_some())
+                .then(|| s.id.clone().unwrap_or_else(|| s.url.clone()))
+        });
+        if identity == *spotify_refresh_identity.peek() {
+            return;
+        }
+        spotify_refresh_identity.set(identity.clone());
+        let Some(my_identity) = identity else {
+            return;
+        };
+        spawn(async move {
+            updates::run_spotify_refresh(config).await;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(1800)).await;
+                if spotify_refresh_identity.peek().as_deref() != Some(my_identity.as_str()) {
+                    return;
+                }
+                updates::run_spotify_refresh(config).await;
             }
         });
     });
@@ -1840,7 +1869,12 @@ fn App() -> Element {
                 .read()
                 .server
                 .as_ref()
-                .map(|s| s.service == config::MusicService::YtMusic)
+                .map(|s| {
+                    matches!(
+                        s.service,
+                        config::MusicService::YtMusic | config::MusicService::Spotify
+                    )
+                })
                 .unwrap_or(false)
             {
                 if let Some(msg) = ctrl.playback_error.read().clone() {
@@ -1958,6 +1992,7 @@ fn App() -> Element {
                     volume: volume,
                     persisted_volume: persisted_volume,
                     is_rightbar_open: is_rightbar_open,
+                    is_devices_open: is_devices_open,
                 }
             }
             div {
@@ -2279,6 +2314,10 @@ fn App() -> Element {
                     current_song_artist: current_song_artist,
                     current_song_album: current_song_album,
                 }
+                SpotifyDevicesPanel {
+                    is_devices_open: is_devices_open,
+                    is_rightbar_open: is_rightbar_open,
+                }
             }
             Fullscreen {
                 player: player,
@@ -2347,6 +2386,7 @@ fn App() -> Element {
                     volume: volume,
                     persisted_volume: persisted_volume,
                     is_rightbar_open: is_rightbar_open,
+                    is_devices_open: is_devices_open,
                 }
             }
         }

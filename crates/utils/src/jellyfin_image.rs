@@ -261,6 +261,9 @@ pub fn encode_cover_url(url: &str) -> String {
 }
 
 fn decode_embedded_cover_url(tag: &str) -> Option<String> {
+    if tag.starts_with("http://") || tag.starts_with("https://") {
+        return Some(tag.to_string());
+    }
     let hex = tag.strip_prefix("urlhex_")?;
     if hex.len() % 2 != 0 {
         return None;

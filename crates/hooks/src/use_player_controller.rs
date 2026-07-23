@@ -1,4 +1,4 @@
-use config::AppConfig;
+use config::{AppConfig, MusicService};
 use dioxus::logger::tracing::Instrument;
 use dioxus::{logger::tracing, prelude::*};
 use player::engine::{SourceFactory, Transition};
@@ -117,6 +117,39 @@ pub struct PlayerController {
     /// Rendered as a banner by whoever subscribes — currently the
     /// settings popup error sink mirrors it on next open.
     pub playback_error: Signal<Option<String>>,
+    /// The Spotify playback host (a browser tab running the Web Playback SDK),
+    /// lazily started on the first Spotify play. `None` until then. Spotify audio
+    /// plays in the browser, not the Symphonia engine, so its transport is routed
+    /// here instead of to `player`.
+    pub spotify_host: Signal<Option<::server::spotify::host::SpotifyHost>>,
+    /// The SDK's Connect device id, set once the host reports `Ready`. Playback is
+    /// started against it via the Web API; the device picker hides it from the
+    /// remote-device list (it renders as the in-app entry).
+    pub spotify_device: Signal<Option<String>>,
+    /// A Spotify track URI waiting for the device to become ready (first play).
+    pub(crate) spotify_pending_uri: Signal<Option<String>>,
+    /// Whether the browser tab reported playback is allowed (autoplay probe or
+    /// the enable-playback click). Plays issued before this just storm autoplay
+    /// errors and can wedge the SDK, so the first play waits on it.
+    pub(crate) spotify_activated: Signal<bool>,
+    /// Spotify Connect device playback is routed to instead of the in-app SDK
+    /// device (`None`). While set, transport goes through the Web API and a
+    /// poll loop owns progress/auto-advance.
+    pub spotify_device_override: Signal<Option<String>>,
+    /// Millisecond-precision progress anchor for external playback: the last
+    /// reported position and when it arrived. Reads interpolate elapsed time on
+    /// top, so second-granular state ticks don't lag the lyric clock.
+    pub(crate) spotify_progress_anchor: Signal<Option<(u64, std::time::Instant)>>,
+    /// Whether a host launch is in flight — serializes rapid first plays so
+    /// they can't spawn multiple hosts (and browser tabs).
+    pub(crate) spotify_host_starting: Signal<bool>,
+    /// Whether the current track is playing through the Spotify host rather than
+    /// the engine — transport methods and the progress pump branch on this.
+    pub(crate) external_active: Signal<bool>,
+    /// Set once the user explicitly picks a playback target from the device
+    /// panel (including "this app"). Suppresses automatic adoption of an
+    /// externally active Connect device so it can't override a deliberate choice.
+    pub(crate) spotify_device_chosen: Signal<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -352,6 +385,24 @@ impl PlayerController {
         }
     }
 
+    /// Hydrate the now-playing display signals from a track we don't own in the
+    /// queue — a Spotify Connect session started elsewhere, or one whose track
+    /// advanced remotely. Leaves `current_queue_index` untouched, since the
+    /// track has no position in our queue.
+    pub(crate) fn hydrate_external_track_metadata(&mut self, track: Track, progress_secs: u64) {
+        let progress_secs = progress_secs.min(track.duration);
+        self.current_song_title.set(track.title.clone());
+        self.current_song_artist.set(track.artist.clone());
+        self.current_song_album.set(track.album.clone());
+        self.current_song_khz.set(track.khz);
+        self.current_song_bitrate.set(track.bitrate);
+        self.current_song_duration.set(track.duration);
+        self.current_song_progress.set(progress_secs);
+        self.current_song_cover_url
+            .set(self.cover_url_for_track(&track));
+        self.current_track_snapshot.set(Some(track));
+    }
+
     fn pending_resume_seek(&self, track: &Track) -> (Option<u64>, bool) {
         let pending = self.pending_resume.read().clone();
         let restore_seek_secs = pending.as_ref().and_then(|pending| {
@@ -489,8 +540,194 @@ impl PlayerController {
         }
     }
 
+    /// The current Spotify OAuth access token, if Spotify is the active server.
+    pub(crate) fn spotify_access(&self) -> Option<String> {
+        let cfg = self.config.peek();
+        let server = cfg.server.as_ref()?;
+        if server.service != MusicService::Spotify {
+            return None;
+        }
+        let packed = server.access_token.clone()?;
+        let access = ::server::spotify::auth::unpack_token(&packed).0;
+        (!access.is_empty()).then_some(access)
+    }
+
+    /// Start the browser playback host if it isn't running yet (first Spotify play).
+    fn ensure_spotify_host(&mut self) {
+        if self.spotify_host.peek().is_some() || *self.spotify_host_starting.peek() {
+            return;
+        }
+        let Some(access) = self.spotify_access() else {
+            return;
+        };
+        let browser = self.config.peek().spotify_browser.clone();
+        self.spotify_host_starting.set(true);
+        let mut host_sig = self.spotify_host;
+        let mut starting = self.spotify_host_starting;
+        let mut error = self.playback_error;
+        let mut external = self.external_active;
+        let mut playing = self.is_playing;
+        let mut pending = self.spotify_pending_uri;
+        spawn(async move {
+            match ::server::spotify::host::SpotifyHost::start(access, browser).await {
+                Ok(host) => host_sig.set(Some(host)),
+                Err(e) => {
+                    tracing::warn!(error = %e, "spotify host failed to start");
+                    error.set(Some(e));
+                    if *external.peek() {
+                        external.set(false);
+                        playing.set(false);
+                        pending.set(None);
+                    }
+                }
+            }
+            starting.set(false);
+        });
+    }
+
+    /// The Spotify access token for UI data fetches (Connect device list).
+    pub fn spotify_access_token(&self) -> Option<String> {
+        self.spotify_access()
+    }
+
+    /// Route Spotify playback to a Connect device (`None` = the in-app SDK
+    /// device), transferring the live session over when one is active.
+    pub fn spotify_select_device(&mut self, device_id: Option<String>) {
+        self.spotify_device_chosen.set(true);
+        self.spotify_device_override.set(device_id.clone());
+        if !*self.external_active.peek() {
+            return;
+        }
+        let Some(access) = self.spotify_access() else {
+            return;
+        };
+        let Some(target) = device_id.or_else(|| self.spotify_device.peek().clone()) else {
+            return;
+        };
+        let play = *self.is_playing.peek();
+        spawn(async move {
+            if let Err(e) = ::server::spotify::api::transfer_playback(&access, &target, play).await
+            {
+                tracing::warn!(error = %e, "spotify device transfer failed");
+            }
+        });
+    }
+
+    /// Adopt a Connect device that is already playing on its own — e.g. the user
+    /// started it from the Spotify app, possibly before this app launched.
+    /// Routes transport to it and flips `external_active` so the player-state
+    /// poller begins syncing progress and play/pause state, without transferring
+    /// or restarting the live session. No-op when the feature is disabled, a
+    /// target is already active, or the user has made an explicit choice.
+    pub fn spotify_adopt_external(&mut self, device_id: String) {
+        if *self.spotify_device_chosen.peek()
+            || self.spotify_device_override.peek().is_some()
+            || !self.config.peek().spotify_prefer_active_device
+        {
+            return;
+        }
+        self.spotify_device_override.set(Some(device_id));
+        self.external_active.set(true);
+    }
+
+    pub(crate) fn spotify_transport_pause(&mut self) {
+        if self.spotify_device_override.peek().is_some() {
+            if let Some(access) = self.spotify_access() {
+                spawn(async move {
+                    let _ = ::server::spotify::api::player_pause(&access).await;
+                });
+            }
+        } else if let Some(host) = self.spotify_host.peek().clone() {
+            host.pause();
+        }
+    }
+
+    pub(crate) fn spotify_transport_resume(&mut self) {
+        if self.spotify_device_override.peek().is_some() {
+            if let Some(access) = self.spotify_access() {
+                spawn(async move {
+                    let _ = ::server::spotify::api::player_resume(&access).await;
+                });
+            }
+        } else if let Some(host) = self.spotify_host.peek().clone() {
+            host.resume();
+        }
+    }
+
+    /// Begin playing a Spotify track id. A chosen Connect device gets the URI
+    /// directly; otherwise ensure the host and start it on the SDK device — or
+    /// stash it as pending until the device is ready AND the tab has confirmed
+    /// playback is allowed. The pump fires the pending URI on those events.
+    fn spotify_play(&mut self, item_id: &str) {
+        let uri = format!("spotify:track:{item_id}");
+        if let Some(device) = self.spotify_device_override.peek().clone() {
+            if let Some(access) = self.spotify_access() {
+                self.spotify_pending_uri.set(None);
+                let mut error = self.playback_error;
+                spawn(async move {
+                    if let Err(e) =
+                        ::server::spotify::api::start_playback(&access, &device, &[uri]).await
+                    {
+                        tracing::warn!(error = %e, "spotify start_playback failed");
+                        error.set(Some(e));
+                    }
+                });
+            }
+            return;
+        }
+        self.ensure_spotify_host();
+        if !*self.spotify_activated.peek() {
+            self.spotify_pending_uri.set(Some(uri));
+            return;
+        }
+        match (self.spotify_access(), self.spotify_device.peek().clone()) {
+            (Some(access), Some(device)) => {
+                self.spotify_pending_uri.set(None);
+                let uri = uri.clone();
+                let mut error = self.playback_error;
+                spawn(async move {
+                    if let Err(e) =
+                        ::server::spotify::api::start_playback(&access, &device, &[uri]).await
+                    {
+                        tracing::warn!(error = %e, "spotify start_playback failed");
+                        error.set(Some(e));
+                    }
+                });
+            }
+            _ => self.spotify_pending_uri.set(Some(uri)),
+        }
+    }
+
+    /// Stop external (Spotify) playback and hand control back to the engine.
+    /// Also drops any deferred play so a later `Ready`/`Activated` event can't
+    /// start an obsolete track over whatever plays next.
+    pub(crate) fn stop_external_playback(&mut self) {
+        if !*self.external_active.peek() {
+            return;
+        }
+        self.spotify_pending_uri.set(None);
+        self.spotify_transport_pause();
+        self.external_active.set(false);
+    }
+
     /// Seek the current track. All progress-bar / lyric scrubbers route here.
     pub fn seek(&mut self, time: Duration) {
+        if *self.external_active.peek() {
+            if self.spotify_device_override.peek().is_some() {
+                if let Some(access) = self.spotify_access() {
+                    let ms = time.as_millis() as u64;
+                    spawn(async move {
+                        let _ = ::server::spotify::api::player_seek(&access, ms).await;
+                    });
+                }
+            } else if let Some(host) = self.spotify_host.peek().clone() {
+                host.seek(time.as_millis() as u64);
+            }
+            self.spotify_progress_anchor
+                .set(Some((time.as_millis() as u64, std::time::Instant::now())));
+            self.current_song_progress.set(time.as_secs());
+            return;
+        }
         // The scrub targets the visible track. During a crossfade that's the
         // outgoing session: revert the armed transition and seek it by its own
         // token, so a fade that just completed can't misdirect the seek.
@@ -503,6 +740,20 @@ impl PlayerController {
     }
 
     pub fn displayed_progress_secs_f64(&self) -> f64 {
+        if *self.external_active.peek() {
+            if let Some((ms, at)) = *self.spotify_progress_anchor.peek() {
+                let mut pos = ms as f64 / 1000.0;
+                if *self.is_playing.peek() {
+                    pos += at.elapsed().as_secs_f64();
+                }
+                let dur = *self.current_song_duration.peek();
+                if dur > 0 {
+                    pos = pos.min(dur as f64);
+                }
+                return pos;
+            }
+            return *self.current_song_progress.peek() as f64;
+        }
         // Mid-crossfade the bar shows the outgoing (fading) track's live position.
         if self.pending_crossfade_ui.peek().is_some()
             && let Some(fading) = self.player.peek().fading_position()
@@ -602,6 +853,37 @@ impl PlayerController {
         let is_server_item = item_ref.is_server();
         let id = item_ref.primary_id().unwrap_or_default().to_string();
         let stream_id = item_ref.stream_id().unwrap_or_default().to_string();
+
+        let is_spotify_item = track.id.service() == Some(MusicService::Spotify);
+        if !is_spotify_item {
+            self.stop_external_playback();
+        } else if self.spotify_access().is_some() {
+            self.playback_error.set(None);
+            self.cancel_radio_task();
+            self.cancel_load_task();
+            self.clear_pending_crossfade_ui();
+            self.player.peek().stop_for_transition();
+            let token = self.allocate_token();
+            self.set_intent(PlaybackIntent::Committed { token });
+            self.external_active.set(true);
+            self.spotify_progress_anchor
+                .set(Some((0, std::time::Instant::now())));
+            self.hydrate_current_track_metadata(idx, 0);
+            self.is_playing.set(true);
+            self.spotify_play(&id);
+            scrobble_scheduler::schedule(
+                track.clone(),
+                Some(id.clone()),
+                self.config,
+                self.current_token,
+                token,
+                self.is_playing,
+                Some(self.active_source),
+                ScrobbleOptions::REMOTE_NATIVE,
+                self.db.peek().clone(),
+            );
+            return;
+        }
 
         // ── classify the source ─────────────────────────────────────────
 
@@ -1032,6 +1314,15 @@ pub fn use_player_controller(
     let load_task = use_signal(|| None::<dioxus_core::Task>);
     let station_registry = use_context::<Signal<radio::registry::StationRegistry>>();
     let playback_error = use_signal(|| None::<String>);
+    let spotify_host = use_signal(|| None::<::server::spotify::host::SpotifyHost>);
+    let spotify_device = use_signal(|| None::<String>);
+    let spotify_pending_uri = use_signal(|| None::<String>);
+    let spotify_activated = use_signal(|| false);
+    let spotify_device_override = use_signal(|| None::<String>);
+    let spotify_progress_anchor = use_signal(|| None::<(u64, std::time::Instant)>);
+    let spotify_host_starting = use_signal(|| false);
+    let external_active = use_signal(|| false);
+    let spotify_device_chosen = use_signal(|| false);
     let db = use_signal(move || db_handle);
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
 
@@ -1101,5 +1392,14 @@ pub fn use_player_controller(
         load_task,
         station_registry,
         playback_error,
+        spotify_host,
+        spotify_device,
+        spotify_pending_uri,
+        spotify_activated,
+        spotify_device_override,
+        spotify_progress_anchor,
+        spotify_host_starting,
+        external_active,
+        spotify_device_chosen,
     }
 }

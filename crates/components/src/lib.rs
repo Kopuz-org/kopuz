@@ -42,6 +42,7 @@ pub mod showcase;
 pub mod sidebar;
 pub mod sort_control;
 pub mod source_switcher;
+pub mod spotify_devices;
 pub mod stat_card;
 pub mod titlebar;
 pub mod track_list_view;

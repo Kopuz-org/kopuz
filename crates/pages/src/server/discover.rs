@@ -565,13 +565,19 @@ fn play_playlist_async(
                     // mid-stream break leaves `accumulated` truncated, and
                     // caching that would poison every future click on this tile.
                     None => {
-                        cache_writer.write().insert(id, accumulated);
+                        cache_writer.write().insert(id.clone(), accumulated);
                         break;
                     }
                 }
             }
             if !started {
-                fail(&mut ctrl, &mut now_playing);
+                match source.fetch_album_tracks(&id).await {
+                    Ok(tracks) if !tracks.is_empty() => {
+                        cache_writer.write().insert(id, tracks.clone());
+                        ctrl.play_queue_linear(tracks);
+                    }
+                    _ => fail(&mut ctrl, &mut now_playing),
+                }
             }
         }
         .instrument(play_span),

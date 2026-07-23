@@ -53,7 +53,11 @@ impl PlayerController {
                     self.cancel_load_task();
                     self.clear_pending_crossfade_ui();
                     self.set_intent(PlaybackIntent::Stopped);
-                    self.player.peek().pause();
+                    if *self.external_active.peek() {
+                        self.spotify_transport_pause();
+                    } else {
+                        self.player.peek().pause();
+                    }
                     self.is_playing.set(false);
                     return;
                 }
@@ -325,6 +329,7 @@ impl PlayerController {
         // stream open, etc.) so its eventual completion doesn't start playback
         // against the cleared queue or post a stale error banner.
         self.cancel_load_task();
+        self.stop_external_playback();
         self.set_intent(PlaybackIntent::Stopped);
         self.cancel_radio_task();
         self.player.peek().stop_for_transition();
@@ -337,6 +342,11 @@ impl PlayerController {
     }
 
     pub fn pause(&mut self) {
+        if *self.external_active.peek() {
+            self.spotify_transport_pause();
+            self.is_playing.set(false);
+            return;
+        }
         let idx = *self.current_queue_index.peek();
         let is_radio = self
             .get_track_at(idx)
@@ -365,6 +375,11 @@ impl PlayerController {
     }
 
     pub fn resume(&mut self) {
+        if *self.external_active.peek() {
+            self.spotify_transport_resume();
+            self.is_playing.set(true);
+            return;
+        }
         let idx = *self.current_queue_index.peek();
         let is_radio = self
             .get_track_at(idx)

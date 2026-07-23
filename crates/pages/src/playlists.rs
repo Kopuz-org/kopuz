@@ -364,8 +364,8 @@ fn PlaylistsGrid(
         let yt_nonce = *yt_refresh_nonce.read();
         let trigger = *refresh_trigger.read();
         // YT auto-syncs only once (a stamp guards re-runs); other servers re-fetch
-        // on a server/identity change. `discover` marks the active source as YT.
-        let is_ytmusic = caps().discover;
+        // on a server/identity change.
+        let is_ytmusic = caps().albums == ::server::source::AlbumType::YtMusic;
 
         // Dedup key from the active server's identity (+ trigger), so a re-render
         // with the same server doesn't re-fetch.
@@ -603,7 +603,7 @@ fn PlaylistsGrid(
         store.playlists.clone()
     };
     drop(conf);
-    let is_yt = caps().discover;
+    let is_yt = caps().albums == ::server::source::AlbumType::YtMusic;
     let yt_anon = config
         .read()
         .server

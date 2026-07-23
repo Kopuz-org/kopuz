@@ -839,7 +839,7 @@ pub fn play_radio(
 }
 
 /// Copy a shareable link for a track: its source's public web URL when it has
-/// one (YT), else fall back to a MusicBrainz lookup by metadata. The provider
+/// one (YT Music or Spotify), else fall back to a MusicBrainz lookup by metadata. The provider
 /// URL knowledge lives in the source impl ([`MediaSource::web_url`]), not here.
 pub fn share_track(track: Track, source: ::server::source::ActiveSource) {
     if let Some(url) = source.web_url(&track) {

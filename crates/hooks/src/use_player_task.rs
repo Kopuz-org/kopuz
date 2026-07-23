@@ -71,6 +71,93 @@ fn send_bg_cmd(cmd: BgCmd) {
     }
 }
 
+/// Record one completed listen for the current track — the same accounting the
+/// engine's completion path does, used by the external (Spotify) advance paths.
+fn record_listen(mut config: Signal<AppConfig>, ctrl: &PlayerController) {
+    let idx = *ctrl.current_queue_index.peek();
+    if let Some(track) = ctrl.get_track_at(idx) {
+        let track_id = track.id.uid().to_string();
+        *config
+            .write()
+            .listen_counts
+            .entry(track_id.clone())
+            .or_insert(0) += 1;
+        bump_listen_count_db(track_id, ctrl.db.peek().clone());
+    }
+}
+
+/// The now-playing fields the OS media widget needs, cloned out of the Dioxus
+/// signals by the caller so this seam stays UI-framework-free.
+struct OsTrack<'a> {
+    title: &'a str,
+    artist: &'a str,
+    album: &'a str,
+    duration_secs: u64,
+    position_secs: u64,
+    playing: bool,
+    artwork: Option<&'a str>,
+}
+
+/// Platforms whose OS media widget Kopuz drives directly. Matches the set the
+/// local `Player` pushes to; for remote Spotify playback the engine is stopped,
+/// so the poll loop feeds these the now-playing metadata itself.
+#[cfg(any(
+    target_os = "macos",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "android"
+))]
+mod os_now_playing {
+    use super::OsTrack;
+
+    /// The OS media widget wants a local file, not a URL. Cache `cover_url` to a
+    /// temp file keyed by the (base62, filename-safe) Spotify track id, so the
+    /// same track reuses the file and the macOS artwork cache stays warm.
+    /// Returns `None` on empty url or any IO/network failure — a missing cover
+    /// just shows the widget's generic glyph.
+    pub(super) async fn cache_artwork(track_id: &str, cover_url: &str) -> Option<String> {
+        if cover_url.is_empty() {
+            return None;
+        }
+        let path = std::env::temp_dir().join(format!("kopuz_remote_cover_{track_id}.jpg"));
+        if !path.exists() {
+            let bytes = reqwest::get(cover_url).await.ok()?.bytes().await.ok()?;
+            tokio::fs::write(&path, bytes).await.ok()?;
+        }
+        Some(path.to_string_lossy().into_owned())
+    }
+
+    /// Push an external (Spotify Connect) track to the OS media widget. The local
+    /// engine is stopped for remote playback, so nothing else feeds it.
+    pub(super) fn push(track: OsTrack<'_>) {
+        player::systemint::update_now_playing(
+            track.title,
+            track.artist,
+            track.album,
+            track.duration_secs as f64,
+            track.position_secs as f64,
+            track.playing,
+            track.artwork,
+        );
+    }
+}
+
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "linux",
+    target_os = "windows",
+    target_os = "android"
+)))]
+mod os_now_playing {
+    use super::OsTrack;
+
+    pub(super) async fn cache_artwork(_track_id: &str, _cover_url: &str) -> Option<String> {
+        None
+    }
+
+    pub(super) fn push(_track: OsTrack<'_>) {}
+}
+
 fn drain_bg_cmds() -> Vec<BgCmd> {
     let mut cmds = Vec::new();
     if let Some(lock) = BG_CMD_RX.get()
@@ -218,6 +305,350 @@ pub fn use_player_task(ctrl: PlayerController) {
         });
     });
 
+    use_effect(move || {
+        let host = ctrl.spotify_host.read().clone();
+        let access = {
+            let cfg = config.read();
+            cfg.server
+                .as_ref()
+                .filter(|s| s.service == MusicService::Spotify)
+                .and_then(|s| s.access_token.clone())
+                .map(|p| server::spotify::auth::unpack_token(&p).0)
+                .filter(|t| !t.is_empty())
+        };
+        if let (Some(host), Some(access)) = (host, access) {
+            spawn(async move {
+                host.set_token(access).await;
+            });
+        }
+    });
+
+    use_effect(move || {
+        let vol = *ctrl.volume.read();
+        if !*ctrl.external_active.read() {
+            return;
+        }
+        if ctrl.spotify_device_override.read().is_some() {
+            if let Some(access) = ctrl.spotify_access() {
+                let percent = (vol.clamp(0.0, 1.0) * 100.0).round() as u8;
+                spawn(async move {
+                    let _ = server::spotify::api::player_volume(&access, percent).await;
+                });
+            }
+        } else if let Some(host) = ctrl.spotify_host.read().clone() {
+            host.set_volume(vol);
+        }
+    });
+
+    use_future(move || {
+        let mut ctrl = ctrl;
+        async move {
+            let mut prev_playing = false;
+            let mut prev_progress: u64 = 0;
+            let mut prev_duration: u64 = 0;
+            let mut prev_track_id: Option<String> = None;
+            let mut os_artwork: Option<String> = None;
+            loop {
+                tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+                if !*ctrl.external_active.peek() || ctrl.spotify_device_override.peek().is_none() {
+                    prev_playing = false;
+                    prev_progress = 0;
+                    prev_track_id = None;
+                    os_artwork = None;
+                    let discover = !*ctrl.spotify_device_chosen.peek()
+                        && ctrl.spotify_device_override.peek().is_none();
+                    let access = discover.then(|| ctrl.spotify_access()).flatten();
+                    if let Some(access) = access
+                        && let Ok(Some(st)) = server::spotify::api::player_state(&access).await
+                        && st.is_playing
+                        && let Some(dev) = st.device_id
+                        && Some(&dev) != ctrl.spotify_device.peek().as_ref()
+                    {
+                        ctrl.spotify_adopt_external(dev);
+                        // Adoption flips `external_active`; reflect the live track
+                        // now rather than waiting a poll, so a cold start lands on
+                        // what's actually playing instead of the restored last song.
+                        if *ctrl.external_active.peek() {
+                            let progress = st.progress_ms / 1000;
+                            if let Some(track) = st.track.clone() {
+                                ctrl.hydrate_external_track_metadata(track, progress);
+                            }
+                            ctrl.is_playing.set(st.is_playing);
+                            ctrl.spotify_progress_anchor
+                                .set(Some((st.progress_ms, std::time::Instant::now())));
+                            let cover = ctrl.current_song_cover_url.peek().clone();
+                            os_artwork = match st.track_id.as_deref() {
+                                Some(id) => os_now_playing::cache_artwork(id, &cover).await,
+                                None => None,
+                            };
+                            os_now_playing::push(OsTrack {
+                                title: &ctrl.current_song_title.peek(),
+                                artist: &ctrl.current_song_artist.peek(),
+                                album: &ctrl.current_song_album.peek(),
+                                duration_secs: *ctrl.current_song_duration.peek(),
+                                position_secs: progress,
+                                playing: st.is_playing,
+                                artwork: os_artwork.as_deref(),
+                            });
+                            prev_track_id = st.track_id;
+                            prev_playing = st.is_playing;
+                            prev_progress = st.progress_ms;
+                            prev_duration = st.duration_ms;
+                        }
+                    }
+                    continue;
+                }
+                let Some(access) = ctrl.spotify_access() else {
+                    continue;
+                };
+                let ended_before =
+                    prev_playing && prev_duration > 0 && prev_progress + 5000 >= prev_duration;
+                match server::spotify::api::player_state(&access).await {
+                    Ok(Some(st)) => {
+                        if st.track_id != prev_track_id {
+                            if let Some(track) = st.track.clone() {
+                                ctrl.hydrate_external_track_metadata(track, st.progress_ms / 1000);
+                            }
+                            let cover = ctrl.current_song_cover_url.peek().clone();
+                            os_artwork = match st.track_id.as_deref() {
+                                Some(id) => os_now_playing::cache_artwork(id, &cover).await,
+                                None => None,
+                            };
+                            prev_track_id = st.track_id.clone();
+                        }
+                        ctrl.is_playing.set(st.is_playing);
+                        ctrl.spotify_progress_anchor
+                            .set(Some((st.progress_ms, std::time::Instant::now())));
+                        ctrl.current_song_progress.set(st.progress_ms / 1000);
+                        if st.duration_ms > 0 {
+                            ctrl.current_song_duration.set(st.duration_ms / 1000);
+                        }
+                        os_now_playing::push(OsTrack {
+                            title: &ctrl.current_song_title.peek(),
+                            artist: &ctrl.current_song_artist.peek(),
+                            album: &ctrl.current_song_album.peek(),
+                            duration_secs: *ctrl.current_song_duration.peek(),
+                            position_secs: st.progress_ms / 1000,
+                            playing: st.is_playing,
+                            artwork: os_artwork.as_deref(),
+                        });
+                        let at_end = st.progress_ms == 0
+                            || (st.duration_ms > 0 && st.progress_ms + 1500 >= st.duration_ms);
+                        if !st.is_playing && ended_before && at_end {
+                            prev_playing = false;
+                            prev_progress = 0;
+                            record_listen(config, &ctrl);
+                            ctrl.play_next();
+                            continue;
+                        }
+                        prev_playing = st.is_playing;
+                        prev_progress = st.progress_ms;
+                        prev_duration = st.duration_ms;
+                    }
+                    Ok(None) => {
+                        if ended_before {
+                            record_listen(config, &ctrl);
+                            ctrl.play_next();
+                        }
+                        prev_playing = false;
+                        prev_progress = 0;
+                        prev_track_id = None;
+                        os_artwork = None;
+                    }
+                    Err(_) => {}
+                }
+            }
+        }
+    });
+
+    let mut spotify_pump = use_signal(|| None::<dioxus_core::Task>);
+    use_effect(move || {
+        let host = ctrl.spotify_host.read().clone();
+        if let Some(prev) = spotify_pump.take() {
+            prev.cancel();
+        }
+        let Some(host) = host else { return };
+        let mut rx = host.subscribe();
+        let mut ctrl = ctrl;
+        let mut config = config;
+        let task = spawn(async move {
+            use server::spotify::host::HostEvent;
+            use tokio::sync::broadcast::error::RecvError;
+            let mut last_auth_refresh: Option<std::time::Instant> = None;
+            loop {
+                let ev = match rx.recv().await {
+                    Ok(ev) => ev,
+                    Err(RecvError::Lagged(_)) => continue,
+                    Err(RecvError::Closed) => break,
+                };
+                match ev {
+                    HostEvent::Ready { device_id } => {
+                        ctrl.spotify_device.set(Some(device_id.clone()));
+                        if !*ctrl.spotify_activated.peek() {
+                            continue;
+                        }
+                        let pending = ctrl.spotify_pending_uri.peek().clone();
+                        if let (Some(uri), Some(access)) = (pending, ctrl.spotify_access()) {
+                            ctrl.spotify_pending_uri.set(None);
+                            let dev = device_id.clone();
+                            let mut error = ctrl.playback_error;
+                            spawn(async move {
+                                if let Err(e) =
+                                    server::spotify::api::start_playback(&access, &dev, &[uri])
+                                        .await
+                                {
+                                    tracing::warn!(error = %e, "spotify deferred start failed");
+                                    error.set(Some(e));
+                                }
+                            });
+                        }
+                    }
+                    HostEvent::NotReady => {}
+                    HostEvent::Media {
+                        action,
+                        position_ms,
+                    } => {
+                        if *ctrl.external_active.peek() {
+                            match action.as_str() {
+                                "play" => ctrl.resume(),
+                                "pause" => ctrl.pause(),
+                                "next" => ctrl.play_next(),
+                                "prev" => ctrl.play_prev(),
+                                "seek" => {
+                                    if let Some(ms) = position_ms {
+                                        ctrl.seek(std::time::Duration::from_millis(ms));
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    HostEvent::State {
+                        paused,
+                        position_ms,
+                        duration_ms,
+                        ended,
+                        ..
+                    } => {
+                        if *ctrl.external_active.peek()
+                            && ctrl.spotify_device_override.peek().is_none()
+                        {
+                            if ended {
+                                record_listen(config, &ctrl);
+                                ctrl.play_next();
+                            } else {
+                                ctrl.is_playing.set(!paused);
+                                ctrl.spotify_progress_anchor
+                                    .set(Some((position_ms, std::time::Instant::now())));
+                                ctrl.current_song_progress.set(position_ms / 1000);
+                                if duration_ms > 0 {
+                                    ctrl.current_song_duration.set(duration_ms / 1000);
+                                }
+                            }
+                        }
+                    }
+                    HostEvent::Activated => {
+                        ctrl.spotify_activated.set(true);
+                        if *ctrl.external_active.peek() {
+                            let uri = ctrl.spotify_pending_uri.peek().clone().or_else(|| {
+                                ctrl.current_track()
+                                    .filter(|t| t.id.service() == Some(MusicService::Spotify))
+                                    .map(|t| format!("spotify:track:{}", t.id.key()))
+                            });
+                            if let (Some(uri), Some(access), Some(device)) = (
+                                uri,
+                                ctrl.spotify_access(),
+                                ctrl.spotify_device.peek().clone(),
+                            ) {
+                                ctrl.spotify_pending_uri.set(None);
+                                let mut error = ctrl.playback_error;
+                                spawn(async move {
+                                    if let Err(e) = server::spotify::api::start_playback(
+                                        &access,
+                                        &device,
+                                        &[uri],
+                                    )
+                                    .await
+                                    {
+                                        tracing::warn!(error = %e, "spotify activation start failed");
+                                        error.set(Some(e));
+                                    }
+                                });
+                            }
+                        }
+                    }
+                    HostEvent::Error { kind, message } => {
+                        if kind == "auth"
+                            && last_auth_refresh
+                                .is_none_or(|t| t.elapsed() > std::time::Duration::from_secs(60))
+                        {
+                            let creds = {
+                                let cfg = config.peek();
+                                cfg.server
+                                    .as_ref()
+                                    .filter(|s| s.service == MusicService::Spotify)
+                                    .and_then(|s| {
+                                        s.access_token.clone().map(|t| (t, s.url.clone()))
+                                    })
+                            };
+                            if let Some((packed, client_id)) = creds {
+                                last_auth_refresh = Some(std::time::Instant::now());
+                                let mut error = ctrl.playback_error;
+                                spawn(async move {
+                                    match server::spotify::auth::refresh_packed(
+                                        &packed,
+                                        client_id.clone(),
+                                    )
+                                    .await
+                                    {
+                                        Ok(new_packed) => {
+                                            let mut cfg = config.write();
+                                            if let Some(srv) = cfg.server.as_mut()
+                                                && srv.service == MusicService::Spotify
+                                                && srv.url == client_id
+                                                && srv.access_token.as_deref()
+                                                    == Some(packed.as_str())
+                                            {
+                                                srv.access_token = Some(new_packed);
+                                                tracing::info!(
+                                                    "spotify token refreshed after SDK auth error"
+                                                );
+                                            }
+                                        }
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                error = %e,
+                                                "spotify auth-error token refresh failed"
+                                            );
+                                            error.set(Some(
+                                                "Spotify session expired — re-sign in from Settings."
+                                                    .to_string(),
+                                            ));
+                                        }
+                                    }
+                                });
+                                continue;
+                            }
+                        }
+                        let msg = match kind.as_str() {
+                            "account" => "Spotify playback needs a Premium account.".to_string(),
+                            "auth" => {
+                                "Spotify session expired — re-sign in from Settings.".to_string()
+                            }
+                            "widevine" => "This browser can't play Spotify (no Widevine DRM). \
+                                Open the Spotify player tab in Chrome, Edge, or Brave."
+                                .to_string(),
+                            "license" => message,
+                            _ => format!("Spotify player error: {message}"),
+                        };
+                        ctrl.playback_error.set(Some(msg));
+                    }
+                }
+            }
+        });
+        spotify_pump.set(Some(task));
+    });
+
     let gens = crate::db_reactivity::use_generations();
     use_future(move || {
         let mut ctrl = ctrl;
@@ -272,7 +703,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                         // auto-advance check below, which needs is_playing.
                         Event::PhaseChanged {
                             phase: Phase::Idle, ..
-                        } => ctrl.is_playing.set(false),
+                        } if !*ctrl.external_active.peek() => ctrl.is_playing.set(false),
                         // Commit the deferred crossfade UI exactly on fade end.
                         Event::TrackSwitched { token, .. } => {
                             ctrl.commit_transition(token);
@@ -318,6 +749,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                 }
 
                 let is_playing = *ctrl.is_playing.read();
+                let external = *ctrl.external_active.peek();
 
                 {
                     let current_track = {
@@ -548,7 +980,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                     let duration = *ctrl.current_song_duration.read();
                     let pos_secs = pos.as_secs().min(duration);
                     let current_token = *ctrl.current_token.read();
-                    if !defer_player_progress && pos_secs != last_progress_secs {
+                    if !external && !defer_player_progress && pos_secs != last_progress_secs {
                         last_progress_secs = pos_secs;
                         ctrl.current_song_progress.set(pos_secs);
                     }
@@ -645,7 +1077,8 @@ pub fn use_player_task(ctrl: PlayerController) {
                         *ctrl.is_loading.read() || ctrl.pending_crossfade_ui.read().is_some();
 
                     let remaining_secs = duration.saturating_sub(pos_secs);
-                    let should_crossfade = duration > 0
+                    let should_crossfade = !external
+                        && duration > 0
                         && pos_secs < duration
                         && ctrl.should_crossfade()
                         && ctrl.has_next_track()
@@ -678,7 +1111,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                     }
 
                     let is_radio = duration == u64::MAX;
-                    let should_skip = if is_radio {
+                    let should_skip = if is_radio || external {
                         false
                     } else {
                         ctrl.player.read().is_playback_complete()

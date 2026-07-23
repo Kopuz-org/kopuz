@@ -36,6 +36,7 @@ mod jellyfin;
 mod local;
 mod offline;
 mod soundcloud;
+mod spotify;
 mod subsonic;
 mod types;
 mod youtube_music;
@@ -43,6 +44,7 @@ use jellyfin::JellyfinSource;
 use local::LocalSource;
 use offline::OfflineServerSource;
 use soundcloud::SoundcloudSource;
+use spotify::SpotifySource;
 use subsonic::SubsonicSource;
 pub use types::*;
 use youtube_music::YtSource;
@@ -134,7 +136,7 @@ pub trait MediaSource: Send + Sync {
     }
 
     /// The track's canonical public web URL, when this source has shareable web
-    /// pages (e.g. a YouTube Music watch link). `None` otherwise — callers fall
+    /// pages (e.g. a YouTube Music watch link or Spotify track link). `None` otherwise — callers fall
     /// back to a metadata lookup (MusicBrainz). Sync: it's a pure id→URL mapping.
     fn web_url(&self, _track: &reader::Track) -> Option<String> {
         None
@@ -791,6 +793,7 @@ fn remote_source(db: Db, source: Source, conn: &ServerConn) -> Box<dyn MediaSour
         }
         MusicService::YtMusic => Box::new(YtSource::new(db, source, conn)),
         MusicService::SoundCloud => Box::new(SoundcloudSource::new(db, source, conn)),
+        MusicService::Spotify => Box::new(SpotifySource::new(db, source, conn)),
     }
 }
 

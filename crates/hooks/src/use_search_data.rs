@@ -60,7 +60,12 @@ pub fn use_search_data(search_query: Signal<String>, config: Signal<AppConfig>) 
                 return None;
             }
             let span = tracing::info_span!("query.search", source = conf.active_source.as_str());
-            let (tracks, albums) = source.search(&query).instrument(span).await.ok()?;
+            let (tracks, albums) = source
+                .search(&query)
+                .instrument(span)
+                .await
+                .inspect_err(|e| tracing::warn!(error = %e, "search failed"))
+                .ok()?;
             let result_tracks: TrackRes = tracks
                 .iter()
                 .map(|t| (t.clone(), server::cover::track(&conf, t, 80)))
