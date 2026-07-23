@@ -31,3 +31,4 @@ scrobble = { workspace = true }
 radio = { workspace = true }
 discord-presence = { workspace = true }
 tokio = { workspace = true, features = ["fs", "sync", "macros"] }
+amuse-api = { workspace = true }

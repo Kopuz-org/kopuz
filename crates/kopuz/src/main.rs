@@ -1,3 +1,4 @@
+use amuse_api::AmuseApi;
 use components::{
     CoverArtBackground, QuickSearch, bottombar::Bottombar, compact_player::CompactPlayer,
     download_overlay::DownloadOverlay, fullscreen::Fullscreen, rightbar::Rightbar,
@@ -173,6 +174,8 @@ fn main() {
         };
 
         PRESENCE.set(presence).ok();
+
+        AmuseApi::start().ok();
 
         #[cfg(target_os = "macos")]
         {

@@ -101,6 +101,11 @@ time = "0.3"
 # pins deno_core ^0.331, so deno_core must stay on 0.331.x to share one V8 link.
 deno_core = "0.331"
 rustypipe-botguard = "0.1.2"
+# For Amuse API
+axum = "0.8.9"
+tower-http = { version = "0.7.0", features = ["cors"] }
+tower = "0.5.3"
+
 
 # Workspace components
 i18n = { package = "kopuz-i18n", version = "0.11.0", path = "./crates/i18n" }
@@ -116,6 +121,7 @@ kopuz = { version = "0.11.0", path = "./crates/kopuz" }
 server = { package = "kopuz-server", version = "0.11.0", path = "./crates/server" }
 kopuz_route = { package = "kopuz-route", version = "0.11.0", path = "./crates/kopuz_route" }
 discord-presence = { package = "kopuz-discord-presence", version = "0.11.0", path = "./crates/discord-presence" }
+amuse-api = { package = "kopuz-amuse-api", version = "0.11.0", path = "./crates/amuse-api" }
 scrobble = { package = "kopuz-scrobble", version = "0.11.0", path = "./crates/scrobble" }
 radio = { package = "kopuz-radio", version = "0.11.0", path = "./crates/radio" }
 

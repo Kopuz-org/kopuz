@@ -33,6 +33,7 @@ webbrowser = { workspace = true }
 dioxus = { workspace = true, features = ["mobile"] }
 
 [dependencies]
+amuse-api = { workspace = true }
 base64 = { workspace = true }
 directories = { workspace = true }
 discord-presence = { workspace = true }
