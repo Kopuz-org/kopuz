@@ -45,12 +45,13 @@ fn logs_section(mut config: Signal<AppConfig>) -> Element {
                     },
                 }
                 p {
-                    class: "text-xs text-amber-400/80 pb-3",
+                    class: "px-5 pb-3 text-xs text-amber-400/80",
                     "{i18n::t(\"tracing_warning\")}"
                 }
             }
-            div { class: "flex flex-wrap gap-3 py-3",
+            div { class: "flex flex-wrap gap-3 px-5 pt-3 pb-5",
                 button {
+                    r#type: "button",
                     class: "px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors flex items-center gap-2",
                     onclick: move |_| {
                         if let Err(e) = utils::logs::open_log_dir() {
@@ -61,6 +62,7 @@ fn logs_section(mut config: Signal<AppConfig>) -> Element {
                     "{i18n::t(\"open_logs_folder\")}"
                 }
                 button {
+                    r#type: "button",
                     class: "px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors flex items-center gap-2",
                     onclick: move |_| {
                         spawn(async move {
@@ -80,6 +82,7 @@ fn logs_section(mut config: Signal<AppConfig>) -> Element {
                 // hook / crash-report path. English-only by design (dev tool).
                 if cfg!(debug_assertions) {
                     button {
+                        r#type: "button",
                         class: "px-4 py-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 text-sm transition-colors flex items-center gap-2",
                         onclick: move |_| trigger_test_crash(),
                         i { class: "fa-solid fa-bomb" }
@@ -128,9 +131,10 @@ fn ClearCacheButton() -> Element {
     let mut reextracting = use_signal(|| false);
     let mut trigger_reextract = use_context::<hooks::CoverReextractTrigger>().0;
     rsx! {
-        div { class: "flex flex-wrap gap-3 mt-4 items-center",
+        div { class: "settings-row flex min-h-[3.25rem] flex-wrap items-center justify-end gap-2 px-5 py-2.5",
             button {
-                class: "px-4 py-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 text-sm transition-colors flex items-center gap-2",
+                r#type: "button",
+                class: "px-3 py-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 text-sm transition-colors flex items-center gap-2",
                 onclick: move |_| {
                     reextracting.set(false);
                     spawn(async move {
@@ -142,7 +146,8 @@ fn ClearCacheButton() -> Element {
                 "{i18n::t(\"clear_cover_cache\")}"
             }
             button {
-                class: "px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors flex items-center gap-2",
+                r#type: "button",
+                class: "px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors flex items-center gap-2",
                 onclick: move |_| {
                     cleared.set(false);
                     *trigger_reextract.write() += 1;
@@ -162,7 +167,7 @@ fn ClearCacheButton() -> Element {
 }
 
 use components::settings_items::{
-    BackBehaviorSelector, ChannelModeSelector, DeviceChangeBehaviorSelector,
+    AppSelect, BackBehaviorSelector, ChannelModeSelector, DeviceChangeBehaviorSelector,
     DiscordPresencePausedSettings, DiscordPresenceSettings, EqualizerPanel, LanguageSelector,
     LastFmSettings, LibreFmSettings, LocalSourceSettings, MusicBrainzSettings,
     RadioRegistryDropdown, SampleRateModeSelector, ServerSettings, SettingItem, SettingsSection,
@@ -284,12 +289,12 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     };
 
     rsx! {
-        div { class: if cfg!(target_os = "android") { "px-4 pt-2 pb-28 w-full" } else { "p-8 w-full" },
+        div { class: if cfg!(target_os = "android") { "px-3 pt-2 pb-28 w-full max-w-4xl mx-auto" } else { "px-6 py-7 w-full max-w-4xl mx-auto" },
             if !cfg!(target_os = "android") {
-                h1 { class: "text-3xl font-semibold tracking-tight text-white mb-6", "{i18n::t(\"settings\")}" }
+                h1 { class: "text-2xl font-semibold tracking-tight text-white mb-5 px-1", "{i18n::t(\"settings\")}" }
             }
 
-            div { class: "space-y-12",
+            div { class: "space-y-8",
                 SettingsSection {
                     title: i18n::t("general").to_string(),
                         SettingItem {
@@ -304,6 +309,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+
+                        div { class: "settings-subsection-label", "{i18n::t(\"appearance\")}" }
 
                         SettingItem {
                             title: i18n::t("appearance").to_string(),
@@ -455,6 +462,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                         }
 
+                        div { class: "settings-subsection-label", "{i18n::t(\"library\")}" }
+
                         SettingItem {
                             title: i18n::t("local_libraries").to_string(),
                             control: rsx! {
@@ -589,6 +598,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+                        div { class: "settings-subsection-label", "{i18n::t(\"general\")}" }
+
                         SettingItem {
                             title: i18n::t("reduce_animations").to_string(),
                             control: rsx! {
@@ -654,30 +665,17 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     {
                                         let current_mode = config.read().titlebar_mode;
                                         rsx! {
-                                            select {
-                                                class: "bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-white/25",
-                                                onchange: move |evt| {
-                                                    config.write().titlebar_mode = match evt.value().as_str() {
+                                            AppSelect {
+                                                class: "settings-select",
+                                                value: match current_mode { config::TitlebarMode::System => "system", config::TitlebarMode::Off => "off", config::TitlebarMode::Custom => "custom" }.to_string(),
+                                                options: vec![("custom".into(), i18n::t("titlebar_custom")), ("system".into(), i18n::t("titlebar_system")), ("off".into(), i18n::t("titlebar_off"))],
+                                                on_change: move |value: String| {
+                                                    config.write().titlebar_mode = match value.as_str() {
                                                         "system" => config::TitlebarMode::System,
                                                         "off" => config::TitlebarMode::Off,
                                                         _ => config::TitlebarMode::Custom,
                                                     };
                                                 },
-                                                option {
-                                                    value: "custom",
-                                                    selected: current_mode == config::TitlebarMode::Custom,
-                                                    "{i18n::t(\"titlebar_custom\")}"
-                                                }
-                                                option {
-                                                    value: "system",
-                                                    selected: current_mode == config::TitlebarMode::System,
-                                                    "{i18n::t(\"titlebar_system\")}"
-                                                }
-                                                option {
-                                                    value: "off",
-                                                    selected: current_mode == config::TitlebarMode::Off,
-                                                    "{i18n::t(\"titlebar_off\")}"
-                                                }
                                             }
                                         }
                                     }
@@ -690,24 +688,16 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 {
                                     let current_style = config.read().ui_style;
                                     rsx! {
-                                        select {
-                                            class: "bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-white/25",
-                                            onchange: move |evt| {
-                                                config.write().ui_style = match evt.value().as_str() {
+                                        AppSelect {
+                                            class: "settings-select",
+                                            value: (if current_style == config::UiStyle::Vaxry { "vaxry" } else { "normal" }).to_string(),
+                                            options: vec![("normal".into(), i18n::t("ui_normal")), ("vaxry".into(), i18n::t("ui_vaxry"))],
+                                            on_change: move |value: String| {
+                                                config.write().ui_style = match value.as_str() {
                                                     "vaxry" => config::UiStyle::Vaxry,
                                                     _ => config::UiStyle::Normal,
                                                 };
                                             },
-                                            option {
-                                                value: "normal",
-                                                selected: current_style == config::UiStyle::Normal,
-                                                "{i18n::t(\"ui_normal\")}"
-                                            }
-                                            option {
-                                                value: "vaxry",
-                                                selected: current_style == config::UiStyle::Vaxry,
-                                                "{i18n::t(\"ui_vaxry\")}"
-                                            }
                                         }
                                     }
                                 }
@@ -719,24 +709,16 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 {
                                     let current_position = config.read().player_bar_position;
                                     rsx! {
-                                        select {
-                                            class: "bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-white/25",
-                                            onchange: move |evt| {
-                                                config.write().player_bar_position = match evt.value().as_str() {
+                                        AppSelect {
+                                            class: "settings-select",
+                                            value: (if current_position == config::PlayerBarPosition::Top { "top" } else { "bottom" }).to_string(),
+                                            options: vec![("bottom".into(), i18n::t("position_bottom")), ("top".into(), i18n::t("position_top"))],
+                                            on_change: move |value: String| {
+                                                config.write().player_bar_position = match value.as_str() {
                                                     "top" => config::PlayerBarPosition::Top,
                                                     _ => config::PlayerBarPosition::Bottom,
                                                 };
                                             },
-                                            option {
-                                                value: "bottom",
-                                                selected: current_position == config::PlayerBarPosition::Bottom,
-                                                "{i18n::t(\"position_bottom\")}"
-                                            }
-                                            option {
-                                                value: "top",
-                                                selected: current_position == config::PlayerBarPosition::Top,
-                                                "{i18n::t(\"position_top\")}"
-                                            }
                                         }
                                     }
                                 }
@@ -764,21 +746,23 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                             }
                                         }
                                     }
-                                    SettingItem {
-                                        title: i18n::t("discord_presence_paused").to_string(),
-                                        control: rsx! {
-                                            DiscordPresencePausedSettings {
-                                                enabled: config.read().discord_presence_paused.unwrap_or(true),
-                                                on_change: move |val| config.write().discord_presence_paused = Some(val),
+                                    if config.read().discord_presence.unwrap_or(true) {
+                                        SettingItem {
+                                            title: i18n::t("discord_presence_paused").to_string(),
+                                            control: rsx! {
+                                                DiscordPresencePausedSettings {
+                                                    enabled: config.read().discord_presence_paused.unwrap_or(true),
+                                                    on_change: move |val| config.write().discord_presence_paused = Some(val),
+                                                }
                                             }
                                         }
-                                    }
-                                    SettingItem {
-                                        title: i18n::t("discord_presence_source").to_string(),
-                                        control: rsx! {
-                                            ToggleSetting {
-                                                enabled: config.read().discord_presence_source.unwrap_or(true),
-                                                on_change: move |val| config.write().discord_presence_source = Some(val),
+                                        SettingItem {
+                                            title: i18n::t("discord_presence_source").to_string(),
+                                            control: rsx! {
+                                                ToggleSetting {
+                                                    enabled: config.read().discord_presence_source.unwrap_or(true),
+                                                    on_change: move |val| config.write().discord_presence_source = Some(val),
+                                                }
                                             }
                                         }
                                     }
@@ -1016,8 +1000,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
-                        div { class: "py-2",
-                            p { class: "text-white font-medium mb-3", "{i18n::t(\"equalizer\")}" }
+                        div { class: "px-5 py-4",
+                            p { class: "text-sm text-white/90 font-medium mb-3", "{i18n::t(\"equalizer\")}" }
                             EqualizerPanel {
                                 current: config.read().equalizer.clone(),
                                 on_preview: move |equalizer: config::EqualizerSettings| {
