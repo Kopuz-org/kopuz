@@ -4,7 +4,7 @@ static HOST: &str = "127.0.0.1";
 use axum::response::Json;
 use axum::{Router, routing::get};
 use serde::Serialize;
-use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::sync::{Mutex, OnceLock};
 use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
 
@@ -34,7 +34,7 @@ pub struct AmuseApi {
 static NOW_PLAYING: OnceLock<Mutex<AmuseApi>> = OnceLock::new();
 
 impl AmuseApi {
-    pub fn new() -> Result<MutexGuard<'static, Self>, Box<dyn std::error::Error>> {
+    pub fn new() -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!("Starting Amuse API");
         let app = Self::create_routes();
         tracing::info!("Routes created");
@@ -51,7 +51,7 @@ impl AmuseApi {
             });
         });
 
-        Ok(Self::now_playing().lock().unwrap())
+        Ok(())
     }
 
     pub fn default_value() -> Self {
@@ -100,25 +100,27 @@ impl AmuseApi {
 
     pub fn set(
         &self,
-        title: &str,
-        artist: &str,
-        album: &str,
-        elapsed_secs: u64,
-        duration_secs: u64,
+        has_song: bool,
+        is_playing: bool,
+        title: Option<&str>,
+        artist: Option<&str>,
+        album: Option<&str>,
+        elapsed_secs: Option<u64>,
+        duration_secs: Option<u64>,
         cover_url: Option<&str>,
         source_url: Option<&str>,
     ) {
         *Self::now_playing().lock().unwrap() = Self {
             player: Player {
-                hasSong: false,
-                isPaused: false,
-                seekbarCurrentPosition: elapsed_secs,
+                hasSong: has_song,
+                isPaused: !is_playing,
+                seekbarCurrentPosition: elapsed_secs.unwrap_or(0),
             },
             track: Track {
-                duration: duration_secs,
-                title: title.to_string(),
-                author: artist.to_string(),
-                album: album.to_string(),
+                duration: duration_secs.unwrap_or(0),
+                title: title.unwrap_or("").to_string(),
+                author: artist.unwrap_or("").to_string(),
+                album: album.unwrap_or("").to_string(),
                 cover: cover_url.unwrap_or("").to_string(),
                 url: source_url.unwrap_or("").to_string(),
             },
