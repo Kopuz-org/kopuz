@@ -19,10 +19,6 @@ pub enum FetchStrategy {
     LastFmOnly,
 }
 
-// Maybe host on the website?
-pub const DEFAULT_REGISTRY_URL: &str =
-    "https://raw.githubusercontent.com/Kopuz-org/kopuz/refs/heads/master/radio-registry/index.json";
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RegistryEntry {
     pub url: String,
@@ -31,6 +27,9 @@ pub struct RegistryEntry {
     #[serde(default)]
     pub is_default: bool,
 }
+
+pub const DEFAULT_REGISTRY_URL: &str =
+    "https://raw.githubusercontent.com/Kopuz-org/kopuz/refs/heads/master/radio-registry/index.json";
 
 pub fn default_radio_registries() -> Vec<RegistryEntry> {
     vec![RegistryEntry {
@@ -368,13 +367,13 @@ impl EqPreset {
         }
     }
 
-    pub const fn gains(self) -> [f32; 5] {
+    pub const fn gains(self) -> [f32; 10] {
         match self {
-            Self::Flat | Self::Custom => [0.0, 0.0, 0.0, 0.0, 0.0],
-            Self::BassBoost => [6.0, 4.5, 2.0, -0.5, -1.5],
-            Self::TrebleBoost => [-1.5, -0.5, 0.5, 4.0, 6.0],
-            Self::VocalBoost => [-2.0, 0.5, 3.5, 2.5, -0.5],
-            Self::Loudness => [4.0, 2.0, 0.5, 2.5, 4.0],
+            Self::Flat | Self::Custom => [0.0; 10],
+            Self::BassBoost => [7.0, 6.5, 5.0, 3.5, 1.0, -0.5, -1.0, -1.5, -1.5, -1.5],
+            Self::TrebleBoost => [-1.5, -1.5, -1.0, -0.5, 0.0, 0.5, 2.0, 4.0, 6.0, 6.5],
+            Self::VocalBoost => [-2.5, -2.0, -1.5, 0.0, 2.5, 3.5, 3.0, 2.5, 0.5, -0.5],
+            Self::Loudness => [5.0, 4.5, 3.0, 1.5, 0.5, 0.0, 1.0, 2.5, 4.0, 4.5],
         }
     }
 
@@ -390,8 +389,36 @@ impl EqPreset {
     }
 }
 
-fn default_eq_bands() -> [f32; 5] {
-    [0.0, 0.0, 0.0, 0.0, 0.0]
+fn default_eq_bands() -> [f32; 10] {
+    [0.0; 10]
+}
+
+/// Slots in the current 10-band layout (32/64/125/250/500/1k/2k/4k/8k/16k Hz)
+/// that the legacy 5-band layout (60/250/1k/4k/12k Hz) maps onto, picked as the
+/// nearest frequency: 60→64, 250→250, 1k→1k, 4k→4k, 12k→16k.
+const LEGACY_EQ_BAND_SLOTS: [usize; 5] = [1, 3, 5, 7, 9];
+
+fn deserialize_eq_bands<'de, D>(deserializer: D) -> Result<[f32; 10], D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let values: Vec<f32> = Vec::deserialize(deserializer)?;
+    let mut out = [0.0_f32; 10];
+
+    if values.len() == LEGACY_EQ_BAND_SLOTS.len() {
+        // Migrate a saved 5-band custom preset onto the nearest 10-band slots so
+        // existing boosts keep their original frequencies instead of shifting
+        // down (e.g. a 1 kHz boost must not be reinterpreted as a 125 Hz boost).
+        for (&slot, value) in LEGACY_EQ_BAND_SLOTS.iter().zip(values.iter().copied()) {
+            out[slot] = value;
+        }
+    } else {
+        for (slot, value) in out.iter_mut().zip(values.iter().copied()) {
+            *slot = value;
+        }
+    }
+
+    Ok(out)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -400,14 +427,17 @@ pub struct EqualizerSettings {
     pub enabled: bool,
     #[serde(default)]
     pub preset: EqPreset,
-    #[serde(default = "default_eq_bands")]
-    pub bands: [f32; 5],
+    #[serde(
+        default = "default_eq_bands",
+        deserialize_with = "deserialize_eq_bands"
+    )]
+    pub bands: [f32; 10],
     #[serde(default)]
     pub preamp_db: f32,
 }
 
 impl EqualizerSettings {
-    pub fn resolved_bands(&self) -> [f32; 5] {
+    pub fn resolved_bands(&self) -> [f32; 10] {
         if self.preset == EqPreset::Custom {
             self.bands
         } else {
@@ -650,6 +680,34 @@ pub struct AppConfig {
     pub language: String,
     #[serde(default)]
     pub reduce_animations: bool,
+    /// When enabled, fullscreen mode hides its own transport controls and lets
+    /// the player bar act as the multimedia controller instead.
+    #[serde(default)]
+    pub fullscreen_use_player_bar: bool,
+    /// Fullscreen: the Up Next / Lyrics side panel is collapsed. Toggled from
+    /// the fullscreen UI itself, remembered across sessions.
+    #[serde(default)]
+    pub fullscreen_tabs_collapsed: bool,
+    /// Use the current track's cover as the app background, overriding the
+    /// active theme's background (including the album-art gradient).
+    #[serde(default)]
+    pub cover_art_background: bool,
+    /// How strongly the cover art background is darkened, in percent (0-95).
+    #[serde(default = "default_cover_art_darkening")]
+    pub cover_art_darkening: u8,
+    /// Blur radius of the cover art background, in pixels (0 = sharp).
+    #[serde(default)]
+    pub cover_art_blur: u8,
+    /// Absolute path to a user-chosen image used as the app background,
+    /// overriding both the theme background and the cover art background.
+    /// Empty = unset. Shares the darkening/blur treatment with cover art.
+    #[serde(default)]
+    pub custom_background_path: String,
+    /// Absolute path to a user-chosen font file (ttf/otf/woff/woff2) applied
+    /// as the app's UI font, overriding the default JetBrains Mono stack.
+    /// Empty = unset.
+    #[serde(default)]
+    pub custom_font_path: String,
     /// Opt-in chrome/Perfetto performance trace. Read at startup (the
     /// subscriber is built once), so a change needs a restart. Adds runtime
     /// overhead — surfaced with a warning in settings.
@@ -663,6 +721,8 @@ pub struct AppConfig {
     pub minimize_to_tray: bool,
     #[serde(default = "default_show_source_toggle")]
     pub show_source_toggle: bool,
+    #[serde(default = "default_true")]
+    pub show_row_images: bool,
     #[serde(default = "default_sidebar_order")]
     pub sidebar_order: Vec<String>,
     #[serde(default = "default_volume")]
@@ -711,6 +771,9 @@ pub struct AppConfig {
     pub cover_fetch_strategy: FetchStrategy,
     #[serde(default = "default_radio_registries")]
     pub radio_registries: Vec<RegistryEntry>,
+    /// Station manifests (JSON) pinned from the radio browser.
+    #[serde(default)]
+    pub pinned_stations: Vec<String>,
     #[serde(default)]
     pub prefer_local_lyrics: bool,
     #[serde(default)]
@@ -772,6 +835,10 @@ fn default_show_source_toggle() -> bool {
 
 fn default_auto_check_updates() -> bool {
     true
+}
+
+fn default_cover_art_darkening() -> u8 {
+    60
 }
 
 pub fn default_sidebar_order() -> Vec<String> {
@@ -858,10 +925,18 @@ impl Default for AppConfig {
             librefm_session_key: String::new(),
             language: default_language(),
             reduce_animations: false,
+            fullscreen_use_player_bar: false,
+            fullscreen_tabs_collapsed: false,
+            cover_art_background: false,
+            cover_art_darkening: default_cover_art_darkening(),
+            cover_art_blur: 0,
+            custom_background_path: String::new(),
+            custom_font_path: String::new(),
             tracing_enabled: false,
             auto_check_updates: default_auto_check_updates(),
             minimize_to_tray: false,
             show_source_toggle: default_show_source_toggle(),
+            show_row_images: true,
             sidebar_order: default_sidebar_order(),
             volume: default_volume(),
             volume_scroll_step: default_volume_scroll_step(),
@@ -886,6 +961,7 @@ impl Default for AppConfig {
             auto_fetch_covers: false,
             cover_fetch_strategy: FetchStrategy::default(),
             radio_registries: default_radio_registries(),
+            pinned_stations: Vec::new(),
             prefer_local_lyrics: false,
             enable_musixmatch_lyrics: false,
         }
@@ -1018,8 +1094,40 @@ impl AppConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppConfig, BackBehavior, Browser, MusicServer, ServerAuth};
+    use super::{AppConfig, BackBehavior, Browser, EqualizerSettings, MusicServer, ServerAuth};
     use std::path::PathBuf;
+
+    #[test]
+    fn legacy_five_band_custom_eq_migrates_to_nearest_slots() {
+        // A custom preset saved by the old 5-band UI: boosts at 60/250/1k/4k/12k Hz.
+        let json = r#"{
+            "enabled": true,
+            "preset": "Custom",
+            "bands": [3.0, 0.0, 5.0, -2.0, 4.0],
+            "preamp_db": 0.0
+        }"#;
+
+        let eq: EqualizerSettings = serde_json::from_str(json).unwrap();
+
+        // Each legacy value lands on the nearest 10-band slot (64/250/1k/4k/16k Hz),
+        // not the first five slots (which are now 32/64/125/250/500 Hz).
+        assert_eq!(
+            eq.bands,
+            [0.0, 3.0, 0.0, 0.0, 0.0, 5.0, 0.0, -2.0, 0.0, 4.0]
+        );
+    }
+
+    #[test]
+    fn modern_ten_band_eq_round_trips_unchanged() {
+        let bands = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0];
+        let json = format!(
+            r#"{{ "enabled": true, "preset": "Custom", "bands": {bands:?}, "preamp_db": 0.0 }}"#
+        );
+
+        let eq: EqualizerSettings = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(eq.bands, bands);
+    }
 
     #[test]
     fn config_deserializes_legacy_single_music_directory() {

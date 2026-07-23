@@ -782,7 +782,10 @@ pub fn use_player_task(ctrl: PlayerController) {
 
                 if let Some(next_track) = lyrics_prefetch {
                     let next_track_key = next_track.id.uid().to_string();
-                    if last_lyrics_prefetch_track.as_ref() != Some(&next_track_key) {
+                    // Radio has no lyrics to prefetch.
+                    if !crate::playback_ref::PlaybackItemRef::parse(&next_track_key).is_radio()
+                        && last_lyrics_prefetch_track.as_ref() != Some(&next_track_key)
+                    {
                         last_lyrics_prefetch_track = Some(next_track_key);
                         let (
                             server_url,

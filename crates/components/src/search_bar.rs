@@ -16,7 +16,7 @@ pub fn SearchBar(search_query: Signal<String>) -> Element {
             input {
                 r#type: "text",
                 placeholder: "{i18n::t(\"search_placeholder\")}",
-                class: "w-full bg-white/5 border border-white/10 rounded-full py-3 pl-12 pr-4 text-white focus:outline-none focus:border-white/20 transition-colors",
+                class: "w-full bg-white/10 border border-white/10 rounded-full py-3 pl-12 pr-4 text-white focus:outline-none focus:border-white/25 transition-colors",
                 oninput: move |evt| {
                     let value = evt.value();
                     let tick = debounce_gen.fetch_add(1, Ordering::Relaxed) + 1;

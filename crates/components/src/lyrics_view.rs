@@ -1,7 +1,6 @@
 use config::AppConfig;
 use dioxus::{document::eval, prelude::*};
 use hooks::PlayerController;
-use std::fmt;
 
 const FULLSCREEN_LYRIC_CLASS: &str = "text-white/40 text-2xl font-semibold transition-colors duration-300 hover:text-white/60 cursor-pointer whitespace-pre-wrap";
 const FULLSCREEN_ACTIVE_LYRIC_CLASS: &str =
@@ -35,20 +34,7 @@ const FULLSCREEN_ACTIVE_OPPOSITE_LYRIC_CLASS: &str = "text-white text-2xl italic
 const RIGHTBAR_OPPOSITE_LYRIC_CLASS: &str = "text-white/40 text-lg italic font-semibold transition-colors duration-300 hover:text-white/60 cursor-pointer whitespace-pre-wrap text-right w-full";
 const RIGHTBAR_ACTIVE_OPPOSITE_LYRIC_CLASS: &str = "text-white text-lg italic font-semibold transition-colors duration-300 whitespace-pre-wrap text-right w-full";
 const LYRIC_SEAMLESS_GAP_SECONDS: f64 = 3.0;
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum LayoutMode {
-    Rightbar,
-    Fullscreen,
-}
-
-impl fmt::Display for LayoutMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            LayoutMode::Rightbar => write!(f, "rightbar"),
-            LayoutMode::Fullscreen => write!(f, "fullscreen"),
-        }
-    }
-}
+pub use crate::shared::LayoutMode;
 
 fn lyric_line_class(
     layout: LayoutMode,
@@ -273,12 +259,39 @@ pub fn LyricsView(
     layout: LayoutMode,
 ) -> Element {
     let mut ctrl = use_context::<PlayerController>();
+    let mut auto_sync = use_signal(|| true);
 
     // Clear functions when the component is dropped
     use_drop(move || {
         let _cleanup = eval(&format!(
-            "if (window.__{layout}_updateLyrics) delete window.__{layout}_updateLyrics; if (window.__{layout}_resetLyrics) delete window.__{layout}_resetLyrics"
+            "for (const key of ['updateLyrics', 'resetLyrics', 'setAutoSync', 'autoSync', 'programmaticScroll']) delete window[`__{layout}_${{key}}`];"
         ));
+    });
+
+    // Hand scroll control back to the user the moment they scroll the lyrics
+    // themselves; the sync button re-arms auto-scroll.
+    use_future(move || async move {
+        let mut listener = eval(&format!(
+            r#"
+                const attach = () => {{
+                    const container = document.getElementById('{layout}-lyrics-content');
+                    if (!container) {{ requestAnimationFrame(attach); return; }}
+                    container.addEventListener('scroll', () => {{
+                        if (window.__{layout}_programmaticScroll) return;
+                        if (window.__{layout}_autoSync === false) return;
+                        window.__{layout}_autoSync = false;
+                        dioxus.send('user_scroll');
+                    }});
+                }};
+                attach();
+            "#
+        ));
+
+        while let Ok(val) = listener.recv::<serde_json::Value>().await {
+            if val.as_str() == Some("user_scroll") {
+                auto_sync.set(false);
+            }
+        }
     });
 
     use_hook(move || {
@@ -294,6 +307,8 @@ pub fn LyricsView(
                 let scrollAnimationFrame;
                 let activeClass = "{active_class}";
                 let inactiveClass = "{inactive_class}";
+                window.__{layout}_autoSync = true;
+                window.__{layout}_programmaticScroll = false;
 
                 const resetWords = (lineEl) => {{
                     lineEl?.querySelectorAll('[data-lyric-chunk]').forEach((word) => {{
@@ -341,6 +356,7 @@ pub fn LyricsView(
                 }};
 
                 const scrollLineIntoComfortView = (lineEl) => {{
+                    if (!window.__{layout}_autoSync) return;
                     const container = document.getElementById('{layout}-lyrics-content');
                     if (!container || !lineEl) return;
 
@@ -360,6 +376,7 @@ pub fn LyricsView(
                     const startedAt = performance.now();
                     const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
 
+                    window.__{layout}_programmaticScroll = true;
                     const step = (now) => {{
                         const progress = Math.min(1, (now - startedAt) / durationMs);
                         container.scrollTop = startTop + distance * easeOutCubic(progress);
@@ -367,6 +384,7 @@ pub fn LyricsView(
                             scrollAnimationFrame = requestAnimationFrame(step);
                         }} else {{
                             scrollAnimationFrame = null;
+                            setTimeout(() => {{ window.__{layout}_programmaticScroll = false; }}, 80);
                         }}
                     }};
 
@@ -440,6 +458,13 @@ pub fn LyricsView(
                     }}
                 }}
 
+                window.__{layout}_setAutoSync = (val) => {{
+                    window.__{layout}_autoSync = val;
+                    if (val && currEl) {{
+                        scrollLineIntoComfortView(currEl);
+                    }}
+                }}
+
                 window.__{layout}_resetLyrics = () => {{
                     if (scrollAnimationFrame) {{
                         cancelAnimationFrame(scrollAnimationFrame);
@@ -459,9 +484,12 @@ pub fn LyricsView(
     use_resource(move || {
         let lyrics = lyrics.read().clone();
 
+        // a fresh track re-arms auto-scroll
+        auto_sync.set(true);
+
         // scroll to top on lyrics change
         let _scroll_to_top = eval(&format!(
-            "window.__{layout}_resetLyrics?.(); document.getElementById('{layout}-lyrics-content')?.scrollTo({{ top: 0, left: 0 }});"
+            "if (window.__{layout}_autoSync !== undefined) window.__{layout}_autoSync = true; window.__{layout}_resetLyrics?.(); document.getElementById('{layout}-lyrics-content')?.scrollTo({{ top: 0, left: 0 }});"
         ));
 
         async move {
@@ -520,7 +548,14 @@ pub fn LyricsView(
         }
     });
 
+    let show_sync_button = !auto_sync()
+        && matches!(
+            &*lyrics.read(),
+            Some(Some(utils::lyrics::Lyrics::Synced(_)))
+        );
+
     rsx! {
+        div { class: "relative flex flex-col flex-1 min-h-0",
         div {
             id: "{layout}-lyrics-content",
             class: match layout {
@@ -582,6 +617,28 @@ pub fn LyricsView(
                     None => rsx! { "{i18n::t(\"loading_lyrics\")}" },
                 }
             }
+        }
+
+        if show_sync_button {
+            button {
+                class: "absolute bottom-4 right-4 z-10 flex items-center justify-center w-9 h-9 rounded-full bg-black/40 hover:bg-black/60 backdrop-blur text-white/90 shadow-lg ring-1 ring-white/10 transition-colors",
+                onclick: move |_| {
+                    auto_sync.set(true);
+                    let _ = eval(&format!("window.__{layout}_setAutoSync?.(true)"));
+                },
+                svg {
+                    class: "w-5 h-5",
+                    view_box: "0 0 24 24",
+                    fill: "none",
+                    stroke: "currentColor",
+                    stroke_width: "2",
+                    stroke_linecap: "round",
+                    stroke_linejoin: "round",
+                    path { d: "M21 12a9 9 0 1 1-2.64-6.36" }
+                    polyline { points: "21 3 21 9 15 9" }
+                }
+            }
+        }
         }
     }
 }

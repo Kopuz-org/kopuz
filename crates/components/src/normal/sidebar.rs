@@ -410,7 +410,7 @@ fn SidebarLink(
                 div { class: "flex flex-col opacity-0 group-hover:opacity-100 transition-opacity pr-1",
                     button {
                         class: if can_move_up {
-                            "text-slate-500 hover:text-white transition-colors leading-none px-1"
+                            "text-slate-500 hover:text-white hover:bg-white/10 rounded-full transition-colors active:scale-95 leading-none px-1"
                         } else {
                             "text-slate-700 cursor-default leading-none px-1"
                         },
@@ -422,7 +422,7 @@ fn SidebarLink(
                     }
                     button {
                         class: if can_move_down {
-                            "text-slate-500 hover:text-white transition-colors leading-none px-1"
+                            "text-slate-500 hover:text-white hover:bg-white/10 rounded-full transition-colors active:scale-95 leading-none px-1"
                         } else {
                             "text-slate-700 cursor-default leading-none px-1"
                         },

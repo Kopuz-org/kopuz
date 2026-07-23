@@ -241,11 +241,35 @@ impl PlayerController {
 
     /// Follow a radio station's live now-playing metadata into the UI signals
     /// for as long as it plays.
-    fn start_radio_metadata(&mut self, station_id: String, stream_id: String) {
+    ///
+    /// `icy_rx` carries `StreamTitle` updates from the audio connection. Only
+    /// wired up for stations without a live (REST/WebSocket) provider, so the
+    /// two sources never fight.
+    fn start_radio_metadata(
+        &mut self,
+        station_id: String,
+        stream_id: String,
+        icy_rx: Option<tokio::sync::watch::Receiver<utils::icy::IcyMeta>>,
+    ) {
         let Some(provider) = self.station_registry.read().create_provider(&station_id) else {
             tracing::warn!("[radio] no metadata provider for station: {station_id}");
             return;
         };
+        // Station artwork / name fallbacks for song updates without their own.
+        let station_cover: Option<String> =
+            self.station_registry
+                .read()
+                .get(&station_id)
+                .and_then(|m| match &m.metadata {
+                    Some(radio::manifest::MetadataSourceDef::Static(s)) => s.cover_url.clone(),
+                    _ => None,
+                });
+        let station_name: Option<String> = self
+            .station_registry
+            .read()
+            .get(&station_id)
+            .map(|m| m.name.clone())
+            .filter(|n| !n.trim().is_empty());
         let mut current_song_title = self.current_song_title;
         let mut current_song_artist = self.current_song_artist;
         let mut current_song_album = self.current_song_album;
@@ -253,12 +277,39 @@ impl PlayerController {
         let task = spawn(async move {
             use radio::provider::RadioMetadataProvider;
             let mut rx = provider.start(&stream_id);
-            while let Some(meta) = rx.recv().await {
-                current_song_title.set(meta.title.clone());
-                current_song_artist.set(meta.artist.clone());
-                current_song_album.set(meta.station.clone());
-                current_song_cover_url.set(meta.cover_url.unwrap_or_default());
-            }
+            // Signals are Copy: each loop gets its own mutable handle.
+            let mut icy_song_title = current_song_title;
+            let mut icy_song_artist = current_song_artist;
+            let mut icy_song_cover = current_song_cover_url;
+            let provider_loop = async {
+                while let Some(meta) = rx.recv().await {
+                    current_song_title.set(meta.title.clone());
+                    current_song_artist.set(meta.artist.clone());
+                    current_song_album.set(meta.station.clone());
+                    current_song_cover_url.set(meta.cover_url.unwrap_or_default());
+                }
+            };
+            let icy_loop = async {
+                let Some(mut icy_rx) = icy_rx else { return };
+                while icy_rx.changed().await.is_ok() {
+                    let meta = icy_rx.borrow_and_update().clone();
+                    if meta.title.trim().is_empty() {
+                        continue;
+                    }
+                    let (artist, title) = utils::icy::split_artist_title(&meta.title);
+                    icy_song_title.set(title);
+                    // No artist in title: show station.
+                    if let Some(artist) = artist.or_else(|| station_name.clone()) {
+                        icy_song_artist.set(artist);
+                    }
+                    let cover = meta
+                        .cover_url
+                        .or_else(|| station_cover.clone())
+                        .unwrap_or_default();
+                    icy_song_cover.set(cover);
+                }
+            };
+            tokio::join!(provider_loop, icy_loop);
         });
         self.radio_task.set(Some(task));
     }
@@ -868,15 +919,27 @@ impl PlayerController {
         // Remote stream reference + synchronous cover URL for server/radio
         // items that aren't cached offline. Streams resolve in the load task;
         // only the cover is built here so artwork shows immediately on click.
+        // ICY titles only for stations without a live metadata provider.
+        let mut use_icy = false;
         let remote_ref: Option<(String, String)> = if offline_path.is_some() {
             None
         } else if is_radio_item {
-            self.station_registry
-                .read()
-                .get(&id)
+            let registry = self.station_registry.read();
+            let station = registry.get(&id);
+            use_icy = station.is_some_and(|s| !s.has_live_metadata());
+            // Static cover/favicon so artwork shows from the first frame.
+            let cover = station
+                .and_then(|s| match &s.metadata {
+                    Some(radio::manifest::MetadataSourceDef::Static(st)) => {
+                        st.resolve(&stream_id).2.map(str::to_string)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_default();
+            station
                 .and_then(|s| s.streams.iter().find(|str| str.id == stream_id))
                 .map(|s| s.url.clone())
-                .map(|stream_url| (stream_url, String::new()))
+                .map(|stream_url| (stream_url, cover))
         } else if is_server_item {
             // Every server source resolves its stream async in the load task, so
             // the ref is a pending marker; only the cover is built now, through
@@ -965,6 +1028,15 @@ impl PlayerController {
 
         let task = spawn(
             async move {
+                // ICY channel: tx goes to the stream download, rx to the
+                // metadata follower after load commits.
+                let (icy_tx, icy_rx) = if is_radio_item && use_icy {
+                    let (tx, rx) = tokio::sync::watch::channel(utils::icy::IcyMeta::default());
+                    (Some(tx), Some(rx))
+                } else {
+                    (None, None)
+                };
+
                 let factory: SourceFactory = if let Some(path) = local_path {
                     Box::new(move || decoder::open_file(&path).map_err(|e| e.to_string()))
                 } else if let Some(path) = offline_path {
@@ -985,6 +1057,7 @@ impl PlayerController {
                                 info.format,
                                 info.user_agent,
                                 false,
+                                None,
                                 rt_handle.clone(),
                             )()
                         }
@@ -1024,7 +1097,14 @@ impl PlayerController {
                     // The factory runs on the decode worker (no runtime), so
                     // hand StreamBuffer's download a handle from this task.
                     let rt_handle = tokio::runtime::Handle::current();
-                    network_factory(stream_url, yt_format, yt_user_agent, is_radio_item, rt_handle)
+                    network_factory(
+                        stream_url,
+                        yt_format,
+                        yt_user_agent,
+                        is_radio_item,
+                        icy_tx,
+                        rt_handle,
+                    )
                 };
 
                 let meta = NowPlayingMeta {
@@ -1070,7 +1150,7 @@ impl PlayerController {
                         }
 
                         if is_radio_item {
-                            ctrl.start_radio_metadata(station_id, stream_id);
+                            ctrl.start_radio_metadata(station_id, stream_id, icy_rx);
                         } else {
                             let (item_id, source, options) = if is_server_item {
                                 (
@@ -1128,6 +1208,7 @@ fn network_factory(
     yt_format: Option<(::server::ytmusic::player::AudioFormat, bool)>,
     yt_user_agent: Option<String>,
     is_radio: bool,
+    icy_tx: Option<tokio::sync::watch::Sender<utils::icy::IcyMeta>>,
     rt_handle: tokio::runtime::Handle,
 ) -> SourceFactory {
     Box::new(move || {
@@ -1137,6 +1218,7 @@ fn network_factory(
                     stream_url,
                     true,
                     yt_user_agent,
+                    icy_tx,
                     rt_handle,
                 );
                 Ok(decoder::from_stream_with_hint(stream, "ogg"))
@@ -1159,6 +1241,7 @@ fn network_factory(
                         stream_url,
                         false,
                         yt_user_agent,
+                        None,
                         rt_handle,
                     );
                     stream.wait_for_total_size();
@@ -1183,6 +1266,7 @@ fn network_factory(
                     stream_url,
                     false,
                     yt_user_agent,
+                    None,
                     rt_handle,
                 );
                 stream.wait_for_total_size();

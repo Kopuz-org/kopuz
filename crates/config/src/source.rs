@@ -131,6 +131,7 @@ pub enum Browser {
     Brave,
     Edge,
     Vivaldi,
+    Helium,
 }
 
 impl Browser {
@@ -140,6 +141,7 @@ impl Browser {
         Browser::Brave,
         Browser::Edge,
         Browser::Vivaldi,
+        Browser::Helium,
     ];
 
     /// The stable id used in URL routes, settings UI option values,
@@ -151,6 +153,7 @@ impl Browser {
             Browser::Brave => "brave",
             Browser::Edge => "edge",
             Browser::Vivaldi => "vivaldi",
+            Browser::Helium => "helium",
         }
     }
 
@@ -161,6 +164,7 @@ impl Browser {
             Browser::Brave => "Brave",
             Browser::Edge => "Edge",
             Browser::Vivaldi => "Vivaldi",
+            Browser::Helium => "Helium",
         }
     }
 

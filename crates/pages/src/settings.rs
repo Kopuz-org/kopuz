@@ -278,7 +278,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     rsx! {
         div { class: if cfg!(target_os = "android") { "px-4 pt-2 pb-28 w-full" } else { "p-8 w-full" },
             if !cfg!(target_os = "android") {
-                h1 { class: "text-3xl font-bold text-white mb-6", "{i18n::t(\"settings\")}" }
+                h1 { class: "text-3xl font-semibold tracking-tight text-white mb-6", "{i18n::t(\"settings\")}" }
             }
 
             div { class: "space-y-12",
@@ -307,6 +307,144 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     }
                                 }
                             }
+                        }
+
+                        SettingItem {
+                            title: i18n::t("cover_art_background").to_string(),
+                            control: rsx! {
+                                ToggleSetting {
+                                    enabled: config.read().cover_art_background,
+                                    on_change: move |val| config.write().cover_art_background = val,
+                                }
+                            }
+                        }
+                        if cfg!(not(target_os = "android")) {
+                            SettingItem {
+                                title: i18n::t("custom_background").to_string(),
+                                control: rsx! {
+                                    div { class: "flex items-center gap-2",
+                                        if !config.read().custom_background_path.is_empty() {
+                                            span {
+                                                class: "text-xs text-white/50 font-mono max-w-[220px] truncate",
+                                                "{config.read().custom_background_path}"
+                                            }
+                                            button {
+                                                class: "px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-red-300 text-sm transition-colors",
+                                                onclick: move |_| config.write().custom_background_path = String::new(),
+                                                "{i18n::t(\"remove\")}"
+                                            }
+                                        }
+                                        button {
+                                            class: "px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors",
+                                            onclick: move |_| {
+                                                #[cfg(not(target_os = "android"))]
+                                                spawn(async move {
+                                                    if let Some(file) = rfd::AsyncFileDialog::new()
+                                                        .add_filter("Images", &["jpg", "jpeg", "png", "webp", "gif", "bmp"])
+                                                        .pick_file()
+                                                        .await
+                                                    {
+                                                        config.write().custom_background_path =
+                                                            file.path().display().to_string();
+                                                    }
+                                                });
+                                            },
+                                            "{i18n::t(\"choose_image\")}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if cfg!(not(target_os = "android")) {
+                            SettingItem {
+                                title: i18n::t("custom_font").to_string(),
+                                control: rsx! {
+                                    div { class: "flex items-center gap-2",
+                                        if !config.read().custom_font_path.is_empty() {
+                                            span {
+                                                class: "text-xs text-white/50 font-mono max-w-[220px] truncate",
+                                                "{config.read().custom_font_path}"
+                                            }
+                                            button {
+                                                class: "px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-red-300 text-sm transition-colors",
+                                                onclick: move |_| config.write().custom_font_path = String::new(),
+                                                "{i18n::t(\"remove\")}"
+                                            }
+                                        }
+                                        button {
+                                            class: "px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors",
+                                            onclick: move |_| {
+                                                #[cfg(not(target_os = "android"))]
+                                                spawn(async move {
+                                                    if let Some(file) = rfd::AsyncFileDialog::new()
+                                                        .add_filter("Fonts", &["ttf", "otf", "woff", "woff2"])
+                                                        .pick_file()
+                                                        .await
+                                                    {
+                                                        config.write().custom_font_path =
+                                                            file.path().display().to_string();
+                                                    }
+                                                });
+                                            },
+                                            "{i18n::t(\"choose_font\")}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if config.read().cover_art_background
+                            || !config.read().custom_background_path.is_empty()
+                        {
+                                SettingItem {
+                                    title: i18n::t("cover_art_darkening").to_string(),
+                                    control: rsx! {
+                                        div { class: "flex items-center gap-3 min-w-[220px]",
+                                            input {
+                                                r#type: "range",
+                                                min: "0",
+                                                max: "95",
+                                                step: "5",
+                                                value: format!("{}", config.read().cover_art_darkening),
+                                                class: "w-40",
+                                                style: "accent-color: var(--color-indigo-500);",
+                                                oninput: move |evt| {
+                                                    if let Ok(value) = evt.value().parse::<u8>() {
+                                                        config.write().cover_art_darkening = value.min(95);
+                                                    }
+                                                }
+                                            }
+                                            span {
+                                                class: "text-xs font-mono text-white/80 w-16 text-right",
+                                                "{config.read().cover_art_darkening}%"
+                                            }
+                                        }
+                                    }
+                                }
+                                SettingItem {
+                                    title: i18n::t("cover_art_blur").to_string(),
+                                    control: rsx! {
+                                        div { class: "flex items-center gap-3 min-w-[220px]",
+                                            input {
+                                                r#type: "range",
+                                                min: "0",
+                                                max: "100",
+                                                step: "5",
+                                                value: format!("{}", config.read().cover_art_blur),
+                                                class: "w-40",
+                                                style: "accent-color: var(--color-indigo-500);",
+                                                oninput: move |evt| {
+                                                    if let Ok(value) = evt.value().parse::<u8>() {
+                                                        config.write().cover_art_blur = value.min(100);
+                                                    }
+                                                }
+                                            }
+                                            span {
+                                                class: "text-xs font-mono text-white/80 w-16 text-right",
+                                                "{config.read().cover_art_blur}px"
+                                            }
+                                        }
+                                    }
+                                }
                         }
 
                         SettingItem {
@@ -432,6 +570,17 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+                        if cfg!(not(target_os = "android")) {
+                            SettingItem {
+                                title: i18n::t("fullscreen_use_player_bar").to_string(),
+                                control: rsx! {
+                                    ToggleSetting {
+                                        enabled: config.read().fullscreen_use_player_bar,
+                                        on_change: move |val| config.write().fullscreen_use_player_bar = val,
+                                    }
+                                }
+                            }
+                        }
                         SettingItem {
                             title: i18n::t("auto_check_updates").to_string(),
                             control: rsx! {
@@ -461,6 +610,15 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+                        SettingItem {
+                            title: i18n::t("show_row_images").to_string(),
+                            control: rsx! {
+                                ToggleSetting {
+                                    enabled: config.read().show_row_images,
+                                    on_change: move |val| config.write().show_row_images = val,
+                                }
+                            }
+                        }
                         if cfg!(any(target_os = "linux", target_os = "windows")) {
                             SettingItem {
                                 title: i18n::t("titlebar_mode").to_string(),
@@ -469,7 +627,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                         let current_mode = config.read().titlebar_mode;
                                         rsx! {
                                             select {
-                                                class: "bg-stone-800 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-indigo-500",
+                                                class: "bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-white/25",
                                                 onchange: move |evt| {
                                                     config.write().titlebar_mode = match evt.value().as_str() {
                                                         "system" => config::TitlebarMode::System,
@@ -505,7 +663,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     let current_style = config.read().ui_style;
                                     rsx! {
                                         select {
-                                            class: "bg-stone-800 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-indigo-500",
+                                            class: "bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-white/25",
                                             onchange: move |evt| {
                                                 config.write().ui_style = match evt.value().as_str() {
                                                     "vaxry" => config::UiStyle::Vaxry,
@@ -534,7 +692,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     let current_position = config.read().player_bar_position;
                                     rsx! {
                                         select {
-                                            class: "bg-stone-800 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-indigo-500",
+                                            class: "bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-white/25",
                                             onchange: move |evt| {
                                                 config.write().player_bar_position = match evt.value().as_str() {
                                                     "top" => config::PlayerBarPosition::Top,
@@ -651,7 +809,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 title: i18n::t("download_quality").to_string(),
                                 control: rsx! {
                                     select {
-                                        class: "bg-stone-800 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-indigo-500",
+                                        class: "bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-white/25",
                                         onchange: move |evt| {
                                             config.write().offline_quality = OfflineQuality::from_value_str(&evt.value());
                                         },
@@ -704,7 +862,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     let current = config.read().cover_fetch_strategy;
                                     rsx! {
                                         select {
-                                            class: "bg-stone-800 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-indigo-500",
+                                            class: "bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-white/25",
                                             onchange: move |evt| {
                                                 config.write().cover_fetch_strategy = match evt.value().as_str() {
                                                     "lastfm_first" => FetchStrategy::LastFmFirst,

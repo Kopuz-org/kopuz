@@ -145,7 +145,7 @@ pub fn SortControl<F: LibrarySortField + Eq + std::fmt::Debug + 'static>(
                                     }
 
                                     button {
-                                        class: "shrink-0 w-7 h-7 flex items-center justify-center rounded-md bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition-colors",
+                                        class: "shrink-0 w-7 h-7 flex items-center justify-center rounded-full bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition-colors active:scale-95",
                                         title: if direction == SortDirection::Asc { "{i18n::t(\"sort_ascending\")}" } else { "{i18n::t(\"sort_descending\")}" },
                                         onclick: move |evt| {
                                             evt.stop_propagation();
@@ -160,7 +160,7 @@ pub fn SortControl<F: LibrarySortField + Eq + std::fmt::Debug + 'static>(
                                     }
 
                                     button {
-                                        class: "shrink-0 w-7 h-7 flex items-center justify-center rounded-md text-white/30 hover:text-red-300 hover:bg-red-500/10 transition-colors",
+                                        class: "shrink-0 w-7 h-7 flex items-center justify-center rounded-full text-white/30 hover:text-red-300 hover:bg-red-500/10 transition-colors active:scale-95",
                                         title: "{i18n::t(\"sort_remove\")}",
                                         onclick: move |evt| {
                                             evt.stop_propagation();

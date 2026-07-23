@@ -33,6 +33,7 @@ webbrowser = { workspace = true }
 dioxus = { workspace = true, features = ["mobile"] }
 
 [dependencies]
+base64 = { workspace = true }
 directories = { workspace = true }
 discord-presence = { workspace = true }
 uuid = { workspace = true }

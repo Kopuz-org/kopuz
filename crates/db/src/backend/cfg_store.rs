@@ -310,6 +310,7 @@ fn parse_browser(s: Option<&str>) -> Option<Browser> {
         Some("brave") => Some(Browser::Brave),
         Some("edge") => Some(Browser::Edge),
         Some("vivaldi") => Some(Browser::Vivaldi),
+        Some("helium") => Some(Browser::Helium),
         _ => None,
     }
 }

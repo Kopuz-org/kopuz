@@ -259,12 +259,39 @@ impl PlayerController {
     }
     pub fn play_radio(&mut self, station_id: &str, stream_id: &str) {
         let path = format!("radio:{}:{}", station_id, stream_id);
+
+        // Seed station name&artist from the manifest so the UI never shows
+        // raw ids while waiting for the first metadata update.
+        let (title, artist) = {
+            let registry = self.station_registry.read();
+            let station = registry.get(station_id);
+            let title = station
+                .map(|s| s.name.clone())
+                .filter(|n| !n.trim().is_empty())
+                .unwrap_or_else(|| stream_id.to_string());
+            let artist = station
+                .and_then(|s| match &s.metadata {
+                    Some(radio::manifest::MetadataSourceDef::Static(st)) => {
+                        Some(st.resolve(stream_id).1.to_string())
+                    }
+                    _ => None,
+                })
+                .or_else(|| {
+                    station
+                        .and_then(|s| s.streams.iter().find(|st| st.id == stream_id))
+                        .map(|st| st.name.clone())
+                })
+                .filter(|a| !a.trim().is_empty())
+                .unwrap_or_else(|| "Live Radio".to_string());
+            (title, artist)
+        };
+
         let track = Track {
             id: reader::models::TrackId::Local(std::path::PathBuf::from(path)),
             cover: None,
             album_id: "".to_string(),
-            title: stream_id.to_string(),
-            artist: station_id.to_string(),
+            title,
+            artist,
             album: "Live Radio".to_string(),
             duration: u64::MAX,
             khz: 0,

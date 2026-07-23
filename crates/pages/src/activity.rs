@@ -118,7 +118,7 @@ pub fn Activity(config: Signal<AppConfig>) -> Element {
                                 "{i18n::t(\"library\")}"
                             }
                         }
-                        h1 { class: if is_vaxry { "text-2xl font-bold text-white mb-1" } else { "text-3xl font-bold text-white mb-2" },
+                        h1 { class: if is_vaxry { "text-2xl font-semibold tracking-tight text-white mb-1" } else { "text-3xl font-semibold tracking-tight text-white mb-2" },
                             "{i18n::t(\"listening_logs\")}"
                         }
                         p { class: "text-slate-400 text-sm", "{subtitle}" }

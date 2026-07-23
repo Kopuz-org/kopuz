@@ -48,7 +48,19 @@ connectivity = Conectividade
 discord_presence_paused = Mostrar status do Discord em pausa
 discord_presence_source = Mostrar a fonte de mídia no status do Discord
 reduce_animations = Reduzir animações
+fullscreen_use_player_bar = Usar a barra do player como controles em tela cheia
+cover_art_background = Capa como plano de fundo
+cover_art_darkening = Escurecimento da capa
+cover_art_blur = Desfoque da capa
+custom_background = Plano de fundo personalizado
+choose_image = Escolher imagem
+custom_font = Fonte personalizada
+choose_font = Escolher fonte
+jump_to_current_song = Ir para a música atual
+hide_side_panel = Ocultar painel lateral
+show_side_panel = Mostrar painel lateral
 show_source_toggle = Mostrar alternância de fonte
+show_row_images = Mostrar imagens nas linhas
 titlebar_mode = Barra de título
 titlebar_custom = Personalizada (desenhada pelo app)
 titlebar_system = Decorações do sistema
@@ -193,6 +205,7 @@ heart_track_to_add_server = Curta uma faixa enquanto ela estiver tocando para ad
 
 # Search & Placeholders
 search_placeholder = Buscar artistas, álbuns ou faixas...
+quick_search_placeholder = Digite para buscar, Enter para tocar…
 no_results_found = Nenhum resultado encontrado para "{ $query }"
 listenbrainz_token_placeholder = Insira seu token do ListenBrainz
 lastfm_api_key_placeholder = Digite sua chave de API do Last.fm
@@ -400,12 +413,18 @@ remove_cover = Remover capa
 
 # Radio Page
 radio_filter_stations = Filtrar estações…
+radio_search_stations = Buscar estações…
+radio_selected = Seleção
+radio_top_stations = Estações populares
+radio_search_results = Resultados da busca
+radio_powered_by = Com tecnologia de radio-browser.info
+radio_loading_stations = Carregando estações…
+radio_search_failed = Não foi possível conectar ao radio-browser.info
 radio_subtitle = Sintonize estações de rádio na internet ao vivo
 radio_no_stations_match = Nenhuma estação corresponde à sua pesquisa
 radio_station_col = Estação
 radio_description_col = Descrição
 radio_streams_col = Transmissões
-radio_play = Tocar
 radio_listen_moe_desc = Música pop coreana e de anime, 24/7.
 radio_j1_desc = Sucessos atuais e músicas clássicas do Japão.
 radio_doujinstyle_desc = Música doujin, trilhas sonoras de videogames e muito mais.
