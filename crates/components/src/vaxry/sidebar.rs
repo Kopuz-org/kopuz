@@ -99,7 +99,7 @@ const TOOL_ITEMS: &[NavItem] = &[NavItem {
 #[component]
 pub fn SidebarVaxry(props: SidebarProps) -> Element {
     let config = use_context::<Signal<config::AppConfig>>();
-    let mut width = use_signal(|| 240i32);
+    let mut width = use_signal(|| 200i32);
     let mut is_collapsed = use_signal(|| false);
     let mut is_resizing = use_signal(|| false);
 

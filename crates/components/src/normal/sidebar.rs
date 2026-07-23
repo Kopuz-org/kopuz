@@ -134,7 +134,7 @@ const BOTTOM_MENU: &[SidebarItem] = &[SidebarItem {
 #[component]
 pub fn SidebarNormal(props: SidebarProps) -> Element {
     let mut config = use_context::<Signal<config::AppConfig>>();
-    let mut width = use_signal(|| 268);
+    let mut width = use_signal(|| 240);
     let mut is_collapsed = use_signal(|| false);
     let mut is_resizing = use_signal(|| false);
 
