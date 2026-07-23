@@ -175,7 +175,7 @@ fn main() {
 
         PRESENCE.set(presence).ok();
 
-        AmuseApi::new().ok();
+        AmuseApi::start().ok();
 
         #[cfg(target_os = "macos")]
         {

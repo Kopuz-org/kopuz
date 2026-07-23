@@ -34,7 +34,7 @@ pub struct AmuseApi {
 static NOW_PLAYING: OnceLock<Mutex<AmuseApi>> = OnceLock::new();
 
 impl AmuseApi {
-    pub fn new() -> Result<(), Box<dyn std::error::Error>> {
+    pub fn start() -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!("Starting Amuse API");
         let app = Self::create_routes();
         tracing::info!("Routes created");
@@ -98,32 +98,7 @@ impl AmuseApi {
             )
     }
 
-    pub fn set(
-        &self,
-        has_song: bool,
-        is_playing: bool,
-        title: Option<&str>,
-        artist: Option<&str>,
-        album: Option<&str>,
-        elapsed_secs: Option<u64>,
-        duration_secs: Option<u64>,
-        cover_url: Option<&str>,
-        source_url: Option<&str>,
-    ) {
-        *Self::now_playing().lock().unwrap() = Self {
-            player: Player {
-                hasSong: has_song,
-                isPaused: !is_playing,
-                seekbarCurrentPosition: elapsed_secs.unwrap_or(0),
-            },
-            track: Track {
-                duration: duration_secs.unwrap_or(0),
-                title: title.unwrap_or("").to_string(),
-                author: artist.unwrap_or("").to_string(),
-                album: album.unwrap_or("").to_string(),
-                cover: cover_url.unwrap_or("").to_string(),
-                url: source_url.unwrap_or("").to_string(),
-            },
-        };
+    pub fn set(&self, player: Player, track: Track) {
+        *Self::now_playing().lock().unwrap() = Self { player, track };
     }
 }
