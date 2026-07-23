@@ -7,7 +7,7 @@ pub fn StatCard(label: String, value: String, icon: &'static str) -> Element {
             div {
                 class: "border border-white/5 px-1.5 py-2 rounded-lg flex flex-col items-center justify-center gap-0.5 min-w-0",
                 i { class: "fa-solid {icon} text-xs text-white/50" }
-                p { class: "text-base font-bold text-white leading-none", "{value}" }
+                p { class: "text-base font-semibold tracking-tight text-white leading-none", "{value}" }
                 p {
                     class: "text-[9px] font-medium text-slate-500 uppercase tracking-wide truncate max-w-full",
                     "{label}"
@@ -24,7 +24,7 @@ pub fn StatCard(label: String, value: String, icon: &'static str) -> Element {
             }
             div {
                 p { class: "text-xs font-medium text-slate-500", "{label}" }
-                p { class: "text-2xl font-bold text-white", "{value}" }
+                p { class: "text-2xl font-semibold tracking-tight text-white", "{value}" }
             }
         }
     }

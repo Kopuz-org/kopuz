@@ -762,7 +762,7 @@ fn ServerHeroBanner(
                         i { class: "fa-solid fa-star text-[8px]" }
                         "{i18n::t(\"featured_album\")}"
                     }
-                    h1 { class: "text-3xl md:text-5xl font-black text-white mb-4 leading-tight break-words", style: "overflow: hidden; text-overflow:ellipsis;white-space: nowrap;", "{hero_title}" }
+                    h1 { class: "text-3xl md:text-5xl font-semibold tracking-tight text-white mb-4 leading-tight break-words", style: "overflow: hidden; text-overflow:ellipsis;white-space: nowrap;", "{hero_title}" }
                     if !hero_artist.is_empty() {
                         p { class: "text-base md:text-lg text-white/60 mb-8 font-medium line-clamp-1 max-w-md", "{i18n::t_with(\"by_artist_full\", &[(\"artist\", hero_artist.clone())])}" }
                     }
@@ -857,16 +857,16 @@ fn render_continue_listening(
                     if is_vaxry {
                         p { class: "text-[10px] font-bold mb-0.5", style: "color: rgba(255,255,255,0.35);", "{i18n::t(\"library\")}" }
                     }
-                    h2 { class: if is_vaxry { "text-2xl font-bold text-white" } else { "text-2xl font-bold text-white tracking-tight" }, "{i18n::t(\"continue_listening\")}" }
+                    h2 { class: "text-2xl font-semibold tracking-tight text-white", "{i18n::t(\"continue_listening\")}" }
                 }
                 div { class: "flex gap-2",
                     button {
-                        class: "w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-all",
+                        class: "w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors active:scale-95",
                         onclick: move |_| scroll_container("jelly-continue-scroll", -1),
                         i { class: "fa-solid fa-chevron-left text-sm" }
                     }
                     button {
-                        class: "w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-all",
+                        class: "w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors active:scale-95",
                         onclick: move |_| scroll_container("jelly-continue-scroll", 1),
                         i { class: "fa-solid fa-chevron-right text-sm" }
                     }
@@ -941,7 +941,7 @@ fn render_listen_now(
                     if is_vaxry {
                         p { class: "text-[10px] font-bold mb-0.5", style: "color: rgba(255,255,255,0.35);", "{i18n::t(\"music\")}" }
                     }
-                    h2 { class: if is_vaxry { "text-2xl font-bold text-white" } else { "text-3xl font-extrabold text-white tracking-tight leading-none" }, "{i18n::t(\"listen_now\")}" }
+                    h2 { class: if is_vaxry { "text-2xl font-semibold tracking-tight text-white" } else { "text-3xl font-semibold tracking-tight text-white leading-none" }, "{i18n::t(\"listen_now\")}" }
                 }
             }
             if use_cards {
@@ -953,7 +953,7 @@ fn render_listen_now(
                                 let id = album_id.clone();
                                 move |_| on_select_album.call(id.clone())
                             },
-                            div { class: "aspect-square rounded-lg bg-stone-800 mb-2 overflow-hidden relative",
+                            div { class: "aspect-square rounded-xl bg-stone-800 mb-2 overflow-hidden relative",
                                 if let Some(url) = cover_url {
                                     img { src: "{url}", class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-500", decoding: "async", loading: "lazy" }
                                 } else {
@@ -978,7 +978,7 @@ fn render_listen_now(
                 div { class: "grid grid-cols-[repeat(auto-fill,minmax(350px,1fr))] gap-4",
                     for (album_id, title, artist, cover_url) in jellyfin_shuffled.iter().skip(1).take(8).cloned() {
                         div {
-                            class: "flex items-center bg-white/5 hover:bg-white/10 border border-white/5 rounded-lg cursor-pointer transition-all duration-300 group overflow-hidden pr-4",
+                            class: "flex items-center bg-white/5 hover:bg-white/10 border border-white/5 rounded-xl cursor-pointer transition-all duration-300 group overflow-hidden pr-4",
                             onclick: {
                                 let id = album_id.clone();
                                 move |_| on_select_album.call(id.clone())
@@ -1029,16 +1029,16 @@ fn render_top_artists(
                     if is_vaxry {
                         p { class: "text-[10px] font-bold mb-0.5", style: "color: rgba(255,255,255,0.35);", "{i18n::t(\"artists\")}" }
                     }
-                    h2 { class: if is_vaxry { "text-2xl font-bold text-white" } else { "text-2xl font-bold text-white tracking-tight" }, "{i18n::t(\"top_artists\")}" }
+                    h2 { class: "text-2xl font-semibold tracking-tight text-white", "{i18n::t(\"top_artists\")}" }
                 }
                 div { class: "flex gap-2",
                     button {
-                        class: "w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-all hover:scale-105",
+                        class: "w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors active:scale-95",
                         onclick: move |_| scroll_container("jelly-artists-scroll", -1),
                         i { class: "fa-solid fa-chevron-left text-sm" }
                     }
                     button {
-                        class: "w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-all hover:scale-105",
+                        class: "w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors active:scale-95",
                         onclick: move |_| scroll_container("jelly-artists-scroll", 1),
                         i { class: "fa-solid fa-chevron-right text-sm" }
                     }
@@ -1092,16 +1092,16 @@ fn render_albums_row(
                     if is_vaxry {
                         p { class: "text-[10px] font-bold mb-0.5", style: "color: rgba(255,255,255,0.35);", "{eyebrow}" }
                     }
-                    h2 { class: if is_vaxry { "text-2xl font-bold text-white" } else { "text-2xl font-bold text-white tracking-tight" }, "{title}" }
+                    h2 { class: "text-2xl font-semibold tracking-tight text-white", "{title}" }
                 }
                 div { class: "flex gap-2",
                     button {
-                        class: "w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-all hover:scale-105",
+                        class: "w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors active:scale-95",
                         onclick: move |_| scroll_container(scroll_id, -1),
                         i { class: "fa-solid fa-chevron-left text-sm" }
                     }
                     button {
-                        class: "w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-all hover:scale-105",
+                        class: "w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors active:scale-95",
                         onclick: move |_| scroll_container(scroll_id, 1),
                         i { class: "fa-solid fa-chevron-right text-sm" }
                     }
@@ -1117,7 +1117,7 @@ fn render_albums_row(
                             let id = album_id.clone();
                             move |_| on_select_album.call(id.clone())
                         },
-                        div { class: "aspect-square rounded-lg bg-stone-800/80 mb-4 overflow-hidden transition-all duration-300 relative",
+                        div { class: "aspect-square rounded-xl bg-stone-800/80 mb-4 overflow-hidden transition-all duration-300 relative",
                             if let Some(url) = cover_url {
                                 img { src: "{url}", class: "w-full h-full object-cover group-hover:scale-105 transition-transform duration-500", decoding: "async", loading: "lazy" }
                             } else {
@@ -1159,16 +1159,16 @@ fn render_playlists(
                     if is_vaxry {
                         p { class: "text-[10px] font-bold mb-0.5", style: "color: rgba(255,255,255,0.35);", "{i18n::t(\"library\")}" }
                     }
-                    h2 { class: if is_vaxry { "text-2xl font-bold text-white" } else { "text-2xl font-bold text-white tracking-tight" }, "{i18n::t(\"playlists\")}" }
+                    h2 { class: "text-2xl font-semibold tracking-tight text-white", "{i18n::t(\"playlists\")}" }
                 }
                 div { class: "flex gap-2",
                     button {
-                        class: "w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-all",
+                        class: "w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors active:scale-95",
                         onclick: move |_| scroll_container("jelly-playlists-scroll", -1),
                         i { class: "fa-solid fa-chevron-left text-sm" }
                     }
                     button {
-                        class: "w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-all",
+                        class: "w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white transition-colors active:scale-95",
                         onclick: move |_| scroll_container("jelly-playlists-scroll", 1),
                         i { class: "fa-solid fa-chevron-right text-sm" }
                     }
@@ -1187,7 +1187,7 @@ fn render_playlists(
                                     let id = id.clone();
                                     move |_| on_select_playlist.call(id.clone())
                                 },
-                                div { class: "aspect-square rounded-lg bg-white/5 mb-4 overflow-hidden transition-all duration-500 relative",
+                                div { class: "aspect-square rounded-xl bg-white/5 mb-4 overflow-hidden transition-all duration-500 relative",
                                     if let Some(url) = cover_url {
                                         img { src: "{url}", class: "w-full h-full object-cover group-hover:scale-110 transition-transform duration-700", decoding: "async", loading: "lazy" }
                                     } else {

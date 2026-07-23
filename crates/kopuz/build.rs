@@ -156,8 +156,12 @@ fn bake_font_css(css: &str, fonts: &Path) -> String {
 
 fn main() {
     let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    embed_fonts(&crate_dir);
-    embed_favicon(&crate_dir);
+    let asset_crate_dir = std::env::var_os("KOPUZ_ASSET_FILE")
+        .map(PathBuf::from)
+        .and_then(|path| path.parent()?.parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| crate_dir.clone());
+    embed_fonts(&asset_crate_dir);
+    embed_favicon(&asset_crate_dir);
 
     #[cfg(target_os = "windows")]
     {

@@ -2,25 +2,28 @@
 
 /* Themed scrollbars — uses CSS vars so all themes apply automatically */
 ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 10px;
+    height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-    background: var(--color-black, #000000);
+    background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
     background: var(--color-slate-500, #64748b);
-    border-radius: 3px;
+    border-radius: 5px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
     background: var(--color-slate-400, #94a3b8);
+    background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-corner {
-    background: var(--color-black, #000000);
+    background: transparent;
 }
 
 @keyframes scan-slide {

@@ -73,7 +73,9 @@ pub fn Rightbar(
         let fetch_id = fetch_gen.peek().wrapping_add(1);
         fetch_gen.set(fetch_id);
 
-        if title.is_empty() {
+        // Radio has no lyrics; querying providers with station names only
+        // produces junk matches.
+        if title.is_empty() || hooks::playback_ref::PlaybackItemRef::parse(&track_path).is_radio() {
             lyrics.set(Some(None));
             return;
         }
@@ -203,30 +205,30 @@ pub fn Rightbar(
             }
 
             div {
-                class: "flex items-center justify-between px-4 py-4 border-b border-white/10",
+                class: "flex items-center justify-between px-4 py-3 border-b border-white/10",
                 div {
-                    class: "flex items-center gap-1",
+                    class: "flex items-center gap-1 p-1 rounded-lg bg-white/10",
                     button {
                         class: if *active_tab.read() == 0 {
-                            "px-2 py-1 text-[10px] font-medium tracking-wider text-white border-b-2 border-white"
+                            "px-4 py-1.5 text-xs font-medium rounded-md bg-white/20 text-white transition-colors"
                         } else {
-                            "px-2 py-1 text-[10px] font-medium tracking-wider text-white/40 hover:text-white/70 transition-colors"
+                            "px-4 py-1.5 text-xs font-medium rounded-md text-white/50 hover:text-white/80 transition-colors"
                         },
                         onclick: move |_| active_tab.set(0),
                         "{up_next_text}"
                     }
                     button {
                         class: if *active_tab.read() == 1 {
-                            "px-2 py-1 text-[10px] font-medium tracking-wider text-white border-b-2 border-white"
+                            "px-4 py-1.5 text-xs font-medium rounded-md bg-white/20 text-white transition-colors"
                         } else {
-                            "px-2 py-1 text-[10px] font-medium tracking-wider text-white/40 hover:text-white/70 transition-colors"
+                            "px-4 py-1.5 text-xs font-medium rounded-md text-white/50 hover:text-white/80 transition-colors"
                         },
                         onclick: move |_| active_tab.set(1),
                         "{lyrics_text}"
                     }
                 }
                 button {
-                    class: "text-white/40 hover:text-white",
+                    class: "w-9 h-9 rounded-full flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
                     onclick: move |_| is_rightbar_open.set(false),
                     i { class: "fa-solid fa-xmark text-sm" }
                 }

@@ -90,7 +90,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
         div { class: "w-full max-w-[1600px] mx-auto select-none flex-1 min-h-0 flex flex-col",
             div { class: "flex items-end gap-6 mb-8 px-6 pt-6 shrink-0",
                 div {
-                    class: if props.on_cover_click.is_some() { "w-44 h-44 rounded-lg overflow-hidden shrink-0 shadow-2xl bg-white/5 cursor-pointer" } else { "w-44 h-44 rounded-lg overflow-hidden shrink-0 shadow-2xl bg-white/5" },
+                    class: if props.on_cover_click.is_some() { "w-44 h-44 rounded-xl overflow-hidden shrink-0 shadow-2xl bg-white/5 cursor-pointer" } else { "w-44 h-44 rounded-xl overflow-hidden shrink-0 shadow-2xl bg-white/5" },
                     style: "box-shadow: 0 20px 60px rgba(0,0,0,0.6);",
                     onclick: move |_| {
                         if let Some(ref h) = props.on_cover_click {
@@ -129,7 +129,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                             }
                         }
                     }
-                    h1 { class: "text-4xl font-bold text-white truncate mb-1", "{props.name}" }
+                    h1 { class: "text-4xl font-semibold tracking-tight text-white truncate mb-1", "{props.name}" }
                     p {
                         class: "text-sm mb-3",
                         style: "color: var(--color-white); opacity: 0.45;",
@@ -171,7 +171,7 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                             }
                             if props.on_download_all.is_some() || props.on_delete_all.is_some() {
                                 button {
-                                    class: "inline-flex items-center justify-center h-9 w-9 rounded-full text-sm font-medium transition-colors border border-white/12 hover:bg-white/10",
+                                    class: "inline-flex items-center justify-center h-9 w-9 rounded-full text-sm font-medium transition-colors border border-white/12 hover:bg-white/10 active:scale-95",
                                     style: "color: var(--color-white); opacity: 0.6;",
                                     disabled: props.is_downloading_all,
                                     onclick: move |_| {

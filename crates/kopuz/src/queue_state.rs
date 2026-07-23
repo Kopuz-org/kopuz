@@ -68,6 +68,34 @@ fn is_restorable_queue_track(track: &Track) -> bool {
     is_streamable_queue_track(track) || track.id.local_path().is_some_and(|p| p.exists())
 }
 
+/// Per-track `exists()` stats dominate restore on slow/external volumes
+/// (milliseconds each × thousands of tracks), so they run fanned out across
+/// threads. A panicked chunk defaults to keeping its tracks — playback
+/// already tolerates missing files at play time.
+fn restorable_flags(queue: &[Track]) -> Vec<bool> {
+    const THREADS: usize = 32;
+    let chunk_size = queue.len().div_ceil(THREADS).max(1);
+    let chunks: Vec<&[Track]> = queue.chunks(chunk_size).collect();
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = chunks
+            .iter()
+            .map(|tracks| {
+                scope.spawn(move || {
+                    tracks
+                        .iter()
+                        .map(is_restorable_queue_track)
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .zip(&chunks)
+            .flat_map(|(handle, tracks)| handle.join().unwrap_or_else(|_| vec![true; tracks.len()]))
+            .collect()
+    })
+}
+
 pub fn sanitize(state: PersistedQueueState) -> Option<PersistedQueueState> {
     if state.queue.is_empty() {
         return None;
@@ -77,12 +105,13 @@ pub fn sanitize(state: PersistedQueueState) -> Option<PersistedQueueState> {
         .current_queue_index
         .min(state.queue.len().saturating_sub(1));
     let mut selected_track_survived = false;
+    let flags = restorable_flags(&state.queue);
     let survivors: Vec<(usize, Track)> = state
         .queue
         .into_iter()
         .enumerate()
-        .filter(|(idx, track)| {
-            let keep = is_restorable_queue_track(track);
+        .filter(|(idx, _)| {
+            let keep = flags[*idx];
             if keep && *idx == original_index {
                 selected_track_survived = true;
             }

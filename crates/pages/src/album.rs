@@ -99,7 +99,7 @@ pub fn Album(
             if album_id.read().is_empty() {
                 div { class: "flex-1 min-h-0 flex flex-col",
                     if !cfg!(target_os = "android") {
-                        h1 { class: "text-3xl font-bold text-white mb-6 shrink-0", "{i18n::t(\"all_albums\")}" }
+                        h1 { class: "text-3xl font-semibold tracking-tight text-white mb-6 shrink-0", "{i18n::t(\"all_albums\")}" }
                     }
 
                     AlbumGrid {
@@ -879,7 +879,7 @@ fn YtAlbumDetail(
                             onclick: move |_| nav_ctrl.navigate_to_artist(artist_for_nav.clone()),
                             "{artist_name}"
                         }
-                        h1 { class: "text-3xl font-bold text-white leading-[1.1] break-words", "{title}" }
+                        h1 { class: "text-3xl font-semibold tracking-tight text-white leading-[1.1] break-words", "{title}" }
                         div { class: "text-sm text-slate-400 flex flex-wrap items-center gap-x-2 justify-center md:justify-start",
                             if let Some(y) = year {
                                 span { class: "uppercase tracking-wide text-xs font-semibold text-white/40", "{i18n::t(\"album\")}" }
@@ -937,7 +937,8 @@ fn YtAlbumDetail(
                         }
                         // Shuffle.
                         button {
-                            class: format!("w-11 h-11 rounded-full border flex items-center justify-center transition-colors {}", if *ctrl.shuffle.read() { "text-white bg-white/10 border-white/30" } else { "text-slate-300 border-white/15 hover:text-white hover:border-white/30" }),
+                            class: format!("w-11 h-11 rounded-full border flex items-center justify-center transition-colors {}", if *ctrl.shuffle.read() { "bg-white/10 border-white/30" } else { "text-slate-300 border-white/15 hover:text-white hover:border-white/30" }),
+                            style: if *ctrl.shuffle.read() { "color: var(--color-indigo-500);" } else { "" },
                             title: i18n::t("shuffle").to_string(),
                             onclick: move |_| ctrl.toggle_shuffle(),
                             i { class: "fa-solid fa-shuffle" }

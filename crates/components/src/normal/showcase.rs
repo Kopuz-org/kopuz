@@ -161,7 +161,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                              h5 { class: "text-sm font-bold text-white/60 mb-2", "{props.description}" }
                          }
                      }
-                     h1 { class: if cfg!(target_os = "android") { "text-3xl font-bold text-white mb-3" } else { "text-5xl md:text-7xl font-bold text-white mb-6" }, "{props.name}" }
+                     h1 { class: if cfg!(target_os = "android") { "text-3xl font-semibold tracking-tight text-white mb-3" } else { "text-5xl md:text-7xl font-semibold tracking-tight text-white mb-6" }, "{props.name}" }
                      div { class: if cfg!(target_os = "android") { "flex items-center justify-center gap-4 text-slate-400" } else { "flex items-center gap-6 text-slate-400" },
                          {
                             let count = props.tracks.len();
@@ -178,7 +178,8 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                 div { class: "flex items-center gap-4",
                      if !props.tracks.is_empty() {
                         button {
-                            class: format!("w-14 h-14 rounded-full flex items-center justify-center {}", if *ctrl.shuffle.read() { "text-white" } else { "text-slate-400 hover:text-white" }),
+                            class: "w-14 h-14 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
+                            style: if *ctrl.shuffle.read() { "color: var(--color-indigo-500);" } else { "" },
                             title: if *ctrl.shuffle.read() {
                                 i18n::t("shuffle_on").to_string()
                             } else {
@@ -201,7 +202,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                          }
                          if props.on_download_all.is_some() || props.on_delete_all.is_some() {
                              button {
-                                 class: "w-12 h-12 rounded-full border border-white/20 hover:border-white/40 text-white/70 hover:text-white flex items-center justify-center transition-colors",
+                                 class: "w-12 h-12 rounded-full border border-white/20 hover:border-white/40 text-white/70 hover:text-white hover:bg-white/10 flex items-center justify-center transition-colors active:scale-95",
                                  title: if all_downloaded { "Remove downloads" } else { "Download all for offline playback" },
                                  disabled: props.is_downloading_all,
                                  onclick: move |_| {

@@ -183,7 +183,11 @@ pub trait ReadStore: Send + Sync {
     ) -> Result<Vec<reader::Track>, DbError>;
 
     /// Local tracks under a directory (path-prefix match), path-ordered.
-    async fn folder_tracks(&self, prefix: &str) -> Result<Vec<reader::Track>, DbError>;
+    async fn folder_tracks(
+        &self,
+        source: &Source,
+        prefix: &str,
+    ) -> Result<Vec<reader::Track>, DbError>;
 
     /// This source's recently-played track keys, newest first (capped).
     async fn recently_played(&self, source: &Source, limit: u32) -> Result<Vec<String>, DbError>;
@@ -405,8 +409,8 @@ pub trait Storage: ReadStore {
         folder_id: Option<&str>,
     ) -> Result<(), DbError>;
 
-    /// Increment one track's play count (single-row upsert; key = `TrackId::uid()`).
-    async fn bump_listen_count(&self, track_uid: &str) -> Result<(), DbError>;
+    /// Increment one track's play count in its source partition.
+    async fn bump_listen_count(&self, source: &Source, track_uid: &str) -> Result<(), DbError>;
 
     /// Record a play for this source's recently-played history (caps + trims).
     async fn push_recent(&self, source: &Source, track_key: &str) -> Result<(), DbError>;

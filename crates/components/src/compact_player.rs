@@ -28,19 +28,19 @@ fn skin_for(style: UiStyle) -> CompactSkin {
             container: "bg-[#0a0a0a]",
             title: "text-[14px] font-bold text-white/95 truncate leading-tight",
             cover: "rounded-lg ring-1 ring-white/10 shadow-lg shadow-black/50",
-            play_btn: "w-10 h-10 flex items-center justify-center rounded-full bg-white text-black hover:scale-105 active:scale-95 transition-all shadow-lg shadow-black/40",
+            play_btn: "w-10 h-10 flex items-center justify-center rounded-full text-white hover:bg-white/10 transition-colors active:scale-95",
             play_icon: "text-base",
-            ctrl_btn: "w-8 h-8 flex items-center justify-center rounded-full text-slate-300 hover:text-white hover:bg-white/10 transition-all",
-            progress_fill: "bg-white group-hover:bg-green-500",
+            ctrl_btn: "w-9 h-9 flex items-center justify-center rounded-full text-slate-300 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
+            progress_fill: "bg-white/90",
         },
         UiStyle::Vaxry => CompactSkin {
             container: "bg-black",
             title: "text-[13px] font-mono font-semibold uppercase tracking-wide text-white/90 truncate leading-tight",
             cover: "rounded-none ring-1 ring-white/10",
-            play_btn: "w-9 h-9 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-all active:scale-95",
+            play_btn: "w-9 h-9 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors active:scale-95",
             play_icon: "text-sm",
-            ctrl_btn: "w-8 h-8 flex items-center justify-center text-slate-400 hover:text-white transition-colors",
-            progress_fill: "bg-white/70 group-hover:bg-white",
+            ctrl_btn: "w-9 h-9 flex items-center justify-center rounded-full text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
+            progress_fill: "bg-white/90",
         },
     }
 }
@@ -125,7 +125,7 @@ pub fn CompactPlayer() -> Element {
                 }
 
                 button {
-                    class: "w-8 h-8 flex items-center justify-center text-slate-500 hover:text-white transition-colors shrink-0",
+                    class: "w-9 h-9 flex items-center justify-center rounded-full text-slate-500 hover:text-white hover:bg-white/10 transition-colors active:scale-95 shrink-0",
                     title: i18n::t("restore_full_player").to_string(),
                     onmousedown: move |evt| evt.stop_propagation(),
                     onclick: move |_| compact_mode.set(false),

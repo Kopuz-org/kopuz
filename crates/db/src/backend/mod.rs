@@ -119,8 +119,12 @@ impl ReadStore for Native {
         queries::genre_tracks(&self.pool(), source, genre).await
     }
 
-    async fn folder_tracks(&self, prefix: &str) -> Result<Vec<reader::Track>, DbError> {
-        queries::folder_tracks(&self.pool(), prefix).await
+    async fn folder_tracks(
+        &self,
+        source: &crate::Source,
+        prefix: &str,
+    ) -> Result<Vec<reader::Track>, DbError> {
+        queries::folder_tracks(&self.pool(), source, prefix).await
     }
 
     async fn recently_played(
@@ -363,8 +367,12 @@ impl Storage for Native {
         writes::set_playlist_folder(&self.pool(), playlist_ref, folder_id).await
     }
 
-    async fn bump_listen_count(&self, track_uid: &str) -> Result<(), DbError> {
-        cfg_store::bump_listen_count(&self.pool(), track_uid).await
+    async fn bump_listen_count(
+        &self,
+        source: &crate::Source,
+        track_uid: &str,
+    ) -> Result<(), DbError> {
+        cfg_store::bump_listen_count(&self.pool(), source, track_uid).await
     }
 
     async fn push_recent(&self, source: &crate::Source, track_key: &str) -> Result<(), DbError> {
