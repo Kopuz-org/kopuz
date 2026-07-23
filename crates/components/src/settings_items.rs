@@ -22,8 +22,8 @@ pub fn SettingItem(title: String, control: Element) -> Element {
 #[component]
 pub fn SettingsSection(title: String, children: Element) -> Element {
     rsx! {
-        section { class: "rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden",
-            div { class: "px-5 py-3 border-b border-white/10 bg-white/[0.03]",
+        section { class: "rounded-xl border border-white/10 bg-white/[0.02]",
+            div { class: "px-5 py-3 rounded-t-xl border-b border-white/10 bg-white/[0.03]",
                 h2 { class: "text-xs font-semibold uppercase tracking-wider text-white/60",
                     "{title}"
                 }
@@ -34,18 +34,93 @@ pub fn SettingsSection(title: String, children: Element) -> Element {
 }
 
 #[component]
-pub fn LanguageSelector(current_language: String, on_change: EventHandler<String>) -> Element {
+pub fn AppSelect(
+    value: String,
+    options: Vec<(String, String)>,
+    on_change: EventHandler<String>,
+    #[props(default)] class: String,
+) -> Element {
+    let mut open = use_signal(|| false);
+    let selected_label = options
+        .iter()
+        .find(|(option_value, _)| option_value == &value)
+        .map(|(_, label)| label.as_str())
+        .unwrap_or(value.as_str());
+    let open_class = if open() { "z-[70]" } else { "z-0" };
+
     rsx! {
-        select {
-            class: "bg-white/5 border border-white/10 rounded px-3 py-1 text-sm text-white focus:outline-none focus:border-white/20",
-            onchange: move |evt| on_change.call(evt.value()),
-            for (code, name) in i18n::available_languages() {
-                option {
-                    value: *code,
-                    selected: *code == current_language.as_str(),
-                    "{name}"
+        div { class: "app-select relative {open_class} {class}",
+            button {
+                r#type: "button",
+                class: "app-select-trigger relative z-[1] w-full",
+                aria_expanded: open(),
+                onclick: move |_| open.toggle(),
+                span { class: "truncate", "{selected_label}" }
+                svg {
+                    class: if open() { "app-select-chevron rotate-180" } else { "app-select-chevron" },
+                    view_box: "0 0 16 16",
+                    fill: "none",
+                    path {
+                        d: "m4 6 4 4 4-4",
+                        stroke: "currentColor",
+                        stroke_width: "1.5",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                    }
                 }
             }
+            if open() {
+                button {
+                    r#type: "button",
+                    class: "fixed inset-0 z-0 cursor-default",
+                    aria_label: "Close menu",
+                    onclick: move |_| open.set(false),
+                    onwheel: move |event| {
+                        event.prevent_default();
+                        event.stop_propagation();
+                    },
+                }
+                div {
+                    class: "app-select-menu",
+                    onwheel: move |event| event.stop_propagation(),
+                    for (option_value, label) in &options {
+                        {
+                            let option_value = option_value.clone();
+                            let is_selected = option_value == value;
+                            rsx! {
+                                button {
+                                    r#type: "button",
+                                    class: if is_selected { "app-select-option app-select-option-selected" } else { "app-select-option" },
+                                    onclick: move |_| {
+                                        on_change.call(option_value.clone());
+                                        open.set(false);
+                                    },
+                                    span { class: "min-w-0 whitespace-normal", "{label}" }
+                                    if is_selected {
+                                        span { class: "app-select-check", "✓" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub fn LanguageSelector(current_language: String, on_change: EventHandler<String>) -> Element {
+    let options = i18n::available_languages()
+        .iter()
+        .map(|(code, name)| ((*code).to_string(), (*name).to_string()))
+        .collect();
+    rsx! {
+        AppSelect {
+            value: current_language,
+            options,
+            on_change,
+            class: "settings-select",
         }
     }
 }
@@ -60,50 +135,41 @@ pub fn ThemeSelector(current_theme: String, on_change: EventHandler<String>) -> 
         .map(|(id, ct)| (id.clone(), ct.name.clone()))
         .collect();
     custom.sort_by(|a, b| a.1.cmp(&b.1));
+    let mut options = vec![
+        ("album-art".into(), i18n::t("album_art_gradient")),
+        ("default".into(), i18n::t("default_theme")),
+        ("gruvbox".into(), i18n::t("gruvbox_material")),
+        ("gruvbox-classic".into(), i18n::t("gruvbox_classic")),
+        ("gruvbox-dark-soft".into(), i18n::t("gruvbox_dark_soft")),
+        ("dracula".into(), i18n::t("dracula")),
+        ("nord".into(), i18n::t("nord")),
+        ("catppuccin".into(), i18n::t("catppuccin_mocha")),
+        ("ef-night".into(), i18n::t("ef_night")),
+        ("ayu-dark".into(), i18n::t("ayu_dark")),
+        ("ayu-mirage".into(), i18n::t("ayu_mirage")),
+        ("vague".into(), i18n::t("vague")),
+        ("onedarkpro".into(), i18n::t("one_dark_pro")),
+        ("osmium".into(), i18n::t("osmium")),
+        ("kanagawa-dragon".into(), i18n::t("kanagawa_dragon")),
+        ("everforest".into(), i18n::t("everforest")),
+        ("rosepine".into(), i18n::t("rosepine")),
+        ("kettek16".into(), "kettek16".into()),
+        ("default-light".into(), i18n::t("default_light")),
+        ("catppuccin-latte".into(), i18n::t("catppuccin_latte")),
+        ("rosepine-dawn".into(), i18n::t("rosepine_dawn")),
+        ("everforest-light".into(), i18n::t("everforest_light")),
+        ("ayu-light".into(), i18n::t("ayu_light")),
+        ("one-light".into(), i18n::t("one_light")),
+        ("gruvbox-light".into(), i18n::t("gruvbox_light_soft")),
+    ];
+    options.extend(custom);
 
     rsx! {
-        select {
-            class: "bg-white/5 border border-white/10 rounded px-3 py-1 text-sm text-white focus:outline-none focus:border-white/20",
-            value: "{current_theme}",
-            onchange: move |evt| on_change.call(evt.value()),
-            optgroup { label: "{i18n::t(\"theme_group_dynamic\")}",
-                option { value: "album-art", "{i18n::t(\"album_art_gradient\")}" }
-            }
-            optgroup { label: "{i18n::t(\"theme_group_dark\")}",
-                option { value: "default", "{i18n::t(\"default_theme\")}" }
-                option { value: "gruvbox", "{i18n::t(\"gruvbox_material\")}" }
-                option { value: "gruvbox-classic", "{i18n::t(\"gruvbox_classic\")}" }
-                option { value: "gruvbox-dark-soft", "{i18n::t(\"gruvbox_dark_soft\")}" }
-                option { value: "dracula", "{i18n::t(\"dracula\")}" }
-                option { value: "nord", "{i18n::t(\"nord\")}" }
-                option { value: "catppuccin", "{i18n::t(\"catppuccin_mocha\")}" }
-                option { value: "ef-night", "{i18n::t(\"ef_night\")}" }
-                option { value: "ayu-dark", "{i18n::t(\"ayu_dark\")}" }
-                option { value: "ayu-mirage", "{i18n::t(\"ayu_mirage\")}" }
-                option { value: "vague", "{i18n::t(\"vague\")}" }
-                option { value: "onedarkpro", "{i18n::t(\"one_dark_pro\")}" }
-                option { value: "osmium", "{i18n::t(\"osmium\")}" }
-                option { value: "kanagawa-dragon", "{i18n::t(\"kanagawa_dragon\")}" }
-                option { value: "everforest", "{i18n::t(\"everforest\")}" }
-                option { value: "rosepine", "{i18n::t(\"rosepine\")}" }
-                option { value: "kettek16", "kettek16" }
-            }
-            optgroup { label: "{i18n::t(\"theme_group_light\")}",
-                option { value: "default-light", "{i18n::t(\"default_light\")}" }
-                option { value: "catppuccin-latte", "{i18n::t(\"catppuccin_latte\")}" }
-                option { value: "rosepine-dawn", "{i18n::t(\"rosepine_dawn\")}" }
-                option { value: "everforest-light", "{i18n::t(\"everforest_light\")}" }
-                option { value: "ayu-light", "{i18n::t(\"ayu_light\")}" }
-                option { value: "one-light", "{i18n::t(\"one_light\")}" }
-                option { value: "gruvbox-light", "{i18n::t(\"gruvbox_light_soft\")}" }
-            }
-            if !custom.is_empty() {
-                optgroup { label: "{i18n::t(\"theme_group_custom\")}",
-                    for (id, name) in &custom {
-                        option { value: "{id}", "{name}" }
-                    }
-                }
-            }
+        AppSelect {
+            value: current_theme,
+            options,
+            on_change,
+            class: "settings-select",
         }
     }
 }
@@ -1189,18 +1255,16 @@ fn channel_mode_label(mode: ChannelMode) -> String {
 
 #[component]
 pub fn ChannelModeSelector(current: ChannelMode, on_change: EventHandler<ChannelMode>) -> Element {
+    let options = ChannelMode::ALL
+        .iter()
+        .map(|mode| (mode.value_str().to_string(), channel_mode_label(*mode)))
+        .collect();
     rsx! {
-        select {
-            class: "bg-white/5 border border-white/10 rounded px-3 py-1 text-sm text-white focus:outline-none focus:border-white/20",
-            value: current.value_str(),
-            onchange: move |evt| on_change.call(ChannelMode::from_value_str(&evt.value())),
-            for mode in ChannelMode::ALL {
-                option {
-                    value: mode.value_str(),
-                    selected: *mode == current,
-                    "{channel_mode_label(*mode)}"
-                }
-            }
+        AppSelect {
+            value: current.value_str().to_string(),
+            options,
+            on_change: move |value: String| on_change.call(ChannelMode::from_value_str(&value)),
+            class: "settings-select",
         }
     }
 }
@@ -1217,18 +1281,16 @@ pub fn SampleRateModeSelector(
     current: SampleRateMode,
     on_change: EventHandler<SampleRateMode>,
 ) -> Element {
+    let options = SampleRateMode::ALL
+        .iter()
+        .map(|mode| (mode.value_str().to_string(), sample_rate_mode_label(*mode)))
+        .collect();
     rsx! {
-        select {
-            class: "bg-white/5 border border-white/10 rounded px-3 py-1 text-sm text-white focus:outline-none focus:border-white/20",
-            value: current.value_str(),
-            onchange: move |evt| on_change.call(SampleRateMode::from_value_str(&evt.value())),
-            for mode in SampleRateMode::ALL {
-                option {
-                    value: mode.value_str(),
-                    selected: *mode == current,
-                    "{sample_rate_mode_label(*mode)}"
-                }
-            }
+        AppSelect {
+            value: current.value_str().to_string(),
+            options,
+            on_change: move |value: String| on_change.call(SampleRateMode::from_value_str(&value)),
+            class: "settings-select",
         }
     }
 }
@@ -1245,18 +1307,23 @@ pub fn DeviceChangeBehaviorSelector(
     current: DeviceChangeBehavior,
     on_change: EventHandler<DeviceChangeBehavior>,
 ) -> Element {
+    let options = DeviceChangeBehavior::ALL
+        .iter()
+        .map(|behavior| {
+            (
+                behavior.value_str().to_string(),
+                device_change_behavior_label(*behavior),
+            )
+        })
+        .collect();
     rsx! {
-        select {
-            class: "bg-white/5 border border-white/10 rounded px-3 py-1 text-sm text-white focus:outline-none focus:border-white/20",
-            value: current.value_str(),
-            onchange: move |evt| on_change.call(DeviceChangeBehavior::from_value_str(&evt.value())),
-            for behavior in DeviceChangeBehavior::ALL {
-                option {
-                    value: behavior.value_str(),
-                    selected: *behavior == current,
-                    "{device_change_behavior_label(*behavior)}"
-                }
-            }
+        AppSelect {
+            value: current.value_str().to_string(),
+            options,
+            on_change: move |value: String| {
+                on_change.call(DeviceChangeBehavior::from_value_str(&value))
+            },
+            class: "settings-select",
         }
     }
 }

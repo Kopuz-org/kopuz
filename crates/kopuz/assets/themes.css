@@ -440,38 +440,154 @@
     background-color: var(--color14) !important;
 }
 
-/* Global Dropdown and Select Overrides - Force black background */
+/* App-wide native selects. Keep the platform menu behavior, but make the
+   closed control match the rest of Kopuz instead of looking like raw HTML. */
 select,
 select option,
 select optgroup {
-    background-color: #000000 !important;
-    background: #000000 !important;
-    color: #ffffff !important;
+    background-color: var(--color-black, #000000) !important;
+    color: var(--color-white, #ffffff) !important;
 }
 
 select {
     appearance: none !important;
     -webkit-appearance: none !important;
     -moz-appearance: none !important;
-    background-color: #000000 !important;
-    background: #000000 !important;
-    color: #ffffff !important;
-    border: 1px solid rgba(255, 255, 255, 0.2) !important;
-    padding: 6px 10px !important;
-    border-radius: 4px !important;
+    color-scheme: dark;
+    min-height: 2.25rem;
+    background-color: color-mix(
+        in srgb,
+        var(--color-black, #000000) 92%,
+        var(--color-white, #ffffff)
+    ) !important;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='m4 6 4 4 4-4' stroke='%2394a3b8' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") !important;
+    background-repeat: no-repeat !important;
+    background-position: right 0.7rem center !important;
+    background-size: 1rem !important;
+    color: var(--color-white, #ffffff) !important;
+    border: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 16%, transparent) !important;
+    padding: 0.45rem 2.25rem 0.45rem 0.75rem !important;
+    border-radius: 0.5rem !important;
+    cursor: pointer;
+    transition: border-color 140ms ease, background-color 140ms ease,
+        box-shadow 140ms ease;
+}
+
+select:hover {
+    border-color: color-mix(in srgb, var(--color-white, #ffffff) 30%, transparent) !important;
+    background-color: color-mix(
+        in srgb,
+        var(--color-black, #000000) 86%,
+        var(--color-white, #ffffff)
+    ) !important;
 }
 
 select:focus {
     outline: none !important;
-    border-color: #ffffff !important;
-    background-color: #000000 !important;
-    background: #000000 !important;
+    border-color: var(--color-indigo-400, #e8a866) !important;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-indigo-500, #d9842f) 22%, transparent);
+}
+
+select:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.settings-select {
+    width: min(14rem, calc(100vw - 2rem));
+}
+
+.app-select-trigger {
+    display: flex;
+    min-height: 2.25rem;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.45rem 0.7rem 0.45rem 0.75rem;
+    border: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 16%, transparent);
+    border-radius: 0.5rem;
+    background: color-mix(in srgb, var(--color-black, #000000) 58%, transparent);
+    -webkit-backdrop-filter: blur(14px) saturate(120%);
+    backdrop-filter: blur(14px) saturate(120%);
+    color: var(--color-white, #ffffff);
+    font-size: 0.875rem;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 140ms ease, background-color 140ms ease,
+        box-shadow 140ms ease;
+}
+
+.app-select-trigger:hover,
+.app-select-trigger[aria-expanded="true"] {
+    border-color: color-mix(in srgb, var(--color-white, #ffffff) 30%, transparent);
+    background: color-mix(in srgb, var(--color-black, #000000) 70%, transparent);
+}
+
+.app-select-trigger:focus-visible {
+    border-color: var(--color-indigo-400, #e8a866);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-indigo-500, #d9842f) 22%, transparent);
+}
+
+.app-select-chevron {
+    width: 1rem;
+    height: 1rem;
+    flex: none;
+    color: var(--color-slate-400, #94a3b8);
+    transition: transform 140ms ease;
+}
+
+.app-select-menu {
+    position: absolute;
+    top: calc(100% + 0.35rem);
+    right: 0;
+    z-index: 1;
+    width: max(100%, 16rem);
+    max-width: calc(100vw - 1rem);
+    max-height: min(20rem, 55vh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0.35rem;
+    border: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 16%, transparent);
+    border-radius: 0.65rem;
+    background: color-mix(in srgb, var(--color-black, #000000) 72%, transparent);
+    -webkit-backdrop-filter: blur(18px) saturate(125%);
+    backdrop-filter: blur(18px) saturate(125%);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+}
+
+.app-select-option {
+    display: flex;
+    width: 100%;
+    min-height: 2rem;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.4rem 0.55rem;
+    border-radius: 0.4rem;
+    color: var(--color-white, #ffffff);
+    font-size: 0.875rem;
+    text-align: left;
+    cursor: pointer;
+}
+
+.app-select-option:hover,
+.app-select-option:focus-visible {
+    background: color-mix(in srgb, var(--color-indigo-500, #d9842f) 18%, transparent);
+}
+
+.app-select-option-selected {
+    background: color-mix(in srgb, var(--color-indigo-500, #d9842f) 25%, transparent);
+    color: var(--color-indigo-400, #e8a866);
+}
+
+.app-select-check {
+    flex: none;
+    font-size: 0.75rem;
 }
 
 /* Kettek16 specific select styling */
 .theme-kettek16 select {
     background-color: #090909 !important;
-    background: #090909 !important;
     color: #fef638 !important;
     border-color: #228833 !important;
 }

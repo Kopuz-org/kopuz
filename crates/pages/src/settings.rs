@@ -162,7 +162,7 @@ fn ClearCacheButton() -> Element {
 }
 
 use components::settings_items::{
-    BackBehaviorSelector, ChannelModeSelector, DeviceChangeBehaviorSelector,
+    AppSelect, BackBehaviorSelector, ChannelModeSelector, DeviceChangeBehaviorSelector,
     DiscordPresencePausedSettings, DiscordPresenceSettings, EqualizerPanel, LanguageSelector,
     LastFmSettings, LibreFmSettings, MultiDirectoryPicker, MusicBrainzSettings,
     RadioRegistryDropdown, SampleRateModeSelector, ServerSettings, SettingItem, SettingsSection,
@@ -611,30 +611,17 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     {
                                         let current_mode = config.read().titlebar_mode;
                                         rsx! {
-                                            select {
-                                                class: "bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-white/25",
-                                                onchange: move |evt| {
-                                                    config.write().titlebar_mode = match evt.value().as_str() {
+                                            AppSelect {
+                                                class: "settings-select",
+                                                value: match current_mode { config::TitlebarMode::System => "system", config::TitlebarMode::Off => "off", config::TitlebarMode::Custom => "custom" }.to_string(),
+                                                options: vec![("custom".into(), i18n::t("titlebar_custom")), ("system".into(), i18n::t("titlebar_system")), ("off".into(), i18n::t("titlebar_off"))],
+                                                on_change: move |value: String| {
+                                                    config.write().titlebar_mode = match value.as_str() {
                                                         "system" => config::TitlebarMode::System,
                                                         "off" => config::TitlebarMode::Off,
                                                         _ => config::TitlebarMode::Custom,
                                                     };
                                                 },
-                                                option {
-                                                    value: "custom",
-                                                    selected: current_mode == config::TitlebarMode::Custom,
-                                                    "{i18n::t(\"titlebar_custom\")}"
-                                                }
-                                                option {
-                                                    value: "system",
-                                                    selected: current_mode == config::TitlebarMode::System,
-                                                    "{i18n::t(\"titlebar_system\")}"
-                                                }
-                                                option {
-                                                    value: "off",
-                                                    selected: current_mode == config::TitlebarMode::Off,
-                                                    "{i18n::t(\"titlebar_off\")}"
-                                                }
                                             }
                                         }
                                     }
@@ -647,24 +634,16 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 {
                                     let current_style = config.read().ui_style;
                                     rsx! {
-                                        select {
-                                            class: "bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-white/25",
-                                            onchange: move |evt| {
-                                                config.write().ui_style = match evt.value().as_str() {
+                                        AppSelect {
+                                            class: "settings-select",
+                                            value: (if current_style == config::UiStyle::Vaxry { "vaxry" } else { "normal" }).to_string(),
+                                            options: vec![("normal".into(), i18n::t("ui_normal")), ("vaxry".into(), i18n::t("ui_vaxry"))],
+                                            on_change: move |value: String| {
+                                                config.write().ui_style = match value.as_str() {
                                                     "vaxry" => config::UiStyle::Vaxry,
                                                     _ => config::UiStyle::Normal,
                                                 };
                                             },
-                                            option {
-                                                value: "normal",
-                                                selected: current_style == config::UiStyle::Normal,
-                                                "{i18n::t(\"ui_normal\")}"
-                                            }
-                                            option {
-                                                value: "vaxry",
-                                                selected: current_style == config::UiStyle::Vaxry,
-                                                "{i18n::t(\"ui_vaxry\")}"
-                                            }
                                         }
                                     }
                                 }
@@ -676,24 +655,16 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 {
                                     let current_position = config.read().player_bar_position;
                                     rsx! {
-                                        select {
-                                            class: "bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-white/25",
-                                            onchange: move |evt| {
-                                                config.write().player_bar_position = match evt.value().as_str() {
+                                        AppSelect {
+                                            class: "settings-select",
+                                            value: (if current_position == config::PlayerBarPosition::Top { "top" } else { "bottom" }).to_string(),
+                                            options: vec![("bottom".into(), i18n::t("position_bottom")), ("top".into(), i18n::t("position_top"))],
+                                            on_change: move |value: String| {
+                                                config.write().player_bar_position = match value.as_str() {
                                                     "top" => config::PlayerBarPosition::Top,
                                                     _ => config::PlayerBarPosition::Bottom,
                                                 };
                                             },
-                                            option {
-                                                value: "bottom",
-                                                selected: current_position == config::PlayerBarPosition::Bottom,
-                                                "{i18n::t(\"position_bottom\")}"
-                                            }
-                                            option {
-                                                value: "top",
-                                                selected: current_position == config::PlayerBarPosition::Top,
-                                                "{i18n::t(\"position_top\")}"
-                                            }
                                         }
                                     }
                                 }

@@ -380,8 +380,14 @@
   .z-50 {
     z-index: 50;
   }
+  .z-\[1\] {
+    z-index: 1;
+  }
   .z-\[60\] {
     z-index: 60;
+  }
+  .z-\[70\] {
+    z-index: 70;
   }
   .z-\[90\] {
     z-index: 90;
@@ -853,6 +859,9 @@
     --tw-scale-z: 125%;
     scale: var(--tw-scale-x) var(--tw-scale-y);
   }
+  .rotate-180 {
+    rotate: 180deg;
+  }
   .transform {
     transform: var(--tw-rotate-x,) var(--tw-rotate-y,) var(--tw-rotate-z,) var(--tw-skew-x,) var(--tw-skew-y,);
   }
@@ -1122,6 +1131,10 @@
   }
   .rounded-xl {
     border-radius: var(--radius-xl);
+  }
+  .rounded-t-xl {
+    border-top-left-radius: var(--radius-xl);
+    border-top-right-radius: var(--radius-xl);
   }
   .rounded-l-full {
     border-top-left-radius: calc(infinity * 1px);
@@ -1929,6 +1942,9 @@
   }
   .break-all {
     word-break: break-all;
+  }
+  .whitespace-normal {
+    white-space: normal;
   }
   .whitespace-nowrap {
     white-space: nowrap;
@@ -2854,14 +2870,6 @@
   .focus\:border-indigo-500 {
     &:focus {
       border-color: var(--color-indigo-500);
-    }
-  }
-  .focus\:border-white\/20 {
-    &:focus {
-      border-color: color-mix(in srgb, #fff 20%, transparent);
-      @supports (color: color-mix(in lab, red, red)) {
-        border-color: color-mix(in oklab, var(--color-white) 20%, transparent);
-      }
     }
   }
   .focus\:border-white\/25 {
