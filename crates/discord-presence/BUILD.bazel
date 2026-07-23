@@ -1,0 +1,12 @@
+load("//build_defs:kopuz_rust.bzl", "kopuz_rust_library")
+
+package(default_visibility = ["//visibility:public"])
+exports_files(["Cargo.toml"])
+
+kopuz_rust_library(
+    name = "discord_presence",
+    extra_deps = [
+        "//crates/reader",
+        "//crates/utils",
+    ],
+)

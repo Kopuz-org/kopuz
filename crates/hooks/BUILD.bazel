@@ -1,0 +1,19 @@
+load("//build_defs:kopuz_rust.bzl", "kopuz_rust_library")
+
+package(default_visibility = ["//visibility:public"])
+exports_files(["Cargo.toml"])
+
+kopuz_rust_library(
+    name = "hooks",
+    extra_deps = [
+        "//crates/config",
+        "//crates/db",
+        "//crates/discord-presence:discord_presence",
+        "//crates/player",
+        "//crates/radio",
+        "//crates/reader",
+        "//crates/scrobble",
+        "//crates/server",
+        "//crates/utils",
+    ],
+)
