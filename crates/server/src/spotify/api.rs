@@ -189,7 +189,9 @@ pub async fn saved_tracks_page(
     Ok((tracks, next))
 }
 
-/// The user's playlists (owned + followed).
+/// The user's playlists. In Development Mode Spotify may list followed
+/// playlists while denying access to their entries; [`playlist_entries`]
+/// reports that restriction explicitly.
 pub async fn list_playlists(access: &str) -> Result<Vec<PlaylistSummary>, String> {
     let mut out = Vec::new();
     let mut offset: u32 = 0;
@@ -239,7 +241,15 @@ pub async fn playlist_entries(access: &str, playlist_id: &str) -> Result<Vec<Tra
             &[("limit", "50".to_string()), ("offset", offset.to_string())],
             "playlist entries",
         )
-        .await?;
+        .await
+        .map_err(|e| {
+            if e.contains("403") {
+                "Spotify only exposes playlist tracks for playlists you own or collaborate on"
+                    .to_string()
+            } else {
+                e
+            }
+        })?;
         let items = body["items"].as_array().cloned().unwrap_or_default();
         if items.is_empty() {
             break;
@@ -328,8 +338,8 @@ pub async fn album_remote(
 }
 
 /// Discover-home shelves from the personalization endpoints that survived
-/// Spotify's dev-mode API cuts: top tracks (two ranges), recently played, and
-/// new releases. Shelves whose endpoint fails (e.g. a token signed in before
+/// Spotify's dev-mode API cuts: top tracks (two ranges) and recently played.
+/// Shelves whose endpoint fails (e.g. a token signed in before
 /// the `user-top-read` / `user-read-recently-played` scopes were added) are
 /// skipped, so the page degrades instead of erroring.
 pub async fn discover_home(access: &str) -> Result<crate::ytmusic::discover::DiscoverHome, String> {

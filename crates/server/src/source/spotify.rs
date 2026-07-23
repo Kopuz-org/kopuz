@@ -45,6 +45,11 @@ impl MediaSource for SpotifySource {
         &self.db
     }
 
+    fn web_url(&self, track: &reader::Track) -> Option<String> {
+        (track.id.service() == Some(config::MusicService::Spotify))
+            .then(|| format!("https://open.spotify.com/track/{}", track.id.key()))
+    }
+
     fn capabilities(&self) -> Capabilities {
         Capabilities {
             edit_tags: false,

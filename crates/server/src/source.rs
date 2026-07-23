@@ -136,7 +136,7 @@ pub trait MediaSource: Send + Sync {
     }
 
     /// The track's canonical public web URL, when this source has shareable web
-    /// pages (e.g. a YouTube Music watch link). `None` otherwise — callers fall
+    /// pages (e.g. a YouTube Music watch link or Spotify track link). `None` otherwise — callers fall
     /// back to a metadata lookup (MusicBrainz). Sync: it's a pure id→URL mapping.
     fn web_url(&self, _track: &reader::Track) -> Option<String> {
         None

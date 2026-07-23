@@ -337,7 +337,7 @@ fn ServerServiceFields(
             p { class: "text-xs text-white/60",
                 "Create an app at developer.spotify.com, add the redirect URI "
                 code { "http://127.0.0.1:8898/callback" }
-                ", and paste its Client ID above. Saving opens Spotify's sign-in page in your default browser — kopuz never sees your password. Playing tracks requires a Spotify Premium account; your library and playlists load on any account."
+                ", add your Spotify account under User Management, and paste its Client ID above. Saving opens Spotify's sign-in page in your default browser — kopuz never sees your password. Spotify Development Mode is limited to five authorized users and requires the app owner to have Premium. Playback also requires Premium; followed playlists may be listed but Spotify only exposes tracks for playlists you own or collaborate on."
             }
         },
         _ => rsx! {

@@ -868,11 +868,18 @@ fn YtAlbumDetail(
     let tracks_play_all = tracks.clone();
     let tracks_download_all = tracks.clone();
     let artist_for_nav_btn = artist_name.clone();
-    // Share target: the album's YT browse link when resolved, else the first
-    // track's web url so the button still does something before the fetch lands.
+    // Prefer the provider's album page; fall back to its first track page.
     let share_url = browse_id
         .as_ref()
-        .map(|id| format!("https://music.youtube.com/browse/{id}"))
+        .and_then(|id| match tracks.first().and_then(|t| t.id.service()) {
+            Some(config::MusicService::Spotify) => {
+                Some(format!("https://open.spotify.com/album/{id}"))
+            }
+            Some(config::MusicService::YtMusic) => {
+                Some(format!("https://music.youtube.com/browse/{id}"))
+            }
+            _ => None,
+        })
         .or_else(|| tracks.first().and_then(|t| active_source.peek().web_url(t)));
 
     rsx! {
