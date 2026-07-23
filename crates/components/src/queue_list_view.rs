@@ -3,7 +3,6 @@ use dioxus::document::eval;
 use dioxus::prelude::*;
 use hooks::PlayerController;
 use serde_json::Value;
-use std::fmt;
 
 use crate::virtual_scroll::{VirtualScrollView, use_virtual_scroll};
 
@@ -16,20 +15,7 @@ use crate::queue_drag::{
 };
 use crate::reorder_buttons::ReorderButtons;
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum LayoutMode {
-    Rightbar,
-    Fullscreen,
-}
-
-impl fmt::Display for LayoutMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            LayoutMode::Rightbar => write!(f, "rightbar"),
-            LayoutMode::Fullscreen => write!(f, "fullscreen"),
-        }
-    }
-}
+pub use crate::shared::LayoutMode;
 
 #[component]
 pub fn QueueRow(
@@ -47,12 +33,13 @@ pub fn QueueRow(
     on_move_up: EventHandler<MouseEvent>,
     on_move_down: EventHandler<MouseEvent>,
 ) -> Element {
+    let config = use_context::<Signal<AppConfig>>();
     let base_class = match layout {
         LayoutMode::Fullscreen => {
             if is_reorder_source {
-                "flex items-center gap-4 px-4 py-3 bg-white/10 cursor-grabbing rounded transition-colors group opacity-70"
+                "flex items-center gap-4 px-4 py-2 bg-white/10 cursor-grabbing rounded-lg transition-colors group opacity-70"
             } else {
-                "flex items-center gap-4 px-4 py-3 hover:bg-white/5 cursor-grab active:cursor-grabbing rounded transition-colors group"
+                "flex items-center gap-4 px-4 py-2 hover:bg-white/5 cursor-grab active:cursor-grabbing rounded-lg transition-colors group"
             }
         }
         LayoutMode::Rightbar => rightbar_queue_row_class(is_reorder_source),
@@ -75,7 +62,7 @@ pub fn QueueRow(
             style: match layout {
                 LayoutMode::Fullscreen => "",
                 LayoutMode::Rightbar => {
-                    "content-visibility: auto; contain-intrinsic-size: 0 56px;"
+                    "content-visibility: auto; contain-intrinsic-size: 0 52px;"
                 }
             },
             onmousedown: move |evt| on_row_mouse_down.call(evt),
@@ -93,17 +80,25 @@ pub fn QueueRow(
                 }
             }
 
-            div {
-                class: "rounded-md overflow-hidden flex-shrink-0 shadow-sm",
-                style: match layout {
-                    LayoutMode::Fullscreen => "width: 48px; height: 48px; background: url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27400%27 height=%27400%27 viewBox=%270 0 400 400%27%3E%3Crect width=%27400%27 height=%27400%27 fill=%27%231e1b2e%27/%3E%3Ccircle cx=%27200%27 cy=%27180%27 r=%2770%27 fill=%27none%27 stroke=%27%233d3466%27 stroke-width=%276%27/%3E%3Cpath d=%27M155 280 Q200 240 245 280%27 fill=%27none%27 stroke=%27%233d3466%27 stroke-width=%276%27 stroke-linecap=%27round%27/%3E%3C/svg%3E') center/cover no-repeat, rgba(255,255,255,0.05);",
-                    LayoutMode::Rightbar => "width: 40px; height: 40px; background: url('data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%27400%27 height=%27400%27 viewBox=%270 0 400 400%27%3E%3Crect width=%27400%27 height=%27400%27 fill=%27%231e1b2e%27/%3E%3Ccircle cx=%27200%27 cy=%27180%27 r=%2770%27 fill=%27none%27 stroke=%27%233d3466%27 stroke-width=%276%27/%3E%3Cpath d=%27M155 280 Q200 240 245 280%27 fill=%27none%27 stroke=%27%233d3466%27 stroke-width=%276%27 stroke-linecap=%27round%27/%3E%3C/svg%3E') center/cover no-repeat, rgba(255,255,255,0.05);",
-                },
+            if config.read().show_row_images {
+                div {
+                    class: "rounded-md overflow-hidden flex-shrink-0 shadow-sm",
+                    style: {
+                        let size = match layout {
+                            LayoutMode::Fullscreen => 48,
+                            LayoutMode::Rightbar => 40,
+                        };
+                        format!(
+                            "width: {size}px; height: {size}px; background: url('{}') center/cover no-repeat, rgba(255,255,255,0.05);",
+                            utils::DEFAULT_COVER_SVG
+                        )
+                    },
 
-                if let Some(ref url) = cover_url {
-                    img {
-                        src: "{url.as_ref()}",
-                        class: "w-full h-full object-cover",
+                    if let Some(ref url) = cover_url {
+                        img {
+                            src: "{url.as_ref()}",
+                            class: "w-full h-full object-cover",
+                        }
                     }
                 }
             }
@@ -122,10 +117,10 @@ pub fn QueueRow(
                 div {
                     class: match layout {
                         LayoutMode::Fullscreen => {
-                            "text-sm text-white/50 truncate group-hover:text-white/70"
+                            "text-sm text-white/65 truncate group-hover:text-white/80"
                         }
                         LayoutMode::Rightbar => {
-                            "text-xs text-white/50 truncate group-hover:text-white/70"
+                            "text-xs text-white/65 truncate group-hover:text-white/80"
                         }
                     },
                     "{track.artist}"
@@ -177,8 +172,9 @@ pub fn QueueSummary(
     };
 
     let queue_summary = format!(
-        "{} • {}",
-        i18n::t_with("showcase_song_count", &[("count", queue_count.to_string())]),
+        "{}/{} • {}",
+        *current_queue_index.read() + 1,
+        queue_count,
         format_queue_duration(queue_duration)
     );
 
@@ -193,14 +189,15 @@ pub fn QueueSummary(
                 }
             },
 
-            span { class: "text-white/45", "{queue_summary}" }
-
             button {
-                class: "text-white/60 cursor-pointer",
+                class: "text-white/60 hover:text-white/85 cursor-pointer transition-colors",
+                "aria-label": i18n::t("jump_to_current_song").to_string(),
+                title: i18n::t("jump_to_current_song").to_string(),
                 onclick: move |_| {
-                    eval(&format!("window.__{layout}_scrollIntoView(null)"));
+                    let idx = *current_queue_index.peek();
+                    eval(&format!("window.__{layout}_queueJump?.({idx})"));
                 },
-                "{*current_queue_index.read() + 1}/{queue_count}"
+                "{queue_summary}"
             }
         }
     }
@@ -279,98 +276,80 @@ pub fn QueueListView(
     // Clear functions when the component is dropped
     use_drop(move || {
         let _cleanup = eval(&format!(
+            "window.__{layout}_queueScrollDispose?.(); delete window.__{layout}_queueScrollDispose; delete window.__{layout}_queueJump;"
+        ));
+    });
+
+    let mut auto_sync = use_signal(|| true);
+
+    use_hook(move || {
+        // The queue is virtualized, so the playing row usually isn't in the
+        // DOM — jumping goes through scrollTop math on the row index instead
+        // of scrollIntoView. Far jumps snap instantly; near ones glide.
+        let _jump_func = eval(&format!(
             r#"
-                if (window.__{layout}_scrollIntoView) delete window.__{layout}_scrollIntoView;
-                if (window.__{layout}_updateActiveQueueItem) delete window.__{layout}_updateActiveQueueItem;
+                window.__{layout}_queueJump = (index) => {{
+                    const attempt = (tries) => {{
+                        const container = document.getElementById('{queue_list_id}');
+                        if (!container) {{
+                            if (tries > 0) requestAnimationFrame(() => attempt(tries - 1));
+                            return;
+                        }}
+                        const target = Math.max(0, index * {item_height} - container.clientHeight * 0.35);
+                        const behavior = Math.abs(container.scrollTop - target) > 3000 ? 'auto' : 'smooth';
+                        container.scrollTo({{ top: target, behavior }});
+                    }};
+                    attempt(10);
+                }};
             "#,
         ));
     });
 
-    use_hook(move || {
-        let scroll_block = match layout {
-            LayoutMode::Fullscreen => "start",
-            LayoutMode::Rightbar => "end",
-        };
-
-        // Fullscreen behaviot: Scroll into view on next queue item when it becomes active only
-        // when the current is in view.
-        // Rightbar behavior:  Scrolls into view on next queue item when it becomes active only
-        // when the current is in view, while the next is not.
-        let scroll_when = match layout {
-            LayoutMode::Fullscreen => "currentIsInView",
-            LayoutMode::Rightbar => "currentIsInView && !nextIsInView",
-        };
-
-        let _scroll_func = eval(&format!(
+    // Hand scroll control back to the user the moment they scroll the queue
+    // themselves; the sync button re-arms auto-follow. Watching input events
+    // (wheel / touch / scrollbar grab) instead of `scroll` keeps our own
+    // smooth jumps — whose end time the browser doesn't expose — from
+    // disarming auto-follow.
+    use_future(move || async move {
+        let mut listener = eval(&format!(
             r#"
-                let isFirst = true;
-                let latestItem;
-
-                window.__{layout}_scrollIntoView = (nextItem) =>  {{
-                    if (latestItem && nextItem) {{
-                        const container = document.getElementById('{queue_list_id}');
-                        const containerRect = container.getBoundingClientRect();
-
-                        const currentRect = latestItem.getBoundingClientRect();
-                        const currentIsInView = currentRect.top >= containerRect.top && currentRect.bottom <= containerRect.bottom;
-
-                        const nextRect = nextItem.getBoundingClientRect();
-                        const nextIsInView = nextRect.top >= containerRect.top && nextRect.bottom <= containerRect.bottom;
-
-                        if ({scroll_when}) {{
-                            nextItem.scrollIntoView({{ behavior: 'smooth', block: '{scroll_block}' }});
-                        }}
-
-                        latestItem = nextItem;
-
-                    }} else if (isFirst && nextItem) {{
-                        nextItem.scrollIntoView({{ behavior: 'smooth', block: '{scroll_block}' }});
-                        latestItem = nextItem;
-                        isFirst = false;
-
-                    }} else if (latestItem && !nextItem) {{
-                        latestItem.scrollIntoView({{ behavior: 'smooth', block: '{scroll_block}' }});
-                    }}
-                }}
-            "#,
+                window.__{layout}_queueScrollDispose?.();
+                let disposed = false;
+                window.__{layout}_queueScrollDispose = () => {{ disposed = true; }};
+                const attach = () => {{
+                    if (disposed) return;
+                    const container = document.getElementById('{queue_list_id}');
+                    if (!container) {{ requestAnimationFrame(attach); return; }}
+                    const disarm = () => dioxus.send('user_scroll');
+                    const scrollbarDown = (event) => {{
+                        if (event.target === container) disarm();
+                    }};
+                    container.addEventListener('wheel', disarm, {{ passive: true }});
+                    container.addEventListener('touchmove', disarm, {{ passive: true }});
+                    container.addEventListener('mousedown', scrollbarDown);
+                    window.__{layout}_queueScrollDispose = () => {{
+                        disposed = true;
+                        container.removeEventListener('wheel', disarm);
+                        container.removeEventListener('touchmove', disarm);
+                        container.removeEventListener('mousedown', scrollbarDown);
+                    }};
+                }};
+                attach();
+            "#
         ));
 
-        // Highlight next queue item when it becomes active and dehighlight the current one
-        let _update_func = eval(&format!(
-            r#"
-                let currentQueueItem;
-                window.__{layout}_updateActiveQueueItem = (nextIndex) => {{
-                    const nextQueueItem = document.getElementById(`{layout}__queue-item-${{nextIndex}}`);
-
-                    if (currentQueueItem != nextQueueItem) {{
-
-                        if (currentQueueItem) {{
-                            currentQueueItem.classList.remove("{layout}__active-queue-item");
-
-                            const icon = currentQueueItem.querySelector("i");
-                            if (icon) {{ icon.className = "fa-solid fa-play text-xs text-white/60"; }}
-                        }}
-
-                        if (nextQueueItem) {{
-                            nextQueueItem.classList.add("{layout}__active-queue-item");
-
-                            const icon = nextQueueItem.querySelector("i");
-                            if (icon) {{ icon.className = "fa-solid fa-volume-high text-xs"; }}
-                        }}
-
-                        window.__{layout}_scrollIntoView(nextQueueItem);
-                        currentQueueItem = nextQueueItem;
-                    }}
-                }}
-            "#,
-        ));
+        while let Ok(val) = listener.recv::<Value>().await {
+            if val.as_str() == Some("user_scroll") {
+                auto_sync.set(false);
+            }
+        }
     });
 
     use_effect(move || {
         let current_index = *current_queue_index.read();
-        let _update = eval(&format!(
-            "if (window.__{layout}_updateActiveQueueItem) window.__{layout}_updateActiveQueueItem({current_index});"
-        ));
+        if *auto_sync.read() {
+            let _jump = eval(&format!("window.__{layout}_queueJump?.({current_index});"));
+        }
     });
 
     let cover_max_width = match layout {
@@ -565,6 +544,7 @@ pub fn QueueListView(
         if items.is_empty() {
             div { class: "text-white/30 text-center py-10 text-sm", "{i18n::t(\"no_more_songs\")}" }
         } else {
+            div { class: "relative flex flex-col flex-1 min-h-0",
             QueueSummary {
                 key: "{layout}",
                 queue_count,
@@ -827,6 +807,27 @@ pub fn QueueListView(
                         }
                     }
                 }
+            }
+
+            if !auto_sync() {
+                button {
+                    class: "absolute bottom-4 right-4 z-10 flex items-center justify-center w-9 h-9 rounded-full bg-black/40 hover:bg-black/60 backdrop-blur text-white/90 shadow-lg ring-1 ring-white/10 transition-colors",
+                    "aria-label": i18n::t("jump_to_current_song").to_string(),
+                    title: i18n::t("jump_to_current_song").to_string(),
+                    onclick: move |_| auto_sync.set(true),
+                    svg {
+                        class: "w-5 h-5",
+                        view_box: "0 0 24 24",
+                        fill: "none",
+                        stroke: "currentColor",
+                        stroke_width: "2",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                        path { d: "M21 12a9 9 0 1 1-2.64-6.36" }
+                        polyline { points: "21 3 21 9 15 9" }
+                    }
+                }
+            }
             }
         }
     }

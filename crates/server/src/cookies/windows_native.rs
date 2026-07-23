@@ -63,7 +63,7 @@ const ABE_KEY_FILE: &str = ".kopuz-abe";
 /// (elevation CLSID, candidate IElevator IIDs newest-first). Chrome 149 rotated
 /// to IElevator2Chrome (== the elevation typelib GUID); the older IElevatorChrome
 /// IID is kept as a fallback for pre-149. Brands without an elevation service
-/// (Chromium/Vivaldi) return None — the plant is skipped, v10 still works.
+/// (Chromium/Vivaldi/Helium) return None — the plant is skipped, v10 still works.
 fn brand_elevation(browser: Browser) -> Option<(u128, &'static [u128])> {
     match browser {
         Browser::Chrome => Some((
@@ -81,7 +81,7 @@ fn brand_elevation(browser: Browser) -> Option<(u128, &'static [u128])> {
             0x576B31AF_6369_4B6B_8560_E4B203A97A8B,
             &[0xF396861E_0C8E_4C71_8256_2FAE6D759CE9],
         )),
-        Browser::Chromium | Browser::Vivaldi => None,
+        Browser::Chromium | Browser::Vivaldi | Browser::Helium => None,
     }
 }
 

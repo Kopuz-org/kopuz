@@ -1,0 +1,54 @@
+load("@crates//:defs.bzl", "aliases", "all_crate_deps", "crate_edition")
+load("@rules_rust//rust:defs.bzl", "rust_binary", "rust_test")
+load("//build_defs:kopuz_rust.bzl", "kopuz_rust_library")
+
+package(default_visibility = ["//visibility:public"])
+exports_files(["Cargo.toml"])
+
+kopuz_rust_library(
+    name = "server",
+    compile_data = glob(["src/ytmusic/decipher/solver/*"]),
+    extra_deps = [
+        "//crates/config",
+        "//crates/db",
+        "//crates/reader",
+        "//crates/utils",
+    ],
+)
+
+rust_test(
+    name = "server_integration_test",
+    aliases = aliases(
+        normal = True,
+        normal_dev = True,
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+    crate_name = "source",
+    deps = [
+        ":server",
+        "//crates/db",
+        "//crates/reader",
+    ] + all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ),
+    edition = crate_edition(),
+    proc_macro_deps = all_crate_deps(
+        proc_macro = True,
+        proc_macro_dev = True,
+    ),
+    rustc_env = {"CARGO_PKG_VERSION": "0.11.0"},
+    srcs = ["tests/source.rs"],
+)
+
+rust_binary(
+    name = "duration_probe",
+    aliases = aliases(normal = True, proc_macro = True),
+    crate_name = "duration_probe",
+    deps = [":server"] + all_crate_deps(normal = True),
+    edition = crate_edition(),
+    proc_macro_deps = all_crate_deps(proc_macro = True),
+    rustc_env = {"CARGO_PKG_VERSION": "0.11.0"},
+    srcs = ["examples/duration_probe.rs"],
+)

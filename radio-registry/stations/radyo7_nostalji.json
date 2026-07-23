@@ -4,6 +4,7 @@
   "name": "Radyo 7 Nostalji",
   "description": "Radyo 7 Nostalji - Eski Türk Müziği",
   "icon": "fa-solid fa-radio",
+  "tags": ["turkish", "nostalgia"],
   "streams": [
     { "id": "main", "name": "Canlı Yayın", "url": "http://37.247.98.8/stream/24/", "icon": "fa-solid fa-play" }
   ],

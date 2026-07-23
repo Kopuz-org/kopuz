@@ -217,15 +217,15 @@ pub fn PlaylistsPage(
                                 style: "color: rgba(255,255,255,0.35);",
                                 "{i18n::t(\"library\")}"
                             }
-                            h1 { class: "text-2xl font-bold text-white", "{i18n::t(\"playlists\")}" }
+                            h1 { class: "text-2xl font-semibold tracking-tight text-white", "{i18n::t(\"playlists\")}" }
                         }
                     } else {
-                        h1 { class: "text-3xl font-bold text-white", "{i18n::t(\"playlists\")}" }
+                        h1 { class: "text-3xl font-semibold tracking-tight text-white", "{i18n::t(\"playlists\")}" }
                     }
                     div { class: "flex items-center gap-1",
                         if caps().folders {
                             button {
-                                class: "text-white/60 flex items-center hover:text-white transition-colors p-3 rounded-full hover:bg-white/10",
+                                class: "w-10 h-10 flex items-center justify-center text-white/60 hover:text-white rounded-full hover:bg-white/10 transition-colors active:scale-95",
                                 title: i18n::t("new_folder").to_string(),
                                 onclick: move |_| {
                                     let new_id = uuid::Uuid::new_v4().to_string();
@@ -245,7 +245,7 @@ pub fn PlaylistsPage(
                             }
                         }
                         button {
-                            class: "text-white/60 flex items-center hover:text-white transition-colors p-3 rounded-full hover:bg-white/10",
+                            class: "w-10 h-10 flex items-center justify-center text-white/60 hover:text-white rounded-full hover:bg-white/10 transition-colors active:scale-95",
                             title: i18n::t("add_playlist").to_string(),
                             aria_label: i18n::t("add_playlist").to_string(),
                             onclick: move |_| {
@@ -280,7 +280,11 @@ pub fn PlaylistsPage(
                             let read_db = consume_context::<hooks::ReadDb>();
                             let local = consume_context::<Signal<::server::source::ActiveSource>>().peek().clone();
                             spawn(async move {
-                                let tracks = read_db.folder_tracks(&prefix).await.unwrap_or_default();
+                                let source_key = local.source().clone();
+                                let tracks = read_db
+                                    .folder_tracks(&source_key, &prefix)
+                                    .await
+                                    .unwrap_or_default();
                                 let refs: Vec<String> = tracks
                                     .iter()
                                     .map(|track| track.id.key().into_owned())
@@ -631,7 +635,7 @@ fn PlaylistsGrid(
                                 }
                             }
                             button {
-                                class: "px-3 py-1 rounded bg-white/5 hover:bg-white/10 text-white/80 transition-colors disabled:opacity-50",
+                                class: "px-3 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 transition-colors disabled:opacity-50",
                                 disabled: syncing,
                                 onclick: move |_| {
                                     let next = *yt_refresh_nonce.peek() + 1;
@@ -670,7 +674,7 @@ fn PlaylistsGrid(
                         rsx! {
                             div {
                                 key: "{playlist.id}",
-                                class: "bg-white/5 border border-white/5 rounded-lg p-6 hover:bg-white/10 transition-all cursor-pointer group relative",
+                                class: "bg-white/5 border border-white/5 rounded-xl p-6 hover:bg-white/10 transition-all cursor-pointer group relative",
                                 onclick: move |_| selected_playlist_id.set(Some(playlist_id_nav.clone())),
                                 div { class: "mb-4 w-full aspect-square rounded-xl flex items-center justify-center overflow-hidden transition-all bg-white/5",
                                     if let Some(url) = cover_url {
@@ -821,7 +825,7 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
         rsx! {
             div {
                 key: "{pid}",
-                class: "bg-white/5 border border-white/5 rounded-lg p-4 hover:bg-white/10 transition-all cursor-pointer group relative",
+                class: "bg-white/5 border border-white/5 rounded-xl p-4 hover:bg-white/10 transition-all cursor-pointer group relative",
                 onclick: move |_| selected_playlist_id.set(Some(pid_click.clone())),
                 div { class: "mb-4 w-full h-32 rounded-xl flex items-center justify-center overflow-hidden transition-all bg-white/5",
                     if let Some(url) = cover_url {
@@ -1039,7 +1043,7 @@ fn folders_layout(ctx: FoldersCtx<'_>) -> Element {
                                     rsx! {
                                         div {
                                             key: "{fid}",
-                                            class: "bg-white/5 border border-white/5 rounded-lg p-4 hover:bg-white/10 transition-all cursor-pointer group relative",
+                                            class: "bg-white/5 border border-white/5 rounded-xl p-4 hover:bg-white/10 transition-all cursor-pointer group relative",
                                             onclick: move |_| open_folder_id.set(Some(fid_open.clone())),
                                             div { class: "mb-4 w-full h-32 rounded-xl flex items-center justify-center overflow-hidden transition-all bg-white/5",
                                                 if let Some(url) = cover_url {
@@ -1130,7 +1134,7 @@ fn RenameTextModal(
                 onclick: move |evt| evt.stop_propagation(),
                 h2 { class: "text-lg font-bold text-white mb-4", "{title}" }
                 input {
-                    class: "w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 mb-4",
+                    class: "w-full bg-white/10 border border-white/10 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-white/25 mb-4",
                     value: "{value()}",
                     oninput: move |evt| value.set(evt.value()),
                     onkeydown: move |evt| {

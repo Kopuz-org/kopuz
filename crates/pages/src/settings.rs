@@ -45,12 +45,13 @@ fn logs_section(mut config: Signal<AppConfig>) -> Element {
                     },
                 }
                 p {
-                    class: "text-xs text-amber-400/80 pb-3",
+                    class: "px-5 pb-3 text-xs text-amber-400/80",
                     "{i18n::t(\"tracing_warning\")}"
                 }
             }
-            div { class: "flex flex-wrap gap-3 py-3",
+            div { class: "flex flex-wrap gap-3 px-5 pt-3 pb-5",
                 button {
+                    r#type: "button",
                     class: "px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors flex items-center gap-2",
                     onclick: move |_| {
                         if let Err(e) = utils::logs::open_log_dir() {
@@ -61,6 +62,7 @@ fn logs_section(mut config: Signal<AppConfig>) -> Element {
                     "{i18n::t(\"open_logs_folder\")}"
                 }
                 button {
+                    r#type: "button",
                     class: "px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors flex items-center gap-2",
                     onclick: move |_| {
                         spawn(async move {
@@ -80,6 +82,7 @@ fn logs_section(mut config: Signal<AppConfig>) -> Element {
                 // hook / crash-report path. English-only by design (dev tool).
                 if cfg!(debug_assertions) {
                     button {
+                        r#type: "button",
                         class: "px-4 py-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 text-sm transition-colors flex items-center gap-2",
                         onclick: move |_| trigger_test_crash(),
                         i { class: "fa-solid fa-bomb" }
@@ -128,9 +131,10 @@ fn ClearCacheButton() -> Element {
     let mut reextracting = use_signal(|| false);
     let mut trigger_reextract = use_context::<hooks::CoverReextractTrigger>().0;
     rsx! {
-        div { class: "flex flex-wrap gap-3 mt-4 items-center",
+        div { class: "settings-row flex min-h-[3.25rem] flex-wrap items-center justify-end gap-2 px-5 py-2.5",
             button {
-                class: "px-4 py-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 text-sm transition-colors flex items-center gap-2",
+                r#type: "button",
+                class: "px-3 py-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 text-sm transition-colors flex items-center gap-2",
                 onclick: move |_| {
                     reextracting.set(false);
                     spawn(async move {
@@ -142,7 +146,8 @@ fn ClearCacheButton() -> Element {
                 "{i18n::t(\"clear_cover_cache\")}"
             }
             button {
-                class: "px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors flex items-center gap-2",
+                r#type: "button",
+                class: "px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors flex items-center gap-2",
                 onclick: move |_| {
                     cleared.set(false);
                     *trigger_reextract.write() += 1;
@@ -162,13 +167,15 @@ fn ClearCacheButton() -> Element {
 }
 
 use components::settings_items::{
-    BackBehaviorSelector, ChannelModeSelector, DeviceChangeBehaviorSelector,
+    AppSelect, BackBehaviorSelector, ChannelModeSelector, DeviceChangeBehaviorSelector,
     DiscordPresencePausedSettings, DiscordPresenceSettings, EqualizerPanel, LanguageSelector,
-    LastFmSettings, LibreFmSettings, MultiDirectoryPicker, MusicBrainzSettings,
+    LastFmSettings, LibreFmSettings, LocalSourceSettings, MusicBrainzSettings,
     RadioRegistryDropdown, SampleRateModeSelector, ServerSettings, SettingItem, SettingsSection,
     ThemeSelector, ToggleSetting,
 };
-use components::settings_popups::{AddRegistryPopup, AddServerPopup, LoginPopup};
+use components::settings_popups::{
+    AddLocalSourcePopup, AddRegistryPopup, AddServerPopup, LoginPopup,
+};
 use config::{AppConfig, FetchStrategy, MusicService, OfflineQuality};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
@@ -182,7 +189,12 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
         format!("{}s", config.read().crossfade_seconds)
     };
     let mut show_add_server = use_signal(|| false);
+    let mut show_add_local_source = use_signal(|| false);
     let mut show_login = use_signal(|| false);
+
+    let mut local_source_name = use_signal(String::new);
+    let mut local_source_directories = use_signal(Vec::<std::path::PathBuf>::new);
+    let mut local_source_error = use_signal(|| Option::<String>::None);
 
     let server_name = use_signal(String::new);
     let server_url = use_signal(String::new);
@@ -242,6 +254,13 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     };
 
     let db_for_switch = use_context::<hooks::ReadDb>();
+    let db_for_local_switch = db_for_switch.clone();
+    let handle_switch_local = move |source: config::Source| {
+        let db = db_for_local_switch.clone();
+        spawn(async move {
+            hooks::source_switch::apply_source_switch(config, db, source).await;
+        });
+    };
     let handle_switch_server = move |id: String| {
         crate::settings_actions::switch_server(
             config,
@@ -270,12 +289,12 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     };
 
     rsx! {
-        div { class: if cfg!(target_os = "android") { "px-4 pt-2 pb-28 w-full" } else { "p-8 w-full" },
+        div { class: if cfg!(target_os = "android") { "px-3 pt-2 pb-28 w-full max-w-4xl mx-auto" } else { "px-6 py-7 w-full max-w-4xl mx-auto" },
             if !cfg!(target_os = "android") {
-                h1 { class: "text-3xl font-bold text-white mb-6", "{i18n::t(\"settings\")}" }
+                h1 { class: "text-2xl font-semibold tracking-tight text-white mb-5 px-1", "{i18n::t(\"settings\")}" }
             }
 
-            div { class: "space-y-12",
+            div { class: "space-y-8",
                 SettingsSection {
                     title: i18n::t("general").to_string(),
                         SettingItem {
@@ -291,6 +310,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             }
                         }
 
+                        div { class: "settings-subsection-label", "{i18n::t(\"appearance\")}" }
+
                         SettingItem {
                             title: i18n::t("appearance").to_string(),
                             control: rsx! {
@@ -304,22 +325,191 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         }
 
                         SettingItem {
-                            title: i18n::t("music_directory").to_string(),
+                            title: i18n::t("cover_art_background").to_string(),
+                            control: rsx! {
+                                ToggleSetting {
+                                    enabled: config.read().cover_art_background,
+                                    on_change: move |val| config.write().cover_art_background = val,
+                                }
+                            }
+                        }
+                        if cfg!(not(target_os = "android")) {
+                            SettingItem {
+                                title: i18n::t("custom_background").to_string(),
                                 control: rsx! {
-                                MultiDirectoryPicker {
-                                    current_paths: config.read().music_directory.clone(),
-                                    on_add: move |path| {
-                                        let mut config = config.write();
-                                        if !config.music_directory.contains(&path) {
-                                            config.music_directory.push(path);
+                                    div { class: "flex items-center gap-2",
+                                        if !config.read().custom_background_path.is_empty() {
+                                            span {
+                                                class: "text-xs text-white/50 font-mono max-w-[220px] truncate",
+                                                "{config.read().custom_background_path}"
+                                            }
+                                            button {
+                                                class: "px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-red-300 text-sm transition-colors",
+                                                onclick: move |_| config.write().custom_background_path = String::new(),
+                                                "{i18n::t(\"remove\")}"
+                                            }
                                         }
-                                    },
-                                    on_remove: move |index| {
-                                        let mut config = config.write();
-                                        if index < config.music_directory.len() {
-                                            config.music_directory.remove(index);
+                                        button {
+                                            class: "px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors",
+                                            onclick: move |_| {
+                                                #[cfg(not(target_os = "android"))]
+                                                spawn(async move {
+                                                    if let Some(file) = rfd::AsyncFileDialog::new()
+                                                        .add_filter("Images", &["jpg", "jpeg", "png", "webp", "gif", "bmp"])
+                                                        .pick_file()
+                                                        .await
+                                                    {
+                                                        config.write().custom_background_path =
+                                                            file.path().display().to_string();
+                                                    }
+                                                });
+                                            },
+                                            "{i18n::t(\"choose_image\")}"
                                         }
                                     }
+                                }
+                            }
+                        }
+                        if cfg!(not(target_os = "android")) {
+                            SettingItem {
+                                title: i18n::t("custom_font").to_string(),
+                                control: rsx! {
+                                    div { class: "flex items-center gap-2",
+                                        if !config.read().custom_font_path.is_empty() {
+                                            span {
+                                                class: "text-xs text-white/50 font-mono max-w-[220px] truncate",
+                                                "{config.read().custom_font_path}"
+                                            }
+                                            button {
+                                                class: "px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-red-300 text-sm transition-colors",
+                                                onclick: move |_| config.write().custom_font_path = String::new(),
+                                                "{i18n::t(\"remove\")}"
+                                            }
+                                        }
+                                        button {
+                                            class: "px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors",
+                                            onclick: move |_| {
+                                                #[cfg(not(target_os = "android"))]
+                                                spawn(async move {
+                                                    if let Some(file) = rfd::AsyncFileDialog::new()
+                                                        .add_filter("Fonts", &["ttf", "otf", "woff", "woff2"])
+                                                        .pick_file()
+                                                        .await
+                                                    {
+                                                        config.write().custom_font_path =
+                                                            file.path().display().to_string();
+                                                    }
+                                                });
+                                            },
+                                            "{i18n::t(\"choose_font\")}"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if config.read().cover_art_background
+                            || !config.read().custom_background_path.is_empty()
+                        {
+                                SettingItem {
+                                    title: i18n::t("cover_art_darkening").to_string(),
+                                    control: rsx! {
+                                        div { class: "flex items-center gap-3 min-w-[220px]",
+                                            input {
+                                                r#type: "range",
+                                                min: "0",
+                                                max: "95",
+                                                step: "5",
+                                                value: format!("{}", config.read().cover_art_darkening),
+                                                class: "w-40",
+                                                style: "accent-color: var(--color-indigo-500);",
+                                                oninput: move |evt| {
+                                                    if let Ok(value) = evt.value().parse::<u8>() {
+                                                        config.write().cover_art_darkening = value.min(95);
+                                                    }
+                                                }
+                                            }
+                                            span {
+                                                class: "text-xs font-mono text-white/80 w-16 text-right",
+                                                "{config.read().cover_art_darkening}%"
+                                            }
+                                        }
+                                    }
+                                }
+                                SettingItem {
+                                    title: i18n::t("cover_art_blur").to_string(),
+                                    control: rsx! {
+                                        div { class: "flex items-center gap-3 min-w-[220px]",
+                                            input {
+                                                r#type: "range",
+                                                min: "0",
+                                                max: "100",
+                                                step: "5",
+                                                value: format!("{}", config.read().cover_art_blur),
+                                                class: "w-40",
+                                                style: "accent-color: var(--color-indigo-500);",
+                                                oninput: move |evt| {
+                                                    if let Ok(value) = evt.value().parse::<u8>() {
+                                                        config.write().cover_art_blur = value.min(100);
+                                                    }
+                                                }
+                                            }
+                                            span {
+                                                class: "text-xs font-mono text-white/80 w-16 text-right",
+                                                "{config.read().cover_art_blur}px"
+                                            }
+                                        }
+                                    }
+                                }
+                        }
+
+                        div { class: "settings-subsection-label", "{i18n::t(\"library\")}" }
+
+                        SettingItem {
+                            title: i18n::t("local_libraries").to_string(),
+                            control: rsx! {
+                                LocalSourceSettings {
+                                    active_source: config.read().active_source.clone(),
+                                    default_directories: config.read().music_directory.clone(),
+                                    sources: config.read().local_sources.clone(),
+                                    on_add: move |_| show_add_local_source.set(true),
+                                    on_delete: move |id: String| config.write().remove_local_source(&id),
+                                    on_switch: handle_switch_local,
+                                    on_add_folder: move |(source, path): (config::Source, std::path::PathBuf)| {
+                                        let mut cfg = config.write();
+                                        match source {
+                                            config::Source::Local => {
+                                                if !cfg.music_directory.contains(&path) {
+                                                    cfg.music_directory.push(path);
+                                                }
+                                            }
+                                            config::Source::LocalLibrary(id) => {
+                                                if let Some(local) = cfg.local_sources.iter_mut().find(|local| local.id == id)
+                                                    && !local.directories.contains(&path)
+                                                {
+                                                    local.directories.push(path);
+                                                }
+                                            }
+                                            config::Source::Server(_) => {}
+                                        }
+                                    },
+                                    on_remove_folder: move |(source, index): (config::Source, usize)| {
+                                        let mut cfg = config.write();
+                                        match source {
+                                            config::Source::Local => {
+                                                if index < cfg.music_directory.len() {
+                                                    cfg.music_directory.remove(index);
+                                                }
+                                            }
+                                            config::Source::LocalLibrary(id) => {
+                                                if let Some(local) = cfg.local_sources.iter_mut().find(|local| local.id == id)
+                                                    && index < local.directories.len()
+                                                {
+                                                    local.directories.remove(index);
+                                                }
+                                            }
+                                            config::Source::Server(_) => {}
+                                        }
+                                    },
                                 }
                             }
                         }
@@ -408,12 +598,25 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+                        div { class: "settings-subsection-label", "{i18n::t(\"general\")}" }
+
                         SettingItem {
                             title: i18n::t("reduce_animations").to_string(),
                             control: rsx! {
                                 ToggleSetting {
                                     enabled: config.read().reduce_animations,
                                     on_change: move |val| config.write().reduce_animations = val,
+                                }
+                            }
+                        }
+                        if cfg!(not(target_os = "android")) {
+                            SettingItem {
+                                title: i18n::t("fullscreen_use_player_bar").to_string(),
+                                control: rsx! {
+                                    ToggleSetting {
+                                        enabled: config.read().fullscreen_use_player_bar,
+                                        on_change: move |val| config.write().fullscreen_use_player_bar = val,
+                                    }
                                 }
                             }
                         }
@@ -446,6 +649,15 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+                        SettingItem {
+                            title: i18n::t("show_row_images").to_string(),
+                            control: rsx! {
+                                ToggleSetting {
+                                    enabled: config.read().show_row_images,
+                                    on_change: move |val| config.write().show_row_images = val,
+                                }
+                            }
+                        }
                         if cfg!(any(target_os = "linux", target_os = "windows")) {
                             SettingItem {
                                 title: i18n::t("titlebar_mode").to_string(),
@@ -453,30 +665,17 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     {
                                         let current_mode = config.read().titlebar_mode;
                                         rsx! {
-                                            select {
-                                                class: "bg-stone-800 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-indigo-500",
-                                                onchange: move |evt| {
-                                                    config.write().titlebar_mode = match evt.value().as_str() {
+                                            AppSelect {
+                                                class: "settings-select",
+                                                value: match current_mode { config::TitlebarMode::System => "system", config::TitlebarMode::Off => "off", config::TitlebarMode::Custom => "custom" }.to_string(),
+                                                options: vec![("custom".into(), i18n::t("titlebar_custom")), ("system".into(), i18n::t("titlebar_system")), ("off".into(), i18n::t("titlebar_off"))],
+                                                on_change: move |value: String| {
+                                                    config.write().titlebar_mode = match value.as_str() {
                                                         "system" => config::TitlebarMode::System,
                                                         "off" => config::TitlebarMode::Off,
                                                         _ => config::TitlebarMode::Custom,
                                                     };
                                                 },
-                                                option {
-                                                    value: "custom",
-                                                    selected: current_mode == config::TitlebarMode::Custom,
-                                                    "{i18n::t(\"titlebar_custom\")}"
-                                                }
-                                                option {
-                                                    value: "system",
-                                                    selected: current_mode == config::TitlebarMode::System,
-                                                    "{i18n::t(\"titlebar_system\")}"
-                                                }
-                                                option {
-                                                    value: "off",
-                                                    selected: current_mode == config::TitlebarMode::Off,
-                                                    "{i18n::t(\"titlebar_off\")}"
-                                                }
                                             }
                                         }
                                     }
@@ -489,24 +688,16 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 {
                                     let current_style = config.read().ui_style;
                                     rsx! {
-                                        select {
-                                            class: "bg-stone-800 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-indigo-500",
-                                            onchange: move |evt| {
-                                                config.write().ui_style = match evt.value().as_str() {
+                                        AppSelect {
+                                            class: "settings-select",
+                                            value: (if current_style == config::UiStyle::Vaxry { "vaxry" } else { "normal" }).to_string(),
+                                            options: vec![("normal".into(), i18n::t("ui_normal")), ("vaxry".into(), i18n::t("ui_vaxry"))],
+                                            on_change: move |value: String| {
+                                                config.write().ui_style = match value.as_str() {
                                                     "vaxry" => config::UiStyle::Vaxry,
                                                     _ => config::UiStyle::Normal,
                                                 };
                                             },
-                                            option {
-                                                value: "normal",
-                                                selected: current_style == config::UiStyle::Normal,
-                                                "{i18n::t(\"ui_normal\")}"
-                                            }
-                                            option {
-                                                value: "vaxry",
-                                                selected: current_style == config::UiStyle::Vaxry,
-                                                "{i18n::t(\"ui_vaxry\")}"
-                                            }
                                         }
                                     }
                                 }
@@ -518,24 +709,16 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 {
                                     let current_position = config.read().player_bar_position;
                                     rsx! {
-                                        select {
-                                            class: "bg-stone-800 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-indigo-500",
-                                            onchange: move |evt| {
-                                                config.write().player_bar_position = match evt.value().as_str() {
+                                        AppSelect {
+                                            class: "settings-select",
+                                            value: (if current_position == config::PlayerBarPosition::Top { "top" } else { "bottom" }).to_string(),
+                                            options: vec![("bottom".into(), i18n::t("position_bottom")), ("top".into(), i18n::t("position_top"))],
+                                            on_change: move |value: String| {
+                                                config.write().player_bar_position = match value.as_str() {
                                                     "top" => config::PlayerBarPosition::Top,
                                                     _ => config::PlayerBarPosition::Bottom,
                                                 };
                                             },
-                                            option {
-                                                value: "bottom",
-                                                selected: current_position == config::PlayerBarPosition::Bottom,
-                                                "{i18n::t(\"position_bottom\")}"
-                                            }
-                                            option {
-                                                value: "top",
-                                                selected: current_position == config::PlayerBarPosition::Top,
-                                                "{i18n::t(\"position_top\")}"
-                                            }
                                         }
                                     }
                                 }
@@ -563,21 +746,23 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                             }
                                         }
                                     }
-                                    SettingItem {
-                                        title: i18n::t("discord_presence_paused").to_string(),
-                                        control: rsx! {
-                                            DiscordPresencePausedSettings {
-                                                enabled: config.read().discord_presence_paused.unwrap_or(true),
-                                                on_change: move |val| config.write().discord_presence_paused = Some(val),
+                                    if config.read().discord_presence.unwrap_or(true) {
+                                        SettingItem {
+                                            title: i18n::t("discord_presence_paused").to_string(),
+                                            control: rsx! {
+                                                DiscordPresencePausedSettings {
+                                                    enabled: config.read().discord_presence_paused.unwrap_or(true),
+                                                    on_change: move |val| config.write().discord_presence_paused = Some(val),
+                                                }
                                             }
                                         }
-                                    }
-                                    SettingItem {
-                                        title: i18n::t("discord_presence_source").to_string(),
-                                        control: rsx! {
-                                            ToggleSetting {
-                                                enabled: config.read().discord_presence_source.unwrap_or(true),
-                                                on_change: move |val| config.write().discord_presence_source = Some(val),
+                                        SettingItem {
+                                            title: i18n::t("discord_presence_source").to_string(),
+                                            control: rsx! {
+                                                ToggleSetting {
+                                                    enabled: config.read().discord_presence_source.unwrap_or(true),
+                                                    on_change: move |val| config.write().discord_presence_source = Some(val),
+                                                }
                                             }
                                         }
                                     }
@@ -636,7 +821,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 title: i18n::t("download_quality").to_string(),
                                 control: rsx! {
                                     select {
-                                        class: "bg-stone-800 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-indigo-500",
+                                        class: "bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-white/25",
                                         onchange: move |evt| {
                                             config.write().offline_quality = OfflineQuality::from_value_str(&evt.value());
                                         },
@@ -689,7 +874,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     let current = config.read().cover_fetch_strategy;
                                     rsx! {
                                         select {
-                                            class: "bg-stone-800 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-indigo-500",
+                                            class: "bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-white/25",
                                             onchange: move |evt| {
                                                 config.write().cover_fetch_strategy = match evt.value().as_str() {
                                                     "lastfm_first" => FetchStrategy::LastFmFirst,
@@ -815,8 +1000,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
-                        div { class: "py-2",
-                            p { class: "text-white font-medium mb-3", "{i18n::t(\"equalizer\")}" }
+                        div { class: "px-5 py-4",
+                            p { class: "text-sm text-white/90 font-medium mb-3", "{i18n::t(\"equalizer\")}" }
                             EqualizerPanel {
                                 current: config.read().equalizer.clone(),
                                 on_preview: move |equalizer: config::EqualizerSettings| {
@@ -848,6 +1033,43 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         error,
                         on_close: move |_| show_add_server.set(false),
                         on_save: handle_add_server
+                    }
+                }
+
+                if show_add_local_source() {
+                    AddLocalSourcePopup {
+                        name: local_source_name,
+                        directories: local_source_directories,
+                        error: local_source_error,
+                        on_close: move |_| {
+                            show_add_local_source.set(false);
+                            local_source_name.set(String::new());
+                            local_source_directories.set(Vec::new());
+                            local_source_error.set(None);
+                        },
+                        on_save: move |_| {
+                            let name = local_source_name().trim().to_string();
+                            if name.is_empty() {
+                                local_source_error.set(Some(i18n::t("local_library_name_required").to_string()));
+                                return;
+                            }
+                            let directories = local_source_directories();
+                            if directories.is_empty() {
+                                local_source_error.set(Some(i18n::t("local_library_folder_required").to_string()));
+                                return;
+                            }
+                            let source = config::SavedLocalSource::new(name, directories);
+                            let active = config::Source::LocalLibrary(source.id.clone());
+                            {
+                                let mut cfg = config.write();
+                                cfg.add_local_source(source);
+                                cfg.set_active_local_source(active);
+                            }
+                            show_add_local_source.set(false);
+                            local_source_name.set(String::new());
+                            local_source_directories.set(Vec::new());
+                            local_source_error.set(None);
+                        },
                     }
                 }
 

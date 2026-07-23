@@ -1,0 +1,46 @@
+module(
+    name = "kopuz",
+    version = "0.11.0",
+)
+
+bazel_dep(name = "rules_rust", version = "0.71.3")
+
+rust = use_extension("@rules_rust//rust:extensions.bzl", "rust")
+rust.toolchain(
+    edition = "2024",
+    versions = ["1.95.0"],
+)
+use_repo(rust, "rust_toolchains")
+register_toolchains("@rust_toolchains//:all")
+
+crate = use_extension("@rules_rust//crate_universe:extensions.bzl", "crate")
+crate.annotation(
+    crate = "rav1e",
+    version = "0.8.1",
+    build_script_env = {
+        "CARGO_PKG_AUTHORS": "Thomas Daede <tdaede@xiph.org>",
+        "CARGO_PKG_DESCRIPTION": "The fastest and safest AV1 encoder",
+        "CARGO_PKG_HOMEPAGE": "",
+        "CARGO_PKG_LICENSE": "BSD-2-Clause",
+        "CARGO_PKG_REPOSITORY": "https://github.com/xiph/rav1e/",
+    },
+)
+crate.annotation(
+    crate = "v8",
+    version = "130.0.7",
+    patches = ["//bazel/patches:v8-hermetic-binding.patch"],
+)
+crate.from_cargo(
+    name = "crates",
+    cargo_lockfile = "//:Cargo.lock",
+    lockfile = "//:Cargo.Bazel.lock",
+    manifests = ["//:Cargo.toml"],
+    supported_platform_triples = [
+        "aarch64-apple-darwin",
+        "aarch64-unknown-linux-gnu",
+        "x86_64-apple-darwin",
+        "x86_64-pc-windows-msvc",
+        "x86_64-unknown-linux-gnu",
+    ],
+)
+use_repo(crate, "crates")

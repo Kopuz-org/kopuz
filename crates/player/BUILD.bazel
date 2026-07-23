@@ -1,0 +1,10 @@
+load("//build_defs:kopuz_rust.bzl", "kopuz_rust_library")
+
+package(default_visibility = ["//visibility:public"])
+exports_files(["Cargo.toml"])
+
+kopuz_rust_library(
+    name = "player",
+    extra_deps = ["//crates/config"],
+    test_compile_data = glob(["src/engine/testdata/**"]),
+)

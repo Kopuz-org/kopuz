@@ -1,6 +1,51 @@
 use config::{Browser, MusicService};
 use dioxus::prelude::*;
 
+use crate::settings_items::MultiDirectoryPicker;
+
+#[component]
+pub fn AddLocalSourcePopup(
+    name: Signal<String>,
+    directories: Signal<Vec<std::path::PathBuf>>,
+    error: Signal<Option<String>>,
+    on_close: EventHandler<()>,
+    on_save: EventHandler<()>,
+) -> Element {
+    rsx! {
+        div { class: "overlay", onclick: move |_| on_close.call(()),
+            div { class: "popup", onclick: |e| e.stop_propagation(),
+                h2 { "{i18n::t(\"add_local_library\")}" }
+                if let Some(err) = error() {
+                    p { class: "error", "{err}" }
+                }
+                input {
+                    placeholder: "{i18n::t(\"local_library_name\")}",
+                    value: "{name()}",
+                    oninput: move |e| name.set(e.value()),
+                    onkeydown: move |e| e.stop_propagation(),
+                }
+                MultiDirectoryPicker {
+                    current_paths: directories(),
+                    on_add: move |path| {
+                        if !directories.peek().contains(&path) {
+                            directories.write().push(path);
+                        }
+                    },
+                    on_remove: move |index| {
+                        if index < directories.peek().len() {
+                            directories.write().remove(index);
+                        }
+                    },
+                }
+                div { class: "actions",
+                    button { onclick: move |_| on_close.call(()), "{i18n::t(\"cancel\")}" }
+                    button { onclick: move |_| on_save.call(()), "{i18n::t(\"save\")}" }
+                }
+            }
+        }
+    }
+}
+
 #[component]
 pub fn AddServerPopup(
     server_name: Signal<String>,

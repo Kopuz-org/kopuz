@@ -120,7 +120,7 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
     );
     push(&path_text, t.id.uid());
 
-    let input_class = "w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-white text-sm focus:outline-none focus:border-white/20";
+    let input_class = "w-full bg-white/10 border border-white/10 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-white/25";
 
     let mut do_save = move || {
         if let Some(handler) = props.on_save {
@@ -173,20 +173,20 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
                 onclick: move |e| e.stop_propagation(),
 
                 div { class: "flex items-center justify-between mb-4",
-                    h2 { class: "text-xl font-bold text-white",
+                    h2 { class: "text-xl font-semibold tracking-tight text-white",
                         if *editing.read() { "{edit_metadata_text}" } else { "{metadata_text}" }
                     }
                     div { class: "flex items-center gap-1",
                         if editable && !*editing.read() {
                             button {
-                                class: "w-8 h-8 flex items-center justify-center rounded-full text-slate-400 hover:text-white hover:bg-white/10 transition-colors",
+                                class: "w-9 h-9 flex items-center justify-center rounded-full text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
                                 title: "{edit_text}",
                                 onclick: move |_| editing.set(true),
                                 i { class: "fa-solid fa-pen" }
                             }
                         }
                         button {
-                            class: "w-8 h-8 flex items-center justify-center rounded-full text-slate-400 hover:text-white hover:bg-white/10 transition-colors",
+                            class: "w-9 h-9 flex items-center justify-center rounded-full text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
                             onclick: move |_| props.on_close.call(()),
                             i { class: "fa-solid fa-xmark" }
                         }
@@ -205,7 +205,7 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
                     if *editing.read() {
                         div { class: "flex flex-col gap-2",
                             button {
-                                class: "bg-white/10 hover:bg-white/20 text-white px-3 py-2 rounded text-sm transition-colors flex items-center gap-2",
+                                class: "bg-white/10 hover:bg-white/20 text-white px-3 py-2 rounded-lg text-sm transition-colors flex items-center gap-2",
                                 onclick: pick_cover,
                                 i { class: "fa-solid fa-image" }
                                 if cover_preview.read().is_some() { "{change_photo_text}" } else { "{add_photo_text}" }
@@ -304,7 +304,7 @@ pub fn MetadataModal(props: MetadataModalProps) -> Element {
                             "{cancel_text}"
                         }
                         button {
-                            class: "bg-white text-black px-4 py-2 rounded text-sm font-medium hover:bg-slate-200 transition-colors",
+                            class: "bg-white text-black px-4 py-2 rounded-lg text-sm font-medium hover:bg-slate-200 transition-colors",
                             onclick: move |_| do_save(),
                             "{save_text}"
                         }

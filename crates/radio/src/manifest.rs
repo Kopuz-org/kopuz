@@ -24,6 +24,17 @@ pub struct StationManifest {
     pub metadata: Option<MetadataSourceDef>,
 }
 
+impl StationManifest {
+    /// True when the station has a live now-playing source (REST or WebSocket).
+    /// Stations without one can fall back to ICY metadata.
+    pub fn has_live_metadata(&self) -> bool {
+        matches!(
+            self.metadata,
+            Some(MetadataSourceDef::Rest(_)) | Some(MetadataSourceDef::WebSocket(_))
+        )
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamDef {
     pub id: String,

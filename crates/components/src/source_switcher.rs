@@ -76,6 +76,15 @@ fn entries(config: &AppConfig) -> Vec<(Source, String, &'static str, &'static st
         LOCAL_ACCENT,
         i18n::t("source_on_this_device").to_string(),
     )];
+    for local in &config.local_sources {
+        v.push((
+            Source::LocalLibrary(local.id.clone()),
+            local.name.clone(),
+            "fa-solid fa-folder-tree",
+            LOCAL_ACCENT,
+            i18n::t("source_on_this_device").to_string(),
+        ));
+    }
     for s in &config.servers {
         let (icon, accent) = service_style(s.service);
         v.push((
