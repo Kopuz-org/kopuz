@@ -33,10 +33,6 @@ pub struct AmuseApi {
 
 static NOW_PLAYING: OnceLock<Mutex<AmuseApi>> = OnceLock::new();
 
-fn now_playing() -> &'static Mutex<AmuseApi> {
-    NOW_PLAYING.get_or_init(|| Mutex::new(AmuseApi::default()))
-}
-
 impl AmuseApi {
     pub fn new() -> Result<MutexGuard<'static, Self>, Box<dyn std::error::Error>> {
         tracing::info!("Starting Amuse API");
@@ -55,10 +51,10 @@ impl AmuseApi {
             });
         });
 
-        Ok(now_playing().lock().unwrap())
+        Ok(Self::now_playing().lock().unwrap())
     }
 
-    pub fn default() -> Self {
+    pub fn default_value() -> Self {
         Self {
             player: Player {
                 hasSong: false,
@@ -76,8 +72,12 @@ impl AmuseApi {
         }
     }
 
+    fn now_playing() -> &'static Mutex<Self> {
+        NOW_PLAYING.get_or_init(|| Mutex::new(Self::default_value()))
+    }
+
     async fn query() -> Json<Self> {
-        Json(now_playing().lock().unwrap().clone())
+        Json(Self::now_playing().lock().unwrap().clone())
     }
 
     async fn root() -> &'static str {
@@ -108,7 +108,7 @@ impl AmuseApi {
         cover_url: Option<&str>,
         source_url: Option<&str>,
     ) {
-        *now_playing().lock().unwrap() = Self {
+        *Self::now_playing().lock().unwrap() = Self {
             player: Player {
                 hasSong: false,
                 isPaused: false,
