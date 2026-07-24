@@ -689,6 +689,13 @@ pub struct AppConfig {
     /// Blur radius of the cover art background, in pixels (0 = sharp).
     #[serde(default)]
     pub cover_art_blur: u8,
+    /// Resize and re-encode local artwork before serving it to the UI. Disabled
+    /// by default so the original file bytes are served untouched.
+    #[serde(default)]
+    pub image_optimization_enabled: bool,
+    /// Maximum width/height used when local artwork optimization is enabled.
+    #[serde(default = "default_image_optimization_max_size")]
+    pub image_optimization_max_size: u32,
     /// Absolute path to a user-chosen image used as the app background,
     /// overriding both the theme background and the cover art background.
     /// Empty = unset. Shares the darkening/blur treatment with cover art.
@@ -832,6 +839,10 @@ fn default_cover_art_darkening() -> u8 {
     60
 }
 
+fn default_image_optimization_max_size() -> u32 {
+    1024
+}
+
 pub fn default_sidebar_order() -> Vec<String> {
     vec![
         "home".to_string(),
@@ -920,6 +931,8 @@ impl Default for AppConfig {
             cover_art_background: false,
             cover_art_darkening: default_cover_art_darkening(),
             cover_art_blur: 0,
+            image_optimization_enabled: false,
+            image_optimization_max_size: default_image_optimization_max_size(),
             custom_background_path: String::new(),
             custom_font_path: String::new(),
             tracing_enabled: false,

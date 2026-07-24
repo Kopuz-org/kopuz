@@ -319,7 +319,7 @@ pub trait Storage: ReadStore {
         image_ref: Option<&str>,
     ) -> Result<(), DbError>;
 
-    /// Set/clear an album's cover (manual covers survive non-manual updates).
+    /// Explicitly set/clear an album's cover and its manual state.
     async fn update_album_cover(
         &self,
         source: &Source,
@@ -327,6 +327,15 @@ pub trait Storage: ReadStore {
         cover_path: Option<&str>,
         manual: bool,
     ) -> Result<(), DbError>;
+
+    /// Set an automatically resolved cover unless a manual cover now exists.
+    /// Returns whether the album row was updated.
+    async fn update_album_cover_if_not_manual(
+        &self,
+        source: &Source,
+        album_id: &str,
+        cover_path: &str,
+    ) -> Result<bool, DbError>;
 
     /// Upsert one playlist's metadata (name/cover/image_tag), keeping membership.
     async fn upsert_playlist_meta(

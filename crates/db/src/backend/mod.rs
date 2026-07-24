@@ -277,6 +277,15 @@ impl Storage for Native {
         writes::update_album_cover(&self.pool(), source, album_id, cover_path, manual).await
     }
 
+    async fn update_album_cover_if_not_manual(
+        &self,
+        source: &crate::Source,
+        album_id: &str,
+        cover_path: &str,
+    ) -> Result<bool, DbError> {
+        writes::update_album_cover_if_not_manual(&self.pool(), source, album_id, cover_path).await
+    }
+
     async fn upsert_playlist_meta(
         &self,
         source: &crate::Source,
