@@ -17,7 +17,7 @@
 <br/>
   <br/>
   <p>
-    <b>English</b> | <a href="docs/README-TR.md">Türkçe</a> | <a href="docs/README-PT-PT.md">Português de Portugal</a>
+    <b>English</b> | <a href="docs/README-TR.md">Türkçe</a> | <a href="docs/README-PT-PT.md">Português de Portugal</a> | <a href="docs/README-ML.md">മലയാളം</a>
   </p>
 </div>
 
