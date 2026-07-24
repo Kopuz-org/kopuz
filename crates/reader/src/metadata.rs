@@ -1,5 +1,5 @@
 use super::models::{Album, CoverChange, Library, Track, TrackEdits, TrackId};
-use super::utils::{find_folder_cover, save_cover};
+use lofty::config::ParseOptions;
 use lofty::file::TaggedFileExt;
 use lofty::picture::{Picture, PictureType};
 use lofty::prelude::*;
@@ -12,6 +12,11 @@ use symphonia::core::io::MediaSourceStream;
 use symphonia::core::meta::{MetadataOptions, RawValue, StandardTag, Tag as SymphoniaTag};
 use symphonia::core::units::Timestamp;
 
+pub(crate) struct ScannedTrack {
+    pub track: Track,
+    pub album: Album,
+}
+
 fn slugify_album_key(value: &str) -> String {
     value
         .to_lowercase()
@@ -20,18 +25,22 @@ fn slugify_album_key(value: &str) -> String {
 }
 
 pub fn make_album_id(album: &str, grouping_key: &str) -> String {
-    let normalized_album = album.trim();
+    let album_key = slugify_album_key(album.trim());
+    let grouping_key = slugify_album_key(grouping_key.trim());
 
-    if !normalized_album.is_empty() {
-        return format!("alb_{}", slugify_album_key(normalized_album));
+    if !album_key.is_empty() {
+        return format!("alb2_{}_{}_{}", grouping_key.len(), grouping_key, album_key);
     }
 
-    let fallback = slugify_album_key(grouping_key);
-    if fallback.is_empty() {
-        "alb_unknown".to_string()
+    if grouping_key.is_empty() {
+        "alb2_unknown".to_string()
     } else {
-        format!("alb_unknown_{fallback}")
+        format!("alb2_unknown_{}_{}", grouping_key.len(), grouping_key)
     }
+}
+
+pub(crate) fn album_id_is_current(album_id: &str) -> bool {
+    album_id.starts_with("alb2_")
 }
 
 fn select_best_picture(pictures: &[Picture]) -> Option<&Picture> {
@@ -94,11 +103,14 @@ pub fn extract_metadata(
 
     let album_artist = tag
         .and_then(|t| t.get_string(ItemKey::AlbumArtist))
-        .map(|s| s.to_string());
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string);
 
     let parent_path = track_path.parent().map(|p| p.to_string_lossy());
-    let grouping_key = album_artist
+    let grouping_key = album_title
         .as_deref()
+        .and_then(|title| (!title.trim().is_empty()).then_some(()))
+        .map(|()| album_artist.as_deref().unwrap_or(&artist))
         .or(parent_path.as_deref())
         .unwrap_or(&artist);
 
@@ -153,11 +165,12 @@ pub fn extract_metadata(
     }
 }
 
-pub fn read(track_path: &Path, cover_cache: &Path, library: &mut Library) -> Option<Track> {
-    let tagged_file = match Probe::open(track_path).ok()?.read() {
+pub(crate) fn read_metadata(track_path: &Path) -> Option<ScannedTrack> {
+    let options = ParseOptions::new().read_cover_art(false);
+    let tagged_file = match Probe::open(track_path).ok()?.options(options).read() {
         Ok(tagged_file) => tagged_file,
         Err(_) if is_matroska_audio(track_path) => {
-            return read_with_symphonia(track_path, cover_cache, library);
+            return read_with_symphonia(track_path);
         }
         Err(_) => return None,
     };
@@ -167,62 +180,35 @@ pub fn read(track_path: &Path, cover_cache: &Path, library: &mut Library) -> Opt
         .or_else(|| tagged_file.first_tag());
 
     let track = extract_metadata(tag, properties, track_path);
-    let album_id = track.album_id.clone();
-
     let album_artist = tag
         .and_then(|t| t.get_string(ItemKey::AlbumArtist))
         .map(|s| s.to_string())
         .unwrap_or_else(|| track.artist.clone());
+    let genre = tag
+        .and_then(|t| t.genre().map(|g| g.to_string()))
+        .unwrap_or_else(|| "Unknown".to_string());
+    let year = tag
+        .and_then(|t| t.get_string(ItemKey::Year))
+        .and_then(|s| s.get(..4).unwrap_or(s).parse::<u16>().ok())
+        .unwrap_or(0);
+    let album = Album {
+        id: track.album_id.clone(),
+        title: track.album.clone(),
+        artist: album_artist,
+        genre,
+        year,
+        cover_path: None,
+        manual_cover: false,
+    };
 
-    let album = library.albums.iter().find(|a| a.id == album_id);
-    let album_exists = album.is_some();
-    let needs_cover = album.and_then(|album| album.cover_path.as_ref()).is_none();
-    let mut cover = None;
+    Some(ScannedTrack { track, album })
+}
 
-    if needs_cover {
-        if let Some(picture) = extract_embedded_cover(&tagged_file, tag) {
-            let extension = picture.mime_type().and_then(|mime_type| mime_type.ext());
-            cover = save_cover(&album_id, picture.data(), extension, cover_cache).ok();
-        } else if let Some(folder_cover) = track_path.parent().and_then(|parent| {
-            let stem = track_path.file_stem().and_then(|s| s.to_str());
-            let extensions = ["jpg", "jpeg", "png", "webp"];
-            if let Some(stem) = stem {
-                for ext in &extensions {
-                    let candidate = parent.join(stem).with_extension(ext);
-                    if candidate.is_file() {
-                        return Some(candidate);
-                    }
-                }
-            }
-            find_folder_cover(parent)
-        }) {
-            cover = Some(folder_cover);
-        }
-    }
-
-    if !album_exists || cover.is_some() {
-        let genre = tag
-            .and_then(|t| t.genre().map(|g| g.to_string()))
-            .unwrap_or_else(|| "Unknown".to_string());
-
-        let year = tag
-            .and_then(|t| t.get_string(ItemKey::Year))
-            .and_then(|s| s.get(..4).unwrap_or(s).parse::<u16>().ok())
-            .unwrap_or(0);
-
-        library.add_album(Album {
-            id: album_id.clone(),
-            title: track.album.clone(),
-            artist: album_artist,
-            genre,
-            year,
-            cover_path: cover,
-            manual_cover: false,
-        });
-    }
-
-    library.add_track(track.clone());
-    Some(track)
+pub fn read(track_path: &Path, _cover_cache: &Path, library: &mut Library) -> Option<Track> {
+    let scanned = read_metadata(track_path)?;
+    library.add_album(scanned.album);
+    library.add_track(scanned.track.clone());
+    Some(scanned.track)
 }
 
 /// Write `edits` back into the audio file's primary tag. Empty string fields
@@ -374,11 +360,7 @@ fn find_symphonia_tag<'a>(
         })
 }
 
-fn read_with_symphonia(
-    track_path: &Path,
-    cover_cache: &Path,
-    library: &mut Library,
-) -> Option<Track> {
+fn read_with_symphonia(track_path: &Path) -> Option<ScannedTrack> {
     let file = std::fs::File::open(track_path).ok()?;
     let file_size = file.metadata().ok().map(|m| m.len()).unwrap_or(0);
 
@@ -444,6 +426,7 @@ fn read_with_symphonia(
         &["ALBUMARTIST"],
     )
     .and_then(symphonia_tag_to_string)
+    .filter(|value| !value.trim().is_empty())
     .unwrap_or_else(|| artist.clone());
 
     let parent_path = track_path.parent().map(|p| p.to_string_lossy());
@@ -517,53 +500,61 @@ fn read_with_symphonia(
         playlist_item_id: None,
     };
 
-    let album_id = track.album_id.clone();
-    let album = library.albums.iter().find(|a| a.id == album_id);
-    let album_exists = album.is_some();
-    let needs_cover = album.and_then(|album| album.cover_path.as_ref()).is_none();
-    let cover = if needs_cover {
-        track_path.parent().and_then(|parent| {
-            let stem = track_path.file_stem().and_then(|s| s.to_str());
-            let extensions = ["jpg", "jpeg", "png", "webp"];
-            if let Some(stem) = stem {
-                for ext in &extensions {
-                    let candidate = parent.join(stem).with_extension(ext);
-                    if candidate.is_file() {
-                        return Some(candidate);
-                    }
-                }
-            }
-            find_folder_cover(parent)
-        })
-    } else {
-        None
+    let genre = find_symphonia_tag(&tags, |t| matches!(t, StandardTag::Genre(_)), &["GENRE"])
+        .and_then(symphonia_tag_to_string)
+        .unwrap_or_else(|| "Unknown".to_string());
+    let year = find_symphonia_tag(
+        &tags,
+        |t| matches!(t, StandardTag::ReleaseDate(_) | StandardTag::ReleaseYear(_)),
+        &["DATE", "YEAR"],
+    )
+    .and_then(symphonia_tag_to_string)
+    .and_then(|value| value.get(..4).and_then(|prefix| prefix.parse::<u16>().ok()))
+    .unwrap_or(0);
+    let album = Album {
+        id: track.album_id.clone(),
+        title: track.album.clone(),
+        artist: album_artist,
+        genre,
+        year,
+        cover_path: None,
+        manual_cover: false,
     };
 
-    if !album_exists || cover.is_some() {
-        let genre = find_symphonia_tag(&tags, |t| matches!(t, StandardTag::Genre(_)), &["GENRE"])
-            .and_then(symphonia_tag_to_string)
-            .unwrap_or_else(|| "Unknown".to_string());
-        let year = find_symphonia_tag(
-            &tags,
-            |t| matches!(t, StandardTag::ReleaseDate(_) | StandardTag::ReleaseYear(_)),
-            &["DATE", "YEAR"],
-        )
-        .and_then(symphonia_tag_to_string)
-        .and_then(|value| value.get(..4).and_then(|prefix| prefix.parse::<u16>().ok()))
-        .unwrap_or(0);
+    Some(ScannedTrack { track, album })
+}
 
-        library.add_album(Album {
-            id: album_id.clone(),
-            title: track.album.clone(),
-            artist: album_artist,
-            genre,
-            year,
-            cover_path: cover,
-            manual_cover: false,
-        });
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn album_ids_distinguish_artists_with_the_same_album_title() {
+        let yasar = make_album_id("Divane", "Yaşar");
+        let resul_dindar = make_album_id("Divane", "Resul Dindar");
+
+        assert_ne!(yasar, resul_dindar);
+        assert_eq!(yasar, make_album_id(" divane ", " YAŞAR "));
+        assert!(album_id_is_current(&yasar));
+        assert!(!album_id_is_current("alb_divane"));
     }
 
-    library.add_track(track.clone());
-    let _ = cover_cache;
-    Some(track)
+    #[test]
+    fn blank_album_artist_falls_back_to_track_artist_for_grouping() {
+        let mut tag = Tag::new(lofty::tag::TagType::Id3v2);
+        tag.insert_text(ItemKey::TrackArtist, "Track Artist".to_string());
+        tag.insert_text(ItemKey::AlbumTitle, "Shared Album".to_string());
+        tag.insert_text(ItemKey::AlbumArtist, "  \t".to_string());
+
+        let track = extract_metadata(
+            Some(&tag),
+            &FileProperties::default(),
+            Path::new("/music/track.mp3"),
+        );
+
+        assert_eq!(
+            track.album_id,
+            make_album_id("Shared Album", "Track Artist")
+        );
+    }
 }

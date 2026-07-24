@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 
 use db::{Page, Source, TrackFilter};
-use reader::models::{Track, TrackId};
+use reader::models::{Album, Track, TrackId};
 
 fn unique_db() -> PathBuf {
     // pid + counter, not just clock: macOS's µs clock let parallel tests
@@ -102,6 +102,42 @@ async fn upsert_then_prune() {
     assert!(remaining.contains(&"/music/a.flac".to_string()));
     assert!(remaining.contains(&"/other/c.flac".to_string()));
     assert!(!remaining.contains(&"/music/b.flac".to_string()));
+
+    let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
+}
+
+#[tokio::test]
+async fn automatic_cover_update_preserves_concurrent_manual_cover() {
+    let db_path = unique_db();
+    let db = db::init(&db_path).await.unwrap();
+    let album = Album {
+        id: "album".into(),
+        title: "Album".into(),
+        artist: "Artist".into(),
+        genre: "Unknown".into(),
+        year: 0,
+        cover_path: None,
+        manual_cover: false,
+    };
+    db.upsert_albums(&Source::Local, &[album]).await.unwrap();
+
+    assert!(
+        db.update_album_cover_if_not_manual(&Source::Local, "album", "/auto.jpg")
+            .await
+            .unwrap()
+    );
+    db.update_album_cover(&Source::Local, "album", Some("/manual.jpg"), true)
+        .await
+        .unwrap();
+    assert!(
+        !db.update_album_cover_if_not_manual(&Source::Local, "album", "/late-auto.jpg")
+            .await
+            .unwrap()
+    );
+
+    let stored = db.album(&Source::Local, "album").await.unwrap().unwrap();
+    assert_eq!(stored.cover_path, Some(PathBuf::from("/manual.jpg")));
+    assert!(stored.manual_cover);
 
     let _ = std::fs::remove_dir_all(db_path.parent().unwrap());
 }

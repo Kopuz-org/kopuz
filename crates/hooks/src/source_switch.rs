@@ -21,9 +21,8 @@ pub enum ConnStatus {
     Offline,
 }
 
-/// Connection status of the active source: Local is always Online (no auth); a
-/// server runs `validate()` on each switch — `Connecting` until it resolves to
-/// `Online` (valid) or `Offline` (expired/unreachable).
+/// Connection status of the active source: local libraries are always Online
+/// (no auth); a server runs `validate()` on each switch.
 pub fn use_connection_status() -> Memo<ConnStatus> {
     let active_source = use_context::<Signal<ActiveSource>>();
     let config = use_context::<Signal<AppConfig>>();
@@ -32,7 +31,7 @@ pub fn use_connection_status() -> Memo<ConnStatus> {
         // Subscribe to the active source (rebuilds on switch); `peek` the config
         // so a volume/theme change doesn't trigger a re-validation.
         let src = active_source.read().clone();
-        if matches!(config.peek().active_source, Source::Local) {
+        if config.peek().active_source.is_local() {
             status.set(ConnStatus::Online);
             return;
         }
@@ -59,9 +58,10 @@ pub async fn apply_source_switch(
     source: Source,
 ) -> bool {
     match source {
-        Source::Local => {
-            config.write().clear_active_server();
-            tracing::info!(target: "kopuz::source", source = "local", "source switched");
+        Source::Local | Source::LocalLibrary(_) => {
+            let source_key = source.as_str().to_string();
+            config.write().set_active_local_source(source);
+            tracing::info!(target: "kopuz::source", source = %source_key, "source switched");
             true
         }
         Source::Server(id) => {

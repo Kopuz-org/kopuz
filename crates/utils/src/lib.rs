@@ -75,7 +75,10 @@ where
     }
 }
 
-fn format_artwork_url_impl(path: Option<&impl AsRef<Path>>, size: Option<u32>) -> Option<CoverUrl> {
+fn format_artwork_url_impl<P: AsRef<Path> + ?Sized>(
+    path: Option<&P>,
+    size: Option<u32>,
+) -> Option<CoverUrl> {
     let p = path?;
     let p = p.as_ref();
     let p_str = p.to_string_lossy();
@@ -156,11 +159,14 @@ fn format_artwork_url_impl(path: Option<&impl AsRef<Path>>, size: Option<u32>) -
     }
 }
 
-pub fn format_artwork_url(path: Option<&impl AsRef<Path>>) -> Option<CoverUrl> {
+pub fn format_artwork_url<P: AsRef<Path> + ?Sized>(path: Option<&P>) -> Option<CoverUrl> {
     format_artwork_url_impl(path, None)
 }
 
-pub fn format_artwork_thumb_url(path: Option<&impl AsRef<Path>>, size: u32) -> Option<CoverUrl> {
+pub fn format_artwork_thumb_url<P: AsRef<Path> + ?Sized>(
+    path: Option<&P>,
+    size: u32,
+) -> Option<CoverUrl> {
     format_artwork_url_impl(path, Some(size))
 }
 

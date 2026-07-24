@@ -312,18 +312,94 @@ cargo install --locked dioxus-cli
 
 #### Developing Kopuz
 
+Install [Bazelisk](https://github.com/bazelbuild/bazelisk), which reads the
+repository's pinned `.bazelversion`. On macOS:
+
 ```bash
-# Clone the repository
-$ git clone https://github.com/Kopuz-org/kopuz
+brew install bazelisk
+```
 
-# Move to the cloned directory
+Clone the repository and build the desktop binary:
+
+```bash
+git clone https://github.com/Kopuz-org/kopuz
 cd kopuz
+bazel build //:kopuz
+```
 
-# Install npm dependencies
-npm install
+Run it with a separate debug database:
 
-# Serve project with Dioxus CLI
-dx serve --package kopuz
+```bash
+KOPUZ_DB_PATH=kopuz-debug.db bazel run //:kopuz
+```
+
+Build the optimized binary:
+
+```bash
+bazel build --config=release //:kopuz
+```
+
+The first Bazel invocation downloads the pinned Bazel and Rust toolchains plus
+the third-party crates recorded in `Cargo.lock` and `Cargo.Bazel.lock`. The
+built binary is available through the stable `bazel-bin/crates/kopuz/kopuz`
+symlink.
+
+Test one crate or the complete workspace:
+
+```bash
+bazel test //crates/db:db_test
+bazel test //:tests
+```
+
+Run Clippy with warnings denied:
+
+```bash
+bazel build \
+  --aspects=@rules_rust//rust:defs.bzl%rust_clippy_aspect \
+  --output_groups=clippy_checks \
+  --@rules_rust//rust/settings:clippy_flag=-Dwarnings \
+  //crates/...
+```
+
+Check formatting without changing files:
+
+```bash
+bazel build \
+  --aspects=@rules_rust//rust:defs.bzl%rustfmt_aspect \
+  --output_groups=rustfmt_checks \
+  //crates/...
+```
+
+Apply rustfmt:
+
+```bash
+bazel run @rules_rust//:rustfmt -- //crates/...
+```
+
+Cargo manifests remain the source of truth for dependency versions and features.
+After changing a manifest or `Cargo.lock`, regenerate Bazel's resolution lock:
+
+```bash
+CARGO_BAZEL_REPIN=1 bazel build //crates/config:config
+```
+
+Tailwind output is committed because Dioxus consumes it as an application asset.
+Regenerate it whenever UI classes change:
+
+```bash
+npm ci
+npx @tailwindcss/cli -i ./tailwind.css \
+  -o ./crates/kopuz/assets/tailwind.css
+```
+
+The Bazel target builds and runs the native Rust executable. Dioxus still owns
+desktop installers and mobile project generation, so use the existing wrapper
+after the Bazel build/test gates when producing those artifacts:
+
+```bash
+just build
+just android-patch
+just ios-build-sim
 ```
 
 ### macOS

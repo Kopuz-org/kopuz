@@ -1,0 +1,44 @@
+package(default_visibility = ["//visibility:public"])
+
+exports_files([
+    ".clippy.toml",
+    "Cargo.Bazel.lock",
+    "Cargo.lock",
+    "Cargo.toml",
+    "Dioxus.toml",
+    "tailwind.css",
+])
+
+alias(
+    name = "kopuz",
+    actual = "//crates/kopuz:kopuz",
+)
+
+test_suite(
+    name = "tests",
+    tests = [
+        "//crates/components:components_test",
+        "//crates/config:config_test",
+        "//crates/db:config_integration_test",
+        "//crates/db:db_test",
+        "//crates/db:favorites_integration_test",
+        "//crates/db:import_integration_test",
+        "//crates/db:migration_integration_test",
+        "//crates/db:persistence_integration_test",
+        "//crates/db:queries_integration_test",
+        "//crates/db:typed_queries_integration_test",
+        "//crates/db:writes_integration_test",
+        "//crates/discord-presence:discord_presence_test",
+        "//crates/hooks:hooks_test",
+        "//crates/i18n:i18n_test",
+        "//crates/kopuz_route:kopuz_route_test",
+        "//crates/pages:pages_test",
+        "//crates/player:player_test",
+        "//crates/radio:radio_test",
+        "//crates/reader:reader_test",
+        "//crates/scrobble:scrobble_test",
+        "//crates/server:server_integration_test",
+        "//crates/server:server_test",
+        "//crates/utils:utils_test",
+    ],
+)

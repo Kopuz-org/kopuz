@@ -29,14 +29,9 @@ pub(crate) fn TrackMetadata(
                         }
                     }
                 } else {
-                    let src = if cover.starts_with("artwork://") {
-                        format!("{}&hq=1", cover)
-                    } else {
-                        cover.clone()
-                    };
                     rsx! {
                         img {
-                            src: "{src}",
+                            src: "{cover}",
                             class: "rounded-xl",
                             style: "max-width: 100%; max-height: 100%; width: auto; height: auto; box-shadow: 0 25px 60px -15px rgba(0,0,0,0.55);",
                         }
