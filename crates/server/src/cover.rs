@@ -19,6 +19,14 @@ use utils::CoverUrl;
 
 use crate::source::ArtistView;
 
+fn local_artwork(config: &AppConfig, path: Option<&Path>) -> Option<CoverUrl> {
+    if config.image_optimization_enabled {
+        utils::format_artwork_thumb_url(path, config.image_optimization_max_size)
+    } else {
+        utils::format_artwork_url(path)
+    }
+}
+
 /// Resolve a cover from a stored cover-path ref — album covers and artist-grid
 /// images, where the ref is a filesystem path (local) or a remote image path /
 /// `directurl:` form (a server). `max_width` sizes the request.
@@ -37,7 +45,7 @@ pub fn from_path(
 ) -> Option<CoverUrl> {
     let path = cover_path?;
     if path.is_absolute() {
-        return utils::format_artwork_thumb_url(Some(&path.to_path_buf()), max_width);
+        return local_artwork(config, Some(path));
     }
     // A `urlhex_`/`directurl:` ref carries the full image URL and resolves with no
     // server; a bare service id needs the active server's base URL + token (absent
@@ -189,7 +197,7 @@ impl<'a> ArtistArt<'a> {
 /// declared view; none of them branches on the service.
 pub fn artist(config: &AppConfig, art: ArtistArt<'_>, max_width: u32) -> Option<CoverUrl> {
     let override_owned = art.override_path.map(Path::to_path_buf);
-    if let Some(cover) = utils::format_artwork_url(override_owned.as_ref()) {
+    if let Some(cover) = local_artwork(config, override_owned.as_deref()) {
         return Some(cover);
     }
     if let Some(ArtistImageRef::Remote(url)) = art.photo {
@@ -199,7 +207,7 @@ pub fn artist(config: &AppConfig, art: ArtistArt<'_>, max_width: u32) -> Option<
         return Some(utils::cover_url_from_string(url.to_string()));
     }
     if let Some(ArtistImageRef::Local(path)) = art.photo
-        && let Some(cover) = utils::format_artwork_url(Some(path))
+        && let Some(cover) = local_artwork(config, Some(path))
     {
         return Some(cover);
     }
@@ -219,9 +227,9 @@ pub fn artist(config: &AppConfig, art: ArtistArt<'_>, max_width: u32) -> Option<
 /// the per-service remote ref. No caller-side album lookup.
 pub fn track(config: &AppConfig, track: &Track, max_width: u32) -> Option<CoverUrl> {
     let Some(service) = track.id.service() else {
-        // Local track → its (album) art file as a sized asset.
+        // Local track → original album art, unless optimization is enabled.
         let owned = track.cover.as_deref().map(PathBuf::from);
-        return utils::format_artwork_thumb_url(owned.as_ref(), max_width);
+        return local_artwork(config, owned.as_deref());
     };
     let server = config.server.as_ref()?;
     let url = match service {
@@ -358,6 +366,27 @@ mod tests {
         assert_eq!(
             &*got, url,
             "self-contained remote ref → its URL, not artwork://"
+        );
+    }
+
+    #[test]
+    fn local_artwork_is_original_unless_optimization_is_enabled() {
+        let path = Path::new("/music/album/cover.png");
+        let original = from_path(&local_active(), Some(path), 80).expect("local cover");
+        assert!(
+            !original.contains("&s="),
+            "default must serve original: {original}"
+        );
+
+        let optimized = AppConfig {
+            image_optimization_enabled: true,
+            image_optimization_max_size: 512,
+            ..local_active()
+        };
+        let resized = from_path(&optimized, Some(path), 80).expect("optimized local cover");
+        assert!(
+            resized.ends_with("&s=512"),
+            "selected size must be used: {resized}"
         );
     }
 

@@ -398,6 +398,39 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                         }
 
+                        SettingItem {
+                            title: i18n::t("optimize_local_artwork").to_string(),
+                            control: rsx! {
+                                ToggleSetting {
+                                    enabled: config.read().image_optimization_enabled,
+                                    on_change: move |value| {
+                                        config.write().image_optimization_enabled = value;
+                                    },
+                                }
+                            }
+                        }
+                        if config.read().image_optimization_enabled {
+                            SettingItem {
+                                title: i18n::t("artwork_max_size").to_string(),
+                                control: rsx! {
+                                    AppSelect {
+                                        value: config.read().image_optimization_max_size.to_string(),
+                                        options: vec![
+                                            ("256".to_string(), "256 px".to_string()),
+                                            ("512".to_string(), "512 px".to_string()),
+                                            ("1024".to_string(), "1024 px".to_string()),
+                                            ("1920".to_string(), "1920 px".to_string()),
+                                        ],
+                                        on_change: move |value: String| {
+                                            if let Ok(size) = value.parse::<u32>() {
+                                                config.write().image_optimization_max_size = size;
+                                            }
+                                        },
+                                    }
+                                }
+                            }
+                        }
+
                         div { class: "settings-subsection-label", "{i18n::t(\"library\")}" }
 
                         SettingItem {
