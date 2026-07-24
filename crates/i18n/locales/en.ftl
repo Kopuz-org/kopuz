@@ -413,10 +413,6 @@ back_behavior_rewind = Rewind, then previous
 back_behavior_always_prev = Always previous
 
 metadata = Metadata
-clear_cover_cache = Clear cover cache
-cache_cleared = Cache cleared
-force_rescan_photos = Force rescan photos
-rescanning_photos = Re-extracting covers…
 auto_fetch_covers = Auto-fetch album covers
 prefer_local_lyrics = Prefer local lyrics (.lrc / embedded, no online fallback)
 enable_musixmatch_lyrics = Use Musixmatch lyrics fallback

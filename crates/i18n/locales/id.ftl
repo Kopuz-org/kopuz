@@ -413,10 +413,6 @@ back_behavior_rewind = MUNDUR → BERIKUTNYA
 back_behavior_always_prev = SELALU BERIKUTNYA
 
 metadata = Metadata
-clear_cover_cache = Bersihkan cache sampul
-cache_cleared = Cache dibersihkan
-force_rescan_photos = Paksa pindai ulang foto
-rescanning_photos = Mengekstrak ulang sampul…
 auto_fetch_covers = Otomatis mengambil sampul album
 prefer_local_lyrics = Prefer lirik lokal (.lrc / disematkan, bukan daring fallback)
 enable_musixmatch_lyrics = Gunakan lirik Musixmatch fallback

@@ -404,10 +404,6 @@ position_bottom = למטה
 position_top = למעלה
 
 metadata = מטא-נתונים
-clear_cover_cache = נקה מטמון עטיפות
-cache_cleared = המטמון נוקה
-force_rescan_photos = אלץ סריקה מחדש של תמונות
-rescanning_photos = מחלץ עטיפות מחדש…
 auto_fetch_covers = הבאה אוטומטית של עטיפות אלבומים
 prefer_local_lyrics = העדפת מילים מקומיות (.lrc / מוטמעות, ללא חלופה מקוונת)
 enable_musixmatch_lyrics = השתמש ב-Musixmatch כמקור גיבוי למילים

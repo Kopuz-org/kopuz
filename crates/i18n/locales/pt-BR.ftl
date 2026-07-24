@@ -403,10 +403,6 @@ position_bottom = Inferior
 position_top = Superior
 
 metadata = Metadados
-clear_cover_cache = Limpar cache de capas
-cache_cleared = Cache limpo
-force_rescan_photos = Forçar reanálise de fotos
-rescanning_photos = Reextraindo capas…
 auto_fetch_covers = Buscar capas de álbum automaticamente
 prefer_local_lyrics = Preferir letras locais (.lrc / incorporadas, sem recurso online)
 enable_musixmatch_lyrics = Usar Musixmatch como fonte alternativa de letras

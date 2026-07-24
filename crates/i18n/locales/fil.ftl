@@ -413,10 +413,6 @@ back_behavior_rewind = REWIND → PREV
 back_behavior_always_prev = LAGING PREV
 
 metadata = Metadata
-clear_cover_cache = I-clear ang cover cache
-cache_cleared = Na-clear ang cache
-force_rescan_photos = Piliting i-rescan ang mga larawan
-rescanning_photos = Muling kinukuha ang mga cover…
 auto_fetch_covers = Awtomatikong kunin ang mga album cover
 prefer_local_lyrics = Unahin ang lokal na lyrics (.lrc / embedded, walang online fallback)
 enable_musixmatch_lyrics = Gamitin ang Musixmatch bilang fallback ng lyrics

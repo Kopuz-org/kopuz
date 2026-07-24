@@ -405,10 +405,6 @@ position_bottom = Снизу
 position_top = Сверху
 
 metadata = Метаданные
-clear_cover_cache = Очистить кеш обложек
-cache_cleared = Кеш очищен
-force_rescan_photos = Принудительно пересканировать фото
-rescanning_photos = Повторное извлечение обложек…
 auto_fetch_covers = Автоматически загружать обложки альбомов
 prefer_local_lyrics = Предпочитать локальные тексты (.lrc / встроенные, без онлайн-резерва)
 enable_musixmatch_lyrics = Использовать Musixmatch как резервный источник текстов

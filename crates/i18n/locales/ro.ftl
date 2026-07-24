@@ -404,10 +404,6 @@ position_bottom = Jos
 position_top = Sus
 
 metadata = Metadate
-clear_cover_cache = Golește cache-ul coperților
-cache_cleared = Cache golit
-force_rescan_photos = Forțează rescanarea fotografiilor
-rescanning_photos = Se reextrag coperțile…
 auto_fetch_covers = Preia automat coperțile albumelor
 prefer_local_lyrics = Preferă versurile locale (.lrc / încorporate, fără rezervă online)
 enable_musixmatch_lyrics = Folosește Musixmatch ca sursă de rezervă pentru versuri

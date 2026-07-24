@@ -410,10 +410,6 @@ position_bottom = أسفل
 position_top = أعلى
 
 metadata = بيانات وصفية
-clear_cover_cache = مسح ذاكرة الأغلفة المؤقتة
-cache_cleared = تم مسح الذاكرة المؤقتة
-force_rescan_photos = إعادة فحص الصور إجبارياً
-rescanning_photos = إعادة استخراج الأغلفة…
 auto_fetch_covers = الجلب التلقائي لأغلفة الألبومات
 prefer_local_lyrics = تفضيل كلمات الأغاني المحلية (.lrc / مضمّنة، دون رجوع إلى الإنترنت)
 enable_musixmatch_lyrics = استخدام Musixmatch كمصدر احتياطي لكلمات الأغاني

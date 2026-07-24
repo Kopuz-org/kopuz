@@ -413,10 +413,6 @@ back_behavior_rewind = TERUGSPOELEN → VORIGE
 back_behavior_always_prev = ALTIJD VORIGE
 
 metadata = Metadata
-clear_cover_cache = Hoescache wissen
-cache_cleared = Cache gewist
-force_rescan_photos = Foto's geforceerd opnieuw scannen
-rescanning_photos = Hoezen opnieuw extraheren…
 auto_fetch_covers = Albumhoezen automatisch ophalen
 prefer_local_lyrics = Voorkeur voor lokale songteksten (.lrc / ingesloten, geen online terugval)
 enable_musixmatch_lyrics = Musixmatch als terugval voor songteksten gebruiken

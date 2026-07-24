@@ -410,10 +410,6 @@ position_bottom = 下
 position_top = 上
 
 metadata = メタデータ
-clear_cover_cache = カバーキャッシュをクリア
-cache_cleared = キャッシュをクリアしました
-force_rescan_photos = 写真の再スキャンを強制
-rescanning_photos = カバーを再抽出中…
 auto_fetch_covers = アルバムカバーを自動取得
 prefer_local_lyrics = ローカル歌詞を優先（.lrc / 埋め込み、オンラインフォールバックなし）
 enable_musixmatch_lyrics = Musixmatchを歌詞の予備ソースとして使用

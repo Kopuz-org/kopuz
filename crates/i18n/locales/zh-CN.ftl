@@ -404,10 +404,6 @@ position_bottom = 底部
 position_top = 顶部
 
 metadata = 元数据
-clear_cover_cache = 清除封面缓存
-cache_cleared = 缓存已清除
-force_rescan_photos = 强制重新扫描照片
-rescanning_photos = 正在重新提取封面…
 auto_fetch_covers = 自动获取专辑封面
 prefer_local_lyrics = 优先使用本地歌词（.lrc / 内嵌，无在线回退）
 enable_musixmatch_lyrics = 使用 Musixmatch 作为备用歌词来源

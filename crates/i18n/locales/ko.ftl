@@ -404,10 +404,6 @@ position_bottom = 아래
 position_top = 위
 
 metadata = 메타데이터
-clear_cover_cache = 커버 캐시 지우기
-cache_cleared = 캐시 지움
-force_rescan_photos = 사진 강제 재검색
-rescanning_photos = 커버 다시 추출 중…
 auto_fetch_covers = 앨범 커버 자동 가져오기
 prefer_local_lyrics = 로컬 가사 우선 (.lrc / 내장, 온라인 대체 없음)
 enable_musixmatch_lyrics = Musixmatch를 가사 예비 소스로 사용

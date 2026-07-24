@@ -404,10 +404,6 @@ position_bottom = anpa
 position_top = sewi
 
 metadata = ijo nanpa
-clear_cover_cache = o weka e sitelen awen
-cache_cleared = sitelen awen li weka
-force_rescan_photos = o lukin sin e sitelen
-rescanning_photos = sitelen li kama sin…
 auto_fetch_covers = o kama e sitelen kulupu pi kalama sama
 prefer_local_lyrics = o wile e nimi kalama lon ilo (.lrc / lon insa, ala lon linja)
 enable_musixmatch_lyrics = o kepeken Musixmatch tan nimi kalama ante

@@ -174,6 +174,7 @@ mod tests {
         let track_path = dir.join("track.flac");
         let same_stem = dir.join("track.jpg");
         let manual = dir.join("manual.jpg");
+        let missing = dir.join("missing.jpg");
         File::create(&track_path).unwrap();
         File::create(&same_stem).unwrap();
         File::create(&manual).unwrap();
@@ -181,10 +182,12 @@ mod tests {
         let mut library = Library {
             tracks: vec![
                 track(track_path.clone(), "indexed"),
+                track(track_path.clone(), "stale"),
                 track(track_path, "manual"),
             ],
             albums: vec![
                 album("indexed", None, false),
+                album("stale", Some(missing), false),
                 album("manual", Some(manual.clone()), true),
             ],
             ..Default::default()
@@ -192,11 +195,12 @@ mod tests {
 
         let report = index_local_covers(&mut library, cache, Arc::new(|_| {})).await;
 
-        assert_eq!(report.attempted, 1);
-        assert_eq!(report.found, 1);
+        assert_eq!(report.attempted, 2);
+        assert_eq!(report.found, 2);
         assert_eq!(library.albums[0].cover_path, Some(same_stem));
-        assert_eq!(library.albums[1].cover_path, Some(manual));
-        assert!(library.albums[1].manual_cover);
+        assert_eq!(library.albums[1].cover_path, library.albums[0].cover_path);
+        assert_eq!(library.albums[2].cover_path, Some(manual));
+        assert!(library.albums[2].manual_cover);
 
         let _ = std::fs::remove_dir_all(dir);
     }

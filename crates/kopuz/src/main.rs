@@ -68,6 +68,39 @@ fn configured_local_sources(config: &config::AppConfig) -> Vec<(config::Source, 
         .collect()
 }
 
+async fn persist_resolved_covers(
+    db: &db::Db,
+    source: &config::Source,
+    albums: &[reader::Album],
+    missing_ids: &std::collections::HashSet<String>,
+    gens: hooks::db_reactivity::Generations,
+    scan_is_current: &impl Fn() -> bool,
+) {
+    let mut changed = false;
+    for album in albums {
+        if !missing_ids.contains(&album.id) {
+            continue;
+        }
+        let Some(cover) = album.cover_path.as_ref() else {
+            continue;
+        };
+        if !scan_is_current() {
+            break;
+        }
+        let path = cover.to_string_lossy().into_owned();
+        if db
+            .update_album_cover(source, &album.id, Some(&path), false)
+            .await
+            .is_ok()
+        {
+            changed = true;
+        }
+    }
+    if changed {
+        gens.bump(hooks::db_reactivity::Table::Albums);
+    }
+}
+
 /// Build the `@font-face` + `body`/`#app-root` override CSS for a user-picked
 /// font file, inlining its bytes as a `data:` URI so no custom protocol handler
 /// is needed. Returns `None` when the path is empty, unreadable, or an
@@ -470,8 +503,6 @@ fn App() -> Element {
         use_hook(|| Signal::new_in_scope(::server::DownloadProgress::default(), ScopeId::ROOT));
     pages::server::download_manager::register_progress_signal(download_progress);
     let mut trigger_rescan = use_signal(|| 0);
-    let trigger_cover_reextract = use_signal(|| 0);
-    use_context_provider(|| hooks::CoverReextractTrigger(trigger_cover_reextract));
     // Applies detached yt-dlp completions (history + rescan) in this scope —
     // the job drivers outlive the downloads page and can't write these.
     pages::ytdlp_jobs::use_ytdlp_completion_sink(config, trigger_rescan);
@@ -1409,26 +1440,15 @@ fn App() -> Element {
                         missing = local_report.missing,
                         "local cover indexing complete"
                     );
-                    let mut changed = false;
-                    for album in &lib.albums {
-                        if !missing_local.contains(&album.id) {
-                            continue;
-                        }
-                        let Some(cover) = album.cover_path.as_ref() else {
-                            continue;
-                        };
-                        let path = cover.to_string_lossy().into_owned();
-                        if db
-                            .update_album_cover(&source, &album.id, Some(&path), false)
-                            .await
-                            .is_ok()
-                        {
-                            changed = true;
-                        }
-                    }
-                    if changed {
-                        gens.bump(hooks::db_reactivity::Table::Albums);
-                    }
+                    persist_resolved_covers(
+                        &db,
+                        &source,
+                        &lib.albums,
+                        &missing_local,
+                        gens,
+                        &scan_is_current,
+                    )
+                    .await;
 
                     if fetch_covers {
                         let fetcher = reader::cover_fetcher::CoverFetcher::new(
@@ -1453,26 +1473,15 @@ fn App() -> Element {
                             report.missing,
                             report.errors,
                         );
-                        let mut changed = false;
-                        for album in lib.albums.iter() {
-                            if !missing_before.contains(&album.id) {
-                                continue;
-                            }
-                            let Some(cover) = album.cover_path.as_ref() else {
-                                continue;
-                            };
-                            let p = cover.to_string_lossy().into_owned();
-                            if db
-                                .update_album_cover(&source, &album.id, Some(&p), false)
-                                .await
-                                .is_ok()
-                            {
-                                changed = true;
-                            }
-                        }
-                        if changed {
-                            gens.bump(hooks::db_reactivity::Table::Albums);
-                        }
+                        persist_resolved_covers(
+                            &db,
+                            &source,
+                            &lib.albums,
+                            &missing_before,
+                            gens,
+                            &scan_is_current,
+                        )
+                        .await;
                     }
                     drop(progress_cb);
                 }.instrument(tracing::info_span!("library.index_covers")));
@@ -1484,97 +1493,6 @@ fn App() -> Element {
             }
             }
         }.instrument(tracing::info_span!("library.rescan")));
-    });
-
-    // Force re-extraction of local covers (embedded art, then folder art) for
-    // any album whose cached cover file is missing. No online fetch — this is
-    // the "force rescan photos" action and is independent of auto_fetch_covers.
-    let db_for_reextract = db.clone();
-    let mut cover_reextract_in_flight = use_signal(|| false);
-    use_effect(move || {
-        if !*initial_load_done.read() || !*config_loaded_ok.read() {
-            return;
-        }
-        if *trigger_cover_reextract.read() == 0 {
-            return;
-        }
-        let db = db_for_reextract.clone();
-        let gens = gens_for_albums;
-        if *cover_reextract_in_flight.peek() {
-            return;
-        }
-        cover_reextract_in_flight.set(true);
-        let cover_cache_dir = cover_cache();
-        let local_sources: Vec<config::Source> = configured_local_libraries
-            .peek()
-            .iter()
-            .map(|(source, _)| source.clone())
-            .collect();
-        spawn(
-            async move {
-                let mut changed = 0u32;
-                for source in local_sources {
-                    let albums = match db.albums(&source).await {
-                        Ok(a) => a,
-                        Err(e) => {
-                            tracing::error!(error = %e, "cover re-extract: album query failed");
-                            continue;
-                        }
-                    };
-                    for album in &albums {
-                        // Manual covers are user-set; a present file needs nothing.
-                        if album.manual_cover
-                            || album.cover_path.as_ref().is_some_and(|p| p.exists())
-                        {
-                            continue;
-                        }
-                        let tracks = match db.album_tracks(&source, &album.id).await {
-                            Ok(t) => t,
-                            Err(_) => continue,
-                        };
-                        let mut new_cover: Option<std::path::PathBuf> = None;
-                        for track in &tracks {
-                            let Some(path) = track.id.local_path() else {
-                                continue;
-                            };
-                            // Embedded art first, then a folder image beside the track.
-                            if let Some((data, _mime)) = reader::read_cover(path)
-                                && let Ok(saved) = reader::utils::save_cover(
-                                    &album.id,
-                                    &data,
-                                    None,
-                                    &cover_cache_dir,
-                                )
-                            {
-                                new_cover = Some(saved);
-                                break;
-                            }
-                            if let Some(folder) =
-                                path.parent().and_then(reader::utils::find_folder_cover)
-                            {
-                                new_cover = Some(folder);
-                                break;
-                            }
-                        }
-                        if let Some(cover) = new_cover {
-                            let p = cover.to_string_lossy().into_owned();
-                            if db
-                                .update_album_cover(&source, &album.id, Some(&p), false)
-                                .await
-                                .is_ok()
-                            {
-                                changed += 1;
-                            }
-                        }
-                    }
-                }
-                if changed > 0 {
-                    gens.bump(hooks::db_reactivity::Table::Albums);
-                }
-                tracing::info!(updated = changed, "cover re-extract: complete");
-            }
-            .instrument(tracing::info_span!("library.cover_reextract")),
-        );
     });
 
     use_effect(move || {

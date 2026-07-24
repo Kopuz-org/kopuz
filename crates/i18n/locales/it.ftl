@@ -406,10 +406,6 @@ back_behavior_rewind = RIAVVOLGI → PRECEDENTE
 back_behavior_always_prev = SEMPRE PRECEDENTE
 
 metadata = Metadati
-clear_cover_cache = Svuota cache copertine
-cache_cleared = Cache svuotata
-force_rescan_photos = Forza nuova scansione foto
-rescanning_photos = Riestrazione copertine…
 auto_fetch_covers = Cerca in automatico copertine album
 prefer_local_lyrics = Preferisci testi locali (.lrc / incorporati, nessun ripiego online)
 enable_musixmatch_lyrics = Usa Musixmatch come fonte testi di riserva

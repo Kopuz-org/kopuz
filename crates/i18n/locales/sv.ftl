@@ -413,10 +413,6 @@ back_behavior_rewind = Spola tillbaka, sedan föregående
 back_behavior_always_prev = Alltid föregående
 
 metadata = Metadata
-clear_cover_cache = Rensa omslagscache
-cache_cleared = Cache rensad
-force_rescan_photos = Skanna om artist- och albumbilder
-rescanning_photos = Extraherar omslag igen…
 auto_fetch_covers = Hämta albumomslag automatiskt
 prefer_local_lyrics = Föredra lokala låttexter (.lrc/inbäddade, ingen online-reservlösning)
 enable_musixmatch_lyrics = Använd Musixmatch som reservkälla för låttexter

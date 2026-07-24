@@ -404,10 +404,6 @@ position_bottom = Lent
 position_top = Fent
 
 metadata = Metaadatok
-clear_cover_cache = Borítók gyorsítótárának törlése
-cache_cleared = Gyorsítótár törölve
-force_rescan_photos = Fényképek újraellenőrzésének kényszerítése
-rescanning_photos = Borítók újrakinyerése…
 auto_fetch_covers = Album borítók automatikus letöltése
 prefer_local_lyrics = Helyi dalszöveg előnyben (.lrc / beágyazott, nincs online tartalék)
 enable_musixmatch_lyrics = Musixmatch használata tartalék dalszövegforrásként

@@ -413,10 +413,6 @@ back_behavior_rewind = TUA LẠI → BÀI TRƯỚC
 back_behavior_always_prev = LUÔN VỀ BÀI TRƯỚC
 
 metadata = Siêu dữ liệu
-clear_cover_cache = Xóa bộ nhớ đệm ảnh bìa
-cache_cleared = Đã xóa bộ nhớ đệm
-force_rescan_photos = Buộc quét lại ảnh
-rescanning_photos = Đang trích xuất lại ảnh bìa…
 auto_fetch_covers = Tự động tải bìa album
 prefer_local_lyrics = Ưu tiên lời bài hát cục bộ (.lrc / nhúng, không dùng nguồn trực tuyến dự phòng)
 enable_musixmatch_lyrics = Dùng Musixmatch làm nguồn lời bài hát dự phòng

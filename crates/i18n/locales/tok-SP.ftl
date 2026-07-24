@@ -405,10 +405,6 @@ position_bottom = Bottom
 position_top = Top
 
 metadata = Metadata
-clear_cover_cache = o weka e sitelen awen
-cache_cleared = sitelen awen li weka
-force_rescan_photos = o lukin sin e sitelen
-rescanning_photos = sitelen li kama sin…
 auto_fetch_covers = Auto-fetch album covers
 prefer_local_lyrics = Prefer local lyrics (.lrc / embedded, no online fallback)
 enable_musixmatch_lyrics = Use Musixmatch lyrics fallback

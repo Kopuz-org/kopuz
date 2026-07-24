@@ -413,10 +413,6 @@ back_behavior_rewind = ரிவைண்ட் → முந்தைய
 back_behavior_always_prev = எப்போதும் முந்தைய
 
 metadata = மெட்டாடேட்டா
-clear_cover_cache = அட்டை தற்காலிக சேமிப்பை அழி
-cache_cleared = தற்காலிக சேமிப்பு அழிக்கப்பட்டது
-force_rescan_photos = புகைப்படங்களை மீண்டும் ஸ்கேன் செய்ய கட்டாயப்படுத்து
-rescanning_photos = அட்டைகளை மீண்டும் பிரித்தெடுக்கிறது…
 auto_fetch_covers = ஆல்பம் கவர்களைத் தானாகப் பெறு
 prefer_local_lyrics = உள்ளூர் வரிகளை விரும்பு (.lrc / உட்பொதிந்த, ஆன்லைன் மாற்று இல்லை)
 enable_musixmatch_lyrics = Musixmatch வரிகள் மாற்றைப் பயன்படுத்து

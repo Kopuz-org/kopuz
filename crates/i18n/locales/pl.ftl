@@ -404,10 +404,6 @@ position_bottom = Dół
 position_top = Góra
 
 metadata = Metadane
-clear_cover_cache = Wyczyść pamięć podręczną okładek
-cache_cleared = Pamięć podręczna wyczyszczona
-force_rescan_photos = Wymuś ponowne skanowanie zdjęć
-rescanning_photos = Ponowne wyodrębnianie okładek…
 auto_fetch_covers = Automatyczne pobieranie okładek albumów
 prefer_local_lyrics = Preferuj lokalne teksty (.lrc / osadzone, bez rezerwy online)
 enable_musixmatch_lyrics = Użyj Musixmatch jako zapasowego źródła tekstów

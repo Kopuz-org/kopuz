@@ -26,8 +26,3 @@ pub use debug_db::debug_db_section;
 // layer) so `pages`/`components` depend on `hooks`, not `db`, and so cannot name
 // the write-capable `db::Db` at all.
 pub use db::{Page, ReadDb, TrackFilter, TrackSort};
-
-/// Forces re-extraction of album covers from local embedded/folder art (no
-/// online fetch). Provided by the app root; the settings page bumps it.
-#[derive(Clone, Copy)]
-pub struct CoverReextractTrigger(pub dioxus::prelude::Signal<i32>);

@@ -405,10 +405,6 @@ position_bottom = Bas
 position_top = Haut
 
 metadata = Métadonnées
-clear_cover_cache = Vider le cache des pochettes
-cache_cleared = Cache vidé
-force_rescan_photos = Forcer la réanalyse des photos
-rescanning_photos = Réextraction des pochettes…
 auto_fetch_covers = Récupérer automatiquement les pochettes
 prefer_local_lyrics = Préférer les paroles locales (.lrc / intégrées, sans repli en ligne)
 enable_musixmatch_lyrics = Utiliser Musixmatch comme source de paroles de secours

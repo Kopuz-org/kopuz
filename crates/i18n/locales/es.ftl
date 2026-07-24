@@ -405,10 +405,6 @@ position_bottom = Abajo
 position_top = Arriba
 
 metadata = Metadatos
-clear_cover_cache = Borrar caché de carátulas
-cache_cleared = Caché borrada
-force_rescan_photos = Forzar reescaneo de fotos
-rescanning_photos = Volviendo a extraer carátulas…
 auto_fetch_covers = Obtener portadas automáticamente
 prefer_local_lyrics = Preferir letras locales (.lrc / incrustadas, sin recurso en línea)
 enable_musixmatch_lyrics = Usar Musixmatch como fuente de letras de respaldo

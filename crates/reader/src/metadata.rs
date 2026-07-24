@@ -25,18 +25,22 @@ fn slugify_album_key(value: &str) -> String {
 }
 
 pub fn make_album_id(album: &str, grouping_key: &str) -> String {
-    let normalized_album = album.trim();
+    let album_key = slugify_album_key(album.trim());
+    let grouping_key = slugify_album_key(grouping_key.trim());
 
-    if !normalized_album.is_empty() {
-        return format!("alb_{}", slugify_album_key(normalized_album));
+    if !album_key.is_empty() {
+        return format!("alb2_{}_{}_{}", grouping_key.len(), grouping_key, album_key);
     }
 
-    let fallback = slugify_album_key(grouping_key);
-    if fallback.is_empty() {
-        "alb_unknown".to_string()
+    if grouping_key.is_empty() {
+        "alb2_unknown".to_string()
     } else {
-        format!("alb_unknown_{fallback}")
+        format!("alb2_unknown_{}_{}", grouping_key.len(), grouping_key)
     }
+}
+
+pub(crate) fn album_id_is_current(album_id: &str) -> bool {
+    album_id.starts_with("alb2_")
 }
 
 fn select_best_picture(pictures: &[Picture]) -> Option<&Picture> {
@@ -102,8 +106,10 @@ pub fn extract_metadata(
         .map(|s| s.to_string());
 
     let parent_path = track_path.parent().map(|p| p.to_string_lossy());
-    let grouping_key = album_artist
+    let grouping_key = album_title
         .as_deref()
+        .and_then(|title| (!title.trim().is_empty()).then_some(()))
+        .map(|()| album_artist.as_deref().unwrap_or(&artist))
         .or(parent_path.as_deref())
         .unwrap_or(&artist);
 
@@ -199,13 +205,7 @@ pub(crate) fn read_metadata(track_path: &Path) -> Option<ScannedTrack> {
 
 pub fn read(track_path: &Path, _cover_cache: &Path, library: &mut Library) -> Option<Track> {
     let scanned = read_metadata(track_path)?;
-    if !library
-        .albums
-        .iter()
-        .any(|album| album.id == scanned.album.id)
-    {
-        library.albums.push(scanned.album);
-    }
+    library.add_album(scanned.album);
     library.add_track(scanned.track.clone());
     Some(scanned.track)
 }
@@ -520,4 +520,20 @@ fn read_with_symphonia(track_path: &Path) -> Option<ScannedTrack> {
     };
 
     Some(ScannedTrack { track, album })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn album_ids_distinguish_artists_with_the_same_album_title() {
+        let yasar = make_album_id("Divane", "Yaşar");
+        let resul_dindar = make_album_id("Divane", "Resul Dindar");
+
+        assert_ne!(yasar, resul_dindar);
+        assert_eq!(yasar, make_album_id(" divane ", " YAŞAR "));
+        assert!(album_id_is_current(&yasar));
+        assert!(!album_id_is_current("alb_divane"));
+    }
 }

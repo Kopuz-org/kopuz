@@ -404,10 +404,6 @@ position_bottom = Κάτω
 position_top = Πάνω
 
 metadata = Μεταδεδομένα
-clear_cover_cache = Εκκαθάριση προσωρινής μνήμης εξωφύλλων
-cache_cleared = Η προσωρινή μνήμη εκκαθαρίστηκε
-force_rescan_photos = Εξαναγκασμός επανασάρωσης φωτογραφιών
-rescanning_photos = Επανεξαγωγή εξωφύλλων…
 auto_fetch_covers = Αυτόματη λήψη εξωφύλλων άλμπουμ
 prefer_local_lyrics = Προτίμηση τοπικών στίχων (.lrc / ενσωματωμένοι, χωρίς διαδικτυακή εναλλακτική)
 enable_musixmatch_lyrics = Χρήση του Musixmatch ως εφεδρική πηγή στίχων

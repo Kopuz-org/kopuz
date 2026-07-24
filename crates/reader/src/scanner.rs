@@ -1,5 +1,5 @@
-use super::metadata::{ScannedTrack, read_metadata};
-use super::models::Library;
+use super::metadata::{ScannedTrack, album_id_is_current, read_metadata};
+use super::models::{Album, Library};
 use super::utils::is_artist_image_file;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -34,6 +34,7 @@ pub async fn scan_directory(
         library
             .tracks
             .iter()
+            .filter(|track| album_id_is_current(&track.album_id))
             .filter_map(|t| t.id.local_path().map(Path::to_path_buf))
             .collect(),
     );
@@ -125,6 +126,23 @@ pub async fn scan_directory(
     Ok(())
 }
 
+fn merge_album_state(mut new_album: Album, existing: &Album) -> Album {
+    if new_album.cover_path.is_none() || existing.manual_cover {
+        new_album.cover_path = existing.cover_path.clone();
+    }
+    if existing.manual_cover {
+        new_album.manual_cover = true;
+    }
+    new_album
+}
+
+fn album_metadata_key(album: &Album) -> (String, String) {
+    (
+        album.title.trim().to_lowercase(),
+        album.artist.trim().to_lowercase(),
+    )
+}
+
 fn merge_scanned_tracks(library: &mut Library, scanned_tracks: Vec<ScannedTrack>) {
     let mut track_indexes: HashMap<_, _> = library
         .tracks
@@ -138,6 +156,15 @@ fn merge_scanned_tracks(library: &mut Library, scanned_tracks: Vec<ScannedTrack>
         .enumerate()
         .map(|(index, album)| (album.id.clone(), index))
         .collect();
+    // A legacy title-only album may hold another artist's automatic cover after
+    // a collision. Only an explicitly chosen cover is safe to carry forward.
+    let legacy_album_indexes: HashMap<_, _> = library
+        .albums
+        .iter()
+        .enumerate()
+        .filter(|(_, album)| !album_id_is_current(&album.id) && album.manual_cover)
+        .map(|(index, album)| (album_metadata_key(album), index))
+        .collect();
 
     for scanned in scanned_tracks {
         if let Some(&index) = track_indexes.get(&scanned.track.id) {
@@ -148,10 +175,16 @@ fn merge_scanned_tracks(library: &mut Library, scanned_tracks: Vec<ScannedTrack>
             library.tracks.push(scanned.track);
         }
 
-        if !album_indexes.contains_key(&scanned.album.id) {
+        if let Some(&index) = album_indexes.get(&scanned.album.id) {
+            library.albums[index] = merge_album_state(scanned.album, &library.albums[index]);
+        } else {
+            let mut album = scanned.album;
+            if let Some(&legacy_index) = legacy_album_indexes.get(&album_metadata_key(&album)) {
+                album = merge_album_state(album, &library.albums[legacy_index]);
+            }
             let index = library.albums.len();
-            album_indexes.insert(scanned.album.id.clone(), index);
-            library.albums.push(scanned.album);
+            album_indexes.insert(album.id.clone(), index);
+            library.albums.push(album);
         }
     }
 }
@@ -238,6 +271,8 @@ mod tests {
     fn merge_is_indexed_and_keeps_existing_album_state() {
         let manual_cover = PathBuf::from("/covers/manual.jpg");
         let mut existing_album = album("album-a");
+        existing_album.title = "Old Album".to_string();
+        existing_album.genre = "Old Genre".to_string();
         existing_album.cover_path = Some(manual_cover.clone());
         existing_album.manual_cover = true;
         let mut library = Library {
@@ -251,7 +286,12 @@ mod tests {
             vec![
                 ScannedTrack {
                     track: track("/music/old.flac", "album-a", "Updated"),
-                    album: album("album-a"),
+                    album: {
+                        let mut updated = album("album-a");
+                        updated.title = "Updated Album".to_string();
+                        updated.genre = "Updated Genre".to_string();
+                        updated
+                    },
                 },
                 ScannedTrack {
                     track: track("/music/new.flac", "album-b", "New"),
@@ -263,7 +303,66 @@ mod tests {
         assert_eq!(library.tracks.len(), 2);
         assert_eq!(library.tracks[0].title, "Updated");
         assert_eq!(library.albums.len(), 2);
+        assert_eq!(library.albums[0].title, "Updated Album");
+        assert_eq!(library.albums[0].genre, "Updated Genre");
         assert_eq!(library.albums[0].cover_path, Some(manual_cover));
         assert!(library.albums[0].manual_cover);
+    }
+
+    #[test]
+    fn merge_carries_cover_state_from_matching_legacy_album() {
+        let manual_cover = PathBuf::from("/covers/manual.jpg");
+        let mut legacy_album = album("alb_divane");
+        legacy_album.title = "Divane".to_string();
+        legacy_album.artist = "Yaşar".to_string();
+        legacy_album.cover_path = Some(manual_cover.clone());
+        legacy_album.manual_cover = true;
+        let mut scanned_album = album("alb2_6_yaşar_divane");
+        scanned_album.title = "Divane".to_string();
+        scanned_album.artist = "Yaşar".to_string();
+        let mut library = Library {
+            tracks: vec![track("/music/divane.flac", "alb_divane", "Divane")],
+            albums: vec![legacy_album],
+            ..Default::default()
+        };
+
+        merge_scanned_tracks(
+            &mut library,
+            vec![ScannedTrack {
+                track: track("/music/divane.flac", "alb2_6_yaşar_divane", "Divane"),
+                album: scanned_album,
+            }],
+        );
+
+        assert_eq!(library.tracks[0].album_id, "alb2_6_yaşar_divane");
+        assert_eq!(library.albums.len(), 2);
+        assert_eq!(library.albums[1].cover_path, Some(manual_cover));
+        assert!(library.albums[1].manual_cover);
+    }
+
+    #[test]
+    fn merge_does_not_carry_ambiguous_legacy_automatic_cover() {
+        let mut legacy_album = album("alb_divane");
+        legacy_album.title = "Divane".to_string();
+        legacy_album.artist = "Yaşar".to_string();
+        legacy_album.cover_path = Some(PathBuf::from("/covers/wrong-artist.jpg"));
+        let mut scanned_album = album("alb2_6_yaşar_divane");
+        scanned_album.title = "Divane".to_string();
+        scanned_album.artist = "Yaşar".to_string();
+        let mut library = Library {
+            albums: vec![legacy_album],
+            ..Default::default()
+        };
+
+        merge_scanned_tracks(
+            &mut library,
+            vec![ScannedTrack {
+                track: track("/music/divane.flac", "alb2_6_yaşar_divane", "Divane"),
+                album: scanned_album,
+            }],
+        );
+
+        assert_eq!(library.albums[1].cover_path, None);
+        assert!(!library.albums[1].manual_cover);
     }
 }
