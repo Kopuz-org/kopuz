@@ -1382,25 +1382,61 @@ fn App() -> Element {
                 gens.bump(hooks::db_reactivity::Table::Tracks);
                 gens.bump(hooks::db_reactivity::Table::Albums);
 
-                if fetch_covers {
-                    // Fetch missing covers in the background so the UI stays responsive.
-                    // Passing `progress_cb` into the task keeps the scan-progress bar
-                    // alive during fetching; it disappears automatically when the task ends.
-                    // Albums that HAD no cover before the fetch get the fetched one
-                    // written straight to the DB (manual covers were never in the
-                    // missing set, so they can't be overwritten).
-                    let lib_for_fetch = current_lib;
-                    let db = db.clone();
-                    let source = source.clone();
-                    let lastfm_key = lastfm_key.clone();
-                    spawn(async move {
+                let lib_for_covers = current_lib;
+                let db = db.clone();
+                let source = source.clone();
+                let lastfm_key = lastfm_key.clone();
+                spawn(async move {
+                    let mut lib = lib_for_covers;
+                    let missing_local: std::collections::HashSet<String> = lib
+                        .albums
+                        .iter()
+                        .filter(|album| {
+                            !album.manual_cover
+                                && album.cover_path.as_ref().is_none_or(|path| !path.exists())
+                        })
+                        .map(|album| album.id.clone())
+                        .collect();
+                    let local_report = reader::index_local_covers(
+                        &mut lib,
+                        cover_cache(),
+                        progress_cb.clone(),
+                    )
+                    .await;
+                    tracing::info!(
+                        attempted = local_report.attempted,
+                        found = local_report.found,
+                        missing = local_report.missing,
+                        "local cover indexing complete"
+                    );
+                    let mut changed = false;
+                    for album in &lib.albums {
+                        if !missing_local.contains(&album.id) {
+                            continue;
+                        }
+                        let Some(cover) = album.cover_path.as_ref() else {
+                            continue;
+                        };
+                        let path = cover.to_string_lossy().into_owned();
+                        if db
+                            .update_album_cover(&source, &album.id, Some(&path), false)
+                            .await
+                            .is_ok()
+                        {
+                            changed = true;
+                        }
+                    }
+                    if changed {
+                        gens.bump(hooks::db_reactivity::Table::Albums);
+                    }
+
+                    if fetch_covers {
                         let fetcher = reader::cover_fetcher::CoverFetcher::new(
                             cover_cache(),
                             fetch_strategy,
                             lastfm_key,
-                            progress_cb,
+                            progress_cb.clone(),
                         );
-                        let mut lib = lib_for_fetch;
                         let missing_before: std::collections::HashSet<String> = lib
                             .albums
                             .iter()
@@ -1437,11 +1473,9 @@ fn App() -> Element {
                         if changed {
                             gens.bump(hooks::db_reactivity::Table::Albums);
                         }
-                    }.instrument(tracing::info_span!("library.fetch_covers")));
-                } else {
-                    // No cover fetching — drop the callback so the progress bar closes.
+                    }
                     drop(progress_cb);
-                }
+                }.instrument(tracing::info_span!("library.index_covers")));
             } else {
                 // No music directories configured: the local library is empty.
                 let _ = db.prune_source(&source, &[], &[]).await;
