@@ -1,6 +1,6 @@
 <!--markdownlint-disable MD013 MD033 MD041 -->
 <div align="center">
-  <img src="crates/kopuz/assets/banner.png" alt="Kopuz ലോഗോ" height="300"/>
+  <img src="../crates/kopuz/assets/banner.png" alt="Kopuz ലോഗോ" height="300"/>
   <h1>Kopuz</h1>
   <p>
     Rust ഉം Dioxus ഫ്രെയിംവർക്കും ഉപയോഗിച്ച് നിർമ്മിച്ച ആധുനികവും ഭാരം കുറഞ്ഞതുമായ
@@ -18,7 +18,7 @@
 <br/>
   <br/>
   <p>
-    <a href=../README.md</a> | <a href="../README-TR.md">Türkçe</a> | <a href="../README-PT-PT.md">Português de Portugal</a> | <b> മലയാളം </b>
+    <a href="../README.md">English</a> | <a href="../README-TR.md">Türkçe</a> | <a href="../README-PT-PT.md">Português de Portugal</a> | <b> മലയാളം </b>
   </p>
 </div>
 
