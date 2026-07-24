@@ -1,0 +1,22 @@
+common --enable_bzlmod
+common --enable_platform_specific_config
+common --announce_rc
+
+build --incompatible_strict_action_env
+build --action_env=PATH
+build --action_env=PKG_CONFIG_PATH
+build --action_env=NIX_LDFLAGS
+build --show_timestamps
+build --verbose_failures
+build --@rules_rust//rust/settings:clippy.toml=//:.clippy.toml
+build:release --compilation_mode=opt
+build:release --strip=always
+
+test --test_output=errors
+
+build:release --@rules_rust//rust/settings:lto=thin
+
+build:macos --repo_env=DEVELOPER_DIR=/Library/Developer/CommandLineTools
+build:macos --repo_env=SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
+build:macos --action_env=DEVELOPER_DIR=/Library/Developer/CommandLineTools
+build:macos --action_env=SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk

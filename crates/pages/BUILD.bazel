@@ -1,0 +1,20 @@
+load("//build_defs:kopuz_rust.bzl", "kopuz_rust_library")
+
+package(default_visibility = ["//visibility:public"])
+exports_files(["Cargo.toml"])
+
+kopuz_rust_library(
+    name = "pages",
+    extra_deps = [
+        "//crates/components",
+        "//crates/config",
+        "//crates/hooks",
+        "//crates/i18n",
+        "//crates/kopuz_route",
+        "//crates/player",
+        "//crates/radio",
+        "//crates/reader",
+        "//crates/server",
+        "//crates/utils",
+    ],
+)
