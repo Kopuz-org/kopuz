@@ -1,0 +1,10 @@
+{
+  "trace_id": "9f1a732c-2cd1-4270-a3ac-91ff0a92b466",
+  "exit_code": 2,
+  "error_messages": [
+    "Error validating working directory\n\nCaused by:\n    Buck appears to be running in a stale working directory. This will likely lead to failed or slow builds. To remediate, restart Buck2."
+  ],
+  "finalizing_error_messages": [
+    "'invocation recorder' failed to finalize\n\nCaused by:\n    Scribe sink not enabled (internal error)"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "trace_id": "ba1ef7fa-abb1-4217-a289-a12255bcd3a6",
+  "exit_code": 2,
+  "error_messages": [
+    "Error validating working directory\n\nCaused by:\n    0: Failed to stat `/Users/lidldev/Documents/rusic/buck-out/v2`\n    1: ENOENT: No such file or directory"
+  ],
+  "finalizing_error_messages": [
+    "'invocation recorder' failed to finalize\n\nCaused by:\n    Scribe sink not enabled (internal error)"
+  ]
+}
