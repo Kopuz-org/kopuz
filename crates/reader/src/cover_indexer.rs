@@ -3,7 +3,7 @@ use crate::models::Library;
 use crate::utils::{find_folder_cover, save_cover};
 use lofty::file::TaggedFileExt;
 use lofty::probe::Probe;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -16,6 +16,18 @@ pub struct LocalCoverIndexReport {
     pub missing: usize,
 }
 
+/// Album IDs eligible for automatic local or remote cover resolution.
+pub fn missing_cover_ids(library: &Library) -> HashSet<String> {
+    library
+        .albums
+        .iter()
+        .filter(|album| {
+            !album.manual_cover && album.cover_path.as_ref().is_none_or(|path| !path.exists())
+        })
+        .map(|album| album.id.clone())
+        .collect()
+}
+
 /// Populate missing local album covers after the foreground metadata scan.
 ///
 /// Only one representative track is opened per album, keeping artwork I/O
@@ -26,6 +38,7 @@ pub async fn index_local_covers(
     cover_cache: PathBuf,
     on_progress: Arc<dyn Fn(String) + Send + Sync>,
 ) -> LocalCoverIndexReport {
+    let missing_ids = missing_cover_ids(library);
     let representatives: HashMap<_, _> = library
         .tracks
         .iter()
@@ -43,9 +56,7 @@ pub async fn index_local_covers(
         .albums
         .iter()
         .enumerate()
-        .filter(|(_, album)| {
-            !album.manual_cover && album.cover_path.as_ref().is_none_or(|path| !path.exists())
-        })
+        .filter(|(_, album)| missing_ids.contains(&album.id))
         .filter_map(|(index, album)| {
             representatives
                 .get(album.id.as_str())

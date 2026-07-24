@@ -88,12 +88,17 @@ async fn persist_resolved_covers(
             break;
         }
         let path = cover.to_string_lossy().into_owned();
-        if db
-            .update_album_cover(source, &album.id, Some(&path), false)
+        match db
+            .update_album_cover_if_not_manual(source, &album.id, &path)
             .await
-            .is_ok()
         {
-            changed = true;
+            Ok(written) => changed |= written,
+            Err(error) => tracing::warn!(
+                album_id = %album.id,
+                source = %source.as_str(),
+                %error,
+                "failed to persist automatically resolved album cover"
+            ),
         }
     }
     if changed {
@@ -1419,15 +1424,7 @@ fn App() -> Element {
                 let lastfm_key = lastfm_key.clone();
                 spawn(async move {
                     let mut lib = lib_for_covers;
-                    let missing_local: std::collections::HashSet<String> = lib
-                        .albums
-                        .iter()
-                        .filter(|album| {
-                            !album.manual_cover
-                                && album.cover_path.as_ref().is_none_or(|path| !path.exists())
-                        })
-                        .map(|album| album.id.clone())
-                        .collect();
+                    let missing_local = reader::missing_cover_ids(&lib);
                     let local_report = reader::index_local_covers(
                         &mut lib,
                         cover_cache(),
@@ -1457,15 +1454,7 @@ fn App() -> Element {
                             lastfm_key,
                             progress_cb.clone(),
                         );
-                        let missing_before: std::collections::HashSet<String> = lib
-                            .albums
-                            .iter()
-                            .filter(|a| {
-                                a.cover_path.as_ref().is_none_or(|p| !p.exists())
-                                    && !a.manual_cover
-                            })
-                            .map(|a| a.id.clone())
-                            .collect();
+                        let missing_before = reader::missing_cover_ids(&lib);
                         let report = fetcher.fetch_missing_covers(&mut lib).await;
                         tracing::info!(
                             "Cover auto-fetch: {} found, {} missing, {} errors",

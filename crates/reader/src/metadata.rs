@@ -103,7 +103,8 @@ pub fn extract_metadata(
 
     let album_artist = tag
         .and_then(|t| t.get_string(ItemKey::AlbumArtist))
-        .map(|s| s.to_string());
+        .filter(|value| !value.trim().is_empty())
+        .map(str::to_string);
 
     let parent_path = track_path.parent().map(|p| p.to_string_lossy());
     let grouping_key = album_title
@@ -425,6 +426,7 @@ fn read_with_symphonia(track_path: &Path) -> Option<ScannedTrack> {
         &["ALBUMARTIST"],
     )
     .and_then(symphonia_tag_to_string)
+    .filter(|value| !value.trim().is_empty())
     .unwrap_or_else(|| artist.clone());
 
     let parent_path = track_path.parent().map(|p| p.to_string_lossy());
@@ -535,5 +537,24 @@ mod tests {
         assert_eq!(yasar, make_album_id(" divane ", " YAŞAR "));
         assert!(album_id_is_current(&yasar));
         assert!(!album_id_is_current("alb_divane"));
+    }
+
+    #[test]
+    fn blank_album_artist_falls_back_to_track_artist_for_grouping() {
+        let mut tag = Tag::new(lofty::tag::TagType::Id3v2);
+        tag.insert_text(ItemKey::TrackArtist, "Track Artist".to_string());
+        tag.insert_text(ItemKey::AlbumTitle, "Shared Album".to_string());
+        tag.insert_text(ItemKey::AlbumArtist, "  \t".to_string());
+
+        let track = extract_metadata(
+            Some(&tag),
+            &FileProperties::default(),
+            Path::new("/music/track.mp3"),
+        );
+
+        assert_eq!(
+            track.album_id,
+            make_album_id("Shared Album", "Track Artist")
+        );
     }
 }

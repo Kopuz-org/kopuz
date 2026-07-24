@@ -9,7 +9,7 @@ pub mod scanner;
 pub mod sort;
 pub mod utils;
 
-pub use cover_indexer::{LocalCoverIndexReport, index_local_covers};
+pub use cover_indexer::{LocalCoverIndexReport, index_local_covers, missing_cover_ids};
 pub use metadata::{read, read_cover, write_tags};
 pub use models::{
     Album, ArtistImageRef, CoverChange, FavoritesStore, Library, PlaylistFolder, PlaylistStore,
