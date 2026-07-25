@@ -220,12 +220,6 @@ Make sure you have Rust and the Dioxus CLI installed:
 cargo install --locked dioxus-cli
 ```
 
-On Fedora, you may need to install the following development dependencies:
-
-```bash
-sudo dnf install webkit2gtk4.1-devel libxdo-devel
-```
-
 Then build and install Kopuz:
 
 ```bash
