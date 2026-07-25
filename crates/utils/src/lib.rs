@@ -1,19 +1,17 @@
-//! Shared utility crate for Kopuz: color helpers, image processing (artwork,
-//! thumbnails, subsonic images), lyrics fetching, and terminal logging.
+//! Shared utility crate for Kopuz: color helpers, artwork URLs, lyrics fetching,
+//! and terminal logging.
 
 pub mod artist;
 pub mod color;
 pub mod db_cache;
 pub mod hls_source;
 pub mod icy;
-pub mod jellyfin_image;
 pub mod logs;
 pub mod lyrics;
 pub mod musicbrainz;
 pub mod playlist;
 pub mod range_source;
 pub mod stream_buffer;
-pub mod subsonic_image;
 pub mod themes;
 use std::path::Path;
 use std::sync::Arc;
@@ -75,10 +73,7 @@ where
     }
 }
 
-fn format_artwork_url_impl<P: AsRef<Path> + ?Sized>(
-    path: Option<&P>,
-    size: Option<u32>,
-) -> Option<CoverUrl> {
+pub fn format_artwork_url<P: AsRef<Path> + ?Sized>(path: Option<&P>) -> Option<CoverUrl> {
     let p = path?;
     let p = p.as_ref();
     let p_str = p.to_string_lossy();
@@ -138,42 +133,38 @@ fn format_artwork_url_impl<P: AsRef<Path> + ?Sized>(
         .add(b'\\')
         .add(b':');
 
+    // Version the URL because the WebView caches protocol responses for a year;
+    // the token prevents an old full-resolution response from surviving a
+    // change back to the thumbnail/HQ split.
     if cfg!(target_os = "windows") {
-        let mut url = format!(
-            "http://artwork.dioxus.localhost/local?p={}",
+        let url = format!(
+            "http://artwork.dioxus.localhost/local?p={}&v=thumb400-hq1920",
             percent_encoding::utf8_percent_encode(&abs_str, QUERY_VAL)
         );
-        if let Some(size) = size {
-            url.push_str(&format!("&s={size}"));
-        }
         Some(cover_url_from_string(url))
     } else {
-        let mut url = format!(
-            "artwork://local?p={}",
+        let url = format!(
+            "artwork://local?p={}&v=thumb400-hq1920",
             percent_encoding::utf8_percent_encode(&abs_str, QUERY_VAL)
         );
-        if let Some(size) = size {
-            url.push_str(&format!("&s={size}"));
-        }
         Some(cover_url_from_string(url))
     }
-}
-
-pub fn format_artwork_url<P: AsRef<Path> + ?Sized>(path: Option<&P>) -> Option<CoverUrl> {
-    format_artwork_url_impl(path, None)
-}
-
-pub fn format_artwork_thumb_url<P: AsRef<Path> + ?Sized>(
-    path: Option<&P>,
-    size: u32,
-) -> Option<CoverUrl> {
-    format_artwork_url_impl(path, Some(size))
 }
 
 pub const DEFAULT_COVER_SVG: &str = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='400' viewBox='0 0 400 400'%3E%3Crect width='400' height='400' fill='%231e1b2e'/%3E%3Ccircle cx='200' cy='180' r='70' fill='none' stroke='%233d3466' stroke-width='6'/%3E%3Cpath d='M155 280 Q200 240 245 280' fill='none' stroke='%233d3466' stroke-width='6' stroke-linecap='round'/%3E%3C/svg%3E";
 
 pub fn default_cover_url() -> CoverUrl {
     cover_url_from_string(DEFAULT_COVER_SVG.to_string())
+}
+
+#[cfg(test)]
+mod artwork_url_tests {
+    #[test]
+    fn local_artwork_url_versions_the_webview_cache() {
+        let url = super::format_artwork_url(Some(std::path::Path::new("/music/cover.jpg")))
+            .expect("artwork URL");
+        assert!(url.contains("&v=thumb400-hq1920"));
+    }
 }
 
 #[cfg(test)]

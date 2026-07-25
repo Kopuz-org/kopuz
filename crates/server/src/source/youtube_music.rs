@@ -328,7 +328,7 @@ impl MediaSource for YtSource {
                 image_tag: s
                     .thumbnail_url
                     .as_ref()
-                    .map(|u| utils::jellyfin_image::encode_cover_url(u)),
+                    .map(|u| reader::CoverRef::encode_url(u)),
             })
             .collect())
     }

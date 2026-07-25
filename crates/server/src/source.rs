@@ -702,16 +702,6 @@ pub(super) async fn mirror_added(
     Ok(())
 }
 
-/// Encode a cover URL into the `urlhex_…` tag the Subsonic cover seam decodes
-/// back (the synthetic album/track cover reference for Subsonic/Custom).
-pub(super) fn encode_cover_url_tag(url: &str) -> String {
-    let mut hex = String::with_capacity(url.len() * 2);
-    for b in url.as_bytes() {
-        hex.push_str(&format!("{b:02x}"));
-    }
-    format!("urlhex_{hex}")
-}
-
 /// Filter a library corpus by a lowercased `query` — the shared search behavior
 /// for corpus-backed sources (local, Jellyfin, Subsonic). Matches tracks on
 /// title/artist/album/genre (≤100) and albums on title/artist/genre, deduped by

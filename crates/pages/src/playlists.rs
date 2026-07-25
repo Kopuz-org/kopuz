@@ -553,14 +553,11 @@ fn PlaylistsGrid(
         if let Some(tag) = &playlist.image_tag
             && let Some(server) = &conf.server
         {
-            return utils::map_cover_url(Some(utils::jellyfin_image::jellyfin_image_url(
-                &server.url,
-                &playlist.id,
-                Some(tag.as_str()),
-                server.access_token.as_deref(),
+            return ::server::cover::resolve(
+                &conf,
+                reader::CoverRef::remote_item(server.service, &playlist.id, Some(tag.as_str())),
                 384,
-                80,
-            )));
+            );
         }
         let first_ref = playlist.tracks.first()?;
         let track = first_tracks
