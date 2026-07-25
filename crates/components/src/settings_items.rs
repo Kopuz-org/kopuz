@@ -1,19 +1,22 @@
 use config::{
     AppConfig, BackBehavior, ChannelMode, DeviceChangeBehavior, EqPreset,
-    EqualizerSettings as EqualizerConfig, SampleRateMode, SavedServer,
+    EqualizerSettings as EqualizerConfig, SampleRateMode, SavedLocalSource, SavedServer,
 };
 use dioxus::prelude::*;
 #[cfg(not(target_os = "android"))]
 use rfd::AsyncFileDialog;
 use scrobble::lastfm;
 use scrobble::librefm;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tracing::Instrument;
+
+static APP_SELECT_ID: AtomicUsize = AtomicUsize::new(0);
 
 #[component]
 pub fn SettingItem(title: String, control: Element) -> Element {
     rsx! {
-        div { class: "flex items-center justify-between gap-4 py-3",
-            p { class: "text-sm text-white font-medium", "{title}" }
+        div { class: "settings-row flex items-center justify-between gap-5 px-5 py-2.5",
+            p { class: "min-w-0 text-sm text-white/90 font-medium", "{title}" }
             {control}
         }
     }
@@ -21,31 +24,248 @@ pub fn SettingItem(title: String, control: Element) -> Element {
 
 #[component]
 pub fn SettingsSection(title: String, children: Element) -> Element {
+    let mut expanded = use_signal(|| true);
+
     rsx! {
-        section { class: "rounded-xl border border-white/10 bg-white/[0.02] overflow-hidden",
-            div { class: "px-5 py-3 border-b border-white/10 bg-white/[0.03]",
-                h2 { class: "text-xs font-semibold uppercase tracking-wider text-white/60",
+        section { class: "settings-section rounded-xl overflow-visible",
+            button {
+                r#type: "button",
+                class: "settings-section-header w-full flex items-center justify-between gap-3 px-5 py-3 rounded-t-xl text-left",
+                aria_expanded: expanded(),
+                onclick: move |_| expanded.toggle(),
+                h2 { class: "text-xs font-semibold uppercase tracking-wider text-white/65",
                     "{title}"
                 }
+                i { class: if expanded() { "fa-solid fa-chevron-up text-[10px] text-white/40" } else { "fa-solid fa-chevron-down text-[10px] text-white/40" } }
             }
-            div { class: "px-5 py-1 divide-y divide-white/[0.06]", {children} }
+            if expanded() {
+                div { class: "settings-section-body divide-y divide-white/[0.07]", {children} }
+            }
+        }
+    }
+}
+
+#[component]
+pub fn AppSelect(
+    value: String,
+    options: Vec<(String, String)>,
+    on_change: EventHandler<String>,
+    #[props(default)] class: String,
+) -> Element {
+    let mut open = use_signal(|| false);
+    let instance_id = use_hook(|| APP_SELECT_ID.fetch_add(1, Ordering::Relaxed));
+    let trigger_id = format!("app-select-trigger-{instance_id}");
+    let menu_id = format!("app-select-menu-{instance_id}");
+    let selected_index = options
+        .iter()
+        .position(|(option_value, _)| option_value == &value)
+        .unwrap_or(0);
+    let mut active_index = use_signal(|| selected_index);
+    let mut typeahead = use_signal(String::new);
+    let mut typeahead_at = use_signal(std::time::Instant::now);
+    use_effect(move || {
+        if open() {
+            let index = active_index();
+            document::eval(&format!(
+                "document.getElementById('app-select-option-{instance_id}-{index}')?.scrollIntoView({{block:'nearest'}})"
+            ));
+        }
+    });
+    let selected_label = options
+        .iter()
+        .find(|(option_value, _)| option_value == &value)
+        .map(|(_, label)| label.as_str())
+        .unwrap_or(value.as_str());
+    let open_class = if open() { "z-[70]" } else { "z-0" };
+    let active_option_id = format!("app-select-option-{instance_id}-{}", active_index());
+    let keyboard_options = options.clone();
+    let keyboard_trigger_id = trigger_id.clone();
+
+    rsx! {
+        div { class: "app-select relative {open_class} {class}",
+            button {
+                id: "{trigger_id}",
+                r#type: "button",
+                role: "combobox",
+                class: "app-select-trigger relative z-[1] w-full",
+                aria_haspopup: "listbox",
+                aria_expanded: open(),
+                aria_controls: "{menu_id}",
+                aria_activedescendant: if open() { Some(active_option_id.as_str()) } else { None },
+                onclick: move |_| {
+                    if !open() {
+                        active_index.set(selected_index);
+                    }
+                    open.toggle();
+                },
+                onkeydown: move |event| {
+                    let option_count = keyboard_options.len();
+                    if option_count == 0 {
+                        return;
+                    }
+
+                    let move_active = |next: usize, mut active_index: Signal<usize>| {
+                        active_index.set(next);
+                    };
+
+                    match event.key() {
+                        Key::Escape if open() => {
+                            event.prevent_default();
+                            open.set(false);
+                        }
+                        Key::Tab if open() => open.set(false),
+                        Key::ArrowDown => {
+                            event.prevent_default();
+                            if open() {
+                                move_active((active_index() + 1) % option_count, active_index);
+                            } else {
+                                active_index.set(selected_index);
+                                open.set(true);
+                            }
+                        }
+                        Key::ArrowUp => {
+                            event.prevent_default();
+                            if open() {
+                                move_active((active_index() + option_count - 1) % option_count, active_index);
+                            } else {
+                                active_index.set(selected_index);
+                                open.set(true);
+                            }
+                        }
+                        Key::Enter => {
+                            event.prevent_default();
+                            if open() {
+                                if let Some((option_value, _)) = keyboard_options.get(active_index()) {
+                                    on_change.call(option_value.clone());
+                                }
+                                open.set(false);
+                            } else {
+                                active_index.set(selected_index);
+                                open.set(true);
+                            }
+                        }
+                        Key::Character(character) if character == " " => {
+                            event.prevent_default();
+                            if open() {
+                                if let Some((option_value, _)) = keyboard_options.get(active_index()) {
+                                    on_change.call(option_value.clone());
+                                }
+                                open.set(false);
+                            } else {
+                                active_index.set(selected_index);
+                                open.set(true);
+                            }
+                        }
+                        Key::Character(character) if !character.chars().any(char::is_control) => {
+                            let now = std::time::Instant::now();
+                            let mut query = if now.duration_since(*typeahead_at.peek())
+                                > std::time::Duration::from_millis(700)
+                            {
+                                String::new()
+                            } else {
+                                typeahead.peek().clone()
+                            };
+                            query.push_str(&character.to_lowercase());
+                            typeahead.set(query.clone());
+                            typeahead_at.set(now);
+                            if let Some(index) = keyboard_options.iter().position(|(_, label)| {
+                                label.to_lowercase().starts_with(&query)
+                            }) {
+                                event.prevent_default();
+                                move_active(index, active_index);
+                                if !open() {
+                                    open.set(true);
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
+                },
+                span { class: "truncate", "{selected_label}" }
+                svg {
+                    class: if open() { "app-select-chevron rotate-180" } else { "app-select-chevron" },
+                    view_box: "0 0 16 16",
+                    fill: "none",
+                    path {
+                        d: "m4 6 4 4 4-4",
+                        stroke: "currentColor",
+                        stroke_width: "1.5",
+                        stroke_linecap: "round",
+                        stroke_linejoin: "round",
+                    }
+                }
+            }
+            if open() {
+                button {
+                    r#type: "button",
+                    class: "fixed inset-0 z-0 cursor-default",
+                    aria_label: "Close menu",
+                    onclick: move |_| {
+                        open.set(false);
+                        document::eval(&format!("document.getElementById('{keyboard_trigger_id}')?.focus()"));
+                    },
+                    onwheel: move |event| {
+                        event.prevent_default();
+                        event.stop_propagation();
+                    },
+                }
+                div {
+                    id: "{menu_id}",
+                    role: "listbox",
+                    aria_labelledby: "{trigger_id}",
+                    class: "app-select-menu",
+                    onwheel: move |event| event.stop_propagation(),
+                    for (index, (option_value, label)) in options.iter().enumerate() {
+                        {
+                            let option_value = option_value.clone();
+                            let option_trigger_id = trigger_id.clone();
+                            let is_selected = option_value == value;
+                            let is_active = index == active_index();
+                            let option_class = match (is_selected, is_active) {
+                                (true, true) => "app-select-option app-select-option-selected app-select-option-active",
+                                (true, false) => "app-select-option app-select-option-selected",
+                                (false, true) => "app-select-option app-select-option-active",
+                                (false, false) => "app-select-option",
+                            };
+                            rsx! {
+                                button {
+                                    id: "app-select-option-{instance_id}-{index}",
+                                    r#type: "button",
+                                    role: "option",
+                                    tabindex: "-1",
+                                    aria_selected: is_selected,
+                                    class: "{option_class}",
+                                    onclick: move |_| {
+                                        on_change.call(option_value.clone());
+                                        open.set(false);
+                                        document::eval(&format!("document.getElementById('{option_trigger_id}')?.focus()"));
+                                    },
+                                    span { class: "min-w-0 whitespace-normal", "{label}" }
+                                    if is_selected {
+                                        span { class: "app-select-check", "✓" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
 
 #[component]
 pub fn LanguageSelector(current_language: String, on_change: EventHandler<String>) -> Element {
+    let options = i18n::available_languages()
+        .iter()
+        .map(|(code, name)| ((*code).to_string(), (*name).to_string()))
+        .collect();
     rsx! {
-        select {
-            class: "bg-white/5 border border-white/10 rounded px-3 py-1 text-sm text-white focus:outline-none focus:border-white/20",
-            onchange: move |evt| on_change.call(evt.value()),
-            for (code, name) in i18n::available_languages() {
-                option {
-                    value: *code,
-                    selected: *code == current_language.as_str(),
-                    "{name}"
-                }
-            }
+        AppSelect {
+            value: current_language,
+            options,
+            on_change,
+            class: "settings-select",
         }
     }
 }
@@ -60,50 +280,41 @@ pub fn ThemeSelector(current_theme: String, on_change: EventHandler<String>) -> 
         .map(|(id, ct)| (id.clone(), ct.name.clone()))
         .collect();
     custom.sort_by(|a, b| a.1.cmp(&b.1));
+    let mut options = vec![
+        ("album-art".into(), i18n::t("album_art_gradient")),
+        ("default".into(), i18n::t("default_theme")),
+        ("gruvbox".into(), i18n::t("gruvbox_material")),
+        ("gruvbox-classic".into(), i18n::t("gruvbox_classic")),
+        ("gruvbox-dark-soft".into(), i18n::t("gruvbox_dark_soft")),
+        ("dracula".into(), i18n::t("dracula")),
+        ("nord".into(), i18n::t("nord")),
+        ("catppuccin".into(), i18n::t("catppuccin_mocha")),
+        ("ef-night".into(), i18n::t("ef_night")),
+        ("ayu-dark".into(), i18n::t("ayu_dark")),
+        ("ayu-mirage".into(), i18n::t("ayu_mirage")),
+        ("vague".into(), i18n::t("vague")),
+        ("onedarkpro".into(), i18n::t("one_dark_pro")),
+        ("osmium".into(), i18n::t("osmium")),
+        ("kanagawa-dragon".into(), i18n::t("kanagawa_dragon")),
+        ("everforest".into(), i18n::t("everforest")),
+        ("rosepine".into(), i18n::t("rosepine")),
+        ("kettek16".into(), "kettek16".into()),
+        ("default-light".into(), i18n::t("default_light")),
+        ("catppuccin-latte".into(), i18n::t("catppuccin_latte")),
+        ("rosepine-dawn".into(), i18n::t("rosepine_dawn")),
+        ("everforest-light".into(), i18n::t("everforest_light")),
+        ("ayu-light".into(), i18n::t("ayu_light")),
+        ("one-light".into(), i18n::t("one_light")),
+        ("gruvbox-light".into(), i18n::t("gruvbox_light_soft")),
+    ];
+    options.extend(custom);
 
     rsx! {
-        select {
-            class: "bg-white/5 border border-white/10 rounded px-3 py-1 text-sm text-white focus:outline-none focus:border-white/20",
-            value: "{current_theme}",
-            onchange: move |evt| on_change.call(evt.value()),
-            optgroup { label: "{i18n::t(\"theme_group_dynamic\")}",
-                option { value: "album-art", "{i18n::t(\"album_art_gradient\")}" }
-            }
-            optgroup { label: "{i18n::t(\"theme_group_dark\")}",
-                option { value: "default", "{i18n::t(\"default_theme\")}" }
-                option { value: "gruvbox", "{i18n::t(\"gruvbox_material\")}" }
-                option { value: "gruvbox-classic", "{i18n::t(\"gruvbox_classic\")}" }
-                option { value: "gruvbox-dark-soft", "{i18n::t(\"gruvbox_dark_soft\")}" }
-                option { value: "dracula", "{i18n::t(\"dracula\")}" }
-                option { value: "nord", "{i18n::t(\"nord\")}" }
-                option { value: "catppuccin", "{i18n::t(\"catppuccin_mocha\")}" }
-                option { value: "ef-night", "{i18n::t(\"ef_night\")}" }
-                option { value: "ayu-dark", "{i18n::t(\"ayu_dark\")}" }
-                option { value: "ayu-mirage", "{i18n::t(\"ayu_mirage\")}" }
-                option { value: "vague", "{i18n::t(\"vague\")}" }
-                option { value: "onedarkpro", "{i18n::t(\"one_dark_pro\")}" }
-                option { value: "osmium", "{i18n::t(\"osmium\")}" }
-                option { value: "kanagawa-dragon", "{i18n::t(\"kanagawa_dragon\")}" }
-                option { value: "everforest", "{i18n::t(\"everforest\")}" }
-                option { value: "rosepine", "{i18n::t(\"rosepine\")}" }
-                option { value: "kettek16", "kettek16" }
-            }
-            optgroup { label: "{i18n::t(\"theme_group_light\")}",
-                option { value: "default-light", "{i18n::t(\"default_light\")}" }
-                option { value: "catppuccin-latte", "{i18n::t(\"catppuccin_latte\")}" }
-                option { value: "rosepine-dawn", "{i18n::t(\"rosepine_dawn\")}" }
-                option { value: "everforest-light", "{i18n::t(\"everforest_light\")}" }
-                option { value: "ayu-light", "{i18n::t(\"ayu_light\")}" }
-                option { value: "one-light", "{i18n::t(\"one_light\")}" }
-                option { value: "gruvbox-light", "{i18n::t(\"gruvbox_light_soft\")}" }
-            }
-            if !custom.is_empty() {
-                optgroup { label: "{i18n::t(\"theme_group_custom\")}",
-                    for (id, name) in &custom {
-                        option { value: "{id}", "{name}" }
-                    }
-                }
-            }
+        AppSelect {
+            value: current_theme,
+            options,
+            on_change,
+            class: "settings-select",
         }
     }
 }
@@ -146,6 +357,97 @@ pub fn MultiDirectoryPicker(
                 }
             }
             AddFolderButton { on_add, add_text }
+        }
+    }
+}
+
+#[component]
+pub fn LocalSourceSettings(
+    active_source: config::Source,
+    default_directories: Vec<std::path::PathBuf>,
+    sources: Vec<SavedLocalSource>,
+    on_add: EventHandler<()>,
+    on_delete: EventHandler<String>,
+    on_switch: EventHandler<config::Source>,
+    on_add_folder: EventHandler<(config::Source, std::path::PathBuf)>,
+    on_remove_folder: EventHandler<(config::Source, usize)>,
+) -> Element {
+    let default_active = active_source == config::Source::Local;
+    rsx! {
+        div { class: "flex flex-col gap-3 w-full",
+            div { class: "bg-white/5 p-3 rounded w-full space-y-2",
+                div { class: "flex items-center justify-between gap-3",
+                    div { class: "min-w-0 flex items-center gap-2",
+                        p { class: "text-sm font-medium text-white truncate", "{i18n::t(\"local\")}" }
+                        if default_active {
+                            span { class: "text-[10px] px-2 py-0.5 rounded bg-indigo-500/30 text-indigo-200",
+                                "{i18n::t(\"active_local_library\")}"
+                            }
+                        }
+                    }
+                    if !default_active {
+                        button {
+                            onclick: move |_| on_switch.call(config::Source::Local),
+                            class: "text-xs bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-white transition-colors",
+                            "{i18n::t(\"switch_to_local_library\")}"
+                        }
+                    }
+                }
+                MultiDirectoryPicker {
+                    current_paths: default_directories,
+                    on_add: move |path| on_add_folder.call((config::Source::Local, path)),
+                    on_remove: move |index| on_remove_folder.call((config::Source::Local, index)),
+                }
+            }
+            for source in sources.iter().cloned() {
+                {
+                    let id = source.id.clone();
+                    let id_delete = id.clone();
+                    let source_key = config::Source::LocalLibrary(id.clone());
+                    let switch_key = source_key.clone();
+                    let add_folder_key = source_key.clone();
+                    let remove_folder_key = source_key.clone();
+                    let is_active = active_source.local_library_id() == Some(source.id.as_str());
+                    rsx! {
+                        div { key: "{source.id}", class: "bg-white/5 p-3 rounded w-full space-y-2",
+                            div { class: "flex items-center justify-between gap-3",
+                                div { class: "min-w-0 flex items-center gap-2",
+                                    p { class: "text-sm font-medium text-white truncate", "{source.name}" }
+                                    if is_active {
+                                        span { class: "text-[10px] px-2 py-0.5 rounded bg-indigo-500/30 text-indigo-200",
+                                            "{i18n::t(\"active_local_library\")}"
+                                        }
+                                    }
+                                }
+                                div { class: "flex items-center gap-2 shrink-0",
+                                    if !is_active {
+                                        button {
+                                            onclick: move |_| on_switch.call(switch_key.clone()),
+                                            class: "text-xs bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-white transition-colors",
+                                            "{i18n::t(\"switch_to_local_library\")}"
+                                        }
+                                    }
+                                    button {
+                                        onclick: move |_| on_delete.call(id_delete.clone()),
+                                        class: "text-red-400 hover:text-red-300 text-sm px-2 py-1 transition-colors",
+                                        "{i18n::t(\"delete\")}"
+                                    }
+                                }
+                            }
+                            MultiDirectoryPicker {
+                                current_paths: source.directories.clone(),
+                                on_add: move |path| on_add_folder.call((add_folder_key.clone(), path)),
+                                on_remove: move |index| on_remove_folder.call((remove_folder_key.clone(), index)),
+                            }
+                        }
+                    }
+                }
+            }
+            button {
+                onclick: move |_| on_add.call(()),
+                class: "bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start",
+                "{i18n::t(\"add_local_library\")}"
+            }
         }
     }
 }
@@ -782,12 +1084,16 @@ pub fn EqualizerPanel(
         "stroke: color-mix(in oklab, var(--color-indigo-500) 52%, var(--color-slate-400)); transition: stroke 180ms ease-out;"
             .to_string()
     };
+    let preset_options = EqPreset::all()
+        .into_iter()
+        .map(|preset| (preset.as_storage().to_string(), eq_preset_label(preset)))
+        .collect();
 
     rsx! {
-        div { class: "flex flex-col gap-4 w-full",
-            div { class: "flex flex-wrap items-center gap-3",
+        div { class: "flex flex-col gap-4 min-w-0 w-full",
+            div { class: "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[12rem_15rem_minmax(16rem,1fr)] items-stretch gap-3",
                 div {
-                    class: "bg-white/5 p-1 rounded-xl flex relative h-10 items-center border border-white/5 w-48",
+                    class: "bg-white/5 p-1 rounded-xl flex relative min-h-10 items-center border border-white/5 w-full",
                     div {
                         class: "absolute h-8 bg-white/10 rounded-lg transition-all duration-300 ease-out",
                         style: "{slider_style}"
@@ -816,14 +1122,15 @@ pub fn EqualizerPanel(
                     }
                 }
 
-                div { class: "flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2",
+                div { class: "flex min-w-0 items-center gap-2 bg-white/5 border border-white/10 rounded-xl px-3 py-2",
                     span { class: "text-xs text-slate-400", "{i18n::t(\"eq_preset\")}" }
-                    select {
-                        class: "bg-transparent text-sm text-white focus:outline-none",
-                        value: "{draft.read().preset.as_storage()}",
-                        onchange: move |evt| {
+                    AppSelect {
+                        class: "min-w-0 flex-1",
+                        value: draft.read().preset.as_storage().to_string(),
+                        options: preset_options,
+                        on_change: move |value: String| {
                             let mut next = draft.peek().clone();
-                            let preset = EqPreset::from_storage(&evt.value());
+                            let preset = EqPreset::from_storage(&value);
                             let previous_bands = *displayed_bands.peek();
                             next.preset = preset;
                             if let Some(default_preamp_db) = preset.default_preamp_db() {
@@ -858,17 +1165,10 @@ pub fn EqualizerPanel(
                             on_preview.call(next.clone());
                             on_commit.call(next);
                         },
-                        for preset in EqPreset::all() {
-                            option {
-                                value: "{preset.as_storage()}",
-                                selected: preset == draft.read().preset,
-                                "{eq_preset_label(preset)}"
-                            }
-                        }
                     }
                 }
 
-                div { class: "flex items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2 min-w-[220px] flex-1",
+                div { class: "flex min-w-0 items-center gap-3 bg-white/5 border border-white/10 rounded-xl px-3 py-2 md:col-span-2 xl:col-span-1",
                     div { class: "min-w-0",
                         p { class: "text-xs text-slate-400", "{i18n::t(\"eq_preamp\")}" }
                         p { class: "text-[11px] text-slate-500", "{i18n::t(\"eq_preamp_desc\")}" }
@@ -909,7 +1209,7 @@ pub fn EqualizerPanel(
                 style: "background: color-mix(in oklab, var(--color-neutral-900) 78%, transparent); border-color: color-mix(in oklab, var(--color-white) 8%, transparent);",
                 svg {
                     class: "{graph_class}",
-                    style: "width: 1100px; height: 280px; min-width: 1100px;",
+                    style: "width: 100%; height: auto; min-width: 680px; aspect-ratio: 1100 / 280;",
                     view_box: "0 0 1100 280",
                     onmousedown: move |evt: MouseEvent| {
                         let point = evt.element_coordinates();
@@ -1189,18 +1489,16 @@ fn channel_mode_label(mode: ChannelMode) -> String {
 
 #[component]
 pub fn ChannelModeSelector(current: ChannelMode, on_change: EventHandler<ChannelMode>) -> Element {
+    let options = ChannelMode::ALL
+        .iter()
+        .map(|mode| (mode.value_str().to_string(), channel_mode_label(*mode)))
+        .collect();
     rsx! {
-        select {
-            class: "bg-white/5 border border-white/10 rounded px-3 py-1 text-sm text-white focus:outline-none focus:border-white/20",
-            value: current.value_str(),
-            onchange: move |evt| on_change.call(ChannelMode::from_value_str(&evt.value())),
-            for mode in ChannelMode::ALL {
-                option {
-                    value: mode.value_str(),
-                    selected: *mode == current,
-                    "{channel_mode_label(*mode)}"
-                }
-            }
+        AppSelect {
+            value: current.value_str().to_string(),
+            options,
+            on_change: move |value: String| on_change.call(ChannelMode::from_value_str(&value)),
+            class: "settings-select",
         }
     }
 }
@@ -1217,18 +1515,16 @@ pub fn SampleRateModeSelector(
     current: SampleRateMode,
     on_change: EventHandler<SampleRateMode>,
 ) -> Element {
+    let options = SampleRateMode::ALL
+        .iter()
+        .map(|mode| (mode.value_str().to_string(), sample_rate_mode_label(*mode)))
+        .collect();
     rsx! {
-        select {
-            class: "bg-white/5 border border-white/10 rounded px-3 py-1 text-sm text-white focus:outline-none focus:border-white/20",
-            value: current.value_str(),
-            onchange: move |evt| on_change.call(SampleRateMode::from_value_str(&evt.value())),
-            for mode in SampleRateMode::ALL {
-                option {
-                    value: mode.value_str(),
-                    selected: *mode == current,
-                    "{sample_rate_mode_label(*mode)}"
-                }
-            }
+        AppSelect {
+            value: current.value_str().to_string(),
+            options,
+            on_change: move |value: String| on_change.call(SampleRateMode::from_value_str(&value)),
+            class: "settings-select",
         }
     }
 }
@@ -1245,18 +1541,23 @@ pub fn DeviceChangeBehaviorSelector(
     current: DeviceChangeBehavior,
     on_change: EventHandler<DeviceChangeBehavior>,
 ) -> Element {
+    let options = DeviceChangeBehavior::ALL
+        .iter()
+        .map(|behavior| {
+            (
+                behavior.value_str().to_string(),
+                device_change_behavior_label(*behavior),
+            )
+        })
+        .collect();
     rsx! {
-        select {
-            class: "bg-white/5 border border-white/10 rounded px-3 py-1 text-sm text-white focus:outline-none focus:border-white/20",
-            value: current.value_str(),
-            onchange: move |evt| on_change.call(DeviceChangeBehavior::from_value_str(&evt.value())),
-            for behavior in DeviceChangeBehavior::ALL {
-                option {
-                    value: behavior.value_str(),
-                    selected: *behavior == current,
-                    "{device_change_behavior_label(*behavior)}"
-                }
-            }
+        AppSelect {
+            value: current.value_str().to_string(),
+            options,
+            on_change: move |value: String| {
+                on_change.call(DeviceChangeBehavior::from_value_str(&value))
+            },
+            class: "settings-select",
         }
     }
 }
@@ -1271,17 +1572,18 @@ pub fn RadioRegistryDropdown(
 ) -> Element {
     let mut expanded = use_signal(|| false);
     let is_open = expanded();
-    let chevron = if is_open { "▾" } else { "▸" };
     let add_text = i18n::t("add");
     let delete_text = i18n::t("delete");
     let default_registry = i18n::t("radio_default_registry");
     rsx! {
-        div { class: "flex flex-col w-full",
+        div { class: "settings-row flex flex-col w-full px-5",
             button {
-                class: "flex items-center justify-between w-full py-2 cursor-pointer group",
+                r#type: "button",
+                class: "flex min-h-[3.25rem] items-center justify-between gap-4 w-full cursor-pointer group text-left",
+                aria_expanded: is_open,
                 onclick: move |_| expanded.set(!is_open),
                 div { class: "flex items-center gap-2",
-                    span { class: "text-white font-medium", "{i18n::t(\"radio\")}" }
+                    span { class: "text-sm text-white/90 font-medium", "{i18n::t(\"radio\")}" }
                     span {
                         class: "text-xs text-slate-500",
                         {
@@ -1291,14 +1593,11 @@ pub fn RadioRegistryDropdown(
                         }
                     }
                 }
-                span {
-                    class: "text-white/60 group-hover:text-white transition-colors text-sm",
-                    "{chevron}"
-                }
+                i { class: if is_open { "fa-solid fa-chevron-up text-[10px] text-white/40" } else { "fa-solid fa-chevron-down text-[10px] text-white/40" } }
             }
             // Expandable panel
             if is_open {
-                div { class: "flex flex-col gap-2 pl-2 pb-2 border-l border-white/5 ml-1",
+                div { class: "flex flex-col gap-2 pb-3",
                     if registries.is_empty() {
                         p { class: "text-xs text-slate-500 italic py-1", "{i18n::t(\"radio_registries_empty\")}" }
                     }

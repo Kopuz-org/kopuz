@@ -30,6 +30,23 @@ impl SubsonicSource {
     }
 }
 
+fn playlist_meta(
+    client: &SubsonicClient,
+    playlist: crate::subsonic::SubsonicPlaylist,
+) -> PlaylistMeta {
+    let image_tag = playlist
+        .cover_art
+        .as_deref()
+        .and_then(|id| client.cover_art_url(id, Some(512)).ok())
+        .map(|url| encode_cover_url_tag(&url));
+
+    PlaylistMeta {
+        id: playlist.id,
+        name: playlist.name,
+        image_tag,
+    }
+}
+
 #[async_trait]
 impl MediaSource for SubsonicSource {
     fn source(&self) -> &Source {
@@ -278,11 +295,7 @@ impl MediaSource for SubsonicSource {
             .get_playlists()
             .await?
             .into_iter()
-            .map(|p| PlaylistMeta {
-                id: p.id,
-                name: p.name,
-                image_tag: None,
-            })
+            .map(|playlist| playlist_meta(&self.client, playlist))
             .collect())
     }
 
@@ -346,5 +359,63 @@ impl MediaSource for SubsonicSource {
             }
         }
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn playlist_cover_art_becomes_a_renderable_image_tag() {
+        let client = SubsonicClient::new("https://music.example.test", "user", "password");
+        let playlist = serde_json::from_value(serde_json::json!({
+            "id": "playlist-1",
+            "name": "Mix",
+            "songCount": 3,
+            "coverArt": "playlist-cover-1"
+        }))
+        .expect("valid Subsonic playlist");
+        let meta = playlist_meta(&client, playlist);
+
+        let image_tag = meta.image_tag.expect("playlist image tag");
+        let image_url = utils::jellyfin_image::jellyfin_image_url(
+            "https://unused.example.test",
+            &meta.id,
+            Some(&image_tag),
+            None,
+            384,
+            80,
+        );
+        let parsed = reqwest::Url::parse(&image_url).expect("valid cover URL");
+
+        assert_eq!(parsed.host_str(), Some("music.example.test"));
+        assert_eq!(parsed.path(), "/rest/getCoverArt.view");
+        assert!(
+            parsed
+                .query_pairs()
+                .any(|(key, value)| { key == "id" && value == "playlist-cover-1" })
+        );
+        assert!(
+            parsed
+                .query_pairs()
+                .any(|(key, value)| { key == "size" && value == "512" })
+        );
+    }
+
+    #[test]
+    fn playlist_without_cover_art_keeps_the_track_fallback() {
+        let client = SubsonicClient::new("https://music.example.test", "user", "password");
+        let meta = playlist_meta(
+            &client,
+            crate::subsonic::SubsonicPlaylist {
+                id: "playlist-1".to_string(),
+                name: "Mix".to_string(),
+                song_count: Some(3),
+                cover_art: None,
+            },
+        );
+
+        assert!(meta.image_tag.is_none());
     }
 }

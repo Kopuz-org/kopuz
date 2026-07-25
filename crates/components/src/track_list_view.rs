@@ -15,6 +15,8 @@ pub struct TrackListViewProps {
     pub tracks: Vec<Track>,
     #[props(default = false)]
     pub is_album: bool,
+    #[props(default)]
+    pub release_year: Option<u16>,
     pub on_close: EventHandler<()>,
     pub on_cover_click: Option<EventHandler<()>>,
     pub on_delete_track: Option<EventHandler<usize>>,
@@ -90,6 +92,7 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                 cover_url: props.cover_url.clone(),
                 tracks: props.tracks.clone(),
                 is_album: props.is_album,
+                release_year: props.release_year,
                 is_selection_mode: is_selection_mode(),
                 selected_tracks: selected_tracks.read().clone(),
                 all_selected: !props.tracks.is_empty()

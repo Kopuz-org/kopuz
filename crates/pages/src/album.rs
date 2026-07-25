@@ -689,6 +689,7 @@ fn AlbumDetail(
                 })),
                 cover_url,
                 is_album: true,
+                release_year: (album.year > 0).then_some(album.year),
                 tracks: tracks(),
                 on_close,
                 enable_metadata: cap.edit_tags,
@@ -789,7 +790,7 @@ fn AlbumDetail(
 }
 
 /// YT-Music-style album page: a left meta column (cover, artist link, title,
-/// "Album • year", song count · duration, play / shuffle / download) beside the
+/// "Album", song count · duration · year, play / shuffle / download) beside the
 /// full track list. Shown only for the catalog remote (YT) once the album
 /// resolved; local/other sources use [`TrackListView`]. Rows reuse [`TrackRow`]
 /// so play / queue / menu / download behave exactly as everywhere else.
@@ -881,15 +882,17 @@ fn YtAlbumDetail(
                         }
                         h1 { class: "text-3xl font-semibold tracking-tight text-white leading-[1.1] break-words", "{title}" }
                         div { class: "text-sm text-slate-400 flex flex-wrap items-center gap-x-2 justify-center md:justify-start",
-                            if let Some(y) = year {
+                            if year.is_some() {
                                 span { class: "uppercase tracking-wide text-xs font-semibold text-white/40", "{i18n::t(\"album\")}" }
-                                span { class: "text-white/30", "•" }
-                                span { "{y}" }
                                 span { class: "text-white/30", "•" }
                             }
                             span { "{i18n::t_with(\"showcase_song_count\", &[(\"count\", song_count.to_string())])}" }
                             span { class: "text-white/30", "•" }
                             span { "{dur_min} {i18n::t(\"min\")}" }
+                            if let Some(y) = year {
+                                span { class: "text-white/30", "•" }
+                                span { "{y}" }
+                            }
                         }
                     }
                     div { class: "flex items-center gap-3 mt-1",

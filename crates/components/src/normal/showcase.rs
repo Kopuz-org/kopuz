@@ -172,6 +172,10 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                          }
                          span { "•" }
                          p { "{duration_min} {i18n::t(\"min\")}" }
+                         if let Some(year) = props.release_year {
+                             span { "•" }
+                             p { "{year}" }
+                         }
                      }
                  }
 

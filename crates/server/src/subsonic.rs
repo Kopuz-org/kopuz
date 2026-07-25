@@ -67,6 +67,7 @@ pub struct SubsonicPlaylist {
     pub id: String,
     pub name: String,
     pub song_count: Option<u32>,
+    pub cover_art: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

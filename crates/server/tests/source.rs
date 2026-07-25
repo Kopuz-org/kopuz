@@ -49,7 +49,7 @@ fn unique_db() -> PathBuf {
 #[tokio::test]
 async fn local_create_then_add_playlist_round_trips() {
     let db = db::init(&unique_db()).await.unwrap();
-    let src = source::local(db.clone());
+    let src = source::local(db.clone(), Source::Local);
 
     let id = src
         .create_playlist("Road Trip", &["/music/a.flac".into()])
@@ -85,7 +85,7 @@ async fn local_create_then_add_playlist_round_trips() {
 #[tokio::test]
 async fn local_favorite_round_trips() {
     let db = db::init(&unique_db()).await.unwrap();
-    let src = source::local(db.clone());
+    let src = source::local(db.clone(), Source::Local);
 
     assert!(!src.is_favorite("/music/x.flac").await);
 
@@ -105,7 +105,7 @@ async fn local_favorite_round_trips() {
 #[tokio::test]
 async fn record_favorite_writes_a_clean_local_row_and_reverts() {
     let db = db::init(&unique_db()).await.unwrap();
-    let src = source::local(db.clone());
+    let src = source::local(db.clone(), Source::Local);
     let t = track(TrackId::Local("/music/x.flac".into()));
 
     // record_favorite writes the local state as a CLEAN row (no dirty/pending) —

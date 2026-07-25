@@ -604,7 +604,7 @@ pub trait MediaSource: Send + Sync {
     /// Increment a track's play count, keyed by its uid. DB-cache op.
     async fn bump_listen_count(&self, track_uid: &str) -> Result<(), SourceError> {
         self.db()
-            .bump_listen_count(track_uid)
+            .bump_listen_count(self.source(), track_uid)
             .await
             .map_err(SourceError::from)
     }
@@ -809,13 +809,9 @@ pub fn configured_server(db: Db, config: &AppConfig) -> Option<Box<dyn MediaSour
     Some(remote_source(db, source, &conn))
 }
 
-/// The local (filesystem) [`MediaSource`] — for the statically-local pages,
-/// which never act on a server and so need no config.
-pub fn local(db: Db) -> Box<dyn MediaSource> {
-    Box::new(LocalSource {
-        db,
-        source: Source::Local,
-    })
+/// A local (filesystem) [`MediaSource`] using the supplied DB namespace.
+pub fn local(db: Db, source: Source) -> Box<dyn MediaSource> {
+    Box::new(LocalSource { db, source })
 }
 
 /// The [`MediaSource`] backing a given [`Source`] key — the single factory.
@@ -825,7 +821,7 @@ pub fn local(db: Db) -> Box<dyn MediaSource> {
 /// the result (the cached [`ActiveSource`]) rather than calling per render.
 pub fn resolve(db: Db, config: &AppConfig, source: &Source) -> Box<dyn MediaSource> {
     match source {
-        Source::Local => local(db),
+        Source::Local | Source::LocalLibrary(_) => local(db, source.clone()),
         Source::Server(id) => match ServerConn::resolve(config) {
             Some(conn) => remote_source(db, Source::Server(id.clone()), &conn),
             None => Box::new(OfflineServerSource {

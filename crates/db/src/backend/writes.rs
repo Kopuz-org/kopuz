@@ -419,6 +419,25 @@ pub async fn update_album_cover(
     Ok(())
 }
 
+#[tracing::instrument(skip_all, fields(album_id = %album_id, source = %source.as_str()))]
+pub async fn update_album_cover_if_not_manual(
+    pool: &SqlitePool,
+    source: &Source,
+    album_id: &str,
+    cover_path: &str,
+) -> Result<bool, DbError> {
+    let result = sqlx::query(
+        "UPDATE albums SET cover_path = ?3 \
+         WHERE source = ?1 AND source_album_id = ?2 AND manual_cover = 0",
+    )
+    .bind(source.as_str())
+    .bind(album_id)
+    .bind(cover_path)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() != 0)
+}
+
 #[tracing::instrument(skip_all, fields(pl_id = %pl_id, source = %source.as_str()))]
 pub async fn upsert_playlist_meta(
     pool: &SqlitePool,

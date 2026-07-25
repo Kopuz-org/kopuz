@@ -126,6 +126,8 @@ pub struct ShowcaseProps {
     pub on_delete_all: Option<EventHandler<()>>,
     #[props(default = false)]
     pub is_album: bool,
+    #[props(default)]
+    pub release_year: Option<u16>,
     #[props(default = false)]
     pub is_downloading_all: bool,
     #[props(default = false)]

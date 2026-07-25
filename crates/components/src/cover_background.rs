@@ -21,17 +21,11 @@ pub fn CoverArtBackground(cover: String) -> Element {
         "filter: none; transform: none;".to_string()
     };
 
-    let src = if cover.starts_with("artwork://") {
-        format!("{cover}&hq=1")
-    } else {
-        cover
-    };
-
     rsx! {
         div {
             class: "absolute inset-0 -z-10 overflow-hidden pointer-events-none bg-black",
             img {
-                src: "{src}",
+                src: "{cover}",
                 class: "w-full h-full object-cover",
                 style: "{img_style}",
             }

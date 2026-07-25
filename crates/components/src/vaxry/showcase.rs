@@ -139,7 +139,11 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                 "showcase_song_count",
                                 &[("count", count.to_string())],
                             );
-                            rsx! { "{song_text} · {duration_min} {i18n::t(\"min\")}" }
+                            let release_year = props
+                                .release_year
+                                .map(|year| format!(" · {year}"))
+                                .unwrap_or_default();
+                            rsx! { "{song_text} · {duration_min} {i18n::t(\"min\")}{release_year}" }
                         }
                     }
 
