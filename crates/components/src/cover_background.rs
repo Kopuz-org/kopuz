@@ -1,7 +1,11 @@
 use config::AppConfig;
 use dioxus::prelude::*;
 
-pub(crate) fn high_quality_artwork_url(cover: String) -> String {
+/// Upgrade a local-artwork URL to the protocol's high-quality variant. The
+/// default URL serves a 400px thumbnail, which visibly blurs anywhere the cover
+/// is painted large (backdrops, the home hero). Remote URLs pass through — they
+/// carry their own size parameter.
+pub fn high_quality_artwork_url(cover: String) -> String {
     if cover.starts_with("artwork://") || cover.starts_with("http://artwork.dioxus.localhost/") {
         format!("{cover}&hq=1")
     } else {
