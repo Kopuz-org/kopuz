@@ -214,7 +214,9 @@ Kopuz is soon available on Flathub. To install from source manifest:
 
 #### Requirements
 
-Make sure you have Rust and the Dioxus CLI installed:
+Make sure you have Rust and the Dioxus CLI installed. We recommend installing
+`dioxus-cli` through your distro's package manager when available. If it's not packaged for your distro, you
+can install it via Cargo as a fallback:
 
 ```bash
 cargo install --locked dioxus-cli
