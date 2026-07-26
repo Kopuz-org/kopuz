@@ -344,6 +344,7 @@ ytdlp_js_runtimes_tooltip = אם YouTube נכשל עם שגיאות JS או את
 ytdlp_format_best_audio = אודיו מיטבי
 ytdlp_format_mp3 = MP3
 ytdlp_format_flac = FLAC
+ytdlp_format_opus = OPUS
 ytdlp_format_wav = WAV
 ytdlp_format_video = וידאו (MP4)
 ytdlp_status_downloading_eta = { $percent }%  { $speed }  זמן נותר { $eta }

@@ -135,6 +135,7 @@ ytdlp_js_runtimes_tooltip = YouTube JS അല്ലെങ്കിൽ captcha �
 ytdlp_format_best_audio = മികച്ച ഓഡിയോ
 ytdlp_format_mp3 = MP3
 ytdlp_format_flac = FLAC
+ytdlp_format_opus = OPUS
 ytdlp_format_wav = WAV
 ytdlp_format_video = വീഡിയോ (MP4)
 ytdlp_status_downloading_eta = { $percent }%  { $speed }  ETA { $eta }

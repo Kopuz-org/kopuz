@@ -124,10 +124,10 @@ media source carries its own credentials and its own favorites.
   and `Swap L/R` output modes.
 - **yt-dlp Integration**: Download audio directly from YouTube and other
   supported sites via yt-dlp. Choose your output format (Best Audio, MP3, FLAC,
-  WAV, or MP4 video). FLAC is not recommended since yt-dlp remuxes lossy audio
-  rather than decoding from a lossless source. Supports SponsorBlock, chapter
-  splitting, cookies, rate limiting, and more. Requires `yt-dlp` installed on
-  your system.
+  Opus, WAV, or MP4 video). FLAC is not recommended since yt-dlp remuxes lossy
+  audio rather than decoding from a lossless source. Supports SponsorBlock,
+  chapter splitting, cookies, rate limiting, and more. Requires `yt-dlp`
+  installed on your system.
 - **Metadata Settings**: A dedicated Metadata section in Settings lets you
   control how artist images are sourced. Choose between **Album Cover** (uses
   the first album artwork as the artist photo, default) or **Artist Photo**

@@ -350,6 +350,7 @@ ytdlp_js_runtimes_tooltip = YouTube が JS エラーや captcha チャレンジ 
 ytdlp_format_best_audio = 最高音質
 ytdlp_format_mp3 = MP3
 ytdlp_format_flac = FLAC
+ytdlp_format_opus = OPUS
 ytdlp_format_wav = WAV
 ytdlp_format_video = ビデオ (MP4)
 ytdlp_status_downloading_eta = { $percent }%  { $speed }  残り { $eta }

@@ -84,7 +84,7 @@ pub fn YtdlpPage(config: Signal<AppConfig>) -> Element {
             }
 
             div { class: "flex gap-2 mb-4 flex-wrap",
-                for fmt in [AudioFormat::BestAudio, AudioFormat::Mp3, AudioFormat::Flac, AudioFormat::Wav, AudioFormat::Video] {
+                for fmt in [AudioFormat::BestAudio, AudioFormat::Mp3, AudioFormat::Flac, AudioFormat::Opus, AudioFormat::Wav, AudioFormat::Video] {
                     button {
                         class: if *format.read() == fmt {
                             "text-xs px-3 py-1.5 rounded-lg bg-white/20 text-white font-medium transition-colors"

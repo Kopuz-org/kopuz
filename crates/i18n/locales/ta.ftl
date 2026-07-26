@@ -135,6 +135,7 @@ ytdlp_js_runtimes_tooltip = YouTube JS அல்லது captcha சவால�
 ytdlp_format_best_audio = சிறந்த ஆடியோ
 ytdlp_format_mp3 = MP3
 ytdlp_format_flac = FLAC
+ytdlp_format_opus = OPUS
 ytdlp_format_wav = WAV
 ytdlp_format_video = வீடியோ (MP4)
 ytdlp_status_downloading_eta = { $percent }%  { $speed }  ETA { $eta }

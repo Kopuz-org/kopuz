@@ -345,6 +345,7 @@ ytdlp_js_runtimes_tooltip = Si YouTube falla con errores de JS o de desafío cap
 ytdlp_format_best_audio = Mejor Audio
 ytdlp_format_mp3 = MP3
 ytdlp_format_flac = FLAC
+ytdlp_format_opus = OPUS
 ytdlp_format_wav = WAV
 ytdlp_format_video = Video (MP4)
 ytdlp_status_downloading_eta = { $percent }%  { $speed }  Faltan { $eta }

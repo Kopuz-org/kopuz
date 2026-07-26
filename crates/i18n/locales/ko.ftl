@@ -344,6 +344,7 @@ ytdlp_js_runtimes_tooltip = YouTube가 JS 오류나 captcha 챌린지 오류로 
 ytdlp_format_best_audio = 최고 음질
 ytdlp_format_mp3 = MP3
 ytdlp_format_flac = FLAC
+ytdlp_format_opus = OPUS
 ytdlp_format_wav = WAV
 ytdlp_format_video = 비디오 (MP4)
 ytdlp_status_downloading_eta = { $percent }%  { $speed }  남은 시간 { $eta }
