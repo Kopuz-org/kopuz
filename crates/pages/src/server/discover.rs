@@ -302,16 +302,8 @@ fn SongListShelf(
                             {
                                 let track = track.clone();
                                 let tracks_for_play = tracks.clone();
-                                let cover_url = utils::jellyfin_image::resolve_track_cover(
-                                    track.cover.as_deref(),
-                                    &track.id.key(),
-                                    &track.album_id,
-                                    "",
-                                    None,
-                                    96,
-                                    80,
-                                )
-                                .map(utils::cover_url_from_string);
+                                let cover_url =
+                                    server::cover::track(&ctrl.config.read(), &track, 96);
                                 let track_for_play = track.clone();
                                 let track_for_menu = track.clone();
                                 let track_path_for_match = track.id.clone();
@@ -725,21 +717,14 @@ fn Card(
 
 #[component]
 fn SongCard(track: Track) -> Element {
-    let thumbnail = utils::jellyfin_image::resolve_track_cover(
-        track.cover.as_deref(),
-        &track.id.key(),
-        &track.album_id,
-        "",
-        None,
-        320,
-        80,
-    );
     let title = track.title.clone();
     let artist = track.artist.clone();
     let video_id = track_video_id(&track);
 
     let active_source = use_context::<Signal<::server::source::ActiveSource>>();
     let mut ctrl = use_context::<hooks::use_player_controller::PlayerController>();
+    let thumbnail = server::cover::track(&ctrl.config.read(), &track, 320)
+        .map(|cover| cover.as_ref().to_string());
     let now_playing = use_context::<DiscoverNowPlaying>().0;
     let mut cache = use_context::<DiscoverPrefetchCache>().0;
 

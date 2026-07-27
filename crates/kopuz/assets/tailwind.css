@@ -1995,12 +1995,6 @@
   .text-emerald-400 {
     color: var(--color-emerald-400);
   }
-  .text-emerald-400\/80 {
-    color: color-mix(in srgb, oklch(76.5% 0.177 163.223) 80%, transparent);
-    @supports (color: color-mix(in lab, red, red)) {
-      color: color-mix(in oklab, var(--color-emerald-400) 80%, transparent);
-    }
-  }
   .text-green-400 {
     color: var(--color-green-400);
   }

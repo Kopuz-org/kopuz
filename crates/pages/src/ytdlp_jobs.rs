@@ -61,6 +61,7 @@ pub enum AudioFormat {
     BestAudio,
     Mp3,
     Flac,
+    Opus,
     Wav,
     Video,
 }
@@ -71,6 +72,7 @@ impl AudioFormat {
             Self::BestAudio => "ytdlp_format_best_audio",
             Self::Mp3 => "ytdlp_format_mp3",
             Self::Flac => "ytdlp_format_flac",
+            Self::Opus => "ytdlp_format_opus",
             Self::Wav => "ytdlp_format_wav",
             Self::Video => "ytdlp_format_video",
         }
@@ -85,6 +87,7 @@ impl AudioFormat {
             Self::BestAudio => "Best Audio",
             Self::Mp3 => "MP3",
             Self::Flac => "FLAC",
+            Self::Opus => "OPUS",
             Self::Wav => "WAV",
             Self::Video => "Video (MP4)",
         }
@@ -94,6 +97,7 @@ impl AudioFormat {
         match s {
             "MP3" => Self::Mp3,
             "FLAC" => Self::Flac,
+            "OPUS" => Self::Opus,
             "WAV" => Self::Wav,
             "Video (MP4)" => Self::Video,
             _ => Self::BestAudio,
@@ -105,6 +109,7 @@ impl AudioFormat {
             Self::BestAudio => vec!["-x", "--audio-quality", "0"],
             Self::Mp3 => vec!["-x", "--audio-format", "mp3", "--audio-quality", "0"],
             Self::Flac => vec!["-x", "--audio-format", "flac"],
+            Self::Opus => vec!["-x", "--audio-format", "opus"],
             Self::Wav => vec!["-x", "--audio-format", "wav"],
             Self::Video => vec!["-f", "bestvideo+bestaudio", "--merge-output-format", "mp4"],
         }
@@ -471,7 +476,11 @@ fn build_command(
 
     if matches!(
         fmt,
-        AudioFormat::Mp3 | AudioFormat::Flac | AudioFormat::Wav | AudioFormat::BestAudio
+        AudioFormat::Mp3
+            | AudioFormat::Flac
+            | AudioFormat::Opus
+            | AudioFormat::Wav
+            | AudioFormat::BestAudio
     ) {
         cmd.arg("--audio-quality")
             .arg(opts.audio_quality.to_string());

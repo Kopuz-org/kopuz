@@ -1,5 +1,5 @@
 {
-  "checksum": "d83663bd49cfc8177576025d7f6e44a8056b652d16bf8aa9bccdb550c04d3037",
+  "checksum": "1c645a7d2ffa9ff010ddfc7710915278648971590254320de6d0cb219d2564f1",
   "crates": {
     "adler 1.0.2": {
       "name": "adler",
@@ -26853,8 +26853,16 @@
         "deps": {
           "common": [
             {
+              "id": "base64 0.22.1",
+              "target": "base64"
+            },
+            {
               "id": "directories 6.0.0",
               "target": "directories"
+            },
+            {
+              "id": "futures-util 0.3.32",
+              "target": "futures_util"
             },
             {
               "id": "hex 0.4.3",
@@ -26893,8 +26901,16 @@
               "target": "sha1"
             },
             {
+              "id": "sha2 0.11.0",
+              "target": "sha2"
+            },
+            {
               "id": "tokio 1.52.3",
               "target": "tokio"
+            },
+            {
+              "id": "tokio-tungstenite 0.30.0",
+              "target": "tokio_tungstenite"
             },
             {
               "id": "tracing 0.1.44",
@@ -26903,6 +26919,10 @@
             {
               "id": "uuid 1.23.5",
               "target": "uuid"
+            },
+            {
+              "id": "webbrowser 1.2.1",
+              "target": "webbrowser"
             }
           ],
           "selects": {
@@ -26926,10 +26946,6 @@
               {
                 "id": "aes-gcm 0.11.0",
                 "target": "aes_gcm"
-              },
-              {
-                "id": "base64 0.22.1",
-                "target": "base64"
               },
               {
                 "id": "sqlx 0.8.0",

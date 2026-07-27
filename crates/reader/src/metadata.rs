@@ -50,6 +50,21 @@ fn select_best_picture(pictures: &[Picture]) -> Option<&Picture> {
         .or_else(|| pictures.first())
 }
 
+fn release_year(tag: Option<&Tag>) -> u16 {
+    tag.and_then(|tag| {
+        [
+            ItemKey::RecordingDate,
+            ItemKey::Year,
+            ItemKey::ReleaseDate,
+            ItemKey::OriginalReleaseDate,
+        ]
+        .into_iter()
+        .filter_map(|key| tag.get_string(key))
+        .find_map(|value| value.get(..4).unwrap_or(value).parse::<u16>().ok())
+    })
+    .unwrap_or(0)
+}
+
 pub fn extract_embedded_cover<'a>(
     tagged_file: &'a TaggedFile,
     tag: Option<&'a Tag>,
@@ -187,10 +202,7 @@ pub(crate) fn read_metadata(track_path: &Path) -> Option<ScannedTrack> {
     let genre = tag
         .and_then(|t| t.genre().map(|g| g.to_string()))
         .unwrap_or_else(|| "Unknown".to_string());
-    let year = tag
-        .and_then(|t| t.get_string(ItemKey::Year))
-        .and_then(|s| s.get(..4).unwrap_or(s).parse::<u16>().ok())
-        .unwrap_or(0);
+    let year = release_year(tag);
     let album = Album {
         id: track.album_id.clone(),
         title: track.album.clone(),
@@ -556,5 +568,13 @@ mod tests {
             track.album_id,
             make_album_id("Shared Album", "Track Artist")
         );
+    }
+
+    #[test]
+    fn release_year_reads_common_recording_date_tag() {
+        let mut tag = Tag::new(lofty::tag::TagType::VorbisComments);
+        tag.insert_text(ItemKey::RecordingDate, "2011-01-24".to_string());
+
+        assert_eq!(release_year(Some(&tag)), 2011);
     }
 }

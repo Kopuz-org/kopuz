@@ -6,8 +6,7 @@ use crate::{server_ops::ServerConn, subsonic::SubsonicClient};
 
 use super::{
     AlbumType, ArtistView, AuthOutcome, Capabilities, FavoritesSync, LibrarySnapshot, MediaSource,
-    PlaylistMeta, PlaylistOps, SourceError, StreamInfo, encode_cover_url_tag, mirror_added,
-    mirror_created,
+    PlaylistMeta, PlaylistOps, SourceError, StreamInfo, mirror_added, mirror_created,
 };
 
 pub(super) struct SubsonicSource {
@@ -27,6 +26,23 @@ impl SubsonicSource {
             client: SubsonicClient::new(&conn.url, &conn.user_id, &conn.token),
             service: conn.service,
         }
+    }
+}
+
+fn playlist_meta(
+    client: &SubsonicClient,
+    playlist: crate::subsonic::SubsonicPlaylist,
+) -> PlaylistMeta {
+    let image_tag = playlist
+        .cover_art
+        .as_deref()
+        .and_then(|id| client.cover_art_url(id, Some(512)).ok())
+        .map(|url| reader::CoverRef::encode_url(&url));
+
+    PlaylistMeta {
+        id: playlist.id,
+        name: playlist.name,
+        image_tag,
     }
 }
 
@@ -55,10 +71,6 @@ impl MediaSource for SubsonicSource {
 
     async fn fetch_library(&self) -> Result<LibrarySnapshot, SourceError> {
         use std::path::PathBuf;
-        let prefix = match self.service {
-            MusicService::Custom => "custom",
-            _ => "subsonic",
-        };
         let mut albums = Vec::new();
         let mut tracks = Vec::new();
         let mut artist_images = Vec::new();
@@ -87,11 +99,16 @@ impl MediaSource for SubsonicSource {
                     .cover_art
                     .as_ref()
                     .and_then(|c| self.client.cover_art_url(c, Some(512)).ok())
-                    .map(|url| encode_cover_url_tag(&url));
-                let album_id_prefixed = match &album_cover_tag {
-                    Some(tag) => format!("{}:{}:{}", prefix, album.id, tag),
-                    None => format!("{}:{}:none", prefix, album.id),
-                };
+                    .map(|url| reader::CoverRef::encode_url(&url));
+                let album_id_prefixed = reader::CoverRef::stored_item_ref(
+                    self.service,
+                    &album.id,
+                    Some(
+                        album_cover_tag
+                            .as_deref()
+                            .unwrap_or(reader::CoverRef::NO_COVER),
+                    ),
+                );
                 let album_name = album.name.clone();
                 let album_artist = album.artist.clone().unwrap_or_default();
                 albums.push(reader::Album {
@@ -119,13 +136,16 @@ impl MediaSource for SubsonicSource {
                         .cover_art
                         .as_ref()
                         .and_then(|c| self.client.cover_art_url(c, Some(512)).ok())
-                        .map(|url| encode_cover_url_tag(&url));
+                        .map(|url| reader::CoverRef::encode_url(&url));
                     tracks.push(reader::Track {
                         id: reader::models::TrackId::Server {
                             service: self.service,
                             item_id: song.id.clone(),
                         },
-                        cover: Some(song_cover_tag.unwrap_or_else(|| "none".to_string())),
+                        cover: Some(
+                            song_cover_tag
+                                .unwrap_or_else(|| reader::CoverRef::NO_COVER.to_string()),
+                        ),
                         album_id: album_id_prefixed.clone(),
                         title: song.title,
                         artist: song.artist.clone().unwrap_or_else(|| album_artist.clone()),
@@ -278,11 +298,7 @@ impl MediaSource for SubsonicSource {
             .get_playlists()
             .await?
             .into_iter()
-            .map(|p| PlaylistMeta {
-                id: p.id,
-                name: p.name,
-                image_tag: None,
-            })
+            .map(|playlist| playlist_meta(&self.client, playlist))
             .collect())
     }
 
@@ -295,27 +311,27 @@ impl MediaSource for SubsonicSource {
             .into_iter()
             .map(|item| {
                 // Encode the cover URL as the `urlhex_` tag the cover resolver
-                // understands; album_id carries it (or `:none`) like subsonic_sync.
+                // understands; album_id carries it (or `:none`) like fetch_library
+                // — same encoder, so these ids match the synced album rows.
                 let cover_tag = item
                     .cover_art
                     .as_ref()
                     .and_then(|id| self.client.cover_art_url(id, Some(512)).ok())
-                    .map(|url| format!("urlhex_{}", hex::encode(url.as_bytes())));
-                let album_id = item
-                    .album_id
-                    .as_ref()
-                    .map(|id| match &cover_tag {
-                        Some(tag) => format!("jellyfin:{}:{}", id, tag),
-                        None => format!("jellyfin:{}:none", id),
-                    })
-                    .unwrap_or_else(|| format!("jellyfin:{}:none", item.id));
+                    .map(|url| reader::CoverRef::encode_url(&url));
+                let album_id = reader::CoverRef::stored_item_ref(
+                    self.service,
+                    item.album_id.as_deref().unwrap_or(&item.id),
+                    Some(cover_tag.as_deref().unwrap_or(reader::CoverRef::NO_COVER)),
+                );
                 let artist = item.artist.clone().unwrap_or_default();
                 reader::models::Track {
                     id: reader::models::TrackId::Server {
                         service: self.service,
                         item_id: item.id.clone(),
                     },
-                    cover: Some(cover_tag.unwrap_or_else(|| "none".to_string())),
+                    cover: Some(
+                        cover_tag.unwrap_or_else(|| reader::CoverRef::NO_COVER.to_string()),
+                    ),
                     album_id,
                     title: item.title,
                     artist: artist.clone(),
@@ -346,5 +362,61 @@ impl MediaSource for SubsonicSource {
             }
         }
         Ok(out)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn playlist_cover_art_becomes_a_renderable_image_tag() {
+        let client = SubsonicClient::new("https://music.example.test", "user", "password");
+        let playlist = serde_json::from_value(serde_json::json!({
+            "id": "playlist-1",
+            "name": "Mix",
+            "songCount": 3,
+            "coverArt": "playlist-cover-1"
+        }))
+        .expect("valid Subsonic playlist");
+        let meta = playlist_meta(&client, playlist);
+
+        let image_tag = meta.image_tag.expect("playlist image tag");
+        let image_url = crate::cover::resolve(
+            &config::AppConfig::default(),
+            reader::CoverRef::remote_item(MusicService::Subsonic, &meta.id, Some(&image_tag)),
+            384,
+        )
+        .expect("renderable cover URL");
+        let parsed = reqwest::Url::parse(&image_url).expect("valid cover URL");
+
+        assert_eq!(parsed.host_str(), Some("music.example.test"));
+        assert_eq!(parsed.path(), "/rest/getCoverArt.view");
+        assert!(
+            parsed
+                .query_pairs()
+                .any(|(key, value)| { key == "id" && value == "playlist-cover-1" })
+        );
+        assert!(
+            parsed
+                .query_pairs()
+                .any(|(key, value)| { key == "size" && value == "512" })
+        );
+    }
+
+    #[test]
+    fn playlist_without_cover_art_keeps_the_track_fallback() {
+        let client = SubsonicClient::new("https://music.example.test", "user", "password");
+        let meta = playlist_meta(
+            &client,
+            crate::subsonic::SubsonicPlaylist {
+                id: "playlist-1".to_string(),
+                name: "Mix".to_string(),
+                song_count: Some(3),
+                cover_art: None,
+            },
+        );
+
+        assert!(meta.image_tag.is_none());
     }
 }

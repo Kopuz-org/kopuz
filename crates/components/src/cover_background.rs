@@ -1,6 +1,18 @@
 use config::AppConfig;
 use dioxus::prelude::*;
 
+/// Upgrade a local-artwork URL to the protocol's high-quality variant. The
+/// default URL serves a 400px thumbnail, which visibly blurs anywhere the cover
+/// is painted large (backdrops, the home hero). Remote URLs pass through — they
+/// carry their own size parameter.
+pub fn high_quality_artwork_url(cover: String) -> String {
+    if cover.starts_with("artwork://") || cover.starts_with("http://artwork.dioxus.localhost/") {
+        format!("{cover}&hq=1")
+    } else {
+        cover
+    }
+}
+
 /// Art backdrop: the cover under user-configurable blur and darkening so
 /// text stays readable. The overscan grows with the blur radius to keep
 /// blurred edge bleed outside the viewport.
@@ -21,11 +33,7 @@ pub fn CoverArtBackground(cover: String) -> Element {
         "filter: none; transform: none;".to_string()
     };
 
-    let src = if cover.starts_with("artwork://") {
-        format!("{cover}&hq=1")
-    } else {
-        cover
-    };
+    let src = high_quality_artwork_url(cover);
 
     rsx! {
         div {
@@ -40,5 +48,24 @@ pub fn CoverArtBackground(cover: String) -> Element {
                 style: "background-color: rgba(0, 0, 0, {scrim});",
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::high_quality_artwork_url;
+
+    #[test]
+    fn local_artwork_uses_the_hq_protocol_variant() {
+        assert_eq!(
+            high_quality_artwork_url("artwork://local?p=%2Fcover.jpg".to_string()),
+            "artwork://local?p=%2Fcover.jpg&hq=1"
+        );
+        assert_eq!(
+            high_quality_artwork_url(
+                "http://artwork.dioxus.localhost/local?p=C%3A%5Ccover.jpg".to_string()
+            ),
+            "http://artwork.dioxus.localhost/local?p=C%3A%5Ccover.jpg&hq=1"
+        );
     }
 }
