@@ -210,13 +210,23 @@ paru -S kopuz-bin
 
 ### Flatpak (Recommended)
 
-Kopuz is soon available on Flathub. To install from source manifest:
+Kopuz is soon available on Flathub. In the meantime, you can install it via our
+pre-built Flatpak repository, or build it yourself from source.
 
-#### Requirements
+#### Option 1: Install pre-built (recommended)
+
+```bash
+flatpak install --user --or-update \
+    https://kopuz-org.github.io/kopuz-flatpak/com.temidaradev.kopuz.flatpakref
+```
+
+#### Option 2: Build from source manifest
+
+##### Requirements
 
 Make sure you have Rust and the Dioxus CLI installed. We recommend installing
-`dioxus-cli` through your distro's package manager when available. If it's not packaged for your distro, you
-can install it via Cargo as a fallback:
+`dioxus-cli` through your distro's package manager when available. If it's not
+packaged for your distro, you can install it via Cargo as a fallback:
 
 ```bash
 cargo install --locked dioxus-cli
@@ -227,17 +237,14 @@ Then build and install Kopuz:
 ```bash
 git clone https://github.com/temidaradev/kopuz
 cd kopuz
-
 dx build --release --package kopuz
-
 flatpak-builder --user --install --force-clean \
   build-dir packaging/flatpak/com.temidaradev.kopuz.json
-
 flatpak run com.temidaradev.kopuz
 ```
 
 You can also click on the file and open it with an app provider, for example KDE
-discover
+Discover.
 
 ### AppImage
 
