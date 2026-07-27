@@ -385,22 +385,45 @@ impl PlayerController {
         }
     }
 
-    /// Hydrate the now-playing display signals from a track we don't own in the
-    /// queue — a Spotify Connect session started elsewhere, or one whose track
-    /// advanced remotely. Leaves `current_queue_index` untouched, since the
-    /// track has no position in our queue.
+    /// Adopt a Spotify Connect track started elsewhere. Upsert it into the
+    /// queue and select its logical position so the normal queue-state save can
+    /// restore it after restart instead of falling back to the last track
+    /// clicked in kopuz.
     pub(crate) fn hydrate_external_track_metadata(&mut self, track: Track, progress_secs: u64) {
-        let progress_secs = progress_secs.min(track.duration);
-        self.current_song_title.set(track.title.clone());
-        self.current_song_artist.set(track.artist.clone());
-        self.current_song_album.set(track.album.clone());
-        self.current_song_khz.set(track.khz);
-        self.current_song_bitrate.set(track.bitrate);
-        self.current_song_duration.set(track.duration);
-        self.current_song_progress.set(progress_secs);
-        self.current_song_cover_url
-            .set(self.cover_url_for_track(&track));
-        self.current_track_snapshot.set(Some(track));
+        let physical_idx = self
+            .queue
+            .peek()
+            .iter()
+            .position(|queued| queued.id == track.id);
+        let physical_idx = match physical_idx {
+            Some(idx) => {
+                self.queue.write()[idx] = track;
+                idx
+            }
+            None => {
+                let idx = self.queue.peek().len();
+                self.queue.write().push(track);
+                idx
+            }
+        };
+
+        let logical_idx = if *self.shuffle.peek() {
+            if let Some(idx) = self
+                .shuffle_order
+                .peek()
+                .iter()
+                .position(|physical| *physical == physical_idx)
+            {
+                idx
+            } else {
+                let idx = self.shuffle_order.peek().len();
+                self.shuffle_order.write().push(physical_idx);
+                idx
+            }
+        } else {
+            physical_idx
+        };
+        self.hydrate_current_track_metadata(logical_idx, progress_secs);
     }
 
     fn pending_resume_seek(&self, track: &Track) -> (Option<u64>, bool) {

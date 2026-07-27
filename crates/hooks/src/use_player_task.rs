@@ -533,8 +533,9 @@ pub fn use_player_task(ctrl: PlayerController) {
                         paused,
                         position_ms,
                         duration_ms,
+                        track_id,
+                        track,
                         ended,
-                        ..
                     } => {
                         if *ctrl.external_active.peek()
                             && ctrl.spotify_device_override.peek().is_none()
@@ -547,6 +548,20 @@ pub fn use_player_task(ctrl: PlayerController) {
                                 ctrl.spotify_progress_anchor
                                     .set(Some((position_ms, std::time::Instant::now())));
                                 ctrl.current_song_progress.set(position_ms / 1000);
+                                let shown_id = ctrl
+                                    .current_track_snapshot
+                                    .peek()
+                                    .as_ref()
+                                    .map(|shown| shown.id.key().to_string());
+                                if track_id.is_some()
+                                    && track_id != shown_id
+                                    && let Some(track) = track
+                                {
+                                    ctrl.hydrate_external_track_metadata(
+                                        *track,
+                                        position_ms / 1000,
+                                    );
+                                }
                                 if duration_ms > 0 {
                                     ctrl.current_song_duration.set(duration_ms / 1000);
                                 }

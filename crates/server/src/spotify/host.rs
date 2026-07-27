@@ -39,6 +39,9 @@ pub enum HostEvent {
         position_ms: u64,
         duration_ms: u64,
         track_id: Option<String>,
+        /// Full SDK metadata so a track started from another Spotify client can
+        /// replace the stale queue metadata in kopuz immediately.
+        track: Option<Box<reader::Track>>,
         /// Heuristic end-of-track (SDK reports paused at position 0 after play).
         ended: bool,
     },
@@ -597,6 +600,7 @@ fn emit_event(val: &Value, event_tx: &broadcast::Sender<HostEvent>) {
             position_ms: val["position"].as_u64().unwrap_or(0),
             duration_ms: val["duration"].as_u64().unwrap_or(0),
             track_id: val["track_id"].as_str().map(str::to_string),
+            track: super::api::parse_track(&val["track"]).map(Box::new),
             ended: val["ended"].as_bool().unwrap_or(false),
         },
         "error" => HostEvent::Error {
@@ -869,6 +873,26 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
     }
 
     let lastSentKey = "";
+    function trackPayload(cur, duration) {
+      if (!cur || !cur.id) return null;
+      const album = cur.album || {};
+      return {
+        id: cur.id,
+        name: cur.name || "",
+        duration_ms: duration || cur.duration_ms || 0,
+        artists: (cur.artists || []).map((artist) => ({ name: artist.name || "" })),
+        album: {
+          id: album.id || "",
+          name: album.name || "",
+          images: (album.images || []).map((image) => ({
+            url: image.url || "",
+            width: image.width || null,
+            height: image.height || null,
+          })),
+        },
+      };
+    }
+
     function handleState(s) {
       const paused = s.paused, pos = s.position || 0, dur = s.duration || 0;
       const cur = s.track_window && s.track_window.current_track;
@@ -888,7 +912,7 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
         prevPaused = paused;
         wasPlaying = !paused;
         lastSentKey = paused + "|" + pos + "|" + tid;
-        send({ event: "state", paused, position: pos, duration: dur, track_id: tid, ended: false });
+        send({ event: "state", paused, position: pos, duration: dur, track_id: tid, track: trackPayload(cur, dur), ended: false });
         return;
       }
 
@@ -923,7 +947,7 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
       const key = paused + "|" + pos + "|" + tid;
       if (!ended && key === lastSentKey) return;
       lastSentKey = key;
-      send({ event: "state", paused, position: pos, duration: dur, track_id: tid, ended });
+      send({ event: "state", paused, position: pos, duration: dur, track_id: tid, track: trackPayload(cur, dur), ended });
     }
 
     document.getElementById("activate").addEventListener("click", () => {
@@ -973,5 +997,44 @@ mod tests {
     #[test]
     fn player_page_enables_sdk_media_session_metadata() {
         assert!(PLAYER_PAGE.contains("enableMediaSession: true"));
+    }
+
+    #[test]
+    fn state_event_carries_track_metadata() {
+        let (event_tx, mut event_rx) = broadcast::channel(1);
+        emit_event(
+            &serde_json::json!({
+                "event": "state",
+                "paused": false,
+                "position": 12_000,
+                "duration": 180_000,
+                "track_id": "new-track",
+                "track": {
+                    "id": "new-track",
+                    "name": "Started Elsewhere",
+                    "duration_ms": 180_000,
+                    "artists": [{"name": "Remote Artist"}],
+                    "album": {
+                        "id": "album-id",
+                        "name": "Remote Album",
+                        "images": [{"url": "https://i.scdn.co/image/cover"}]
+                    }
+                },
+                "ended": false
+            }),
+            &event_tx,
+        );
+
+        let HostEvent::State { track, .. } = event_rx.try_recv().expect("state event") else {
+            panic!("expected state event");
+        };
+        let track = track.expect("track metadata");
+        assert_eq!(track.id.key(), "new-track");
+        assert_eq!(track.title, "Started Elsewhere");
+        assert_eq!(track.artist, "Remote Artist");
+        assert_eq!(
+            track.cover.as_deref(),
+            Some("https://i.scdn.co/image/cover")
+        );
     }
 }
