@@ -146,7 +146,7 @@ pub fn AddServerPopup(
                     option {
                         value: "spotify",
                         selected: server_service() == MusicService::Spotify,
-                        "Spotify"
+                        "Spotify (experimental)"
                     }
                 }
 
