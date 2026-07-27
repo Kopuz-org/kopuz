@@ -13,6 +13,7 @@
 //! `activated`, `error`, …), broadcast to subscribers.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{Value, json};
@@ -28,6 +29,10 @@ pub enum HostEvent {
     Ready { device_id: String },
     /// The device went offline.
     NotReady,
+    /// Every browser page disconnected and none reconnected during the grace
+    /// period. This is distinct from the SDK device going offline while its
+    /// page is still open.
+    BrowserDisconnected,
     /// A player-state tick.
     State {
         paused: bool,
@@ -62,6 +67,18 @@ pub struct SpotifyHost {
     event_tx: broadcast::Sender<HostEvent>,
     /// The current OAuth token, re-sent to each new tab and on rotation.
     token: Arc<Mutex<String>>,
+    /// Aborts the localhost accept loop when the final handle is dropped.
+    _lifetime: Arc<HostLifetime>,
+}
+
+struct HostLifetime {
+    accept_loop: tokio::task::AbortHandle,
+}
+
+impl Drop for HostLifetime {
+    fn drop(&mut self) {
+        self.accept_loop.abort();
+    }
 }
 
 impl SpotifyHost {
@@ -77,12 +94,7 @@ impl SpotifyHost {
         let (cmd_tx, _) = broadcast::channel::<String>(64);
         let (event_tx, _) = broadcast::channel::<HostEvent>(256);
         let token = Arc::new(Mutex::new(access));
-
-        let host = Self {
-            cmd_tx: cmd_tx.clone(),
-            event_tx: event_tx.clone(),
-            token: token.clone(),
-        };
+        let connections = Arc::new(BrowserConnections::default());
 
         let nonce = {
             let bytes: [u8; 16] = rand::random();
@@ -95,15 +107,23 @@ impl SpotifyHost {
         let url = format!("http://127.0.0.1:{port}/?k={nonce}");
         open_player_page(&url, browser.as_deref())?;
 
-        tokio::spawn(accept_loop(
+        let accept_loop = tokio::spawn(accept_loop(
             listener,
+            cmd_tx.clone(),
+            event_tx.clone(),
+            token.clone(),
+            Arc::new(WsGate { nonce, port }),
+            connections,
+        ));
+
+        Ok(Self {
             cmd_tx,
             event_tx,
             token,
-            Arc::new(WsGate { nonce, port }),
-        ));
-
-        Ok(host)
+            _lifetime: Arc::new(HostLifetime {
+                accept_loop: accept_loop.abort_handle(),
+            }),
+        })
     }
 
     /// Subscribe to player events.
@@ -377,6 +397,50 @@ struct WsGate {
     port: u16,
 }
 
+/// Tracks live player pages. A short grace period lets a page reload or repair
+/// a transient WebSocket failure before the app decides that the browser was
+/// actually closed and opens it again.
+#[derive(Default)]
+struct BrowserConnections {
+    live: AtomicUsize,
+    generation: AtomicU64,
+}
+
+impl BrowserConnections {
+    fn connect(self: &Arc<Self>, event_tx: broadcast::Sender<HostEvent>) -> BrowserConnection {
+        self.live.fetch_add(1, Ordering::AcqRel);
+        self.generation.fetch_add(1, Ordering::AcqRel);
+        BrowserConnection {
+            connections: self.clone(),
+            event_tx,
+        }
+    }
+}
+
+struct BrowserConnection {
+    connections: Arc<BrowserConnections>,
+    event_tx: broadcast::Sender<HostEvent>,
+}
+
+impl Drop for BrowserConnection {
+    fn drop(&mut self) {
+        if self.connections.live.fetch_sub(1, Ordering::AcqRel) != 1 {
+            return;
+        }
+        let generation = self.connections.generation.fetch_add(1, Ordering::AcqRel) + 1;
+        let connections = self.connections.clone();
+        let event_tx = self.event_tx.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            if connections.live.load(Ordering::Acquire) == 0
+                && connections.generation.load(Ordering::Acquire) == generation
+            {
+                let _ = event_tx.send(HostEvent::BrowserDisconnected);
+            }
+        });
+    }
+}
+
 impl WsGate {
     fn authorizes(&self, path: &str, head: &str) -> bool {
         if path != format!("/ws?k={}", self.nonce) {
@@ -401,6 +465,7 @@ async fn accept_loop(
     event_tx: broadcast::Sender<HostEvent>,
     token: Arc<Mutex<String>>,
     gate: Arc<WsGate>,
+    connections: Arc<BrowserConnections>,
 ) {
     loop {
         let Ok((stream, _)) = listener.accept().await else {
@@ -410,8 +475,10 @@ async fn accept_loop(
         let event_tx = event_tx.clone();
         let token = token.clone();
         let gate = gate.clone();
+        let connections = connections.clone();
         tokio::spawn(async move {
-            if let Err(e) = handle_stream(stream, cmd_tx, event_tx, token, gate).await {
+            if let Err(e) = handle_stream(stream, cmd_tx, event_tx, token, gate, connections).await
+            {
                 tracing::debug!(error = %e, "spotify host connection ended");
             }
         });
@@ -424,6 +491,7 @@ async fn handle_stream(
     event_tx: broadcast::Sender<HostEvent>,
     token: Arc<Mutex<String>>,
     gate: Arc<WsGate>,
+    connections: Arc<BrowserConnections>,
 ) -> Result<(), String> {
     let mut peek = [0u8; 2048];
     let n = stream.peek(&mut peek).await.map_err(|e| e.to_string())?;
@@ -444,6 +512,7 @@ async fn handle_stream(
         let ws = tokio_tungstenite::accept_async(stream)
             .await
             .map_err(|e| e.to_string())?;
+        let _connection = connections.connect(event_tx.clone());
         run_ws(ws, cmd_tx, event_tx, token).await;
         Ok(())
     } else {
@@ -631,7 +700,7 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
       } catch (e) { done(false, e && e.name); }
     }
 
-    function claimMediaSession(cur) {
+    function claimMediaSession() {
       if (!("mediaSession" in navigator)) return;
       const ms = navigator.mediaSession;
       const forward = (action, extra) => () => send(Object.assign({ event: "media", action }, extra));
@@ -642,32 +711,6 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
         ms.setActionHandler("previoustrack", forward("prev"));
         ms.setActionHandler("seekto", (d) => {
           if (d && d.seekTime != null) send({ event: "media", action: "seek", position_ms: Math.round(d.seekTime * 1000) });
-        });
-      } catch (e) {}
-      ensureMediaMetadata(cur);
-    }
-
-    let lastCur = null, lastMetaTitle = null;
-    function ensureMediaMetadata(cur) {
-      if (cur) lastCur = cur;
-      cur = cur || lastCur;
-      if (!cur || !("mediaSession" in navigator) || typeof MediaMetadata === "undefined") return;
-      const ms = navigator.mediaSession;
-      const title = cur.name || "";
-      if (title !== lastMetaTitle) {
-        lastMetaTitle = title;
-        logLine("media session metadata -> " + title);
-      }
-      try {
-        ms.metadata = new MediaMetadata({
-          title,
-          artist: (cur.artists || []).map((a) => a.name).join(", "),
-          album: (cur.album && cur.album.name) || "",
-          artwork: ((cur.album && cur.album.images) || []).map((i) => ({
-            src: i.url,
-            sizes: (i.width || 300) + "x" + (i.height || 300),
-            type: "image/jpeg",
-          })),
         });
       } catch (e) {}
     }
@@ -739,10 +782,11 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
         name: "kopuz",
         getOAuthToken: (cb) => { tokenCalls++; logLine("getOAuthToken #" + tokenCalls); cb(token); },
         volume: 1.0,
+        enableMediaSession: true,
       });
       player.addListener("ready", ({ device_id }) => {
         isReady = true;
-        claimMediaSession(null);
+        claimMediaSession();
         send({ event: "ready", device_id });
         setStatus(autoplayBlocked ? "Click the button to enable playback."
                                   : "Ready — audio plays in this tab.");
@@ -785,7 +829,7 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
         if (!player) return;
         let st = null;
         try { st = await player.getCurrentState(); } catch (e) {}
-        if (!st) { ensureMediaMetadata(null); return; }
+        if (!st) { claimMediaSession(); return; }
         const pos = st.position || 0, dur = st.duration || 0;
         if (!st.paused) {
           if (pos === lastPos && Date.now() - lastPosAt > 3500 && dur > 0 && pos < dur - 2000) {
@@ -830,7 +874,10 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
       const cur = s.track_window && s.track_window.current_track;
       const tid = cur ? cur.id : null;
 
-      ensureMediaMetadata(cur);
+      // The SDK publishes the metadata/artwork (including Safari's native Now
+      // Playing integration). Reclaim the handlers afterward so kopuz's queue,
+      // rather than the SDK's one-track window, owns transport actions.
+      claimMediaSession();
       try { if ("mediaSession" in navigator) navigator.mediaSession.playbackState = paused ? "paused" : "playing"; } catch (e) {}
 
       if (tid !== curId) {
@@ -840,7 +887,6 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
         deathRetries = 0;
         prevPaused = paused;
         wasPlaying = !paused;
-        claimMediaSession(cur);
         lastSentKey = paused + "|" + pos + "|" + tid;
         send({ event: "state", paused, position: pos, duration: dur, track_id: tid, ended: false });
         return;
@@ -895,3 +941,37 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
   <script src="https://sdk.scdn.co/spotify-player.js"></script>
 </body>
 </html>"#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn browser_disconnect_waits_for_reconnect_grace() {
+        let connections = Arc::new(BrowserConnections::default());
+        let (event_tx, mut event_rx) = broadcast::channel(4);
+
+        let first = connections.connect(event_tx.clone());
+        drop(first);
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+        let replacement = connections.connect(event_tx);
+        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+        assert!(matches!(
+            event_rx.try_recv(),
+            Err(broadcast::error::TryRecvError::Empty)
+        ));
+
+        drop(replacement);
+        let event = tokio::time::timeout(std::time::Duration::from_secs(3), event_rx.recv())
+            .await
+            .expect("final disconnect should emit after the grace period")
+            .expect("host event channel should remain open");
+        assert!(matches!(event, HostEvent::BrowserDisconnected));
+    }
+
+    #[test]
+    fn player_page_enables_sdk_media_session_metadata() {
+        assert!(PLAYER_PAGE.contains("enableMediaSession: true"));
+    }
+}

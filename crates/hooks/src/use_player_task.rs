@@ -487,10 +487,12 @@ pub fn use_player_task(ctrl: PlayerController) {
                             ctrl.spotify_pending_uri.set(None);
                             let dev = device_id.clone();
                             let mut error = ctrl.playback_error;
+                            let current_device = ctrl.spotify_device;
                             spawn(async move {
                                 if let Err(e) =
                                     server::spotify::api::start_playback(&access, &dev, &[uri])
                                         .await
+                                    && current_device.peek().as_deref() == Some(dev.as_str())
                                 {
                                     tracing::warn!(error = %e, "spotify deferred start failed");
                                     error.set(Some(e));
@@ -498,7 +500,16 @@ pub fn use_player_task(ctrl: PlayerController) {
                             });
                         }
                     }
-                    HostEvent::NotReady => {}
+                    HostEvent::NotReady => {
+                        ctrl.spotify_device.set(None);
+                    }
+                    HostEvent::BrowserDisconnected => {
+                        tracing::info!(
+                            "spotify player browser disconnected; waiting for the next play"
+                        );
+                        ctrl.spotify_browser_disconnected();
+                        break;
+                    }
                     HostEvent::Media {
                         action,
                         position_ms,
@@ -557,6 +568,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                             ) {
                                 ctrl.spotify_pending_uri.set(None);
                                 let mut error = ctrl.playback_error;
+                                let current_device = ctrl.spotify_device;
                                 spawn(async move {
                                     if let Err(e) = server::spotify::api::start_playback(
                                         &access,
@@ -564,6 +576,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                                         &[uri],
                                     )
                                     .await
+                                        && current_device.peek().as_deref() == Some(device.as_str())
                                     {
                                         tracing::warn!(error = %e, "spotify activation start failed");
                                         error.set(Some(e));

@@ -585,6 +585,22 @@ impl PlayerController {
         });
     }
 
+    /// Forget a closed Spotify browser host. The next explicit play reads the
+    /// current browser setting and starts a fresh host; closing a background
+    /// tab must not immediately reopen a browser the user no longer wants.
+    pub(crate) fn spotify_browser_disconnected(&mut self) {
+        self.spotify_host.set(None);
+        self.spotify_device.set(None);
+        self.spotify_activated.set(false);
+        if self.spotify_device_override.peek().is_some() {
+            return;
+        }
+        self.spotify_pending_uri.set(None);
+        self.spotify_progress_anchor.set(None);
+        self.external_active.set(false);
+        self.is_playing.set(false);
+    }
+
     /// The Spotify access token for UI data fetches (Connect device list).
     pub fn spotify_access_token(&self) -> Option<String> {
         self.spotify_access()
@@ -685,9 +701,11 @@ impl PlayerController {
                 self.spotify_pending_uri.set(None);
                 let uri = uri.clone();
                 let mut error = self.playback_error;
+                let current_device = self.spotify_device;
                 spawn(async move {
                     if let Err(e) =
                         ::server::spotify::api::start_playback(&access, &device, &[uri]).await
+                        && current_device.peek().as_deref() == Some(device.as_str())
                     {
                         tracing::warn!(error = %e, "spotify start_playback failed");
                         error.set(Some(e));
