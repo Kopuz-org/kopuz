@@ -31,9 +31,18 @@ impl PlayerController {
         }
     }
 
+    /// `current_queue_index` points into the permutation while shuffle is on,
+    /// so end-of-queue is measured there too — and against a permutation that
+    /// still covers the queue, or Next lands on a position that resolves to no
+    /// track and does nothing at all.
     fn play_next_with_transition(&mut self, allow_crossfade: bool) {
         let idx = *self.current_queue_index.peek();
-        let queue_len = self.queue.peek().len();
+        let queue_len = if *self.shuffle.peek() {
+            self.repair_shuffle_order();
+            self.shuffle_order.peek().len()
+        } else {
+            self.queue.peek().len()
+        };
 
         if queue_len == 0 {
             return;
@@ -95,7 +104,12 @@ impl PlayerController {
         }
 
         let idx = *self.current_queue_index.peek();
-        let queue_len = self.queue.peek().len();
+        let queue_len = if *self.shuffle.peek() {
+            self.repair_shuffle_order();
+            self.shuffle_order.peek().len()
+        } else {
+            self.queue.peek().len()
+        };
 
         if queue_len == 0 {
             return;
@@ -141,6 +155,54 @@ impl PlayerController {
         // will be used as a pointer to the retrieve the current track in the shuffled order
         self.current_queue_index.set(0);
         self.shuffle_order.set(order);
+    }
+
+    /// Position of a queue index inside the running shuffle permutation, or
+    /// `None` when the permutation still doesn't cover it after repair.
+    pub(crate) fn shuffle_position_of(&mut self, physical_idx: usize) -> Option<usize> {
+        self.repair_shuffle_order();
+        self.shuffle_order
+            .peek()
+            .iter()
+            .position(|&idx| idx == physical_idx)
+    }
+
+    /// Make the permutation cover the whole queue again without disturbing the
+    /// order it already has. A permutation shorter than the queue leaves
+    /// positions that resolve to no track at all, so Next reaches one and
+    /// silently does nothing; the missing entries are shuffled among themselves
+    /// and appended rather than triggering a full reshuffle.
+    fn repair_shuffle_order(&mut self) {
+        let queue_len = self.queue.peek().len();
+        if self.shuffle_order.peek().len() == queue_len
+            && self
+                .shuffle_order
+                .peek()
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                == queue_len
+        {
+            return;
+        }
+        let repaired = Self::repaired_order(&self.shuffle_order.peek(), queue_len);
+        self.shuffle_order.set(repaired);
+    }
+
+    fn repaired_order(order: &[usize], queue_len: usize) -> Vec<usize> {
+        use rand::seq::SliceRandom;
+        let mut repaired: Vec<usize> = Vec::with_capacity(queue_len);
+        for &idx in order {
+            if idx < queue_len && !repaired.contains(&idx) {
+                repaired.push(idx);
+            }
+        }
+        let mut missing: Vec<usize> = (0..queue_len)
+            .filter(|idx| !repaired.contains(idx))
+            .collect();
+        missing.shuffle(&mut rand::rng());
+        repaired.extend(missing);
+        repaired
     }
 
     pub fn play_queue_shuffled(&mut self, tracks: Vec<Track>) {
@@ -579,5 +641,23 @@ mod tests {
         assert!(PlayerController::has_following_track(0, 1, Queue));
         assert!(PlayerController::has_following_track(4, 5, Queue));
         assert!(PlayerController::has_following_track(4, 5, Track));
+    }
+
+    /// A permutation that doesn't cover the queue leaves positions resolving to
+    /// no track, so Next silently does nothing and end-of-queue lands early.
+    /// Repairing must extend it, never reorder what the user is already hearing.
+    #[test]
+    fn repaired_permutation_keeps_the_order_it_already_had() {
+        let repaired = PlayerController::repaired_order(&[3, 0], 5);
+        assert_eq!(&repaired[..2], &[3, 0]);
+        assert_eq!(repaired.len(), 5);
+
+        let mut covered = repaired.clone();
+        covered.sort_unstable();
+        assert_eq!(covered, vec![0, 1, 2, 3, 4]);
+
+        let repaired = PlayerController::repaired_order(&[2, 9, 2, 0], 3);
+        assert_eq!(&repaired[..2], &[2, 0]);
+        assert_eq!(repaired.len(), 3);
     }
 }

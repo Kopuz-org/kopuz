@@ -156,6 +156,19 @@ impl SpotifyHost {
         self.send(json!({ "cmd": "set_volume", "volume": volume }));
     }
 
+    /// Update the browser-owned OS media card before SDK state catches up.
+    pub fn set_now_playing(&self, track: &reader::Track, artwork: &str) {
+        self.send(json!({
+            "cmd": "now_playing",
+            "track_id": track.id.key(),
+            "title": track.title,
+            "artist": track.artist,
+            "album": track.album,
+            "duration_ms": track.duration.saturating_mul(1000),
+            "artwork": artwork,
+        }));
+    }
+
     pub fn disconnect(&self) {
         self.send(json!({ "cmd": "disconnect" }));
     }
@@ -649,6 +662,7 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
     let prevPaused = true, deathRetries = 0, lastPauseCmdAt = 0, hasPlayed = false;
     let errTimes = [], stallResumes = 0, autoplayBlocked = false, isReady = false;
     let unexpectedPauseAt = 0, lastDeathAt = 0, userActivated = false;
+    let mediaSessionTrackId = null, commandedMediaSessionId = null, commandedMediaSessionAt = 0;
     const IS_FIREFOX = /firefox/i.test(navigator.userAgent);
     const LICENSE_HINT = IS_FIREFOX
       ? "Spotify playback keeps failing — Firefox has a known Spotify player bug. " +
@@ -691,6 +705,74 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
       };
     })();
 
+    function installMediaSession() {
+      if (!("mediaSession" in navigator)) return;
+      const forward = (action) => () => send({ event: "media", action });
+      const handlers = {
+        play: forward("play"),
+        pause: forward("pause"),
+        nexttrack: forward("next"),
+        previoustrack: forward("prev"),
+        seekto: (d) => {
+          if (d && d.seekTime != null) send({ event: "media", action: "seek", position_ms: Math.round(d.seekTime * 1000) });
+        },
+      };
+      for (const action in handlers) {
+        try { navigator.mediaSession.setActionHandler(action, handlers[action]); } catch (e) {}
+      }
+    }
+
+    function updateMediaSession(cur, paused, position, duration) {
+      if (!("mediaSession" in navigator)) return;
+      try {
+        navigator.mediaSession.playbackState = paused ? "paused" : "playing";
+        if (commandedMediaSessionId && cur && cur.id !== commandedMediaSessionId
+            && Date.now() - commandedMediaSessionAt < 5000) return;
+        if (cur && cur.id === commandedMediaSessionId) commandedMediaSessionId = null;
+        if (cur && cur.id && cur.id !== mediaSessionTrackId) {
+          const album = cur.album || {};
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: cur.name || "",
+            artist: (cur.artists || []).map((artist) => artist.name || "").filter(Boolean).join(", "),
+            album: album.name || "",
+            artwork: (album.images || []).filter((image) => image.url).map((image) => ({ src: image.url })),
+          });
+          mediaSessionTrackId = cur.id;
+        }
+        if (duration > 0 && navigator.mediaSession.setPositionState) {
+          navigator.mediaSession.setPositionState({
+            duration: duration / 1000,
+            playbackRate: 1,
+            position: Math.max(0, Math.min(position, duration)) / 1000,
+          });
+        }
+      } catch (e) {}
+    }
+
+    function applyCommandedMediaSession(d) {
+      if (!("mediaSession" in navigator)) return;
+      try {
+        commandedMediaSessionId = d.track_id || null;
+        commandedMediaSessionAt = Date.now();
+        mediaSessionTrackId = commandedMediaSessionId;
+        const artwork = /^https?:\/\//i.test(d.artwork || "") ? [{ src: d.artwork }] : [];
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: d.title || "",
+          artist: d.artist || "",
+          album: d.album || "",
+          artwork,
+        });
+        navigator.mediaSession.playbackState = "playing";
+        if (d.duration_ms > 0 && navigator.mediaSession.setPositionState) {
+          navigator.mediaSession.setPositionState({
+            duration: d.duration_ms / 1000,
+            playbackRate: 1,
+            position: 0,
+          });
+        }
+      } catch (e) { logLine("media metadata failed: " + e); }
+    }
+
     function probeAutoplay() {
       const done = (ok, why) => {
         logLine("autoplay " + (ok ? "allowed" : "blocked" + (why ? " (" + why + ")" : "")));
@@ -705,21 +787,6 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
         if (!p || !p.then) { done(true); return; }
         p.then(() => { a.pause(); done(true); }).catch((e) => done(false, e && e.name));
       } catch (e) { done(false, e && e.name); }
-    }
-
-    function claimMediaSession() {
-      if (!("mediaSession" in navigator)) return;
-      const ms = navigator.mediaSession;
-      const forward = (action, extra) => () => send(Object.assign({ event: "media", action }, extra));
-      try {
-        ms.setActionHandler("play", forward("play"));
-        ms.setActionHandler("pause", forward("pause"));
-        ms.setActionHandler("nexttrack", forward("next"));
-        ms.setActionHandler("previoustrack", forward("prev"));
-        ms.setActionHandler("seekto", (d) => {
-          if (d && d.seekTime != null) send({ event: "media", action: "seek", position_ms: Math.round(d.seekTime * 1000) });
-        });
-      } catch (e) {}
     }
 
     let wsRetries = 0;
@@ -749,6 +816,8 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
           logLine("token rotated while disconnected — reconnecting SDK");
           player.connect().then((ok) => logLine("connect() -> " + ok));
         }
+      } else if (d.cmd === "now_playing") {
+        applyCommandedMediaSession(d);
       } else if (!player) {
         return;
       } else if (d.cmd === "pause") { lastPauseCmdAt = Date.now(); player.pause(); }
@@ -789,11 +858,11 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
         name: "kopuz",
         getOAuthToken: (cb) => { tokenCalls++; logLine("getOAuthToken #" + tokenCalls); cb(token); },
         volume: 1.0,
-        enableMediaSession: true,
+        enableMediaSession: false,
       });
+      installMediaSession();
       player.addListener("ready", ({ device_id }) => {
         isReady = true;
-        claimMediaSession();
         send({ event: "ready", device_id });
         setStatus(autoplayBlocked ? "Click the button to enable playback."
                                   : "Ready — audio plays in this tab.");
@@ -836,7 +905,7 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
         if (!player) return;
         let st = null;
         try { st = await player.getCurrentState(); } catch (e) {}
-        if (!st) { claimMediaSession(); return; }
+        if (!st) return;
         const pos = st.position || 0, dur = st.duration || 0;
         if (!st.paused) {
           if (pos === lastPos && Date.now() - lastPosAt > 3500 && dur > 0 && pos < dur - 2000) {
@@ -902,11 +971,7 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
       const tid = cur ? cur.id : null;
       const contextUri = (s.context && s.context.uri) || null;
 
-      // The SDK publishes the metadata/artwork (including Safari's native Now
-      // Playing integration). Reclaim the handlers afterward so kopuz's queue,
-      // rather than the SDK's one-track window, owns transport actions.
-      claimMediaSession();
-      try { if ("mediaSession" in navigator) navigator.mediaSession.playbackState = paused ? "paused" : "playing"; } catch (e) {}
+      updateMediaSession(cur, paused, pos, dur);
 
       if (tid !== curId) {
         curId = tid;
@@ -999,8 +1064,19 @@ mod tests {
     }
 
     #[test]
-    fn player_page_enables_sdk_media_session_metadata() {
-        assert!(PLAYER_PAGE.contains("enableMediaSession: true"));
+    fn player_page_owns_media_session_instead_of_the_sdk() {
+        assert!(PLAYER_PAGE.contains("enableMediaSession: false"));
+        assert!(PLAYER_PAGE.contains("navigator.mediaSession.metadata = new MediaMetadata"));
+        assert!(PLAYER_PAGE.contains("d.cmd === \"now_playing\""));
+        assert!(PLAYER_PAGE.contains("commandedMediaSessionId"));
+    }
+
+    #[test]
+    fn player_page_routes_media_transport_without_sdk_handlers() {
+        for action in ["nexttrack", "previoustrack", "play", "pause", "seekto"] {
+            assert!(PLAYER_PAGE.contains(action), "{action} must be routed");
+        }
+        assert!(!PLAYER_PAGE.contains("ms.setActionHandler = function"));
     }
 
     #[test]

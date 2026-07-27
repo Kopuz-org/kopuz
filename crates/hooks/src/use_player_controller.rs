@@ -143,6 +143,10 @@ pub struct PlayerController {
     /// Whether a host launch is in flight — serializes rapid first plays so
     /// they can't spawn multiple hosts (and browser tabs).
     pub(crate) spotify_host_starting: Signal<bool>,
+    /// Latest Spotify start request, canceled when superseded.
+    pub(crate) spotify_start_task: Signal<Option<dioxus_core::Task>>,
+    /// Track id kopuz last asked Spotify to play, and when.
+    pub(crate) spotify_commanded: Signal<Option<(String, std::time::Instant)>>,
     /// Whether the current track is playing through the Spotify host rather than
     /// the engine — transport methods and the progress pump branch on this.
     pub(crate) external_active: Signal<bool>,
@@ -389,13 +393,21 @@ impl PlayerController {
     /// queue and select its logical position so the normal queue-state save can
     /// restore it after restart instead of falling back to the last track
     /// clicked in kopuz.
+    ///
+    /// Under shuffle, Spotify reports every track change — including the ones
+    /// kopuz itself commanded — so reshuffling on all of them tears up the run
+    /// mid-listen. A track the queue already held keeps its permutation
+    /// position; only a track the queue has never seen is a genuine pick from
+    /// another client, and that one starts a new run, because leaving a
+    /// just-appended index in the old permutation puts it at the end and makes
+    /// Next stop immediately.
     pub(crate) fn hydrate_external_track_metadata(&mut self, track: Track, progress_secs: u64) {
-        let physical_idx = self
+        let queued_idx = self
             .queue
             .peek()
             .iter()
             .position(|queued| queued.id == track.id);
-        let physical_idx = match physical_idx {
+        let physical_idx = match queued_idx {
             Some(idx) => {
                 self.queue.write()[idx] = track;
                 idx
@@ -408,12 +420,14 @@ impl PlayerController {
         };
 
         let logical_idx = if *self.shuffle.peek() {
-            // An explicit selection from another Spotify client starts a new
-            // shuffle run. Keeping its old (or newly appended) permutation
-            // position can put it at the end and make Next stop immediately.
-            self.current_queue_index.set(physical_idx);
-            self.rebuild_shuffle_order();
-            0
+            match queued_idx.and_then(|_| self.shuffle_position_of(physical_idx)) {
+                Some(position) => position,
+                None => {
+                    self.current_queue_index.set(physical_idx);
+                    self.rebuild_shuffle_order();
+                    0
+                }
+            }
         } else {
             physical_idx
         };
@@ -640,6 +654,10 @@ impl PlayerController {
             return;
         }
         self.spotify_pending_uri.set(None);
+        self.spotify_commanded.set(None);
+        if let Some(task) = self.spotify_start_task.take() {
+            task.cancel();
+        }
         self.spotify_progress_anchor.set(None);
         self.external_active.set(false);
         self.is_playing.set(false);
@@ -718,43 +736,64 @@ impl PlayerController {
     /// directly; otherwise ensure the host and start it on the SDK device — or
     /// stash it as pending until the device is ready AND the tab has confirmed
     /// playback is allowed. The pump fires the pending URI on those events.
-    fn spotify_play(&mut self, item_id: &str) {
+    pub(crate) fn start_spotify_uri(&mut self, access: String, device: String, uri: String) {
+        if let Some(task) = self.spotify_start_task.take() {
+            task.cancel();
+        }
+        let mut error = self.playback_error;
+        let task = spawn(async move {
+            tokio::time::sleep(Duration::from_millis(125)).await;
+            if let Err(e) = ::server::spotify::api::start_playback(&access, &device, &[uri]).await {
+                tracing::warn!(error = %e, "spotify start_playback failed");
+                error.set(Some(e));
+            }
+        });
+        self.spotify_start_task.set(Some(task));
+    }
+
+    /// True while Spotify is still reporting a track other than the one kopuz
+    /// last commanded. The SDK keeps emitting state for the outgoing track for
+    /// a beat after a skip, and applying it flashes the previous song back over
+    /// the one kopuz already showed. Self-clearing: the first report that
+    /// matches, or the window lapsing, drops the guard so a track genuinely
+    /// started from another client is never held back for long.
+    pub(crate) fn spotify_report_is_stale(&mut self, reported: Option<&str>) -> bool {
+        let Some((commanded, at)) = self.spotify_commanded.peek().clone() else {
+            return false;
+        };
+        if at.elapsed() > Duration::from_secs(3) || reported == Some(commanded.as_str()) {
+            self.spotify_commanded.set(None);
+            return false;
+        }
+        true
+    }
+
+    fn spotify_play(&mut self, item_id: &str, track: &Track) {
         let uri = format!("spotify:track:{item_id}");
-        if let Some(device) = self.spotify_device_override.peek().clone() {
+        self.spotify_commanded
+            .set(Some((item_id.to_string(), std::time::Instant::now())));
+        let override_device = self.spotify_device_override.peek().clone();
+        if let Some(device) = override_device {
             if let Some(access) = self.spotify_access() {
                 self.spotify_pending_uri.set(None);
-                let mut error = self.playback_error;
-                spawn(async move {
-                    if let Err(e) =
-                        ::server::spotify::api::start_playback(&access, &device, &[uri]).await
-                    {
-                        tracing::warn!(error = %e, "spotify start_playback failed");
-                        error.set(Some(e));
-                    }
-                });
+                self.start_spotify_uri(access, device, uri);
             }
             return;
         }
         self.ensure_spotify_host();
+        if let Some(host) = self.spotify_host.peek().clone() {
+            let artwork = self.current_song_cover_url.peek().clone();
+            host.set_now_playing(track, &artwork);
+        }
         if !*self.spotify_activated.peek() {
             self.spotify_pending_uri.set(Some(uri));
             return;
         }
-        match (self.spotify_access(), self.spotify_device.peek().clone()) {
+        let sdk_device = self.spotify_device.peek().clone();
+        match (self.spotify_access(), sdk_device) {
             (Some(access), Some(device)) => {
                 self.spotify_pending_uri.set(None);
-                let uri = uri.clone();
-                let mut error = self.playback_error;
-                let current_device = self.spotify_device;
-                spawn(async move {
-                    if let Err(e) =
-                        ::server::spotify::api::start_playback(&access, &device, &[uri]).await
-                        && current_device.peek().as_deref() == Some(device.as_str())
-                    {
-                        tracing::warn!(error = %e, "spotify start_playback failed");
-                        error.set(Some(e));
-                    }
-                });
+                self.start_spotify_uri(access, device, uri);
             }
             _ => self.spotify_pending_uri.set(Some(uri)),
         }
@@ -768,6 +807,10 @@ impl PlayerController {
             return;
         }
         self.spotify_pending_uri.set(None);
+        self.spotify_commanded.set(None);
+        if let Some(task) = self.spotify_start_task.take() {
+            task.cancel();
+        }
         self.spotify_transport_pause();
         self.external_active.set(false);
     }
@@ -932,7 +975,7 @@ impl PlayerController {
                 .set(Some((0, std::time::Instant::now())));
             self.hydrate_current_track_metadata(idx, 0);
             self.is_playing.set(true);
-            self.spotify_play(&id);
+            self.spotify_play(&id, &track);
             scrobble_scheduler::schedule(
                 track.clone(),
                 Some(id.clone()),
@@ -1383,6 +1426,8 @@ pub fn use_player_controller(
     let spotify_device_override = use_signal(|| None::<String>);
     let spotify_progress_anchor = use_signal(|| None::<(u64, std::time::Instant)>);
     let spotify_host_starting = use_signal(|| false);
+    let spotify_start_task = use_signal(|| None::<dioxus_core::Task>);
+    let spotify_commanded = use_signal(|| None::<(String, std::time::Instant)>);
     let external_active = use_signal(|| false);
     let spotify_device_chosen = use_signal(|| false);
     let db = use_signal(move || db_handle);
@@ -1461,6 +1506,8 @@ pub fn use_player_controller(
         spotify_device_override,
         spotify_progress_anchor,
         spotify_host_starting,
+        spotify_start_task,
+        spotify_commanded,
         external_active,
         spotify_device_chosen,
     }

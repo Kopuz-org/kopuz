@@ -486,19 +486,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                         let pending = ctrl.spotify_pending_uri.peek().clone();
                         if let (Some(uri), Some(access)) = (pending, ctrl.spotify_access()) {
                             ctrl.spotify_pending_uri.set(None);
-                            let dev = device_id.clone();
-                            let mut error = ctrl.playback_error;
-                            let current_device = ctrl.spotify_device;
-                            spawn(async move {
-                                if let Err(e) =
-                                    server::spotify::api::start_playback(&access, &dev, &[uri])
-                                        .await
-                                    && current_device.peek().as_deref() == Some(dev.as_str())
-                                {
-                                    tracing::warn!(error = %e, "spotify deferred start failed");
-                                    error.set(Some(e));
-                                }
-                            });
+                            ctrl.start_spotify_uri(access, device_id, uri);
                         }
                     }
                     HostEvent::NotReady => {
@@ -545,7 +533,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                             if ended {
                                 record_listen(config, &ctrl);
                                 ctrl.play_next();
-                            } else {
+                            } else if !ctrl.spotify_report_is_stale(track_id.as_deref()) {
                                 ctrl.is_playing.set(!paused);
                                 ctrl.spotify_progress_anchor
                                     .set(Some((position_ms, std::time::Instant::now())));
@@ -1049,9 +1037,14 @@ pub fn use_player_task(ctrl: PlayerController) {
 
                 if is_playing {
                     let duration = *ctrl.current_song_duration.read();
-                    let pos_secs = pos.as_secs().min(duration);
+                    let pos_secs = if external {
+                        ctrl.displayed_progress_secs_f64() as u64
+                    } else {
+                        pos.as_secs()
+                    }
+                    .min(duration);
                     let current_token = *ctrl.current_token.read();
-                    if !external && !defer_player_progress && pos_secs != last_progress_secs {
+                    if !defer_player_progress && pos_secs != last_progress_secs {
                         last_progress_secs = pos_secs;
                         ctrl.current_song_progress.set(pos_secs);
                     }
