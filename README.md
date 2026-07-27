@@ -40,10 +40,9 @@ this is mythological rather than historical.
 Kopuz allows you to scan your local directories for audio files, stream from
 your Jellyfin or Subsonic (Navidrome, etc.) server, or connect **YouTube
 Music**, **SoundCloud**, or **Spotify** as a streaming backend, automatically
-organizing everything
-into a browsable library. You can navigate by artists, albums, genres, or
-explore your custom playlists. The application is built for performance and
-desktop integration, utilizing the power of Rust.
+organizing everything into a browsable library. You can navigate by artists,
+albums, genres, or explore your custom playlists. The application is built for
+performance and desktop integration, utilizing the power of Rust.
 
 Library, playlists, favorites, and settings are stored in a local **SQLite**
 database (`kopuz.db`); the UI reads it live so changes show up immediately. Each
@@ -67,10 +66,10 @@ media source carries its own credentials and its own favorites.
 - **Discord RPC**: Embedded RPC included!!!
 - **Multiple Backends**: Stream from your Jellyfin or Subsonic-compatible server
   (Navidrome works great), connect YouTube Music, SoundCloud, or Spotify, or
-  just point it at a local folder. Mix and match as you like. Every source is exposed through
-  one unified `MediaSource` layer, and the UI adapts to each source's
-  capabilities (search, downloads, radio, discover, favorites sync, etc.) rather
-  than hardcoding per-service behavior.
+  just point it at a local folder. Mix and match as you like. Every source is
+  exposed through one unified `MediaSource` layer, and the UI adapts to each
+  source's capabilities (search, downloads, radio, discover, favorites sync,
+  etc.) rather than hardcoding per-service behavior.
 - **YouTube Music**: Full streaming backend with a Spotify-style **Discover**
   page (recommended songs, playlists, albums, artists, and moods), rich **artist
   profiles** (banner, top songs, albums, singles, related artists),
@@ -511,15 +510,16 @@ You need three things:
 
 - **Spotify Premium.** The Web Playback SDK refuses to stream on free accounts.
   Browsing your library still works without Premium, playback does not.
-- **Your own Spotify client.** Kopuz does not ship a Client ID, you create one in
-  about two minutes and paste it in.
+- **Your own Spotify client.** Kopuz does not ship a Client ID, you create one
+  in about two minutes and paste it in.
 - **A supported browser installed.** Chrome, Edge, Brave, Chromium, Vivaldi, or
   Safari on macOS. Firefox is not usable here: the SDK has a long-standing bug
   in Firefox where playback dies a few seconds in, so Kopuz will not pick it.
 
 ### 1. Create your Spotify app
 
-1. Open [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard)
+1. Open
+   [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard)
    and log in with the account you want to listen with.
 2. Click **Create app**. Name and description can be anything, they are only
    shown to you.
