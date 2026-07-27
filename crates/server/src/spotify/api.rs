@@ -277,6 +277,25 @@ pub async fn album_tracks_full(access: &str, album_id: &str) -> Result<Vec<Track
     album_remote(access, album_id).await.map(|a| a.tracks)
 }
 
+/// Resolve the full queue represented by an SDK playback context. Spotify can
+/// expose many context kinds; playlist and album are the ones whose complete,
+/// ordered tracks can be reconstructed through the Web API.
+pub async fn context_tracks(access: &str, context_uri: &str) -> Result<Option<Vec<Track>>, String> {
+    if let Some(id) = context_uri
+        .strip_prefix("spotify:playlist:")
+        .filter(|id| !id.is_empty())
+    {
+        return playlist_entries(access, id).await.map(Some);
+    }
+    if let Some(id) = context_uri
+        .strip_prefix("spotify:album:")
+        .filter(|id| !id.is_empty())
+    {
+        return album_tracks_full(access, id).await.map(Some);
+    }
+    Ok(None)
+}
+
 /// One album with header metadata and every track, for the remote album page
 /// and discover tiles. The tracks endpoint returns simplified items without an
 /// album object, so the album's own name/artwork is stamped into each before

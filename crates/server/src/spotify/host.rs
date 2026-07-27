@@ -39,6 +39,8 @@ pub enum HostEvent {
         position_ms: u64,
         duration_ms: u64,
         track_id: Option<String>,
+        /// Spotify playlist/album URI when the SDK exposes one.
+        context_uri: Option<String>,
         /// Full SDK metadata so a track started from another Spotify client can
         /// replace the stale queue metadata in kopuz immediately.
         track: Option<Box<reader::Track>>,
@@ -600,6 +602,7 @@ fn emit_event(val: &Value, event_tx: &broadcast::Sender<HostEvent>) {
             position_ms: val["position"].as_u64().unwrap_or(0),
             duration_ms: val["duration"].as_u64().unwrap_or(0),
             track_id: val["track_id"].as_str().map(str::to_string),
+            context_uri: val["context_uri"].as_str().map(str::to_string),
             track: super::api::parse_track(&val["track"]).map(Box::new),
             ended: val["ended"].as_bool().unwrap_or(false),
         },
@@ -897,6 +900,7 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
       const paused = s.paused, pos = s.position || 0, dur = s.duration || 0;
       const cur = s.track_window && s.track_window.current_track;
       const tid = cur ? cur.id : null;
+      const contextUri = (s.context && s.context.uri) || null;
 
       // The SDK publishes the metadata/artwork (including Safari's native Now
       // Playing integration). Reclaim the handlers afterward so kopuz's queue,
@@ -912,7 +916,7 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
         prevPaused = paused;
         wasPlaying = !paused;
         lastSentKey = paused + "|" + pos + "|" + tid;
-        send({ event: "state", paused, position: pos, duration: dur, track_id: tid, track: trackPayload(cur, dur), ended: false });
+        send({ event: "state", paused, position: pos, duration: dur, track_id: tid, context_uri: contextUri, track: trackPayload(cur, dur), ended: false });
         return;
       }
 
@@ -947,7 +951,7 @@ const PLAYER_PAGE: &str = r#"<!doctype html>
       const key = paused + "|" + pos + "|" + tid;
       if (!ended && key === lastSentKey) return;
       lastSentKey = key;
-      send({ event: "state", paused, position: pos, duration: dur, track_id: tid, track: trackPayload(cur, dur), ended });
+      send({ event: "state", paused, position: pos, duration: dur, track_id: tid, context_uri: contextUri, track: trackPayload(cur, dur), ended });
     }
 
     document.getElementById("activate").addEventListener("click", () => {
@@ -1009,6 +1013,7 @@ mod tests {
                 "position": 12_000,
                 "duration": 180_000,
                 "track_id": "new-track",
+                "context_uri": "spotify:playlist:playlist-id",
                 "track": {
                     "id": "new-track",
                     "name": "Started Elsewhere",
@@ -1025,9 +1030,13 @@ mod tests {
             &event_tx,
         );
 
-        let HostEvent::State { track, .. } = event_rx.try_recv().expect("state event") else {
+        let HostEvent::State {
+            track, context_uri, ..
+        } = event_rx.try_recv().expect("state event")
+        else {
             panic!("expected state event");
         };
+        assert_eq!(context_uri.as_deref(), Some("spotify:playlist:playlist-id"));
         let track = track.expect("track metadata");
         assert_eq!(track.id.key(), "new-track");
         assert_eq!(track.title, "Started Elsewhere");

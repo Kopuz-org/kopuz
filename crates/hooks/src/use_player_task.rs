@@ -470,6 +470,7 @@ pub fn use_player_task(ctrl: PlayerController) {
             use server::spotify::host::HostEvent;
             use tokio::sync::broadcast::error::RecvError;
             let mut last_auth_refresh: Option<std::time::Instant> = None;
+            let mut loaded_context_uri: Option<String> = None;
             loop {
                 let ev = match rx.recv().await {
                     Ok(ev) => ev,
@@ -534,6 +535,7 @@ pub fn use_player_task(ctrl: PlayerController) {
                         position_ms,
                         duration_ms,
                         track_id,
+                        context_uri,
                         track,
                         ended,
                     } => {
@@ -553,14 +555,60 @@ pub fn use_player_task(ctrl: PlayerController) {
                                     .peek()
                                     .as_ref()
                                     .map(|shown| shown.id.key().to_string());
-                                if track_id.is_some()
-                                    && track_id != shown_id
-                                    && let Some(track) = track
-                                {
-                                    ctrl.hydrate_external_track_metadata(
-                                        *track,
-                                        position_ms / 1000,
-                                    );
+                                let track_changed = track_id
+                                    .as_deref()
+                                    .is_some_and(|id| shown_id.as_deref() != Some(id));
+                                if track_changed {
+                                    if let Some(track) = track {
+                                        ctrl.hydrate_external_track_metadata(
+                                            *track,
+                                            position_ms / 1000,
+                                        );
+                                    }
+                                    if context_uri.as_ref() != loaded_context_uri.as_ref()
+                                        && let (Some(access), Some(context_uri), Some(track_id)) = (
+                                            ctrl.spotify_access(),
+                                            context_uri.as_deref(),
+                                            track_id.as_deref(),
+                                        )
+                                    {
+                                        match server::spotify::api::context_tracks(
+                                            &access,
+                                            context_uri,
+                                        )
+                                        .await
+                                        {
+                                            Ok(Some(tracks)) => {
+                                                let still_current = ctrl
+                                                    .current_track_snapshot
+                                                    .peek()
+                                                    .as_ref()
+                                                    .is_some_and(|shown| {
+                                                        shown.id.key() == track_id
+                                                    });
+                                                if still_current {
+                                                    ctrl.hydrate_external_context(
+                                                        tracks,
+                                                        track_id,
+                                                        position_ms / 1000,
+                                                    );
+                                                    loaded_context_uri =
+                                                        Some(context_uri.to_string());
+                                                }
+                                            }
+                                            Ok(None) => {
+                                                loaded_context_uri = Some(context_uri.to_string());
+                                            }
+                                            Err(e) => tracing::warn!(
+                                                error = %e,
+                                                context = context_uri,
+                                                "spotify playback context could not be loaded"
+                                            ),
+                                        }
+                                    }
+                                }
+                                if context_uri.is_none() {
+                                    loaded_context_uri = None;
                                 }
                                 if duration_ms > 0 {
                                     ctrl.current_song_duration.set(duration_ms / 1000);

@@ -408,18 +408,39 @@ impl PlayerController {
         };
 
         let logical_idx = if *self.shuffle.peek() {
-            if let Some(idx) = self
-                .shuffle_order
-                .peek()
-                .iter()
-                .position(|physical| *physical == physical_idx)
-            {
-                idx
-            } else {
-                let idx = self.shuffle_order.peek().len();
-                self.shuffle_order.write().push(physical_idx);
-                idx
-            }
+            // An explicit selection from another Spotify client starts a new
+            // shuffle run. Keeping its old (or newly appended) permutation
+            // position can put it at the end and make Next stop immediately.
+            self.current_queue_index.set(physical_idx);
+            self.rebuild_shuffle_order();
+            0
+        } else {
+            physical_idx
+        };
+        self.hydrate_current_track_metadata(logical_idx, progress_secs);
+    }
+
+    /// Replace the provisional one-track external queue with the complete
+    /// Spotify playlist/album once its context finishes loading.
+    pub(crate) fn hydrate_external_context(
+        &mut self,
+        tracks: Vec<Track>,
+        current_track_id: &str,
+        progress_secs: u64,
+    ) {
+        let Some(physical_idx) = tracks
+            .iter()
+            .position(|track| track.id.key() == current_track_id)
+        else {
+            return;
+        };
+
+        self.queue.set(tracks);
+        self.history.write().clear();
+        self.current_queue_index.set(physical_idx);
+        let logical_idx = if *self.shuffle.peek() {
+            self.rebuild_shuffle_order();
+            0
         } else {
             physical_idx
         };
