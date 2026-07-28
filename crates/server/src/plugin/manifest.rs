@@ -9,9 +9,33 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-/// Directory the host scans for plugins.
+/// Writable directory the host scans for plugins, and where a plugin dropped in
+/// by hand belongs.
 pub fn plugins_dir() -> PathBuf {
     db::config_dir().join("plugins")
+}
+
+/// Every directory scanned for plugins.
+///
+/// `KOPUZ_PLUGIN_PATH` holds extra roots, separated the way `PATH` is. It exists
+/// so a declarative package manager can install plugins read-only and outside
+/// the config directory: Nix and Flatpak both hand the app immutable store paths
+/// and have nowhere to copy a plugin to.
+pub fn plugin_search_paths() -> Vec<PathBuf> {
+    let mut roots = vec![plugins_dir()];
+    if let Some(extra) = std::env::var_os("KOPUZ_PLUGIN_PATH") {
+        roots.extend(std::env::split_paths(&extra).filter(|p| !p.as_os_str().is_empty()));
+    }
+    roots
+}
+
+/// Per-plugin writable state, handed to the child as `KOPUZ_PLUGIN_DATA_DIR`.
+///
+/// Deliberately not under the manifest directory: that is read-only whenever the
+/// plugin came from a store path, and the child still needs somewhere to keep
+/// credentials and caches.
+pub fn data_dir_for(id: &str) -> PathBuf {
+    db::config_dir().join("plugin-data").join(id)
 }
 
 /// The `plugin.toml` body, plus the directory it was found in.
@@ -52,11 +76,10 @@ impl PluginManifest {
     }
 
     /// This plugin's private state directory, handed to the child as
-    /// `KOPUZ_PLUGIN_DATA_DIR`. Created by the host, owned by the plugin —
-    /// never read or deleted by Kopuz, including when the user removes the
-    /// source.
+    /// `KOPUZ_PLUGIN_DATA_DIR`. Created by the host, owned by the plugin, never
+    /// read or deleted by Kopuz, including when the user removes the source.
     pub fn data_dir(&self) -> PathBuf {
-        self.dir.join("data")
+        data_dir_for(&self.id)
     }
 
     fn validate(&self) -> Result<(), String> {
@@ -89,11 +112,30 @@ pub fn is_valid_id(id: &str) -> bool {
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
 }
 
-/// Every readable manifest under [`plugins_dir`]. A bad entry is warned about
-/// and skipped — one broken plugin must never hide the rest, and discovery runs
-/// on a UI path where an `Err` has nowhere useful to go.
+/// Every readable manifest across [`plugin_search_paths`]. A bad entry is warned
+/// about and skipped: one broken plugin must never hide the rest, and discovery
+/// runs on a UI path where an `Err` has nowhere useful to go.
+///
+/// An id found in more than one root resolves to the first one, so a plugin
+/// dropped into the config directory shadows a packaged build of the same id.
 pub fn discover() -> Vec<PluginManifest> {
-    discover_in(&plugins_dir())
+    let mut found: Vec<PluginManifest> = Vec::new();
+    for root in plugin_search_paths() {
+        for manifest in discover_in(&root) {
+            if let Some(shadowed) = found.iter().find(|m| m.id == manifest.id) {
+                tracing::debug!(
+                    id = %manifest.id,
+                    kept = %shadowed.dir.display(),
+                    ignored = %manifest.dir.display(),
+                    "duplicate plugin id"
+                );
+                continue;
+            }
+            found.push(manifest);
+        }
+    }
+    found.sort_by_key(|m| m.name.to_lowercase());
+    found
 }
 
 /// [`discover`] against an explicit root. Split out so tests do not need the
@@ -160,6 +202,37 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("mkdir");
         std::fs::write(dir.join("plugin.toml"), body).expect("write manifest");
         std::fs::write(dir.join("run"), b"#!/bin/sh\n").expect("write exe");
+    }
+
+    /// A store-installed plugin sits on a read-only path, so nothing may be
+    /// written beside its manifest. Guards the Nix and Flatpak case.
+    #[test]
+    fn state_never_lands_next_to_the_manifest() {
+        let root = std::env::temp_dir().join(format!("kopuz-ro-{}", uuid::Uuid::new_v4()));
+        write_plugin(
+            &root,
+            "packaged",
+            "id = \"packaged\"\nname = \"Packaged\"\nversion = \"1.0\"\nprotocol = 1\nexecutable = \"run\"\n",
+        );
+        let Ok(manifest) = load(&root.join("packaged")) else {
+            panic!("manifest loads");
+        };
+        assert!(
+            !manifest.data_dir().starts_with(&manifest.dir),
+            "data dir {} must not sit under the manifest dir {}",
+            manifest.data_dir().display(),
+            manifest.dir.display()
+        );
+        assert!(manifest.data_dir().ends_with("plugin-data/packaged"));
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn extra_roots_come_from_the_environment() {
+        // Only the shape is asserted: the process env is shared across tests, so
+        // setting KOPUZ_PLUGIN_PATH here would race.
+        let roots = plugin_search_paths();
+        assert_eq!(roots.first(), Some(&plugins_dir()));
     }
 
     #[test]

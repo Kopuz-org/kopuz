@@ -39,11 +39,28 @@ plugins/
   example/
     plugin.toml
     kopuz-plugin-example
-    data/            # created by Kopuz, owned by you
 ```
 
-A malformed manifest, or one whose executable is missing, is logged and skipped
-— it never hides the other plugins. **Settings → Plugins** lists what was found
+`KOPUZ_PLUGIN_PATH` adds further roots, separated the way `PATH` is, scanned
+after the config directory. Packaged builds want this: under Nix, Flatpak or any
+other store-based install the plugin sits on a read-only path with nowhere to
+copy it from, so the package sets the variable instead.
+
+```
+KOPUZ_PLUGIN_PATH=/nix/store/…-kopuz-plugin-example/share/kopuz/plugins
+```
+
+Nothing is ever written next to the manifest, so that path may be read-only. A
+plugin's own state lives in `<config dir>/plugin-data/<id>/`, which Kopuz creates
+and hands over as `KOPUZ_PLUGIN_DATA_DIR`. Kopuz never reads or deletes it, not
+even when the user removes the source.
+
+An id found in more than one root resolves to the first, so a plugin dropped into
+the config directory shadows a packaged build of the same id, which is what you
+want while testing a local build.
+
+A malformed manifest, or one whose executable is missing, is logged and skipped,
+and never hides the other plugins. **Settings → Plugins** lists what was found
 and has a rescan button.
 
 ## The manifest
