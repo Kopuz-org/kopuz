@@ -32,6 +32,9 @@ use crate::source::{Capabilities, SourceError};
 
 /// How long a plugin has to answer an ordinary call.
 const CALL_TIMEOUT: Duration = Duration::from_secs(60);
+/// The sign-in wizard is paced by a person at a browser, so a plugin holding
+/// `auth_submit` open until an OAuth callback arrives is working, not wedged.
+const AUTH_TIMEOUT: Duration = Duration::from_secs(300);
 /// Gap between health pings.
 const PING_INTERVAL: Duration = Duration::from_secs(20);
 /// A ping this slow counts as a failure.
@@ -148,6 +151,15 @@ impl PluginClient {
     }
 
     /// Invoke one method, leaving the result as raw JSON.
+    /// Ordinary calls answer promptly or something is wrong. The auth wizard is
+    /// the exception, since it waits on a person.
+    fn deadline_for(method: &str) -> Duration {
+        match method {
+            wire::method::AUTH_BEGIN | wire::method::AUTH_SUBMIT => AUTH_TIMEOUT,
+            _ => CALL_TIMEOUT,
+        }
+    }
+
     pub async fn call_raw<P: Serialize>(
         &self,
         method: &str,
@@ -156,7 +168,9 @@ impl PluginClient {
         let params = serde_json::to_value(params).map_err(|e| {
             SourceError::InvalidInput(format!("cannot encode {method} params: {e}"))
         })?;
-        self.inner.request(method, params, CALL_TIMEOUT).await
+        self.inner
+            .request(method, params, Self::deadline_for(method))
+            .await
     }
 
     /// Fire a notification. Best-effort by definition — there is no reply to
