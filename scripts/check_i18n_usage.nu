@@ -10,7 +10,7 @@ def extract-locale-keys [path: path] {
 }
 
 def extract-rust-i18n-usages [repo_root: path] {
-  glob ($repo_root | path join "**" "*.rs")
+  glob ($repo_root | path join "crates" "**" "*.rs")
   | each {|file|
       open $file
       | lines

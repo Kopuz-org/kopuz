@@ -66,6 +66,7 @@ pub fn AddServerPopup(
         MusicService::Custom => "custom",
         MusicService::YtMusic => "ytmusic",
         MusicService::SoundCloud => "soundcloud",
+        MusicService::Spotify => "spotify",
     };
 
     let server_name_label = i18n::t("server_name").to_string();
@@ -111,6 +112,7 @@ pub fn AddServerPopup(
                             "custom" => MusicService::Custom,
                             "ytmusic" => MusicService::YtMusic,
                             "soundcloud" => MusicService::SoundCloud,
+                            "spotify" => MusicService::Spotify,
                             _ => MusicService::Jellyfin,
                         };
                         server_service.set(service);
@@ -140,6 +142,11 @@ pub fn AddServerPopup(
                         value: "soundcloud",
                         selected: server_service() == MusicService::SoundCloud,
                         "SoundCloud"
+                    }
+                    option {
+                        value: "spotify",
+                        selected: server_service() == MusicService::Spotify,
+                        "Spotify (experimental)"
                     }
                 }
 
@@ -363,6 +370,19 @@ fn ServerServiceFields(
                         "{browser.label()}"
                     }
                 }
+            }
+        },
+        MusicService::Spotify => rsx! {
+            input {
+                placeholder: "Spotify Client ID",
+                value: "{server_url()}",
+                oninput: move |e| server_url.set(e.value()),
+                onkeydown: move |e| e.stop_propagation()
+            }
+            p { class: "text-xs text-white/60",
+                "Create an app at developer.spotify.com, add the redirect URI "
+                code { "http://127.0.0.1:8898/callback" }
+                ", add your Spotify account under User Management, and paste its Client ID above. Saving opens Spotify's sign-in page in your default browser — kopuz never sees your password. Spotify Development Mode is limited to five authorized users and requires the app owner to have Premium. Playback also requires Premium; followed playlists may be listed but Spotify only exposes tracks for playlists you own or collaborate on."
             }
         },
         _ => rsx! {

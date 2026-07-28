@@ -46,6 +46,10 @@ fn track_cover_url(conf: &AppConfig, track: &Track) -> Option<String> {
     ::server::cover::track(conf, track, 384).map(|c| c.to_string())
 }
 
+/// The hero stretches one cover across the full content width (up to 800px
+/// tall), so it asks for far more pixels than the 384px grid cards.
+const HERO_COVER_WIDTH: u32 = 1400;
+
 /// The source-agnostic Home body (sections + hero). Rendered for local and any
 /// server; the active source decides the data, covers (via the source seam), the
 /// recently-played list, and offline/sync gating.
@@ -411,12 +415,20 @@ pub fn HomeBody(
             .collect::<Vec<_>>()
     });
 
-    let jellyfin_hero_cover = use_memo(move || {
+    let hero_cover = use_memo(move || {
         let conf = config.read();
         let entry = hero_entry.read();
-        let (_, album_opt, _) = entry.as_ref()?;
-        let album = album_opt.as_ref()?;
-        ::server::cover::from_path(&conf, album.cover_path.as_deref(), 1400).map(|c| c.to_string())
+        let (track, album_opt, _) = entry.as_ref()?;
+        // The album's own art first, but fall back to the track's — the albums
+        // query lags the recently-played one, and not every album has a cover
+        // path, which otherwise left the hero on the 384px card thumbnail.
+        let cover = album_opt
+            .as_ref()
+            .and_then(|album| {
+                ::server::cover::from_path(&conf, album.cover_path.as_deref(), HERO_COVER_WIDTH)
+            })
+            .or_else(|| ::server::cover::track(&conf, track, HERO_COVER_WIDTH))?;
+        Some(components::high_quality_artwork_url(cover.to_string()))
     });
 
     let conf_snapshot = config.read();
@@ -525,7 +537,7 @@ pub fn HomeBody(
                                     is_vaxry,
                                     listen_now_style,
                                     jellyfin_shuffled(),
-                                    jellyfin_hero_cover(),
+                                    hero_cover(),
                                     continue_listening(),
                                     hero_entry(),
                                     jellyfin_artists(),

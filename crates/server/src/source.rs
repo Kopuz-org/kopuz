@@ -36,6 +36,7 @@ mod jellyfin;
 mod local;
 mod offline;
 mod soundcloud;
+mod spotify;
 mod subsonic;
 mod types;
 mod youtube_music;
@@ -43,6 +44,7 @@ use jellyfin::JellyfinSource;
 use local::LocalSource;
 use offline::OfflineServerSource;
 use soundcloud::SoundcloudSource;
+use spotify::SpotifySource;
 use subsonic::SubsonicSource;
 pub use types::*;
 use youtube_music::YtSource;
@@ -134,7 +136,7 @@ pub trait MediaSource: Send + Sync {
     }
 
     /// The track's canonical public web URL, when this source has shareable web
-    /// pages (e.g. a YouTube Music watch link). `None` otherwise — callers fall
+    /// pages (e.g. a YouTube Music watch link or Spotify track link). `None` otherwise — callers fall
     /// back to a metadata lookup (MusicBrainz). Sync: it's a pure id→URL mapping.
     fn web_url(&self, _track: &reader::Track) -> Option<String> {
         None
@@ -702,16 +704,6 @@ pub(super) async fn mirror_added(
     Ok(())
 }
 
-/// Encode a cover URL into the `urlhex_…` tag the Subsonic cover seam decodes
-/// back (the synthetic album/track cover reference for Subsonic/Custom).
-pub(super) fn encode_cover_url_tag(url: &str) -> String {
-    let mut hex = String::with_capacity(url.len() * 2);
-    for b in url.as_bytes() {
-        hex.push_str(&format!("{b:02x}"));
-    }
-    format!("urlhex_{hex}")
-}
-
 /// Filter a library corpus by a lowercased `query` — the shared search behavior
 /// for corpus-backed sources (local, Jellyfin, Subsonic). Matches tracks on
 /// title/artist/album/genre (≤100) and albums on title/artist/genre, deduped by
@@ -791,6 +783,7 @@ fn remote_source(db: Db, source: Source, conn: &ServerConn) -> Box<dyn MediaSour
         }
         MusicService::YtMusic => Box::new(YtSource::new(db, source, conn)),
         MusicService::SoundCloud => Box::new(SoundcloudSource::new(db, source, conn)),
+        MusicService::Spotify => Box::new(SpotifySource::new(db, source, conn)),
     }
 }
 

@@ -222,17 +222,11 @@ pub fn PlaylistDetail(
             let tag = playlist_image_tag.as_ref()?;
             let conf = config.read();
             let server = conf.server.as_ref()?;
-            Some(std::sync::Arc::from(
-                utils::jellyfin_image::jellyfin_image_url(
-                    &server.url,
-                    &playlist_id,
-                    Some(tag.as_str()),
-                    server.access_token.as_deref(),
-                    512,
-                    90,
-                )
-                .as_str(),
-            ))
+            server::cover::resolve(
+                &conf,
+                reader::CoverRef::remote_item(server.service, &playlist_id, Some(tag.as_str())),
+                512,
+            )
         })
         .or_else(|| tracks_val.first().and_then(&cover_for));
 

@@ -19,7 +19,7 @@ pub(crate) fn TrackMetadata(
         div {
             class: "flex-1 min-h-0 w-full flex items-center justify-center mb-6",
             {
-                let cover = current_song_cover_url.read();
+                let cover = current_song_cover_url.read().clone();
                 if cover.is_empty() {
                     rsx! {
                         div {
@@ -29,6 +29,7 @@ pub(crate) fn TrackMetadata(
                         }
                     }
                 } else {
+                    let cover = crate::cover_background::high_quality_artwork_url(cover);
                     rsx! {
                         img {
                             src: "{cover}",

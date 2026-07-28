@@ -119,6 +119,12 @@ use hooks::use_player_controller::PlayerController;
 #[component]
 pub fn Settings(config: Signal<AppConfig>) -> Element {
     let ctrl = use_context::<PlayerController>();
+    let spotify_browsers = use_hook(|| {
+        ::server::spotify::host::available_browsers()
+            .into_iter()
+            .map(|b| (b.id.to_string(), b.label.to_string()))
+            .collect::<Vec<_>>()
+    });
     let crossfade_label = if config.read().crossfade_seconds == 0 {
         i18n::t("crossfade_off")
     } else {
@@ -398,39 +404,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                         }
 
-                        SettingItem {
-                            title: i18n::t("optimize_local_artwork").to_string(),
-                            control: rsx! {
-                                ToggleSetting {
-                                    enabled: config.read().image_optimization_enabled,
-                                    on_change: move |value| {
-                                        config.write().image_optimization_enabled = value;
-                                    },
-                                }
-                            }
-                        }
-                        if config.read().image_optimization_enabled {
-                            SettingItem {
-                                title: i18n::t("artwork_max_size").to_string(),
-                                control: rsx! {
-                                    AppSelect {
-                                        value: config.read().image_optimization_max_size.to_string(),
-                                        options: vec![
-                                            ("256".to_string(), "256 px".to_string()),
-                                            ("512".to_string(), "512 px".to_string()),
-                                            ("1024".to_string(), "1024 px".to_string()),
-                                            ("1920".to_string(), "1920 px".to_string()),
-                                        ],
-                                        on_change: move |value: String| {
-                                            if let Ok(size) = value.parse::<u32>() {
-                                                config.write().image_optimization_max_size = size;
-                                            }
-                                        },
-                                    }
-                                }
-                            }
-                        }
-
                         div { class: "settings-subsection-label", "{i18n::t(\"library\")}" }
 
                         SettingItem {
@@ -562,6 +535,15 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                             } else {
                                                 show_login.set(true);
                                             }
+                                        },
+                                        spotify_browsers: spotify_browsers.clone(),
+                                        spotify_browser: config.read().spotify_browser.clone(),
+                                        on_spotify_browser: move |v: Option<String>| {
+                                            config.write().spotify_browser = v;
+                                        },
+                                        spotify_prefer_active_device: config.read().spotify_prefer_active_device,
+                                        on_spotify_prefer_active_device: move |v: bool| {
+                                            config.write().spotify_prefer_active_device = v;
                                         },
                                     }
                                 }

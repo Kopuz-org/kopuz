@@ -38,6 +38,13 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.13.0" date="2026-07-28">
+      <description>
+        <p>
+          Spotify joins as a streaming backend, built on the public Web API: your saved tracks, albums and playlists, a Discover page, search and scrobbling, with playback through Spotify's Web Playback SDK or any Spotify Connect device you own. Cover reference encoding is centralized in one place, which fixed Subsonic playlist tracks being written with Jellyfin album ids and cover refs being pasted into image tag parameters. Subsonic playlists now use their own cover art, the downloader gains an Opus format, album release years are read from more tag fields, and local files scrobble to Libre.fm again.
+        </p>
+      </description>
+    </release>
     <release version="0.12.0" date="2026-07-24">
       <description>
         <p>

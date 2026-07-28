@@ -621,6 +621,15 @@ pub struct AppConfig {
     pub active_source: Source,
     #[serde(default)]
     pub source_explicitly_set: bool,
+    /// Browser id used to host Spotify playback (`chrome`/`edge`/`brave`/
+    /// `chromium`/`vivaldi`/`safari`); `None` picks the first available.
+    #[serde(default)]
+    pub spotify_browser: Option<String>,
+    /// When Spotify is active and another Connect device is already playing,
+    /// adopt that device on connect (`true`, default) instead of starting
+    /// playback on this app's in-app device.
+    #[serde(default = "default_true")]
+    pub spotify_prefer_active_device: bool,
     #[serde(default, deserialize_with = "deserialize_music_directories")]
     pub music_directory: Vec<PathBuf>,
     #[serde(default = "default_theme")]
@@ -689,13 +698,6 @@ pub struct AppConfig {
     /// Blur radius of the cover art background, in pixels (0 = sharp).
     #[serde(default)]
     pub cover_art_blur: u8,
-    /// Resize and re-encode local artwork before serving it to the UI. Disabled
-    /// by default so the original file bytes are served untouched.
-    #[serde(default)]
-    pub image_optimization_enabled: bool,
-    /// Maximum width/height used when local artwork optimization is enabled.
-    #[serde(default = "default_image_optimization_max_size")]
-    pub image_optimization_max_size: u32,
     /// Absolute path to a user-chosen image used as the app background,
     /// overriding both the theme background and the cover art background.
     /// Empty = unset. Shares the darkening/blur treatment with cover art.
@@ -839,10 +841,6 @@ fn default_cover_art_darkening() -> u8 {
     60
 }
 
-fn default_image_optimization_max_size() -> u32 {
-    1024
-}
-
 pub fn default_sidebar_order() -> Vec<String> {
     vec![
         "home".to_string(),
@@ -901,6 +899,8 @@ impl Default for AppConfig {
             local_sources: Vec::new(),
             active_source: Source::Local,
             source_explicitly_set: false,
+            spotify_browser: None,
+            spotify_prefer_active_device: true,
             music_directory: vec![music_directory],
             theme: default_theme(),
             device_id: default_device_id(),
@@ -931,8 +931,6 @@ impl Default for AppConfig {
             cover_art_background: false,
             cover_art_darkening: default_cover_art_darkening(),
             cover_art_blur: 0,
-            image_optimization_enabled: false,
-            image_optimization_max_size: default_image_optimization_max_size(),
             custom_background_path: String::new(),
             custom_font_path: String::new(),
             tracing_enabled: false,

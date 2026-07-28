@@ -634,7 +634,7 @@ pub fn FavoritesBody(
                     {
                         // Anonymous YT shows a sign-in prompt; otherwise the
                         // standard empty state with a source-appropriate hint.
-                        let yt_anon = caps().discover
+                        let yt_anon = caps().albums == ::server::source::AlbumType::YtMusic
                             && config
                                 .read()
                                 .server
@@ -766,16 +766,11 @@ fn synthesize_albums(tracks: &[reader::models::Track]) -> Vec<reader::models::Al
     by_album
         .into_iter()
         .map(|(album_id, t)| {
-            // Reuse the first track's thumbnail as the album cover, in the
-            // form `jellyfin_image_url_from_path` decodes: a raw URL via the
-            // `directurl:` prefix, an already-embedded tag via `ytmusic:_:`.
-            let cover_path = t.cover.as_deref().map(|c| {
-                if c.starts_with("http://") || c.starts_with("https://") {
-                    PathBuf::from(format!("directurl:{c}"))
-                } else {
-                    PathBuf::from(format!("ytmusic:_:{c}"))
-                }
-            });
+            // Reuse the first track's thumbnail as the album cover. A YT track's
+            // `cover` is already a self-contained form — a raw URL or a
+            // `urlhex_` tag — both of which `CoverRef::parse` reads as-is, so
+            // there's no wrapper to add.
+            let cover_path = t.cover.as_deref().map(PathBuf::from);
             reader::models::Album {
                 id: album_id,
                 title: if t.album.is_empty() {
