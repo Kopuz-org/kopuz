@@ -91,6 +91,11 @@ pub enum MusicService {
     YtMusic,
     SoundCloud,
     Spotify,
+    /// A source provided by an installed plugin. A unit variant on purpose:
+    /// `MusicService` stays `Copy`, and the ~20 existing match sites take one
+    /// trivial arm once instead of growing with every plugin. Which plugin is
+    /// carried by [`MusicServer::plugin_id`].
+    Plugin,
 }
 
 impl MusicService {
@@ -102,6 +107,9 @@ impl MusicService {
             Self::YtMusic => "YouTube Music",
             Self::SoundCloud => "SoundCloud",
             Self::Spotify => "Spotify",
+            // The UI substitutes the manifest's own name; this is only the
+            // fallback badge for a plugin that is no longer installed.
+            Self::Plugin => "Plugin",
         }
     }
 
@@ -128,6 +136,10 @@ pub struct MusicServer {
     /// For `MusicService::YtMusic` only: anonymous mode.
     #[serde(default)]
     pub yt_anonymous: bool,
+    /// For `MusicService::Plugin` only: which installed plugin backs this
+    /// source. Its manifest supplies the display name, icon and accent.
+    #[serde(default)]
+    pub plugin_id: Option<String>,
 }
 
 impl MusicServer {
@@ -145,6 +157,16 @@ impl MusicServer {
             id: Some(uuid::Uuid::new_v4().to_string()),
             yt_browser: None,
             yt_anonymous: false,
+            plugin_id: None,
+        }
+    }
+
+    /// A source backed by an installed plugin. It has no URL and no
+    /// credentials of its own — the plugin owns whatever it needs.
+    pub fn new_plugin(name: String, plugin_id: String) -> Self {
+        Self {
+            plugin_id: Some(plugin_id),
+            ..Self::new_with_service(name, String::new(), MusicService::Plugin)
         }
     }
 
@@ -164,6 +186,7 @@ impl Default for MusicServer {
             id: None,
             yt_browser: None,
             yt_anonymous: false,
+            plugin_id: None,
         }
     }
 }
@@ -242,6 +265,9 @@ pub struct SavedServer {
     /// Persisted anonymous-mode flag.
     #[serde(default)]
     pub yt_anonymous: bool,
+    /// Persisted plugin identity for `MusicService::Plugin` sources.
+    #[serde(default)]
+    pub plugin_id: Option<String>,
 }
 
 impl SavedServer {
@@ -253,6 +279,7 @@ impl SavedServer {
             service,
             yt_browser: None,
             yt_anonymous: false,
+            plugin_id: None,
         }
     }
 
@@ -267,6 +294,7 @@ impl SavedServer {
             service: server.service,
             yt_browser: server.yt_browser,
             yt_anonymous: server.yt_anonymous,
+            plugin_id: server.plugin_id.clone(),
         }
     }
 
@@ -275,6 +303,12 @@ impl SavedServer {
             && sid == &self.id
         {
             return true;
+        }
+        if self.service == MusicService::Plugin || server.service == MusicService::Plugin {
+            // Plugin sources share an empty URL, so identity is the plugin id.
+            return self.service == server.service
+                && self.plugin_id.is_some()
+                && self.plugin_id == server.plugin_id;
         }
         self.url == server.url && self.service == server.service
     }

@@ -1,4 +1,7 @@
+use std::borrow::Cow;
 use std::fmt;
+
+use serde::{Deserialize, Serialize};
 
 use crate::ytmusic::player::AudioFormat;
 
@@ -6,7 +9,9 @@ use crate::ytmusic::player::AudioFormat;
 /// differently instead of pattern-matching opaque strings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SourceError {
-    Unsupported(&'static str),
+    /// The operation name, owned when it came off a plugin's wire and borrowed
+    /// for the built-in sources' `&'static str` literals.
+    Unsupported(Cow<'static, str>),
     Connectivity,
     Auth,
     InvalidInput(String),
@@ -15,7 +20,13 @@ pub enum SourceError {
 
 impl SourceError {
     pub fn unsupported(op: &'static str) -> Self {
-        SourceError::Unsupported(op)
+        SourceError::Unsupported(Cow::Borrowed(op))
+    }
+
+    /// [`unsupported`](Self::unsupported) for a runtime-supplied name — a
+    /// plugin reporting which of its operations is missing.
+    pub fn unsupported_owned(op: String) -> Self {
+        SourceError::Unsupported(Cow::Owned(op))
     }
 }
 
@@ -46,27 +57,31 @@ impl From<db::DbError> for SourceError {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default, Serialize, Deserialize)]
 pub enum PlaylistOps {
+    #[default]
     None,
     AddRemove,
     Reorder,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum ArtistView {
+    #[default]
     Library,
     Remote,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum FavoritesSync {
+    #[default]
     Instant,
     Paginated,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub enum AlbumType {
+    #[default]
     Standard,
     YtMusic,
 }
@@ -88,7 +103,11 @@ pub struct LibrarySnapshot {
     pub artist_images: Vec<(String, String)>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// What a source supports. Also the handshake payload a plugin sends — hence
+/// the serde derives, and hence `#[serde(default)]`: a plugin built against an
+/// older Kopuz simply does not claim capabilities that did not exist yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Capabilities {
     pub edit_tags: bool,
     pub delete_from_disk: bool,
@@ -104,7 +123,7 @@ pub struct Capabilities {
     pub favorites_sync: FavoritesSync,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AuthOutcome {
     Valid,
     Expired,

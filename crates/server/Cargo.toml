@@ -39,6 +39,7 @@ reader = { workspace = true }
 db = { workspace = true }
 utils = { workspace = true }
 async-trait = { workspace = true }
+toml = { workspace = true }
 
 # Browser-cookie import. Not on Windows: rookie pulls `libesedb` (a bundled C
 # library) there, which can't cross-compile.

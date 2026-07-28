@@ -35,6 +35,7 @@ pub mod capabilities;
 mod jellyfin;
 mod local;
 mod offline;
+mod plugin;
 mod soundcloud;
 mod spotify;
 mod subsonic;
@@ -43,6 +44,7 @@ mod youtube_music;
 use jellyfin::JellyfinSource;
 use local::LocalSource;
 use offline::OfflineServerSource;
+use plugin::PluginSource;
 use soundcloud::SoundcloudSource;
 use spotify::SpotifySource;
 use subsonic::SubsonicSource;
@@ -784,6 +786,13 @@ fn remote_source(db: Db, source: Source, conn: &ServerConn) -> Box<dyn MediaSour
         MusicService::YtMusic => Box::new(YtSource::new(db, source, conn)),
         MusicService::SoundCloud => Box::new(SoundcloudSource::new(db, source, conn)),
         MusicService::Spotify => Box::new(SpotifySource::new(db, source, conn)),
+        // A plugin source with no plugin named is a half-written config row;
+        // fall back to the offline stand-in so favorites still queue rather
+        // than losing the source entirely.
+        MusicService::Plugin => match conn.plugin_id.clone() {
+            Some(plugin_id) => Box::new(PluginSource::new(db, source, plugin_id)),
+            None => Box::new(OfflineServerSource { db, source }),
+        },
     }
 }
 

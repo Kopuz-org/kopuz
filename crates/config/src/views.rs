@@ -18,6 +18,8 @@ pub enum ServerAuth {
         user_id: Option<String>,
         anonymous: bool,
     },
+    /// The plugin runs its own sign-in wizard; Kopuz holds no credentials.
+    Plugin { plugin_id: Option<String> },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -73,7 +75,12 @@ pub struct IntegrationConfig {
 
 impl MusicServer {
     pub fn auth(&self) -> ServerAuth {
-        if self.service == MusicService::YtMusic || self.service == MusicService::SoundCloud {
+        if self.service == MusicService::Plugin {
+            ServerAuth::Plugin {
+                plugin_id: self.plugin_id.clone(),
+            }
+        } else if self.service == MusicService::YtMusic || self.service == MusicService::SoundCloud
+        {
             ServerAuth::Browser {
                 browser: self.yt_browser,
                 token: self.access_token.clone(),

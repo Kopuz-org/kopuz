@@ -510,3 +510,19 @@ spotify_connect_device_other = 다른 기기
 spotify_connect_device_this = 이 앱
 spotify_play_on = 재생 위치
 spotify_this_app = kopuz (이 앱)
+
+# Plugin sources (generic — a plugin supplies its own name and prompts).
+plugins = Plugins
+plugins_none = No plugins installed. Drop a plugin folder into the directory above, then rescan.
+plugin_rescan = Rescan plugins
+plugin_protocol = protocol { $version }
+plugin_sign_in = Sign in
+plugin_not_found = Plugin { $id } is not installed
+plugin_pick_one = Pick a plugin from the list
+plugin_no_setup = This plugin collects whatever it needs during sign-in.
+plugin_connecting = Connecting to the plugin…
+plugin_open_sign_in = Open sign-in page
+plugin_signed_in = Signed in.
+plugin_working = Working…
+plugin_retry = Try again
+continue_action = Continue

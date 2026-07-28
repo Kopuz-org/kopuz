@@ -5,6 +5,7 @@ pub mod cookies;
 pub mod cover;
 pub mod download_queue;
 pub mod jellyfin;
+pub mod plugin;
 pub mod provider;
 pub mod server_ops;
 pub mod soundcloud;
@@ -15,3 +16,4 @@ pub mod sync;
 pub mod ytmusic;
 
 pub use download_queue::{DownloadItem, DownloadProgress, DownloadQueue, DownloadStatus};
+pub use plugin::{PluginClient, PluginEvent, PluginManifest, PluginRegistry, registry};

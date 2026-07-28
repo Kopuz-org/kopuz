@@ -261,14 +261,50 @@ pub fn add_server(
     mut server_name: Signal<String>,
     mut server_url: Signal<String>,
     mut server_service: Signal<MusicService>,
+    mut plugin_id: Signal<Option<String>>,
     yt_browser: Signal<Browser>,
     yt_anonymous: Signal<bool>,
     mut error: Signal<Option<String>>,
     mut show_add_server: Signal<bool>,
     mut show_login: Signal<bool>,
     playback_error: Signal<Option<String>>,
+    auth_state: Signal<Option<PluginAuthState>>,
 ) {
     let selected_service = server_service();
+    if selected_service == MusicService::Plugin {
+        let Some(id) = plugin_id() else {
+            error.set(Some(i18n::t("plugin_pick_one").to_string()));
+            return;
+        };
+        let Some(manifest) = ::server::registry().manifest(&id) else {
+            error.set(Some(
+                i18n::t_with("plugin_not_found", &[("id", id)]).to_string(),
+            ));
+            return;
+        };
+        let display_name = match server_name().trim() {
+            "" => manifest.name.clone(),
+            typed => typed.to_string(),
+        };
+        // No URL and no credential form: a plugin source is identified by its
+        // plugin id and signs itself in.
+        let new_server = config::MusicServer::new_plugin(display_name, manifest.id.clone());
+        let saved = config::SavedServer::from_music_server(&new_server);
+        {
+            let mut cfg = config.write();
+            cfg.add_saved_server(saved);
+            cfg.set_active_server_snapshot(new_server);
+        }
+        server_name.set(String::new());
+        server_url.set(String::new());
+        server_service.set(MusicService::Jellyfin);
+        plugin_id.set(None);
+        error.set(None);
+        show_add_server.set(false);
+        plugin_auth_begin(auth_state, error, manifest.id, manifest.name);
+        return;
+    }
+
     let is_ytmusic = selected_service == MusicService::YtMusic;
     let is_soundcloud = selected_service == MusicService::SoundCloud;
     let is_spotify = selected_service == MusicService::Spotify;
@@ -347,6 +383,7 @@ pub fn add_server(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn switch_server(
     config: Signal<AppConfig>,
     db: ReadDb,
@@ -355,11 +392,13 @@ pub fn switch_server(
     error: Signal<Option<String>>,
     mut show_login: Signal<bool>,
     playback_error: Signal<Option<String>>,
+    auth_state: Signal<Option<PluginAuthState>>,
 ) {
     spawn(async move {
-        let Some(service) = config.peek().find_saved_server(&id).map(|s| s.service) else {
+        let Some(saved) = config.peek().find_saved_server(&id).cloned() else {
             return;
         };
+        let service = saved.service;
 
         let usable =
             hooks::source_switch::apply_source_switch(config, db, config::Source::Server(id)).await;
@@ -373,16 +412,23 @@ pub fn switch_server(
                 soundcloud_auto_login(config, yt_browser, error, playback_error)
             }
             MusicService::Spotify => spotify_auto_login(config, error, playback_error),
+            MusicService::Plugin => {
+                if let Some(plugin_id) = saved.plugin_id.clone() {
+                    let name = ::server::registry()
+                        .manifest(&plugin_id)
+                        .map(|m| m.name)
+                        .unwrap_or_else(|| plugin_id.clone());
+                    plugin_auth_begin(auth_state, error, plugin_id, name);
+                }
+            }
             _ => show_login.set(true),
         }
     });
 }
 
 pub fn delete_saved(mut config: Signal<AppConfig>, id: String) {
-    let service = config
-        .peek()
-        .find_saved_server(&id)
-        .map(|server| server.service);
+    let saved = config.peek().find_saved_server(&id).cloned();
+    let service = saved.as_ref().map(|server| server.service);
     config.write().remove_saved_server(&id);
     match service {
         Some(MusicService::YtMusic) => {
@@ -391,8 +437,153 @@ pub fn delete_saved(mut config: Signal<AppConfig>, id: String) {
         Some(MusicService::SoundCloud) => {
             let _ = ::server::soundcloud::signin::delete_profile(&id);
         }
+        Some(MusicService::Plugin) => {
+            // Stop the child and forget it. The plugin's own data directory is
+            // left alone — it is not Kopuz's to delete.
+            if let Some(plugin_id) = saved.and_then(|s| s.plugin_id) {
+                spawn(async move {
+                    let registry = ::server::registry();
+                    if let Some(client) = registry.connected(&plugin_id).await {
+                        client.notify(
+                            ::server::plugin::wire::method::AUTH_CANCEL,
+                            serde_json::json!({}),
+                        );
+                    }
+                    registry.disconnect(&plugin_id).await;
+                });
+            }
+        }
         _ => {}
     }
+}
+
+// ============================ plugin sign-in ============================
+
+/// One step of a plugin's own sign-in wizard, held by the Settings page.
+/// Everything shown to the user comes from `prompt` — Kopuz supplies no
+/// provider-specific text of its own.
+#[derive(Clone, PartialEq)]
+pub struct PluginAuthState {
+    pub plugin_id: String,
+    pub plugin_name: String,
+    pub prompt: ::server::plugin::wire::AuthPrompt,
+    /// True while the plugin is working on the last submission.
+    pub busy: bool,
+}
+
+/// Start (or restart) a plugin's wizard by asking it for its first prompt.
+pub fn plugin_auth_begin(
+    mut auth_state: Signal<Option<PluginAuthState>>,
+    error: Signal<Option<String>>,
+    plugin_id: String,
+    plugin_name: String,
+) {
+    use ::server::plugin::wire::{AuthPrompt, method};
+
+    auth_state.set(Some(PluginAuthState {
+        plugin_id: plugin_id.clone(),
+        plugin_name: plugin_name.clone(),
+        prompt: AuthPrompt::Message {
+            text: i18n::t("plugin_connecting").to_string(),
+        },
+        busy: true,
+    }));
+
+    spawn(
+        async move {
+            let prompt = plugin_call(&plugin_id, method::AUTH_BEGIN, serde_json::json!({})).await;
+            finish_step(auth_state, error, plugin_id, plugin_name, prompt);
+        }
+        .instrument(tracing::info_span!("plugin.auth_begin")),
+    );
+}
+
+/// Post the collected values and render whatever the plugin asks for next.
+pub fn plugin_auth_submit(
+    mut auth_state: Signal<Option<PluginAuthState>>,
+    error: Signal<Option<String>>,
+    values: std::collections::HashMap<String, String>,
+) {
+    use ::server::plugin::wire::method;
+
+    let Some(state) = auth_state.peek().clone() else {
+        return;
+    };
+    let (plugin_id, plugin_name) = (state.plugin_id.clone(), state.plugin_name.clone());
+    auth_state.set(Some(PluginAuthState {
+        busy: true,
+        ..state
+    }));
+
+    spawn(
+        async move {
+            let prompt = plugin_call(
+                &plugin_id,
+                method::AUTH_SUBMIT,
+                serde_json::json!({ "values": values }),
+            )
+            .await;
+            finish_step(auth_state, error, plugin_id, plugin_name, prompt);
+        }
+        .instrument(tracing::info_span!("plugin.auth_submit")),
+    );
+}
+
+/// Abandon the wizard, telling the plugin so it can tear down whatever it
+/// started (a listener, a device-code poll).
+pub fn plugin_auth_cancel(mut auth_state: Signal<Option<PluginAuthState>>) {
+    let Some(state) = auth_state.take() else {
+        return;
+    };
+    spawn(async move {
+        if let Some(client) = ::server::registry().connected(&state.plugin_id).await {
+            client.notify(
+                ::server::plugin::wire::method::AUTH_CANCEL,
+                serde_json::json!({}),
+            );
+        }
+    });
+}
+
+/// Apply one wizard result: close on success, surface the message on failure,
+/// keep going otherwise.
+fn finish_step(
+    mut auth_state: Signal<Option<PluginAuthState>>,
+    mut error: Signal<Option<String>>,
+    plugin_id: String,
+    plugin_name: String,
+    prompt: Result<::server::plugin::wire::AuthPrompt, String>,
+) {
+    use ::server::plugin::wire::AuthPrompt;
+
+    if let Ok(AuthPrompt::Done) = prompt {
+        auth_state.set(None);
+        error.set(None);
+        hooks::use_sync_task::nudge();
+        return;
+    }
+    // A transport failure is shown the same way the plugin's own `Failed`
+    // would be — the user cannot act on the distinction.
+    let prompt = prompt.unwrap_or_else(|message| AuthPrompt::Failed { message });
+    auth_state.set(Some(PluginAuthState {
+        plugin_id,
+        plugin_name,
+        prompt,
+        busy: false,
+    }));
+}
+
+/// One wizard RPC, with the plugin spawned on demand.
+async fn plugin_call(
+    plugin_id: &str,
+    method: &str,
+    params: serde_json::Value,
+) -> Result<::server::plugin::wire::AuthPrompt, String> {
+    let client = ::server::registry()
+        .client(plugin_id)
+        .await
+        .map_err(|e| e.to_string())?;
+    client.call(method, params).await.map_err(|e| e.to_string())
 }
 
 pub fn login_with_password(

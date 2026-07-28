@@ -132,6 +132,7 @@ fn service_prefix(s: config::MusicService) -> &'static str {
         config::MusicService::Custom => "custom",
         config::MusicService::SoundCloud => "soundcloud",
         config::MusicService::Spotify => "spotify",
+        config::MusicService::Plugin => "plugin",
     }
 }
 
@@ -197,7 +198,7 @@ impl CoverRef {
             }
             // YT Music and legacy SoundCloud refs only carry self-contained
             // artwork. Their item identity is irrelevant to cover resolution.
-            "ytmusic" | "soundcloud" => value.map_or(Self::None, Self::parse),
+            "ytmusic" | "soundcloud" | "plugin" => value.map_or(Self::None, Self::parse),
             _ => Self::None,
         }
     }
@@ -229,9 +230,10 @@ impl CoverRef {
                 item_id: item_id.to_string(),
                 signed: false,
             },
-            MusicService::YtMusic | MusicService::SoundCloud | MusicService::Spotify => {
-                cover.map_or(Self::None, Self::parse)
-            }
+            MusicService::YtMusic
+            | MusicService::SoundCloud
+            | MusicService::Spotify
+            | MusicService::Plugin => cover.map_or(Self::None, Self::parse),
         }
     }
 
@@ -277,7 +279,7 @@ impl CoverRef {
             MusicService::Subsonic | MusicService::Custom => {
                 Self::remote_item(service, &item_id, track.cover.as_deref())
             }
-            MusicService::SoundCloud | MusicService::Spotify => {
+            MusicService::SoundCloud | MusicService::Spotify | MusicService::Plugin => {
                 track.cover.as_deref().map_or(Self::None, Self::parse)
             }
         }

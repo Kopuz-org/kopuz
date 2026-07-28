@@ -21,13 +21,16 @@ impl<'a> PlaybackItemRef<'a> {
                 station_id: parts.next().unwrap_or_default(),
                 stream_id: parts.next().unwrap_or_default(),
             },
-            "jellyfin" | "subsonic" | "custom" | "ytmusic" | "soundcloud" | "spotify" => {
-                Self::Server {
-                    service: scheme,
-                    item_id: parts.next().unwrap_or_default(),
-                    extra: parts.next(),
-                }
-            }
+            // `plugin` is load-bearing: without it every plugin track classifies
+            // as Local and both playback and queue-restore break silently. The
+            // item id is `<plugin_id>/<ref>`, which carries no ':' — so the
+            // split below still slices it correctly.
+            "jellyfin" | "subsonic" | "custom" | "ytmusic" | "soundcloud" | "spotify"
+            | "plugin" => Self::Server {
+                service: scheme,
+                item_id: parts.next().unwrap_or_default(),
+                extra: parts.next(),
+            },
             _ => Self::Local(value),
         }
     }
@@ -103,6 +106,20 @@ mod tests {
                 service: "ytmusic",
                 item_id: "video_id",
                 extra: Some("extra"),
+            }
+        );
+    }
+
+    #[test]
+    fn parses_namespaced_plugin_refs() {
+        // The plugin namespace lives inside the item id, so the ':' split is
+        // unaffected and the whole `<plugin_id>/<ref>` survives intact.
+        assert_eq!(
+            PlaybackItemRef::parse("plugin:example/track-1"),
+            PlaybackItemRef::Server {
+                service: "plugin",
+                item_id: "example/track-1",
+                extra: None,
             }
         );
     }

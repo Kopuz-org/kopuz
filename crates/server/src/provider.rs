@@ -54,6 +54,10 @@ impl ProviderClient {
                     user_id: username.to_string(),
                 })
             }
+            MusicService::Plugin => Err(
+                "this source signs in through its own flow; open Settings and use its sign-in button"
+                    .to_string(),
+            ),
             MusicService::YtMusic => Err(
                 "YouTube Music uses OAuth device flow; call login_ytmusic_device() instead"
                     .to_string(),
