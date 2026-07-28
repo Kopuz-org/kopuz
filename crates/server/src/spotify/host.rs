@@ -240,6 +240,14 @@ const BROWSERS: &[(PlayerBrowser, &str, &str)] = &[
         "com.apple.Safari",
         "Safari.app",
     ),
+    (
+        PlayerBrowser {
+            id: "helium",
+            label: "Helium",
+        },
+        "com.imputnet.helium",
+        "Helium.app",
+    ),
 ];
 
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -278,6 +286,13 @@ const BROWSERS: &[(PlayerBrowser, &[&str])] = &[
             label: "Vivaldi",
         },
         &["vivaldi"],
+    ),
+    (
+        PlayerBrowser {
+            id: "helium",
+            label: "Helium",
+        },
+        &["helium"],
     ),
 ];
 
