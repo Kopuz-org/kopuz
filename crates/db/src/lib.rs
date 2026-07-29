@@ -49,6 +49,7 @@ pub struct QueueSnapshot {
     pub progress_secs: u64,
     pub shuffle_order: Vec<usize>,
     pub shuffle_enabled: bool,
+    pub loop_mode: u8,
 }
 
 /// Sort order for a track listing — maps to an indexed `ORDER BY`.

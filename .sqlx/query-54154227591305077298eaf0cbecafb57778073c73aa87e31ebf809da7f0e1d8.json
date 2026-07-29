@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM tracks WHERE source = ?1 AND source_album_id = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "54154227591305077298eaf0cbecafb57778073c73aa87e31ebf809da7f0e1d8"
+}
