@@ -149,7 +149,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                          }
                      }
                  }
-                 div { class: "flex-1",
+                 div { class: "flex-1 min-w-0",
                      if !props.description.is_empty() {
                          if let Some(on_description_click) = props.on_description_click {
                              button {
@@ -161,7 +161,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                              h5 { class: "text-sm font-bold text-white/60 mb-2", "{props.description}" }
                          }
                      }
-                     h1 { class: if cfg!(target_os = "android") { "text-3xl font-semibold tracking-tight text-white mb-3" } else { "text-5xl md:text-7xl font-semibold tracking-tight text-white mb-6" }, "{props.name}" }
+                     h1 { class: if cfg!(target_os = "android") { "text-3xl font-semibold tracking-tight text-white mb-3 break-words line-clamp-3" } else { "text-5xl md:text-7xl font-semibold tracking-tight text-white mb-6 break-words line-clamp-3" }, "{props.name}" }
                      div { class: if cfg!(target_os = "android") { "flex items-center justify-center gap-4 text-slate-400" } else { "flex items-center gap-6 text-slate-400" },
                          {
                             let count = props.tracks.len();
