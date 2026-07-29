@@ -536,9 +536,27 @@ You need three things:
   Browsing your library still works without Premium, playback does not.
 - **Your own Spotify client.** Kopuz does not ship a Client ID, you create one
   in about two minutes and paste it in.
-- **A supported browser installed.** Chrome, Edge, Brave, Chromium, Vivaldi, or
-  Safari on macOS. Firefox is not usable here: the SDK has a long-standing bug
-  in Firefox where playback dies a few seconds in, so Kopuz will not pick it.
+- **A supported browser installed.** Chrome, Edge, Brave, Chromium, Vivaldi,
+  Helium or Safari on macOS. Firefox is not usable here: the SDK has a
+  long-standing bug in Firefox where playback dies a few seconds in, so Kopuz
+  will not pick it.
+
+  > [!NOTE]
+  > To use the Spotify backend with Helium, you need to place the Widevine files
+  > in the correct location. See
+  > [here](https://github.com/imputnet/helium/issues/116#issuecomment-3668370766)
+  > for more information. On NixOS using
+  > [hjem](https://github.com/feel-co/hjem), this can be done by adding
+  >
+  > ```nix
+  > hjem.users.your-username = {
+  >   xdg.config.files."net.imput.helium/WidevineCdm/latest-component-updated-widevine-cdm".text = ''
+  >     {"Path":"${pkgs.widevine-cdm}/share/google/chrome/WidevineCdm"}
+  >   '';
+  > };
+  > ```
+  >
+  > to your configuration.
 
 ### 1. Create your Spotify app
 
@@ -640,7 +658,7 @@ Kopuz:
 
 ### Troubleshooting
 
-- **"Spotify playback needs Chrome, Edge, Brave, Chromium, Vivaldi, or Safari"**
+- **"Spotify playback needs Chrome, Edge, Brave, Chromium, Vivaldi, Helium, or Safari"**
   means none of those were found. Install one, then pick it under **Settings →
   Media servers**.
 - **Sign-in never completes.** Check the redirect URI on your Spotify app
