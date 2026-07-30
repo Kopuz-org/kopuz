@@ -413,7 +413,7 @@ folder_name = Katalognamn...
 new_folder = Ny katalog
 remove_from_folder = Ta bort från katalog
 back_behavior = Bakåtknappens beteende
-back_behavior_rewind = Spola tillbaka, sedan föregående
+back_behavior_rewind = Spola, sedan föregående
 back_behavior_always_prev = Alltid föregående
 
 metadata = Metadata
