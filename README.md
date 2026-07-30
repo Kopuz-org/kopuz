@@ -658,9 +658,9 @@ Kopuz:
 
 ### Troubleshooting
 
-- **"Spotify playback needs Chrome, Edge, Brave, Chromium, Vivaldi, Helium, or Safari"**
-  means none of those were found. Install one, then pick it under **Settings →
-  Media servers**.
+- **"Spotify playback needs Chrome, Edge, Brave, Chromium, Vivaldi, Helium, or
+  Safari"** means none of those were found. Install one, then pick it under
+  **Settings → Media servers**.
 - **Sign-in never completes.** Check the redirect URI on your Spotify app
   character by character, and make sure nothing else is using port 8898.
 - **Sign-in is refused for a friend's account.** Add them under **User
