@@ -10,8 +10,8 @@ pub(crate) fn Tabs(
     current_queue_index: Signal<usize>,
     lyrics: Signal<Option<Option<utils::lyrics::Lyrics>>>,
     current_song_progress: Signal<u64>,
+    active_tab: Signal<usize>,
 ) -> Element {
-    let mut active_tab = use_signal(|| 0usize);
 
     rsx! {
         div {
