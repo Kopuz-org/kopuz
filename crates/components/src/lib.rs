@@ -25,6 +25,7 @@ pub mod player_controls;
 pub mod playlist_detail;
 pub mod playlist_modal;
 pub mod playlist_popups;
+pub mod plugin_auth_popup;
 pub mod queue_drag;
 pub mod queue_list_view;
 pub mod quick_search;

@@ -528,7 +528,10 @@ pub fn ServerSettings(
     /// than starting on this app's in-app device.
     spotify_prefer_active_device: bool,
     on_spotify_prefer_active_device: EventHandler<bool>,
+    /// Run a plugin source's own sign-in wizard. Carries the server id.
+    on_plugin_auth: EventHandler<String>,
 ) -> Element {
+    let manifests = ::server::registry().manifests();
     let login_text = i18n::t("login");
     let delete_text = i18n::t("delete");
     let switch_text = i18n::t("switch_to_server");
@@ -547,6 +550,23 @@ pub fn ServerSettings(
                     let id_switch = id.clone();
                     let id_delete = id.clone();
                     let is_spotify = srv.service == MusicService::Spotify;
+                    let plugin = srv
+                        .plugin_id
+                        .as_deref()
+                        .and_then(|id| manifests.iter().find(|m| m.id == id));
+                    // A plugin source's subtitle is its manifest, not its URL —
+                    // it has no URL, and the manifest is the only place its
+                    // real name and version live.
+                    let detail = match (srv.service, plugin) {
+                        (MusicService::Plugin, Some(m)) => format!("{} {}", m.name, m.version),
+                        (MusicService::Plugin, None) => srv
+                            .plugin_id
+                            .clone()
+                            .map(|id| i18n::t_with("plugin_not_found", &[("id", id)]).to_string())
+                            .unwrap_or_default(),
+                        _ => srv.url.clone(),
+                    };
+                    let id_auth = id.clone();
                     let browsers = spotify_browsers.clone();
                     let chosen = spotify_browser.clone();
                     let prefer_active = spotify_prefer_active_device;
@@ -564,7 +584,7 @@ pub fn ServerSettings(
                                     }
                                 }
                                 p { class: "text-xs text-white/60", "{i18n::t_with(\"service\", &[(\"name\", srv.service.display_name().to_string())])}" }
-                                p { class: "text-xs text-white/60 truncate", "{srv.url}" }
+                                p { class: "text-xs text-white/60 truncate", "{detail}" }
                                 if is_active {
                                     match conn() {
                                         hooks::source_switch::ConnStatus::Online => rsx! {
@@ -587,6 +607,13 @@ pub fn ServerSettings(
                                 }
                             }
                             div { class: "flex items-center gap-2 shrink-0",
+                                if srv.service == MusicService::Plugin {
+                                    button {
+                                        onclick: move |_| on_plugin_auth.call(id_auth.clone()),
+                                        class: "text-xs bg-white/10 hover:bg-white/20 px-2 py-1 rounded text-white transition-colors",
+                                        "{i18n::t(\"plugin_sign_in\")}"
+                                    }
+                                }
                                 if !is_active {
                                     button {
                                         onclick: move |_| on_switch.call(id_switch.clone()),
@@ -1714,6 +1741,46 @@ pub fn RadioRegistryDropdown(
                         "{add_text}"
                     }
                 }
+            }
+        }
+    }
+}
+
+/// The installed-plugins list. Read-only apart from a rescan: installing a
+/// plugin means dropping its directory into the plugins folder, which Kopuz
+/// deliberately does not manage for the user.
+#[component]
+pub fn PluginsSection(plugins_dir: String) -> Element {
+    let mut manifests = use_signal(|| ::server::registry().manifests());
+
+    rsx! {
+        div { class: "flex flex-col gap-2 w-full",
+            p { class: "text-xs text-white/50 font-mono truncate", "{plugins_dir}" }
+            if manifests().is_empty() {
+                p { class: "text-xs text-white/50 italic", "{i18n::t(\"plugins_none\")}" }
+            }
+            for manifest in manifests().into_iter() {
+                div {
+                    key: "{manifest.id}",
+                    class: "flex items-center justify-between gap-4 bg-white/5 p-2 rounded w-full",
+                    div { class: "min-w-0 flex-1",
+                        div { class: "flex items-center gap-2",
+                            i {
+                                class: "{manifest.icon.clone().unwrap_or_else(|| \"fa-solid fa-puzzle-piece\".to_string())}",
+                                style: "color:{manifest.accent.clone().unwrap_or_else(|| \"#8a8a8a\".to_string())}",
+                            }
+                            p { class: "text-sm font-medium text-white truncate", "{manifest.name}" }
+                        }
+                        p { class: "text-xs text-white/60 truncate",
+                            "{manifest.id} · {manifest.version} · {i18n::t_with(\"plugin_protocol\", &[(\"version\", manifest.protocol.to_string())])}"
+                        }
+                    }
+                }
+            }
+            button {
+                onclick: move |_| manifests.set(::server::registry().rescan()),
+                class: "bg-white/10 hover:bg-white/20 px-3 py-1 rounded text-sm text-white transition-colors self-start",
+                "{i18n::t(\"plugin_rescan\")}"
             }
         }
     }

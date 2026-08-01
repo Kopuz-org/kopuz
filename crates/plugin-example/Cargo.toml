@@ -1,0 +1,23 @@
+[package]
+name = "kopuz-plugin-example"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Reference Kopuz plugin: serves a folder of audio files over the plugin protocol."
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+publish = false
+
+[[bin]]
+name = "kopuz-plugin-example"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "io-util", "io-std", "net", "sync", "fs"] }

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO servers (id, name, url, service, yt_browser, yt_anonymous, plugin_id, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ON CONFLICT(id) DO UPDATE SET name=?2, url=?3, service=?4, yt_browser=?5, yt_anonymous=?6, plugin_id=?7, updated_at=?8",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "f2d42fa809c2bdb26840c7f8ef3e9b49505a455ca7d75468086091ef4ca322e2"
+}

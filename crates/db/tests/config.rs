@@ -37,6 +37,7 @@ async fn config_round_trips_with_creds_in_servers_table() {
                 service: MusicService::Jellyfin,
                 yt_browser: None,
                 yt_anonymous: false,
+                plugin_id: None,
             },
             SavedServer {
                 id: "srv-b".into(),
@@ -45,6 +46,7 @@ async fn config_round_trips_with_creds_in_servers_table() {
                 service: MusicService::YtMusic,
                 yt_browser: Some(config::Browser::Brave),
                 yt_anonymous: false,
+                plugin_id: None,
             },
         ],
         server: Some(MusicServer {
@@ -56,6 +58,7 @@ async fn config_round_trips_with_creds_in_servers_table() {
             id: Some("srv-b".into()),
             yt_browser: Some(config::Browser::Brave),
             yt_anonymous: false,
+            plugin_id: None,
         }),
         active_source: config::Source::Server("srv-b".into()),
         theme: "midnight".into(),

@@ -35,7 +35,7 @@ pub async fn load_config(pool: &SqlitePool) -> Result<Option<AppConfig>, DbError
 
     // Hydrate servers from their table (creds included for the active one).
     let rows = sqlx::query!(
-        "SELECT id, name, url, service, access_token, user_id, yt_browser, yt_anonymous \
+        "SELECT id, name, url, service, access_token, user_id, yt_browser, yt_anonymous, plugin_id \
          FROM servers"
     )
     .fetch_all(pool)
@@ -50,6 +50,7 @@ pub async fn load_config(pool: &SqlitePool) -> Result<Option<AppConfig>, DbError
             service: parse_service(&r.service),
             yt_browser: parse_browser(r.yt_browser.as_deref()),
             yt_anonymous: r.yt_anonymous != 0,
+            plugin_id: r.plugin_id.clone(),
         })
         .collect();
 
@@ -63,6 +64,7 @@ pub async fn load_config(pool: &SqlitePool) -> Result<Option<AppConfig>, DbError
             id: Some(r.id.clone()),
             yt_browser: parse_browser(r.yt_browser.as_deref()),
             yt_anonymous: r.yt_anonymous != 0,
+            plugin_id: r.plugin_id.clone(),
         })
     });
 
@@ -90,16 +92,17 @@ pub async fn save_config(pool: &SqlitePool, cfg: &AppConfig) -> Result<(), DbErr
         let browser = s.yt_browser.map(browser_str);
         let anon = s.yt_anonymous as i64;
         sqlx::query!(
-            "INSERT INTO servers (id, name, url, service, yt_browser, yt_anonymous, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
+            "INSERT INTO servers (id, name, url, service, yt_browser, yt_anonymous, plugin_id, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
              ON CONFLICT(id) DO UPDATE SET name=?2, url=?3, service=?4, yt_browser=?5, \
-               yt_anonymous=?6, updated_at=?7",
+               yt_anonymous=?6, plugin_id=?7, updated_at=?8",
             s.id,
             s.name,
             s.url,
             service,
             browser,
             anon,
+            s.plugin_id,
             now
         )
         .execute(&mut *tx)
@@ -124,10 +127,10 @@ pub async fn save_config(pool: &SqlitePool, cfg: &AppConfig) -> Result<(), DbErr
         };
         sqlx::query!(
             "INSERT INTO servers \
-               (id, name, url, service, access_token, user_id, yt_browser, yt_anonymous, auth_state, cred_updated_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10) \
+               (id, name, url, service, access_token, user_id, yt_browser, yt_anonymous, plugin_id, auth_state, cred_updated_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11) \
              ON CONFLICT(id) DO UPDATE SET name=?2, url=?3, service=?4, access_token=?5, \
-               user_id=?6, yt_browser=?7, yt_anonymous=?8, auth_state=?9, cred_updated_at=?10, updated_at=?10",
+               user_id=?6, yt_browser=?7, yt_anonymous=?8, plugin_id=?9, auth_state=?10, cred_updated_at=?11, updated_at=?11",
             id,
             srv.name,
             srv.url,
@@ -136,6 +139,7 @@ pub async fn save_config(pool: &SqlitePool, cfg: &AppConfig) -> Result<(), DbErr
             srv.user_id,
             browser,
             anon,
+            srv.plugin_id,
             auth,
             now
         )
@@ -199,7 +203,7 @@ pub async fn save_config(pool: &SqlitePool, cfg: &AppConfig) -> Result<(), DbErr
 /// creds are reused instead of re-prompting sign-in.
 pub async fn load_server(pool: &SqlitePool, id: &str) -> Result<Option<MusicServer>, DbError> {
     let row = sqlx::query!(
-        "SELECT id, name, url, service, access_token, user_id, yt_browser, yt_anonymous \
+        "SELECT id, name, url, service, access_token, user_id, yt_browser, yt_anonymous, plugin_id \
          FROM servers WHERE id = ?1",
         id
     )
@@ -214,6 +218,7 @@ pub async fn load_server(pool: &SqlitePool, id: &str) -> Result<Option<MusicServ
         id: Some(r.id),
         yt_browser: parse_browser(r.yt_browser.as_deref()),
         yt_anonymous: r.yt_anonymous != 0,
+        plugin_id: r.plugin_id,
     }))
 }
 
@@ -293,6 +298,7 @@ fn parse_service(s: &str) -> MusicService {
         "YtMusic" => MusicService::YtMusic,
         "SoundCloud" => MusicService::SoundCloud,
         "Spotify" => MusicService::Spotify,
+        "Plugin" => MusicService::Plugin,
         _ => MusicService::Jellyfin,
     }
 }
@@ -305,6 +311,7 @@ fn service_str(s: MusicService) -> &'static str {
         MusicService::YtMusic => "YtMusic",
         MusicService::SoundCloud => "SoundCloud",
         MusicService::Spotify => "Spotify",
+        MusicService::Plugin => "Plugin",
     }
 }
 

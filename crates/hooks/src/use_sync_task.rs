@@ -46,6 +46,9 @@ pub fn use_sync_task(config: Signal<config::AppConfig>, db: Db) {
                     let interval = {
                         let base: u64 = match config.peek().active_service() {
                             Some(config::MusicService::YtMusic) => 5 * 60,
+                            // Plugins own their own backend chatter; poll at
+                            // the same cadence as the other catalog remotes.
+                            Some(config::MusicService::Plugin) => 10 * 60,
                             Some(_) => 10 * 60,
                             None => 10 * 60,
                         };

@@ -1014,6 +1014,7 @@ impl AppConfig {
                     service: server.service,
                     yt_browser: server.yt_browser,
                     yt_anonymous: server.yt_anonymous,
+                    plugin_id: server.plugin_id.clone(),
                 });
             }
         }
