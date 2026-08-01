@@ -38,6 +38,8 @@ pub struct TrackListViewProps {
     #[props(default = false)]
     pub enable_metadata: bool,
     pub actions: Option<Element>,
+    #[props(default)]
+    pub on_start_radio: Option<EventHandler<()>>,
 }
 
 #[component]
@@ -99,6 +101,7 @@ pub fn TrackListView(props: TrackListViewProps) -> Element {
                     && props.tracks.iter().all(|t| selected_tracks.read().contains(&t.id)),
                 on_cover_click: props.on_cover_click,
                 actions: props.actions,
+                on_start_radio: props.on_start_radio,
                 on_select_all: move |selected: bool| {
                     if selected {
                         selected_tracks

@@ -93,6 +93,7 @@ add_to_queue = Adaugă la Coadă
 play_next = Redă în continuare
 add_to_playlist = Adaugă la Lista de Redare
 remove_from_playlist = Elimină din Lista de Redare
+start_radio = Pornește Radioul
 share_musicbrainz = Distribuie (MusicBrainz)
 share_link_copied = Link MusicBrainz copiat
 delete = Șterge

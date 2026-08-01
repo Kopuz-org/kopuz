@@ -166,6 +166,7 @@ add_to_queue = Thêm vào hàng đợi
 play_next = Phát tiếp theo
 add_to_playlist = Thêm vào danh sách phát
 remove_from_playlist = Xóa khỏi danh sách phát
+start_radio = Bắt đầu radio
 share_musicbrainz = Chia sẻ (MusicBrainz)
 share_link_copied = Đã sao chép liên kết MusicBrainz
 delete = Xóa

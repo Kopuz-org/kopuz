@@ -93,6 +93,7 @@ add_to_queue = Додати до черги
 play_next = Відтворити наступною
 add_to_playlist = Додати до плейлиста
 remove_from_playlist = Видалити з плейлиста
+start_radio = Запустити радіо
 share_musicbrainz = Поділитися (MusicBrainz)
 share_link_copied = Посилання MusicBrainz скопійовано
 delete = Видалити

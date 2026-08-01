@@ -166,6 +166,7 @@ add_to_queue = Aan wachtrij toevoegen
 play_next = Hierna afspelen
 add_to_playlist = Aan afspeellijst toevoegen
 remove_from_playlist = Uit afspeellijst verwijderen
+start_radio = Radio starten
 share_musicbrainz = Delen (MusicBrainz)
 share_link_copied = MusicBrainz-link gekopieerd
 delete = Verwijderen

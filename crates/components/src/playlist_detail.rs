@@ -230,6 +230,8 @@ pub fn PlaylistDetail(
         })
         .or_else(|| tracks_val.first().and_then(&cover_for));
 
+    let start_radio = crate::radio_actions::playlist_radio_handler(playlist_id.clone());
+
     let pid_for_remove = playlist_id.clone();
     let pid_for_move_up = playlist_id.clone();
     let pid_for_move_down = playlist_id.clone();
@@ -244,6 +246,7 @@ pub fn PlaylistDetail(
             cover_url: playlist_cover,
             tracks: tracks_val,
             on_close,
+            on_start_radio: start_radio,
             enable_metadata: caps.edit_tags,
             on_cover_click: move |_| {
                 let _ = &pid_for_cover;

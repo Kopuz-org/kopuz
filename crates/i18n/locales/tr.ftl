@@ -93,6 +93,7 @@ add_to_queue = Sıraya Ekle
 play_next = Sonraki çal
 add_to_playlist = Çalma Listesine Ekle
 remove_from_playlist = Çalma Listesinden Kaldır
+start_radio = Radyo Başlat
 share_musicbrainz = Paylaş (MusicBrainz)
 share_link_copied = MusicBrainz bağlantısı kopyalandı
 delete = Sil

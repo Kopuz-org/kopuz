@@ -93,6 +93,7 @@ add_to_queue = 󱥄󱥌󱥩󱤾󱤕
 play_next = 󱥄󱤕󱤬󱥒
 add_to_playlist = 󱥄󱥌󱥩󱤟󱤕
 remove_from_playlist = 󱥄󱥶󱥧󱤟󱤕
+start_radio = 󱥄󱥇󱤉󱤾󱤕󱥝
 share_musicbrainz = 󱥄 (MusicBrainz)
 share_link_copied = linja MusicBrainz li kama jo
 delete = 󱥄󱥶

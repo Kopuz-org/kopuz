@@ -93,6 +93,7 @@ add_to_queue = Agregar a la Cola
 play_next = Reproducir a continuación
 add_to_playlist = Agregar a Playlist
 remove_from_playlist = Eliminar de Playlist
+start_radio = Iniciar Radio
 share_musicbrainz = Compartir (MusicBrainz)
 share_link_copied = Enlace de MusicBrainz copiado
 delete = Borrar

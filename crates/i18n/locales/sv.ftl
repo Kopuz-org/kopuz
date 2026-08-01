@@ -166,6 +166,7 @@ add_to_queue = Lägg till i kön
 play_next = Spela nästa
 add_to_playlist = Lägg till i spellista
 remove_from_playlist = Ta bort från spellista
+start_radio = Starta radio
 share_musicbrainz = Dela (MusicBrainz)
 share_link_copied = MusicBrainz länk kopierad
 delete = Ta bort

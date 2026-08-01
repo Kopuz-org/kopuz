@@ -146,6 +146,7 @@ add_to_queue = Adicionar à fila
 play_next = Tocar a seguir
 add_to_playlist = Adicionar à playlist
 remove_from_playlist = Remover da playlist
+start_radio = Iniciar rádio
 share_musicbrainz = Compartilhar (MusicBrainz)
 share_link_copied = Link do MusicBrainz copiado
 delete = Excluir

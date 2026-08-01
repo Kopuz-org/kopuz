@@ -166,6 +166,7 @@ add_to_queue = Aggiungi alla Coda
 play_next = Riproduci come successivo 
 add_to_playlist = Aggiungi alla Playlist
 remove_from_playlist = Rimuovi dalla Playlist
+start_radio = Avvia Radio
 share_musicbrainz = Condividi (MusicBrainz)
 share_link_copied = link MusicBrainz copiato
 delete = Elimina

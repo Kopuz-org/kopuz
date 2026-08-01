@@ -93,6 +93,7 @@ add_to_queue = إضافة إلى قائمة الانتظار
 play_next = تشغيل التالي
 add_to_playlist = إضافة إلى قائمة التشغيل
 remove_from_playlist = إزالة من قائمة التشغيل
+start_radio = بدء الراديو
 share_musicbrainz = مشاركة (MusicBrainz)
 share_link_copied = تم نسخ رابط MusicBrainz
 delete = حذف

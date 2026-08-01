@@ -136,6 +136,10 @@ pub struct ShowcaseProps {
     pub on_click_menu: Option<EventHandler<usize>>,
     pub on_close_menu: Option<EventHandler<()>>,
     pub actions: Option<Element>,
+    /// "Start radio" for whatever this header represents. A prop rather than an
+    /// `actions` element because the two layouts size their header buttons very
+    /// differently — each renders it in its own idiom, next to shuffle.
+    pub on_start_radio: Option<EventHandler<()>>,
     pub on_download_all: Option<EventHandler<()>>,
     pub on_delete_all: Option<EventHandler<()>>,
     #[props(default = false)]

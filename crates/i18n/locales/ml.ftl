@@ -166,6 +166,7 @@ add_to_queue = ക്യൂവിലേക്ക് ചേർക്കുക
 play_next = അടുത്തത് പ്ലേ ചെയ്യുക
 add_to_playlist = പ്ലേലിസ്റ്റിലേക്ക് ചേർക്കുക
 remove_from_playlist = പ്ലേലിസ്റ്റിൽ നിന്ന് നീക്കം ചെയ്യുക
+start_radio = റേഡിയോ ആരംഭിക്കുക
 share_musicbrainz = പങ്കിടുക (MusicBrainz)
 share_link_copied = MusicBrainz ലിങ്ക് പകർത്തി
 delete = ഇല്ലാതാക്കുക

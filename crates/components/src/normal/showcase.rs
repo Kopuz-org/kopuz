@@ -203,6 +203,14 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                             onclick: move |_| ctrl.toggle_shuffle(),
                             i { class: "fa-solid fa-shuffle text-xl ml-1" }
                         }
+                        if let Some(start_radio) = props.on_start_radio {
+                            button {
+                                class: "w-14 h-14 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
+                                title: crate::radio_actions::radio_label(),
+                                onclick: move |_| start_radio.call(()),
+                                i { class: "{crate::radio_actions::RADIO_ICON} text-xl" }
+                            }
+                        }
                         button {
                              class: "w-14 h-14 rounded-full bg-indigo-500 hover:bg-indigo-400 text-black flex items-center justify-center transition-transform hover:scale-105",
                              onclick: move |_| {

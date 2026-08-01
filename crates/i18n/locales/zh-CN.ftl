@@ -93,6 +93,7 @@ add_to_queue = 添加到播放队列
 play_next = 下一首播放
 add_to_playlist = 添加到播放列表
 remove_from_playlist = 从播放列表中移除
+start_radio = 开始电台
 share_musicbrainz = 分享 (MusicBrainz)
 share_link_copied = MusicBrainz 链接已复制
 delete = 删除

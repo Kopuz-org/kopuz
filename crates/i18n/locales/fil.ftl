@@ -166,6 +166,7 @@ add_to_queue = Idagdag sa Queue
 play_next = I-play Susunod
 add_to_playlist = Idagdag sa Playlist
 remove_from_playlist = Alisin sa Playlist
+start_radio = Simulan ang Radyo
 share_musicbrainz = Ibahagi (MusicBrainz)
 share_link_copied = Nakopya ang link ng MusicBrainz
 delete = Burahin

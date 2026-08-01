@@ -166,6 +166,7 @@ add_to_queue = வரிசையில் சேர்
 play_next = அடுத்ததை இயக்கு
 add_to_playlist = பிளேலிஸ்ட்டில் சேர்
 remove_from_playlist = பிளேலிஸ்ட்டிலிருந்து அகற்று
+start_radio = வானொலியைத் தொடங்கு
 share_musicbrainz = பகிர் (MusicBrainz)
 share_link_copied = MusicBrainz இணைப்பு நகலெடுக்கப்பட்டது
 delete = நீக்கு
