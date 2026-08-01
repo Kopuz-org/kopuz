@@ -16,13 +16,6 @@ fn theme_editor_section(_config: Signal<AppConfig>) -> Element {
     rsx! {}
 }
 
-// Desktop-only: open the logs folder in the OS file manager, or export a
-// bundle (latest.log + newest crash report) via a save dialog. rfd is
-// excluded on Android and utils::logs is filesystem-only, so the rest get a
-// stub.
-// Declared `-> ()` so the panic coerces here; calling it from the onclick
-// keeps the handler's return type `()` (a bare `panic!` in the closure infers
-// `!`, which the event-handler trait rejects).
 #[cfg(not(target_os = "android"))]
 fn trigger_test_crash() {
     panic!("manual crash trigger from settings (debug build)");
@@ -78,8 +71,6 @@ fn logs_section(mut config: Signal<AppConfig>) -> Element {
                     i { class: "fa-solid fa-file-export" }
                     "{i18n::t(\"export_logs\")}"
                 }
-                // Debug builds only: deliberately panic to exercise the crash
-                // hook / crash-report path. English-only by design (dev tool).
                 if cfg!(debug_assertions) {
                     button {
                         r#type: "button",
@@ -116,6 +107,159 @@ use config::{AppConfig, FetchStrategy, MusicService, OfflineQuality};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SettingsCategory {
+    General,
+    Customization,
+    Library,
+    Connectivity,
+    Downloads,
+    Metadata,
+    Player,
+    Tools,
+}
+
+#[component]
+fn SettingsFanItem(
+    category: SettingsCategory,
+    selected: SettingsCategory,
+    label: String,
+    icon: &'static str,
+    angle: &'static str,
+    label_x: &'static str,
+    label_y: &'static str,
+    label_tilt: &'static str,
+    on_select: EventHandler<SettingsCategory>,
+) -> Element {
+    let is_selected = category == selected;
+    let selected_class = if is_selected { "is-selected" } else { "" };
+
+    rsx! {
+        button {
+            r#type: "button",
+            class: "settings-fan-item {selected_class}",
+            style: "--fan-angle: {angle};",
+            aria_label: "{label}",
+            aria_pressed: is_selected,
+            title: "{label}",
+            onclick: move |_| on_select.call(category),
+            span { class: "settings-fan-mobile-label", aria_hidden: "true",
+                i { class: "fa-solid {icon}" }
+                span { "{label}" }
+            }
+        }
+        span {
+            class: "settings-fan-label {selected_class}",
+            style: "--label-x: {label_x}; --label-y: {label_y}; --label-tilt: {label_tilt};",
+            aria_hidden: "true",
+            i { class: "fa-solid {icon}" }
+            span { "{label}" }
+        }
+    }
+}
+
+#[component]
+fn SettingsFan(selected: SettingsCategory, on_select: EventHandler<SettingsCategory>) -> Element {
+    rsx! {
+        nav {
+            class: "settings-fan",
+            aria_label: i18n::t("settings"),
+            div { class: "settings-fan-disc",
+            SettingsFanItem {
+                category: SettingsCategory::General,
+                selected,
+                label: i18n::t("general").to_string(),
+                icon: "fa-sliders",
+                angle: "-78.75deg",
+                label_x: "12.92%",
+                label_y: "-32.49%",
+                label_tilt: "-78.75deg",
+                on_select,
+            }
+            SettingsFanItem {
+                category: SettingsCategory::Customization,
+                selected,
+                label: i18n::t("appearance").to_string(),
+                icon: "fa-paintbrush",
+                angle: "-56.25deg",
+                label_x: "36.81%",
+                label_y: "-27.54%",
+                label_tilt: "-56.25deg",
+                on_select,
+            }
+            SettingsFanItem {
+                category: SettingsCategory::Library,
+                selected,
+                label: i18n::t("library").to_string(),
+                icon: "fa-music",
+                angle: "-33.75deg",
+                label_x: "55.08%",
+                label_y: "-18.4%",
+                label_tilt: "-33.75deg",
+                on_select,
+            }
+            SettingsFanItem {
+                category: SettingsCategory::Connectivity,
+                selected,
+                label: i18n::t("connectivity").to_string(),
+                icon: "fa-satellite-dish",
+                angle: "-11.25deg",
+                label_x: "64.98%",
+                label_y: "-6.46%",
+                label_tilt: "-11.25deg",
+                on_select,
+            }
+            SettingsFanItem {
+                category: SettingsCategory::Downloads,
+                selected,
+                label: i18n::t("offline_downloads").to_string(),
+                icon: "fa-cloud-arrow-down",
+                angle: "11.25deg",
+                label_x: "64.98%",
+                label_y: "6.46%",
+                label_tilt: "11.25deg",
+                on_select,
+            }
+            SettingsFanItem {
+                category: SettingsCategory::Metadata,
+                selected,
+                label: i18n::t("metadata").to_string(),
+                icon: "fa-tags",
+                angle: "33.75deg",
+                label_x: "55.08%",
+                label_y: "18.4%",
+                label_tilt: "33.75deg",
+                on_select,
+            }
+            SettingsFanItem {
+                category: SettingsCategory::Player,
+                selected,
+                label: i18n::t("player_settings").to_string(),
+                icon: "fa-wave-square",
+                angle: "56.25deg",
+                label_x: "36.81%",
+                label_y: "27.54%",
+                label_tilt: "56.25deg",
+                on_select,
+            }
+            if !cfg!(target_os = "android") {
+                SettingsFanItem {
+                    category: SettingsCategory::Tools,
+                    selected,
+                    label: i18n::t("logs").to_string(),
+                    icon: "fa-screwdriver-wrench",
+                    angle: "78.75deg",
+                    label_x: "12.92%",
+                    label_y: "32.49%",
+                    label_tilt: "78.75deg",
+                    on_select,
+                }
+            }
+            }
+        }
+    }
+}
+
 #[component]
 pub fn Settings(config: Signal<AppConfig>) -> Element {
     let ctrl = use_context::<PlayerController>();
@@ -149,8 +293,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             .and_then(|s| s.yt_browser)
             .unwrap_or(config::Browser::Chrome)
     });
-    // Anonymous YT mode for the add-server popup. Defaults to browser sign-in on
-    // every platform (Windows cookie decryption is now supported natively).
     let yt_anonymous = use_signal(|| false);
 
     let mut username = use_signal(String::new);
@@ -159,6 +301,16 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     let error = use_signal(|| Option::<String>::None);
     let mut login_error = use_signal(|| Option::<String>::None);
     let is_loading = use_signal(|| false);
+    let mut active_category = use_signal(|| SettingsCategory::General);
+    let settings_anchor = try_consume_context::<components::source_switcher::SettingsAnchor>();
+
+    use_effect(move || {
+        if settings_anchor.is_some_and(|components::source_switcher::SettingsAnchor(anchor)| {
+            anchor.read().as_deref() == Some("settings-media-servers")
+        }) {
+            active_category.set(SettingsCategory::Library);
+        }
+    });
 
     let mut show_add_registry = use_signal(|| false);
     let registry_url = use_signal(String::new);
@@ -231,14 +383,30 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     };
 
     rsx! {
-        div { class: if cfg!(target_os = "android") { "px-3 pt-2 pb-28 w-full max-w-4xl mx-auto" } else { "px-6 py-7 w-full max-w-4xl mx-auto" },
+        div { class: if cfg!(target_os = "android") { "px-3 pt-2 pb-28 w-full max-w-7xl mx-auto" } else if config.read().settings_layout == config::SettingsLayout::TopBar { "settings-page settings-layout-topbar px-6 py-7 w-full max-w-7xl mx-auto" } else { "settings-page settings-layout-cd px-6 py-7 w-full max-w-7xl mx-auto" },
             if !cfg!(target_os = "android") {
                 h1 { class: "text-2xl font-semibold tracking-tight text-white mb-5 px-1", "{i18n::t(\"settings\")}" }
             }
 
-            div { class: "space-y-8",
-                SettingsSection {
-                    title: i18n::t("general").to_string(),
+            div { class: "settings-workspace",
+                SettingsFan {
+                    selected: active_category(),
+                    on_select: move |category| {
+                        active_category.set(category);
+                        let _ = document::eval(
+                            "requestAnimationFrame(() => document.getElementById('settings-category-content')?.scrollIntoView({ block: 'start' }))"
+                        );
+                    },
+                }
+                main { id: "settings-category-content", class: "settings-category-content",
+                if matches!(active_category(), SettingsCategory::General | SettingsCategory::Customization | SettingsCategory::Library) {
+                    SettingsSection {
+                    title: match active_category() {
+                        SettingsCategory::Customization => i18n::t("appearance").to_string(),
+                        SettingsCategory::Library => i18n::t("library").to_string(),
+                        _ => i18n::t("general").to_string(),
+                    },
+                    if active_category() == SettingsCategory::Customization {
                         SettingItem {
                             title: i18n::t("language").to_string(),
                             control: rsx! {
@@ -251,9 +419,9 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+                    }
 
-                        div { class: "settings-subsection-label", "{i18n::t(\"appearance\")}" }
-
+                    if active_category() == SettingsCategory::Customization {
                         SettingItem {
                             title: i18n::t("appearance").to_string(),
                             control: rsx! {
@@ -273,8 +441,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 title: i18n::t("live_theme_file").to_string(),
                                 control: rsx! {
                                     div { class: "flex items-center gap-2",
-                                        // Always shown, since this is the path the
-                                        // generator has to write to.
                                         span {
                                             class: "text-xs text-white/50 font-mono max-w-[220px] truncate",
                                             "{utils::live_theme::resolve_path(&config.read().live_theme_path).display()}"
@@ -445,9 +611,9 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     }
                                 }
                         }
+                    }
 
-                        div { class: "settings-subsection-label", "{i18n::t(\"library\")}" }
-
+                    if active_category() == SettingsCategory::Library {
                         SettingItem {
                             title: i18n::t("local_libraries").to_string(),
                             control: rsx! {
@@ -591,8 +757,9 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
-                        div { class: "settings-subsection-label", "{i18n::t(\"general\")}" }
+                    }
 
+                    if active_category() == SettingsCategory::Customization {
                         SettingItem {
                             title: i18n::t("reduce_animations").to_string(),
                             control: rsx! {
@@ -613,6 +780,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+                    }
+                    if active_category() == SettingsCategory::General {
                         SettingItem {
                             title: i18n::t("auto_check_updates").to_string(),
                             control: rsx! {
@@ -633,6 +802,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+                    }
+                    if active_category() == SettingsCategory::Customization {
                         SettingItem {
                             title: i18n::t("show_source_toggle").to_string(),
                                 control: rsx! {
@@ -642,6 +813,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+                    }
+                    if active_category() == SettingsCategory::Customization {
                         SettingItem {
                             title: i18n::t("show_row_images").to_string(),
                             control: rsx! {
@@ -651,6 +824,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+                    }
+                    if active_category() == SettingsCategory::Customization {
                         if cfg!(any(target_os = "linux", target_os = "windows")) {
                             SettingItem {
                                 title: i18n::t("titlebar_mode").to_string(),
@@ -718,6 +893,29 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             }
                         }
                         SettingItem {
+                            title: i18n::t("settings_layout").to_string(),
+                            control: rsx! {
+                                {
+                                    let current_layout = config.read().settings_layout;
+                                    rsx! {
+                                        AppSelect {
+                                            class: "settings-select",
+                                            value: (if current_layout == config::SettingsLayout::TopBar { "topbar" } else { "cd" }).to_string(),
+                                            options: vec![("cd".into(), i18n::t("settings_layout_cd")), ("topbar".into(), i18n::t("settings_layout_topbar"))],
+                                            on_change: move |value: String| {
+                                                config.write().settings_layout = match value.as_str() {
+                                                    "topbar" => config::SettingsLayout::TopBar,
+                                                    _ => config::SettingsLayout::Cd,
+                                                };
+                                            },
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if active_category() == SettingsCategory::General {
+                        SettingItem {
                             title: i18n::t("back_behavior").to_string(),
                             control: rsx! {
                                 BackBehaviorSelector {
@@ -726,8 +924,14 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+                    }
                 }
-                SettingsSection {
+                }
+                if active_category() == SettingsCategory::Customization {
+                    {theme_editor_section(config)}
+                }
+                if active_category() == SettingsCategory::Connectivity {
+                    SettingsSection {
                     title: i18n::t("connectivity").to_string(),
                                 if !cfg!(target_os = "android") {
                                     SettingItem {
@@ -805,9 +1009,10 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                         }
                                     }
                                 }
+                    }
                 }
 
-                if config.read().server.is_some() {
+                if active_category() == SettingsCategory::Downloads {
                     SettingsSection {
                         title: i18n::t("offline_downloads").to_string(),
                             SettingItem {
@@ -831,7 +1036,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     }
                 }
 
-                SettingsSection {
+                if active_category() == SettingsCategory::Metadata {
+                    SettingsSection {
                     title: i18n::t("metadata").to_string(),
                         SettingItem {
                             title: i18n::t("auto_fetch_covers").to_string(),
@@ -901,9 +1107,11 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+                    }
                 }
 
-                SettingsSection {
+                if active_category() == SettingsCategory::Player {
+                    SettingsSection {
                     title: i18n::t("player_settings").to_string(),
                         SettingItem {
                             title: i18n::t("crossfade").to_string(),
@@ -1005,13 +1213,15 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+                    }
                 }
 
-                {logs_section(config)}
-
-                {hooks::debug_db_section()}
-
-                {theme_editor_section(config)}
+                if active_category() == SettingsCategory::Tools {
+                    div { class: "space-y-8",
+                        {logs_section(config)}
+                        {hooks::debug_db_section()}
+                    }
+                }
 
 
 
@@ -1095,6 +1305,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         },
                         on_save: handle_login
                     }
+                }
                 }
             }
         }

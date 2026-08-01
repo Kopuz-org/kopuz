@@ -2,6 +2,9 @@ language-name = Nederlands
 is_rtl = false
 
 settings = Instellingen
+settings_layout = Instellingennavigatie
+settings_layout_cd = CD
+settings_layout_topbar = Bovenbalk
 theme_editor = Thema-editor
 appearance = Weergave
 language = Taal

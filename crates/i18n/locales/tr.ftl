@@ -2,6 +2,9 @@ language-name = Türkçe
 is_rtl = false
 
 settings = Ayarlar
+settings_layout = Ayarlar Gezintisi
+settings_layout_cd = CD
+settings_layout_topbar = Üst Çubuk
 theme_editor = Tema Düzenleyici
 appearance = Görünüm
 language = Dil

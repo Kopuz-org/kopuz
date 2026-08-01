@@ -2,6 +2,9 @@ language-name = toki pona
 is_rtl = false
 
 settings = nasin ilo
+settings_layout = nasin tawa pi lipu nasin
+settings_layout_cd = CD
+settings_layout_topbar = nasin sewi
 theme_editor = o ante e lukin
 appearance = lukin
 language = toki

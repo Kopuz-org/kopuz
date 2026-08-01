@@ -2,6 +2,9 @@ language-name = עברית
 is_rtl = true
 
 settings = הגדרות
+settings_layout = ניווט בהגדרות
+settings_layout_cd = תקליטור
+settings_layout_topbar = סרגל עליון
 theme_editor = עורך ערכת נושא
 appearance = מראה
 language = שפה

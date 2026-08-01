@@ -2,6 +2,9 @@ language-name = English
 is_rtl = false
 
 settings = Settings
+settings_layout = Settings Navigation
+settings_layout_cd = CD
+settings_layout_topbar = Top Bar
 theme_editor = Theme Editor
 appearance = Appearance
 language = Language

@@ -2,6 +2,9 @@ language-name = Magyar
 is_rtl = false
 
 settings = Beállítások
+settings_layout = Beállítások navigációja
+settings_layout_cd = CD
+settings_layout_topbar = Felső sáv
 theme_editor = Téma szerkesztő
 appearance = Megjelenés
 language = Nyelv

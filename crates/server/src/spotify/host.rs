@@ -245,7 +245,7 @@ const BROWSERS: &[(PlayerBrowser, &str, &str)] = &[
             id: "helium",
             label: "Helium",
         },
-        "com.imputnet.helium",
+        "net.imput.helium",
         "Helium.app",
     ),
 ];

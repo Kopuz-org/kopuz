@@ -2,6 +2,9 @@ language-name = 日本語
 is_rtl = false
 
 settings = 設定
+settings_layout = 設定ナビゲーション
+settings_layout_cd = CD
+settings_layout_topbar = トップバー
 theme_editor = テーマエディター
 appearance = 外観
 language = 言語

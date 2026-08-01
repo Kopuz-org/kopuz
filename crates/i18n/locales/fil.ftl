@@ -2,6 +2,9 @@ language-name = Filipino
 is_rtl = false
 
 settings = Mga Setting
+settings_layout = Nabigasyon ng mga setting
+settings_layout_cd = CD
+settings_layout_topbar = Bar sa itaas
 theme_editor = Editor ng Tema
 appearance = Anyo
 language = Wika

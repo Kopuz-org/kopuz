@@ -2,6 +2,9 @@ language-name = Svenska
 is_rtl = false
 
 settings = Inställningar
+settings_layout = Inställningsnavigering
+settings_layout_cd = CD
+settings_layout_topbar = Övre fält
 theme_editor = Temaredigerare
 appearance = Utseende
 language = Språk

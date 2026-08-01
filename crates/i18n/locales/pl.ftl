@@ -2,6 +2,9 @@ language-name = Polski
 is_rtl = false
 
 settings = Ustawienia
+settings_layout = Nawigacja ustawień
+settings_layout_cd = CD
+settings_layout_topbar = Górny pasek
 theme_editor = Edytor Motywów
 appearance = Wygląd
 language = Język

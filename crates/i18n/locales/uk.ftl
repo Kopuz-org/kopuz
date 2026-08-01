@@ -2,6 +2,9 @@ language-name = Українська
 is_rtl = false
 
 settings = Налаштування
+settings_layout = Навігація налаштувань
+settings_layout_cd = CD
+settings_layout_topbar = Верхня панель
 theme_editor = Редактор тем
 appearance = Зовнішній вигляд
 language = Мова

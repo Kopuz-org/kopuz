@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use crate::{
     AppConfig, ArtistViewOrder, BackBehavior, Browser, ChannelMode, EqualizerSettings,
     FetchStrategy, HomeSection, ListenNowStyle, MusicServer, MusicService, PlayerBarPosition,
-    RegistryEntry, SortOrder, TitlebarMode, UiStyle,
+    RegistryEntry, SettingsLayout, SortOrder, TitlebarMode, UiStyle,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +38,7 @@ pub struct UiConfig {
     pub titlebar_mode: TitlebarMode,
     pub player_bar_position: PlayerBarPosition,
     pub ui_style: UiStyle,
+    pub settings_layout: SettingsLayout,
     pub hero_height: u32,
     pub home_sections: Vec<HomeSection>,
     pub listen_now_style: ListenNowStyle,
@@ -109,6 +110,7 @@ impl AppConfig {
             titlebar_mode: self.titlebar_mode,
             player_bar_position: self.player_bar_position,
             ui_style: self.ui_style,
+            settings_layout: self.settings_layout,
             hero_height: self.hero_height,
             home_sections: self.home_sections.clone(),
             listen_now_style: self.listen_now_style,

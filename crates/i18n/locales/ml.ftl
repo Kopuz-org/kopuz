@@ -2,6 +2,9 @@ language-name = മലയാളം
 is_rtl = false
 
 settings = ക്രമീകരണങ്ങൾ
+settings_layout = ക്രമീകരണ നാവിഗേഷൻ
+settings_layout_cd = CD
+settings_layout_topbar = മുകളിലെ ബാർ
 theme_editor = തീം എഡിറ്റർ
 appearance = രൂപഭാവം
 language = ഭാഷ

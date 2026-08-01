@@ -497,6 +497,207 @@ select:disabled {
     width: min(14rem, calc(100vw - 2rem));
 }
 
+.settings-workspace {
+    --settings-fan-radius: clamp(5rem, calc(50vh - 3.75rem), 15.5rem);
+    --settings-fan-radius: clamp(5rem, calc(50dvh - 3.75rem), 15.5rem);
+    display: grid;
+    grid-template-columns: calc(var(--settings-fan-radius) + 2rem) minmax(0, 1fr);
+    min-height: calc(100vh - 6rem);
+    min-height: calc(100dvh - 6rem);
+    align-items: start;
+    gap: 0.75rem;
+}
+
+@media (min-width: 901px) and (min-height: 541px) {
+    .settings-page.settings-layout-cd {
+        padding-left: 0 !important;
+    }
+
+    .settings-page.settings-layout-cd > h1 {
+        margin-left: 1.5rem;
+    }
+}
+
+.settings-fan {
+    position: sticky;
+    top: max(0.5rem, calc(50vh - var(--settings-fan-radius)));
+    height: calc(var(--settings-fan-radius) + var(--settings-fan-radius));
+    overflow: hidden;
+    isolation: isolate;
+}
+
+.settings-fan-disc {
+    position: relative;
+    width: var(--settings-fan-radius);
+    height: calc(var(--settings-fan-radius) + var(--settings-fan-radius));
+}
+
+.settings-fan-disc::before {
+    position: absolute;
+    z-index: 0;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    border: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 13%, transparent);
+    border-left: 0;
+    border-radius: 0 999px 999px 0;
+    background:
+        repeating-radial-gradient(
+            circle at left center,
+            transparent 0 8px,
+            color-mix(in srgb, var(--color-white, #ffffff) 3.5%, transparent) 9px,
+            transparent 10px
+        ),
+        radial-gradient(
+            circle at left center,
+            color-mix(in srgb, var(--color-white, #ffffff) 8%, var(--color-black, #000000)) 0 21%,
+            color-mix(in srgb, var(--color-black, #000000) 72%, transparent) 21.5% 100%
+        );
+    box-shadow: 0 20px 55px rgba(0, 0, 0, 0.38), inset 0 0 28px rgba(255, 255, 255, 0.04);
+    content: "";
+}
+
+.settings-fan-disc::after {
+    position: absolute;
+    z-index: 10;
+    top: 50%;
+    left: -12.9%;
+    width: 25.8%;
+    aspect-ratio: 1;
+    border: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 22%, transparent);
+    border-radius: 999px;
+    background: radial-gradient(
+        circle,
+        color-mix(in srgb, var(--color-black, #000000) 94%, transparent) 0 42%,
+        color-mix(in srgb, var(--color-white, #ffffff) 11%, var(--color-black, #000000)) 45% 68%,
+        color-mix(in srgb, var(--color-black, #000000) 75%, transparent) 71%
+    );
+    box-shadow: 0 0 18px rgba(0, 0, 0, 0.42);
+    content: "";
+    transform: translateY(-50%);
+    pointer-events: none;
+}
+
+.settings-fan-item {
+    --fan-angle: 0deg;
+    position: absolute;
+    z-index: 1;
+    top: 0;
+    left: -100%;
+    width: 200%;
+    height: 100%;
+    padding: 0;
+    border: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 14%, transparent);
+    border-radius: 999px;
+    background: radial-gradient(
+        circle,
+        color-mix(in srgb, var(--color-white, #ffffff) 5%, transparent) 0 24%,
+        color-mix(in srgb, var(--color-white, #ffffff) 9%, var(--color-black, #000000)) 25% 76%,
+        color-mix(in srgb, var(--color-white, #ffffff) 14%, var(--color-black, #000000)) 100%
+    );
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.18);
+    clip-path: polygon(50% 50%, 99.04% 40.25%, 100% 50%, 99.04% 59.75%);
+    color: white;
+    cursor: pointer;
+    opacity: 0.48;
+    filter: saturate(0.7) blur(0.18px);
+    transform: rotate(var(--fan-angle));
+    transform-origin: center;
+    transition: transform 220ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 180ms ease,
+        filter 180ms ease, box-shadow 180ms ease;
+}
+
+.settings-fan-item:hover {
+    opacity: 0.78;
+    filter: brightness(1.12);
+}
+
+.settings-fan-item:hover + .settings-fan-label {
+    color: white;
+    opacity: 1;
+}
+
+.settings-fan-item:focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-white, #ffffff) 86%, transparent);
+    outline-offset: 3px;
+}
+
+.settings-fan-item.is-selected {
+    z-index: 5;
+    opacity: 1;
+    filter: brightness(1.32);
+    box-shadow: 0 10px 28px rgba(255, 255, 255, 0.08);
+    transform: rotate(var(--fan-angle));
+}
+
+.settings-fan-label {
+    position: absolute;
+    z-index: 8;
+    top: calc(50% + var(--label-y));
+    left: var(--label-x);
+    display: block;
+    width: min(8.5rem, 100%);
+    height: min(3rem, 16%);
+    font-size: clamp(0.55rem, 2.6vh, 0.8rem);
+    font-weight: 650;
+    letter-spacing: 0.015em;
+    line-height: 1.05;
+    color: color-mix(in srgb, var(--color-white, #ffffff) 78%, transparent);
+    opacity: 0.82;
+    pointer-events: none;
+    text-align: center;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+    transform: translate(-50%, -50%) rotate(var(--label-tilt));
+    transition: opacity 180ms ease, transform 180ms ease, font-size 180ms ease;
+}
+
+.settings-fan-label i {
+    position: absolute;
+    top: 50%;
+    left: 0.45rem;
+    width: 1rem;
+    text-align: center;
+    transform: translateY(-50%);
+}
+
+.settings-fan-label > span {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 6.5rem;
+    text-align: center;
+    transform: translate(-50%, -50%);
+}
+
+.settings-fan-label.is-selected {
+    font-size: clamp(0.6rem, 2.8vh, 0.86rem);
+    color: white;
+    opacity: 1;
+    transform: translate(-50%, -50%) rotate(var(--label-tilt));
+}
+
+.settings-fan-mobile-label {
+    display: none;
+}
+
+.settings-category-content {
+    min-width: 0;
+    scroll-margin-top: 1rem;
+    animation: settings-category-enter 220ms ease-out;
+}
+
+@keyframes settings-category-enter {
+    from {
+        opacity: 0;
+        transform: translateY(7px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
 .settings-section {
     border: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 11%, transparent);
     background: color-mix(in srgb, var(--color-black, #000000) 78%, transparent);
@@ -533,6 +734,192 @@ select:disabled {
     font-weight: 700;
     letter-spacing: 0.1em;
     text-transform: uppercase;
+}
+
+@media (min-width: 901px) and (min-height: 541px) {
+    .settings-layout-topbar .settings-workspace {
+        display: block;
+        min-height: 0;
+    }
+
+    .settings-layout-topbar .settings-fan {
+        position: sticky;
+        z-index: 30;
+        top: 0;
+        display: flex;
+        width: 100%;
+        height: auto;
+        margin: 0 0 1rem;
+        padding: 0;
+        gap: 0.15rem;
+        overflow-x: auto;
+        overflow-y: hidden;
+        border-bottom: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 9%, transparent);
+        background: color-mix(in srgb, var(--color-black, #000000) 92%, transparent);
+        scrollbar-width: none;
+    }
+
+    .settings-layout-topbar .settings-fan::-webkit-scrollbar {
+        display: none;
+    }
+
+    .settings-layout-topbar .settings-fan-disc {
+        display: contents;
+    }
+
+    .settings-layout-topbar .settings-fan-disc::before,
+    .settings-layout-topbar .settings-fan-disc::after {
+        display: none;
+    }
+
+    .settings-layout-topbar .settings-fan-item,
+    .settings-layout-topbar .settings-fan-item.is-selected {
+        position: relative;
+        top: auto;
+        left: auto;
+        width: auto;
+        height: 2.75rem;
+        flex: 0 0 auto;
+        padding: 0 0.75rem;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+        clip-path: none;
+        color: color-mix(in srgb, var(--color-white, #ffffff) 52%, transparent);
+        opacity: 1;
+        filter: none;
+        transform: none;
+    }
+
+    .settings-layout-topbar .settings-fan-item:hover {
+        background: color-mix(in srgb, var(--color-white, #ffffff) 4%, transparent);
+        color: color-mix(in srgb, var(--color-white, #ffffff) 78%, transparent);
+        filter: none;
+    }
+
+    .settings-layout-topbar .settings-fan-item.is-selected {
+        border-bottom-color: var(--color-indigo-400, #e8a866);
+        background: color-mix(in srgb, var(--color-white, #ffffff) 3%, transparent);
+        color: var(--color-white, #ffffff);
+    }
+
+    .settings-layout-topbar .settings-fan-label {
+        display: none;
+    }
+
+    .settings-layout-topbar .settings-fan-mobile-label {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+}
+
+@media (max-width: 900px), (max-height: 540px) {
+    .settings-workspace {
+        display: block;
+        min-height: 0;
+    }
+
+    .settings-fan {
+        position: sticky;
+        z-index: 30;
+        top: 0;
+        display: flex;
+        width: 100%;
+        height: auto;
+        margin: 0 0 1rem;
+        padding: 0;
+        gap: 0.15rem;
+        overflow-x: auto;
+        overflow-y: hidden;
+        border-bottom: 1px solid color-mix(in srgb, var(--color-white, #ffffff) 9%, transparent);
+        background: color-mix(in srgb, var(--color-black, #000000) 92%, transparent);
+        scrollbar-width: none;
+    }
+
+    .settings-fan::-webkit-scrollbar {
+        display: none;
+    }
+
+    .settings-fan-disc {
+        display: contents;
+    }
+
+    .settings-fan-disc::before,
+    .settings-fan-disc::after {
+        display: none;
+    }
+
+    .settings-fan-item,
+    .settings-fan-item.is-selected {
+        position: relative;
+        top: auto;
+        left: auto;
+        width: auto;
+        height: 2.75rem;
+        flex: 0 0 auto;
+        padding: 0 0.75rem;
+        border: 0;
+        border-bottom: 2px solid transparent;
+        border-radius: 0;
+        background: transparent;
+        box-shadow: none;
+        clip-path: none;
+        color: color-mix(in srgb, var(--color-white, #ffffff) 52%, transparent);
+        opacity: 1;
+        filter: none;
+        transform: none;
+    }
+
+    .settings-fan-item:hover {
+        background: color-mix(in srgb, var(--color-white, #ffffff) 4%, transparent);
+        color: color-mix(in srgb, var(--color-white, #ffffff) 78%, transparent);
+        filter: none;
+    }
+
+    .settings-fan-item.is-selected {
+        border-bottom-color: var(--color-indigo-400, #e8a866);
+        background: color-mix(in srgb, var(--color-white, #ffffff) 3%, transparent);
+        color: var(--color-white, #ffffff);
+        opacity: 1;
+        filter: none;
+        transform: none;
+    }
+
+    .settings-fan-label,
+    .settings-fan-label.is-selected {
+        position: static;
+        width: auto;
+        font-size: 0.75rem;
+        transform: none;
+    }
+
+    .settings-fan-label {
+        display: none;
+    }
+
+    .settings-fan-mobile-label {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .settings-fan-item,
+    .settings-fan-label {
+        transition: none;
+    }
+
+    .settings-category-content {
+        animation: none;
+    }
 }
 
 .app-select-trigger {

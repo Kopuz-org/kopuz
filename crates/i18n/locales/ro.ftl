@@ -2,6 +2,9 @@ language-name = Română
 is_rtl = false
 
 settings = Setări
+settings_layout = Navigare setări
+settings_layout_cd = CD
+settings_layout_topbar = Bară superioară
 theme_editor = Editor de Teme
 appearance = Aspect
 language = Limbă

@@ -2,6 +2,9 @@ language-name = Italiano
 is_rtl = false
 
 settings = Impostazioni
+settings_layout = Navigazione impostazioni
+settings_layout_cd = CD
+settings_layout_topbar = Barra superiore
 theme_editor = Modifica il tema
 appearance = Aspetto
 language = Lingua
