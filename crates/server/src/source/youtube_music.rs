@@ -66,6 +66,19 @@ impl MediaSource for YtSource {
             .map_err(SourceError::from)
     }
 
+    async fn start_playlist_radio(
+        &self,
+        playlist_ref: &str,
+    ) -> Result<Vec<reader::Track>, SourceError> {
+        if playlist_ref.trim().is_empty() {
+            return Err(SourceError::InvalidInput("playlist has no id".into()));
+        }
+        self.client
+            .start_playlist_mix(playlist_ref)
+            .await
+            .map_err(SourceError::from)
+    }
+
     fn web_url(&self, track: &reader::Track) -> Option<String> {
         let vid = track.id.key();
         (!vid.trim().is_empty()).then(|| format!("https://music.youtube.com/watch?v={vid}"))
