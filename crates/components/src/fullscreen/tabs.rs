@@ -12,7 +12,6 @@ pub(crate) fn Tabs(
     current_song_progress: Signal<u64>,
     active_tab: Signal<usize>,
 ) -> Element {
-
     rsx! {
         div {
             class: "flex-1 flex flex-col h-full min-w-0 bg-black/45 border-l border-white/5",
