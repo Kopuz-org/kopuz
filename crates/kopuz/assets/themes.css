@@ -653,12 +653,7 @@ select:disabled {
 }
 
 .settings-fan-label i {
-    position: absolute;
-    top: 50%;
-    left: 0.45rem;
-    width: 1rem;
-    text-align: center;
-    transform: translateY(-50%);
+    display: none;
 }
 
 .settings-fan-label > span {
