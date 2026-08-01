@@ -285,6 +285,12 @@ impl YouTubeMusicClient {
     // discover/mix `post` and innertube::browse now interpret as "skip
     // SAPISID auth headers" (see browse_maybe_auth / discover::post).
 
+    /// Whether this client has cookies — i.e. the user is signed in rather than
+    /// browsing YT anonymously.
+    pub fn is_authenticated(&self) -> bool {
+        self.cookies.is_some()
+    }
+
     pub async fn start_mix(&self, seed_video_id: &str) -> Result<Vec<Track>, String> {
         mix::fetch(
             mix::MixSeed::Video(seed_video_id),
