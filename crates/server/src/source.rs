@@ -135,6 +135,18 @@ pub trait MediaSource: Send + Sync {
         Err(SourceError::unsupported("radio"))
     }
 
+    /// Start a radio/mix seeded from a whole playlist, returning the generated
+    /// queue. The queue is the source's own mix for that playlist — not the
+    /// playlist's tracks — so callers play it as-is. Shares
+    /// [`Capabilities::radio`] with [`start_radio`](Self::start_radio): a source
+    /// that can seed radio from a track can seed it from a playlist too.
+    async fn start_playlist_radio(
+        &self,
+        _playlist_ref: &str,
+    ) -> Result<Vec<reader::Track>, SourceError> {
+        Err(SourceError::unsupported("playlist radio"))
+    }
+
     /// The track's canonical public web URL, when this source has shareable web
     /// pages (e.g. a YouTube Music watch link or Spotify track link). `None` otherwise — callers fall
     /// back to a metadata lookup (MusicBrainz). Sync: it's a pure id→URL mapping.

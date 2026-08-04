@@ -2,6 +2,9 @@ language-name = Українська
 is_rtl = false
 
 settings = Налаштування
+settings_layout = Навігація налаштувань
+settings_layout_cd = CD
+settings_layout_topbar = Верхня панель
 theme_editor = Редактор тем
 appearance = Зовнішній вигляд
 language = Мова
@@ -90,6 +93,7 @@ add_to_queue = Додати до черги
 play_next = Відтворити наступною
 add_to_playlist = Додати до плейлиста
 remove_from_playlist = Видалити з плейлиста
+start_radio = Запустити радіо
 share_musicbrainz = Поділитися (MusicBrainz)
 share_link_copied = Посилання MusicBrainz скопійовано
 delete = Видалити

@@ -173,6 +173,15 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                 i { class: "fa-solid fa-shuffle text-xs" }
                                 "{i18n::t(\"shuffle\")}"
                             }
+                            if let Some(start_radio) = props.on_start_radio {
+                                button {
+                                    class: "inline-flex items-center justify-center h-9 w-9 rounded-full text-sm font-medium transition-colors border border-white/12 hover:bg-white/10 active:scale-95",
+                                    style: "color: var(--color-white); opacity: 0.6;",
+                                    title: crate::radio_actions::radio_label(),
+                                    onclick: move |_| start_radio.call(()),
+                                    i { class: "{crate::radio_actions::RADIO_ICON} text-xs" }
+                                }
+                            }
                             if props.on_download_all.is_some() || props.on_delete_all.is_some() {
                                 button {
                                     class: "inline-flex items-center justify-center h-9 w-9 rounded-full text-sm font-medium transition-colors border border-white/12 hover:bg-white/10 active:scale-95",
@@ -308,7 +317,11 @@ pub fn ShowcaseVaxry(props: ShowcaseProps) -> Element {
                                                 is_downloading,
                                                 is_currently_playing,
                                                 selected_queue_tracks: (*selected_queue_tracks_arc).clone(),
-                                                row_num: Some(display_idx + 1 - last_disc_size),
+                                                row_num: Some(showcase::track_row_number(
+                                                    track.track_number,
+                                                    display_idx + 1 - last_disc_size,
+                                                    props.is_album,
+                                                )),
                                                 on_select: move |selected| {
                                                     if let Some(handler) = &props.on_select {
                                                         handler.call((idx, selected));

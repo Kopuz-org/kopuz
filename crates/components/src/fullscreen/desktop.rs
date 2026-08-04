@@ -29,6 +29,7 @@ pub(crate) fn FullscreenDesktop(
 ) -> Element {
     let use_player_bar = config.read().fullscreen_use_player_bar;
     let tabs_collapsed = config.read().fullscreen_tabs_collapsed;
+    let active_tab = use_signal(|| 0usize);
 
     rsx! {
         div {
@@ -92,6 +93,7 @@ pub(crate) fn FullscreenDesktop(
                         current_queue_index,
                         lyrics,
                         current_song_progress,
+                        active_tab
                     }
                 }
             }

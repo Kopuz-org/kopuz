@@ -2,6 +2,9 @@ language-name = Magyar
 is_rtl = false
 
 settings = Beállítások
+settings_layout = Beállítások navigációja
+settings_layout_cd = CD
+settings_layout_topbar = Felső sáv
 theme_editor = Téma szerkesztő
 appearance = Megjelenés
 language = Nyelv
@@ -90,6 +93,7 @@ add_to_queue = Hozzáadás sorhoz
 play_next = Lejátszás következőként
 add_to_playlist = Hozzáadás lejátszási listához
 remove_from_playlist = Eltávolítás a lejátszási listából
+start_radio = Rádió indítása
 share_musicbrainz = Megosztás (MusicBrainz)
 share_link_copied = MusicBrainz-link másolva
 delete = Törlés

@@ -2,6 +2,9 @@ language-name = தமிழ்
 is_rtl = false
 
 settings = அமைப்புகள்
+settings_layout = அமைப்புகள் வழிசெலுத்தல்
+settings_layout_cd = CD
+settings_layout_topbar = மேல் பட்டை
 theme_editor = தீம் எடிட்டர்
 appearance = தோற்றம்
 language = மொழி
@@ -163,6 +166,7 @@ add_to_queue = வரிசையில் சேர்
 play_next = அடுத்ததை இயக்கு
 add_to_playlist = பிளேலிஸ்ட்டில் சேர்
 remove_from_playlist = பிளேலிஸ்ட்டிலிருந்து அகற்று
+start_radio = வானொலியைத் தொடங்கு
 share_musicbrainz = பகிர் (MusicBrainz)
 share_link_copied = MusicBrainz இணைப்பு நகலெடுக்கப்பட்டது
 delete = நீக்கு

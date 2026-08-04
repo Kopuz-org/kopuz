@@ -2,6 +2,9 @@ language-name = Tiếng Việt
 is_rtl = false
 
 settings = Cài đặt
+settings_layout = Điều hướng cài đặt
+settings_layout_cd = CD
+settings_layout_topbar = Thanh trên cùng
 theme_editor = Trình chỉnh sửa chủ đề
 appearance = Giao diện
 language = Ngôn ngữ
@@ -163,6 +166,7 @@ add_to_queue = Thêm vào hàng đợi
 play_next = Phát tiếp theo
 add_to_playlist = Thêm vào danh sách phát
 remove_from_playlist = Xóa khỏi danh sách phát
+start_radio = Bắt đầu radio
 share_musicbrainz = Chia sẻ (MusicBrainz)
 share_link_copied = Đã sao chép liên kết MusicBrainz
 delete = Xóa

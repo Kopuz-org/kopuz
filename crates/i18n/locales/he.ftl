@@ -2,6 +2,9 @@ language-name = עברית
 is_rtl = true
 
 settings = הגדרות
+settings_layout = ניווט בהגדרות
+settings_layout_cd = תקליטור
+settings_layout_topbar = סרגל עליון
 theme_editor = עורך ערכת נושא
 appearance = מראה
 language = שפה
@@ -90,6 +93,7 @@ add_to_queue = הוספה לתור
 play_next = נגן הבא בתור
 add_to_playlist = הוספה לרשימת השמעה
 remove_from_playlist = הסרה מרשימת השמעה
+start_radio = הפעלת רדיו
 share_musicbrainz = שיתוף (MusicBrainz)
 share_link_copied = קישור MusicBrainz הועתק
 delete = מחיקה

@@ -1013,7 +1013,11 @@ fn YtAlbumDetail(
                                     cover_url,
                                     is_album: true,
                                     hide_delete: true,
-                                    row_num: Some(idx + 1),
+                                    row_num: Some(components::showcase::track_row_number(
+                                        track.track_number,
+                                        idx + 1,
+                                        true,
+                                    )),
                                     is_menu_open,
                                     is_currently_playing: is_current,
                                     is_downloaded,

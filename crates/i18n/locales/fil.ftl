@@ -2,6 +2,9 @@ language-name = Filipino
 is_rtl = false
 
 settings = Mga Setting
+settings_layout = Nabigasyon ng mga setting
+settings_layout_cd = CD
+settings_layout_topbar = Bar sa itaas
 theme_editor = Editor ng Tema
 appearance = Anyo
 language = Wika
@@ -163,6 +166,7 @@ add_to_queue = Idagdag sa Queue
 play_next = I-play Susunod
 add_to_playlist = Idagdag sa Playlist
 remove_from_playlist = Alisin sa Playlist
+start_radio = Simulan ang Radyo
 share_musicbrainz = Ibahagi (MusicBrainz)
 share_link_copied = Nakopya ang link ng MusicBrainz
 delete = Burahin

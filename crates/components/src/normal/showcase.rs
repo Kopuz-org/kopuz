@@ -124,6 +124,17 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
         ITEM_HEIGHT,
     );
 
+    for (display_idx, (track, _)) in sorted_track_pairs
+        .iter()
+        .enumerate()
+        .take(scroll_info.start_index)
+    {
+        if track.disc_number != last_disc && sort_state.peek().is_none() && props.is_album {
+            last_disc = track.disc_number;
+            last_disc_size = display_idx;
+        }
+    }
+
     rsx! {
          div {
              class: "select-none flex-1 min-h-0 flex flex-col w-full",
@@ -149,7 +160,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                          }
                      }
                  }
-                 div { class: "flex-1",
+                 div { class: "flex-1 min-w-0",
                      if !props.description.is_empty() {
                          if let Some(on_description_click) = props.on_description_click {
                              button {
@@ -161,7 +172,7 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                              h5 { class: "text-sm font-bold text-white/60 mb-2", "{props.description}" }
                          }
                      }
-                     h1 { class: if cfg!(target_os = "android") { "text-3xl font-semibold tracking-tight text-white mb-3" } else { "text-5xl md:text-7xl font-semibold tracking-tight text-white mb-6" }, "{props.name}" }
+                     h1 { class: if cfg!(target_os = "android") { "text-3xl font-semibold tracking-tight text-white mb-3 break-words line-clamp-3" } else { "text-5xl md:text-7xl font-semibold tracking-tight text-white mb-6 break-words line-clamp-3" }, "{props.name}" }
                      div { class: if cfg!(target_os = "android") { "flex items-center justify-center gap-4 text-slate-400" } else { "flex items-center gap-6 text-slate-400" },
                          {
                             let count = props.tracks.len();
@@ -191,6 +202,14 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                             },
                             onclick: move |_| ctrl.toggle_shuffle(),
                             i { class: "fa-solid fa-shuffle text-xl ml-1" }
+                        }
+                        if let Some(start_radio) = props.on_start_radio {
+                            button {
+                                class: "w-14 h-14 rounded-full flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 transition-colors active:scale-95",
+                                title: crate::radio_actions::radio_label(),
+                                onclick: move |_| start_radio.call(()),
+                                i { class: "{crate::radio_actions::RADIO_ICON} text-xl" }
+                            }
                         }
                         button {
                              class: "w-14 h-14 rounded-full bg-indigo-500 hover:bg-indigo-400 text-black flex items-center justify-center transition-transform hover:scale-105",
@@ -329,7 +348,11 @@ pub fn ShowcaseNormal(props: ShowcaseProps) -> Element {
                                              is_downloading: is_downloading,
                                              is_currently_playing,
                                              selected_queue_tracks: (*selected_queue_tracks_arc).clone(),
-                                             row_num: Some(display_idx + 1 - last_disc_size),
+                                             row_num: Some(showcase::track_row_number(
+                                                 track.track_number,
+                                                 display_idx + 1 - last_disc_size,
+                                                 props.is_album,
+                                             )),
                                              on_select: move |selected| {
                                                 if let Some(handler) = &props.on_select {
                                                     handler.call((idx, selected));

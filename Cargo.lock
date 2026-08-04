@@ -4395,6 +4395,7 @@ name = "kopuz-discord-presence"
 version = "0.13.0"
 dependencies = [
  "discord-rich-presence",
+ "kopuz-config",
  "kopuz-reader",
  "kopuz-utils",
  "reqwest 0.13.4",

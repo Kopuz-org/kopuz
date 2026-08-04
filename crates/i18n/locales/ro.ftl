@@ -2,6 +2,9 @@ language-name = Română
 is_rtl = false
 
 settings = Setări
+settings_layout = Navigare setări
+settings_layout_cd = CD
+settings_layout_topbar = Bară superioară
 theme_editor = Editor de Teme
 appearance = Aspect
 language = Limbă
@@ -90,6 +93,7 @@ add_to_queue = Adaugă la Coadă
 play_next = Redă în continuare
 add_to_playlist = Adaugă la Lista de Redare
 remove_from_playlist = Elimină din Lista de Redare
+start_radio = Pornește Radioul
 share_musicbrainz = Distribuie (MusicBrainz)
 share_link_copied = Link MusicBrainz copiat
 delete = Șterge

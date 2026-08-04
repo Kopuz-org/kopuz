@@ -2,6 +2,9 @@ language-name = Svenska
 is_rtl = false
 
 settings = Inställningar
+settings_layout = Inställningsnavigering
+settings_layout_cd = CD
+settings_layout_topbar = Övre fält
 theme_editor = Temaredigerare
 appearance = Utseende
 language = Språk
@@ -163,6 +166,7 @@ add_to_queue = Lägg till i kön
 play_next = Spela nästa
 add_to_playlist = Lägg till i spellista
 remove_from_playlist = Ta bort från spellista
+start_radio = Starta radio
 share_musicbrainz = Dela (MusicBrainz)
 share_link_copied = MusicBrainz länk kopierad
 delete = Ta bort
@@ -413,7 +417,7 @@ folder_name = Katalognamn...
 new_folder = Ny katalog
 remove_from_folder = Ta bort från katalog
 back_behavior = Bakåtknappens beteende
-back_behavior_rewind = Spola tillbaka, sedan föregående
+back_behavior_rewind = Spola, sedan föregående
 back_behavior_always_prev = Alltid föregående
 
 metadata = Metadata

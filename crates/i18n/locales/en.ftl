@@ -2,6 +2,9 @@ language-name = English
 is_rtl = false
 
 settings = Settings
+settings_layout = Settings Navigation
+settings_layout_cd = CD
+settings_layout_topbar = Top Bar
 theme_editor = Theme Editor
 appearance = Appearance
 language = Language
@@ -163,6 +166,7 @@ add_to_queue = Add to Queue
 play_next = Play Next
 add_to_playlist = Add to Playlist
 remove_from_playlist = Remove from Playlist
+start_radio = Start Radio
 share_musicbrainz = Share (MusicBrainz)
 share_link_copied = MusicBrainz link copied
 delete = Delete

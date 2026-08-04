@@ -2,6 +2,9 @@ language-name = 한국어
 is_rtl = false
 
 settings = 설정
+settings_layout = 설정 탐색
+settings_layout_cd = CD
+settings_layout_topbar = 상단 표시줄
 theme_editor = 테마 편집기
 appearance = 모양
 language = 언어
@@ -90,6 +93,7 @@ add_to_queue = 대기열에 추가
 play_next = 다음으로 재생
 add_to_playlist = 재생목록에 추가
 remove_from_playlist = 재생목록에서 제거
+start_radio = 라디오 시작
 share_musicbrainz = 공유 (MusicBrainz)
 share_link_copied = MusicBrainz 링크가 복사됨
 delete = 삭제

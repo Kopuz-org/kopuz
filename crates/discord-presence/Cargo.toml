@@ -23,6 +23,7 @@ serde_json.workspace = true
 tracing.workspace = true
 utils.workspace = true
 reader.workspace = true
+config.workspace = true
 
 # Discord IPC has no meaning on Android, so the real client is desktop-only.
 [target.'cfg(not(target_os = "android"))'.dependencies]

@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-const DEFAULT_SELECTION_BAR_CLASS: &str = "fixed bottom-24 left-1/2 -translate-x-1/2 bg-indigo-500 text-white px-6 py-2.5 rounded-full shadow-2xl flex items-center gap-4 z-50 animate-in fade-in zoom-in duration-200 font-mono";
+const DEFAULT_SELECTION_BAR_CLASS: &str = "fixed bottom-24 left-1/2 -translate-x-1/2 bg-indigo-500 text-black px-6 py-2.5 rounded-full shadow-2xl flex items-center gap-4 z-50 animate-in fade-in zoom-in duration-200 font-mono";
 
 #[component]
 pub fn SelectionBar(
@@ -27,7 +27,7 @@ pub fn SelectionBar(
 
             span { class: "font-bold text-lg whitespace-nowrap pl-2", "{count} selected" }
 
-            div { class: "w-px h-5 bg-white/20" }
+            div { class: "w-px h-5 bg-black/20" }
 
             div { class: "flex items-center gap-4",
                 button {
@@ -53,7 +53,7 @@ pub fn SelectionBar(
                 }
             }
 
-            div { class: "w-px h-5 bg-white/20" }
+            div { class: "w-px h-5 bg-black/20" }
 
             button {
                 class: "hover:opacity-80 transition-opacity flex items-center justify-center pr-2",

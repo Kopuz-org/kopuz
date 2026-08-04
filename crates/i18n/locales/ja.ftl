@@ -2,6 +2,9 @@ language-name = 日本語
 is_rtl = false
 
 settings = 設定
+settings_layout = 設定ナビゲーション
+settings_layout_cd = CD
+settings_layout_topbar = トップバー
 theme_editor = テーマエディター
 appearance = 外観
 language = 言語
@@ -90,6 +93,7 @@ add_to_queue = キューに追加
 play_next = 次に再生
 add_to_playlist = プレイリストに追加
 remove_from_playlist = プレイリストから削除
+start_radio = ラジオを開始
 share_musicbrainz = 共有 (MusicBrainz)
 share_link_copied = MusicBrainzのリンクをコピーしました
 delete = 削除

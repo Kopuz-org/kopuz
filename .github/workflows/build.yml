@@ -1,6 +1,7 @@
 name: build
 
 on:
+  workflow_dispatch:
   push:
     branches: [main, master]
   pull_request:
@@ -8,12 +9,12 @@ on:
 
 jobs:
   locale-parity:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, morph, small]
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/nix-installer-action@c5a866b6ab867e88becbed4467b93592bce69f8a # v21
 
       - name: Check locale parity against en.ftl
         run: nix shell nixpkgs#nushell --command nu scripts/check_locales.nu
@@ -26,37 +27,37 @@ jobs:
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          - runner: [self-hosted, linux, x64, morph, large]
             system: x86_64-linux
-          - os: macos-latest
+          - runner: macos-latest
             system: aarch64-darwin
 
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/nix-installer-action@c5a866b6ab867e88becbed4467b93592bce69f8a # v21
 
       - name: Run Nix checks
         run: nix build .#checks.${{ matrix.system }}.default
 
   push-build:
-    if: github.event_name == 'push'
+    if: github.event_name != 'pull_request'
     strategy:
       matrix:
         include:
-          - os: ubuntu-latest
+          - runner: [self-hosted, linux, x64, morph, large]
             system: x86_64-linux
-          - os: macos-latest
+          - runner: macos-latest
             system: aarch64-darwin
 
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ matrix.runner }}
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/nix-installer-action@c5a866b6ab867e88becbed4467b93592bce69f8a # v21
 
       - uses: cachix/cachix-action@v14
         with:

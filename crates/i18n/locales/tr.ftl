@@ -2,6 +2,9 @@ language-name = Türkçe
 is_rtl = false
 
 settings = Ayarlar
+settings_layout = Ayarlar Gezintisi
+settings_layout_cd = CD
+settings_layout_topbar = Üst Çubuk
 theme_editor = Tema Düzenleyici
 appearance = Görünüm
 language = Dil
@@ -90,6 +93,7 @@ add_to_queue = Sıraya Ekle
 play_next = Sonraki çal
 add_to_playlist = Çalma Listesine Ekle
 remove_from_playlist = Çalma Listesinden Kaldır
+start_radio = Radyo Başlat
 share_musicbrainz = Paylaş (MusicBrainz)
 share_link_copied = MusicBrainz bağlantısı kopyalandı
 delete = Sil

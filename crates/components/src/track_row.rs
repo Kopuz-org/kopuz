@@ -162,8 +162,8 @@ pub fn TrackRow(
     let mix_idx = if on_start_radio.is_some() {
         let idx = actions.len();
         actions.push(MenuAction::new(
-            "Start radio",
-            "fa-solid fa-tower-broadcast",
+            crate::radio_actions::radio_label(),
+            crate::radio_actions::RADIO_ICON,
         ));
         Some(idx)
     } else {
@@ -795,48 +795,12 @@ pub fn TrackRow(
     };
 }
 
-/// The `on_start_radio` handler for a track row: `Some` iff the active source
-/// supports radio ([`Capabilities::radio`]), else `None` (so the row hides the
-/// "Start radio" action). Lets every call site wire radio in one line without
-/// repeating the capability gate or context plumbing.
-///
-/// Reads context via `consume_context`, never a `use_*` hook: call sites invoke
-/// this once per visible row, so a hook here would register a per-row-count
-/// number of hooks and panic the parent on rules-of-hooks when the row count
-/// changes (e.g. an empty server library filling in after a sync).
-pub fn radio_handler(track: Track) -> Option<EventHandler<()>> {
-    let ctrl = consume_context::<PlayerController>();
-    let active_source = consume_context::<Signal<::server::source::ActiveSource>>();
-    let can_radio = active_source.read().capabilities().radio;
-    can_radio.then(|| {
-        EventHandler::new(move |_| {
-            let src = active_source.peek().clone();
-            play_radio(track.clone(), src, ctrl)
-        })
-    })
-}
-
-/// Start radio seeded from a track and play the generated queue. The radio
-/// operation lives in the source layer ([`MediaSource::start_radio`]); this just
-/// resolves the track's source, awaits it, and hands the result to the player.
-/// Call sites wire this into `on_start_radio` only when `capabilities().radio`.
-pub fn play_radio(
-    track: Track,
-    source: ::server::source::ActiveSource,
-    mut ctrl: PlayerController,
-) {
-    let seed = track.id.key().into_owned();
-    spawn(
-        async move {
-            match source.start_radio(&seed).await {
-                Ok(tracks) if !tracks.is_empty() => ctrl.play_queue_linear(tracks),
-                Ok(_) => tracing::debug!(seed = %seed, "radio returned empty queue"),
-                Err(e) => tracing::warn!(seed = %seed, error = %e, "radio failed"),
-            }
-        }
-        .instrument(tracing::info_span!("radio.start")),
-    );
-}
+/// Re-exported from [`crate::radio_actions`], where track and playlist radio
+/// share one implementation. Kept here so the existing row call sites keep
+/// reading `track_row::radio_handler(...)`.
+pub use crate::radio_actions::{
+    play_track_radio as play_radio, track_radio_handler as radio_handler,
+};
 
 /// Copy a shareable link for a track: its source's public web URL when it has
 /// one (YT Music or Spotify), else fall back to a MusicBrainz lookup by metadata. The provider

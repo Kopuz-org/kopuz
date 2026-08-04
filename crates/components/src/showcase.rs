@@ -20,6 +20,20 @@ pub enum SortDirection {
 
 pub type SortState = Option<(SortField, SortDirection)>;
 
+pub fn track_row_number(
+    track_number: Option<u32>,
+    sequential_number: usize,
+    is_album: bool,
+) -> usize {
+    if !is_album {
+        return sequential_number;
+    }
+
+    track_number
+        .and_then(|number| usize::try_from(number).ok())
+        .unwrap_or(sequential_number)
+}
+
 pub fn next_sort_state(current: SortState, field: SortField) -> SortState {
     match current {
         Some((current_field, SortDirection::Asc)) if current_field == field => {
@@ -122,6 +136,10 @@ pub struct ShowcaseProps {
     pub on_click_menu: Option<EventHandler<usize>>,
     pub on_close_menu: Option<EventHandler<()>>,
     pub actions: Option<Element>,
+    /// "Start radio" for whatever this header represents. A prop rather than an
+    /// `actions` element because the two layouts size their header buttons very
+    /// differently — each renders it in its own idiom, next to shuffle.
+    pub on_start_radio: Option<EventHandler<()>>,
     pub on_download_all: Option<EventHandler<()>>,
     pub on_delete_all: Option<EventHandler<()>>,
     #[props(default = false)]
@@ -158,5 +176,25 @@ pub fn Showcase(props: ShowcaseProps) -> Element {
         config::UiStyle::Normal => rsx! {
             crate::normal::showcase::ShowcaseNormal { ..props }
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::track_row_number;
+
+    #[test]
+    fn album_rows_prefer_the_metadata_track_number() {
+        assert_eq!(track_row_number(Some(7), 3, true), 7);
+    }
+
+    #[test]
+    fn album_rows_fall_back_to_the_sequential_number() {
+        assert_eq!(track_row_number(None, 3, true), 3);
+    }
+
+    #[test]
+    fn non_album_rows_keep_the_sequential_number() {
+        assert_eq!(track_row_number(Some(7), 3, false), 3);
     }
 }

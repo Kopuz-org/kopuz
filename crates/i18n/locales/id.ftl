@@ -2,6 +2,9 @@ language-name = Indonesia
 is_rtl = false
 
 settings = Pengaturan
+settings_layout = Navigasi pengaturan
+settings_layout_cd = CD
+settings_layout_topbar = Bilah atas
 theme_editor = Penyunting Tema
 appearance = Penampilan
 language = Bahasa
@@ -163,6 +166,7 @@ add_to_queue = Tambahkan ke Antrian
 play_next = Putar Berikutnya
 add_to_playlist = Tambahkan ke Daftar Putar
 remove_from_playlist = Hapus dari Daftar Putar
+start_radio = Mulai Radio
 share_musicbrainz = Bagikan (MusicBrainz)
 share_link_copied = Tautan MusicBrainz disalin
 delete = Hapus

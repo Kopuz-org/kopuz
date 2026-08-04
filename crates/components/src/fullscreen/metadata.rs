@@ -1,5 +1,7 @@
+use super::actions::TrackActions;
 use crate::NavigationController;
 use dioxus::prelude::*;
+use hooks::favorites::toggle_favorite;
 use hooks::use_player_controller::PlayerController;
 
 #[component]
@@ -13,7 +15,15 @@ pub(crate) fn TrackMetadata(
 ) -> Element {
     let ctrl = use_context::<PlayerController>();
     let nav_ctrl = use_context::<NavigationController>();
+    let favorite_track = use_memo(move || ctrl.current_track_snapshot.read().clone());
+    let is_favorite = hooks::use_db_queries::use_track_is_favorite(favorite_track)();
     let current_track_snapshot = ctrl.current_track_snapshot.read().clone();
+    let actions_track = current_track_snapshot.clone();
+    let favorite_label = if is_favorite {
+        i18n::t("remove_from_favorites").to_string()
+    } else {
+        i18n::t("add_to_favorites").to_string()
+    };
 
     rsx! {
         div {
@@ -42,38 +52,61 @@ pub(crate) fn TrackMetadata(
         }
 
         div {
-            class: "flex flex-col items-start w-full mb-1",
+            class: "flex items-center gap-4 w-full mb-1",
             style: "max-width: 640px;",
-            h1 { class: "text-[28px] font-semibold tracking-tight text-white mb-1 line-clamp-2 w-full", "{current_song_title}" }
             div {
-                class: "flex flex-wrap items-center gap-x-2 gap-y-1 w-full",
-                button {
-                    class: "text-xl text-white/70 font-medium line-clamp-2 max-w-full hover:text-white hover:underline text-left transition-colors",
-                    onclick: move |_| {
-                        let artist = current_song_artist.read().clone();
-                        if artist.is_empty() {
-                            return;
-                        }
-                        is_fullscreen.set(false);
-                        nav_ctrl.navigate_to_artist(artist);
-                    },
-                    "{current_song_artist}"
+                class: "flex flex-col items-start min-w-0 flex-1",
+                h1 { class: "text-[28px] font-semibold tracking-tight text-white mb-1 line-clamp-2 w-full", "{current_song_title}" }
+                div {
+                    class: "flex flex-wrap items-center gap-x-2 gap-y-1 w-full",
+                    button {
+                        class: "text-xl text-white/70 font-medium line-clamp-2 max-w-full hover:text-white hover:underline text-left transition-colors",
+                        onclick: move |_| {
+                            let artist = current_song_artist.read().clone();
+                            if artist.is_empty() {
+                                return;
+                            }
+                            is_fullscreen.set(false);
+                            nav_ctrl.navigate_to_artist(artist);
+                        },
+                        "{current_song_artist}"
+                    }
+                    span { class: "text-white/30 flex-shrink-0", "•" }
+                    button {
+                        class: "text-lg text-white/50 line-clamp-2 max-w-full hover:text-white/80 hover:underline text-left transition-colors",
+                        onclick: move |_| {
+                            let album_id = current_track_snapshot
+                                .as_ref()
+                                .map(|track| track.album_id.clone())
+                                .unwrap_or_default();
+                            if album_id.is_empty() {
+                                return;
+                            }
+                            is_fullscreen.set(false);
+                            nav_ctrl.navigate_to_album(album_id);
+                        },
+                        "{current_song_album}"
+                    }
                 }
-                span { class: "text-white/30 flex-shrink-0", "•" }
+            }
+            div {
+                class: "flex items-center gap-2 flex-shrink-0",
                 button {
-                    class: "text-lg text-white/50 line-clamp-2 max-w-full hover:text-white/80 hover:underline text-left transition-colors",
-                    onclick: move |_| {
-                        let album_id = current_track_snapshot
-                            .as_ref()
-                            .map(|track| track.album_id.clone())
-                            .unwrap_or_default();
-                        if album_id.is_empty() {
-                            return;
-                        }
-                        is_fullscreen.set(false);
-                        nav_ctrl.navigate_to_album(album_id);
+                    class: if is_favorite {
+                        "w-11 h-11 rounded-full flex-shrink-0 flex items-center justify-center bg-white/10 text-red-400 hover:bg-white/15 hover:text-red-300 transition-colors active:scale-95"
+                    } else {
+                        "w-11 h-11 rounded-full flex-shrink-0 flex items-center justify-center bg-white/10 text-white/70 hover:bg-white/15 hover:text-red-400 transition-colors active:scale-95"
                     },
-                    "{current_song_album}"
+                    title: "{favorite_label}",
+                    "aria-label": "{favorite_label}",
+                    onclick: move |_| toggle_favorite(ctrl.current_track_snapshot.read().clone()),
+                    i {
+                        class: if is_favorite { "fa-solid fa-heart" } else { "fa-regular fa-heart" },
+                        "aria-hidden": "true",
+                    }
+                }
+                if let Some(track) = actions_track {
+                    TrackActions { track }
                 }
             }
         }

@@ -44,12 +44,9 @@ pub async fn load_playlists(pool: &SqlitePool, source: &Source) -> Result<Playli
     // and a server playlist that share an id never collide here. The caller
     // passes the IN-MEMORY active source (the persisted blob lags a switch).
     let src = source.as_str();
-    // 'LM' (YT Liked Music) is NOT surfaced as a playlist — likes are the
-    // favorites view's domain — so it never appears in the playlists grid even
-    // if an older sync materialized a row for it.
     let rows = sqlx::query!(
         "SELECT rowid_pk as \"rowid_pk!\", source_pl_id, name, cover_path, image_tag \
-         FROM playlists WHERE source = ?1 AND source_pl_id != 'LM' ORDER BY position",
+         FROM playlists WHERE source = ?1 ORDER BY position",
         src
     )
     .fetch_all(pool)

@@ -1,118 +1,19 @@
-#[cfg(not(target_os = "android"))]
-use crate::theme_editor::ThemeEditorPage;
-#[cfg(not(target_os = "android"))]
-fn theme_editor_section(config: Signal<AppConfig>) -> Element {
-    rsx! {
-        SettingsSection { title: i18n::t("theme_editor").to_string(),
-            div { class: "py-2",
-                ThemeEditorPage { config, embedded: true }
-            }
-        }
-    }
-}
+mod desktop_tools;
+mod navigation;
+mod sections;
 
-#[cfg(target_os = "android")]
-fn theme_editor_section(_config: Signal<AppConfig>) -> Element {
-    rsx! {}
-}
-
-// Desktop-only: open the logs folder in the OS file manager, or export a
-// bundle (latest.log + newest crash report) via a save dialog. rfd is
-// excluded on Android and utils::logs is filesystem-only, so the rest get a
-// stub.
-// Declared `-> ()` so the panic coerces here; calling it from the onclick
-// keeps the handler's return type `()` (a bare `panic!` in the closure infers
-// `!`, which the event-handler trait rejects).
-#[cfg(not(target_os = "android"))]
-fn trigger_test_crash() {
-    panic!("manual crash trigger from settings (debug build)");
-}
-
-#[cfg(not(target_os = "android"))]
-fn logs_section(mut config: Signal<AppConfig>) -> Element {
-    rsx! {
-        SettingsSection { title: i18n::t("logs").to_string(),
-            div {
-                SettingItem {
-                    title: i18n::t("enable_tracing").to_string(),
-                    control: rsx! {
-                        ToggleSetting {
-                            enabled: config.read().tracing_enabled,
-                            on_change: move |v| {
-                                config.write().tracing_enabled = v;
-                            },
-                        }
-                    },
-                }
-                p {
-                    class: "px-5 pb-3 text-xs text-amber-400/80",
-                    "{i18n::t(\"tracing_warning\")}"
-                }
-            }
-            div { class: "flex flex-wrap gap-3 px-5 pt-3 pb-5",
-                button {
-                    r#type: "button",
-                    class: "px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors flex items-center gap-2",
-                    onclick: move |_| {
-                        if let Err(e) = utils::logs::open_log_dir() {
-                            tracing::warn!(error = %e, "failed to open logs folder");
-                        }
-                    },
-                    i { class: "fa-solid fa-folder-open" }
-                    "{i18n::t(\"open_logs_folder\")}"
-                }
-                button {
-                    r#type: "button",
-                    class: "px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm transition-colors flex items-center gap-2",
-                    onclick: move |_| {
-                        spawn(async move {
-                            if let Some(file) = rfd::AsyncFileDialog::new()
-                                .set_file_name("kopuz-logs.txt")
-                                .save_file()
-                                .await
-                                && let Err(e) = utils::logs::export_logs(file.path()) {
-                                    tracing::warn!(error = %e, "failed to export logs");
-                                }
-                        });
-                    },
-                    i { class: "fa-solid fa-file-export" }
-                    "{i18n::t(\"export_logs\")}"
-                }
-                // Debug builds only: deliberately panic to exercise the crash
-                // hook / crash-report path. English-only by design (dev tool).
-                if cfg!(debug_assertions) {
-                    button {
-                        r#type: "button",
-                        class: "px-4 py-2 rounded-lg bg-red-500/20 hover:bg-red-500/30 text-red-300 text-sm transition-colors flex items-center gap-2",
-                        onclick: move |_| trigger_test_crash(),
-                        i { class: "fa-solid fa-bomb" }
-                        "Trigger crash (debug)"
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Debug-build-only database panel: reset / load release DB / seed / re-run
-/// import / vacuum / info, all against the disposable debug DB with a live
-/// pool swap (no restart). English-only by design (dev tool).
-#[cfg(target_os = "android")]
-fn logs_section(_config: Signal<AppConfig>) -> Element {
-    rsx! {}
-}
+use desktop_tools::{logs_section, theme_editor_section};
+use navigation::{SettingsCategory, SettingsNavigation};
+use sections::{ConnectivitySection, DownloadsSection, MetadataSection, PlayerSection};
 
 use components::settings_items::{
-    AppSelect, BackBehaviorSelector, ChannelModeSelector, DeviceChangeBehaviorSelector,
-    DiscordPresencePausedSettings, DiscordPresenceSettings, EqualizerPanel, LanguageSelector,
-    LastFmSettings, LibreFmSettings, LocalSourceSettings, MusicBrainzSettings,
-    RadioRegistryDropdown, SampleRateModeSelector, ServerSettings, SettingItem, SettingsSection,
-    ThemeSelector, ToggleSetting,
+    AppSelect, BackBehaviorSelector, LanguageSelector, LocalSourceSettings, RadioRegistryDropdown,
+    ServerSettings, SettingItem, SettingsSection, ThemeSelector, ToggleSetting,
 };
 use components::settings_popups::{
     AddLocalSourcePopup, AddRegistryPopup, AddServerPopup, LoginPopup,
 };
-use config::{AppConfig, FetchStrategy, MusicService, OfflineQuality};
+use config::{AppConfig, MusicService};
 use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
@@ -125,11 +26,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             .map(|b| (b.id.to_string(), b.label.to_string()))
             .collect::<Vec<_>>()
     });
-    let crossfade_label = if config.read().crossfade_seconds == 0 {
-        i18n::t("crossfade_off")
-    } else {
-        format!("{}s", config.read().crossfade_seconds)
-    };
     let mut show_add_server = use_signal(|| false);
     let mut show_add_local_source = use_signal(|| false);
     let mut show_login = use_signal(|| false);
@@ -149,8 +45,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
             .and_then(|s| s.yt_browser)
             .unwrap_or(config::Browser::Chrome)
     });
-    // Anonymous YT mode for the add-server popup. Defaults to browser sign-in on
-    // every platform (Windows cookie decryption is now supported natively).
     let yt_anonymous = use_signal(|| false);
 
     let mut username = use_signal(String::new);
@@ -159,6 +53,16 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     let error = use_signal(|| Option::<String>::None);
     let mut login_error = use_signal(|| Option::<String>::None);
     let is_loading = use_signal(|| false);
+    let mut active_category = use_signal(|| SettingsCategory::General);
+    let settings_anchor = try_consume_context::<components::source_switcher::SettingsAnchor>();
+
+    use_effect(move || {
+        if settings_anchor.is_some_and(|components::source_switcher::SettingsAnchor(anchor)| {
+            anchor.read().as_deref() == Some("settings-media-servers")
+        }) {
+            active_category.set(SettingsCategory::Library);
+        }
+    });
 
     let mut show_add_registry = use_signal(|| false);
     let registry_url = use_signal(String::new);
@@ -231,14 +135,30 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
     };
 
     rsx! {
-        div { class: if cfg!(target_os = "android") { "px-3 pt-2 pb-28 w-full max-w-4xl mx-auto" } else { "px-6 py-7 w-full max-w-4xl mx-auto" },
+        div { class: if cfg!(target_os = "android") { "px-3 pt-2 pb-28 w-full max-w-7xl mx-auto" } else if config.read().settings_layout == config::SettingsLayout::TopBar { "settings-page settings-layout-topbar px-6 py-7 w-full max-w-7xl mx-auto" } else { "settings-page settings-layout-cd px-6 py-7 w-full max-w-7xl mx-auto" },
             if !cfg!(target_os = "android") {
                 h1 { class: "text-2xl font-semibold tracking-tight text-white mb-5 px-1", "{i18n::t(\"settings\")}" }
             }
 
-            div { class: "space-y-8",
-                SettingsSection {
-                    title: i18n::t("general").to_string(),
+            div { class: "settings-workspace",
+                SettingsNavigation {
+                    selected: active_category(),
+                    on_select: move |category| {
+                        active_category.set(category);
+                        let _ = document::eval(
+                            "requestAnimationFrame(() => document.getElementById('settings-category-content')?.scrollIntoView({ block: 'start' }))"
+                        );
+                    },
+                }
+                main { id: "settings-category-content", class: "settings-category-content",
+                if matches!(active_category(), SettingsCategory::General | SettingsCategory::Customization | SettingsCategory::Library) {
+                    SettingsSection {
+                    title: match active_category() {
+                        SettingsCategory::Customization => i18n::t("appearance").to_string(),
+                        SettingsCategory::Library => i18n::t("library").to_string(),
+                        _ => i18n::t("general").to_string(),
+                    },
+                    if active_category() == SettingsCategory::Customization {
                         SettingItem {
                             title: i18n::t("language").to_string(),
                             control: rsx! {
@@ -251,9 +171,9 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+                    }
 
-                        div { class: "settings-subsection-label", "{i18n::t(\"appearance\")}" }
-
+                    if active_category() == SettingsCategory::Customization {
                         SettingItem {
                             title: i18n::t("appearance").to_string(),
                             control: rsx! {
@@ -273,8 +193,6 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 title: i18n::t("live_theme_file").to_string(),
                                 control: rsx! {
                                     div { class: "flex items-center gap-2",
-                                        // Always shown, since this is the path the
-                                        // generator has to write to.
                                         span {
                                             class: "text-xs text-white/50 font-mono max-w-[220px] truncate",
                                             "{utils::live_theme::resolve_path(&config.read().live_theme_path).display()}"
@@ -445,9 +363,9 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                     }
                                 }
                         }
+                    }
 
-                        div { class: "settings-subsection-label", "{i18n::t(\"library\")}" }
-
+                    if active_category() == SettingsCategory::Library {
                         SettingItem {
                             title: i18n::t("local_libraries").to_string(),
                             control: rsx! {
@@ -591,8 +509,9 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
-                        div { class: "settings-subsection-label", "{i18n::t(\"general\")}" }
+                    }
 
+                    if active_category() == SettingsCategory::Customization {
                         SettingItem {
                             title: i18n::t("reduce_animations").to_string(),
                             control: rsx! {
@@ -613,6 +532,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+                    }
+                    if active_category() == SettingsCategory::General {
                         SettingItem {
                             title: i18n::t("auto_check_updates").to_string(),
                             control: rsx! {
@@ -633,6 +554,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+                    }
+                    if active_category() == SettingsCategory::Customization {
                         SettingItem {
                             title: i18n::t("show_source_toggle").to_string(),
                                 control: rsx! {
@@ -642,6 +565,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+                    }
+                    if active_category() == SettingsCategory::Customization {
                         SettingItem {
                             title: i18n::t("show_row_images").to_string(),
                             control: rsx! {
@@ -651,6 +576,8 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
+                    }
+                    if active_category() == SettingsCategory::Customization {
                         if cfg!(any(target_os = "linux", target_os = "windows")) {
                             SettingItem {
                                 title: i18n::t("titlebar_mode").to_string(),
@@ -718,6 +645,29 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                             }
                         }
                         SettingItem {
+                            title: i18n::t("settings_layout").to_string(),
+                            control: rsx! {
+                                {
+                                    let current_layout = config.read().settings_layout;
+                                    rsx! {
+                                        AppSelect {
+                                            class: "settings-select",
+                                            value: (if current_layout == config::SettingsLayout::TopBar { "topbar" } else { "cd" }).to_string(),
+                                            options: vec![("cd".into(), i18n::t("settings_layout_cd")), ("topbar".into(), i18n::t("settings_layout_topbar"))],
+                                            on_change: move |value: String| {
+                                                config.write().settings_layout = match value.as_str() {
+                                                    "topbar" => config::SettingsLayout::TopBar,
+                                                    _ => config::SettingsLayout::Cd,
+                                                };
+                                            },
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if active_category() == SettingsCategory::General {
+                        SettingItem {
                             title: i18n::t("back_behavior").to_string(),
                             control: rsx! {
                                 BackBehaviorSelector {
@@ -726,292 +676,30 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                 }
                             }
                         }
-                }
-                SettingsSection {
-                    title: i18n::t("connectivity").to_string(),
-                                if !cfg!(target_os = "android") {
-                                    SettingItem {
-                                        title: i18n::t("discord_presence").to_string(),
-                                        control: rsx! {
-                                            DiscordPresenceSettings {
-                                                enabled: config.read().discord_presence.unwrap_or(true),
-                                                on_change: move |val| config.write().discord_presence = Some(val),
-                                            }
-                                        }
-                                    }
-                                    if config.read().discord_presence.unwrap_or(true) {
-                                        SettingItem {
-                                            title: i18n::t("discord_presence_paused").to_string(),
-                                            control: rsx! {
-                                                DiscordPresencePausedSettings {
-                                                    enabled: config.read().discord_presence_paused.unwrap_or(true),
-                                                    on_change: move |val| config.write().discord_presence_paused = Some(val),
-                                                }
-                                            }
-                                        }
-                                        SettingItem {
-                                            title: i18n::t("discord_presence_source").to_string(),
-                                            control: rsx! {
-                                                ToggleSetting {
-                                                    enabled: config.read().discord_presence_source.unwrap_or(true),
-                                                    on_change: move |val| config.write().discord_presence_source = Some(val),
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                SettingItem {
-                                    title: i18n::t("listenbrainz").to_string(),
-                                    control: rsx! {
-                                        MusicBrainzSettings {
-                                            current: config.read().musicbrainz_token.clone(),
-                                            on_save: move |token: String| {
-                                                config.write().musicbrainz_token = token;
-                                            },
-                                        }
-                                    }
-                                }
-                                SettingItem {
-                                    title: i18n::t("lastfm").to_string(),
-                                    control: rsx! {
-                                        LastFmSettings {
-                                            api_key: config.read().lastfm_api_key.clone(),
-                                            api_secret: config.read().lastfm_api_secret.clone(),
-                                            session_key: config.read().lastfm_session_key.clone(),
-
-                                            on_api_key_save: move |value: String| {
-                                                config.write().lastfm_api_key = value;
-                                            },
-
-                                            on_api_secret_save: move |value: String| {
-                                                config.write().lastfm_api_secret = value;
-                                            },
-
-                                            on_session_key_save: move |value: String| {
-                                                config.write().lastfm_session_key = value;
-                                            },
-                                        }
-                                    }
-                                }
-                                SettingItem {
-                                    title: i18n::t("librefm").to_string(),
-                                    control: rsx! {
-                                        LibreFmSettings {
-                                            session_key: config.read().librefm_session_key.clone(),
-
-                                            on_session_key_save: move |value: String| {
-                                                config.write().librefm_session_key = value;
-                                            },
-                                        }
-                                    }
-                                }
-                }
-
-                if config.read().server.is_some() {
-                    SettingsSection {
-                        title: i18n::t("offline_downloads").to_string(),
-                            SettingItem {
-                                title: i18n::t("download_quality").to_string(),
-                                control: rsx! {
-                                    select {
-                                        class: "bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-white/25",
-                                        onchange: move |evt| {
-                                            config.write().offline_quality = OfflineQuality::from_value_str(&evt.value());
-                                        },
-                                        for q in OfflineQuality::ALL {
-                                            option {
-                                                value: q.value_str(),
-                                                selected: *q == config.read().offline_quality,
-                                                "{q.label()}"
-                                            }
-                                        }
-                                    }
-                                }
-                            }
                     }
                 }
-
-                SettingsSection {
-                    title: i18n::t("metadata").to_string(),
-                        SettingItem {
-                            title: i18n::t("auto_fetch_covers").to_string(),
-                            control: rsx! {
-                                ToggleSetting {
-                                    enabled: config.read().auto_fetch_covers,
-                                    on_change: move |val| config.write().auto_fetch_covers = val,
-                                }
-                            }
-                        }
-                        SettingItem {
-                            title: i18n::t("prefer_local_lyrics").to_string(),
-                            control: rsx! {
-                                ToggleSetting {
-                                    enabled: config.read().prefer_local_lyrics,
-                                    on_change: move |val| config.write().prefer_local_lyrics = val,
-                                }
-                            }
-                        }
-                        SettingItem {
-                            title: i18n::t("enable_musixmatch_lyrics").to_string(),
-                            control: rsx! {
-                                ToggleSetting {
-                                    enabled: config.read().enable_musixmatch_lyrics,
-                                    on_change: move |val| config.write().enable_musixmatch_lyrics = val,
-                                }
-                            }
-                        }
-                        SettingItem {
-                            title: i18n::t("cover_fetch_strategy").to_string(),
-                            control: rsx! {
-                                {
-                                    let current = config.read().cover_fetch_strategy;
-                                    rsx! {
-                                        select {
-                                            class: "bg-white/10 text-white rounded-lg px-3 py-2 text-sm border border-white/10 focus:outline-none focus:border-white/25",
-                                            onchange: move |evt| {
-                                                config.write().cover_fetch_strategy = match evt.value().as_str() {
-                                                    "lastfm_first" => FetchStrategy::LastFmFirst,
-                                                    "musicbrainz_only" => FetchStrategy::MusicBrainzOnly,
-                                                    "lastfm_only" => FetchStrategy::LastFmOnly,
-                                                    _ => FetchStrategy::MusicBrainzFirst,
-                                                };
-                                            },
-                                            option {
-                                                value: "musicbrainz_first",
-                                                selected: current == FetchStrategy::MusicBrainzFirst,
-                                                "{i18n::t(\"musicbrainz_first\")}"
-                                            }
-                                            option {
-                                                value: "lastfm_first",
-                                                selected: current == FetchStrategy::LastFmFirst,
-                                                "{i18n::t(\"lastfm_first\")}"
-                                            }
-                                            option {
-                                                value: "musicbrainz_only",
-                                                selected: current == FetchStrategy::MusicBrainzOnly,
-                                                "{i18n::t(\"musicbrainz_only\")}"
-                                            }
-                                            option {
-                                                value: "lastfm_only",
-                                                selected: current == FetchStrategy::LastFmOnly,
-                                                "{i18n::t(\"lastfm_only\")}"
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
                 }
-
-                SettingsSection {
-                    title: i18n::t("player_settings").to_string(),
-                        SettingItem {
-                            title: i18n::t("crossfade").to_string(),
-                            control: rsx! {
-                                div { class: "flex items-center gap-3 min-w-[220px]",
-                                    input {
-                                        r#type: "range",
-                                        min: "0",
-                                        max: "12",
-                                        step: "1",
-                                        value: format!("{}", config.read().crossfade_seconds),
-                                        class: "w-40",
-                                        style: "accent-color: var(--color-indigo-500);",
-                                        oninput: move |evt| {
-                                            if let Ok(value) = evt.value().parse::<u8>() {
-                                                config.write().crossfade_seconds = value.min(12);
-                                            }
-                                        }
-                                    }
-                                    span {
-                                        class: "text-xs font-mono text-white/80 w-16 text-right",
-                                        "{crossfade_label}"
-                                    }
-                                }
-                            }
-                        }
-                        SettingItem {
-                            title: i18n::t("volume_scroll_step").to_string(),
-                            control: rsx! {
-                                div { class: "flex items-center gap-3 min-w-[220px]",
-                                    input {
-                                        r#type: "range",
-                                        min: "1",
-                                        max: "50",
-                                        step: "1",
-                                        value: format!("{}", (config.read().volume_scroll_step * 100.0).round() as i32),
-                                        class: "w-40",
-                                        style: "accent-color: var(--color-indigo-500);",
-                                        oninput: move |evt| {
-                                            if let Ok(pct) = evt.value().parse::<i32>() {
-                                                let clamped = pct.clamp(1, 50);
-                                                config.write().volume_scroll_step = clamped as f32 / 100.0;
-                                            }
-                                        }
-                                    }
-                                    span {
-                                        class: "text-xs font-mono text-white/80 w-16 text-right",
-                                        "{(config.read().volume_scroll_step * 100.0).round() as i32}%"
-                                    }
-                                }
-                            }
-                        }
-                        SettingItem {
-                            title: i18n::t("channel_mode").to_string(),
-                            control: rsx! {
-                                ChannelModeSelector {
-                                    current: config.read().channel_mode,
-                                    on_change: move |mode| {
-                                        config.write().channel_mode = mode;
-                                        ctrl.player.peek().set_channel_mode(mode);
-                                    }
-                                }
-                            }
-                        }
-                        SettingItem {
-                            title: i18n::t("device_change_behavior").to_string(),
-                            control: rsx! {
-                                DeviceChangeBehaviorSelector {
-                                    current: config.read().device_change_behavior,
-                                    on_change: move |behavior| {
-                                        config.write().device_change_behavior = behavior;
-                                        ctrl.player.peek().set_device_change_behavior(behavior);
-                                    }
-                                }
-                            }
-                        }
-                        SettingItem {
-                            title: i18n::t("sample_rate_mode").to_string(),
-                            control: rsx! {
-                                SampleRateModeSelector {
-                                    current: config.read().sample_rate_mode,
-                                    on_change: move |mode| {
-                                        config.write().sample_rate_mode = mode;
-                                        ctrl.player.peek().set_sample_rate_mode(mode);
-                                    }
-                                }
-                            }
-                        }
-                        div { class: "px-5 py-4",
-                            p { class: "text-sm text-white/90 font-medium mb-3", "{i18n::t(\"equalizer\")}" }
-                            EqualizerPanel {
-                                current: config.read().equalizer.clone(),
-                                on_preview: move |equalizer: config::EqualizerSettings| {
-                                    ctrl.player.peek().set_equalizer(equalizer);
-                                },
-                                on_commit: move |equalizer: config::EqualizerSettings| {
-                                    config.write().equalizer = equalizer.clone();
-                                    ctrl.player.peek().set_equalizer(equalizer);
-                                }
-                            }
-                        }
+                if active_category() == SettingsCategory::Customization {
+                    {theme_editor_section(config)}
                 }
-
-                {logs_section(config)}
-
-                {hooks::debug_db_section()}
-
-                {theme_editor_section(config)}
+                if active_category() == SettingsCategory::Connectivity {
+                    ConnectivitySection { config }
+                }
+                if active_category() == SettingsCategory::Downloads {
+                    DownloadsSection { config }
+                }
+                if active_category() == SettingsCategory::Metadata {
+                    MetadataSection { config }
+                }
+                if active_category() == SettingsCategory::Player {
+                    PlayerSection { config }
+                }
+                if active_category() == SettingsCategory::Tools {
+                    div { class: "space-y-8",
+                        {logs_section(config)}
+                        {hooks::debug_db_section()}
+                    }
+                }
 
 
 
@@ -1095,6 +783,7 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         },
                         on_save: handle_login
                     }
+                }
                 }
             }
         }

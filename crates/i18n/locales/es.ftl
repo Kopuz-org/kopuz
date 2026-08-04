@@ -2,6 +2,9 @@ language-name = Español
 is_rtl = false
 
 settings = Ajustes
+settings_layout = Navegación de ajustes
+settings_layout_cd = CD
+settings_layout_topbar = Barra superior
 theme_editor = Editar tema
 appearance = Apariencia
 language = Idioma
@@ -90,6 +93,7 @@ add_to_queue = Agregar a la Cola
 play_next = Reproducir a continuación
 add_to_playlist = Agregar a Playlist
 remove_from_playlist = Eliminar de Playlist
+start_radio = Iniciar Radio
 share_musicbrainz = Compartir (MusicBrainz)
 share_link_copied = Enlace de MusicBrainz copiado
 delete = Borrar
