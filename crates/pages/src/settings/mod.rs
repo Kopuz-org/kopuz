@@ -18,6 +18,37 @@ use dioxus::prelude::*;
 use hooks::use_player_controller::PlayerController;
 
 #[component]
+fn BuildInfoCard() -> Element {
+    let build_summary = utils::build_info::summary();
+    let copy_value = serde_json::to_string(&build_summary).unwrap_or_else(|error| {
+        tracing::warn!(%error, "failed to encode build information for clipboard");
+        "\"\"".to_string()
+    });
+
+    rsx! {
+        aside { class: "mt-4 rounded-xl border border-white/10 bg-black/25 px-5 py-3 flex items-center justify-between gap-5",
+            div { class: "min-w-0 flex flex-col gap-1",
+                span { class: "text-sm font-medium text-white/80", "Kopuz {utils::build_info::VERSION}" }
+                code { class: "text-xs text-white/45 break-all", "{utils::build_info::COMMIT}" }
+            }
+            button {
+                r#type: "button",
+                class: "p-2 rounded text-white/35 hover:text-white hover:bg-white/10 transition-colors shrink-0",
+                title: "{build_summary}",
+                aria_label: "{build_summary}",
+                onclick: move |_| {
+                    let js = format!(
+                        "navigator.clipboard.writeText({copy_value}).catch((e) => console.error('clipboard writeText failed', e));"
+                    );
+                    let _ = dioxus::document::eval(&js);
+                },
+                i { class: "fa-solid fa-copy" }
+            }
+        }
+    }
+}
+
+#[component]
 pub fn Settings(config: Signal<AppConfig>) -> Element {
     let ctrl = use_context::<PlayerController>();
     let spotify_browsers = use_hook(|| {
@@ -678,6 +709,9 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                         }
                     }
                 }
+                }
+                if active_category() == SettingsCategory::General {
+                    BuildInfoCard {}
                 }
                 if active_category() == SettingsCategory::Customization {
                     {theme_editor_section(config)}

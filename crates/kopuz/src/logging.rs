@@ -233,7 +233,12 @@ pub fn init(log_dir: &Path, config_tracing_enabled: bool) {
 
     install_panic_hook();
 
-    tracing::info!(log_dir = %log_dir.display(), "logging initialized");
+    tracing::info!(
+        version = utils::build_info::VERSION,
+        commit = utils::build_info::COMMIT,
+        log_dir = %log_dir.display(),
+        "logging initialized"
+    );
 }
 
 /// Chain a panic hook that writes a discrete crash report (panic message +
@@ -265,13 +270,8 @@ fn install_panic_hook() {
             let backtrace = std::backtrace::Backtrace::force_capture().to_string();
 
             if let Some(dir) = utils::logs::log_dir()
-                && let Some(path) = utils::logs::write_crash_report(
-                    &dir,
-                    env!("CARGO_PKG_VERSION"),
-                    &message,
-                    &location,
-                    &backtrace,
-                )
+                && let Some(path) =
+                    utils::logs::write_crash_report(&dir, &message, &location, &backtrace)
             {
                 tracing::error!(crash_report = %path.display(), panic = %message, %location, "panic — crash report written");
             }

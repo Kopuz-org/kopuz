@@ -2,6 +2,7 @@
   lib,
   stdenv,
   craneLib,
+  gitRev ? null,
   fetchurl,
   pkg-config,
   cmake,
@@ -110,6 +111,9 @@ let
           ]
         );
       };
+  }
+  // lib.optionalAttrs (gitRev != null) {
+    KOPUZ_GIT_COMMIT = gitRev;
   };
 
   # Pre-build all external deps, this derivation is cached across source changes
