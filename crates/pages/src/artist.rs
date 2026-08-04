@@ -556,7 +556,7 @@ pub fn Artist(
                             SelectionBar {
                                 count: selected_tracks.read().len(),
                                 show_delete: caps().delete_from_disk,
-                                class: Some("absolute bottom-24 left-1/2 -translate-x-1/2 bg-indigo-500 text-white px-6 py-2.5 rounded-full shadow-2xl flex items-center gap-4 z-50 animate-in fade-in zoom-in duration-200 font-mono".to_string()),
+                                class: Some("absolute bottom-24 left-1/2 -translate-x-1/2 bg-indigo-500 text-black px-6 py-2.5 rounded-full shadow-2xl flex items-center gap-4 z-50 animate-in fade-in zoom-in duration-200 font-mono".to_string()),
                                 on_add_to_queue: move |_| {
                                     let selected = selected_tracks.read().clone();
                                     let tracks: Vec<_> = artist_tracks()
