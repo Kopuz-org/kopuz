@@ -639,8 +639,8 @@ pub struct AppConfig {
     pub spotify_prefer_active_device: bool,
     #[serde(default, deserialize_with = "deserialize_music_directories")]
     pub music_directory: Vec<PathBuf>,
-    /// Whether the built-in Local library carries favorites and playlists in
-    /// the first configured music folder.
+    /// Whether the built-in Local library carries favorites, playlists, and
+    /// listening activity in the first configured music folder.
     #[serde(default = "default_true")]
     pub local_portable_metadata: bool,
     #[serde(default = "default_theme")]

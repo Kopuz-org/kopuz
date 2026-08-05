@@ -192,6 +192,11 @@ pub trait ReadStore: Send + Sync {
     /// This source's recently-played track keys, newest first (capped).
     async fn recently_played(&self, source: &Source, limit: u32) -> Result<Vec<String>, DbError>;
 
+    /// Every persisted play count as its source-qualified key and count.
+    /// Portable local-library databases use this to remap filesystem refs onto
+    /// the current machine before merging them into the app database.
+    async fn listen_counts(&self) -> Result<Vec<(String, u64)>, DbError>;
+
     /// One representative (first-inserted) track per artist, artist A→Z — for
     /// artist tiles that need a cover without pulling the whole source.
     async fn artist_sample_tracks(
@@ -420,6 +425,15 @@ pub trait Storage: ReadStore {
 
     /// Increment one track's play count in its source partition.
     async fn bump_listen_count(&self, source: &Source, track_uid: &str) -> Result<(), DbError>;
+
+    /// Merge absolute play counts into one source partition. Existing larger
+    /// counts win because listening activity is monotonic and another writer
+    /// may have incremented a row after the incoming snapshot was read.
+    async fn merge_listen_counts(
+        &self,
+        source: &Source,
+        counts: &[(String, u64)],
+    ) -> Result<(), DbError>;
 
     /// Record a play for this source's recently-played history (caps + trims).
     async fn push_recent(&self, source: &Source, track_key: &str) -> Result<(), DbError>;

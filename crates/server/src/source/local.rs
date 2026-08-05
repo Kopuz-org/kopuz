@@ -14,6 +14,7 @@ pub const PORTABLE_LIBRARY_DB_FILENAME: &str = ".kopuz-library.db";
 const PORTABLE_REF_PREFIX: &str = "kopuz-root-v1:";
 const PORTABLE_INIT_KEY: &str = "initialized-v1";
 const PORTABLE_INIT_KIND: &str = "portable-library";
+const PORTABLE_ACTIVITY_INIT_KEY: &str = "activity-initialized-v1";
 
 pub(super) struct LocalSource {
     pub(super) db: Db,
@@ -71,67 +72,104 @@ impl LocalSource {
     /// DB. The marker prevents a deliberately emptied portable library from
     /// resurrecting stale data on the next launch.
     async fn seed_portable(&self, portable: &Db) -> Result<(), SourceError> {
-        if portable
+        let metadata_initialized = portable
             .meta_get(PORTABLE_INIT_KEY, PORTABLE_INIT_KIND)
             .await?
-            .is_some()
-        {
-            return Ok(());
-        }
-
-        let existing_favorites = portable.favorites(Source::Local.as_str()).await?;
-        let existing_playlists = portable.load_playlists(&Source::Local).await?;
-        if existing_favorites.is_empty()
-            && existing_playlists.playlists.is_empty()
-            && existing_playlists.folders.is_empty()
-        {
-            let favorites = self.db.favorites(self.source.as_str()).await?;
-            let favorites: Vec<String> = favorites
-                .iter()
-                .map(|reference| self.encode_ref(reference))
-                .collect();
-            portable
-                .replace_favorites_clean(Source::Local.as_str(), &favorites)
-                .await?;
-
-            let store = self.db.load_playlists(&self.source).await?;
-            for playlist in &store.playlists {
-                let cover = playlist
-                    .cover_path
-                    .as_ref()
-                    .map(|path| self.encode_ref(&path.to_string_lossy()));
-                portable
-                    .upsert_playlist_meta(
-                        &Source::Local,
-                        &playlist.id,
-                        &playlist.name,
-                        cover.as_deref(),
-                        playlist.image_tag.as_deref(),
-                    )
-                    .await?;
-                let tracks: Vec<String> = playlist
-                    .tracks
+            .is_some();
+        if !metadata_initialized {
+            let existing_favorites = portable.favorites(Source::Local.as_str()).await?;
+            let existing_playlists = portable.load_playlists(&Source::Local).await?;
+            if existing_favorites.is_empty()
+                && existing_playlists.playlists.is_empty()
+                && existing_playlists.folders.is_empty()
+            {
+                let favorites = self.db.favorites(self.source.as_str()).await?;
+                let favorites: Vec<String> = favorites
                     .iter()
                     .map(|reference| self.encode_ref(reference))
                     .collect();
                 portable
-                    .set_playlist_tracks(&Source::Local, &playlist.id, &tracks)
+                    .replace_favorites_clean(Source::Local.as_str(), &favorites)
                     .await?;
-            }
-            for folder in &store.folders {
-                portable.create_folder(&folder.id, &folder.name).await?;
-                for playlist_id in &folder.playlist_ids {
+
+                let store = self.db.load_playlists(&self.source).await?;
+                for playlist in &store.playlists {
+                    let cover = playlist
+                        .cover_path
+                        .as_ref()
+                        .map(|path| self.encode_ref(&path.to_string_lossy()));
                     portable
-                        .set_playlist_folder(playlist_id, Some(&folder.id))
+                        .upsert_playlist_meta(
+                            &Source::Local,
+                            &playlist.id,
+                            &playlist.name,
+                            cover.as_deref(),
+                            playlist.image_tag.as_deref(),
+                        )
+                        .await?;
+                    let tracks: Vec<String> = playlist
+                        .tracks
+                        .iter()
+                        .map(|reference| self.encode_ref(reference))
+                        .collect();
+                    portable
+                        .set_playlist_tracks(&Source::Local, &playlist.id, &tracks)
                         .await?;
                 }
+                for folder in &store.folders {
+                    portable.create_folder(&folder.id, &folder.name).await?;
+                    for playlist_id in &folder.playlist_ids {
+                        portable
+                            .set_playlist_folder(playlist_id, Some(&folder.id))
+                            .await?;
+                    }
+                }
             }
+
+            portable
+                .meta_put(PORTABLE_INIT_KEY, PORTABLE_INIT_KIND, "1")
+                .await?;
         }
 
-        portable
-            .meta_put(PORTABLE_INIT_KEY, PORTABLE_INIT_KIND, "1")
-            .await
-            .map_err(SourceError::from)
+        let activity_initialized = portable
+            .meta_get(PORTABLE_ACTIVITY_INIT_KEY, PORTABLE_INIT_KIND)
+            .await?
+            .is_some();
+        if !activity_initialized {
+            let existing_counts = portable.listen_counts().await?;
+            let existing_recents = portable.recently_played(&Source::Local, 1).await?;
+            if existing_counts.is_empty() {
+                let counts = self.db.listen_counts().await?;
+                let portable_counts: Vec<(String, u64)> = counts
+                    .into_iter()
+                    .filter_map(|(key, count)| {
+                        let reference = self.local_count_ref(&key)?;
+                        let encoded = self.encode_ref(reference);
+                        encoded
+                            .starts_with(PORTABLE_REF_PREFIX)
+                            .then_some((encoded, count))
+                    })
+                    .collect();
+                portable
+                    .merge_listen_counts(&Source::Local, &portable_counts)
+                    .await?;
+            }
+
+            if existing_recents.is_empty() {
+                let recents = self.db.recently_played(&self.source, 50).await?;
+                for reference in recents.iter().rev() {
+                    let encoded = self.encode_ref(reference);
+                    if encoded.starts_with(PORTABLE_REF_PREFIX) {
+                        portable.push_recent(&Source::Local, &encoded).await?;
+                    }
+                }
+            }
+            portable
+                .meta_put(PORTABLE_ACTIVITY_INIT_KEY, PORTABLE_INIT_KIND, "1")
+                .await?;
+        }
+
+        Ok(())
     }
 
     async fn metadata_store(&self) -> (&Db, Source) {
@@ -195,6 +233,14 @@ impl LocalSource {
             .iter()
             .map(|reference| self.encode_ref(reference))
             .collect()
+    }
+
+    fn local_count_ref<'a>(&self, key: &'a str) -> Option<&'a str> {
+        match &self.source {
+            Source::Local => Some(key),
+            Source::LocalLibrary(id) => key.strip_prefix(id)?.strip_prefix('|'),
+            Source::Server(_) => None,
+        }
     }
 }
 
@@ -282,6 +328,75 @@ impl MediaSource for LocalSource {
             }
         }
         Ok(store)
+    }
+
+    async fn recently_played(&self, limit: u32) -> Result<Vec<String>, SourceError> {
+        let (db, source) = self.metadata_store().await;
+        Ok(db
+            .recently_played(&source, limit)
+            .await?
+            .iter()
+            .map(|reference| self.decode_ref(reference))
+            .collect())
+    }
+
+    async fn sync_portable_activity(&self) -> Result<Vec<(String, u64)>, SourceError> {
+        let Some(portable) = self.portable_db().await else {
+            return Ok(Vec::new());
+        };
+        let decoded_counts: Vec<(String, u64)> = portable
+            .listen_counts()
+            .await?
+            .into_iter()
+            .map(|(reference, count)| (self.decode_ref(&reference), count))
+            .collect();
+        self.db
+            .merge_listen_counts(&self.source, &decoded_counts)
+            .await?;
+
+        let recents = portable.recently_played(&Source::Local, 50).await?;
+        for reference in recents.iter().rev() {
+            self.db
+                .push_recent(&self.source, &self.decode_ref(reference))
+                .await?;
+        }
+
+        Ok(decoded_counts
+            .into_iter()
+            .map(|(reference, count)| (self.source.listen_count_key(&reference), count))
+            .collect())
+    }
+
+    async fn bump_listen_count(&self, track_uid: &str) -> Result<(), SourceError> {
+        let encoded = self.encode_ref(track_uid);
+        let Some(portable) = self.portable_db().await else {
+            return self
+                .db
+                .bump_listen_count(&self.source, track_uid)
+                .await
+                .map_err(SourceError::from);
+        };
+        portable.bump_listen_count(&Source::Local, &encoded).await?;
+        if let Err(error) = self.db.bump_listen_count(&self.source, track_uid).await {
+            tracing::warn!(%error, "failed to mirror shared listen count into app database");
+        }
+        Ok(())
+    }
+
+    async fn record_recent(&self, track_key: &str) -> Result<(), SourceError> {
+        let encoded = self.encode_ref(track_key);
+        let Some(portable) = self.portable_db().await else {
+            return self
+                .db
+                .push_recent(&self.source, track_key)
+                .await
+                .map_err(SourceError::from);
+        };
+        portable.push_recent(&Source::Local, &encoded).await?;
+        if let Err(error) = self.db.push_recent(&self.source, track_key).await {
+            tracing::warn!(%error, "failed to mirror shared recent history into app database");
+        }
+        Ok(())
     }
 
     async fn add_to_playlist(

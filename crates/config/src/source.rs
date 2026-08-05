@@ -69,8 +69,8 @@ pub struct SavedLocalSource {
     pub name: String,
     #[serde(default)]
     pub directories: Vec<std::path::PathBuf>,
-    /// Store favorites and playlists in the first music folder so the library
-    /// can be shared with another Kopuz installation.
+    /// Store favorites, playlists, and listening activity in the first music
+    /// folder so the library can be shared with another Kopuz installation.
     #[serde(default = "default_portable_metadata")]
     pub portable_metadata: bool,
 }

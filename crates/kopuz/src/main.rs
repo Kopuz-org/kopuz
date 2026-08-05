@@ -521,7 +521,7 @@ fn App() -> Element {
         });
         use_context_provider(|| active_source)
     };
-    hooks::portable_metadata::use_portable_metadata_watch();
+    hooks::portable_metadata::use_portable_metadata_watch(config);
 
     // Capabilities of the active source — drives source-agnostic routing (e.g.
     // which artist view to render) without hardcoding services in the router.

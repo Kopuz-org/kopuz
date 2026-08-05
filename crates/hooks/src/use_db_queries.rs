@@ -247,14 +247,15 @@ pub fn use_tracks_by_keys(
 /// then resolves them, re-running on a source switch or a new play (`Recents`).
 pub fn use_recently_played(source: Memo<Source>) -> Resource<Vec<reader::Track>> {
     let db = use_context::<ReadDb>();
+    let active_source = use_context::<Signal<server::source::ActiveSource>>();
     let gens = use_generations();
     use_resource(move || {
         let _ = gens.generation(Table::Recents);
-        let (db, s) = (db.clone(), source());
+        let (db, s, source_handle) = (db.clone(), source(), active_source.read().clone());
         let span = tracing::info_span!("query.recently_played", source = s.as_str());
         offload(
             async move {
-                let keys = db.recently_played(&s, 50).await.unwrap_or_default();
+                let keys = source_handle.recently_played(50).await.unwrap_or_default();
                 if keys.is_empty() {
                     return Vec::new();
                 }

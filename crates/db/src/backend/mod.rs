@@ -164,6 +164,10 @@ impl ReadStore for Native {
         cfg_store::recently_played(&self.pool(), source, limit).await
     }
 
+    async fn listen_counts(&self) -> Result<Vec<(String, u64)>, DbError> {
+        cfg_store::listen_counts(&self.pool()).await
+    }
+
     async fn artist_sample_tracks(
         &self,
         source: &crate::Source,
@@ -411,6 +415,14 @@ impl Storage for Native {
         track_uid: &str,
     ) -> Result<(), DbError> {
         cfg_store::bump_listen_count(&self.pool(), source, track_uid).await
+    }
+
+    async fn merge_listen_counts(
+        &self,
+        source: &crate::Source,
+        counts: &[(String, u64)],
+    ) -> Result<(), DbError> {
+        cfg_store::merge_listen_counts(&self.pool(), source, counts).await
     }
 
     async fn push_recent(&self, source: &crate::Source, track_key: &str) -> Result<(), DbError> {

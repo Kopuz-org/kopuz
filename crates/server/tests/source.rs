@@ -159,6 +159,15 @@ async fn portable_local_metadata_survives_a_different_mount_path() {
     )
     .await
     .unwrap();
+    db_a.bump_listen_count(&source_a, &first_a.to_string_lossy())
+        .await
+        .unwrap();
+    db_a.bump_listen_count(&source_a, &first_a.to_string_lossy())
+        .await
+        .unwrap();
+    db_a.push_recent(&source_a, &first_a.to_string_lossy())
+        .await
+        .unwrap();
 
     let src_a = source::local_with_directories(db_a, source_a, vec![root_a.clone()]);
     assert_eq!(
@@ -173,6 +182,14 @@ async fn portable_local_metadata_survives_a_different_mount_path() {
         .add_to_playlist("road-trip", &[second_a.to_string_lossy().into_owned()])
         .await
         .unwrap();
+    src_a
+        .bump_listen_count(&second_a.to_string_lossy())
+        .await
+        .unwrap();
+    src_a
+        .record_recent(&second_a.to_string_lossy())
+        .await
+        .unwrap();
 
     let portable_a = root_a.join(source::PORTABLE_LIBRARY_DB_FILENAME);
     assert!(portable_a.is_file());
@@ -182,11 +199,9 @@ async fn portable_local_metadata_survives_a_different_mount_path() {
     let portable_b = root_b.join(source::PORTABLE_LIBRARY_DB_FILENAME);
     std::fs::copy(&portable_a, &portable_b).unwrap();
     let db_b = db::init(&test_dir.join("computer-b.db")).await.unwrap();
-    let src_b = source::local_with_directories(
-        db_b,
-        Source::LocalLibrary("local:computer-b".into()),
-        vec![root_b.clone()],
-    );
+    let source_b = Source::LocalLibrary("local:computer-b".into());
+    let src_b =
+        source::local_with_directories(db_b.clone(), source_b.clone(), vec![root_b.clone()]);
 
     let favorites = src_b.favorites().await.unwrap();
     assert_eq!(
@@ -222,6 +237,43 @@ async fn portable_local_metadata_survives_a_different_mount_path() {
         ]
     );
 
+    let first_b = root_b.join("album").join("first.flac");
+    let second_b = root_b.join("album").join("second.flac");
+    assert_eq!(
+        src_b.recently_played(50).await.unwrap(),
+        vec![
+            second_b.to_string_lossy().into_owned(),
+            first_b.to_string_lossy().into_owned(),
+        ]
+    );
+    let synced_counts: std::collections::HashMap<String, u64> = src_b
+        .sync_portable_activity()
+        .await
+        .unwrap()
+        .into_iter()
+        .collect();
+    assert_eq!(
+        synced_counts.get(&source_b.listen_count_key(&first_b.to_string_lossy())),
+        Some(&2)
+    );
+    assert_eq!(
+        synced_counts.get(&source_b.listen_count_key(&second_b.to_string_lossy())),
+        Some(&1)
+    );
+    let mirrored_counts: std::collections::HashMap<String, u64> =
+        db_b.listen_counts().await.unwrap().into_iter().collect();
+    assert_eq!(
+        mirrored_counts.get(&source_b.listen_count_key(&first_b.to_string_lossy())),
+        Some(&2)
+    );
+    assert_eq!(
+        db_b.recently_played(&source_b, 50).await.unwrap(),
+        vec![
+            second_b.to_string_lossy().into_owned(),
+            first_b.to_string_lossy().into_owned(),
+        ]
+    );
+
     // The shared DB itself contains portable refs, never computer A's mount.
     let raw = db::init_portable(&portable_b).await.unwrap();
     assert_eq!(
@@ -230,5 +282,12 @@ async fn portable_local_metadata_survives_a_different_mount_path() {
             "kopuz-root-v1:0:album/second.flac",
             "kopuz-root-v1:0:album/first.flac",
         ]
+    );
+    let raw_counts: std::collections::HashMap<String, u64> =
+        raw.listen_counts().await.unwrap().into_iter().collect();
+    assert_eq!(raw_counts.get("kopuz-root-v1:0:album/first.flac"), Some(&2));
+    assert_eq!(
+        raw_counts.get("kopuz-root-v1:0:album/second.flac"),
+        Some(&1)
     );
 }

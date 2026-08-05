@@ -234,6 +234,45 @@ pub async fn bump_listen_count(
     Ok(())
 }
 
+/// All source-qualified listen-count rows. The portable-library layer owns the
+/// source/path interpretation because folder refs must be remapped there.
+pub async fn listen_counts(pool: &SqlitePool) -> Result<Vec<(String, u64)>, DbError> {
+    let rows = sqlx::query!("SELECT track_key, count FROM listen_counts")
+        .fetch_all(pool)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| (row.track_key, row.count.max(0) as u64))
+        .collect())
+}
+
+/// Merge a snapshot of counts without ever decreasing a value that may have
+/// been incremented concurrently on this machine.
+pub async fn merge_listen_counts(
+    pool: &SqlitePool,
+    source: &Source,
+    counts: &[(String, u64)],
+) -> Result<(), DbError> {
+    if counts.is_empty() {
+        return Ok(());
+    }
+    let mut tx = pool.begin().await?;
+    for (track_uid, count) in counts {
+        let key = source.listen_count_key(track_uid);
+        let count = (*count).min(i64::MAX as u64) as i64;
+        sqlx::query(
+            "INSERT INTO listen_counts (track_key, count) VALUES (?1, ?2) \
+             ON CONFLICT(track_key) DO UPDATE SET count = MAX(count, excluded.count)",
+        )
+        .bind(key)
+        .bind(count)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(())
+}
+
 /// One source's recently-played track keys, newest first.
 pub async fn recently_played(
     pool: &SqlitePool,

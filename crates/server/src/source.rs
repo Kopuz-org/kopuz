@@ -367,6 +367,22 @@ pub trait MediaSource: Send + Sync {
             .map_err(SourceError::from)
     }
 
+    /// This source's recently-played refs, newest first. Local sources can
+    /// resolve this from their folder-carried database.
+    async fn recently_played(&self, limit: u32) -> Result<Vec<String>, SourceError> {
+        self.db()
+            .recently_played(self.source(), limit)
+            .await
+            .map_err(SourceError::from)
+    }
+
+    /// Import shared play counts into the app DB's source partition and return
+    /// the source-qualified keys needed by the live config cache. Non-portable
+    /// sources have nothing to import.
+    async fn sync_portable_activity(&self) -> Result<Vec<(String, u64)>, SourceError> {
+        Ok(Vec::new())
+    }
+
     /// Whether `ref_` is currently favorited for this source.
     async fn is_favorite(&self, ref_: &str) -> bool {
         self.db()
