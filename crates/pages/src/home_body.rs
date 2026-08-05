@@ -414,7 +414,7 @@ pub fn HomeBody(
                             reader::CoverRef::remote_item(s.service, &p.id, Some(tag.as_str())),
                             384,
                         )
-                        .and_then(|t| Some(t.to_string()))
+                        .map(|t| t.to_string())
                     } else {
                         p.tracks.first().and_then(|tid| {
                             cover_tracks
