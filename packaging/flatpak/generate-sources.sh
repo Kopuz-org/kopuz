@@ -28,31 +28,31 @@ pip install flatpak-cargo-generator
 
 flatpak-cargo-generator "$CUR_DIR/Cargo.lock" -o "cargo-sources.json"
 
-dioxus_releases=$(curl -fsSL "https://api.github.com/repos/DioxusLabs/dioxus/releases/latest")
+#dioxus_releases=$(curl -fsSL "https://api.github.com/repos/DioxusLabs/dioxus/releases/latest")
 
-{
-    echo "["
-    suffix=","
-    for arch in x86_64 aarch64; do
-        file="dx-${arch}-unknown-linux-gnu.zip"
-        asset=$(jq -c --arg file "$file" '.assets[] | select(.name == $file)' <<<"$dioxus_releases")
-        url=$(jq -r '.browser_download_url' <<<"$asset")
-        digest=$(jq -r '.digest' <<<"$asset")
-        algo=${digest%%:*}
-        hash=${digest#*:}       
-        cat <<EOF
-  {
-    "type": "archive",
-    "url": "$url",
-    "$algo": "$hash",
-    "dest": "dioxus-cli",
-    "only-arches": ["$arch"]
-  }$suffix
-EOF
-    suffix=""
-    done
-    echo "]"
-} > dioxus-cli.json
+#{
+#    echo "["
+#    suffix=","
+#    for arch in x86_64 aarch64; do
+#        file="dx-${arch}-unknown-linux-gnu.zip"
+#        asset=$(jq -c --arg file "$file" '.assets[] | select(.name == $file)' <<<"$dioxus_releases")
+#        url=$(jq -r '.browser_download_url' <<<"$asset")
+#        digest=$(jq -r '.digest' <<<"$asset")
+#        algo=${digest%%:*}
+#        hash=${digest#*:}       
+#        cat <<EOF
+#  {
+#    "type": "archive",
+#    "url": "$url",
+#    "$algo": "$hash",
+#    "dest": "dioxus-cli",
+#    "only-arches": ["$arch"]
+#  }$suffix
+#EOF
+#    suffix=""
+#    done
+#    echo "]"
+#} > dioxus-cli.json
 
 # latest doesnt work so pinned to v130.0.7
 
