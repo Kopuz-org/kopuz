@@ -17,7 +17,7 @@ rm -f ~/.local/share/applications/moe.kopuz.kopuz.desktop
 update-desktop-database ~/.local/share/applications || true
 
 echo "[1/2] Build Flatpak..."
-flatpak-builder --user --install --force-clean build-dir packaging/flatpak/moe.kopuz.kopuz.json
+flatpak-builder --install-deps-from=flathub --user --install --force-clean build-dir packaging/flatpak/moe.kopuz.kopuz.json
 
 echo "[2/2] Creating bundle file..."
 mkdir -p dist

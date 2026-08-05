@@ -29,7 +29,7 @@
   ],
   "build-options": {
     "strip": true,
-    "append-path": "/usr/lib/sdk/node22/bin:/usr/lib/sdk/rust-stable/bin"
+    "append-path": "/usr/lib/sdk/node24/bin:/usr/lib/sdk/rust-stable/bin"
   },
   "modules": [
     "native-modules.json",
