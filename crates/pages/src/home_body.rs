@@ -401,15 +401,32 @@ pub fn HomeBody(
             .take(10)
             .cloned()
             .map(|p| {
-                let cover_url = p.tracks.first().and_then(|tid| {
-                    cover_tracks
-                        .iter()
-                        .find(|t| {
-                            let id = t.id.key();
-                            !id.is_empty() && id.as_ref() == tid.as_str()
+                let cover_url = {
+                    if let Some(url) =
+                        ::server::cover::from_path(&conf, p.cover_path.as_deref(), 384)
+                    {
+                        Some(url.to_string())
+                    } else if let Some(tag) = &p.image_tag
+                        && let Some(s) = &conf.server
+                    {
+                        ::server::cover::resolve(
+                            &conf,
+                            reader::CoverRef::remote_item(s.service, &p.id, Some(tag.as_str())),
+                            384,
+                        )
+                        .and_then(|t| Some(t.to_string()))
+                    } else {
+                        p.tracks.first().and_then(|tid| {
+                            cover_tracks
+                                .iter()
+                                .find(|t| {
+                                    let id = t.id.key();
+                                    !id.is_empty() && id.as_ref() == tid.as_str()
+                                })
+                                .and_then(|t| track_cover_url(&conf, t))
                         })
-                        .and_then(|t| track_cover_url(&conf, t))
-                });
+                    }
+                };
                 (p.id, p.name, p.tracks.len(), cover_url)
             })
             .collect::<Vec<_>>()
