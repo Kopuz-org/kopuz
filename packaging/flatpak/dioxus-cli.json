@@ -1,0 +1,16 @@
+[
+  {
+    "type": "archive",
+    "url": "https://github.com/DioxusLabs/dioxus/releases/download/v0.7.10/dx-x86_64-unknown-linux-gnu.zip",
+    "sha256": "61d2132eaf3cd70ca1ac89a7ecc891fcd770e917a5869e29d465459371b26c83",
+    "dest": "dioxus-cli",
+    "only-arches": ["x86_64"]
+  },
+  {
+    "type": "archive",
+    "url": "https://github.com/DioxusLabs/dioxus/releases/download/v0.7.10/dx-aarch64-unknown-linux-gnu.zip",
+    "sha256": "16985f1e1f88fbcf48f3a3cbdbb0c10c9673d0846d88cbc43783b92fd60c8c95",
+    "dest": "dioxus-cli",
+    "only-arches": ["aarch64"]
+  }
+]
