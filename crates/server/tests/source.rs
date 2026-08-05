@@ -190,6 +190,7 @@ async fn portable_local_metadata_survives_a_different_mount_path() {
         .record_recent(&second_a.to_string_lossy())
         .await
         .unwrap();
+    src_a.sync_portable_activity().await.unwrap();
 
     let portable_a = root_a.join(source::PORTABLE_LIBRARY_DB_FILENAME);
     assert!(portable_a.is_file());
@@ -202,6 +203,7 @@ async fn portable_local_metadata_survives_a_different_mount_path() {
     let source_b = Source::LocalLibrary("local:computer-b".into());
     let src_b =
         source::local_with_directories(db_b.clone(), source_b.clone(), vec![root_b.clone()]);
+    src_b.sync_portable_activity().await.unwrap();
 
     let favorites = src_b.favorites().await.unwrap();
     assert_eq!(

@@ -389,24 +389,43 @@ impl Storage for Native {
         writes::sweep_playlist_tracks(&self.pool(), source, pl_id, epoch).await
     }
 
-    async fn create_folder(&self, id: &str, name: &str) -> Result<(), DbError> {
-        writes::create_folder(&self.pool(), id, name).await
+    async fn replace_playlist_store(
+        &self,
+        source: &crate::Source,
+        store: &reader::PlaylistStore,
+    ) -> Result<(), DbError> {
+        writes::replace_playlist_store(&self.pool(), source, store).await
     }
 
-    async fn rename_folder(&self, id: &str, name: &str) -> Result<(), DbError> {
-        writes::rename_folder(&self.pool(), id, name).await
+    async fn create_folder(
+        &self,
+        source: &crate::Source,
+        id: &str,
+        name: &str,
+    ) -> Result<(), DbError> {
+        writes::create_folder(&self.pool(), source, id, name).await
     }
 
-    async fn delete_folder(&self, id: &str) -> Result<(), DbError> {
-        writes::delete_folder(&self.pool(), id).await
+    async fn rename_folder(
+        &self,
+        source: &crate::Source,
+        id: &str,
+        name: &str,
+    ) -> Result<(), DbError> {
+        writes::rename_folder(&self.pool(), source, id, name).await
+    }
+
+    async fn delete_folder(&self, source: &crate::Source, id: &str) -> Result<(), DbError> {
+        writes::delete_folder(&self.pool(), source, id).await
     }
 
     async fn set_playlist_folder(
         &self,
+        source: &crate::Source,
         playlist_ref: &str,
         folder_id: Option<&str>,
     ) -> Result<(), DbError> {
-        writes::set_playlist_folder(&self.pool(), playlist_ref, folder_id).await
+        writes::set_playlist_folder(&self.pool(), source, playlist_ref, folder_id).await
     }
 
     async fn bump_listen_count(

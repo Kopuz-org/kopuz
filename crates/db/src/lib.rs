@@ -406,19 +406,28 @@ pub trait Storage: ReadStore {
         epoch: i64,
     ) -> Result<(), DbError>;
 
+    /// Atomically replace one source's playlists, ordered membership, folders,
+    /// and folder membership from a synchronized snapshot.
+    async fn replace_playlist_store(
+        &self,
+        source: &Source,
+        store: &reader::PlaylistStore,
+    ) -> Result<(), DbError>;
+
     /// Create one (local) playlist folder.
-    async fn create_folder(&self, id: &str, name: &str) -> Result<(), DbError>;
+    async fn create_folder(&self, source: &Source, id: &str, name: &str) -> Result<(), DbError>;
 
     /// Rename one folder.
-    async fn rename_folder(&self, id: &str, name: &str) -> Result<(), DbError>;
+    async fn rename_folder(&self, source: &Source, id: &str, name: &str) -> Result<(), DbError>;
 
     /// Delete one folder; its playlist memberships cascade away.
-    async fn delete_folder(&self, id: &str) -> Result<(), DbError>;
+    async fn delete_folder(&self, source: &Source, id: &str) -> Result<(), DbError>;
 
     /// Move one playlist into `folder_id`, or out of every folder when `None`.
     /// Folder membership is single-folder per playlist.
     async fn set_playlist_folder(
         &self,
+        source: &Source,
         playlist_ref: &str,
         folder_id: Option<&str>,
     ) -> Result<(), DbError>;

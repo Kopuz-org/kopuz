@@ -588,7 +588,7 @@ pub trait MediaSource: Send + Sync {
     /// Create a playlist folder (local organisation). DB-cache op.
     async fn create_folder(&self, id: &str, name: &str) -> Result<(), SourceError> {
         self.db()
-            .create_folder(id, name)
+            .create_folder(self.source(), id, name)
             .await
             .map_err(SourceError::from)
     }
@@ -596,14 +596,17 @@ pub trait MediaSource: Send + Sync {
     /// Rename a playlist folder. DB-cache op.
     async fn rename_folder(&self, id: &str, name: &str) -> Result<(), SourceError> {
         self.db()
-            .rename_folder(id, name)
+            .rename_folder(self.source(), id, name)
             .await
             .map_err(SourceError::from)
     }
 
     /// Delete a playlist folder (its playlists become unfiled). DB-cache op.
     async fn delete_folder(&self, id: &str) -> Result<(), SourceError> {
-        self.db().delete_folder(id).await.map_err(SourceError::from)
+        self.db()
+            .delete_folder(self.source(), id)
+            .await
+            .map_err(SourceError::from)
     }
 
     /// Move a playlist into a folder (or out of one with `None`). DB-cache op.
@@ -613,7 +616,7 @@ pub trait MediaSource: Send + Sync {
         folder_id: Option<&str>,
     ) -> Result<(), SourceError> {
         self.db()
-            .set_playlist_folder(playlist_ref, folder_id)
+            .set_playlist_folder(self.source(), playlist_ref, folder_id)
             .await
             .map_err(SourceError::from)
     }
