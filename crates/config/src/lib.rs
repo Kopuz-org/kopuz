@@ -639,6 +639,10 @@ pub struct AppConfig {
     pub spotify_prefer_active_device: bool,
     #[serde(default, deserialize_with = "deserialize_music_directories")]
     pub music_directory: Vec<PathBuf>,
+    /// Whether the built-in Local library carries favorites and playlists in
+    /// the first configured music folder.
+    #[serde(default = "default_true")]
+    pub local_portable_metadata: bool,
     #[serde(default = "default_theme")]
     pub theme: String,
     /// Palette file matugen or pywal writes, polled for changes while the live
@@ -915,6 +919,7 @@ impl Default for AppConfig {
             spotify_browser: None,
             spotify_prefer_active_device: true,
             music_directory: vec![music_directory],
+            local_portable_metadata: true,
             theme: default_theme(),
             live_theme_path: String::new(),
             device_id: default_device_id(),

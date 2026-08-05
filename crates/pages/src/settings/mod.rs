@@ -366,12 +366,12 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                     }
 
                     if active_category() == SettingsCategory::Library {
-                        SettingItem {
-                            title: i18n::t("local_libraries").to_string(),
-                            control: rsx! {
+                        div { class: "settings-row flex flex-col items-stretch gap-3 px-5 py-3",
+                            p { class: "text-sm text-white/90 font-medium", "{i18n::t(\"local_libraries\")}" }
                                 LocalSourceSettings {
                                     active_source: config.read().active_source.clone(),
                                     default_directories: config.read().music_directory.clone(),
+                                    default_portable_metadata: config.read().local_portable_metadata,
                                     sources: config.read().local_sources.clone(),
                                     on_add: move |_| show_add_local_source.set(true),
                                     on_delete: move |id: String| config.write().remove_local_source(&id),
@@ -412,8 +412,19 @@ pub fn Settings(config: Signal<AppConfig>) -> Element {
                                             config::Source::Server(_) => {}
                                         }
                                     },
+                                    on_portable_metadata: move |(source, enabled): (config::Source, bool)| {
+                                        let mut cfg = config.write();
+                                        match source {
+                                            config::Source::Local => cfg.local_portable_metadata = enabled,
+                                            config::Source::LocalLibrary(id) => {
+                                                if let Some(local) = cfg.local_sources.iter_mut().find(|local| local.id == id) {
+                                                    local.portable_metadata = enabled;
+                                                }
+                                            }
+                                            config::Source::Server(_) => {}
+                                        }
+                                    },
                                 }
-                            }
                         }
 
                         RadioRegistryDropdown {

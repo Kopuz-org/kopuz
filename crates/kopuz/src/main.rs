@@ -483,9 +483,33 @@ fn App() -> Element {
         // Only the resolution-relevant slice of config; a volume/theme change
         // must not rebuild the client. `Memo`'s `PartialEq` dedup gates the effect.
         let identity = use_memo(move || {
+            let config = config.read();
+            let portable_metadata = match &config.active_source {
+                config::Source::Local => config.local_portable_metadata,
+                config::Source::LocalLibrary(id) => config
+                    .local_sources
+                    .iter()
+                    .find(|source| source.id == *id)
+                    .is_some_and(|source| source.portable_metadata),
+                config::Source::Server(_) => false,
+            };
+            let local_directories = match &config.active_source {
+                config::Source::Local if portable_metadata => config.music_directory.clone(),
+                config::Source::LocalLibrary(id) if portable_metadata => config
+                    .local_sources
+                    .iter()
+                    .find(|source| source.id == *id)
+                    .map(|source| source.directories.clone())
+                    .unwrap_or_default(),
+                config::Source::Local
+                | config::Source::LocalLibrary(_)
+                | config::Source::Server(_) => Vec::new(),
+            };
             (
-                config.read().active_source.clone(),
-                config.read().server.clone(),
+                config.active_source.clone(),
+                config.server.clone(),
+                portable_metadata,
+                local_directories,
             )
         });
         let db_eff = db.clone();
@@ -497,6 +521,7 @@ fn App() -> Element {
         });
         use_context_provider(|| active_source)
     };
+    hooks::portable_metadata::use_portable_metadata_watch();
 
     // Capabilities of the active source — drives source-agnostic routing (e.g.
     // which artist view to render) without hardcoding services in the router.

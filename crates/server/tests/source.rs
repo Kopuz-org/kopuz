@@ -126,3 +126,109 @@ async fn record_favorite_writes_a_clean_local_row_and_reverts() {
     assert!(db.dirty_favorites("local").await.unwrap().is_empty());
     assert!(db.dirty_unlikes("local").await.unwrap().is_empty());
 }
+
+#[tokio::test]
+async fn portable_local_metadata_survives_a_different_mount_path() {
+    let global_a_path = unique_db();
+    let test_dir = global_a_path.parent().unwrap();
+    let root_a = test_dir.join("computer-a").join("Music");
+    let root_b = test_dir.join("computer-b").join("Shared Music");
+    std::fs::create_dir_all(&root_a).unwrap();
+    std::fs::create_dir_all(&root_b).unwrap();
+
+    let source_a = Source::LocalLibrary("local:computer-a".into());
+    let first_a = root_a.join("album").join("first.flac");
+    let second_a = root_a.join("album").join("second.flac");
+    let db_a = db::init(&global_a_path).await.unwrap();
+
+    // Existing app-local metadata is imported the first time this folder gets
+    // a portable database.
+    db_a.set_favorite(source_a.as_str(), &first_a.to_string_lossy(), true)
+        .await
+        .unwrap();
+    db_a.clear_favorite_dirty(source_a.as_str(), &first_a.to_string_lossy())
+        .await
+        .unwrap();
+    db_a.upsert_playlist_meta(&source_a, "road-trip", "Road Trip", None, None)
+        .await
+        .unwrap();
+    db_a.set_playlist_tracks(
+        &source_a,
+        "road-trip",
+        &[first_a.to_string_lossy().into_owned()],
+    )
+    .await
+    .unwrap();
+
+    let src_a = source::local_with_directories(db_a, source_a, vec![root_a.clone()]);
+    assert_eq!(
+        src_a.favorites().await.unwrap(),
+        vec![first_a.to_string_lossy().into_owned()]
+    );
+    src_a
+        .record_favorite(&track(TrackId::Local(second_a.clone())), true)
+        .await
+        .unwrap();
+    src_a
+        .add_to_playlist("road-trip", &[second_a.to_string_lossy().into_owned()])
+        .await
+        .unwrap();
+
+    let portable_a = root_a.join(source::PORTABLE_LIBRARY_DB_FILENAME);
+    assert!(portable_a.is_file());
+    drop(src_a);
+
+    // Simulate the same shared folder appearing under another mount path.
+    let portable_b = root_b.join(source::PORTABLE_LIBRARY_DB_FILENAME);
+    std::fs::copy(&portable_a, &portable_b).unwrap();
+    let db_b = db::init(&test_dir.join("computer-b.db")).await.unwrap();
+    let src_b = source::local_with_directories(
+        db_b,
+        Source::LocalLibrary("local:computer-b".into()),
+        vec![root_b.clone()],
+    );
+
+    let favorites = src_b.favorites().await.unwrap();
+    assert_eq!(
+        favorites,
+        vec![
+            root_b
+                .join("album")
+                .join("second.flac")
+                .to_string_lossy()
+                .into_owned(),
+            root_b
+                .join("album")
+                .join("first.flac")
+                .to_string_lossy()
+                .into_owned(),
+        ]
+    );
+    let store = src_b.load_playlists().await.unwrap();
+    assert_eq!(store.playlists.len(), 1);
+    assert_eq!(
+        store.playlists[0].tracks,
+        vec![
+            root_b
+                .join("album")
+                .join("first.flac")
+                .to_string_lossy()
+                .into_owned(),
+            root_b
+                .join("album")
+                .join("second.flac")
+                .to_string_lossy()
+                .into_owned(),
+        ]
+    );
+
+    // The shared DB itself contains portable refs, never computer A's mount.
+    let raw = db::init_portable(&portable_b).await.unwrap();
+    assert_eq!(
+        raw.favorites("local").await.unwrap(),
+        vec![
+            "kopuz-root-v1:0:album/second.flac",
+            "kopuz-root-v1:0:album/first.flac",
+        ]
+    );
+}

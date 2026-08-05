@@ -558,6 +558,16 @@ pub async fn init(db_path: &std::path::Path) -> Result<Db, DbError> {
     Ok(Db(Arc::new(native)))
 }
 
+/// Open the metadata database carried inside a local music folder.
+///
+/// Unlike the main app database this uses SQLite's single-file rollback
+/// journal, which is suitable for a library on a shared filesystem and avoids
+/// persistent `-wal`/`-shm` files being synchronized independently.
+pub async fn init_portable(db_path: &std::path::Path) -> Result<Db, DbError> {
+    let native = backend::Native::open_portable(db_path).await?;
+    Ok(Db(Arc::new(native)))
+}
+
 /// The on-disk database path: `KOPUZ_DB_PATH` override, else `<config_dir>/kopuz.db`
 /// (release) or `kopuz-debug.db` (debug builds, so `dx run` never touches real data).
 pub fn default_db_path() -> std::path::PathBuf {

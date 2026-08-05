@@ -41,6 +41,20 @@ impl Native {
         })
     }
 
+    /// Open a database stored beside a portable music library. Rollback
+    /// journaling keeps the committed state in one file and works on shared
+    /// filesystems where WAL's shared-memory sidecar is not supported.
+    pub async fn open_portable(path: &Path) -> Result<Self, DbError> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| DbError::Io(e.to_string()))?;
+        }
+        let pool = open_portable_pool(path).await?;
+        migrations::run_migrations(&pool).await?;
+        Ok(Self {
+            pool: ArcSwap::from_pointee(pool),
+        })
+    }
+
     fn pool(&self) -> Arc<SqlitePool> {
         self.pool.load_full()
     }
@@ -61,6 +75,21 @@ async fn open_pool(path: &Path) -> Result<SqlitePool, DbError> {
         .foreign_keys(true);
     SqlitePoolOptions::new()
         .max_connections(5)
+        .connect_with(opts)
+        .await
+        .map_err(Into::into)
+}
+
+async fn open_portable_pool(path: &Path) -> Result<SqlitePool, DbError> {
+    let opts = SqliteConnectOptions::new()
+        .filename(path)
+        .create_if_missing(true)
+        .journal_mode(SqliteJournalMode::Delete)
+        .synchronous(SqliteSynchronous::Full)
+        .busy_timeout(std::time::Duration::from_secs(10))
+        .foreign_keys(true);
+    SqlitePoolOptions::new()
+        .max_connections(1)
         .connect_with(opts)
         .await
         .map_err(Into::into)
